@@ -243,6 +243,12 @@ func _command_move(screen_pos: Vector2, queue_up: bool) -> void:
 	var camera: Camera3D = get_viewport().get_camera_3d()
 	if camera == null:
 		return
+	# Right-click on an enemy unit = attack order (units have no physics body, so
+	# this is a screen-space pick like _click_select, not a raycast).
+	var enemy: Unit = _enemy_under_cursor(screen_pos, camera)
+	if enemy != null and _tribe_commands != null:
+		_tribe_commands.order_attack(selected, enemy)
+		return
 	var from: Vector3 = camera.project_ray_origin(screen_pos)
 	var dir: Vector3 = camera.project_ray_normal(screen_pos)
 	var space: PhysicsDirectSpaceState3D = camera.get_world_3d().direct_space_state
@@ -261,6 +267,26 @@ func _command_move(screen_pos: Vector2, queue_up: bool) -> void:
 		return
 	for i in range(selected.size()):
 		selected[i].order_move(target + TribeCommands.formation_offset(i), queue_up)
+
+
+## Nearest enemy (non-player) unit within the click radius of the cursor, or
+## null. Screen-space pick (units have no collision bodies).
+func _enemy_under_cursor(screen_pos: Vector2, camera: Camera3D) -> Unit:
+	if _unit_manager == null:
+		return null
+	var best: Unit = null
+	var best_dist: float = CLICK_RADIUS_PX
+	for unit in _unit_manager.units:
+		if unit.tribe_id == player_tribe_id or unit.state == Unit.State.DEAD:
+			continue
+		var world: Vector3 = unit.global_position + Vector3(0.0, 0.7, 0.0)
+		if camera.is_position_behind(world):
+			continue
+		var dist: float = camera.unproject_position(world).distance_to(screen_pos)
+		if dist < best_dist:
+			best_dist = dist
+			best = unit
+	return best
 
 
 ## Tree -> gather, own construction site -> build, own reincarnation site ->

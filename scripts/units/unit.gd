@@ -29,6 +29,36 @@ const TRIBE_COLORS: Array[Color] = [
 
 const ARRIVE_EPS: float = 0.05       # metres: waypoint counts as reached
 
+# --- Melee combat tuning (phase 5b) -------------------------------------------
+## Distance at which a unit can land a melee hit on its target.
+const MELEE_RANGE: float = 1.2
+## Attackers pursue direct (no A*) once this close; farther away they path.
+const COMBAT_DIRECT_RANGE: float = 2.5
+## Combat units auto-attack enemies within this radius while idle. Braves do NOT
+## (they only retaliate when attacked — see _maybe_retaliate).
+const AGGRO_RADIUS: float = 8.0
+## Seconds between melee strikes.
+const ATTACK_COOLDOWN: float = 0.8
+## Base target (re)search interval; a small per-unit offset staggers the scans
+## so they never all fire on the same frame (never per-frame — see _due_to_scan).
+const TARGET_SEARCH_INTERVAL: float = 0.25
+## Max simultaneous melee attackers on one target; extras wait and back-fill.
+const MAX_MELEE_ATTACKERS: int = 3
+## Radius of the ring the (up to 3) attackers stand on around their target.
+const MELEE_SLOT_RADIUS: float = 0.9
+## Radius overflow attackers wait on around the target until a slot frees.
+const MELEE_WAIT_RADIUS: float = 1.7
+
+## Damage per attack kind (Tuning-Defaults, phase 8 adjustable). The kind is
+## rolled per strike; the warrior scales all of these by melee_strength().
+const MELEE_PUNCH: int = 6
+const MELEE_KICK: int = 8
+const MELEE_SHOVE: int = 3
+## Chance of a kick / shove on any given strike (else punch). The warrior
+## overrides _shove_chance() to shove rarely (he punches/kicks instead).
+const KICK_CHANCE: float = 0.2
+const SHOVE_CHANCE: float = 0.15
+
 var tribe_id: int = 0
 ## Owning tribe, injected by UnitManager.spawn_unit()/Tribe.add_unit().
 var tribe: Tribe = null
@@ -77,10 +107,54 @@ var _path_index: int = 0
 var _pending_target: Vector3 = Vector3.INF
 var _path_queued: bool = false
 
+# --- Combat state (phase 5b) --------------------------------------------------
+## Enemy this unit is meleeing (null = none). Typed, but every read is guarded
+## with is_instance_valid — the target may be freed by another attacker.
+var attack_target: Unit = null
+## Units currently meleeing THIS unit (max MAX_MELEE_ATTACKERS get a slot).
+## Untyped on purpose: entries may be freed, and binding a freed instance to a
+## typed parameter raises a script error (see Brave._tree_valid rationale).
+var melee_attackers: Array = []
+## Count of units committed to attacking this one (targeting it, whether or not
+## they hold a slot yet). Drives 1v1 target preference even before contact.
+var incoming_attackers: int = 0
+## Last unit that damaged this one (drives brave retaliation).
+var last_attacker: Unit = null
+var _attack_cooldown: float = 0.0
+var _target_search_timer: float = 0.0
+## True on ticks where the unit is in range and striking (vs. still approaching);
+## drives the attack-vs-walk animation in _anim_base().
+var _in_melee: bool = false
+## Cached A* goal while approaching a target (replanned when it drifts).
+var _combat_goal: Vector3 = Vector3.INF
+
 
 ## Silhouette key for PlaceholderSprites; overridden by subclasses.
 func unit_kind() -> StringName:
 	return &"unit"
+
+
+## True for units that seek out enemies on their own while idle (Warrior/
+## Firewarrior/Preacher). Braves are false: they only retaliate when hit.
+func _is_combatant() -> bool:
+	return false
+
+
+## Melee damage multiplier (Warrior returns 3.0; everyone else brawls at 1.0).
+func melee_strength() -> float:
+	return 1.0
+
+
+## Probability that a strike is a shove (low-damage, can trigger a downhill roll
+## in phase 5d). The warrior overrides this to shove rarely.
+func _shove_chance() -> float:
+	return SHOVE_CHANCE
+
+
+## Hook called when combat overrides the current activity — Brave uses it to
+## release its worker claims before it starts fighting.
+func _on_combat_interrupt() -> void:
+	pass
 
 
 # --- Core logic (testable without scene tree) ---------------------------------
@@ -89,8 +163,13 @@ func tick(delta: float) -> void:
 	match state:
 		State.MOVE:
 			_tick_move(delta)
+		State.ATTACK:
+			_tick_attack(delta)
+		State.IDLE:
+			_tick_idle(delta)
 		_:
 			pass
+	_apply_animation(false)
 
 
 func _tick_move(delta: float) -> void:
@@ -155,6 +234,7 @@ func _on_path_finished() -> void:
 ## Move order. queue_up appends the target as an additional waypoint
 ## (Shift+right-click), otherwise the current route is replaced.
 func order_move(target: Vector3, queue_up: bool = false) -> void:
+	_end_attack()
 	if not queue_up:
 		waypoint_queue.clear()
 		waypoint_queue.append(target)
@@ -240,16 +320,306 @@ func is_praying() -> bool:
 	return false
 
 
-# --- Damage (scaffold; combat comes in phase 4) --------------------------------
+# --- Combat (phase 5b) --------------------------------------------------------
 
-func take_damage(amount: int) -> void:
+## Applies damage. `attacker` (untyped: may be a freed instance) drives brave
+## retaliation. Lethal damage runs the combat cleanup and marks the unit DEAD;
+## the UnitManager deregisters it via the died signal.
+func take_damage(amount: int, attacker = null) -> void:
 	if state == State.DEAD:
 		return
 	health -= amount
+	if attacker != null and is_instance_valid(attacker):
+		last_attacker = attacker
 	if health <= 0:
 		health = 0
-		_set_state(State.DEAD)
-		died.emit(self)
+		_die()
+		return
+	_maybe_retaliate(attacker)
+
+
+func _die() -> void:
+	# Release our own slot, then tell everyone attacking us to look elsewhere so
+	# waiting attackers can back-fill onto a fresh target.
+	_end_attack()
+	for a in melee_attackers.duplicate():
+		if is_instance_valid(a):
+			a._on_target_died(self)
+	melee_attackers.clear()
+	_set_state(State.DEAD)
+	died.emit(self)
+
+
+## Idle combatants scan for a nearby enemy (throttled) and engage it.
+func _tick_idle(delta: float) -> void:
+	if not _is_combatant():
+		return
+	if _due_to_scan(delta):
+		var enemy: Unit = _scan_for_enemy(AGGRO_RADIUS)
+		if enemy != null:
+			_begin_attack(enemy)
+
+
+## Pursues the current target and strikes it when in range and holding a slot.
+func _tick_attack(delta: float) -> void:
+	if not _target_valid(attack_target):
+		_retarget_or_idle()
+		return
+	var target: Unit = attack_target
+	var slot: int = target.request_melee_slot(self)
+	if slot < 0:
+		# Target is full (3 attackers). Prefer a still-free enemy (1v1), else
+		# wait around the fight until a slot opens (checked, not per-frame).
+		_in_melee = false
+		if _due_to_scan(delta):
+			var alt: Unit = _scan_for_enemy(AGGRO_RADIUS)
+			if alt != null and alt != target and alt.active_melee_attacker_count() \
+					< MAX_MELEE_ATTACKERS:
+				_begin_attack(alt)
+				return
+		_wait_near(target, delta)
+		return
+	var slot_pos: Vector3 = target.melee_slot_position(slot)
+	var dist: float = _flat_dist(position, target.position)
+	if dist > MELEE_RANGE:
+		_in_melee = false
+		_approach(slot_pos, delta)
+		_face_point(target.position)
+		return
+	# In range: stand still, face the target and strike on cooldown.
+	_in_melee = true
+	if _has_path():
+		_clear_path()
+	_face_point(target.position)
+	_attack_cooldown -= delta
+	if _attack_cooldown <= 0.0:
+		_attack_cooldown = ATTACK_COOLDOWN
+		_do_strike(target)
+
+
+## Rolls an attack kind and applies its (strength-scaled) damage to the target.
+func _do_strike(target: Unit) -> void:
+	var kind: StringName = _roll_attack_kind()
+	# Restart the attack animation on each swing for a visible hit cadence.
+	anim_start_ms = Time.get_ticks_msec()
+	target.take_damage(melee_damage(kind), self)
+	# Shove/roll knockback and hit sounds are wired in phases 5b(shove)/5d.
+
+
+## Picks punch / kick / shove for this strike. Shoves are rare (rarer still for
+## the warrior); kicks are uncommon; most strikes are punches.
+func _roll_attack_kind() -> StringName:
+	var r: float = randf()
+	if r < _shove_chance():
+		return &"shove"
+	if r < _shove_chance() + KICK_CHANCE:
+		return &"kick"
+	return &"punch"
+
+
+## Base (unscaled) damage for an attack kind. Pure + static so it is testable.
+static func attack_base_damage(kind: StringName) -> int:
+	match kind:
+		&"kick":
+			return MELEE_KICK
+		&"shove":
+			return MELEE_SHOVE
+		_:
+			return MELEE_PUNCH
+
+
+## Damage this unit deals with the given attack kind (base * melee_strength()).
+func melee_damage(kind: StringName) -> int:
+	return int(round(float(attack_base_damage(kind)) * melee_strength()))
+
+
+# --- Target selection & slots -------------------------------------------------
+
+## Starts (or switches to) meleeing `enemy`. Releases any previous slot and lets
+## the current activity clean up (Brave releases worker claims).
+func _begin_attack(enemy: Unit) -> void:
+	if enemy == null or not is_instance_valid(enemy) or enemy.state == State.DEAD:
+		return
+	if attack_target == enemy:
+		if state != State.ATTACK:
+			_set_state(State.ATTACK)
+		return
+	_on_combat_interrupt()
+	_end_attack()
+	attack_target = enemy
+	enemy.incoming_attackers += 1
+	_attack_cooldown = 0.0
+	_combat_goal = Vector3.INF
+	_set_state(State.ATTACK)
+
+
+## Public order entry used by TribeCommands.order_attack (UI + AI).
+func order_attack(enemy: Unit) -> void:
+	_begin_attack(enemy)
+
+
+## Clears our attack and frees the slot we held on the target.
+func _end_attack() -> void:
+	if attack_target != null and is_instance_valid(attack_target):
+		attack_target.release_melee_slot(self)
+		attack_target.incoming_attackers = maxi(0, attack_target.incoming_attackers - 1)
+	attack_target = null
+	_in_melee = false
+	_combat_goal = Vector3.INF
+
+
+## Our target died: drop it and (combatants) look for another; braves go idle.
+func _on_target_died(target) -> void:
+	if attack_target != target:
+		return
+	attack_target = null
+	_in_melee = false
+	_combat_goal = Vector3.INF
+	_retarget_or_idle()
+
+
+func _retarget_or_idle() -> void:
+	_end_attack()
+	if _is_combatant():
+		var enemy: Unit = _scan_for_enemy(AGGRO_RADIUS)
+		if enemy != null:
+			_begin_attack(enemy)
+			return
+	_set_state(State.IDLE)
+
+
+## Braves fight back when hit (from idle/moving only — busy workers keep working);
+## combatants already have a target, so this is mostly a brave hook.
+func _maybe_retaliate(attacker) -> void:
+	if attacker == null or not is_instance_valid(attacker) or attacker.state == State.DEAD:
+		return
+	if attack_target != null and is_instance_valid(attack_target):
+		return
+	if state == State.IDLE or state == State.MOVE:
+		_begin_attack(attacker)
+
+
+## Nearest enemy in radius, preferring targets with fewer attackers (1v1 bias).
+func _scan_for_enemy(radius: float) -> Unit:
+	if path_service == null:
+		return null
+	var flat: Vector2 = Vector2(position.x, position.z)
+	var best: Unit = null
+	var best_score: float = INF
+	for u in path_service.get_units_in_radius(position, radius):
+		if u == self or u.state == State.DEAD or u.tribe_id == tribe_id:
+			continue
+		var d: float = Vector2(u.position.x, u.position.z).distance_to(flat)
+		# Commitment count dominates the score so free enemies are picked first
+		# (1v1 preference), even before anyone is in striking range.
+		var score: float = float(u.incoming_attackers) * 1000.0 + d
+		if score < best_score:
+			best_score = score
+			best = u
+	return best
+
+
+## Registers `attacker` on this unit's melee ring. Returns its slot index
+## (0..MAX-1) or -1 when the ring is full. Untyped param (freed-safe).
+func request_melee_slot(attacker) -> int:
+	_prune_melee_attackers()
+	var idx: int = melee_attackers.find(attacker)
+	if idx >= 0:
+		return idx
+	if melee_attackers.size() < MAX_MELEE_ATTACKERS:
+		melee_attackers.append(attacker)
+		return melee_attackers.size() - 1
+	return -1
+
+
+func release_melee_slot(attacker) -> void:
+	melee_attackers.erase(attacker)
+
+
+func active_melee_attacker_count() -> int:
+	_prune_melee_attackers()
+	return melee_attackers.size()
+
+
+## Drops freed/dead attackers and any that have since retargeted, freeing slots.
+func _prune_melee_attackers() -> void:
+	var kept: Array = []
+	for a in melee_attackers:
+		if is_instance_valid(a) and a.state != State.DEAD and a.attack_target == self:
+			kept.append(a)
+	melee_attackers = kept
+
+
+## Ring position for slot index around this (target) unit.
+func melee_slot_position(slot: int) -> Vector3:
+	var angle: float = TAU * float(slot) / float(MAX_MELEE_ATTACKERS)
+	return position + Vector3(cos(angle) * MELEE_SLOT_RADIUS, 0.0, sin(angle) * MELEE_SLOT_RADIUS)
+
+
+# --- Combat movement ----------------------------------------------------------
+
+## Approaches `dest`: A* while far (avoids water/obstacles), direct step when
+## close (combat is chaotic and short-range — no need to re-path every metre).
+func _approach(dest: Vector3, delta: float) -> void:
+	if _flat_dist(position, dest) > COMBAT_DIRECT_RANGE and nav_grid != null:
+		if not _has_path() or _flat_dist(_combat_goal, dest) > 1.0:
+			_combat_goal = dest
+			if not _plan_path_to(dest):
+				_step_toward(dest, delta)
+				return
+		if _advance_path(delta):
+			_clear_path()
+		return
+	_step_toward(dest, delta)
+
+
+## Overflow attacker waits on a ring around the target (deterministic angle per
+## unit so they spread out) until a slot frees.
+func _wait_near(target: Unit, delta: float) -> void:
+	var angle: float = float(get_instance_id() % 628) * 0.01
+	var dest: Vector3 = target.position + Vector3(
+		cos(angle) * MELEE_WAIT_RADIUS, 0.0, sin(angle) * MELEE_WAIT_RADIUS)
+	if _flat_dist(position, dest) > 0.25:
+		_step_toward(dest, delta)
+	_face_point(target.position)
+
+
+## Moves directly toward a point on the XZ plane (no pathing), snapping Y.
+func _step_toward(point: Vector3, delta: float) -> void:
+	var flat: Vector2 = Vector2(position.x, position.z)
+	var flat_target: Vector2 = Vector2(point.x, point.z)
+	var to_target: Vector2 = flat_target - flat
+	if to_target.length_squared() > 0.000001:
+		facing = Vector3(to_target.x, 0.0, to_target.y).normalized()
+	var next: Vector2 = flat.move_toward(flat_target, speed * delta)
+	position.x = next.x
+	position.z = next.y
+	_snap_to_ground()
+
+
+func _face_point(point: Vector3) -> void:
+	var dir: Vector3 = Vector3(point.x - position.x, 0.0, point.z - position.z)
+	if dir.length_squared() > 0.000001:
+		facing = dir.normalized()
+
+
+func _flat_dist(a: Vector3, b: Vector3) -> float:
+	return Vector2(a.x, a.z).distance_to(Vector2(b.x, b.z))
+
+
+## Untyped param (freed-safe): true while the target is a live, non-dead unit.
+func _target_valid(target) -> bool:
+	return target != null and is_instance_valid(target) and target.state != State.DEAD
+
+
+## True at most every TARGET_SEARCH_INTERVAL (staggered per unit) — scans are
+## never per-frame (Overview architecture rule).
+func _due_to_scan(delta: float) -> bool:
+	_target_search_timer -= delta
+	if _target_search_timer <= 0.0:
+		_target_search_timer = TARGET_SEARCH_INTERVAL + float(get_instance_id() % 50) * 0.002
+		return true
+	return false
 
 
 # --- State & visuals -------------------------------------------------------------
@@ -299,7 +669,8 @@ func _anim_base() -> StringName:
 		State.MOVE, State.PANIC:
 			return &"walk"
 		State.ATTACK:
-			return &"attack"
+			# Attack frames only while actually striking; walk while closing in.
+			return &"attack" if _in_melee else &"walk"
 		State.CAST:
 			return &"cast"
 		_:

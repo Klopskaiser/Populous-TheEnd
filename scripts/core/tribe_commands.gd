@@ -165,6 +165,47 @@ func order_train(building: TrainingBuilding, units: Array[Unit]) -> void:
 			(unit as Brave).order_train(building)
 
 
+## Right-click attack: selected units melee the clicked enemy. Units distribute
+## intelligently — if the ordered target is already at its 3-attacker limit, a
+## unit picks another free enemy near it instead of piling on a fourth.
+func order_attack(units: Array[Unit], enemy: Unit) -> void:
+	if enemy == null or not is_instance_valid(enemy) or enemy.state == Unit.State.DEAD:
+		return
+	for unit in units:
+		if unit == null or not is_instance_valid(unit) or unit.state == Unit.State.DEAD:
+			continue
+		if unit.tribe_id == enemy.tribe_id:
+			continue   # never attack own tribe
+		var target: Unit = enemy
+		if enemy.active_melee_attacker_count() >= Unit.MAX_MELEE_ATTACKERS:
+			var alt: Unit = _nearest_free_enemy_near(enemy, unit)
+			if alt != null:
+				target = alt
+		unit.order_attack(target)
+
+
+## Nearest enemy (other than `avoid`) of `unit` that still has a free melee slot,
+## searched around `avoid`. Uses the unit manager's spatial hash.
+func _nearest_free_enemy_near(avoid: Unit, unit: Unit) -> Unit:
+	if unit_manager == null:
+		return null
+	var flat: Vector2 = Vector2(unit.position.x, unit.position.z)
+	var best: Unit = null
+	var best_dist: float = INF
+	for u in unit_manager.get_units_in_radius(avoid.position, Unit.AGGRO_RADIUS):
+		if u == avoid or u == unit or u.state == Unit.State.DEAD:
+			continue
+		if u.tribe_id == unit.tribe_id:
+			continue
+		if u.active_melee_attacker_count() >= Unit.MAX_MELEE_ATTACKERS:
+			continue
+		var d: float = Vector2(u.position.x, u.position.z).distance_to(flat)
+		if d < best_dist:
+			best_dist = d
+			best = u
+	return best
+
+
 ## Offset for the index-th unit when assembling into 6-member groups around a
 ## point (used by buildings so newly produced units gather in packs at the
 ## rally point instead of standing around at random). Same ring layout as

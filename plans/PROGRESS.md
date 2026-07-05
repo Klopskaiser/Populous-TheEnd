@@ -806,3 +806,85 @@ fehlerfrei.
 
 **Manuelle Prüfung durch Nutzer: bestanden** (nach zwei Nachbesserungsrunden +
 Selektions-Bugfix bestätigt „funktioniert"). **Sub-Phase 5a abgeschlossen.**
+
+---
+
+## Phase 5b — Nahkampf-Kern (Slots, Krieger, Aggro) (umgesetzt)
+
+**Kampf lebt in der Basisklasse `Unit`** — dadurch prügeln sich alle Einheiten
+gleich (Braves verteidigen sich, Krieger/Feuerkrieger/Prediger kämpfen; Fern-/
+Sonderverhalten folgt 5c). Kern-Ideen: Zielsuche nie pro Frame (gestaffelter
+Timer), Slot-System auf dem **Ziel**, freigabesichere untypisierte Referenzen.
+
+**Gebaut (`scripts/units/unit.gd`):**
+- **Kampf-Konstanten:** `MELEE_RANGE 1.2`, `AGGRO_RADIUS 8`, `ATTACK_COOLDOWN
+  0.8 s`, `TARGET_SEARCH_INTERVAL 0.25 s`, `MAX_MELEE_ATTACKERS 3`,
+  `MELEE_SLOT_RADIUS 0.9` / `MELEE_WAIT_RADIUS 1.7`, `COMBAT_DIRECT_RANGE 2.5`,
+  Schadenswerte `MELEE_PUNCH 6` / `MELEE_KICK 8` / `MELEE_SHOVE 3`,
+  `KICK_CHANCE 0.2` / `SHOVE_CHANCE 0.15`.
+- **`take_damage(amount, attacker=null)`** (Signatur erweitert, alter 1-Arg-Aufruf
+  kompatibel): HP runter, `last_attacker` merken, bei ≤0 → `_die()`
+  (Slot-Cleanup: eigenen Slot freigeben, allen eigenen Angreifern
+  `_on_target_died` melden → Nachrücken/Neuausrichtung, dann State DEAD +
+  `died`), sonst `_maybe_retaliate` (Vergeltung nur aus IDLE/MOVE, nicht bei
+  arbeitenden Braves).
+- **Virtuals:** `_is_combatant()` (Basis false; Krieger/Feuerkrieger/Prediger
+  true), `melee_strength()` (1.0; Krieger 3.0), `_shove_chance()` (0.15; Krieger
+  0.04 = schubst selten), `_on_combat_interrupt()` (Brave gibt Arbeits-Claims frei).
+- **`tick()`** verzweigt jetzt auch nach `State.ATTACK` (`_tick_attack`) und
+  `State.IDLE` (`_tick_idle`, nur Combatants scannen Aggro) und ruft am Ende
+  `_apply_animation(false)` (Attack-Frames nur beim Zuschlagen, sonst Walk beim
+  Anlaufen — `_in_melee`-Flag steuert `_anim_base()`).
+- **Slot-System (auf dem Ziel):** `melee_attackers: Array` (untypisiert),
+  `request_melee_slot(a) -> int` (Index 0..2 oder −1 wenn voll),
+  `release_melee_slot`, `active_melee_attacker_count`, `_prune_melee_attackers`
+  (droppt freigegebene/tote/umgezogene Angreifer → Slot frei), `melee_slot_position`
+  (120°-Ring). **1v1-Bevorzugung** über `incoming_attackers` (Zähler der auf ein
+  Ziel *festgelegten* Angreifer, schon vor Kontakt) → `_scan_for_enemy` wählt das
+  am wenigsten bedrängte Ziel.
+- **Ablauf `_tick_attack`:** Ziel ungültig → `_retarget_or_idle`; Slot voll →
+  (gedrosselt) freies Alternativziel suchen, sonst `_wait_near` (Warte-Ring);
+  außer Reichweite → `_approach` (A* wenn fern, Direktschritt wenn nah); in
+  Reichweite → `_do_strike` (Angriffsart würfeln `_roll_attack_kind`,
+  `melee_damage(kind) = attack_base_damage(kind) * melee_strength()`).
+- **`order_attack(enemy)` / `_begin_attack`** (Interrupt der laufenden Tätigkeit,
+  alten Slot freigeben, `incoming_attackers` pflegen). `order_move` beendet einen
+  laufenden Angriff (`_end_attack`).
+
+**Weitere Dateien:**
+- `warrior.gd`: `_is_combatant`=true, `melee_strength`=3.0, seltenes Schubsen
+  (`WARRIOR_SHOVE_CHANCE 0.04`). `firewarrior.gd`/`preacher.gd`: `_is_combatant`
+  =true (prügeln im Nahkampf; Sonderverhalten 5c).
+- `brave.gd`: `_on_combat_interrupt()` → `_interrupt_tasks()` (nur in Arbeits-/
+  Trainings-States), damit Vergeltung/Angriffsbefehl keine Claims strandet.
+- `unit_manager.gd`: zentrale Tick-Schleife iteriert **Snapshot** (`units.duplicate()`,
+  überspringt DEAD/freigegeben) — eine im Kampf sterbende Einheit meldet sich per
+  `died`-Signal selbst ab, ohne die Iteration zu zerreißen. `_on_unit_died`
+  `queue_free()`t den toten Knoten (bereits aus Registry/Hash/Renderer/Tribe/
+  Slots draußen).
+- `tribe_commands.gd`: `order_attack(units, enemy)` — nur Feinde, intelligente
+  Verteilung (Ziel voll → `_nearest_free_enemy_near`). UI und KI nutzen dieselbe API.
+- `selection_manager.gd`: Rechtsklick auf Feindeinheit (Screen-Space-Pick
+  `_enemy_under_cursor`, da Einheiten keine Physik-Body haben) → `order_attack`;
+  sonst wie bisher Move/Kontextbefehl.
+
+**Erkenntnisse/Stolpersteine:**
+- **Tod während des Ticks:** Sterben mitten in der zentralen `for unit in units`-
+  Schleife würde beim `units.erase` Elemente überspringen → Schleife iteriert
+  jetzt eine Kopie und überspringt DEAD/freigegebene.
+- **Slot-Buchhaltung freigabesicher:** `melee_attackers` untypisiert + überall
+  `is_instance_valid` vor typisierter Nutzung (vgl. 3b/3c).
+- **1v1 braucht Vorab-Commitment:** physische Slots füllen sich erst bei Kontakt;
+  ohne `incoming_attackers` würden zwei Angreifer dasselbe (noch „freie") Ziel
+  wählen. Zähler wird in `_begin_attack`/`_end_attack` gepflegt.
+- **Test-Fallstrick:** 4 Krieger zerlegen einen 60-HP-Brave in einem Tick-Fenster,
+  bevor 3 Slots beobachtbar sind → Slot-Test macht das Ziel künstlich unsterblich.
+
+**Verifikation:** Testsuite grün (**321 Tests**, davon 29 neu in
+`tests/test_combat.gd`: Schaden/Tod + Deregistrierung aus Tribe/Hash, Treffer in
+Reichweite, Verfolgung außer Reichweite, Krieger 3×, Slot-Cap 3 + Nachrücken,
+1v1-Verteilung, Combatant-Aggro, Brave-Vergeltung ohne Distanz-Aggro).
+`--headless --import` + `--headless --quit` + `--quit-after 240` fehlerfrei.
+**Manuelle Prüfung durch Nutzer: ausstehend** (Rechtsklick-Angriff, max. 3 auf
+einen Gegner + Warten/Nachrücken, Verteilung auf mehrere Gegner, Krieger zäher/
+härter, Braves wehren sich statt zu fliehen).

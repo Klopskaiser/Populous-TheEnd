@@ -14,3 +14,8 @@ func _init() -> void:
 
 func unit_kind() -> StringName:
 	return &"firewarrior"
+
+
+## A combat unit: brawls in melee in phase 5b (ranged fireballs come in 5c).
+func _is_combatant() -> bool:
+	return true

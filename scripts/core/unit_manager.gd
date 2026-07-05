@@ -58,8 +58,11 @@ func setup(p_terrain_data: TerrainData, p_nav_grid: NavGrid,
 ## the Node callback overhead alone would dominate with thousands of units),
 ## then runs the manager systems. Tests call unit.tick()/tick() directly.
 func _physics_process(delta: float) -> void:
-	for unit in units:
-		unit.tick(delta)
+	# Iterate a snapshot: a unit dying mid-combat deregisters itself via the
+	# died signal (erasing from `units`), which would otherwise skip elements.
+	for unit in units.duplicate():
+		if is_instance_valid(unit) and unit.state != Unit.State.DEAD:
+			unit.tick(delta)
 	tick(delta)
 
 
@@ -199,6 +202,10 @@ func _on_unit_died(unit: Unit) -> void:
 		var events: Node = get_node_or_null("/root/Events")
 		if events != null:
 			events.unit_died.emit(unit)
+	# Free the dead node (deferred): it is already out of the registry, hash,
+	# renderer, tribe and (via _die) every combat slot, so no live reference
+	# survives to the next frame.
+	unit.queue_free()
 
 
 # --- Spawning -------------------------------------------------------------------

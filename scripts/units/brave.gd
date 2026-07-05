@@ -72,6 +72,14 @@ func unit_kind() -> StringName:
 	return &"brave"
 
 
+## Before the brave starts fighting (retaliation or an explicit attack order),
+## release its worker claims / drop carried wood so nothing is left stranded.
+func _on_combat_interrupt() -> void:
+	if state == State.GATHER or state == State.BUILD or state == State.PRAY \
+			or state == State.TRAIN:
+		_interrupt_tasks()
+
+
 func is_praying() -> bool:
 	return state == State.PRAY and _working
 

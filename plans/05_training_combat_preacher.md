@@ -273,11 +273,11 @@ ihr Sonderverhalten folgt in 5c.) Referenz: „Nahkampf“ + „Aggro & Verteidi
 
 ### Definition of Done 5b
 
-- [ ] Testsuite grün, `--headless --quit` fehlerfrei
+- [x] Testsuite grün, `--headless --quit` fehlerfrei
 - [ ] Manuell: Rechtsklick auf Feind → Prügelkampf; max. 3 hauen auf einen Gegner ein,
   Überzählige warten/rücken nach; bei mehreren freien Gegnern verteilen sich die eigenen
   Einheiten; Krieger deutlich zäher/härter; Braves wehren sich statt zu fliehen
-- [ ] `git add -A && git commit -m "Phase 5b: Nahkampf-Kern (Slots, Krieger, Aggro)" && git push`
+- [x] `git add -A && git commit -m "Phase 5b: Nahkampf-Kern (Slots, Krieger, Aggro)" && git push`
 
 ---
 

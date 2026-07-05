@@ -14,3 +14,8 @@ func _init() -> void:
 
 func unit_kind() -> StringName:
 	return &"preacher"
+
+
+## A combat unit: brawls in melee in phase 5b (conversion comes in 5c).
+func _is_combatant() -> bool:
+	return true
