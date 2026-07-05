@@ -112,7 +112,7 @@ Richtungs-Sprites).
 
 **Gebaut:**
 - `scripts/core/tribe.gd` — `Tribe` (RefCounted): `id`, `color`, `wood`, `mana`,
-  `units`/`buildings` (typisierte Arrays), `shaman` (Phase 5). Abgeleitet als **Methoden**:
+  `units`/`buildings` (typisierte Arrays), `shaman` (Phase 6). Abgeleitet als **Methoden**:
   `population()`, `housing_capacity()` (Summe `Building.housing_capacity()`),
   `praying_braves()` (zählt `Unit.is_praying()`). `tick(delta)`:
   `mana += (pop * MANA_BASE_RATE(0.1) + betende * MANA_PRAY_BONUS(0.5)) * delta`.
@@ -138,7 +138,7 @@ Richtungs-Sprites).
   freier Kapazität, neuer Brave läuft zum `rally_point` (Default: begehbare Zelle südlich,
   von BuildingManager gesetzt). Brauner PrismMesh + Stammfarben-Fahne.
 - `scripts/buildings/reincarnation_site.gd` + Szene — `ReincarnationSite`: kostenlos,
-  3×3, `PRAY_RADIUS = 5`; in Phase 3 nur Gebetsplatz (Respawn folgt Phase 5).
+  3×3, `PRAY_RADIUS = 5`; in Phase 3 nur Gebetsplatz (Respawn folgt Phase 6).
   Flacher Torus-Ring + Stein + Fahne.
 - `scripts/core/tree_resource.gd` + `scenes/tree_resource.tscn` — `TreeResource`:
   `wood_remaining` (40), `harvest(amount) -> int` (nie mehr als vorhanden, einmaliges
@@ -310,7 +310,7 @@ Lieferung, Hütten-Spawn, Rekrutierung nur IDLE, manuelles Kettenfällen),
   Einheiten unter `SEPARATION_RADIUS` (0,55 m) weich auseinander
   (max. 1,6 m/s, Spatial-Hash-Abfrage, deterministische Richtung bei exakter
   Überlappung, Zielzelle muss begehbar bleiben, Y neu gesnappt). `DEAD` und
-  `THROWN` (Würfe ab Phase 5 — dort ist Overlap erlaubt) sind ausgenommen.
+  `THROWN` (Würfe ab Phase 6 — dort ist Overlap erlaubt) sind ausgenommen.
   Zusätzlich streuen Hütten-Spawns Position + Rally-Ziel deterministisch
   (`_spawn_counter` + `formation_offset`).
 - **Holz wird einzeln geerntet:** `TreeResource.harvest_one()` nimmt genau
@@ -418,7 +418,7 @@ vorher Ø **215 ms**/Tick (Separation 190 ms), nachher Ø **23,7 ms**/Tick
 (move 9,0 | hash 5,0 | paths 0,6 | separation 9,2), Spitze 64 ms — unter dem
 33-ms-Budget; im normalen Spiel bewegt sich nur ein Bruchteil gleichzeitig.
 
-**Offen/bekannt (Phase 7):** 4000 `AnimatedSprite3D` sind weiterhin je ein
+**Offen/bekannt (Phase 8):** 4000 `AnimatedSprite3D` sind weiterhin je ein
 Draw Call — falls die GPU-Seite beim Nutzer limitiert, wäre der nächste
 Schritt ein MultiMesh-basiertes Einheiten-Rendering.
 
@@ -444,7 +444,7 @@ Simulation war gemessen im Budget → Hauptverdächtiger war das **Rendering**:
   `discard` bei Alpha < 0,5. Kapazität 4096 Instanzen.
 - `PlaceholderSprites.build_atlas(kinds)` packt alle Frames in EINE
   Atlas-Textur; Tabelle kind → anim → 4 Ansichten → `[start, count, fps]`.
-  Neue Einheiten-Typen (Phase 4/5): Kind in `UnitRenderer.KINDS` ergänzen.
+  Neue Einheiten-Typen (Phase 5/6): Kind in `UnitRenderer.KINDS` ergänzen.
 - Update-Strategie pro Frame: Kamera **einmal** holen; Frames/Ansichten in
   **3 Slices** (nur bei geändertem Frame-Index wird Custom-Data geschrieben,
   Cache `_render_frame` auf der Unit); **Transforms jeden Frame, aber nur
@@ -489,3 +489,197 @@ Sim-Benchmark Ø 19,2 ms / Spitze 34 ms (Budget ~33 ms). Manuelle Prüfung:
 Sprite-Optik: Richtungen/Farben/Hüpfen — falls Sprites kopfstehen, eine
 Zeile im Shader `UV.y` flippen; 6er-Grüppchen beim Massen-Move; kleiner
 tiefengetesteter Ring; Baustelle nutzt Stapel zuerst).
+
+---
+
+## Phase 4 — Original-nahes UI (Sidebar, Minimap, Tabs, Pausemenü)
+
+**Gebaut:**
+- `scripts/ui/ui_theme.gd` — `UiTheme` (class_name, RefCounted): prozedurale
+  Gold/Braun-Optik. `panel_style()`, `inset_style()`, `style_button(btn)`
+  (StyleBoxFlat für normal/hover/pressed/focus/disabled + Font-Farben),
+  `icon(key) -> ImageTexture` (24×24-Pixel-Art, Cache pro Key) für Tabs
+  (`house`/`star`/`people`), Gebäude (`hut`/`warrior_camp`/`firewarrior_camp`/
+  `temple`), die 5 Zauber (`blast`/`lightning`/`swarm`/`landbridge`/`tornado`),
+  `shaman`, `pause`, `menu`. Alles zur Laufzeit erzeugt, `assets\` bleibt leer.
+- `scripts/ui/minimap.gd` — `Minimap` (class_name, Control): rund, **Norden
+  fest**. Terrain aus `TerrainData.cell_height` in ein `Image`/`ImageTexture`
+  (Höhen-Farbstufen konsistent zu `Terrain._color_for_height`, Wasser dunkel),
+  Kreismaske durch transparente Pixel außerhalb des Inkreises; partielles
+  Update bei `Events.terrain_deformed(rect)` (`ImageTexture.update`). Overlay
+  in `_draw()`: Einheiten (2-px-Punkte in Stammfarbe), Gebäude (Quadrate),
+  Bäume (dunkelgrüne Punkte), Kamera-Marker; Punkte außerhalb des Kreises
+  geclippt; Redraw gedrosselt (0,2 s). Links-Klick/Drag = Kamera dorthin.
+  **Statisch/headless-testbar:** `world_to_map(world_xz, map_size, world_size)`,
+  `map_to_world(...)` (beide clampen + div-0-sicher), `height_to_color(h)`.
+- `scenes/ui/sidebar.tscn` + `scripts/ui/sidebar.gd` — `Sidebar` (class_name,
+  Control auf CanvasLayer `UI`): komplette UI-Hülle links, feste Breite 260,
+  volle Höhe, `PanelContainer` mit `mouse_filter = STOP`. Aufbau (VBox):
+  Minimap → Tab-Leiste (3 Icon-Buttons) → Kopfbereich (Schamanin-Porträt
+  **disabled**, je Stamm ein `ProgressBar` in Stammfarbe = Bevölkerungsbalken,
+  „Bevölkerung x/y“, „Holz“, 20-Segment-Mana-Balken) → Tab-Inhalt → Menü-Button.
+  - **Maus-Guard:** statisch `Sidebar.is_mouse_over_ui()` (Panel-Rect-Treffer);
+    `process_mode = ALWAYS`, damit Esc/„Fortsetzen“ auch bei pausiertem Baum
+    greift. Single-Instance in `_instance` (in `_exit_tree` geräumt).
+  - **Signalgetrieben:** `Events.population_changed` → Balken + „x/y“,
+    `mana_changed` → Mana-Segmente, `stockpile_changed` → Holz.
+  - **Statisch/testbar:** `mana_segments(mana, cap, segments)`,
+    `pip_state(charges, max, progress) -> {filled,empty,progress}`,
+    `tribe_bar_fractions(populations) -> Array[float]` (normiert auf Max,
+    all-null-sicher), `default_build_entries()`, `default_spell_entries()`.
+  - **Tab Gebäude:** Button je `default_build_entries()`-Eintrag (Icon + Name +
+    Kosten). Hütte aktiv → `build_menu.start_placement(HUT_SCENE)`; Krieger-/
+    Feuerkrieger-Lager/Tempel disabled + Tooltip „ab Phase 5“ (scene = null).
+  - **Tab Zauber:** 5 Zellen (Pip-Reihe aus `ColorRect`s über Icon-Button),
+    alle **disabled**. Anzeige-API `set_spell_state(id, charges, max_charges,
+    charge_progress, castable)` fertig (füllt Pips, aktiviert Button) — Phase 6
+    verdrahtet nur noch Ladungssystem + Zielmodus.
+  - **Tab Gefolgsleute:** Zähler je Typ aus `Tribe.units`/`unit_kind()`
+    (gedrosselt 0,3 s); Brave aktiv, Krieger/Feuerkrieger/Prediger/Schamanin
+    ausgegraut bei 0. Button „Untätige Braves wählen“ → selektiert eigene
+    IDLE-Braves über `SelectionManager.select_units()`.
+  - **Pausemenü:** Vollbild-Overlay (`process_mode = ALWAYS`), „Fortsetzen“
+    (`get_tree().paused = false`) / „Beenden“ (`get_tree().quit()`); Menü-Button
+    und Esc togglen (`_toggle_pause`), Esc nur wenn kein Bau-Placement aktiv.
+- `scripts/ui/build_menu.gd` — zum **reinen Platzierungs-Controller**
+  refaktoriert: eigener Button entfernt; neue öffentliche API
+  `start_placement(scene)`, `cancel()`, `is_active()` (intern `_toggle_hut` für
+  Hotkey H). Ghost wird bei `Sidebar.is_mouse_over_ui()` versteckt; Platzier-/
+  Abbruch-Klicks über der Sidebar werden ignoriert.
+- `scripts/ui/selection_manager.gd` — Maus-**Start** über der Sidebar wird
+  ignoriert (laufende Drags dürfen dort enden); neue Methode
+  `select_units(units)` (public Wrapper um `_set_selection`).
+- `project.godot` — Input-Actions `cast_spell_1..5` (Tasten 1–5, in Phase 4
+  ohne Wirkung, für Phase 6 reserviert).
+- `scripts/core/main.gd` / `scenes/main.tscn` — altes HUD entfernt, `Sidebar`
+  eingehängt und via `_sidebar.setup(tribes, player_id, unit_manager,
+  building_manager, tree_manager, wood_pile_manager, tribe_commands, build_menu,
+  selection, camera_rig, terrain_data)` verdrahtet.
+- **Entfernt:** `scenes/ui/hud.tscn` + `scripts/ui/hud.gd` (Anzeigen sind in die
+  Sidebar gewandert).
+- `tests/test_ui_logic.gd` — 49 Checks: `world_to_map`/`map_to_world`
+  (Mitte/Ecken/Clamp/Rundtrip/div-0), `height_to_color` (Wasser dunkel, Stufen
+  konsistent zu Terrain-Schwellen), `mana_segments` (Hälfte/voll/Überlauf/
+  Guards), `pip_state` (partiell/voll/0/Clamp), `tribe_bar_fractions`
+  (proportional, all-null-sicher), Build-Registrierung (Hütte aktiv referenziert
+  Hut-Szene + `Hut.WOOD_COST`; disabled ohne Szene), Zauberanzahl.
+
+**Extras/Abweichungen vom Plan:**
+- Kein separates `tribe_bars.gd` — Bevölkerungsbalken als gestylte
+  `ProgressBar`s (Stammfarben-Fill), Längen aus `tribe_bar_fractions()`.
+- Sidebar-Layout komplett in Code (`_build_ui`) aufgebaut; die `.tscn` enthält
+  nur den Root-`Control` mit Skript (analog altem HUD/BuildMenu).
+- Mana-Anzeige-Obergrenze `MANA_DISPLAY_CAP = 1000` (reine Anzeige-Konstante).
+
+**Erkenntnisse/Stolpersteine:**
+- `PanelContainer.mouse_filter = STOP` schluckt GUI-Events über sich bereits,
+  bevor `_unhandled_input` läuft → der explizite `is_mouse_over_ui()`-Guard ist
+  Zusatzsicherung (und deckt SelectionManager/BuildMenu ab, die auf
+  `_unhandled_input` hören). Ein Drag, der über der Sidebar losgelassen wird,
+  wird vom Panel geschluckt und nicht finalisiert (Rand-Edge-Case, unkritisch).
+- Damit Esc/„Fortsetzen“ bei `get_tree().paused = true` noch reagieren, müssen
+  Sidebar **und** Pausemenü `process_mode = PROCESS_MODE_ALWAYS` haben (pausable
+  Nodes erhalten pausiert kein Input).
+
+**Verifikation:** Testsuite grün (**233 Tests**, davon 49 neu in
+`test_ui_logic.gd`), `--headless --import` + `--headless --quit` fehlerfrei,
+Spiel 5 s headless ohne Laufzeitfehler (Sidebar-`_process`/Follower-Refresh
+laufen). **Manuelle Prüfung ausstehend — bitte durch Nutzer** (Sidebar-Optik &
+Tab-Umschaltung, Minimap-Insel/Punkte/Klick-Navigation, Bevölkerungs-/Mana-/
+Holz-Anzeige, Hütte bauen nur über Gebäude-Tab + H, Klicks über der Sidebar
+selektieren/bauen nicht, Box-Select am Sidebar-Rand, Pausemenü friert Spiel,
+Zauber-Tab mit leeren Pips, „Untätige Braves wählen”).
+
+**Bugfix (Nutzerfeedback): Sprite-Tiefe an Gebäuden/planiertem Terrain.**
+Der UnitRenderer-Shader zeichnete das Sprite als **spherisches Billboard** auf
+**einer** konstanten Tiefe (= Bodenpunkt der Einheit). Dadurch lag der Kopf auf
+Bodentiefe, und erhöhte Nachbargeometrie (Hüttendach, planierte Terrain-Kante
+mit scharfen Ecken) war näher an der Kamera und verdeckte Sprite-Teile falsch
+(Köpfe verschwanden im Haus; Terrain verdeckte Sprites uneinheitlich). Fix in
+[unit_renderer.gd](../scripts/ui/unit_renderer.gd): Form/Bildschirmposition
+bleiben kamerazugewandt (keine Verzerrung), aber die **Tiefe pro Vertex** wird
+berechnet, als stünde das Sprite senkrecht in der Welt (jede Zeile um ihre echte
+Welthöhe `up_view.z * VERTEX.y * ELEVATION_GAIN` Richtung Kamera versetzt) plus
+kleiner Bias (`DEPTH_BIAS = 0.35`). Es wird nur `POSITION.z` (NDC-Tiefe)
+geändert, x/y bleiben die spherische Projektion. Ergebnis: Geometrie verdeckt
+Sprites nur noch, wenn sie wirklich davor ist.
+- **Folgerunden (Nutzerfeedback):** Hüttendach-Überstand entfernt
+  ([hut.gd](../scripts/buildings/hut.gd): Dach-Prisma 0.95× → **0.85×** =
+  bündig mit den Wänden). `ELEVATION_GAIN` kurzzeitig auf 1.7 gesetzt (Kopf
+  extra Richtung Kamera) — das **überschoss** (Kopf ragte vor die Wand / lugte
+  hinter dem Haus übers Dach, Restsprite wirkte versetzt) und wurde auf **1.0**
+  (physikalisch korrekt) zurückgesetzt: Kopf sitzt auf seiner echten Tiefe,
+  vorne sichtbar / hinten verdeckt, ohne Überschießen.
+- **Prinzipbedingte Grenze:** Ein flaches Billboard neben einem 3D-Gebäude
+  kann nicht perfekt sein — die auf dem Bildschirm überlappende Sprite-Hälfte
+  wird vor der Wand gezeichnet, wenn der Bodenpunkt der Einheit davor liegt
+  (physikalisch korrekt). Ein völlig artefaktfreies Ergebnis bräuchte echtes
+  2.5D-Grund-Sortieren (Einheiten/Gebäude nach Bodenlinie, ohne Per-Pixel-Z) —
+  bewusst offen für Phase 8, falls gewünscht.
+- **Optische Prüfung ausstehend** (Headless kompiliert den Shader nicht
+  vollständig — bitte im GUI-Start gegentesten).
+
+**Holzwirtschaft-Feinschliff (Nutzerfeedback):**
+- **Manuelles Sammeln = ein Stück pro Weg:** `Brave._tick_loose_chop` liefert
+  jetzt nach **jedem einzelnen** Holz ab und kehrt danach zum Fällplatz zurück
+  (vorher bis Tragekapazität 3 gefüllt). Test `test_manual_chop_one_piece_per_trip`
+  prüft, dass `carried_wood` nie über 1 steigt.
+- **Ablieferung konsolidiert auf bestehende Stapel:** neuer Helfer
+  `Brave._loose_drop_target()` zielt bevorzugt auf einen vorhandenen Stapel mit
+  Platz nahe dem Gebäude-Eingang (`WoodPileManager.pile_with_space_near`,
+  Radius `DROP_CONSOLIDATE_RADIUS = 5`), sonst auf den Eingang.
+- **Stapelgröße skaliert mit Menge:** `WoodPile._update_visual` skaliert den
+  Knoten mit der Holzmenge (`0.8`…`1.45`); Basis bleibt am Boden (Sprite-Füße =
+  Ursprung). Max weiterhin `MAX_AMOUNT = 5`.
+- **HUD „Holz" = Holz nahe eigener Gebäude:** neue Abfrage
+  `WoodPileManager.wood_near_positions(positions, radius)` (jeder Stapel einmal
+  gezählt). Die Sidebar zeigt jetzt die Summe der Stapel im Umkreis
+  `WOOD_NEAR_RADIUS = 12` um die eigenen Gebäude (statt der globalen Gesamtmenge),
+  aktualisiert im gedrosselten Refresh (0,3 s) und bei `stockpile_changed`.
+- Tests: `test_manual_chop_one_piece_per_trip`, `test_wood_pile_manager_near_queries`
+  (Gesamt **241** grün); bestehende Manual-Chop-Tests unverändert grün.
+
+**Trage-Animation, 6er-Gruppen aus Gebäuden, Gebäude-UI (Nutzerfeedback):**
+- **Holz-Trage-Sprite:** `PlaceholderSprites` hat zwei neue Animationsbasen
+  `carry` (stehend, Holzscheit vor dem Körper) und `carry_walk` (laufend) in
+  allen 4 Ansichten (in `make_frames` und `build_atlas`/Atlas aufgenommen).
+  `Brave._anim_base` liefert beim Tragen (`carried_wood > 0`) `carry_walk` beim
+  Laufen bzw. `carry` beim Stehen (`_carry_or`); Walk/Idle/Carry werden per Tick
+  via `_apply_animation(false)` (kein Timer-Neustart) an die echte Bewegung
+  (`_has_path()`) angepasst.
+- **6er-Gruppen aus Gebäuden:** neuer statischer Helfer
+  `TribeCommands.group_slot_offset(index)` (gleiche Ring-Formation wie
+  `order_move`). `Hut._spawn_brave` schickt neue Braves an einen Slot
+  (`_spawn_counter % 36`) in 6er-Gruppen um den Rally-Point statt an einen
+  zufällig gestreuten Punkt.
+- **Gebäude anwählbar + Rally per Rechtsklick:** `Building` hat `selected` /
+  `set_selected()` mit gold-farbenem Auswahlring (Torus, unshaded).
+  `SelectionManager` wählt bei Linksklick zuerst ein eigenes Gebäude (Raycast
+  Layer 2, `_select_building`, wechselseitig exklusiv zur Einheitenauswahl);
+  bei ausgewähltem Gebäude setzt Rechtsklick dessen `rally_point` auf den
+  Terrain-Trefferpunkt (`_set_rally`), sonst weiterhin `_command_move`.
+- **Produktions-/Ausbildungsbalken über Gebäuden:** `Building.production_progress()`
+  (Basis −1 = keiner) + billboard-Sprite-Balken (`_create_overlay`/`_update_overlay`,
+  Tiefen­test aus, Textur nur bei Wertänderung neu). `Hut.production_progress()`
+  = Fortschritt bis zum nächsten Brave (`1 - spawn_timer/SPAWN_INTERVAL`), −1
+  während Bau oder bei erreichtem Bevölkerungslimit.
+- Tests: `test_carry_animation_base`, `test_group_slot_offset`,
+  `test_hut_production_progress` (Gesamt **256** grün).
+
+**Nachbesserungen (Nutzerfeedback):**
+- **Trage-Sprite Rückenansicht:** von hinten wird das Holz (vor dem Körper) nicht
+  mehr gezeichnet — nur minimal kürzere Arme (`_draw_carry_arms_and_log`
+  behandelt `back` separat).
+- **Rally-Marker:** `Building` zeigt bei Auswahl einen Sammelpunkt-Marker
+  (goldener Ring + Pfosten) an der `rally_point`-Position (`_create_rally_marker`/
+  `_update_rally_marker`, Position je Tick aktualisiert).
+- **Produktionsbalken nur bei Auswahl/Hover:** `_update_overlay` zeigt den Balken
+  nur noch, wenn das Gebäude `selected` **oder** `hovered` ist. Hover kommt vom
+  `SelectionManager._update_hover` (Raycast Layer 2 bei Mausbewegung →
+  `Building.set_hovered`).
+
+**Bewusst NICHT umgesetzt (Phase 5 nötig):** „Gebäude von Anhängern besetzen"
+(Einheiten per Rechtsklick reinschicken) und das Slot-/Belegungs-Icon mit
+Einheitentyp-Symbolen — das ist die Ausbildungsgebäude-Mechanik aus Phase 5
+(Krieger-/Feuerkrieger-Lager, Tempel). Bei Hütten gibt es keine Besetzung.
+Wird mit den Trainingsgebäuden in Phase 5 nachgezogen.

@@ -1,4 +1,4 @@
-# Phase 6 — Skirmish-KI & Siegbedingungen
+# Phase 7 — Skirmish-KI & Siegbedingungen
 
 > Architektur-Entscheidungen und Verifikations-Befehle: siehe [00_overview.md](00_overview.md).
 
@@ -11,8 +11,8 @@ die Spielschleife.
 
 ## Voraussetzungen
 
-Phasen 1–5: kompletter Gameplay-Stack (Wirtschaft, Training, Kampf, Zauber, Respawn),
-TribeCommands als einzige Mutations-API.
+Phasen 1–6: kompletter Gameplay-Stack (Wirtschaft, UI, Training, Kampf, Zauber mit
+Ladungssystem, Respawn), TribeCommands als einzige Mutations-API.
 
 ## Deliverables
 
@@ -20,9 +20,9 @@ TribeCommands als einzige Mutations-API.
 |---|---|
 | `scripts/ai/ai_controller.gd` | `class_name AIController extends Node` (Kind von Main, bekommt `tribe`-Referenz). Tickt **1×/s** (Akkumulator in `_process` → `tick_ai()`; `tick_ai()` direkt aufrufbar für Tests). Handelt NUR über TribeCommands |
 | `scripts/ai/ai_state.gd` | State-Machine (`enum AIState {BUILD, TRAIN, ATTACK}`) mit Schwellwert-Übergängen und Rückfall-Logik. Entscheidungslogik als reine Funktionen (Zustand + Tribe-Snapshot rein, Aktionsliste/Folgezustand raus) → headless testbar ohne Szenenbaum |
-| KI-Verhalten pro State | **BUILD:** Hütten bauen bis Ziel-Bevölkerung (Bauplatz-Suche: begehbare freie Zellen nahe der Basis), Braves auf Bäume verteilen (`order_gather`), Trainingslager + Tempel errichten, Reinkarnationsplatz-Beter abstellen. → TRAIN, wenn Bevölkerung ≥ X und Gebäude stehen. **TRAIN:** Braves in Lager schicken (`order_train`), Armee-Mix (z. B. 50 % Krieger, 30 % Feuerkrieger, 20 % Prediger) bis Sollstärke Y; Wirtschaft läuft weiter. → ATTACK, wenn Armee ≥ Y und Schamanin lebt. **ATTACK:** Truppe + Schamanin am Sammelpunkt sammeln, dann Angriffsziel Spielerbasis (nächstes Spieler-Gebäude); Schamanin castet situativ (Blast bei Einheitenklumpen in Reichweite, Lightning auf Spieler-Schamanin/stärkste Einheit — simple Heuristik reicht). **Rückfall:** Armee unter Z % dezimiert oder Schamanin tot → zurück zu BUILD/TRAIN |
+| KI-Verhalten pro State | **BUILD:** Hütten bauen bis Ziel-Bevölkerung (Bauplatz-Suche: begehbare freie Zellen nahe der Basis), Braves auf Bäume verteilen (`order_gather`), Trainingslager + Tempel errichten, Reinkarnationsplatz-Beter abstellen. → TRAIN, wenn Bevölkerung ≥ X und Gebäude stehen. **TRAIN:** Braves in Lager schicken (`order_train`), Armee-Mix (z. B. 50 % Krieger, 30 % Feuerkrieger, 20 % Prediger) bis Sollstärke Y; Wirtschaft läuft weiter. → ATTACK, wenn Armee ≥ Y und Schamanin lebt. **ATTACK:** Truppe + Schamanin am Sammelpunkt sammeln, dann Angriffsziel Spielerbasis (nächstes Spieler-Gebäude); Schamanin castet situativ, wenn eine Ladung verfügbar ist (Blast bei Einheitenklumpen in Reichweite, Lightning auf Spieler-Schamanin/stärkste Einheit — simple Heuristik reicht). **Rückfall:** Armee unter Z % dezimiert oder Schamanin tot → zurück zu BUILD/TRAIN |
 | Siegbedingung in `game_state.gd` | Ein Tribe ist besiegt, wenn er **keine Einheiten UND keine spawnfähigen Gebäude** (Hütten/Trainingsgebäude/Reinkarnationsplatz) mehr hat. Prüfung über Events (`unit_died`, `building_destroyed`), Signal `tribe_defeated(tribe_id)` → Match-Ende |
-| `scenes/ui/end_screen.tscn` + `scripts/ui/end_screen.gd` | Overlay „Sieg!" / „Niederlage" (deutsch) + Button „Beenden"; Spiel pausiert (`get_tree().paused`, UI `process_mode = ALWAYS`) |
+| `scenes/ui/end_screen.tscn` + `scripts/ui/end_screen.gd` | Overlay „Sieg!" / „Niederlage" (deutsch) + Button „Beenden"; Spiel pausiert (`get_tree().paused`, UI `process_mode = ALWAYS` — Muster + Optik vom Pausemenü aus Phase 4 wiederverwenden) |
 | Map-Setup in `main.gd` | Zwei **spiegelsymmetrische Startbasen** (je: Reinkarnationsplatz, Schamanin, Starthütte, Start-Braves, Bäume in Reichweite); Insel-Generierung ggf. symmetrisch spiegeln, damit fair |
 | `tests/test_ai.gd` | siehe Tests unten |
 
@@ -42,8 +42,8 @@ TribeCommands als einzige Mutations-API.
   Bevölkerung/Gebäude über Schwellwert → TRAIN; Armee ≥ Soll + Schamanin lebt → ATTACK;
   Armee dezimiert → Rückfall.
 - **Symmetrie-Check (zentral!):** KI-Tribe ohne Holz → `place_building`-Aktion der KI
-  schlägt fehl, kein Gebäude entsteht, Holz bleibt 0; KI ohne Mana → `cast_spell`
-  schlägt fehl. (Beweist: KI kann nicht cheaten.)
+  schlägt fehl, kein Gebäude entsteht, Holz bleibt 0; KI ohne Zauber-Ladung →
+  `cast_spell` schlägt fehl. (Beweist: KI kann nicht cheaten.)
 - **BUILD-Tick:** KI-Tribe mit Startressourcen einige `tick_ai()` → mindestens eine
   Hütte via TribeCommands platziert, Holz entsprechend reduziert; Braves haben
   GATHER-Aufträge.
@@ -78,5 +78,5 @@ simuliert; prüft, dass genau ein `tribe_defeated` eintritt und keine Skriptfehl
 
 - [ ] Testsuite grün (inkl. Symmetrie-Check), `--headless --quit` fehlerfrei
 - [ ] Komplettes Match manuell gespielt, beide Endscreens gesehen
-- [ ] Checkbox Phase 6 in [00_overview.md](00_overview.md) abgehakt
-- [ ] `git add -A && git commit -m "Phase 6: Skirmish-KI & Siegbedingungen" && git push`
+- [ ] Checkbox Phase 7 in [00_overview.md](00_overview.md) abgehakt
+- [ ] `git add -A && git commit -m "Phase 7: Skirmish-KI & Siegbedingungen" && git push`

@@ -11,10 +11,11 @@ Nach Abschluss einer Phase: Checkbox abhaken, committen, pushen.
 - [x] **Phase 1** — [01_project_terrain_camera.md](01_project_terrain_camera.md): Projektgerüst, verformbares Terrain, RTS-Kamera
 - [x] **Phase 2** — [02_units_selection_movement.md](02_units_selection_movement.md): Pathfinding, Unit-Basis, Selektion & Bewegung
 - [x] **Phase 3** — [03_buildings_economy_hud.md](03_buildings_economy_hud.md): Gebäude, Wirtschaft (Holz/Hütten/Mana), HUD
-- [ ] **Phase 4** — [04_training_combat_preacher.md](04_training_combat_preacher.md): Training, Rally Points, Kampf, Prediger
-- [ ] **Phase 5** — [05_shaman_spells.md](05_shaman_spells.md): Schamanin, Reinkarnation, alle 5 Zauber
-- [ ] **Phase 6** — [06_ai_win_conditions.md](06_ai_win_conditions.md): Skirmish-KI, Siegbedingungen
-- [ ] **Phase 7** — [07_performance_polish.md](07_performance_polish.md): Performance, Balance, Feinschliff
+- [x] **Phase 4** — [04_ui.md](04_ui.md): Original-nahes UI (Sidebar, Minimap, Zauber-/Bau-Panels)
+- [ ] **Phase 5** — [05_training_combat_preacher.md](05_training_combat_preacher.md): Training, Rally Points, Kampf, Prediger *(Sub-Phasen 5a–5d, siehe Plandatei)*
+- [ ] **Phase 6** — [06_shaman_spells.md](06_shaman_spells.md): Schamanin, Reinkarnation, alle 5 Zauber
+- [ ] **Phase 7** — [07_ai_win_conditions.md](07_ai_win_conditions.md): Skirmish-KI, Siegbedingungen
+- [ ] **Phase 8** — [08_performance_polish.md](08_performance_polish.md): Performance, Balance, Feinschliff
 
 Die Phasen sind **strikt sequenziell** — jede baut auf den Artefakten der vorherigen auf.
 Jede Phase endet mit einem **lauffähigen, manuell spielbaren Zwischenstand** und
@@ -113,6 +114,9 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
   selbst und Tests).
 - Mana-Tick zentral: `Tribe.tick(delta)`:
   `mana += (population * BASE_RATE + praying_braves * PRAY_BONUS) * delta`.
+- **Zauber-Ladungssystem (wie Original):** Mana wird automatisch in Zauber-Ladungen
+  umgewandelt (je Zauber `charge_cost`/`max_charges`); Casts verbrauchen Ladungen,
+  kein separater Cooldown. Details in Phase 6, Anzeige (Pips) in Phase 4.
 
 ### 5. Selektion & Input
 - Terrain-/Gebäudeklick: Raycast (`project_ray_origin/normal` →
@@ -138,6 +142,9 @@ künstlichen Deltas auf. Keine Godot-`Timer`-Nodes für Kernlogik.
   Reinkarnationsplatz = flacher Ring); Stammfarben-Fahne als kleines Zweitmesh.
 - Bäume: Zylinder-Stamm + Kegel (`CylinderMesh` mit `top_radius = 0`).
 - Alles in `_ready()` erzeugt — **keine externen Asset-Dateien**, `assets\` bleibt leer.
+- **Auch die UI-Optik ist prozedural:** Gold/Braun-StyleBoxes + generierte
+  Pixel-Art-Icons in `scripts/ui/ui_theme.gd` (Phase 4) — echte Grafiken können
+  später dieselben Slots ersetzen.
 - UI-Sprache Deutsch, Code/Identifier Englisch, typisiertes GDScript (siehe CLAUDE.md §8).
 
 ## Test-Strategie
@@ -182,7 +189,7 @@ künstlichen Deltas auf. Keine Godot-`Timer`-Nodes für Kernlogik.
    `raise_area()` strikt nutzen. `map_data`-Neuzuweisung einmal pro Verformung (bzw.
    gedrosselt), nicht pro Frame.
 9. **KI-Symmetrie:** keine Abkürzungen an TribeCommands vorbei — der Symmetrie-Test in
-   Phase 6 prüft das.
+   Phase 7 prüft das.
 10. **API-Drift Godot 4.7:** bei Unsicherheit exakte Signaturen gegen die lokale 4.7-Doku
     prüfen statt älteren Tutorials zu vertrauen.
 

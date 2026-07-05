@@ -68,9 +68,9 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
 |---|---|
 | **Schamanin** | Wichtigste Einheit, einzige Zauberwirkerin. Stirbt sie, **respawnt** sie nach einer Wartezeit am **Reinkarnationsplatz** (Reincarnation Site). Pro Stamm genau eine. |
 | **Brave (Gefolgsmann)** | Basis-Einheit. Sammelt **passiv Holz**, baut Gebäude aus, generiert durch **Beten Mana**. Wird von Hütten gespawnt. |
-| **Krieger** | Nahkampf-Einheit. Ausbildung im Krieger-Trainingslager. |
-| **Feuerkrieger** | Fernkampf-Einheit (Feuerbälle). Ausbildung im Feuerkrieger-Trainingslager. |
-| **Prediger** | **Konvertiert** feindliche Einheiten zum eigenen Stamm. Ausbildung im Tempel. |
+| **Krieger** | Nahkampf-Einheit. Ausbildung in der **Kaserne** (Krieger-Trainingslager). |
+| **Feuerkrieger** | Fernkampf-Einheit (Feuerbälle). Ausbildung im **Feuertempel** (Feuerkrieger-Trainingslager). |
+| **Prediger** | **Konvertiert** feindliche Einheiten zum eigenen Stamm. Ausbildung im **Tempel**. |
 
 **Steuerung:**
 - **Rechtsklick** bewegt selektierte Einheiten (Standard-RTS-Selektion: Klick + Box-Select).
@@ -89,15 +89,18 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
     Bevölkerung** (nicht wenige wie im Original).
   - Hütten **spawnen über Zeit neue Braves**, solange das Bevölkerungslimit (Summe der
     Hütten-Kapazitäten) nicht erreicht ist.
-- **Trainingsgebäude:** Krieger-Trainingslager, Feuerkrieger-Trainingslager, **Tempel**
-  (für Prediger). Ablauf: Brave betritt das Gebäude → kommt nach Ausbildungszeit als
-  entsprechende Kampfeinheit heraus → läuft zum Rally Point.
+- **Trainingsgebäude:** **Kaserne** (Krieger, 5 Holz/3 s), **Feuertempel** (Feuerkrieger,
+  10 Holz/4 s), **Tempel** (Prediger, 5 Holz/5 s). Ablauf: Brave betritt das Gebäude → kommt
+  nach Ausbildungszeit als entsprechende Kampfeinheit heraus → läuft zum Rally Point.
 - **Reinkarnationsplatz:** Respawn-Ort der Schamanin (siehe §4).
 
 ## 6. Magiesystem
 
 - **Mana** wird **passiv** generiert; die Rate skaliert mit der **eigenen Bevölkerungszahl**
   (je mehr Leute, desto schneller lädt Mana; betende Braves tragen zusätzlich bei).
+- **Ladungssystem (wie im Original):** Mana wird automatisch in **Zauber-Ladungen**
+  umgewandelt (je Zauber `charge_cost` und `max_charges`); Casts verbrauchen gespeicherte
+  Ladungen, es gibt keinen separaten Cooldown. Anzeige als Ladungs-Pips in der Zauberleiste.
 - **Zaubersprüche** (bewusst reduziertes Set):
 
 | # | Zauber | Effekt |

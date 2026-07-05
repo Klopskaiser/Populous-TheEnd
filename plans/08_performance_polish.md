@@ -1,4 +1,4 @@
-# Phase 7 — Performance, Balance & Feinschliff
+# Phase 8 — Performance, Balance & Feinschliff
 
 > Architektur-Entscheidungen und Verifikations-Befehle: siehe [00_overview.md](00_overview.md).
 
@@ -10,17 +10,17 @@ vervollständigt, README dokumentiert das Projekt.
 
 ## Voraussetzungen
 
-Phasen 1–6: vollständig spielbares Skirmish-Match.
+Phasen 1–7: vollständig spielbares Skirmish-Match.
 
 ## Deliverables
 
 | Bereich | Inhalt |
 |---|---|
-| `scripts/core/balance.gd` | `class_name Balance` — ALLE Balancing-Konstanten zentralisieren (bisher in den Klassen verstreut): Kosten, HP, Schaden, Reichweiten, Geschwindigkeiten, Trainings-/Spawn-/Respawn-Zeiten, Mana-Raten, Zauberkosten/-radien/-cooldowns, KI-Schwellwerte. Alle Klassen umstellen; Tests referenzieren Balance statt Magic Numbers |
+| `scripts/core/balance.gd` | `class_name Balance` — ALLE Balancing-Konstanten zentralisieren (bisher in den Klassen verstreut): Kosten, HP, Schaden, Reichweiten, Geschwindigkeiten, Trainings-/Spawn-/Respawn-Zeiten, Mana-Raten, Zauber-Ladungskosten/-maxima/-radien, KI-Schwellwerte. Alle Klassen umstellen; Tests referenzieren Balance statt Magic Numbers |
 | Performance | **Stresstest-Modus** (Kommandozeilen-Flag/Debug-Taste: 200+ Einheiten beider Tribes spawnen). Profiling mit Godot-Profiler im Editor. Bekannte Maßnahmen, falls nötig: gestaffelte `tick`-Raten (Zielsuche/KI seltener als Bewegung), Pfadberechnungs-Queue im NavGrid (Massenbefehle über mehrere Frames verteilen), **MultiMesh für Bäume** (statt N MeshInstance3D), Sichtbarkeits-Culling der Selektionsringe. Ziel: keine spürbaren Hitches bei 200 Einheiten + Landbridge-Cast |
-| Bedienkomfort | **Kontrollgruppen** Strg+1–9 (zuweisen) / 1–9 (auswählen; Konflikt mit Zauber-Hotkeys lösen, z. B. Zauber nur bei Schamanin-Selektion oder auf F1–F5). Doppelklick = alle Einheiten gleichen Typs im Sichtbereich. HUD-Ausbau: Selektionsanzeige (Typ + Anzahl + HP-Balken), Einheitenzähler pro Typ, Schamanin-Respawn-Countdown, „Zur Schamanin springen"-Hotkey |
+| Bedienkomfort | **Kontrollgruppen** Strg+1–9 (zuweisen) / 1–9 (auswählen; Konflikt mit Zauber-Hotkeys lösen, z. B. Zauber nur bei Schamanin-Selektion oder auf F1–F5). Doppelklick = alle Einheiten gleichen Typs im Sichtbereich. UI-Ausbau (Sidebar/Minimap existieren seit Phase 4): **Selektionsanzeige** (Typ + Anzahl + HP-Balken), „Zur Schamanin springen"-Hotkey, Feinschliff der bestehenden Anzeigen (Einheitenzähler, Schamanin-Porträt/Respawn-Countdown aus Phasen 4/6) |
 | Feinschliff | Sound-Hooks: leere `AudioStreamPlayer3D`-Slots an Schlüsselstellen (Angriff, Zauber, Bau fertig, Einheit fertig) — Assets optional später. Einfache Todes-/Treffer-Effekte (kurzes Aufblitzen/Partikel). Wasser leicht animiert (Shader-Scroll), optional |
-| Testsuite-Vervollständigung | Lücken schließen: Kanten- und Fehlerfälle aus den Phasen 1–6 (z. B. Einheit auf Landbridge während Verformung, Gebäudeplatzierung am Kartenrand, Konvertierung während PANIC/THROWN, Tod während Training, Rally Point im Wasser). Headless-KI-Simulationslauf (aus Phase 6) als fester Bestandteil der Suite |
+| Testsuite-Vervollständigung | Lücken schließen: Kanten- und Fehlerfälle aus den Phasen 1–7 (z. B. Einheit auf Landbridge während Verformung, Gebäudeplatzierung am Kartenrand, Konvertierung während PANIC/THROWN, Tod während Training, Rally Point im Wasser). Headless-KI-Simulationslauf (aus Phase 7) als fester Bestandteil der Suite |
 | `README.md` | Projektbeschreibung, Steuerung (deutsch), Startbefehle, Teststrategie, Verweis auf plans\ |
 
 ## Umsetzungsschritte
@@ -65,5 +65,5 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
 - [ ] Gesamte Testsuite grün, `--headless --quit` fehlerfrei
 - [ ] Stresstest manuell bestanden, Match-Balance akzeptabel
 - [ ] README vorhanden
-- [ ] Checkbox Phase 7 in [00_overview.md](00_overview.md) abgehakt
-- [ ] `git add -A && git commit -m "Phase 7: Performance, Balance, Feinschliff" && git push`
+- [ ] Checkbox Phase 8 in [00_overview.md](00_overview.md) abgehakt
+- [ ] `git add -A && git commit -m "Phase 8: Performance, Balance, Feinschliff" && git push`

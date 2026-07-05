@@ -18,15 +18,15 @@ SelectionManager.
 
 | Datei | Inhalt |
 |---|---|
-| `scripts/core/tribe.gd` | `class_name Tribe extends RefCounted`. `id: int`, `color: Color`, `wood: int`, `mana: float`, `units: Array[Unit]`, `buildings: Array[Building]`, `shaman` (ab Phase 5). Abgeleitet: `population` (units.size()), `housing_capacity` (Summe Hütten-Kapazität), `praying_braves`. `tick(delta)`: `mana += (population * BASE_RATE + praying_braves * PRAY_BONUS) * delta` (Konstanten vorerst hier, ab Phase 7 in balance.gd). Signale via Events-Bus (`wood_changed`, `mana_changed`) |
-| `scripts/core/tribe_commands.gd` | `class_name TribeCommands`. **Einzige Mutations-API** (statische Funktionen oder Node unter Main mit Referenzen auf NavGrid/UnitManager/BuildingManager): `place_building(tribe, building_scene, cell) -> Building` (prüft Holzkosten + Footprint-Walkability + frei; zieht Holz ab, reserviert NavGrid-Zellen), `order_move(units, target)`, `order_gather(units, tree)`, `order_train(...)` (Phase 4), `cast_spell(...)` (Phase 5). Ungültig → `null`/false, ohne Seiteneffekt |
+| `scripts/core/tribe.gd` | `class_name Tribe extends RefCounted`. `id: int`, `color: Color`, `wood: int`, `mana: float`, `units: Array[Unit]`, `buildings: Array[Building]`, `shaman` (ab Phase 6). Abgeleitet: `population` (units.size()), `housing_capacity` (Summe Hütten-Kapazität), `praying_braves`. `tick(delta)`: `mana += (population * BASE_RATE + praying_braves * PRAY_BONUS) * delta` (Konstanten vorerst hier, ab Phase 8 in balance.gd). Signale via Events-Bus (`wood_changed`, `mana_changed`) |
+| `scripts/core/tribe_commands.gd` | `class_name TribeCommands`. **Einzige Mutations-API** (statische Funktionen oder Node unter Main mit Referenzen auf NavGrid/UnitManager/BuildingManager): `place_building(tribe, building_scene, cell) -> Building` (prüft Holzkosten + Footprint-Walkability + frei; zieht Holz ab, reserviert NavGrid-Zellen), `order_move(units, target)`, `order_gather(units, tree)`, `order_train(...)` (Phase 5), `cast_spell(...)` (Phase 6). Ungültig → `null`/false, ohne Seiteneffekt |
 | `scripts/core/game_state.gd` (erweitert) | Verwaltet `tribes: Array[Tribe]` (2 Stück: 0 = Spieler/Blau, 1 = KI/Rot), tickt Tribes in `_process` |
 | `scripts/buildings/building.gd` | `class_name Building extends Node3D`. `tribe_id`, `max_health/health`, `wood_cost: int`, `footprint: Vector2i` (Zellen), `rally_point: Vector3`, Bauzustand (`under_construction`, `build_progress` — Braves im BUILD-State treiben ihn voran). Bei Platzierung: Y aus TerrainData, `nav_grid.fill_solid_region(footprint_rect, true)`; bei Zerstörung wieder freigeben + `Events.building_destroyed`. StaticBody3D + BoxShape für Klick-Selektion (eigener Layer). `tick(delta)` für Subklassen-Logik |
 | `scripts/buildings/hut.gd` + `scenes/buildings/hut.tscn` | `class_name Hut extends Building`. `capacity := 100`. Spawn-Logik in `tick`: solange `tribe.population < tribe.housing_capacity`, Spawn-Timer runterzählen → Brave am Gebäuderand spawnen, `order_move` zum `rally_point` |
-| `scripts/buildings/reincarnation_site.gd` + Szene | `class_name ReincarnationSite extends Building`. In dieser Phase: Platzierungsort + **Gebetsplatz** (Braves im PRAY-State in der Nähe zählen als `praying_braves`). Respawn-Logik folgt in Phase 5 |
+| `scripts/buildings/reincarnation_site.gd` + Szene | `class_name ReincarnationSite extends Building`. In dieser Phase: Platzierungsort + **Gebetsplatz** (Braves im PRAY-State in der Nähe zählen als `praying_braves`). Respawn-Logik folgt in Phase 6 |
 | `scripts/core/tree_resource.gd` + `scenes/tree_resource.tscn` | `class_name TreeResource extends Node3D`. `wood_remaining: int`; `harvest(amount) -> int` liefert tatsächlich entnommenes Holz; leer → Baum verschwindet (Zelle im NavGrid wieder frei, falls blockiert). Main verteilt beim Start N Bäume auf begehbare Zellen (Seed-basiert). Registry im `BuildingManager` oder eigenem `TreeManager`-Node für `nearest_tree(pos)` |
 | `scripts/units/brave.gd` (erweitert) | GATHER: nächsten Baum suchen → hinlaufen → hacken (Timer im `tick`) → Holz via TribeCommands/Tribe gutschreiben → nächster Baum. PRAY: zum Reinkarnationsplatz laufen, dort beten (zählt für Mana-Bonus). BUILD: zu Baustelle laufen, `build_progress` treiben. Kommandos über UI: selektierte Braves + Rechtsklick auf Baum → GATHER, auf Baustelle → BUILD, auf Reinkarnationsplatz → PRAY |
-| `scripts/ui/build_menu.gd` + Ghost-Preview | Bau-UI (deutsch: „Hütte" — weitere Gebäude Phase 4): Button/Hotkey → Ghost-Mesh folgt Maus-Raycast, grün/rot je nach Gültigkeit (Walkability + frei + genug Holz), Linksklick platziert via `TribeCommands.place_building`, Esc bricht ab |
+| `scripts/ui/build_menu.gd` + Ghost-Preview | Bau-UI (deutsch: „Hütte" — weitere Gebäude Phase 5): Button/Hotkey → Ghost-Mesh folgt Maus-Raycast, grün/rot je nach Gültigkeit (Walkability + frei + genug Holz), Linksklick platziert via `TribeCommands.place_building`, Esc bricht ab |
 | `scenes/ui/hud.tscn` + `scripts/ui/hud.gd` | HUD (deutsch): „Holz: n", „Mana: n", „Bevölkerung: x/y". Aktualisierung über Events-Signale, kein Polling |
 | `tests/test_economy.gd` | siehe Tests unten |
 
@@ -36,7 +36,7 @@ SelectionManager.
 2. `building.gd`-Basisklasse + `hut.tscn` (brauner PrismMesh + Stammfarben-Fahne);
    NavGrid-Footprint-Reservierung.
 3. `tribe_commands.gd` mit `place_building` (Kosten-/Platzprüfung) — ab jetzt laufen
-   **alle** Mutationen über diese Klasse (UI in Phase 3, KI in Phase 6).
+   **alle** Mutationen über diese Klasse (UI in Phase 3, KI in Phase 7).
 4. Bäume + Brave-GATHER, dann PRAY (Reinkarnationsplatz), dann BUILD (Bauzustand).
 5. Hütten-Spawn-Logik (Timer in `tick`, Kapazitätslimit).
 6. Ghost-Preview-Platzierung + HUD.
