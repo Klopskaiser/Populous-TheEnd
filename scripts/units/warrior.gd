@@ -1,0 +1,18 @@
+class_name Warrior extends Unit
+
+## Melee combat unit trained at the warrior camp (Kaserne). Tougher and much
+## harder-hitting than a brave; melee only. Phase 5a only carries its stats and
+## its sprite silhouette (shield + sword) — the full melee behaviour (3x punch
+## strength, rare shoving, aggro) is wired up in phase 5b.
+
+const MELEE_STRENGTH: float = 3.0
+
+
+func _init() -> void:
+	max_health = 120
+	health = 120
+	speed = 4.0
+
+
+func unit_kind() -> StringName:
+	return &"warrior"

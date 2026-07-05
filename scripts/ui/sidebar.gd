@@ -24,17 +24,20 @@ const FOLLOWER_INTERVAL: float = 0.3
 ## buildings (delivered/stacked wood at the base), not the whole map.
 const WOOD_NEAR_RADIUS: float = 12.0
 
-## Follower rows: kind key -> German label. Only braves are active in phase 4;
-## the combat/caster rows are shown greyed at 0 until phases 5/6.
+## Follower rows: kind key -> German label. Brave/warrior/firewarrior/preacher
+## are active from phase 5; the shaman row stays greyed until phase 6.
 const FOLLOWER_ROWS: Array[Dictionary] = [
 	{"kind": &"brave", "name": "Gefolgsleute", "active": true},
-	{"kind": &"warrior", "name": "Krieger", "active": false},
-	{"kind": &"firewarrior", "name": "Feuerkrieger", "active": false},
-	{"kind": &"preacher", "name": "Prediger", "active": false},
+	{"kind": &"warrior", "name": "Krieger", "active": true},
+	{"kind": &"firewarrior", "name": "Feuerkrieger", "active": true},
+	{"kind": &"preacher", "name": "Prediger", "active": true},
 	{"kind": &"shaman", "name": "Schamanin", "active": false},
 ]
 
 const HUT_SCENE: PackedScene = preload("res://scenes/buildings/hut.tscn")
+const WARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/warrior_camp.tscn")
+const FIREWARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/firewarrior_camp.tscn")
+const TEMPLE_SCENE: PackedScene = preload("res://scenes/buildings/temple.tscn")
 
 # --- Injected references (setup) --------------------------------------------
 var _tribes: Array[Tribe] = []
@@ -116,12 +119,12 @@ static func default_build_entries() -> Array[Dictionary]:
 	return [
 		{"id": &"hut", "name": "Hütte", "scene": HUT_SCENE, "icon": &"hut",
 			"wood_cost": Hut.WOOD_COST, "enabled": true, "hotkey": "H"},
-		{"id": &"warrior_camp", "name": "Krieger-Lager", "scene": null,
-			"icon": &"warrior_camp", "wood_cost": 0, "enabled": false},
-		{"id": &"firewarrior_camp", "name": "Feuerkrieger-Lager", "scene": null,
-			"icon": &"firewarrior_camp", "wood_cost": 0, "enabled": false},
-		{"id": &"temple", "name": "Tempel", "scene": null,
-			"icon": &"temple", "wood_cost": 0, "enabled": false},
+		{"id": &"warrior_camp", "name": "Kaserne", "scene": WARRIOR_CAMP_SCENE,
+			"icon": &"warrior_camp", "wood_cost": WarriorCamp.WOOD_COST, "enabled": true},
+		{"id": &"firewarrior_camp", "name": "Feuertempel", "scene": FIREWARRIOR_CAMP_SCENE,
+			"icon": &"firewarrior_camp", "wood_cost": FirewarriorCamp.WOOD_COST, "enabled": true},
+		{"id": &"temple", "name": "Tempel", "scene": TEMPLE_SCENE,
+			"icon": &"temple", "wood_cost": Temple.WOOD_COST, "enabled": true},
 	]
 
 

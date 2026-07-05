@@ -28,6 +28,16 @@ const C_HAIR: Color = Color(0.5, 0.5, 0.5)
 const C_WOOD: Color = Color(0.55, 0.36, 0.2)
 const C_WOOD_END: Color = Color(0.35, 0.22, 0.1)
 
+## Kind-specific silhouette accents (drawn over the shared body). Everything is
+## multiplied by the tribe colour in the renderer, so these rely on SHAPE and
+## brightness contrast, not hue, to stay readable across tribes.
+const C_SHIELD: Color = Color(0.6, 0.6, 0.64)    # warrior shield block
+const C_BLADE: Color = Color(1.0, 1.0, 1.0)      # bright sword blade
+const C_HELMET: Color = Color(0.4, 0.4, 0.46)    # dark cap (firewarrior)
+const C_FIRE: Color = Color(1.0, 0.78, 0.3)      # fireball in the hand
+const C_HOOD: Color = Color(0.7, 0.7, 0.72)      # preacher hood
+const C_GOWN: Color = Color(0.86, 0.86, 0.88)    # preacher gown
+
 ## Casters get the "cast" animation (see CLAUDE.md par. 3).
 const CASTER_KINDS: Array[StringName] = [&"shaman", &"preacher"]
 
@@ -57,7 +67,7 @@ static func make_frames(unit_kind: StringName) -> SpriteFrames:
 	for anim in anims:
 		for view in VIEWS:
 			var full_name: StringName = StringName("%s_%s" % [anim, view])
-			_add_animation(frames, full_name, _build_frames(anim, view), _anim_fps(anim))
+			_add_animation(frames, full_name, _build_frames(unit_kind, anim, view), _anim_fps(anim))
 	_cache[unit_kind] = frames
 	return frames
 
@@ -82,7 +92,7 @@ static func build_atlas(kinds: Array[StringName]) -> Dictionary:
 		for anim in anims:
 			var per_view: Array = []
 			for view in VIEWS:
-				var frame_images: Array[Image] = _build_frames(anim, view)
+				var frame_images: Array[Image] = _build_frames(kind, anim, view)
 				per_view.append([images.size(), frame_images.size(), _anim_fps(anim)])
 				images.append_array(frame_images)
 			per_base[anim] = per_view
@@ -119,35 +129,111 @@ static func _anim_fps(anim: StringName) -> float:
 
 
 ## Frames for one animation in one view. The left view is the mirrored right
-## view (real art can replace it with distinct frames later).
-static func _build_frames(anim: StringName, view: StringName) -> Array[Image]:
+## view (real art can replace it with distinct frames later). Kind-specific
+## silhouette accents (shield/sword, helmet/fireballs, hood/gown) are drawn on
+## top of the shared body so each unit type is recognisable.
+static func _build_frames(kind: StringName, anim: StringName, view: StringName) -> Array[Image]:
 	var paint_view: StringName = &"right" if view == &"left" else view
 	var images: Array[Image] = []
+	## Upper-body vertical bob per frame (head/arms move; legs are fixed). The
+	## kind accents (helmet/hood/fireballs) follow this so they move WITH the
+	## body, e.g. during idle.
+	var bobs: Array[int] = []
 	match anim:
 		&"walk":
 			images = [
 				_frame_walk(paint_view, 0), _frame_stand(paint_view, 0),
 				_frame_walk(paint_view, 1), _frame_stand(paint_view, 0),
 			]
+			bobs = [0, 0, 0, 0]
 		&"attack":
 			images = [_frame_stand(paint_view, 0), _frame_attack(paint_view)]
+			bobs = [0, 0]
 		&"jump":
 			images = [_frame_stand(paint_view, 0), _frame_jump(paint_view)]
+			bobs = [0, 0]
 		&"carry":
 			images = [_frame_carry(paint_view, 0), _frame_carry(paint_view, 1)]
+			bobs = [0, 1]
 		&"carry_walk":
 			images = [
 				_frame_carry_walk(paint_view, 0), _frame_carry(paint_view, 0),
 				_frame_carry_walk(paint_view, 1), _frame_carry(paint_view, 0),
 			]
+			bobs = [0, 0, 0, 0]
 		&"cast":
 			images = [_frame_stand(paint_view, 0), _frame_cast(paint_view)]
+			bobs = [0, 0]
 		_:
 			images = [_frame_stand(paint_view, 0), _frame_stand(paint_view, 1)]
+			bobs = [0, 1]
+	# Mirror the plain body first, THEN paint the accents in the REAL view — the
+	# side views are not just mirror images (a warrior shows the shield on one
+	# side and the sword on the other).
 	if view == &"left":
 		for img in images:
 			img.flip_x()
+	for i in range(images.size()):
+		_decorate(images[i], kind, view, bobs[i])
 	return images
+
+
+## Draws the kind-specific silhouette accents over the shared body, in the real
+## view (after the mirror) and shifted by the frame's upper-body bob so they
+## animate with the unit. Brave/shaman get nothing (plain silhouette).
+static func _decorate(img: Image, kind: StringName, view: StringName, bob: int) -> void:
+	match kind:
+		&"warrior":
+			_decorate_warrior(img, view, bob)
+		&"firewarrior":
+			_decorate_firewarrior(img, view, bob)
+		&"preacher":
+			_decorate_preacher(img, view, bob)
+		_:
+			pass
+
+
+## Front/back show both shield (left) and raised sword (right). The two side
+## views differ: facing right shows the SWORD, facing left shows the SHIELD
+## (the far-hand item is hidden behind the body).
+static func _decorate_warrior(img: Image, view: StringName, bob: int) -> void:
+	match view:
+		&"right":
+			# Sword held IN the near hand (x7-8), blade raised upward.
+			img.fill_rect(Rect2i(7, 2 + bob, 2, 9), C_BLADE)     # blade up from the hand
+			img.fill_rect(Rect2i(6, 10 + bob, 3, 1), C_HELMET)   # crossguard at the grip
+		&"left":
+			img.fill_rect(Rect2i(4, 9 + bob, 5, 6), C_SHIELD)    # shield in front
+		_:
+			img.fill_rect(Rect2i(2, 9 + bob, 4, 6), C_SHIELD)    # shield, left arm
+			img.fill_rect(Rect2i(12, 1 + bob, 2, 13), C_BLADE)   # sword, right hand
+			img.fill_rect(Rect2i(11, 8 + bob, 4, 1), C_HELMET)   # crossguard
+
+
+## Dark helmet cap over the head + glowing fireballs held AT the hands (both bob).
+static func _decorate_firewarrior(img: Image, view: StringName, bob: int) -> void:
+	img.fill_rect(Rect2i(5, 1 + bob, 6, 2), C_HELMET)        # helmet cap on the head
+	img.fill_rect(Rect2i(7, 0 + bob, 2, 1), C_HELMET)        # small crest
+	match view:
+		&"right":
+			img.fill_rect(Rect2i(7, 11 + bob, 3, 3), C_FIRE)    # fireball in the near hand
+		&"left":
+			img.fill_rect(Rect2i(6, 11 + bob, 3, 3), C_FIRE)    # fireball in the near hand
+		_:
+			img.fill_rect(Rect2i(1, 11 + bob, 3, 3), C_FIRE)    # fireball, left hand
+			img.fill_rect(Rect2i(12, 11 + bob, 3, 3), C_FIRE)   # fireball, right hand
+
+
+## Pointed wizard-style hood framing the head (bobs) + a long static gown over
+## the legs. The brim sits ABOVE the eyes (y3) and the sides clear them, so the
+## face stays visible. Symmetric, so the side views need no special handling.
+static func _decorate_preacher(img: Image, _view: StringName, bob: int) -> void:
+	img.fill_rect(Rect2i(7, 0 + bob, 2, 1), C_HOOD)      # hat tip
+	img.fill_rect(Rect2i(6, 1 + bob, 4, 1), C_HOOD)      # cone
+	img.fill_rect(Rect2i(5, 2 + bob, 6, 1), C_HOOD)      # brim, just above the eyes
+	img.fill_rect(Rect2i(4, 3 + bob, 2, 3), C_HOOD)      # hood sides (cheeks), clear of eyes
+	img.fill_rect(Rect2i(10, 3 + bob, 2, 3), C_HOOD)
+	img.fill_rect(Rect2i(4, 14, 8, 10), C_GOWN)          # gown skirt over the legs
 
 
 static func _add_animation(frames: SpriteFrames, anim: StringName,

@@ -183,6 +183,14 @@ func unregister(unit: Unit) -> void:
 		unit_renderer.unregister_unit(unit)
 
 
+## Removes a unit from the live simulation (registry, spatial hash, renderer)
+## WITHOUT touching its tribe membership — used when a brave enters a training
+## building: it stays alive and counted as population until it graduates into a
+## combat unit. (unregister already leaves the tribe list alone.)
+func remove_from_world(unit: Unit) -> void:
+	unregister(unit)
+
+
 func _on_unit_died(unit: Unit) -> void:
 	unregister(unit)
 	if unit.tribe != null:

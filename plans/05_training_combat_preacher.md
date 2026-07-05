@@ -223,11 +223,11 @@ neuen Einheiten haben nur ihre Werte und ihr sichtbares Modell.
 
 ### Definition of Done 5a
 
-- [ ] Testsuite grün, `--headless --quit` fehlerfrei
-- [ ] Manuell: Camps baubar, Braves reinschicken → korrekte Einheit läuft zur Rally-Fahne;
+- [x] Testsuite grün, `--headless --quit` fehlerfrei
+- [x] Manuell: Camps baubar, Braves reinschicken → korrekte Einheit läuft zur Rally-Fahne;
   Modelle sichtbar (Schild+Schwert / Helm+Feuerbälle / Haube+Gewand); Rally per Rechtsklick
   versetzbar (auch bei Hütten)
-- [ ] `git add -A && git commit -m "Phase 5a: Training, Rally Points, Einheiten-Modelle" && git push`
+- [x] `git add -A && git commit -m "Phase 5a: Training, Rally Points, Einheiten-Modelle" && git push`
 
 ---
 

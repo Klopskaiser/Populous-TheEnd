@@ -130,15 +130,47 @@ func test_build_entries_hut_active() -> void:
 	check(int(hut["wood_cost"]) == Hut.WOOD_COST, "hut cost matches Hut.WOOD_COST")
 
 
-func test_build_entries_disabled_have_no_scene() -> void:
+func test_build_entries_training_buildings_active() -> void:
 	var entries: Array[Dictionary] = Sidebar.default_build_entries()
-	var disabled: int = 0
+	var by_id: Dictionary = {}
 	for e in entries:
-		if not e["enabled"]:
-			disabled += 1
-			check(e["scene"] == null, "%s has no placement scene" % [e["id"]])
-	check(disabled >= 3, "warrior/firewarrior/temple are placeholders")
+		by_id[e["id"]] = e
+	var expected: Dictionary = {
+		&"warrior_camp": [Sidebar.WARRIOR_CAMP_SCENE, WarriorCamp.WOOD_COST],
+		&"firewarrior_camp": [Sidebar.FIREWARRIOR_CAMP_SCENE, FirewarriorCamp.WOOD_COST],
+		&"temple": [Sidebar.TEMPLE_SCENE, Temple.WOOD_COST],
+	}
+	for id: StringName in expected:
+		var e: Dictionary = by_id.get(id, {})
+		check(not e.is_empty(), "%s entry exists" % [id])
+		check(e["enabled"], "%s is enabled" % [id])
+		check(e["scene"] == expected[id][0], "%s references its scene" % [id])
+		check(int(e["wood_cost"]) == int(expected[id][1]), "%s cost matches" % [id])
 
 
 func test_spell_entries_count() -> void:
 	check(Sidebar.default_spell_entries().size() == 5, "five spells registered")
+
+
+## Regression: a selected unit may be freed while still referenced in the
+## selection (e.g. a brave that graduated from a training building via
+## queue_free). Selecting/pruning must not crash on the freed reference.
+func test_selection_tolerates_freed_unit() -> void:
+	var sm: SelectionManager = SelectionManager.new()
+	var live: Unit = Unit.new()
+	var gone: Unit = Unit.new()
+	sm.selected = [live, gone] as Array[Unit]
+	gone.free()
+	sm._set_selection([] as Array[Unit])
+	check(sm.selected.size() == 0, "_set_selection clears without crashing on a freed unit")
+
+	var live2: Unit = Unit.new()
+	var gone2: Unit = Unit.new()
+	sm.selected = [live2, gone2] as Array[Unit]
+	gone2.free()
+	sm._prune_selection()
+	check(sm.selected.size() == 1 and sm.selected[0] == live2, "_prune drops the freed unit")
+
+	sm.free()
+	live.free()
+	live2.free()

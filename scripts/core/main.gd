@@ -7,7 +7,13 @@ extends Node3D
 
 const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
 const SITE_SCENE: PackedScene = preload("res://scenes/buildings/reincarnation_site.tscn")
-const START_BRAVES: int = 10
+const HUT_SCENE: PackedScene = preload("res://scenes/buildings/hut.tscn")
+const WARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/warrior_camp.tscn")
+const FIREWARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/firewarrior_camp.tscn")
+const TEMPLE_SCENE: PackedScene = preload("res://scenes/buildings/temple.tscn")
+const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
+const FIREWARRIOR_SCENE: PackedScene = preload("res://scenes/units/firewarrior.tscn")
+const START_BRAVES: int = 20
 const TREE_COUNT: int = 60
 ## Max player count — one tribe per player, all identical instances.
 const TRIBE_COUNT: int = 4
@@ -81,7 +87,9 @@ func _ready() -> void:
 
 	_tree_manager.spawn_trees(TREE_COUNT, GameState.ISLAND_SEED)
 	_place_start_site(tribes[GameState.PLAYER_TRIBE], nav)
+	_setup_player_base(tribes[GameState.PLAYER_TRIBE], nav)
 	_spawn_start_units(td, nav)
+	_setup_sparring(tribes, nav)
 
 	# Start the camera over the island centre.
 	var center: float = TerrainData.SIZE * 0.5
@@ -118,6 +126,87 @@ func _spawn_start_units(td: TerrainData, nav: NavGrid) -> void:
 			spawned += 1
 	if spawned < START_BRAVES:
 		push_warning("Only %d of %d start braves spawned" % [spawned, START_BRAVES])
+
+
+## Pre-places the player's starting base (fully built): two huts and all three
+## training buildings (Kaserne/Feuertempel/Tempel) around the island centre, so
+## training and rally points can be tried right away. Placements are sequential
+## (each marks its footprint nav-solid), so _find_plot avoids overlaps.
+func _setup_player_base(tribe: Tribe, nav: NavGrid) -> void:
+	var center: Vector2i = Vector2i(TerrainData.SIZE / 2, TerrainData.SIZE / 2)
+	var plan: Array = [
+		[HUT_SCENE, center + Vector2i(-10, -9)],
+		[HUT_SCENE, center + Vector2i(9, -9)],
+		[WARRIOR_CAMP_SCENE, center + Vector2i(-12, 7)],
+		[FIREWARRIOR_CAMP_SCENE, center + Vector2i(0, 12)],
+		[TEMPLE_SCENE, center + Vector2i(12, 7)],
+	]
+	for entry in plan:
+		var scene: PackedScene = entry[0]
+		var anchor: Vector2i = entry[1]
+		var probe: Building = scene.instantiate() as Building
+		var fp: Vector2i = probe.footprint
+		probe.free()
+		var c: Vector2i = _find_plot(anchor, fp, nav)
+		if c.x >= 0:
+			_building_manager.place(scene, tribe, c, 0, true)
+
+
+## Statically pre-places a red sparring tribe (id 1) on the far side of the
+## island: a hut, a warrior camp and a handful of braves/warriors/firewarriors.
+## They do not fight yet (that is phase 5b) — this is the target dummy setup so
+## training and rally points can be tried against real enemy units.
+func _setup_sparring(tribes: Array[Tribe], nav: NavGrid) -> void:
+	if tribes.size() < 2:
+		return
+	var red: Tribe = tribes[1]
+	var anchor: Vector2i = Vector2i(TerrainData.SIZE / 2 + 20, TerrainData.SIZE / 2 + 20)
+	var hut_cell: Vector2i = _find_plot(anchor, Hut.FOOTPRINT, nav)
+	if hut_cell.x >= 0:
+		_building_manager.place(HUT_SCENE, red, hut_cell, 0, true)
+	var camp_cell: Vector2i = _find_plot(anchor + Vector2i(-8, 0), WarriorCamp.FOOTPRINT, nav)
+	if camp_cell.x >= 0:
+		_building_manager.place(WARRIOR_CAMP_SCENE, red, camp_cell, 0, true)
+	# A small starting force spread around the anchor.
+	_spawn_sparring_units(red, anchor, nav)
+
+
+func _spawn_sparring_units(red: Tribe, anchor: Vector2i, nav: NavGrid) -> void:
+	var plan: Array = [
+		[BRAVE_SCENE, 4], [WARRIOR_SCENE, 3], [FIREWARRIOR_SCENE, 2]]
+	var placed: int = 0
+	for entry in plan:
+		var scene: PackedScene = entry[0]
+		for i in range(int(entry[1])):
+			var cell: Vector2i = _find_walkable_near(anchor + Vector2i(6, 0), nav, placed)
+			if cell.x >= 0:
+				_unit_manager.spawn_unit(scene, red.id, nav.cell_to_world(cell))
+			placed += 1
+
+
+## Ring-searches outward from `center` for the first buildable footprint.
+func _find_plot(center: Vector2i, footprint: Vector2i, _nav: NavGrid) -> Vector2i:
+	for radius in range(0, TerrainData.SIZE / 2):
+		for cell in _ring_cells(center, radius):
+			if _tribe_commands.can_place_at(cell, footprint):
+				return cell
+	return Vector2i(-1, -1)
+
+
+## Ring-searches for a walkable cell near `center`; `skip` staggers picks so
+## repeated calls do not stack units on the same spot.
+func _find_walkable_near(center: Vector2i, nav: NavGrid, skip: int) -> Vector2i:
+	var seen: int = 0
+	for radius in range(0, 24):
+		for cell in _ring_cells(center, radius):
+			if not nav.is_cell_walkable(cell):
+				continue
+			if not _tribe_commands.can_place_at(cell, Vector2i(1, 1)):
+				continue
+			if seen >= skip:
+				return cell
+			seen += 1
+	return Vector2i(-1, -1)
 
 
 func _ring_cells(center: Vector2i, radius: int) -> Array[Vector2i]:

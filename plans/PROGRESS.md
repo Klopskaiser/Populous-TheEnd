@@ -584,11 +584,10 @@ tiefengetesteter Ring; Baustelle nutzt Stapel zuerst).
 **Verifikation:** Testsuite grün (**233 Tests**, davon 49 neu in
 `test_ui_logic.gd`), `--headless --import` + `--headless --quit` fehlerfrei,
 Spiel 5 s headless ohne Laufzeitfehler (Sidebar-`_process`/Follower-Refresh
-laufen). **Manuelle Prüfung ausstehend — bitte durch Nutzer** (Sidebar-Optik &
-Tab-Umschaltung, Minimap-Insel/Punkte/Klick-Navigation, Bevölkerungs-/Mana-/
-Holz-Anzeige, Hütte bauen nur über Gebäude-Tab + H, Klicks über der Sidebar
-selektieren/bauen nicht, Box-Select am Sidebar-Rand, Pausemenü friert Spiel,
-Zauber-Tab mit leeren Pips, „Untätige Braves wählen”).
+laufen). **Manuelle Prüfung durch Nutzer bestanden (2026-07-06)** — inkl. der
+Folgerunden unten (Sprite-Tiefe an Gebäuden/Terrain, Holzwirtschaft-Feinschliff,
+Trage-Animation, 6er-Gruppen aus Gebäuden, Gebäude-Auswahl/Rally-Marker/
+Produktionsbalken, Lauf-Beinanimation). Phase 4 abgeschlossen und committet.
 
 **Bugfix (Nutzerfeedback): Sprite-Tiefe an Gebäuden/planiertem Terrain.**
 Der UnitRenderer-Shader zeichnete das Sprite als **spherisches Billboard** auf
@@ -616,8 +615,7 @@ Sprites nur noch, wenn sie wirklich davor ist.
   (physikalisch korrekt). Ein völlig artefaktfreies Ergebnis bräuchte echtes
   2.5D-Grund-Sortieren (Einheiten/Gebäude nach Bodenlinie, ohne Per-Pixel-Z) —
   bewusst offen für Phase 8, falls gewünscht.
-- **Optische Prüfung ausstehend** (Headless kompiliert den Shader nicht
-  vollständig — bitte im GUI-Start gegentesten).
+- **Optische Prüfung durch Nutzer bestanden (2026-07-06).**
 
 **Holzwirtschaft-Feinschliff (Nutzerfeedback):**
 - **Manuelles Sammeln = ein Stück pro Weg:** `Brave._tick_loose_chop` liefert
@@ -683,3 +681,128 @@ Sprites nur noch, wenn sie wirklich davor ist.
 Einheitentyp-Symbolen — das ist die Ausbildungsgebäude-Mechanik aus Phase 5
 (Krieger-/Feuerkrieger-Lager, Tempel). Bei Hütten gibt es keine Besetzung.
 Wird mit den Trainingsgebäuden in Phase 5 nachgezogen.
+
+---
+
+## Phase 5a — Training, Rally Points, Einheiten-Modelle (umgesetzt)
+
+**Gebaut:**
+- `scripts/units/warrior.gd` / `firewarrior.gd` / `preacher.gd` + Szenen —
+  **dünne** `Unit`-Ableitungen mit nur Werten (Krieger 120 HP + `MELEE_STRENGTH
+  = 3.0`; Feuerkrieger 60 HP; Prediger 75 HP), Speed = Basis, je eigenes
+  `unit_kind()` (`&"warrior"`/`&"firewarrior"`/`&"preacher"`). Kampf-/
+  Sonderverhalten folgt in 5b/5c.
+- **Sprite-Silhouetten je Kind:** `PlaceholderSprites._build_frames(kind, anim,
+  view)` reicht `kind` durch (in `make_frames` **und** `build_atlas`), spiegelt
+  erst die Basis (Left = geflippte Right-Ansicht) und ruft dann
+  `_decorate(img, kind, view, bob)` pro Frame in der **echten** Ansicht + mit dem
+  **Pro-Frame-Bob** der Oberkörperbewegung. Dadurch: (a) Seitenansichten sind
+  **nicht bloß gespiegelt** — der Krieger zeigt rechts das **Schwert**, links das
+  **Schild** (das Fern-Hand-Objekt liegt hinter dem Körper); (b) Helm/Haube/
+  Feuerbälle **bobben mit** (z. B. in Idle). Overlays (Shape +
+  Helligkeitskontrast, da alles im Renderer mit der Stammfarbe multipliziert
+  wird): Krieger = **Schild / erhobenes Schwert**, Feuerkrieger = **dunkle
+  Helmkappe + Feuerbälle auf Handhöhe**, Prediger = **spitze Zauberhut-Haube +
+  langes Gewand**. Brave/Schamanin bleiben schmucklos. Neue Kinds in
+  `UnitRenderer.KINDS` (`brave/warrior/firewarrior/preacher`; Prediger ist bereits
+  `CASTER_KIND` → bekommt `cast`-Anim).
+- `scripts/buildings/training_building.gd` — `TrainingBuilding extends Building`:
+  `produces: PackedScene`, `training_time`, **Warteschlange** `incoming`
+  (Index 0 = vorne) + `trainee` (einer drinnen, `null` = Bucht frei). Ablauf im
+  `_tick_active` (läuft im **BuildingManager**-Tick, nicht in der
+  UnitManager-Schleife → kein Mutieren der `units`-Liste mitten in der
+  Iteration): `_prune_queue` → `_assign_slots` (jeder wartende Brave bekommt
+  `queue_slot_world(i)` als Ziel, Schlange **rückt automatisch auf**) →
+  `_admit_front` (nur wenn Bucht frei **und** der vorderste an seinem Slot steht:
+  `UnitManager.remove_from_world` = Alias `unregister`, raus aus
+  Registry/Hash/Renderer, **Tribe-Mitgliedschaft bleibt** → Population zählt
+  weiter) → Timer; `_finish_one` gibt den Trainee frei (aus Tribe + `queue_free`)
+  und spawnt eine Kampfeinheit am Rand → `order_move(rally_point +
+  group_slot_offset)`. `queue_slot_world(i)`: **einreihige Schlange entlang der
+  Gebäude-Außenkante**, Start links vom Eingang (Blick von außen; Tangente
+  `cross(out, up)`), läuft per `_rect_perimeter_point` an der Kante entlang und
+  **um die Ecken herum** (bei langer Schlange), Slots auf begehbare Zellen
+  geklemmt. Population bleibt beim Tausch konstant. `production_progress()`
+  treibt den Balken; `destroy()` gibt Trainee frei + entlässt die Wartenden
+  (`Brave.cancel_training`).
+- `scripts/buildings/warrior_camp.gd` (Kaserne, 5 Holz/3 s, 5×5, Ring+Turm+
+  Federbüschel+Schilde+Runentor), `firewarrior_camp.gd` (Feuertempel, 10 Holz/
+  4 s, 4×4, Rundhütte+Kegeldach+2 lodernde Feuerschalen mit Emission),
+  `temple.gd` (Tempel, 5 Holz/5 s, 4×4, Kuppel+breites Reetdach+blau-goldene
+  Kegel-Spitze) + Szenen. Prozedurale Placeholder-Meshes im Stil der Referenz-
+  bilder.
+- `scripts/units/brave.gd` — neuer `State.TRAIN`-Zweig: `order_train(building)`
+  (Task-Interrupt → `building.add_trainee` → State TRAIN), `_tick_train` seekt
+  zum vom Gebäude zugewiesenen `train_slot_pos` (Fallback Eingang) und setzt
+  `train_reached_slot` (jeden Tick neu → fällt ab, wenn der Slot beim Aufrücken
+  wandert); `enter_training()` (vom Gebäude beim Admit: Pfad leeren, Selektion
+  aus), `cancel_training()` (Gebäude weg → IDLE). `_interrupt_tasks` meldet den
+  Brave vom `train_target` ab.
+- `scripts/core/tribe_commands.gd` — `order_train(building, units)`: nur eigene,
+  lebende Braves; lehnt ab, solange das Gebäude im Bau ist. UI und (später) KI
+  rufen dieselbe API.
+- `scripts/core/unit_manager.gd` — `remove_from_world(unit)` (Alias auf
+  `unregister`, dokumentiert die „lebt weiter, zählt weiter"-Semantik).
+- `scripts/ui/selection_manager.gd` — Rechtsklick auf ein fertiges eigenes
+  `TrainingBuilding` mit selektierten Einheiten → `order_train`. Rally per
+  Rechtsklick bei ausgewähltem Gebäude gilt automatisch (Building-Basis).
+- `scripts/ui/sidebar.gd` — Bau-Tab-Buttons für Kaserne/Feuertempel/Tempel
+  **aktiviert** (Szenen + Kosten aus den Camp-Konstanten; Labels „Kaserne
+  (5 Holz)" usw. über die vorhandene Kosten-Anhängung); Gefolgsleute-Zeilen
+  Krieger/Feuerkrieger/Prediger auf `active` (Schamanin bleibt grau bis Phase 6).
+- `scripts/core/main.gd` — **Sparring-Setup:** roter Tribe (id 1) auf der
+  gegenüberliegenden Inselseite mit vorgebauter Hütte + Kaserne und einer kleinen
+  Truppe (4 Braves, 3 Krieger, 2 Feuerkrieger) via `_find_plot`/
+  `_find_walkable_near` (Ring-Suche). Kämpfen noch nicht (5b), existieren aber.
+
+**Erkenntnisse/Stolpersteine:**
+- **Admit im Gebäude-Tick, nicht im Unit-Tick:** Würde der Brave sich selbst bei
+  Ankunft admitten, liefe `UnitManager.units.erase` mitten in der
+  `for unit in units`-Schleife → übersprungene Elemente. Deshalb flaggt der Brave
+  nur `train_arrived`; das Gebäude (separater BuildingManager-Tick) holt ihn rein.
+- **Population konstant:** `remove_from_world` lässt die Tribe-Liste bewusst in
+  Ruhe; erst `_finish_one` tauscht Brave↔Kampfeinheit atomar.
+- Alle Silhouetten-Overlays werden im Renderer mit der Stammfarbe multipliziert
+  → Erkennbarkeit über **Form + Helligkeit**, nicht Farbton.
+
+**Verifikation:** Testsuite grün (**285 Tests**, davon 21 neu in
+`tests/test_training.gd`: Erzeugung Kampfeinheit + Population ±0 + Typwechsel,
+Rally-Ziel inkl. Rally-Änderung für später fertige Einheiten, leeres Gebäude
+produziert nichts, **Warteschlange einer-nach-dem-anderen** (Rest wartet
+sichtbar in der Welt), FIFO-Queue; `test_ui_logic.gd` Bau-Eintrag-Test auf aktive
+Trainingsgebäude umgestellt). `--headless --import` + `--headless --quit`
+fehlerfrei.
+
+**Nachbesserungen (Nutzerfeedback, erste Runde):**
+- **Krieger-Seitenansichten** zeigen jetzt seitenabhängig Schwert (rechts) bzw.
+  Schild (links) statt gespiegelt beides.
+- **Feuerkrieger:** Feuerbälle auf Handhöhe, Helm + Feuer **bobben mit** der
+  Idle-Bewegung.
+- **Prediger:** Haube bobbt mit; oben spitzer **Zauberhut**-Kegel.
+- **Ausbildungs-Warteschlange:** Braves verschwinden nicht mehr sofort, sondern
+  bilden eine **echte einreihige Schlange entlang der Gebäudekante** (Start links
+  vom Eingang), rücken auf und gehen einzeln rein; lange Schlangen laufen um die
+  Ecken weiter.
+
+**Nachbesserungen (Nutzerfeedback, zweite Runde):**
+- **Feuerkrieger-Seitenansicht:** Feuerball sitzt jetzt IN der Hand statt davor
+  zu schweben.
+- **Krieger-Seitenansicht:** Schwert wird in der Hand gehalten und zeigt nach
+  **oben** (wie in der Frontansicht), statt davor zu schweben/nach unten.
+- **Prediger-Frontansicht:** Hutkrempe sitzt jetzt **über** den Augen, Hauben-
+  Seiten lassen die Augen frei → Gesicht wieder sichtbar.
+- **Startszenario erweitert:** Spieler startet mit **2 Hütten + allen drei
+  Trainingsgebäuden** (vorgebaut, `_setup_player_base` mit `_find_plot`) und
+  **20 Braves** (`START_BRAVES`).
+- **Bestätigt:** Trainingsgebäude dürfen **quadratische** Grundrisse + Box-
+  Hitboxen behalten (bereits so; Modelle unverändert).
+- **Bugfix Selektion:** Ein ausgebildeter (per `queue_free` freigegebener) Brave
+  blieb in `SelectionManager.selected` referenziert → beim nächsten Selektieren
+  `set_selected` auf freigegebener Instanz = Crash, danach keine Selektion mehr
+  möglich. `_set_selection`/`_prune_selection` nutzen jetzt explizite Schleifen
+  mit `is_instance_valid`-Guard (statt typisiertem Filter-Lambda, das schon beim
+  Binden einer freigegebenen Instanz crasht). Regressionstest
+  `test_selection_tolerates_freed_unit`.
+
+**Manuelle Prüfung durch Nutzer: bestanden** (nach zwei Nachbesserungsrunden +
+Selektions-Bugfix bestätigt „funktioniert"). **Sub-Phase 5a abgeschlossen.**

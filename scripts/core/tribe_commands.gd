@@ -153,6 +153,18 @@ func order_pray(units: Array[Unit], site: Building) -> void:
 		order_move(movers, site.center_world())
 
 
+## Sends braves to a training building to be trained into combat units. Only
+## own, living braves are enrolled; the building rejects them while it is still
+## under construction. UI and AI both call this.
+func order_train(building: TrainingBuilding, units: Array[Unit]) -> void:
+	if building == null or not is_instance_valid(building) or building.under_construction:
+		return
+	for unit in units:
+		if unit is Brave and unit.state != Unit.State.DEAD \
+				and unit.tribe_id == building.tribe_id:
+			(unit as Brave).order_train(building)
+
+
 ## Offset for the index-th unit when assembling into 6-member groups around a
 ## point (used by buildings so newly produced units gather in packs at the
 ## rally point instead of standing around at random). Same ring layout as

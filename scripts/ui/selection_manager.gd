@@ -156,12 +156,18 @@ func select_units(units: Array[Unit]) -> void:
 
 func _set_selection(units: Array[Unit]) -> void:
 	_clear_selected_building()
-	_prune_selection()
+	# Guard every method call with is_instance_valid: a selected unit may have
+	# been freed meanwhile (e.g. a brave that graduated from a training building
+	# via queue_free), and calling a method on a freed instance crashes.
 	for unit in selected:
-		unit.set_selected(false)
-	selected = units
-	for unit in selected:
-		unit.set_selected(true)
+		if is_instance_valid(unit):
+			unit.set_selected(false)
+	var kept: Array[Unit] = []
+	for unit in units:
+		if is_instance_valid(unit) and unit.state != Unit.State.DEAD:
+			kept.append(unit)
+			unit.set_selected(true)
+	selected = kept
 
 
 ## Selects an own building (clears any unit/building selection first).
@@ -217,9 +223,15 @@ func _raycast(screen_pos: Vector2, mask: int) -> Dictionary:
 	return space.intersect_ray(query)
 
 
+## Drops freed or dead units from the selection. Uses an explicit loop with an
+## is_instance_valid guard before any typed use — passing a freed instance to a
+## typed lambda parameter would itself raise a script error.
 func _prune_selection() -> void:
-	selected = selected.filter(func(u: Unit) -> bool:
-		return is_instance_valid(u) and u.state != Unit.State.DEAD)
+	var kept: Array[Unit] = []
+	for u in selected:
+		if is_instance_valid(u) and u.state != Unit.State.DEAD:
+			kept.append(u)
+	selected = kept
 
 
 # --- Context commands (right-click) ---------------------------------------------------
@@ -273,5 +285,8 @@ func _dispatch_context_command(hit: Dictionary) -> bool:
 			return true
 		if building is ReincarnationSite:
 			_tribe_commands.order_pray(selected, building)
+			return true
+		if building is TrainingBuilding:
+			_tribe_commands.order_train(building, selected)
 			return true
 	return false

@@ -25,6 +25,7 @@ const CHOP_RANGE: float = 1.5
 const WORK_RANGE: float = 1.7       # flatten-spot range
 const DELIVER_RANGE: float = 2.0
 const PICKUP_RANGE: float = 1.2
+const TRAIN_SLOT_RANGE: float = 0.7   # how close to a queue slot counts as "in it"
 ## If the nav path ends short of the goal but within this distance, walk the
 ## last stretch in a straight line (footprint cells are nav-solid).
 const DIRECT_WALK_RANGE: float = 4.5
@@ -45,6 +46,12 @@ var task_cell: Vector2i = Vector2i(-1, -1)
 var task_tree: Object = null   # untyped: may be freed by another worker
 var task_pile: Object = null   # untyped: may be freed
 var target_building: Building = null   # pray site
+## Training building this brave queues at (State.TRAIN). The building assigns a
+## queue slot each tick; train_reached_slot flips true once the brave stands in
+## it, and the building admits the front brave when its bay is free.
+var train_target: TrainingBuilding = null
+var train_slot_pos: Vector3 = Vector3.INF
+var train_reached_slot: bool = false
 
 var _chop_timer: float = 0.0
 var _retry_timer: float = 0.0
@@ -121,6 +128,35 @@ func order_pray(site: Building) -> void:
 	_set_state(State.PRAY)
 
 
+## Queue up at a training building to be trained into a combat unit. The building
+## assigns a slot each tick and admits the front brave when its bay is free.
+func order_train(building: TrainingBuilding) -> void:
+	if building == null or not is_instance_valid(building) or building.under_construction:
+		return
+	_interrupt_tasks()
+	building.add_trainee(self)
+	train_target = building
+	train_slot_pos = Vector3.INF
+	train_reached_slot = false
+	_set_state(State.TRAIN)
+
+
+## Called by the building when the brave is admitted: it is already removed from
+## the world, so just settle the state (it stops ticking after this).
+func enter_training() -> void:
+	_clear_path()
+	train_reached_slot = true
+	set_selected(false)
+
+
+## Building gone / no longer trainable: leave the queue and go idle.
+func cancel_training() -> void:
+	train_target = null
+	train_slot_pos = Vector3.INF
+	train_reached_slot = false
+	_stop_all()
+
+
 # --- Tick ----------------------------------------------------------------------
 
 func tick(delta: float) -> void:
@@ -134,6 +170,8 @@ func tick(delta: float) -> void:
 			_tick_job(delta)
 		State.PRAY:
 			_tick_pray(delta)
+		State.TRAIN:
+			_tick_train(delta)
 		_:
 			super.tick(delta)
 	# Keep walk/idle/carry in sync with actual motion and carried wood without
@@ -443,6 +481,23 @@ func _tick_pray(delta: float) -> void:
 	# Praying itself is passive: Tribe.tick() counts is_praying() braves.
 
 
+# --- Training ----------------------------------------------------------------------------
+
+## Walks to the queue slot the building assigned; flags train_reached_slot while
+## standing in it (recomputed each tick, so it drops when the slot shifts as the
+## queue advances). The building admits the front brave on its own tick.
+func _tick_train(delta: float) -> void:
+	if not is_instance_valid(train_target) or train_target.under_construction:
+		cancel_training()
+		return
+	var slot: Vector3 = train_slot_pos
+	if slot == Vector3.INF:
+		slot = train_target.entrance_world()   # until the building assigns one
+	train_reached_slot = _seek(slot, TRAIN_SLOT_RANGE, delta)
+	if train_reached_slot:
+		_face_toward(train_target.center_world())
+
+
 # --- Task bookkeeping --------------------------------------------------------------------
 
 ## Releases all claims, drops carried wood as a pile and leaves the job.
@@ -454,12 +509,17 @@ func _interrupt_tasks() -> void:
 		tree_manager.release_claim(task_tree, self)
 	if job != null and is_instance_valid(job):
 		job.leave(self)
+	if train_target != null and is_instance_valid(train_target):
+		train_target.remove_trainee(self)
 	job = null
 	task = Task.NONE
 	task_cell = Vector2i(-1, -1)
 	task_tree = null
 	task_pile = null
 	target_building = null
+	train_target = null
+	train_slot_pos = Vector3.INF
+	train_reached_slot = false
 	hop_visual = false
 	_loose_return_pos = Vector3.INF
 	_set_working(false)
