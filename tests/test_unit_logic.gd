@@ -212,6 +212,53 @@ func test_spatial_hash_radius_query() -> void:
 	manager.free()
 
 
+func test_path_queue_spreads_path_requests() -> void:
+	var td: TerrainData = _flat_terrain()
+	var nav: NavGrid = NavGrid.new(td)
+	var manager: UnitManager = UnitManager.new()
+	manager.setup(td, nav)
+	var count: int = UnitManager.PATHS_PER_TICK + 12
+	var units: Array[Unit] = []
+	for i in range(count):
+		var unit: Unit = _make_unit(td)
+		unit.nav_grid = nav
+		unit.path_service = manager
+		unit.position = Vector3(30.0 + float(i % 10) * 1.5, 5.0, 30.0 + float(i / 10) * 1.5)
+		manager.register(unit)
+		units.append(unit)
+
+	for unit in units:
+		unit.order_move(Vector3(90.0, 5.0, 90.0))
+	var pending: int = 0
+	for unit in units:
+		if unit.state == Unit.State.MOVE and unit.get_remaining_path().is_empty():
+			pending += 1
+	check(pending == count, "all move orders wait for the path queue first")
+
+	manager.tick(TICK)
+	var resolved: int = 0
+	for unit in units:
+		if not unit.get_remaining_path().is_empty():
+			resolved += 1
+	check(resolved == UnitManager.PATHS_PER_TICK,
+		"one tick resolves at most PATHS_PER_TICK paths (got %d)" % resolved)
+
+	manager.tick(TICK)
+	resolved = 0
+	for unit in units:
+		if not unit.get_remaining_path().is_empty():
+			resolved += 1
+	check(resolved == count, "the second tick resolves the rest")
+
+	var before: Vector3 = units[0].position
+	units[0].tick(TICK)
+	check(units[0].position != before, "resolved units actually walk")
+
+	for unit in units:
+		unit.free()
+	manager.free()
+
+
 func test_separation_pushes_overlapping_units_apart() -> void:
 	var td: TerrainData = _flat_terrain()
 	var manager: UnitManager = UnitManager.new()

@@ -4,8 +4,12 @@ class_name RouteVisualizer extends Node3D
 ## selected units — visible only while the units stay selected. Covers both
 ## simple right-click moves (one line + one marker) and waypoint routes
 ## (line along the whole route, marker per waypoint; patrol routes close the
-## loop). Rebuilt every frame from the units' remaining paths and waypoint
-## queues; lines are sampled onto the terrain so they follow the ground.
+## loop). Lines are sampled onto the terrain so they follow the ground.
+##
+## Scale limits: at most MAX_ROUTES units get a route line (one ImmediateMesh
+## surface each — the renderer caps a mesh at 256 surfaces, and hundreds of
+## per-frame surface rebuilds would stall anyway), and the rebuild runs on an
+## interval instead of every frame.
 
 const LINE_COLOR: Color = Color(1.0, 0.95, 0.3, 0.65)
 const MARKER_COLOR: Color = Color(1.0, 0.8, 0.2)
@@ -13,12 +17,15 @@ const LINE_HEIGHT: float = 0.15    # metres above the terrain
 const MARKER_HEIGHT: float = 0.2
 const SAMPLE_STEP: float = 1.0     # metres between terrain samples along a line
 const MAX_MARKERS: int = 256
+const MAX_ROUTES: int = 24         # route lines for the first N selected units
+const UPDATE_INTERVAL: float = 0.1 # seconds between rebuilds
 
 var _selection: SelectionManager = null
 var _terrain_data: TerrainData = null
 
 var _line_mesh: ImmediateMesh = null
 var _multimesh: MultiMesh = null
+var _update_timer: float = 0.0
 
 
 func setup(p_selection: SelectionManager, p_terrain_data: TerrainData) -> void:
@@ -60,14 +67,24 @@ func _ready() -> void:
 	add_child(markers)
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	_update_timer -= delta
+	if _update_timer > 0.0:
+		return
+	_update_timer = UPDATE_INTERVAL
 	_line_mesh.clear_surfaces()
 	var marker_count: int = 0
+	var routes_drawn: int = 0
 	if _selection != null and _terrain_data != null:
 		for unit in _selection.selected:
+			if routes_drawn >= MAX_ROUTES:
+				break
 			if not is_instance_valid(unit) or unit.state == Unit.State.DEAD:
 				continue
+			if unit.state != Unit.State.MOVE and unit.waypoint_queue.is_empty():
+				continue  # nothing to draw, keep the route budget
 			marker_count = _draw_unit_route(unit, marker_count)
+			routes_drawn += 1
 	_multimesh.visible_instance_count = marker_count
 
 

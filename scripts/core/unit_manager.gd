@@ -16,6 +16,19 @@ const HASH_CELL_SIZE: float = 4.0
 const SEPARATION_RADIUS: float = 0.55
 ## Maximum push speed in metres per second.
 const SEPARATION_SPEED: float = 1.6
+## Separation processes at most this many units per tick (round-robin over
+## slices; the push delta is scaled by the slice count) — a full pass every
+## frame would dominate the frame time with thousands of units.
+const SEPARATION_UNITS_PER_TICK: int = 600
+## Max neighbour candidates examined per separated unit. Bounds the cost when
+## thousands of units share one crowded hash bucket (the benchmark showed
+## ~190 ms/tick without this cap when 4000 units converge on one point).
+const SEPARATION_MAX_CHECKS: int = 20
+## Max A* path computations per tick (mass move orders are spread over
+## frames via the path queue instead of stalling one frame).
+const PATHS_PER_TICK: int = 48
+## Sprite view/hop updates run on 1/N of the units per rendered frame.
+const VISUAL_SLICES: int = 3
 
 var terrain_data: TerrainData = null
 var nav_grid: NavGrid = null
@@ -24,8 +37,11 @@ var tree_manager: TreeManager = null
 var wood_pile_manager: WoodPileManager = null
 
 var units: Array[Unit] = []
-var _hash: Dictionary[Vector2i, Array] = {}       # hash cell -> Array of Unit
-var _unit_cells: Dictionary[Unit, Vector2i] = {}  # unit -> current hash cell
+var _hash: Dictionary[Vector2i, Array] = {}   # hash cell -> Array of Unit
+var _path_requests: Array[Unit] = []
+var _path_head: int = 0
+var _separation_phase: int = 0
+var _visual_phase: int = 0
 
 
 func setup(p_terrain_data: TerrainData, p_nav_grid: NavGrid,
@@ -38,44 +54,116 @@ func setup(p_terrain_data: TerrainData, p_nav_grid: NavGrid,
 	wood_pile_manager = p_wood_pile_manager
 
 
+## In-game driver: ticks all units centrally (no per-unit _physics_process —
+## the Node callback overhead alone would dominate with thousands of units),
+## then runs the manager systems. Tests call unit.tick()/tick() directly.
 func _physics_process(delta: float) -> void:
+	for unit in units:
+		unit.tick(delta)
 	tick(delta)
 
 
+## Sprite view/hop updates, staggered over VISUAL_SLICES frames with the
+## camera fetched once per frame (not per unit).
+func _process(_delta: float) -> void:
+	var camera: Camera3D = get_viewport().get_camera_3d()
+	if camera == null or units.is_empty():
+		return
+	var basis: Basis = camera.global_transform.basis
+	var cam_forward: Vector3 = -basis.z
+	var cam_right: Vector3 = basis.x
+	for i in range(_visual_phase, units.size(), VISUAL_SLICES):
+		units[i].update_visual(cam_forward, cam_right)
+	_visual_phase = (_visual_phase + 1) % VISUAL_SLICES
+
+
 func tick(delta: float) -> void:
+	# Hash refresh, inlined (a function call per unit per tick adds up).
 	for unit in units:
-		_update_hash_cell(unit)
+		var new_cell: Vector2i = Vector2i(
+			int(floor(unit.position.x / HASH_CELL_SIZE)),
+			int(floor(unit.position.z / HASH_CELL_SIZE)))
+		if new_cell != unit._hash_cell:
+			_move_hash_cell(unit, new_cell)
+	_drain_path_queue()
 	_apply_separation(delta)
 
 
-## Pushes overlapping units apart (soft, capped speed). Skips dead and thrown
-## units; the target cell must stay walkable so nobody gets shoved into water.
+# --- Path queue -------------------------------------------------------------------
+
+## Registers a unit whose pending move target needs a path (see
+## Unit._start_path_to). Deduplicated via the unit's _path_queued flag.
+func request_path(unit: Unit) -> void:
+	_path_requests.append(unit)
+
+
+func _drain_path_queue() -> void:
+	var budget: int = PATHS_PER_TICK
+	while budget > 0 and _path_head < _path_requests.size():
+		var unit: Unit = _path_requests[_path_head]
+		_path_head += 1
+		if not is_instance_valid(unit):
+			continue
+		unit._resolve_pending_path()
+		budget -= 1
+	if _path_head >= _path_requests.size():
+		_path_requests.clear()
+		_path_head = 0
+
+
+# --- Separation -----------------------------------------------------------------------
+
+## Pushes overlapping units apart (soft, capped speed). Two scale guards:
+## at most SEPARATION_UNITS_PER_TICK units are processed per tick (round-robin
+## slices, push delta scaled by the slice count), and each unit examines at
+## most SEPARATION_MAX_CHECKS neighbour candidates — so a mega-crowd on one
+## spot cannot blow up the tick. Skips dead and thrown units; the target cell
+## must stay walkable so nobody gets shoved into water.
 func _apply_separation(delta: float) -> void:
-	var max_step: float = SEPARATION_SPEED * delta
-	for unit in units:
+	if units.is_empty():
+		return
+	var slices: int = maxi(1, int(ceil(float(units.size()) / float(SEPARATION_UNITS_PER_TICK))))
+	if _separation_phase >= slices:
+		_separation_phase = 0
+	var max_step: float = SEPARATION_SPEED * delta * float(slices)
+	for index in range(_separation_phase, units.size(), slices):
+		var unit: Unit = units[index]
 		if unit.state == Unit.State.DEAD or unit.state == Unit.State.THROWN:
 			continue
 		var push: Vector2 = Vector2.ZERO
-		for other: Unit in get_units_in_radius(unit.position, SEPARATION_RADIUS):
-			if other == unit or other.state == Unit.State.DEAD \
-					or other.state == Unit.State.THROWN:
-				continue
-			var away: Vector2 = Vector2(
-				unit.position.x - other.position.x,
-				unit.position.z - other.position.z)
-			var dist: float = away.length()
-			if dist < 0.001:
-				# Full overlap: deterministic per-unit direction.
-				var angle: float = float(unit.get_instance_id() % 628) * 0.01
-				away = Vector2(cos(angle), sin(angle))
-				dist = 0.001
-			push += away / dist * (SEPARATION_RADIUS - dist)
+		var pos: Vector3 = unit.position
+		var checks: int = SEPARATION_MAX_CHECKS
+		var min_key: Vector2i = hash_key(pos - Vector3(SEPARATION_RADIUS, 0.0, SEPARATION_RADIUS))
+		var max_key: Vector2i = hash_key(pos + Vector3(SEPARATION_RADIUS, 0.0, SEPARATION_RADIUS))
+		for kz in range(min_key.y, max_key.y + 1):
+			for kx in range(min_key.x, max_key.x + 1):
+				var bucket: Array = _hash.get(Vector2i(kx, kz), [])
+				for other: Unit in bucket:
+					if other == unit or other.state == Unit.State.DEAD \
+							or other.state == Unit.State.THROWN:
+						continue
+					checks -= 1
+					var away: Vector2 = Vector2(pos.x - other.position.x, pos.z - other.position.z)
+					var dist: float = away.length()
+					if dist < SEPARATION_RADIUS:
+						if dist < 0.001:
+							# Full overlap: deterministic per-unit direction.
+							var angle: float = float(unit.get_instance_id() % 628) * 0.01
+							away = Vector2(cos(angle), sin(angle))
+							dist = 0.001
+						push += away / dist * (SEPARATION_RADIUS - dist)
+					if checks <= 0:
+						break
+				if checks <= 0:
+					break
+			if checks <= 0:
+				break
 		if push == Vector2.ZERO:
 			continue
 		if push.length() > max_step:
 			push = push.normalized() * max_step
-		var nx: float = unit.position.x + push.x
-		var nz: float = unit.position.z + push.y
+		var nx: float = pos.x + push.x
+		var nz: float = pos.z + push.y
 		if nav_grid != null and not nav_grid.is_cell_walkable(
 				nav_grid.world_to_cell(Vector3(nx, 0.0, nz))):
 			continue
@@ -83,6 +171,7 @@ func _apply_separation(delta: float) -> void:
 		unit.position.z = nz
 		if terrain_data != null:
 			unit.position.y = terrain_data.get_height(nx, nz)
+	_separation_phase = (_separation_phase + 1) % slices
 
 
 # --- Registry -------------------------------------------------------------------
@@ -99,10 +188,9 @@ func unregister(unit: Unit) -> void:
 	units.erase(unit)
 	if unit.died.is_connected(_on_unit_died):
 		unit.died.disconnect(_on_unit_died)
-	var cell: Vector2i = _unit_cells.get(unit, Vector2i(-1, -1))
-	if _hash.has(cell):
-		_hash[cell].erase(unit)
-	_unit_cells.erase(unit)
+	if _hash.has(unit._hash_cell):
+		_hash[unit._hash_cell].erase(unit)
+	unit._hash_cell = Vector2i(2147483647, 2147483647)
 
 
 func _on_unit_died(unit: Unit) -> void:
@@ -122,6 +210,7 @@ func spawn_unit(scene: PackedScene, tribe_id: int, pos: Vector3) -> Unit:
 	unit.tribe_id = tribe_id
 	unit.terrain_data = terrain_data
 	unit.nav_grid = nav_grid
+	unit.path_service = self
 	# Worker references — only Braves have these properties.
 	unit.set("tree_manager", tree_manager)
 	unit.set("wood_pile_manager", wood_pile_manager)
@@ -145,15 +234,17 @@ func hash_key(pos: Vector3) -> Vector2i:
 
 func _update_hash_cell(unit: Unit) -> void:
 	var new_cell: Vector2i = hash_key(unit.position)
-	var old_cell: Vector2i = _unit_cells.get(unit, Vector2i(2147483647, 2147483647))
-	if new_cell == old_cell:
-		return
-	if _hash.has(old_cell):
-		_hash[old_cell].erase(unit)
+	if new_cell != unit._hash_cell:
+		_move_hash_cell(unit, new_cell)
+
+
+func _move_hash_cell(unit: Unit, new_cell: Vector2i) -> void:
+	if _hash.has(unit._hash_cell):
+		_hash[unit._hash_cell].erase(unit)
 	if not _hash.has(new_cell):
 		_hash[new_cell] = []
 	_hash[new_cell].append(unit)
-	_unit_cells[unit] = new_cell
+	unit._hash_cell = new_cell
 
 
 ## All units within radius (XZ distance) around pos.

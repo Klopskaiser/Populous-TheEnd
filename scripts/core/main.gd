@@ -9,6 +9,16 @@ const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
 const SITE_SCENE: PackedScene = preload("res://scenes/buildings/reincarnation_site.tscn")
 const START_BRAVES: int = 10
 const TREE_COUNT: int = 60
+## Max player count — one tribe per player, all identical instances.
+const TRIBE_COUNT: int = 4
+
+## Stress test (key F9): spawns this many braves per tribe per press,
+## staggered over frames so the spawn itself does not hitch.
+const STRESS_BATCH_PER_TRIBE: int = 250
+const STRESS_SPAWNS_PER_FRAME: int = 40
+## Spawn areas per tribe (island quadrants).
+const STRESS_ANCHORS: Array[Vector2i] = [
+	Vector2i(44, 44), Vector2i(84, 44), Vector2i(44, 84), Vector2i(84, 84)]
 
 ## Debug: spawn a small marker at the terrain raycast hit on left-click, to
 ## verify the HeightMapShape3D offset (marker must sit exactly under the cursor).
@@ -25,8 +35,11 @@ const TREE_COUNT: int = 60
 @onready var _hud: Hud = $UI/Hud
 @onready var _build_menu: BuildMenu = $UI/BuildMenu
 @onready var _route_visualizer: RouteVisualizer = $RouteVisualizer
+@onready var _ring_renderer: SelectionRingRenderer = $SelectionRingRenderer
 
 var _marker: MeshInstance3D = null
+var _stress_pending: Array[int] = []   # tribe ids of queued stress spawns
+var _stress_rng: RandomNumberGenerator = RandomNumberGenerator.new()
 
 
 func _ready() -> void:
@@ -40,11 +53,12 @@ func _ready() -> void:
 	var nav: NavGrid = NavGrid.new(td)
 	GameState.nav_grid = nav
 
-	# Tribes: 0 = player (blue), 1 = AI (red) — identical instances.
+	# Tribes: 0 = player (blue), 1-3 = AI — identical instances (max 4 players).
 	var tribes: Array[Tribe] = []
-	for i in range(2):
+	for i in range(TRIBE_COUNT):
 		tribes.append(Tribe.new(i, Unit.TRIBE_COLORS[i]))
 	GameState.tribes = tribes
+	_stress_rng.seed = GameState.ISLAND_SEED
 
 	_unit_manager.setup(td, nav, tribes, _tree_manager, _wood_pile_manager)
 	_building_manager.setup(td, nav, _unit_manager, _wood_pile_manager)
@@ -52,6 +66,7 @@ func _ready() -> void:
 	_wood_pile_manager.setup(td)
 	_tribe_commands.setup(nav, _building_manager, _unit_manager, _tree_manager)
 	_selection.setup(_unit_manager, _tribe_commands, _build_menu)
+	_ring_renderer.setup(_selection)
 	_build_menu.setup(_tribe_commands, nav, self, tribes[GameState.PLAYER_TRIBE])
 	_hud.setup(tribes[GameState.PLAYER_TRIBE], _wood_pile_manager.total_wood())
 	_route_visualizer.setup(_selection, td)
@@ -116,10 +131,47 @@ func _ring_cells(center: Vector2i, radius: int) -> Array[Vector2i]:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("stress_test"):
+		_queue_stress_batch()
+		return
 	if not debug_click_marker:
 		return
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		_place_debug_marker(event.position)
+
+
+# --- Stress test (F9) ----------------------------------------------------------
+
+## Queues STRESS_BATCH_PER_TRIBE braves for every tribe; _physics_process
+## spawns them staggered over frames.
+func _queue_stress_batch() -> void:
+	for tribe_id in range(GameState.tribes.size()):
+		for i in range(STRESS_BATCH_PER_TRIBE):
+			_stress_pending.append(tribe_id)
+	print("Stresstest: %d Einheiten in Warteschlange (gesamt danach: %d)" % [
+		_stress_pending.size(), _unit_manager.units.size() + _stress_pending.size()])
+
+
+func _physics_process(_delta: float) -> void:
+	if _stress_pending.is_empty():
+		return
+	var spawned: int = 0
+	while spawned < STRESS_SPAWNS_PER_FRAME and not _stress_pending.is_empty():
+		_spawn_stress_brave(_stress_pending.pop_back())
+		spawned += 1
+	if _stress_pending.is_empty():
+		print("Stresstest: Spawnen fertig — %d Einheiten gesamt" % _unit_manager.units.size())
+
+
+func _spawn_stress_brave(tribe_id: int) -> void:
+	var nav: NavGrid = GameState.nav_grid
+	var anchor: Vector2i = STRESS_ANCHORS[tribe_id % STRESS_ANCHORS.size()]
+	for attempt in range(24):
+		var cell: Vector2i = anchor + Vector2i(
+			_stress_rng.randi_range(-18, 18), _stress_rng.randi_range(-18, 18))
+		if nav.is_cell_walkable(cell):
+			_unit_manager.spawn_unit(BRAVE_SCENE, tribe_id, nav.cell_to_world(cell))
+			return
 
 
 func _place_debug_marker(screen_pos: Vector2) -> void:

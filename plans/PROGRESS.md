@@ -366,6 +366,63 @@ parallele Ernte-Slots inkl. Freigabe, Separation-Test in `test_unit_logic.gd`),
 **Verifikation:** Testsuite grün (**159 Tests**; neu/angepasst: Stillstand +
 Abbruch + kein Rekrutieren + Fortsetzung nach Holzlieferung, 30-s-Recheck-
 Timer, Lieferung zum nächsten Gebäude beim manuellen Fällen, Eingang-Vertices
-auf Planierhöhe), `--headless --quit` fehlerfrei. Manuelle Prüfung:
-**ausstehend — bitte durch Nutzer prüfen** (Sprung-Animation, Abliefern am
-Haus, Stillstand/Wiederaufnahme bei Holzmangel).
+auf Planierhöhe), `--headless --quit` fehlerfrei. Manuelle Prüfung durch
+Nutzer bestanden; danach Performance-Runde unten.
+
+---
+
+## Phase 3e — Performance für Massen (Ziel: 4000 Einheiten, 4 Spieler × 1000)
+
+**Anlass:** Bei ~500 Einheiten stockte die Selektion, Bewegungsbefehle warfen
+`MAX_MESH_SURFACES`-Fehler (RouteVisualizer: 1 ImmediateMesh-Surface **pro
+selektierter Einheit**, Limit 256) und alles wurde langsam.
+
+**Optimierungen:**
+- **RouteVisualizer:** max. **24** Routenlinien (erste N der Selektion, Einheiten
+  ohne Route zählen nicht), Rebuild nur alle **0,1 s** statt jeden Frame →
+  Surface-Fehler weg.
+- **Selektionsringe als ein MultiMesh:** neuer `SelectionRingRenderer`
+  (`scripts/ui/selection_ring_renderer.gd`, Node in main.tscn, max. 1024
+  Ringe). Vorher erzeugte jede Einheit beim ersten Selektieren einen eigenen
+  Torus-MeshInstance → Stocken bei Box-Select von Hunderten.
+  `Unit.set_selected` setzt nur noch ein Flag.
+- **Pfad-Queue:** `Unit.order_move` rechnet in-game **nicht mehr synchron**
+  (500 Befehle = 500 A* in einem Frame), sondern meldet sich beim UnitManager
+  (`path_service`, `request_path`); der löst **48 Pfade pro Tick** auf
+  (`_resolve_pending_path`, Einheit wartet in MOVE mit leerem Pfad).
+  Tests ohne `path_service` behalten das synchrone Verhalten.
+- **Zentrale Ticks statt Node-Callbacks:** `Unit` hat kein
+  `_physics_process`/`_process` mehr; der UnitManager tickt alle Einheiten in
+  einer Schleife und aktualisiert die Sprite-Ansicht/Hüpfen in **3 Slices**
+  pro Frame mit **einmal pro Frame** geholter Kamera (`Unit.update_visual`).
+- **SpriteFrames-Cache:** `PlaceholderSprites.make_frames` cacht pro Kind —
+  vorher baute **jeder** Spawn alle Animationsbilder neu (Spawn-Hitches).
+- **Separation skaliert:** Budget **600 Einheiten/Tick** (Round-Robin-Slices,
+  Push-Delta skaliert) und max. **20 Nachbar-Kandidaten pro Einheit** —
+  vorher explodierte der Tick, wenn Tausende in einem Hash-Bucket standen
+  (gemessen: **190 ms → 9 ms**). Hash-Zelle liegt jetzt als Feld auf der Unit
+  (`_hash_cell`) statt im Dictionary; Hash-Update inline im Manager-Tick.
+- **Physik-Tickrate 30 Hz** (project.godot `physics_ticks_per_second=30`) —
+  für ein RTS ausreichend, verdoppelt das Budget pro Tick auf ~33 ms.
+- **Stresstest-Szenario:** 4 Tribes (Maximalausbau); Taste **F9** spawnt
+  **250 Braves je Tribe** (= +1000), gestaffelt mit 40 Spawns/Frame über die
+  Inselquadranten; Fortschritt/Gesamtzahl auf der Konsole. Input-Action
+  `stress_test` (F9).
+- **Benchmark-Werkzeug:** `tests/benchmark_units.gd` (kein test_-Präfix, läuft
+  nicht in der Suite): 4000 Einheiten, Massen-Move auf einen Punkt, 600 Ticks,
+  Phasen-Timing. Aufruf:
+  `& $GODOT --path … --headless -s res://tests/benchmark_units.gd`
+
+**Messwerte (Worst-Case: alle 4000 gleichzeitig auf EINEN Punkt):**
+vorher Ø **215 ms**/Tick (Separation 190 ms), nachher Ø **23,7 ms**/Tick
+(move 9,0 | hash 5,0 | paths 0,6 | separation 9,2), Spitze 64 ms — unter dem
+33-ms-Budget; im normalen Spiel bewegt sich nur ein Bruchteil gleichzeitig.
+
+**Offen/bekannt (Phase 7):** 4000 `AnimatedSprite3D` sind weiterhin je ein
+Draw Call — falls die GPU-Seite beim Nutzer limitiert, wäre der nächste
+Schritt ein MultiMesh-basiertes Einheiten-Rendering.
+
+**Verifikation:** Testsuite grün (**163 Tests**; neu: Pfad-Queue-Verteilung
+über Ticks), `--headless --quit` fehlerfrei, Benchmark unter Budget.
+Manuelle Prüfung: **ausstehend — bitte durch Nutzer prüfen** (F9 mehrmals
+drücken → 4000 Einheiten, Box-Select + Massen-Move ohne Stocken/Fehler).

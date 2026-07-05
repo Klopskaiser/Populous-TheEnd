@@ -45,11 +45,24 @@ var facing: Vector3 = Vector3(0, 0, 1)
 ## Injected by UnitManager.spawn_unit() (or directly by tests).
 var terrain_data: TerrainData = null
 var nav_grid: NavGrid = null
+## When set (in-game), order_move paths are computed via the manager's path
+## queue (spread over frames) instead of synchronously — 500 simultaneous
+## move orders would otherwise stall a frame with 500 A* runs. Tests leave
+## this null and get the old synchronous behaviour.
+var path_service: UnitManager = null
+
+var selected: bool = false
+
+## Current spatial-hash cell, managed by the UnitManager (stored on the unit
+## because a Dictionary lookup per unit per tick is measurably slower).
+var _hash_cell: Vector2i = Vector2i(2147483647, 2147483647)
 
 var _path: PackedVector3Array = PackedVector3Array()
 var _path_index: int = 0
+## Queued move target awaiting path computation (INF = none).
+var _pending_target: Vector3 = Vector3.INF
+var _path_queued: bool = false
 var _sprite: AnimatedSprite3D = null
-var _selection_ring: MeshInstance3D = null
 var _view: StringName = &"front"
 
 
@@ -74,12 +87,17 @@ func _ready() -> void:
 		_update_animation()
 
 
-func _physics_process(delta: float) -> void:
-	tick(delta)
-
-
-func _process(_delta: float) -> void:
-	_update_sprite_view()
+## Per-frame visual update, driven by the UnitManager in staggered slices
+## (no per-unit _process callbacks — with thousands of units the Node
+## callback overhead alone would dominate the frame). The camera vectors are
+## fetched once per frame by the manager.
+func update_visual(cam_forward: Vector3, cam_right: Vector3) -> void:
+	if _sprite == null or _sprite.sprite_frames == null:
+		return
+	var new_view: StringName = view_suffix(facing, cam_forward, cam_right)
+	if new_view != _view:
+		_view = new_view
+		_apply_animation(false)
 	_update_hop()
 
 
@@ -87,15 +105,15 @@ func _process(_delta: float) -> void:
 ## animation is frame-driven from the hop phase: arms fly up while airborne
 ## (frame 1) and come down on landing (frame 0).
 func _update_hop() -> void:
-	if _sprite == null:
-		return
 	var base: float = PlaceholderSprites.H * SPRITE_PIXEL_SIZE * 0.5
-	var offset: float = 0.0
-	if hop_visual:
-		offset = absf(sin(float(Time.get_ticks_msec()) * 0.012)) * 0.35
-		if String(_sprite.animation).begins_with("jump"):
-			_sprite.pause()
-			_sprite.frame = 1 if offset > 0.12 else 0
+	if not hop_visual:
+		if _sprite.position.y != base:
+			_sprite.position.y = base
+		return
+	var offset: float = absf(sin(float(Time.get_ticks_msec()) * 0.012)) * 0.35
+	if String(_sprite.animation).begins_with("jump"):
+		_sprite.pause()
+		_sprite.frame = 1 if offset > 0.12 else 0
 	_sprite.position.y = base + offset
 
 
@@ -110,6 +128,8 @@ func tick(delta: float) -> void:
 
 
 func _tick_move(delta: float) -> void:
+	if _pending_target != Vector3.INF:
+		return  # waiting for the path queue
 	if _advance_path(delta):
 		_on_path_finished()
 
@@ -180,6 +200,15 @@ func order_move(target: Vector3, queue_up: bool = false) -> void:
 
 
 func _start_path_to(target: Vector3) -> void:
+	if path_service != null:
+		# Defer to the manager's path queue (spread over frames).
+		_pending_target = target
+		_clear_path()
+		if not _path_queued:
+			_path_queued = true
+			path_service.request_path(self)
+		_set_state(State.MOVE)
+		return
 	if not _plan_path_to(target):
 		# Unreachable: drop the waypoint and stop.
 		if not waypoint_queue.is_empty():
@@ -187,6 +216,21 @@ func _start_path_to(target: Vector3) -> void:
 		_set_state(State.IDLE)
 		return
 	_set_state(State.MOVE)
+
+
+## Called by the UnitManager when this unit's queued path request is due.
+func _resolve_pending_path() -> void:
+	_path_queued = false
+	if _pending_target == Vector3.INF:
+		return
+	var target: Vector3 = _pending_target
+	_pending_target = Vector3.INF
+	if state != State.MOVE:
+		return  # order was superseded while waiting
+	if not _plan_path_to(target):
+		if not waypoint_queue.is_empty():
+			waypoint_queue.pop_front()
+		_set_state(State.IDLE)
 
 
 ## Computes and stores a path without touching the state (Brave sub-states
@@ -206,6 +250,7 @@ func _plan_path_to(target: Vector3) -> bool:
 
 ## Directly injects a path (used by tests and by order handling).
 func set_path(path: PackedVector3Array) -> void:
+	_pending_target = Vector3.INF  # cancel any queued request
 	_path = path
 	_path_index = 0
 	if _path.is_empty():
@@ -253,22 +298,6 @@ func _set_state(new_state: State) -> void:
 
 func _update_animation() -> void:
 	_apply_animation(true)
-
-
-## Picks the sprite view (front/back/left/right) from the unit's facing
-## relative to the camera; on change the animation switches without
-## restarting (frame progress is kept). Visual-only, runs in _process.
-func _update_sprite_view() -> void:
-	if _sprite == null or _sprite.sprite_frames == null or not is_inside_tree():
-		return
-	var camera: Camera3D = get_viewport().get_camera_3d()
-	if camera == null:
-		return
-	var cam_basis: Basis = camera.global_transform.basis
-	var new_view: StringName = view_suffix(facing, -cam_basis.z, cam_basis.x)
-	if new_view != _view:
-		_view = new_view
-		_apply_animation(false)
 
 
 ## Which of the four sprite views matches a facing direction, given the
@@ -337,21 +366,8 @@ func _pick_animation(base: StringName) -> StringName:
 	return &""
 
 
-## Shows/hides the selection ring (created lazily, in-game only).
-func set_selected(selected: bool) -> void:
-	if selected and _selection_ring == null and is_inside_tree():
-		_selection_ring = MeshInstance3D.new()
-		_selection_ring.name = "SelectionRing"
-		var torus: TorusMesh = TorusMesh.new()
-		torus.inner_radius = 0.45
-		torus.outer_radius = 0.6
-		var mat: StandardMaterial3D = StandardMaterial3D.new()
-		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		mat.no_depth_test = true
-		mat.albedo_color = Color(1.0, 0.95, 0.3)
-		torus.material = mat
-		_selection_ring.mesh = torus
-		_selection_ring.position.y = 0.15
-		add_child(_selection_ring)
-	if _selection_ring != null:
-		_selection_ring.visible = selected
+## Marks the unit as selected. The rings are rendered centrally by the
+## SelectionRingRenderer (one MultiMesh) — per-unit ring nodes caused a
+## visible hitch when box-selecting hundreds of units.
+func set_selected(p_selected: bool) -> void:
+	selected = p_selected

@@ -31,9 +31,18 @@ const CASTER_KINDS: Array[StringName] = [&"shaman", &"preacher"]
 const VIEWS: Array[StringName] = [&"front", &"back", &"right", &"left"]
 
 
+## One shared SpriteFrames per kind — building the frames is expensive and
+## AnimatedSprite3D instances can share the resource (each keeps its own
+## frame index). Without the cache, spawning hundreds of units rebuilt all
+## images per unit and caused visible hitches.
+static var _cache: Dictionary[StringName, SpriteFrames] = {}
+
+
 ## Builds the SpriteFrames (idle/walk/attack, plus cast for casters), each in
 ## all four directional views. All current kinds share the same silhouette.
 static func make_frames(unit_kind: StringName) -> SpriteFrames:
+	if _cache.has(unit_kind):
+		return _cache[unit_kind]
 	var frames: SpriteFrames = SpriteFrames.new()
 	frames.remove_animation("default")
 	# "jump" is frame-driven by the hop visual (frame 0 = arms down on the
@@ -45,6 +54,7 @@ static func make_frames(unit_kind: StringName) -> SpriteFrames:
 		for view in VIEWS:
 			var full_name: StringName = StringName("%s_%s" % [anim, view])
 			_add_animation(frames, full_name, _build_frames(anim, view), _anim_fps(anim))
+	_cache[unit_kind] = frames
 	return frames
 
 

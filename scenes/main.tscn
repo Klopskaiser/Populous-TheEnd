@@ -1,4 +1,4 @@
-[gd_scene load_steps=13 format=3]
+[gd_scene load_steps=14 format=3]
 
 [ext_resource type="Script" uid="uid://cuuacyf8ijxs2" path="res://scripts/core/main.gd" id="1_main"]
 [ext_resource type="PackedScene" path="res://scenes/terrain.tscn" id="2_terrain"]
@@ -12,6 +12,7 @@
 [ext_resource type="PackedScene" path="res://scenes/ui/hud.tscn" id="10_hud"]
 [ext_resource type="Script" path="res://scripts/ui/build_menu.gd" id="11_build"]
 [ext_resource type="Script" path="res://scripts/core/wood_pile_manager.gd" id="12_piles"]
+[ext_resource type="Script" path="res://scripts/ui/selection_ring_renderer.gd" id="13_rings"]
 
 [sub_resource type="Environment" id="Environment_1"]
 background_mode = 1
@@ -50,6 +51,9 @@ script = ExtResource("9_commands")
 
 [node name="RouteVisualizer" type="Node3D" parent="."]
 script = ExtResource("6_route")
+
+[node name="SelectionRingRenderer" type="MultiMeshInstance3D" parent="."]
+script = ExtResource("13_rings")
 
 [node name="UI" type="CanvasLayer" parent="."]
 
