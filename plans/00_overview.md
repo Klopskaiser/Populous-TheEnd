@@ -22,7 +22,8 @@ Jede Phase endet mit einem **lauffähigen, manuell spielbaren Zwischenstand** un
 
 ## Arbeitsanweisung pro Sitzung
 
-1. Diese Datei + den Phasenplan der nächsten offenen Phase lesen.
+1. Diese Datei + **[PROGRESS.md](PROGRESS.md)** (Ist-Stand inkl. Extras/Erkenntnissen der
+   bisherigen Phasen) + den Phasenplan der nächsten offenen Phase lesen.
 2. Phase umsetzen (Deliverables + Umsetzungsschritte des Phasenplans).
 3. Nach **jeder** neuen/geänderten Skriptdatei: Syntax-Check (`--check-only`), nach neuen
    Dateien: `--headless --import` (wegen `.uid`-Erzeugung, siehe Risiken).
@@ -30,7 +31,9 @@ Jede Phase endet mit einem **lauffähigen, manuell spielbaren Zwischenstand** un
 5. Projekt-Ladecheck `--headless --quit` — Output muss frei von Fehlern sein.
 6. Manuelle Prüfschritte des Phasenplans per Spielstart durchführen (bzw. den Nutzer
    bitten, wenn Interaktion nötig ist, die headless nicht prüfbar ist).
-7. Checkbox oben abhaken, committen, pushen:
+7. **[PROGRESS.md](PROGRESS.md) ergänzen:** Gebaut (Dateien + Kern-APIs), Extras/
+   Abweichungen vom Plan, Erkenntnisse/Stolpersteine, Verifikationsstand.
+8. Checkbox oben abhaken, committen, pushen:
    `git add -A && git commit -m "Phase N: <Titel>" && git push`
    (Repo ist eingerichtet: `main` → `origin/main`, SSH-Alias `github-privat`,
    lokale Commit-Identität nicht ändern, nie `--global`.)

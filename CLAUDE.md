@@ -120,12 +120,13 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
 
 ## 8. Geplante Projektstruktur & Konventionen
 
-Zielbild für die kommenden Aufgaben (noch nicht angelegt):
+Zielbild für die kommenden Aufgaben:
 
 ```
 D:\game\Populous-TheEnd\
 ├── project.godot
 ├── CLAUDE.md                  # diese Datei
+├── plans\                     # Phasenpläne (00_overview.md) + PROGRESS.md (Ist-Stand, s. §10)
 ├── scenes\                    # Szenen (.tscn): main, terrain, ui, units, buildings
 ├── scripts\
 │   ├── core\                  # GameState, Spieler/Stamm-Verwaltung, Ressourcen, Mana
@@ -157,3 +158,17 @@ D:\game\Populous-TheEnd\
 - **Kein MCP-Compile/-Check** vorhanden (siehe Sonderfall-Hinweis oben). Wenn ein Check
   nicht ausführbar ist, den Grund nennen – **keine erfolgreiche Prüfung behaupten, die
   nicht lief.**
+- **Bekannte Einschränkung:** `--check-only` kennt keine Autoloads – Skripte, die
+  `GameState`/`Events` referenzieren, melden dort fälschlich „Identifier not found".
+  Maßgeblich ist der Projekt-Ladecheck (`--headless --quit`).
+
+## 10. Fortschritts-Doku (`plans\PROGRESS.md`)
+
+- **`plans\PROGRESS.md` ist die Ist-Stand-Doku des Projekts:** was pro Phase tatsächlich
+  gebaut wurde (Dateien + Kern-APIs), Extras/Abweichungen von den Phasenplänen,
+  Erkenntnisse/Stolpersteine und Verifikationsstand.
+- **Bei Arbeitsbeginn an einer neuen Aufgabe/Phase zuerst lesen:**
+  `plans\00_overview.md` (Phasenstatus + Arbeitsanweisung) und `plans\PROGRESS.md` –
+  damit ist der bisherige Stand bekannt, ohne den Code durchsuchen zu müssen.
+- **Nach Abschluss einer Phase oder größeren Erweiterung:** PROGRESS.md ergänzen
+  (Schritt 7 der Arbeitsanweisung in `plans\00_overview.md`).
