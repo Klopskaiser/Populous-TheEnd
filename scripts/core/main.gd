@@ -16,6 +16,7 @@ const START_BRAVES: int = 10
 @onready var _camera_rig: CameraRig = $CameraRig
 @onready var _unit_manager: UnitManager = $UnitManager
 @onready var _selection: SelectionManager = $UI/SelectionManager
+@onready var _route_visualizer: RouteVisualizer = $RouteVisualizer
 
 var _marker: MeshInstance3D = null
 
@@ -32,6 +33,7 @@ func _ready() -> void:
 	GameState.nav_grid = nav
 	_unit_manager.setup(td, nav)
 	_selection.setup(_unit_manager)
+	_route_visualizer.setup(_selection, td)
 
 	_spawn_start_units(td, nav)
 

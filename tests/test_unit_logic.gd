@@ -125,6 +125,56 @@ func test_patrol_repeats_route() -> void:
 	unit.free()
 
 
+func test_view_suffix_directions() -> void:
+	# Camera looks north (-Z), its right vector points east (+X).
+	var fwd: Vector3 = Vector3(0, 0, -1)
+	var right: Vector3 = Vector3(1, 0, 0)
+	check(Unit.view_suffix(Vector3(0, 0, -1), fwd, right) == &"back",
+		"walking away from camera -> back view")
+	check(Unit.view_suffix(Vector3(0, 0, 1), fwd, right) == &"front",
+		"walking toward camera -> front view")
+	check(Unit.view_suffix(Vector3(1, 0, 0), fwd, right) == &"right",
+		"walking screen-right -> right view")
+	check(Unit.view_suffix(Vector3(-1, 0, 0), fwd, right) == &"left",
+		"walking screen-left -> left view")
+	check(Unit.view_suffix(Vector3.ZERO, fwd, right) == &"front",
+		"zero facing falls back to front view")
+	# Rotated camera: looking east -> a unit walking east is seen from behind.
+	check(Unit.view_suffix(Vector3(1, 0, 0), Vector3(1, 0, 0), Vector3(0, 0, 1)) == &"back",
+		"rotated camera: same heading -> back view")
+
+
+func test_facing_follows_movement() -> void:
+	var td: TerrainData = _flat_terrain()
+	var unit: Unit = _make_unit(td)
+	unit.position = Vector3(10.0, 0.0, 10.0)
+	unit.set_path(PackedVector3Array([Vector3(14.0, 0.0, 10.0)]))
+	unit.tick(TICK)
+	check(unit.facing.distance_to(Vector3(1, 0, 0)) < 0.001,
+		"facing points along the movement direction (+X)")
+	_tick_until_idle(unit)
+	check(unit.facing.distance_to(Vector3(1, 0, 0)) < 0.001,
+		"facing is kept after the unit stops")
+	unit.free()
+
+
+func test_remaining_path_shrinks() -> void:
+	var td: TerrainData = _flat_terrain()
+	var unit: Unit = _make_unit(td)
+	unit.position = Vector3(10.0, 0.0, 10.0)
+	unit.set_path(PackedVector3Array([Vector3(12.0, 0.0, 10.0), Vector3(14.0, 0.0, 10.0)]))
+	check(unit.get_remaining_path().size() == 2, "remaining path starts with 2 points")
+	for i in range(100):
+		unit.tick(TICK)
+		if unit.get_remaining_path().size() < 2:
+			break
+	check(unit.get_remaining_path().size() == 1,
+		"first path point is dropped after passing it")
+	_tick_until_idle(unit)
+	check(unit.get_remaining_path().is_empty(), "remaining path is empty when IDLE")
+	unit.free()
+
+
 func test_spatial_hash_radius_query() -> void:
 	var td: TerrainData = _flat_terrain()
 	var manager: UnitManager = UnitManager.new()

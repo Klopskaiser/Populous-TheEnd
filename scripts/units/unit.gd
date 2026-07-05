@@ -34,6 +34,10 @@ var state: State = State.IDLE
 var waypoint_queue: Array[Vector3] = []
 var patrol: bool = false
 
+## Movement direction on the XZ plane (kept when the unit stops); drives the
+## choice of the four sprite views. Default: facing the camera side (south).
+var facing: Vector3 = Vector3(0, 0, 1)
+
 ## Injected by UnitManager.spawn_unit() (or directly by tests).
 var terrain_data: TerrainData = null
 var nav_grid: NavGrid = null
@@ -42,6 +46,7 @@ var _path: PackedVector3Array = PackedVector3Array()
 var _path_index: int = 0
 var _sprite: AnimatedSprite3D = null
 var _selection_ring: MeshInstance3D = null
+var _view: StringName = &"front"
 
 
 ## Silhouette key for PlaceholderSprites; overridden by subclasses.
@@ -69,6 +74,10 @@ func _physics_process(delta: float) -> void:
 	tick(delta)
 
 
+func _process(_delta: float) -> void:
+	_update_sprite_view()
+
+
 # --- Core logic (testable without scene tree) ---------------------------------
 
 func tick(delta: float) -> void:
@@ -86,6 +95,9 @@ func _tick_move(delta: float) -> void:
 	var target: Vector3 = _path[_path_index]
 	var flat_pos: Vector2 = Vector2(position.x, position.z)
 	var flat_target: Vector2 = Vector2(target.x, target.z)
+	var to_target: Vector2 = flat_target - flat_pos
+	if to_target.length_squared() > 0.000001:
+		facing = Vector3(to_target.x, 0.0, to_target.y).normalized()
 	var next: Vector2 = flat_pos.move_toward(flat_target, speed * delta)
 	position.x = next.x
 	position.z = next.y
@@ -155,6 +167,16 @@ func set_path(path: PackedVector3Array) -> void:
 		_set_state(State.MOVE)
 
 
+## Not-yet-walked part of the current path (for route visualisation).
+func get_remaining_path() -> PackedVector3Array:
+	var points: PackedVector3Array = PackedVector3Array()
+	if state != State.MOVE:
+		return points
+	for i in range(_path_index, _path.size()):
+		points.append(_path[i])
+	return points
+
+
 # --- Damage (scaffold; combat comes in phase 4) --------------------------------
 
 func take_damage(amount: int) -> void:
@@ -178,20 +200,85 @@ func _set_state(new_state: State) -> void:
 
 
 func _update_animation() -> void:
+	_apply_animation(true)
+
+
+## Picks the sprite view (front/back/left/right) from the unit's facing
+## relative to the camera; on change the animation switches without
+## restarting (frame progress is kept). Visual-only, runs in _process.
+func _update_sprite_view() -> void:
+	if _sprite == null or _sprite.sprite_frames == null or not is_inside_tree():
+		return
+	var camera: Camera3D = get_viewport().get_camera_3d()
+	if camera == null:
+		return
+	var cam_basis: Basis = camera.global_transform.basis
+	var new_view: StringName = view_suffix(facing, -cam_basis.z, cam_basis.x)
+	if new_view != _view:
+		_view = new_view
+		_apply_animation(false)
+
+
+## Which of the four sprite views matches a facing direction, given the
+## camera's forward and right vectors. Static + camera-free so it is
+## headless-testable. Boundary (45 deg) prefers front/back.
+static func view_suffix(p_facing: Vector3, cam_forward: Vector3, cam_right: Vector3) -> StringName:
+	var flat_facing: Vector2 = Vector2(p_facing.x, p_facing.z)
+	var flat_forward: Vector2 = Vector2(cam_forward.x, cam_forward.z)
+	if flat_facing.length_squared() < 0.000001 or flat_forward.length_squared() < 0.000001:
+		return &"front"
+	flat_facing = flat_facing.normalized()
+	flat_forward = flat_forward.normalized()
+	var dot: float = flat_facing.dot(flat_forward)
+	if dot >= 0.7071:
+		return &"back"    # walking away from the camera
+	if dot <= -0.7071:
+		return &"front"   # walking toward the camera
+	var flat_right: Vector2 = Vector2(cam_right.x, cam_right.z)
+	return &"right" if flat_facing.dot(flat_right) > 0.0 else &"left"
+
+
+func _apply_animation(restart: bool) -> void:
 	if _sprite == null or _sprite.sprite_frames == null:
 		return
-	var anim: StringName
+	var base: StringName
 	match state:
 		State.MOVE, State.PANIC:
-			anim = &"walk"
+			base = &"walk"
 		State.ATTACK:
-			anim = &"attack"
+			base = &"attack"
 		State.CAST:
-			anim = &"cast"
+			base = &"cast"
 		_:
-			anim = &"idle"
-	if _sprite.sprite_frames.has_animation(anim):
-		_sprite.play(anim)
+			base = &"idle"
+	var anim: StringName = _pick_animation(base)
+	if anim == &"":
+		return
+	if _sprite.animation == anim:
+		if restart:
+			_sprite.play(anim)
+		return
+	var frame: int = _sprite.frame
+	var progress: float = _sprite.frame_progress
+	_sprite.play(anim)
+	if not restart:
+		# Only the view direction changed: keep the frame position.
+		_sprite.set_frame_and_progress(frame, progress)
+
+
+## Fallback chain: directional -> front variant -> plain name -> idle_front.
+func _pick_animation(base: StringName) -> StringName:
+	var frames: SpriteFrames = _sprite.sprite_frames
+	var candidates: Array[StringName] = [
+		StringName("%s_%s" % [base, _view]),
+		StringName("%s_front" % base),
+		base,
+		&"idle_front",
+	]
+	for candidate in candidates:
+		if frames.has_animation(candidate):
+			return candidate
+	return &""
 
 
 ## Shows/hides the selection ring (created lazily, in-game only).
