@@ -107,7 +107,46 @@ func test_tree_growth_and_yield() -> void:
 	tree.grow_tick(TreeResource.GROWTH_TIME * 5.0)
 	check(tree.stage == 3, "tree never grows past the max stage")
 	check(tree.chop_time() > 2.9, "big trees take longer to fell")
+
+	# Harvesting takes one wood at a time and drops the tree a stage.
+	check(tree.harvest_one() == 1, "harvest takes exactly one wood")
+	check(tree.stage == 2, "big tree drops to stage 2 after one harvest")
+	check(tree.harvest_one() == 1, "second harvest takes one wood")
+	check(tree.stage == 1, "tree drops to stage 1")
+	check(tree.harvest_one() == 1, "third harvest takes the last wood")
+	check(tree.felled_flag, "tree is gone after its last wood")
+	check(tree.harvest_one() == 0, "a felled tree yields nothing")
 	tree.free()
+
+
+func test_tree_parallel_harvest_slots() -> void:
+	var w: Dictionary = _make_world()
+	var tm: TreeManager = w.tree_manager
+	var big: TreeResource = tm.spawn_tree(Vector2i(60, 60), 3)
+
+	var workers: Array[Brave] = []
+	for i in range(4):
+		workers.append(Brave.new())
+	# A big tree (3 wood) supports up to 3 parallel harvesters.
+	for i in range(3):
+		check(tm.claim_nearest_tree(Vector3(60, 5, 60), 10.0, workers[i]) == big,
+			"harvest slot %d on the big tree" % (i + 1))
+	check(tm.claim_nearest_tree(Vector3(60, 5, 60), 10.0, workers[3]) == null,
+		"a big tree has no fourth harvest slot")
+	tm.release_claim(big, workers[0])
+	check(tm.claim_nearest_tree(Vector3(60, 5, 60), 10.0, workers[3]) == big,
+		"released slot can be claimed again")
+
+	# A small tree (1 wood) supports only one harvester.
+	var small: TreeResource = tm.spawn_tree(Vector2i(80, 80), 0)
+	check(tm.claim_nearest_tree(Vector3(80, 5, 80), 5.0, workers[0]) == small,
+		"single slot on a small tree")
+	check(tm.claim_nearest_tree(Vector3(80, 5, 80), 5.0, workers[1]) == null,
+		"small tree has no second harvest slot")
+
+	for worker in workers:
+		worker.free()
+	_free_world(w)
 
 
 func test_tree_reproduction() -> void:

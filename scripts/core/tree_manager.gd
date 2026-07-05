@@ -167,27 +167,29 @@ func nearest_tree(pos: Vector3) -> TreeResource:
 	return _nearest(pos, INF, false)
 
 
-## Nearest unclaimed tree within radius; claims it for the claimer.
+## Nearest tree within radius that still has a free harvest slot (a tree
+## supports as many parallel harvesters as it has wood, max 3); claims a slot
+## for the claimer.
 func claim_nearest_tree(pos: Vector3, radius: float, claimer: Object) -> TreeResource:
 	var tree: TreeResource = _nearest(pos, radius, true)
 	if tree != null:
-		tree.claimed_by = claimer
+		tree.add_claimer(claimer)
 	return tree
 
 
 func release_claim(tree: TreeResource, claimer: Object) -> void:
-	if is_instance_valid(tree) and tree.claimed_by == claimer:
-		tree.claimed_by = null
+	if is_instance_valid(tree):
+		tree.remove_claimer(claimer)
 
 
-func _nearest(pos: Vector3, radius: float, unclaimed_only: bool) -> TreeResource:
+func _nearest(pos: Vector3, radius: float, claimable_only: bool) -> TreeResource:
 	var best: TreeResource = null
 	var best_dist: float = radius * radius
 	var flat: Vector2 = Vector2(pos.x, pos.z)
 	for tree in trees:
 		if not is_instance_valid(tree) or tree.felled_flag:
 			continue
-		if unclaimed_only and tree.is_claimed():
+		if claimable_only and not tree.can_claim():
 			continue
 		var d: float = Vector2(tree.position.x, tree.position.z).distance_squared_to(flat)
 		if d < best_dist:
@@ -196,21 +198,21 @@ func _nearest(pos: Vector3, radius: float, unclaimed_only: bool) -> TreeResource
 	return best
 
 
-## Fells a tree: deregisters it, frees the node and returns the wood yield.
-## Safe against double felling (returns 0 the second time). Callers must drop
-## their reference right after this call.
-func fell_tree(tree: TreeResource) -> int:
+## Takes one unit of wood from the tree (the tree drops a growth stage). When
+## the last unit is taken the tree is deregistered and freed. Callers must
+## re-validate their reference right after this call.
+func harvest_tree(tree: TreeResource) -> int:
 	if tree == null or not is_instance_valid(tree) or tree.felled_flag:
 		return 0
-	tree.felled_flag = true
-	var wood: int = tree.wood_yield()
-	trees.erase(tree)
-	var c: Vector2i = _tree_cells.get(tree, Vector2i(-1, -1))
-	_tree_cells.erase(tree)
-	if c.x >= 0:
-		_occupied.erase(c)
-	if tree.is_inside_tree():
-		tree.queue_free()
-	else:
-		tree.free()
+	var wood: int = tree.harvest_one()
+	if tree.felled_flag:
+		trees.erase(tree)
+		var c: Vector2i = _tree_cells.get(tree, Vector2i(-1, -1))
+		_tree_cells.erase(tree)
+		if c.x >= 0:
+			_occupied.erase(c)
+		if tree.is_inside_tree():
+			tree.queue_free()
+		else:
+			tree.free()
 	return wood

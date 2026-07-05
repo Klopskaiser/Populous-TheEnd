@@ -291,6 +291,47 @@ Wachstum/Ertrag, Vermehrung inkl. Deckel, Stapel-Mechanik, Platzierungs-
 validierung inkl. Unebenheits-Limit + Orientierung, kompletter Bau-Flow
 Planieren→Fällen→Liefern→Bauen, Baustopp ohne Holz + Fortsetzung nach
 Lieferung, Hütten-Spawn, Rekrutierung nur IDLE, manuelles Kettenfällen),
+`--headless --quit` fehlerfrei. Manuelle Prüfung durch Nutzer bestanden
+(„funktioniert gut“); danach Feinschliff-Runde unten.
+
+---
+
+## Phase 3c — Feinschliff-Runde (Nutzerfeedback)
+
+**Änderungen:**
+- **Holzstapel als Sprite:** `WoodPile`-Visual ist jetzt ein gebillboardetes
+  `Sprite3D` mit prozeduraler 16×16-Pixel-Art (ein Klotz-Log je Holzeinheit,
+  bei Mengenänderung neu generiert) statt 3D-Boxen — gleiche Optik-Schiene
+  wie die Einheiten-Sprites.
+- **Planieren dauert doppelt so lange:** `Brave.FLATTEN_RATE` 1.0 → **0.5** m/s
+  (mehr Hopser pro Zelle).
+- **Hüttenpreis:** `Hut.WOOD_COST` 20 → **15** (Button-Text folgt der Konstante).
+- **Einheiten-Separation (kein Voll-Overlap):** `UnitManager.tick` schiebt
+  Einheiten unter `SEPARATION_RADIUS` (0,55 m) weich auseinander
+  (max. 1,6 m/s, Spatial-Hash-Abfrage, deterministische Richtung bei exakter
+  Überlappung, Zielzelle muss begehbar bleiben, Y neu gesnappt). `DEAD` und
+  `THROWN` (Würfe ab Phase 5 — dort ist Overlap erlaubt) sind ausgenommen.
+  Zusätzlich streuen Hütten-Spawns Position + Rally-Ziel deterministisch
+  (`_spawn_counter` + `formation_offset`).
+- **Holz wird einzeln geerntet:** `TreeResource.harvest_one()` nimmt genau
+  1 Holz und stuft den Baum **eine Wachstumsphase herab** (groß → mittelgroß
+  → mittelklein → weg); ein großer Baum braucht drei Ernten. Restholz je
+  Stufe = 1/1/2/3 (`wood_yield()`); `TreeManager.fell_tree` wurde durch
+  `harvest_tree` ersetzt (entfernt den Baum erst bei der letzten Einheit).
+  Herabgestufte Bäume wachsen über den Growth-Timer wieder nach.
+- **Parallele Ernte:** Bäume haben Ernte-Slots = Restholz (max. **3** am
+  großen Baum): `claimers`-Array + `can_claim/add_claimer/remove_claimer`,
+  `claim_nearest_tree` vergibt Slots. Arbeiter hacken denselben Baum weiter,
+  bis Tragekapazität (3) voll, Baum weg oder genug Holz unterwegs ist; beim
+  manuellen Fällen wird jede Einheit sofort als Stapel abgelegt.
+
+**Erkenntnis (wichtig):** Auch ein **`Object`-typisierter** Parameter wirft bei
+freigegebenen Instanzen denselben Script-Error wie spezifischere Typen —
+Prüf-Funktionen wie `_tree_valid` müssen ihren Parameter **komplett untypisiert**
+lassen (Variant) und zuerst `is_instance_valid` prüfen.
+
+**Verifikation:** Testsuite grün (**149 Tests**; neu: Ernte-Herabstufung,
+parallele Ernte-Slots inkl. Freigabe, Separation-Test in `test_unit_logic.gd`),
 `--headless --quit` fehlerfrei. Manuelle Prüfung: **ausstehend — bitte durch
-Nutzer prüfen** (Ghost mit Eingang/R-Rotation, Planier-Hüpfen, Holzkette,
-Baumvermehrung über längere Spielzeit).
+Nutzer prüfen** (Stapel-Sprite-Optik, Entzerrung am Hütteneingang,
+stufenweises Abernten großer Bäume mit mehreren Arbeitern).

@@ -210,3 +210,28 @@ func test_spatial_hash_radius_query() -> void:
 	for unit: Unit in [inside_a, inside_b, outside_near, outside_far]:
 		unit.free()
 	manager.free()
+
+
+func test_separation_pushes_overlapping_units_apart() -> void:
+	var td: TerrainData = _flat_terrain()
+	var manager: UnitManager = UnitManager.new()
+	manager.setup(td, null)
+	var a: Unit = _make_unit(td)
+	var b: Unit = _make_unit(td)
+	a.position = Vector3(50.0, 5.0, 50.0)
+	b.position = Vector3(50.0, 5.0, 50.0)   # full overlap
+	manager.register(a)
+	manager.register(b)
+
+	for i in range(100):
+		manager.tick(TICK)
+	var dist: float = Vector2(a.position.x, a.position.z).distance_to(
+		Vector2(b.position.x, b.position.z))
+	check(dist >= 0.4, "overlapping units are pushed apart (dist %f)" % dist)
+	check(dist <= 2.0, "separation does not fling units away")
+	check_near(a.position.y, td.get_height(a.position.x, a.position.z),
+		"pushed unit stays snapped to the terrain")
+
+	a.free()
+	b.free()
+	manager.free()

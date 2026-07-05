@@ -25,7 +25,7 @@ const PICKUP_RANGE: float = 1.2
 ## If the nav path ends short of the goal but within this distance, walk the
 ## last stretch in a straight line (footprint cells are nav-solid).
 const DIRECT_WALK_RANGE: float = 4.5
-const FLATTEN_RATE: float = 1.0     # metres of vertex adjustment per second
+const FLATTEN_RATE: float = 0.5     # metres of vertex adjustment per second
 const BUILD_RATE: float = 0.2       # build_progress per second
 const JOB_TREE_RADIUS: float = 30.0 # tree search radius around the site
 const CHOP_CHAIN_RADIUS: float = 8.0
@@ -64,10 +64,11 @@ func is_praying() -> bool:
 	return state == State.PRAY and _working
 
 
-## Wood on the claimed tree, counted by the site as incoming.
+## Wood this worker expects to take from its claimed tree, counted by the
+## site as incoming (capped by what the brave can still carry).
 func claimed_tree_yield() -> int:
 	if task == Task.CHOP and _tree_valid(task_tree):
-		return task_tree.wood_yield()
+		return mini(task_tree.wood_yield(), CARRY_CAPACITY - carried_wood)
 	return 0
 
 
@@ -81,15 +82,15 @@ func order_move(target: Vector3, queue_up: bool = false) -> void:
 	super.order_move(target, queue_up)
 
 
-## Manual chop order (right-click on a tree): fell it and drop the wood on
-## the spot, then continue with nearby trees.
+## Manual chop order (right-click on a tree): harvest it unit by unit, drop
+## the wood on the spot, then continue with nearby trees. Player orders always
+## count, even when the tree's harvest slots are full.
 func order_chop(tree: TreeResource) -> void:
 	if tree == null or not is_instance_valid(tree) or tree.felled_flag:
 		return
 	_interrupt_tasks()
 	task_tree = tree
-	if not tree.is_claimed():
-		tree.claimed_by = self
+	tree.add_claimer(self)
 	_chop_timer = tree.chop_time()
 	_set_state(State.GATHER)
 
@@ -215,6 +216,9 @@ func _tick_flatten(delta: float) -> void:
 		_end_subtask()
 
 
+## Harvests the claimed tree one wood at a time; keeps chopping the same tree
+## until the carry capacity is full, the tree is gone or the site has enough
+## incoming wood, then delivers.
 func _tick_job_chop(delta: float) -> void:
 	if not _tree_valid(task_tree):
 		task_tree = null
@@ -226,11 +230,17 @@ func _tick_job_chop(delta: float) -> void:
 	_face_toward(task_tree.position)
 	_chop_timer -= delta
 	if _chop_timer <= 0.0:
-		carried_wood += tree_manager.fell_tree(task_tree)
-		task_tree = null
-		task = Task.DELIVER
-		_set_working(false)
-		_reset_seek()
+		carried_wood += tree_manager.harvest_tree(task_tree)
+		if carried_wood >= CARRY_CAPACITY or not _tree_valid(task_tree) \
+				or not job.wants_more_wood():
+			if tree_manager != null and _tree_valid(task_tree):
+				tree_manager.release_claim(task_tree, self)
+			task_tree = null
+			task = Task.DELIVER
+			_set_working(false)
+			_reset_seek()
+		else:
+			_chop_timer = task_tree.chop_time()
 
 
 func _tick_pickup(delta: float) -> void:
@@ -302,11 +312,14 @@ func _tick_loose_chop(delta: float) -> void:
 	if _chop_timer <= 0.0:
 		var got: int = 0
 		if tree_manager != null:
-			got = tree_manager.fell_tree(task_tree)
-		task_tree = null
+			got = tree_manager.harvest_tree(task_tree)
 		if got > 0 and wood_pile_manager != null:
-			# Drop the wood as a pile right where the tree stood.
+			# Drop each harvested unit as a pile right on the spot.
 			wood_pile_manager.deposit(position, got)
+		if _tree_valid(task_tree):
+			_chop_timer = task_tree.chop_time()  # keep working the same tree
+			return
+		task_tree = null
 		_set_working(false)
 		if not _next_loose_tree():
 			_stop_all()
@@ -370,9 +383,10 @@ func _stop_all() -> void:
 
 # --- Helpers ---------------------------------------------------------------------
 
-## Untyped parameter on purpose: the referenced tree may already be freed and
-## a typed parameter would raise a script error.
-func _tree_valid(tree: Object) -> bool:
+## Fully untyped parameter on purpose: the referenced tree may already be
+## freed, and passing a freed instance to ANY typed parameter (even `Object`)
+## raises a script error.
+func _tree_valid(tree) -> bool:
 	return tree != null and is_instance_valid(tree) and not tree.felled_flag
 
 

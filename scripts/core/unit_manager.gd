@@ -5,8 +5,17 @@ class_name UnitManager extends Node
 ## The spatial hash (cell size ~4 m) enables cheap radius queries for target
 ## search and separation — never per-frame O(n^2) distance loops. The hash is
 ## refreshed in tick() (called from _physics_process; tests call it manually).
+##
+## Soft separation: units closer than SEPARATION_RADIUS push each other apart
+## (each unit moves away from its neighbours, so pairs separate symmetrically).
+## This prevents full overlap in normal play; scripted throws (Blast/Tornado,
+## phase 5) use the THROWN state which is excluded here.
 
 const HASH_CELL_SIZE: float = 4.0
+## Minimum comfortable distance between unit centres.
+const SEPARATION_RADIUS: float = 0.55
+## Maximum push speed in metres per second.
+const SEPARATION_SPEED: float = 1.6
 
 var terrain_data: TerrainData = null
 var nav_grid: NavGrid = null
@@ -33,9 +42,47 @@ func _physics_process(delta: float) -> void:
 	tick(delta)
 
 
-func tick(_delta: float) -> void:
+func tick(delta: float) -> void:
 	for unit in units:
 		_update_hash_cell(unit)
+	_apply_separation(delta)
+
+
+## Pushes overlapping units apart (soft, capped speed). Skips dead and thrown
+## units; the target cell must stay walkable so nobody gets shoved into water.
+func _apply_separation(delta: float) -> void:
+	var max_step: float = SEPARATION_SPEED * delta
+	for unit in units:
+		if unit.state == Unit.State.DEAD or unit.state == Unit.State.THROWN:
+			continue
+		var push: Vector2 = Vector2.ZERO
+		for other: Unit in get_units_in_radius(unit.position, SEPARATION_RADIUS):
+			if other == unit or other.state == Unit.State.DEAD \
+					or other.state == Unit.State.THROWN:
+				continue
+			var away: Vector2 = Vector2(
+				unit.position.x - other.position.x,
+				unit.position.z - other.position.z)
+			var dist: float = away.length()
+			if dist < 0.001:
+				# Full overlap: deterministic per-unit direction.
+				var angle: float = float(unit.get_instance_id() % 628) * 0.01
+				away = Vector2(cos(angle), sin(angle))
+				dist = 0.001
+			push += away / dist * (SEPARATION_RADIUS - dist)
+		if push == Vector2.ZERO:
+			continue
+		if push.length() > max_step:
+			push = push.normalized() * max_step
+		var nx: float = unit.position.x + push.x
+		var nz: float = unit.position.z + push.y
+		if nav_grid != null and not nav_grid.is_cell_walkable(
+				nav_grid.world_to_cell(Vector3(nx, 0.0, nz))):
+			continue
+		unit.position.x = nx
+		unit.position.z = nz
+		if terrain_data != null:
+			unit.position.y = terrain_data.get_height(nx, nz)
 
 
 # --- Registry -------------------------------------------------------------------

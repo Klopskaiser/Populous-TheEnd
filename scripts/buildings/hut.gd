@@ -5,7 +5,7 @@ class_name Hut extends Building
 ## (see CLAUDE.md par. 5). Built by braves: foundation flattening first, then
 ## construction with delivered wood.
 
-const WOOD_COST: int = 20
+const WOOD_COST: int = 15
 const FOOTPRINT: Vector2i = Vector2i(4, 4)
 const CAPACITY: int = 100
 const SPAWN_INTERVAL: float = 10.0   # seconds per new brave
@@ -13,6 +13,7 @@ const SPAWN_INTERVAL: float = 10.0   # seconds per new brave
 const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
 
 var spawn_timer: float = SPAWN_INTERVAL
+var _spawn_counter: int = 0
 
 
 func _init() -> void:
@@ -45,11 +46,15 @@ func _tick_active(delta: float) -> void:
 		_spawn_brave()
 
 
+## Spawn position and rally target get a small deterministic scatter so new
+## braves do not stack on one spot at the entrance.
 func _spawn_brave() -> void:
-	var pos: Vector3 = edge_spawn_position()
+	_spawn_counter += 1
+	var pos: Vector3 = edge_spawn_position() \
+		+ TribeCommands.formation_offset(_spawn_counter % 7) * 0.35
 	var brave: Unit = unit_manager.spawn_unit(BRAVE_SCENE, tribe_id, pos)
 	if brave != null and rally_point != Vector3.ZERO:
-		brave.order_move(rally_point)
+		brave.order_move(rally_point + TribeCommands.formation_offset(_spawn_counter % 19))
 
 
 ## Authored with the entrance facing south (+z); the mesh root is rotated by

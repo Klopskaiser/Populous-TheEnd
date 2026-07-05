@@ -1,12 +1,14 @@
 class_name TreeResource extends Node3D
 
 ## Wild tree with four growth stages (klein -> mittelklein -> mittelgroß ->
-## groß). Braves fell the whole tree (chop timer) and carry away its yield;
-## growth and reproduction are driven by the TreeManager. Trees do not block
-## the NavGrid (thin obstacles).
+## groß). Wood is harvested ONE unit at a time: each harvest drops the tree a
+## growth stage (a big tree takes three trips); the last unit removes it.
+## Several workers may harvest the same tree at once (as many as it has wood,
+## so max 3 on a big tree). Growth and reproduction are driven by the
+## TreeManager. Trees do not block the NavGrid (thin obstacles).
 
 const MAX_STAGE: int = 3
-## Wood yield per stage: klein/mittelklein = 1, mittelgroß = 2, groß = 3.
+## Remaining wood per stage: klein/mittelklein = 1, mittelgroß = 2, groß = 3.
 const YIELDS: Array[int] = [1, 1, 2, 3]
 const STAGE_SCALES: Array[float] = [0.35, 0.55, 0.8, 1.0]
 ## Seconds per growth stage.
@@ -14,24 +16,55 @@ const GROWTH_TIME: float = 75.0
 
 var stage: int = 0
 var growth_timer: float = GROWTH_TIME
-## Worker (Brave) that reserved this tree; untyped because it may be freed.
-var claimed_by: Object = null
-## Set once when the tree is felled — guards against double felling when two
-## braves were sent to the same tree.
+## Workers currently harvesting this tree; untyped entries (may be freed).
+var claimers: Array = []
+## Set once when the last wood is taken — guards late references while the
+## node awaits queue_free.
 var felled_flag: bool = false
 
 
+## Wood still in the tree.
 func wood_yield() -> int:
 	return YIELDS[stage]
 
 
-## Bigger trees take longer to fell.
+## Seconds per single harvest; bigger trees take a bit longer.
 func chop_time() -> float:
 	return 1.5 + 0.5 * float(stage)
 
 
-func is_claimed() -> bool:
-	return claimed_by != null and is_instance_valid(claimed_by)
+## Takes one unit of wood: the tree drops a growth stage (3 wood -> stage 2
+## -> stage 1); the last unit marks it felled (the TreeManager removes it).
+func harvest_one() -> int:
+	if felled_flag:
+		return 0
+	if wood_yield() > 1:
+		set_stage(stage - 1)
+	else:
+		felled_flag = true
+	return 1
+
+
+# --- Claims (parallel harvesting) ---------------------------------------------
+
+## A tree supports as many parallel harvesters as it has wood (max 3).
+func can_claim() -> bool:
+	_prune_claimers()
+	return not felled_flag and claimers.size() < wood_yield()
+
+
+func add_claimer(worker: Object) -> void:
+	if not (worker in claimers):
+		claimers.append(worker)
+
+
+func remove_claimer(worker: Object) -> void:
+	claimers.erase(worker)
+
+
+func _prune_claimers() -> void:
+	claimers = claimers.filter(func(w: Variant) -> bool:
+		return w != null and is_instance_valid(w))
 
 
 func set_stage(p_stage: int) -> void:
