@@ -27,7 +27,7 @@ const PICKUP_RANGE: float = 1.2
 const DIRECT_WALK_RANGE: float = 4.5
 const FLATTEN_RATE: float = 0.5     # metres of vertex adjustment per second
 const BUILD_RATE: float = 0.2       # build_progress per second
-const JOB_TREE_RADIUS: float = 30.0 # tree search radius around the site
+const JOB_TREE_RADIUS: float = 40.0 # tree search radius around the site
 const CHOP_CHAIN_RADIUS: float = 8.0
 const TASK_RETRY: float = 0.6
 
@@ -47,6 +47,8 @@ var _chop_timer: float = 0.0
 var _retry_timer: float = 0.0
 var _working: bool = false
 var _seek_goal: Vector3 = Vector3.INF
+## Where the loose-chopping brave was working, to return after a delivery.
+var _loose_return_pos: Vector3 = Vector3.INF
 
 
 func _init() -> void:
@@ -92,6 +94,8 @@ func order_chop(tree: TreeResource) -> void:
 	task_tree = tree
 	tree.add_claimer(self)
 	_chop_timer = tree.chop_time()
+	task = Task.CHOP
+	_loose_return_pos = Vector3.INF
 	_set_state(State.GATHER)
 
 
@@ -119,7 +123,10 @@ func order_pray(site: Building) -> void:
 func tick(delta: float) -> void:
 	match state:
 		State.GATHER:
-			_tick_loose_chop(delta)
+			if task == Task.DELIVER:
+				_tick_loose_deliver(delta)
+			else:
+				_tick_loose_chop(delta)
 		State.BUILD:
 			_tick_job(delta)
 		State.PRAY:
@@ -186,6 +193,13 @@ func _choose_job_task() -> void:
 	if job.needs_flatten():
 		if _claim_flatten():
 			return
+	# Wood is missing but no source was found above AND the progress cap is
+	# reached: the site stalls (re-checked after WOOD_RECHECK_INTERVAL) and
+	# this worker quits instead of hammering forever.
+	if job.wants_more_wood() and job.build_progress >= job.progress_cap() - 0.0001:
+		job.mark_wood_stalled()
+		_stop_all()
+		return
 	if job.foundation_done:
 		task = Task.CONSTRUCT
 		_reset_seek()
@@ -297,12 +311,18 @@ func _end_subtask() -> void:
 
 
 # --- Loose chopping (manual order, no job) ----------------------------------------
+## Harvest until the hands are full (or the trees run out), carry the wood to
+## the nearest own building and pile it at its entrance, then return to the
+## chopping spot and continue with nearby trees.
 
 func _tick_loose_chop(delta: float) -> void:
 	if not _tree_valid(task_tree):
 		task_tree = null
 		if not _next_loose_tree():
-			_stop_all()
+			if carried_wood > 0:
+				_start_loose_deliver()
+			else:
+				_stop_all()
 			return
 	if not _seek(task_tree.position, CHOP_RANGE, delta):
 		return
@@ -310,28 +330,86 @@ func _tick_loose_chop(delta: float) -> void:
 	_face_toward(task_tree.position)
 	_chop_timer -= delta
 	if _chop_timer <= 0.0:
-		var got: int = 0
 		if tree_manager != null:
-			got = tree_manager.harvest_tree(task_tree)
-		if got > 0 and wood_pile_manager != null:
-			# Drop each harvested unit as a pile right on the spot.
-			wood_pile_manager.deposit(position, got)
+			carried_wood += tree_manager.harvest_tree(task_tree)
+		_loose_return_pos = position
+		if carried_wood >= CARRY_CAPACITY:
+			if tree_manager != null and _tree_valid(task_tree):
+				tree_manager.release_claim(task_tree, self)
+			task_tree = null
+			_start_loose_deliver()
+			return
 		if _tree_valid(task_tree):
 			_chop_timer = task_tree.chop_time()  # keep working the same tree
 			return
 		task_tree = null
 		_set_working(false)
 		if not _next_loose_tree():
+			if carried_wood > 0:
+				_start_loose_deliver()
+			else:
+				_stop_all()
+
+
+func _start_loose_deliver() -> void:
+	task = Task.DELIVER
+	_set_working(false)
+	_reset_seek()
+
+
+func _tick_loose_deliver(delta: float) -> void:
+	if carried_wood <= 0:
+		task = Task.CHOP
+		if not _next_loose_tree():
 			_stop_all()
+		return
+	var building: Building = _nearest_own_building()
+	if building == null:
+		# No building anywhere: drop the wood on the spot (old behaviour).
+		if wood_pile_manager != null:
+			wood_pile_manager.deposit(position, carried_wood)
+			carried_wood = 0
+		task = Task.CHOP
+		if not _next_loose_tree():
+			_stop_all()
+		return
+	if not _seek(building.entrance_world(), DELIVER_RANGE, delta):
+		return
+	if wood_pile_manager != null:
+		wood_pile_manager.deposit(position, carried_wood)
+		carried_wood = 0
+	task = Task.CHOP
+	if not _next_loose_tree():
+		_stop_all()
 
 
+func _nearest_own_building() -> Building:
+	if tribe == null:
+		return null
+	var best: Building = null
+	var best_dist: float = INF
+	var flat: Vector2 = Vector2(position.x, position.z)
+	for building in tribe.buildings:
+		if not is_instance_valid(building):
+			continue
+		var d: float = Vector2(building.position.x, building.position.z).distance_squared_to(flat)
+		if d < best_dist:
+			best_dist = d
+			best = building
+	return best
+
+
+## Next tree near the current chopping spot (after a delivery the brave
+## returns to where it was working).
 func _next_loose_tree() -> bool:
 	if tree_manager == null:
 		return false
-	var tree: TreeResource = tree_manager.claim_nearest_tree(position, CHOP_CHAIN_RADIUS, self)
+	var search_from: Vector3 = _loose_return_pos if _loose_return_pos != Vector3.INF else position
+	var tree: TreeResource = tree_manager.claim_nearest_tree(search_from, CHOP_CHAIN_RADIUS, self)
 	if tree == null:
 		return false
 	task_tree = tree
+	task = Task.CHOP
 	_chop_timer = tree.chop_time()
 	_reset_seek()
 	return true
@@ -368,6 +446,7 @@ func _interrupt_tasks() -> void:
 	task_pile = null
 	target_building = null
 	hop_visual = false
+	_loose_return_pos = Vector3.INF
 	_set_working(false)
 	if carried_wood > 0 and wood_pile_manager != null:
 		wood_pile_manager.deposit(position, carried_wood)
@@ -464,11 +543,16 @@ func _face_toward(target_pos: Vector3) -> void:
 		facing = dir.normalized()
 
 
-## Sub-state animations: chopping/building/flattening use the attack frames,
+## Sub-state animations: chopping/building use the attack frames, flattening
+## uses the hop-driven jump frames (arms up in the air, down on landing),
 ## praying stands (idle), walking phases use walk.
 func _anim_base() -> StringName:
 	match state:
-		State.GATHER, State.BUILD:
+		State.BUILD:
+			if _working and task == Task.FLATTEN:
+				return &"jump"
+			return &"attack" if _working else &"walk"
+		State.GATHER:
 			return &"attack" if _working else &"walk"
 		State.PRAY:
 			return &"idle" if _working else &"walk"

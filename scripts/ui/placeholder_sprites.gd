@@ -36,7 +36,9 @@ const VIEWS: Array[StringName] = [&"front", &"back", &"right", &"left"]
 static func make_frames(unit_kind: StringName) -> SpriteFrames:
 	var frames: SpriteFrames = SpriteFrames.new()
 	frames.remove_animation("default")
-	var anims: Array[StringName] = [&"idle", &"walk", &"attack"]
+	# "jump" is frame-driven by the hop visual (frame 0 = arms down on the
+	# ground, frame 1 = arms up in the air), not by the animation timer.
+	var anims: Array[StringName] = [&"idle", &"walk", &"attack", &"jump"]
 	if unit_kind in CASTER_KINDS:
 		anims.append(&"cast")
 	for anim in anims:
@@ -71,6 +73,8 @@ static func _build_frames(anim: StringName, view: StringName) -> Array[Image]:
 			]
 		&"attack":
 			images = [_frame_stand(paint_view, 0), _frame_attack(paint_view)]
+		&"jump":
+			images = [_frame_stand(paint_view, 0), _frame_jump(paint_view)]
 		&"cast":
 			images = [_frame_stand(paint_view, 0), _frame_cast(paint_view)]
 		_:
@@ -163,6 +167,21 @@ static func _frame_attack(view: StringName) -> Image:
 		img.fill_rect(Rect2i(2, 8, 2, 6), C_LIMB)
 		img.fill_rect(Rect2i(12, 6, 4, 3), C_LIMB)    # arm thrust out
 	_draw_legs_stand(img)
+	return img
+
+
+## Airborne frame of the flatten hop: both arms thrown up, legs tucked.
+static func _frame_jump(view: StringName) -> Image:
+	var img: Image = _new_image()
+	_draw_torso(img, view, 0)
+	_draw_head(img, view, 0)
+	if view == &"right":
+		img.fill_rect(Rect2i(9, 1, 2, 7), C_LIMB)     # near arm thrown up
+	else:
+		img.fill_rect(Rect2i(2, 1, 2, 7), C_LIMB)     # both arms thrown up
+		img.fill_rect(Rect2i(12, 1, 2, 7), C_LIMB)
+	img.fill_rect(Rect2i(5, 16, 2, 5), C_LIMB)        # legs tucked mid-air
+	img.fill_rect(Rect2i(9, 16, 2, 5), C_LIMB)
 	return img
 
 

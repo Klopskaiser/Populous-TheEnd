@@ -94,6 +94,8 @@ func _recruit_workers() -> void:
 	for building in buildings:
 		if not building.under_construction:
 			continue
+		if building.wood_stalled:
+			continue  # waiting for new wood (re-checked on an interval)
 		if building.workers.size() >= Building.MAX_WORKERS:
 			continue
 		for unit in unit_manager.get_units_in_radius(building.center_world(), RECRUIT_RADIUS):

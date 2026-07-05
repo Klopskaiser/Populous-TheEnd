@@ -24,6 +24,9 @@ const ABSORB_INTERVAL: float = 0.5
 ## Terrain/nav updates are batched and flushed at this interval.
 const FLUSH_INTERVAL: float = 0.25
 const FLATTEN_EPS: float = 0.02
+## When no wood source is reachable the site stalls; after this interval it
+## becomes available for workers again (they re-check for new wood/trees).
+const WOOD_RECHECK_INTERVAL: float = 30.0
 
 var tribe_id: int = 0
 var tribe: Tribe = null
@@ -40,6 +43,9 @@ var build_progress: float = 0.0            # 0..1
 var wood_delivered: int = 0
 var foundation_done: bool = false
 var flatten_target: float = 0.0
+## True while the site waits for wood with no source in reach: workers left
+## and recruiting pauses until the re-check timer expires (or wood arrives).
+var wood_stalled: bool = false
 ## Worker braves currently assigned to this construction site.
 var workers: Array[Brave] = []
 
@@ -55,6 +61,7 @@ var _flatten_claims: Dictionary[Vector2i, int] = {}
 var _dirty: Rect2i = Rect2i()
 var _flush_timer: float = FLUSH_INTERVAL
 var _absorb_timer: float = ABSORB_INTERVAL
+var _wood_recheck_timer: float = 0.0
 
 
 ## German display name, overridden by subclasses (UI language is German).
@@ -151,6 +158,10 @@ func init_construction() -> void:
 	for z in range(cell.y, cell.y + footprint.y):
 		for x in range(cell.x, cell.x + footprint.x):
 			_flatten_remaining[Vector2i(x, z)] = true
+	# The entrance cell is levelled too, so the doorway sits flush.
+	var entrance: Vector2i = entrance_cell()
+	if terrain_data != null and terrain_data.in_bounds(entrance):
+		_flatten_remaining[entrance] = true
 
 
 # --- Gameplay tick (driven by BuildingManager) -----------------------------------
@@ -171,6 +182,10 @@ func _tick_construction(delta: float) -> void:
 	if _absorb_timer <= 0.0:
 		_absorb_timer = ABSORB_INTERVAL
 		_absorb_piles()
+	if wood_stalled:
+		_wood_recheck_timer -= delta
+		if _wood_recheck_timer <= 0.0:
+			wood_stalled = false  # workers may try again (30-s re-check)
 
 
 ## Subclass logic while the building is operational.
@@ -307,13 +322,33 @@ func wants_more_wood() -> bool:
 	return under_construction and wood_needed_total() > wood_incoming()
 
 
+## Progress ceiling from the delivered-wood fraction.
+func progress_cap() -> float:
+	if wood_cost <= 0:
+		return 1.0
+	return float(wood_delivered) / float(wood_cost)
+
+
+## Called by workers when no wood source is reachable anywhere: the site
+## pauses (workers leave, recruiting skips it) until the re-check interval
+## expires or wood arrives at the entrance.
+func mark_wood_stalled() -> void:
+	if wood_stalled:
+		return
+	wood_stalled = true
+	_wood_recheck_timer = WOOD_RECHECK_INTERVAL
+
+
 func _absorb_piles() -> void:
 	if wood_pile_manager == null:
 		return
 	var need: int = wood_needed_total()
 	if need <= 0:
 		return
-	wood_delivered += wood_pile_manager.take_from_radius(entrance_world(), ABSORB_RADIUS, need)
+	var taken: int = wood_pile_manager.take_from_radius(entrance_world(), ABSORB_RADIUS, need)
+	if taken > 0:
+		wood_delivered += taken
+		wood_stalled = false  # fresh wood on site: back to work
 
 
 # --- Build phase --------------------------------------------------------------------------
@@ -324,10 +359,7 @@ func _absorb_piles() -> void:
 func add_build_progress(amount: float) -> void:
 	if not under_construction or not foundation_done:
 		return
-	var cap: float = 1.0
-	if wood_cost > 0:
-		cap = float(wood_delivered) / float(wood_cost)
-	build_progress = clampf(build_progress + amount, 0.0, cap)
+	build_progress = clampf(build_progress + amount, 0.0, progress_cap())
 	_update_construction_visual()
 	if build_progress >= 1.0:
 		finish_construction()

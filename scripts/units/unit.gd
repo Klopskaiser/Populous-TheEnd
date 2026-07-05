@@ -83,7 +83,9 @@ func _process(_delta: float) -> void:
 	_update_hop()
 
 
-## Small sprite bounce while hop_visual is set (visual only).
+## Small sprite bounce while hop_visual is set (visual only). The "jump"
+## animation is frame-driven from the hop phase: arms fly up while airborne
+## (frame 1) and come down on landing (frame 0).
 func _update_hop() -> void:
 	if _sprite == null:
 		return
@@ -91,6 +93,9 @@ func _update_hop() -> void:
 	var offset: float = 0.0
 	if hop_visual:
 		offset = absf(sin(float(Time.get_ticks_msec()) * 0.012)) * 0.35
+		if String(_sprite.animation).begins_with("jump"):
+			_sprite.pause()
+			_sprite.frame = 1 if offset > 0.12 else 0
 	_sprite.position.y = base + offset
 
 

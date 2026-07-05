@@ -332,6 +332,40 @@ lassen (Variant) und zuerst `is_instance_valid` prüfen.
 
 **Verifikation:** Testsuite grün (**149 Tests**; neu: Ernte-Herabstufung,
 parallele Ernte-Slots inkl. Freigabe, Separation-Test in `test_unit_logic.gd`),
-`--headless --quit` fehlerfrei. Manuelle Prüfung: **ausstehend — bitte durch
-Nutzer prüfen** (Stapel-Sprite-Optik, Entzerrung am Hütteneingang,
-stufenweises Abernten großer Bäume mit mehreren Arbeitern).
+`--headless --quit` fehlerfrei. Manuelle Prüfung durch Nutzer bestanden
+(„das klappt gut“); danach Feinschliff-Runde 2 unten.
+
+---
+
+## Phase 3d — Feinschliff-Runde 2 (Nutzerfeedback)
+
+**Änderungen:**
+- **Baustellen-Stillstand bei Holzmangel:** Holz-Suchradius um die Baustelle
+  30 → **40 m** (`Brave.JOB_TREE_RADIUS`). Findet ein Arbeiter weder Baum noch
+  Stapel und der Baufortschritt steht am Holz-Deckel, ruft er
+  `Building.mark_wood_stalled()` auf und **bricht ab** (IDLE). Gestallte
+  Baustellen werden vom Rekrutieren übersprungen; nach
+  `WOOD_RECHECK_INTERVAL` (**30 s**) wird der Stillstand aufgehoben und
+  Arbeiter versuchen es erneut. Trifft vorher Holz am Eingang ein
+  (`_absorb_piles` > 0), endet der Stillstand sofort. Neue Helfer:
+  `Building.progress_cap()`.
+- **Manuelles Fällen liefert ab:** Lose fällende Braves sammeln bis
+  Tragekapazität (3) bzw. bis der Baum weg ist und tragen das Holz zum
+  **nächstgelegenen eigenen Gebäude** (Stapel am Eingang), kehren dann zur
+  Fällstelle zurück (`_loose_return_pos`) und machen weiter. Ohne eigenes
+  Gebäude fällt das Holz wie bisher vor Ort. GATHER nutzt jetzt die Tasks
+  CHOP/DELIVER.
+- **Eingangsfeld wird mitplaniert:** `init_construction()` nimmt die
+  `entrance_cell()` in die Planier-Liste auf — der Eingang liegt bündig.
+- **Sprung-Animation beim Planieren:** neue Placeholder-Animation `jump`
+  (Frame 0 = Arme unten/gelandet, Frame 1 = **Arme hochgerissen**/in der
+  Luft, Beine angezogen). Kein Animations-Timer: `Unit._update_hop()` pausiert
+  die Animation und wählt den Frame aus der Hop-Phase (Offset > 0,12 m =
+  Luft). `Brave._anim_base()` liefert beim Planieren `jump` statt `attack`.
+
+**Verifikation:** Testsuite grün (**159 Tests**; neu/angepasst: Stillstand +
+Abbruch + kein Rekrutieren + Fortsetzung nach Holzlieferung, 30-s-Recheck-
+Timer, Lieferung zum nächsten Gebäude beim manuellen Fällen, Eingang-Vertices
+auf Planierhöhe), `--headless --quit` fehlerfrei. Manuelle Prüfung:
+**ausstehend — bitte durch Nutzer prüfen** (Sprung-Animation, Abliefern am
+Haus, Stillstand/Wiederaufnahme bei Holzmangel).

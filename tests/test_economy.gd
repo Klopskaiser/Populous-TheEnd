@@ -278,6 +278,11 @@ func test_flatten_and_construct_flow() -> void:
 			if absf(td.vertex_height(vx, vz) - hut.flatten_target) > 0.05:
 				flat_ok = false
 	check(flat_ok, "footprint vertices sit at the flatten target")
+	# The entrance cell (62, 64) is levelled too.
+	check_near(td.vertex_height(62, 64), hut.flatten_target,
+		"entrance cell vertex is levelled", 0.05)
+	check_near(td.vertex_height(63, 65), hut.flatten_target,
+		"entrance cell far vertex is levelled", 0.05)
 	# Workers are released.
 	for brave in braves:
 		brave.tick(TICK)
@@ -290,12 +295,13 @@ func test_flatten_and_construct_flow() -> void:
 	_free_world(w)
 
 
-func test_progress_requires_wood() -> void:
+func test_progress_requires_wood_and_site_stalls() -> void:
 	var w: Dictionary = _make_world()
 	var tribe: Tribe = w.tribe
 	var bm: BuildingManager = w.building_manager
 
-	# Flat plot, no trees anywhere -> foundation gets done, build stalls at 0.
+	# Flat plot, no trees anywhere -> foundation gets done, then the site
+	# stalls and the worker quits instead of hammering forever.
 	var hut: Hut = w.commands.place_building(tribe, HUT_SCENE, Vector2i(60, 60)) as Hut
 	var brave: Brave = w.unit_manager.spawn_unit(
 		BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(57, 60))) as Brave
@@ -308,21 +314,47 @@ func test_progress_requires_wood() -> void:
 		ticks += 1
 	check(hut.foundation_done, "flat foundation is levelled quickly")
 
-	for i in range(400):   # 20 simulated seconds
+	ticks = 0
+	while brave.state != Unit.State.IDLE and ticks < 200:
 		bm.tick(TICK)
 		brave.tick(TICK)
-	check(hut.under_construction, "without wood the build cannot finish")
+		ticks += 1
+	check(brave.state == Unit.State.IDLE, "worker quits when no wood source exists")
+	check(hut.wood_stalled, "site is marked wood-stalled")
+	check(hut.workers.is_empty(), "no workers stay on a stalled site")
 	check_near(hut.build_progress, 0.0, "progress is capped at the delivered fraction (0)")
 
-	# Deliver all wood as piles at the entrance -> absorbed -> build finishes.
+	# While stalled, recruiting leaves the idle brave alone.
+	w.unit_manager.tick(TICK)
+	for i in range(60):   # 3 simulated seconds > recruit interval
+		bm.tick(TICK)
+		brave.tick(TICK)
+	check(brave.state == Unit.State.IDLE, "stalled site does not draft workers")
+
+	# Wood arrives at the entrance -> absorbed -> unstalled -> the idle brave
+	# is recruited again and finishes the build.
 	w.wood_pile_manager.deposit(hut.entrance_world(), Hut.WOOD_COST)
 	ticks = 0
 	while hut.under_construction and ticks < MAX_TICKS:
 		bm.tick(TICK)
+		w.unit_manager.tick(TICK)
 		brave.tick(TICK)
 		ticks += 1
 	check(not hut.under_construction, "build finishes once the wood is on site")
 	check(hut.wood_delivered == Hut.WOOD_COST, "the piles were absorbed into the site")
+	_free_world(w)
+
+
+func test_wood_stall_recheck_timer() -> void:
+	var w: Dictionary = _make_world()
+	var hut: Hut = w.commands.place_building(w.tribe, HUT_SCENE, Vector2i(60, 60)) as Hut
+	hut.mark_wood_stalled()
+	check(hut.wood_stalled, "site can be marked stalled")
+	var t: float = 0.0
+	while t < Building.WOOD_RECHECK_INTERVAL + 1.0:
+		w.building_manager.tick(TICK)
+		t += TICK
+	check(not hut.wood_stalled, "stall clears after the re-check interval")
 	_free_world(w)
 
 
@@ -410,4 +442,27 @@ func test_manual_chop_leaves_piles() -> void:
 	check(tm.trees.is_empty(), "both trees were felled (chain chopping)")
 	check(wpm.total_wood() == 5, "the yield lies in piles on the ground (got %d)" % wpm.total_wood())
 	check(brave.carried_wood == 0, "brave carries nothing afterwards")
+	_free_world(w)
+
+
+func test_manual_chop_delivers_to_nearest_building() -> void:
+	var w: Dictionary = _make_world()
+	var wpm: WoodPileManager = w.wood_pile_manager
+
+	# A finished hut nearby: the chopped wood is carried to its entrance.
+	var hut: Hut = w.building_manager.place(
+		HUT_SCENE, w.tribe, Vector2i(70, 60), 0, true) as Hut
+	var tree: TreeResource = w.tree_manager.spawn_tree(Vector2i(60, 60), 3)   # 3 wood
+	var brave: Brave = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(58, 60))) as Brave
+	brave.order_chop(tree)
+
+	var ticks: int = 0
+	while brave.state != Unit.State.IDLE and ticks < MAX_TICKS:
+		brave.tick(TICK)
+		ticks += 1
+	check(w.tree_manager.trees.is_empty(), "the tree was fully harvested")
+	check(wpm.total_wood() == 3, "all wood ended up in piles")
+	check(wpm.wood_in_radius(hut.entrance_world(), 5.0) == 3,
+		"the wood was carried to the hut entrance")
 	_free_world(w)
