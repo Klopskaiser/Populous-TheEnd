@@ -29,12 +29,14 @@
 ## 2. Engine, Werkzeuge & Befehle
 
 - **Engine:** Godot **4.7 stable** (Windows, 64-bit).
-- **Executable:** `C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe`
-  (im Folgenden `$GODOT`). Falls die Exe verschoben wird, nur diesen Abschnitt anpassen.
+- **Executable:** `C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v4.7-stable_win64.exe`
+  (im Folgenden `$GODOT`; Achtung: der äußere Eintrag `…win64.exe` ist ein **Ordner**,
+  die eigentliche Exe liegt gleichnamig darin). Falls die Exe verschoben wird, nur
+  diesen Abschnitt anpassen.
 - **Sprache:** GDScript (typisiert, siehe §8).
 
 ```powershell
-$GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe'
+$GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v4.7-stable_win64.exe'
 
 & $GODOT --path D:\game\Populous-TheEnd --editor            # Editor öffnen
 & $GODOT --path D:\game\Populous-TheEnd                     # Spiel starten (Hauptszene)

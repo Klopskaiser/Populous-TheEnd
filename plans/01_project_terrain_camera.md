@@ -57,7 +57,7 @@ Keine (erste Phase). Projektverzeichnis enthält nur CLAUDE.md, plans\ und Git-S
   `sea_level`; es existiert eine zusammenhängend begehbare Landfläche (> N Zellen).
 
 ```powershell
-$GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe'
+$GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v4.7-stable_win64.exe'
 & $GODOT --path D:\game\Populous-TheEnd --headless --import
 & $GODOT --path D:\game\Populous-TheEnd --headless -s res://tests/run_tests.gd   # Exit-Code 0
 & $GODOT --path D:\game\Populous-TheEnd --headless --quit                        # keine Fehler im Output

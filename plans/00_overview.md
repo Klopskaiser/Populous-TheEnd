@@ -8,7 +8,7 @@ dieses Dokument und die Phasenpläne legen fest, *wie* und *in welcher Reihenfol
 
 Nach Abschluss einer Phase: Checkbox abhaken, committen, pushen.
 
-- [ ] **Phase 1** — [01_project_terrain_camera.md](01_project_terrain_camera.md): Projektgerüst, verformbares Terrain, RTS-Kamera
+- [x] **Phase 1** — [01_project_terrain_camera.md](01_project_terrain_camera.md): Projektgerüst, verformbares Terrain, RTS-Kamera
 - [ ] **Phase 2** — [02_units_selection_movement.md](02_units_selection_movement.md): Pathfinding, Unit-Basis, Selektion & Bewegung
 - [ ] **Phase 3** — [03_buildings_economy_hud.md](03_buildings_economy_hud.md): Gebäude, Wirtschaft (Holz/Hütten/Mana), HUD
 - [ ] **Phase 4** — [04_training_combat_preacher.md](04_training_combat_preacher.md): Training, Rally Points, Kampf, Prediger
@@ -38,7 +38,7 @@ Jede Phase endet mit einem **lauffähigen, manuell spielbaren Zwischenstand** un
 ## Verifikations-Befehle
 
 ```powershell
-$GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe'
+$GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v4.7-stable_win64.exe'
 
 # Nach dem Anlegen neuer Dateien (erzeugt .uid-Dateien, aktualisiert Import-Cache):
 & $GODOT --path D:\game\Populous-TheEnd --headless --import
