@@ -424,5 +424,68 @@ Schritt ein MultiMesh-basiertes Einheiten-Rendering.
 
 **Verifikation:** Testsuite grün (**163 Tests**; neu: Pfad-Queue-Verteilung
 über Ticks), `--headless --quit` fehlerfrei, Benchmark unter Budget.
-Manuelle Prüfung: **ausstehend — bitte durch Nutzer prüfen** (F9 mehrmals
-drücken → 4000 Einheiten, Box-Select + Massen-Move ohne Stocken/Fehler).
+Manuelle Prüfung durch Nutzer: keine Fehler mehr, Performance aber weiterhin
+unbefriedigend → Rendering-Umbau in Phase 3f unten.
+
+---
+
+## Phase 3f — MultiMesh-Rendering, Stapel-Priorität, 6er-Gruppen, Auswahlring
+
+**Anlass:** Stresstest fehlerfrei, aber Performance weiter schlecht. Die
+Simulation war gemessen im Budget → Hauptverdächtiger war das **Rendering**:
+4000 `AnimatedSprite3D` = 4000 Draw Calls + 4000 Node-Updates pro Frame.
+
+**1. MultiMesh-Einheiten-Rendering (ein Draw Call für alle Einheiten):**
+- `scripts/ui/unit_renderer.gd` — `UnitRenderer` (MultiMeshInstance3D in
+  main.tscn): QuadMesh (16×24 px × 0,06 m, Füße am Ursprung) mit
+  ShaderMaterial — **Billboarding im Vertex-Shader**
+  (`VIEW_MATRIX * mat4(INV_VIEW_MATRIX[0..2], MODEL_MATRIX[3])`), Frame über
+  per-Instanz-Custom-Data (Atlas-UV-Offset), Stammfarbe über Instanzfarbe,
+  `discard` bei Alpha < 0,5. Kapazität 4096 Instanzen.
+- `PlaceholderSprites.build_atlas(kinds)` packt alle Frames in EINE
+  Atlas-Textur; Tabelle kind → anim → 4 Ansichten → `[start, count, fps]`.
+  Neue Einheiten-Typen (Phase 4/5): Kind in `UnitRenderer.KINDS` ergänzen.
+- Update-Strategie pro Frame: Kamera **einmal** holen; Frames/Ansichten in
+  **3 Slices** (nur bei geändertem Frame-Index wird Custom-Data geschrieben,
+  Cache `_render_frame` auf der Unit); **Transforms jeden Frame, aber nur
+  für bewegte Einheiten** (`_render_pos`-Vergleich — Stehende kosten einen
+  Vector-Vergleich). Hüpf-Offset global berechnet; Jump-Frame aus Hop-Phase.
+- `Unit` hat **keine visuellen Kinder mehr** (brave.tscn = nur Root):
+  Sprite-Maschinerie entfernt; Animations-Zustand als Daten
+  (`anim_base_name` + `anim_start_ms`, `_apply_animation` setzt nur noch
+  diese); neu `Unit.view_index()` (int, 0=front/1=back/2=right/3=left,
+  `view_suffix` bleibt als Wrapper für Tests). Registrierung/Deregistrierung
+  über UnitManager → Renderer (Swap-Remove, null-guarded für Tests).
+
+**2. Stapel vor Bäumen (Bugfix):** In `Brave._choose_job_task()` wird bei
+Holzbedarf jetzt **zuerst** nach Stapeln gesucht (PICKUP), erst dann nach
+Bäumen (CHOP) — liegengelassenes Holz wird immer als erstes verbaut
+(Stapel-Suche unbegrenzt über die Insel; Stapel im Absorb-Radius nimmt die
+Baustelle weiter selbst).
+
+**3. 6er-Gruppen + dichteres Packing (Original-Look):**
+- `TribeCommands.order_move`: Selektion räumlich sortiert, in **Gruppen à 6**
+  geteilt; Gruppenzentren im Ring-Formationsmuster mit `GROUP_SPACING = 2,2 m`,
+  Mitglieder eng um ihr Zentrum (`MEMBER_OFFSETS`, Radius ~0,55 m).
+- `SEPARATION_RADIUS` 0,55 → **0,44** (20 % dichter); Member-Abstände liegen
+  knapp darüber → Gruppen stehen ruhig, zwischen Gruppen sichtbarer Abstand.
+- Pfad-Sharing war unnötig: A* misst nur ~0,5 ms/Tick (Queue).
+
+**4. Auswahlring:** kleiner (Torus 0,26/0,34 — „um die Beine“), **mit
+Tiefentest** (zeichnet nicht mehr über die Sprites), Höhe 0,08 m — Ring und
+Modell-Fußpunkt decken sich.
+
+**Erkenntnisse:**
+- `MODEL_MATRIX[3]` enthält bei MultiMesh die Instanz-Position — damit ist
+  Shader-Billboarding pro Instanz trivial.
+- Transform-Schreiben nur bei Positionsänderung macht stehende Massen fast
+  gratis; die MultiMesh-API lädt den Buffer ohnehin gesammelt hoch.
+
+**Verifikation:** Testsuite grün (**184 Tests**; neu: Stapel-Priorität
+(Bäume bleiben unangetastet), 6er-Gruppenbildung, Separations-Schwelle an
+0,44 angepasst), `--headless --quit` fehlerfrei (lädt Shader/Atlas),
+Sim-Benchmark Ø 19,2 ms / Spitze 34 ms (Budget ~33 ms). Manuelle Prüfung:
+**ausstehend — bitte durch Nutzer prüfen** (FPS mit 4000 Einheiten,
+Sprite-Optik: Richtungen/Farben/Hüpfen — falls Sprites kopfstehen, eine
+Zeile im Shader `UV.y` flippen; 6er-Grüppchen beim Massen-Move; kleiner
+tiefengetesteter Ring; Baustelle nutzt Stapel zuerst).

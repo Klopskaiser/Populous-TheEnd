@@ -212,6 +212,51 @@ func test_spatial_hash_radius_query() -> void:
 	manager.free()
 
 
+func test_move_orders_form_groups_of_six() -> void:
+	var td: TerrainData = _flat_terrain()
+	var tc: TribeCommands = TribeCommands.new()
+	var units: Array[Unit] = []
+	for i in range(12):
+		var unit: Unit = _make_unit(td)
+		unit.position = Vector3(30.0 + float(i), 5.0, 30.0)
+		units.append(unit)
+
+	var target: Vector3 = Vector3(80.0, 5.0, 80.0)
+	tc.order_move(units, target)
+
+	# Collect the assigned member targets (waypoint_queue[0] per unit).
+	var targets: Array[Vector3] = []
+	for unit in units:
+		check(unit.waypoint_queue.size() == 1, "every unit got exactly one waypoint")
+		targets.append(unit.waypoint_queue[0])
+	# Group 1 packs tightly around the raw target...
+	var near_target: int = 0
+	var far_targets: Array[Vector3] = []
+	for t in targets:
+		if Vector2(t.x, t.z).distance_to(Vector2(target.x, target.z)) <= 1.2:
+			near_target += 1
+		else:
+			far_targets.append(t)
+	check(near_target == 6, "first group of 6 packs around the target (got %d)" % near_target)
+	check(far_targets.size() == 6, "second group of 6 stands apart")
+	# ...and group 2 packs tightly around its own centre, clearly away.
+	var center: Vector3 = Vector3.ZERO
+	for t in far_targets:
+		center += t
+	center /= float(far_targets.size())
+	check(Vector2(center.x, center.z).distance_to(Vector2(target.x, target.z)) >= 1.5,
+		"group centres keep visible spacing")
+	var second_tight: bool = true
+	for t in far_targets:
+		if Vector2(t.x, t.z).distance_to(Vector2(center.x, center.z)) > 1.2:
+			second_tight = false
+	check(second_tight, "second group packs tightly around its centre")
+
+	for unit in units:
+		unit.free()
+	tc.free()
+
+
 func test_path_queue_spreads_path_requests() -> void:
 	var td: TerrainData = _flat_terrain()
 	var nav: NavGrid = NavGrid.new(td)
@@ -274,7 +319,7 @@ func test_separation_pushes_overlapping_units_apart() -> void:
 		manager.tick(TICK)
 	var dist: float = Vector2(a.position.x, a.position.z).distance_to(
 		Vector2(b.position.x, b.position.z))
-	check(dist >= 0.4, "overlapping units are pushed apart (dist %f)" % dist)
+	check(dist >= 0.3, "overlapping units are pushed apart (dist %f)" % dist)
 	check(dist <= 2.0, "separation does not fling units away")
 	check_near(a.position.y, td.get_height(a.position.x, a.position.z),
 		"pushed unit stays snapped to the terrain")

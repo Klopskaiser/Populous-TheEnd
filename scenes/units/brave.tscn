@@ -4,5 +4,3 @@
 
 [node name="Brave" type="Node3D"]
 script = ExtResource("1_brave")
-
-[node name="Sprite" type="AnimatedSprite3D" parent="."]

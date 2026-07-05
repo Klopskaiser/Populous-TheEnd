@@ -173,6 +173,17 @@ func _choose_job_task() -> void:
 		if _claim_flatten():
 			return
 	if job.wants_more_wood():
+		# Wood lying around is used FIRST — only fell trees when no pile
+		# is left (piles inside the absorb radius are excluded, the site
+		# swallows those by itself).
+		if wood_pile_manager != null:
+			var pile: WoodPile = wood_pile_manager.nearest_pile(
+				position, job.entrance_world(), Building.ABSORB_RADIUS)
+			if pile != null:
+				task_pile = pile
+				task = Task.PICKUP
+				_reset_seek()
+				return
 		if tree_manager != null:
 			var tree: TreeResource = tree_manager.claim_nearest_tree(
 				job.center_world(), JOB_TREE_RADIUS, self)
@@ -180,14 +191,6 @@ func _choose_job_task() -> void:
 				task_tree = tree
 				_chop_timer = tree.chop_time()
 				task = Task.CHOP
-				_reset_seek()
-				return
-		if wood_pile_manager != null:
-			var pile: WoodPile = wood_pile_manager.nearest_pile(
-				position, job.entrance_world(), Building.ABSORB_RADIUS)
-			if pile != null:
-				task_pile = pile
-				task = Task.PICKUP
 				_reset_seek()
 				return
 	if job.needs_flatten():

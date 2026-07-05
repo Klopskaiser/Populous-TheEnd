@@ -7,7 +7,7 @@ class_name SelectionRingRenderer extends MultiMeshInstance3D
 
 const MAX_RINGS: int = 1024
 const RING_COLOR: Color = Color(1.0, 0.95, 0.3)
-const RING_HEIGHT: float = 0.15
+const RING_HEIGHT: float = 0.08
 
 var _selection: SelectionManager = null
 var _multimesh: MultiMesh = null
@@ -18,12 +18,13 @@ func setup(p_selection: SelectionManager) -> void:
 
 
 func _ready() -> void:
+	# Small ring around the feet; depth-tested so it does not draw over the
+	# unit sprites (and lines up with the model's ground position).
 	var torus: TorusMesh = TorusMesh.new()
-	torus.inner_radius = 0.45
-	torus.outer_radius = 0.6
+	torus.inner_radius = 0.26
+	torus.outer_radius = 0.34
 	var mat: StandardMaterial3D = StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.no_depth_test = true
 	mat.albedo_color = RING_COLOR
 	torus.material = mat
 	_multimesh = MultiMesh.new()

@@ -27,6 +27,7 @@ const STRESS_ANCHORS: Array[Vector2i] = [
 @onready var _terrain: Terrain = $Terrain
 @onready var _camera_rig: CameraRig = $CameraRig
 @onready var _unit_manager: UnitManager = $UnitManager
+@onready var _unit_renderer: UnitRenderer = $UnitRenderer
 @onready var _building_manager: BuildingManager = $BuildingManager
 @onready var _tree_manager: TreeManager = $TreeManager
 @onready var _wood_pile_manager: WoodPileManager = $WoodPileManager
@@ -61,6 +62,7 @@ func _ready() -> void:
 	_stress_rng.seed = GameState.ISLAND_SEED
 
 	_unit_manager.setup(td, nav, tribes, _tree_manager, _wood_pile_manager)
+	_unit_manager.unit_renderer = _unit_renderer
 	_building_manager.setup(td, nav, _unit_manager, _wood_pile_manager)
 	_tree_manager.setup(td, nav)
 	_wood_pile_manager.setup(td)

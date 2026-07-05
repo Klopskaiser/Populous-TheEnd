@@ -9,6 +9,19 @@ class_name TribeCommands extends Node
 ## order_train() and cast_spell() follow in phases 4 and 5.
 
 const FORMATION_SPACING: float = 1.3
+## Units move in packs of GROUP_SIZE (like the original game): tight inside
+## a group, visible spacing between groups.
+const GROUP_SIZE: int = 6
+## Distance between group centres in the target formation.
+const GROUP_SPACING: float = 2.2
+## Tight member offsets inside a group (centre + 5 around it); just outside
+## the separation radius so the pack stands calm.
+const MEMBER_OFFSETS: Array[Vector3] = [
+	Vector3(0.0, 0.0, 0.0),
+	Vector3(0.55, 0.0, 0.0), Vector3(-0.55, 0.0, 0.0),
+	Vector3(0.27, 0.0, 0.48), Vector3(-0.27, 0.0, 0.48),
+	Vector3(0.0, 0.0, -0.55),
+]
 ## Maximum height range (max - min vertex) on a footprint; steeper plots
 ## cannot be built on (the flatten phase handles anything below this).
 const MAX_LEVEL_DIFF: float = 3.0
@@ -76,15 +89,25 @@ func can_place_at(cell: Vector2i, footprint: Vector2i) -> bool:
 
 # --- Unit orders ----------------------------------------------------------------------
 
-## Move order with deterministic formation scatter (centre, then rings of
-## 6/12/18) so units do not stack on one spot.
+## Move order in packs of GROUP_SIZE: the selection is sorted spatially so
+## nearby units end up in the same group, group centres get deterministic
+## formation offsets (rings), members stand tightly around their centre.
 func order_move(units: Array[Unit], target: Vector3, queue_up: bool = false) -> void:
-	var i: int = 0
+	var alive: Array[Unit] = []
 	for unit in units:
-		if unit.state == Unit.State.DEAD:
-			continue
-		unit.order_move(target + formation_offset(i), queue_up)
-		i += 1
+		if unit.state != Unit.State.DEAD:
+			alive.append(unit)
+	# Spatial sort: units that stand together march together.
+	alive.sort_custom(func(a: Unit, b: Unit) -> bool:
+		var ka: float = a.position.z * 1000.0 + a.position.x
+		var kb: float = b.position.z * 1000.0 + b.position.x
+		return ka < kb)
+	var group_scale: float = GROUP_SPACING / FORMATION_SPACING
+	for g in range(0, alive.size(), GROUP_SIZE):
+		var group_index: int = g / GROUP_SIZE
+		var group_target: Vector3 = target + formation_offset(group_index) * group_scale
+		for m in range(g, mini(g + GROUP_SIZE, alive.size())):
+			alive[m].order_move(group_target + MEMBER_OFFSETS[m - g], queue_up)
 
 
 ## Braves fell the tree (and keep chopping nearby ones); non-braves just walk

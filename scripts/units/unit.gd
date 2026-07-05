@@ -4,10 +4,14 @@ class_name Unit extends Node3D
 ##
 ## No physics body: movement walks the NavGrid path via move_toward on the XZ
 ## plane, Y is snapped from TerrainData every tick. Core logic lives in
-## tick(delta) (called from _physics_process) so tests can drive it manually
+## tick(delta) (driven by the UnitManager) so tests can drive it manually
 ## with artificial deltas, outside the scene tree. Uses local `position`
 ## (units are direct children of UnitManager at the origin, so local == global
 ## and it also works outside the tree).
+##
+## Units have NO visual children: all units are drawn by the central
+## UnitRenderer (one MultiMesh draw call). The unit only keeps its animation
+## state (anim_base_name + anim_start_ms) and render cache fields.
 
 ## Later phases fill in the behaviour for GATHER/PRAY/BUILD/ATTACK/TRAIN/
 ## PANIC/CAST/THROWN.
@@ -24,7 +28,6 @@ const TRIBE_COLORS: Array[Color] = [
 ]
 
 const ARRIVE_EPS: float = 0.05       # metres: waypoint counts as reached
-const SPRITE_PIXEL_SIZE: float = 0.06
 
 var tribe_id: int = 0
 ## Owning tribe, injected by UnitManager.spawn_unit()/Tribe.add_unit().
@@ -53,68 +56,31 @@ var path_service: UnitManager = null
 
 var selected: bool = false
 
+## Animation state, consumed by the UnitRenderer: base name (idle/walk/...)
+## and the start time for frame timing.
+var anim_base_name: StringName = &"idle"
+var anim_start_ms: int = 0
+
 ## Current spatial-hash cell, managed by the UnitManager (stored on the unit
 ## because a Dictionary lookup per unit per tick is measurably slower).
 var _hash_cell: Vector2i = Vector2i(2147483647, 2147483647)
+
+## Render slot bookkeeping, managed by the UnitRenderer.
+var _render_index: int = -1
+var _render_kind: StringName = &"unit"
+var _render_pos: Vector3 = Vector3.INF
+var _render_frame: int = -1
 
 var _path: PackedVector3Array = PackedVector3Array()
 var _path_index: int = 0
 ## Queued move target awaiting path computation (INF = none).
 var _pending_target: Vector3 = Vector3.INF
 var _path_queued: bool = false
-var _sprite: AnimatedSprite3D = null
-var _view: StringName = &"front"
 
 
 ## Silhouette key for PlaceholderSprites; overridden by subclasses.
 func unit_kind() -> StringName:
 	return &"unit"
-
-
-func _ready() -> void:
-	_sprite = get_node_or_null("Sprite") as AnimatedSprite3D
-	if _sprite != null:
-		_sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-		_sprite.shaded = false
-		_sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
-		_sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
-		_sprite.pixel_size = SPRITE_PIXEL_SIZE
-		# Feet at the node origin.
-		_sprite.position.y = PlaceholderSprites.H * SPRITE_PIXEL_SIZE * 0.5
-		_sprite.modulate = TRIBE_COLORS[tribe_id % TRIBE_COLORS.size()]
-		if _sprite.sprite_frames == null:
-			_sprite.sprite_frames = PlaceholderSprites.make_frames(unit_kind())
-		_update_animation()
-
-
-## Per-frame visual update, driven by the UnitManager in staggered slices
-## (no per-unit _process callbacks — with thousands of units the Node
-## callback overhead alone would dominate the frame). The camera vectors are
-## fetched once per frame by the manager.
-func update_visual(cam_forward: Vector3, cam_right: Vector3) -> void:
-	if _sprite == null or _sprite.sprite_frames == null:
-		return
-	var new_view: StringName = view_suffix(facing, cam_forward, cam_right)
-	if new_view != _view:
-		_view = new_view
-		_apply_animation(false)
-	_update_hop()
-
-
-## Small sprite bounce while hop_visual is set (visual only). The "jump"
-## animation is frame-driven from the hop phase: arms fly up while airborne
-## (frame 1) and come down on landing (frame 0).
-func _update_hop() -> void:
-	var base: float = PlaceholderSprites.H * SPRITE_PIXEL_SIZE * 0.5
-	if not hop_visual:
-		if _sprite.position.y != base:
-			_sprite.position.y = base
-		return
-	var offset: float = absf(sin(float(Time.get_ticks_msec()) * 0.012)) * 0.35
-	if String(_sprite.animation).begins_with("jump"):
-		_sprite.pause()
-		_sprite.frame = 1 if offset > 0.12 else 0
-	_sprite.position.y = base + offset
 
 
 # --- Core logic (testable without scene tree) ---------------------------------
@@ -301,22 +267,29 @@ func _update_animation() -> void:
 
 
 ## Which of the four sprite views matches a facing direction, given the
-## camera's forward and right vectors. Static + camera-free so it is
-## headless-testable. Boundary (45 deg) prefers front/back.
-static func view_suffix(p_facing: Vector3, cam_forward: Vector3, cam_right: Vector3) -> StringName:
+## camera's forward and right vectors. Returns an index into
+## PlaceholderSprites.VIEWS (0 = front, 1 = back, 2 = right, 3 = left).
+## Static + camera-free so it is headless-testable. Boundary (45 deg)
+## prefers front/back.
+static func view_index(p_facing: Vector3, cam_forward: Vector3, cam_right: Vector3) -> int:
 	var flat_facing: Vector2 = Vector2(p_facing.x, p_facing.z)
 	var flat_forward: Vector2 = Vector2(cam_forward.x, cam_forward.z)
 	if flat_facing.length_squared() < 0.000001 or flat_forward.length_squared() < 0.000001:
-		return &"front"
+		return 0
 	flat_facing = flat_facing.normalized()
 	flat_forward = flat_forward.normalized()
 	var dot: float = flat_facing.dot(flat_forward)
 	if dot >= 0.7071:
-		return &"back"    # walking away from the camera
+		return 1    # walking away from the camera -> back
 	if dot <= -0.7071:
-		return &"front"   # walking toward the camera
+		return 0    # walking toward the camera -> front
 	var flat_right: Vector2 = Vector2(cam_right.x, cam_right.z)
-	return &"right" if flat_facing.dot(flat_right) > 0.0 else &"left"
+	return 2 if flat_facing.dot(flat_right) > 0.0 else 3
+
+
+## StringName variant of view_index (kept for tests/readability).
+static func view_suffix(p_facing: Vector3, cam_forward: Vector3, cam_right: Vector3) -> StringName:
+	return PlaceholderSprites.VIEWS[view_index(p_facing, cam_forward, cam_right)]
 
 
 ## Animation base name for the current state; subclasses refine this for
@@ -333,37 +306,16 @@ func _anim_base() -> StringName:
 			return &"idle"
 
 
+## Refreshes the animation state consumed by the UnitRenderer: the base name
+## follows the state (_anim_base hook); the timer restarts on a base change
+## or an explicit restart, so frame timing starts at frame 0.
 func _apply_animation(restart: bool) -> void:
-	if _sprite == null or _sprite.sprite_frames == null:
-		return
-	var anim: StringName = _pick_animation(_anim_base())
-	if anim == &"":
-		return
-	if _sprite.animation == anim:
-		if restart:
-			_sprite.play(anim)
-		return
-	var frame: int = _sprite.frame
-	var progress: float = _sprite.frame_progress
-	_sprite.play(anim)
-	if not restart:
-		# Only the view direction changed: keep the frame position.
-		_sprite.set_frame_and_progress(frame, progress)
-
-
-## Fallback chain: directional -> front variant -> plain name -> idle_front.
-func _pick_animation(base: StringName) -> StringName:
-	var frames: SpriteFrames = _sprite.sprite_frames
-	var candidates: Array[StringName] = [
-		StringName("%s_%s" % [base, _view]),
-		StringName("%s_front" % base),
-		base,
-		&"idle_front",
-	]
-	for candidate in candidates:
-		if frames.has_animation(candidate):
-			return candidate
-	return &""
+	var base: StringName = _anim_base()
+	if base != anim_base_name:
+		anim_base_name = base
+		anim_start_ms = Time.get_ticks_msec()
+	elif restart:
+		anim_start_ms = Time.get_ticks_msec()
 
 
 ## Marks the unit as selected. The rings are rendered centrally by the

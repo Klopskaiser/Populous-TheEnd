@@ -345,6 +345,50 @@ func test_progress_requires_wood_and_site_stalls() -> void:
 	_free_world(w)
 
 
+func test_workers_use_piles_before_trees() -> void:
+	var w: Dictionary = _make_world()
+	var tm: TreeManager = w.tree_manager
+	var bm: BuildingManager = w.building_manager
+
+	var hut: Hut = w.commands.place_building(w.tribe, HUT_SCENE, Vector2i(60, 60)) as Hut
+	# Skip the flatten phase — this test is about the wood source choice.
+	hut._flatten_remaining.clear()
+	hut.foundation_done = true
+
+	# Trees right next to the site AND enough piled wood further away:
+	# the piles must be used first, the trees must stay untouched.
+	for c: Vector2i in [Vector2i(55, 58), Vector2i(55, 62), Vector2i(68, 58),
+			Vector2i(68, 62), Vector2i(60, 55)]:
+		tm.spawn_tree(c, 3)
+	var pile_pos: Vector3 = w.nav.cell_to_world(Vector2i(62, 76))   # ~11 m from entrance
+	w.wood_pile_manager.deposit(pile_pos, Hut.WOOD_COST)
+
+	var brave: Brave = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(57, 60))) as Brave
+	brave.order_build(hut)
+	for i in range(30):
+		bm.tick(TICK)
+		brave.tick(TICK)
+		if brave.task != Brave.Task.NONE:
+			break
+	check(brave.task == Brave.Task.PICKUP, "worker fetches piled wood, not a tree")
+
+	var ticks: int = 0
+	while hut.under_construction and ticks < MAX_TICKS:
+		bm.tick(TICK)
+		brave.tick(TICK)
+		ticks += 1
+	check(not hut.under_construction, "build finishes on piled wood alone")
+	check(hut.wood_delivered == Hut.WOOD_COST, "all wood came from the piles")
+	check(tm.trees.size() == 5, "no tree was felled")
+	var all_big: bool = true
+	for tree in tm.trees:
+		if tree.stage != 3:
+			all_big = false
+	check(all_big, "no tree was even harvested")
+	_free_world(w)
+
+
 func test_wood_stall_recheck_timer() -> void:
 	var w: Dictionary = _make_world()
 	var hut: Hut = w.commands.place_building(w.tribe, HUT_SCENE, Vector2i(60, 60)) as Hut

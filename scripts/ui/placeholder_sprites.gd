@@ -58,6 +58,49 @@ static func make_frames(unit_kind: StringName) -> SpriteFrames:
 	return frames
 
 
+## Builds one texture atlas with ALL frames of the given kinds, for the
+## MultiMesh-based UnitRenderer (one draw call for all units instead of one
+## AnimatedSprite3D per unit). Returns:
+##   texture:  ImageTexture with all frames in a grid
+##   uvs:      PackedVector2Array — UV offset per global frame index
+##   frame_uv: Vector2 — UV size of one frame
+##   table:    kind -> anim base -> Array[4 views] of [start, count, fps]
+##             (view order matches VIEWS: front, back, right, left)
+static func build_atlas(kinds: Array[StringName]) -> Dictionary:
+	var images: Array[Image] = []
+	var table: Dictionary = {}
+	for kind in kinds:
+		var anims: Array[StringName] = [&"idle", &"walk", &"attack", &"jump"]
+		if kind in CASTER_KINDS:
+			anims.append(&"cast")
+		var per_base: Dictionary = {}
+		for anim in anims:
+			var per_view: Array = []
+			for view in VIEWS:
+				var frame_images: Array[Image] = _build_frames(anim, view)
+				per_view.append([images.size(), frame_images.size(), _anim_fps(anim)])
+				images.append_array(frame_images)
+			per_base[anim] = per_view
+		table[kind] = per_base
+
+	var cols: int = 16
+	var rows: int = int(ceil(float(images.size()) / float(cols)))
+	var atlas: Image = Image.create(cols * W, rows * H, false, Image.FORMAT_RGBA8)
+	var uvs: PackedVector2Array = PackedVector2Array()
+	var atlas_size: Vector2 = Vector2(float(cols * W), float(rows * H))
+	for i in range(images.size()):
+		var px: int = (i % cols) * W
+		var py: int = (i / cols) * H
+		atlas.blit_rect(images[i], Rect2i(0, 0, W, H), Vector2i(px, py))
+		uvs.append(Vector2(float(px), float(py)) / atlas_size)
+	return {
+		"texture": ImageTexture.create_from_image(atlas),
+		"uvs": uvs,
+		"frame_uv": Vector2(float(W), float(H)) / atlas_size,
+		"table": table,
+	}
+
+
 static func _anim_fps(anim: StringName) -> float:
 	match anim:
 		&"walk":

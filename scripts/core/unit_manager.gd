@@ -12,8 +12,9 @@ class_name UnitManager extends Node
 ## phase 5) use the THROWN state which is excluded here.
 
 const HASH_CELL_SIZE: float = 4.0
-## Minimum comfortable distance between unit centres.
-const SEPARATION_RADIUS: float = 0.55
+## Minimum comfortable distance between unit centres (tight packing: group
+## members stand just outside this radius).
+const SEPARATION_RADIUS: float = 0.44
 ## Maximum push speed in metres per second.
 const SEPARATION_SPEED: float = 1.6
 ## Separation processes at most this many units per tick (round-robin over
@@ -27,21 +28,20 @@ const SEPARATION_MAX_CHECKS: int = 20
 ## Max A* path computations per tick (mass move orders are spread over
 ## frames via the path queue instead of stalling one frame).
 const PATHS_PER_TICK: int = 48
-## Sprite view/hop updates run on 1/N of the units per rendered frame.
-const VISUAL_SLICES: int = 3
 
 var terrain_data: TerrainData = null
 var nav_grid: NavGrid = null
 var tribes: Array[Tribe] = []
 var tree_manager: TreeManager = null
 var wood_pile_manager: WoodPileManager = null
+## Central MultiMesh renderer (set by Main; null in headless tests).
+var unit_renderer: UnitRenderer = null
 
 var units: Array[Unit] = []
 var _hash: Dictionary[Vector2i, Array] = {}   # hash cell -> Array of Unit
 var _path_requests: Array[Unit] = []
 var _path_head: int = 0
 var _separation_phase: int = 0
-var _visual_phase: int = 0
 
 
 func setup(p_terrain_data: TerrainData, p_nav_grid: NavGrid,
@@ -61,20 +61,6 @@ func _physics_process(delta: float) -> void:
 	for unit in units:
 		unit.tick(delta)
 	tick(delta)
-
-
-## Sprite view/hop updates, staggered over VISUAL_SLICES frames with the
-## camera fetched once per frame (not per unit).
-func _process(_delta: float) -> void:
-	var camera: Camera3D = get_viewport().get_camera_3d()
-	if camera == null or units.is_empty():
-		return
-	var basis: Basis = camera.global_transform.basis
-	var cam_forward: Vector3 = -basis.z
-	var cam_right: Vector3 = basis.x
-	for i in range(_visual_phase, units.size(), VISUAL_SLICES):
-		units[i].update_visual(cam_forward, cam_right)
-	_visual_phase = (_visual_phase + 1) % VISUAL_SLICES
 
 
 func tick(delta: float) -> void:
@@ -182,6 +168,8 @@ func register(unit: Unit) -> void:
 	units.append(unit)
 	unit.died.connect(_on_unit_died)
 	_update_hash_cell(unit)
+	if unit_renderer != null:
+		unit_renderer.register_unit(unit)
 
 
 func unregister(unit: Unit) -> void:
@@ -191,6 +179,8 @@ func unregister(unit: Unit) -> void:
 	if _hash.has(unit._hash_cell):
 		_hash[unit._hash_cell].erase(unit)
 	unit._hash_cell = Vector2i(2147483647, 2147483647)
+	if unit_renderer != null:
+		unit_renderer.unregister_unit(unit)
 
 
 func _on_unit_died(unit: Unit) -> void:
