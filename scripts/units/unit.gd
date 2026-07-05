@@ -27,6 +27,8 @@ const ARRIVE_EPS: float = 0.05       # metres: waypoint counts as reached
 const SPRITE_PIXEL_SIZE: float = 0.06
 
 var tribe_id: int = 0
+## Owning tribe, injected by UnitManager.spawn_unit()/Tribe.add_unit().
+var tribe: Tribe = null
 var max_health: int = 100
 var health: int = 100
 var speed: float = 4.0
@@ -89,9 +91,15 @@ func tick(delta: float) -> void:
 
 
 func _tick_move(delta: float) -> void:
-	if _path_index >= _path.size():
+	if _advance_path(delta):
 		_on_path_finished()
-		return
+
+
+## Walks one step along the current path (also used by Brave sub-states that
+## are not State.MOVE). Returns true when the path is exhausted.
+func _advance_path(delta: float) -> bool:
+	if _path_index >= _path.size():
+		return true
 	var target: Vector3 = _path[_path_index]
 	var flat_pos: Vector2 = Vector2(position.x, position.z)
 	var flat_target: Vector2 = Vector2(target.x, target.z)
@@ -104,6 +112,16 @@ func _tick_move(delta: float) -> void:
 	_snap_to_ground()
 	if next.distance_to(flat_target) <= ARRIVE_EPS:
 		_path_index += 1
+	return _path_index >= _path.size()
+
+
+func _has_path() -> bool:
+	return _path_index < _path.size()
+
+
+func _clear_path() -> void:
+	_path = PackedVector3Array()
+	_path_index = 0
 
 
 func _snap_to_ground() -> void:
@@ -143,18 +161,28 @@ func order_move(target: Vector3, queue_up: bool = false) -> void:
 
 
 func _start_path_to(target: Vector3) -> void:
+	if not _plan_path_to(target):
+		# Unreachable: drop the waypoint and stop.
+		if not waypoint_queue.is_empty():
+			waypoint_queue.pop_front()
+		_set_state(State.IDLE)
+		return
+	_set_state(State.MOVE)
+
+
+## Computes and stores a path without touching the state (Brave sub-states
+## use this too). Returns false if the target is unreachable.
+func _plan_path_to(target: Vector3) -> bool:
 	var path: PackedVector3Array
 	if nav_grid != null:
 		path = nav_grid.find_path(position, target)
 	else:
 		path = PackedVector3Array([target])
 	if path.is_empty():
-		# Unreachable: drop the waypoint and stop.
-		if not waypoint_queue.is_empty():
-			waypoint_queue.pop_front()
-		_set_state(State.IDLE)
-		return
-	set_path(path)
+		return false
+	_path = path
+	_path_index = 0
+	return true
 
 
 ## Directly injects a path (used by tests and by order handling).
@@ -175,6 +203,11 @@ func get_remaining_path() -> PackedVector3Array:
 	for i in range(_path_index, _path.size()):
 		points.append(_path[i])
 	return points
+
+
+## True while this unit generates the prayer mana bonus (Brave overrides).
+func is_praying() -> bool:
+	return false
 
 
 # --- Damage (scaffold; combat comes in phase 4) --------------------------------
@@ -238,20 +271,24 @@ static func view_suffix(p_facing: Vector3, cam_forward: Vector3, cam_right: Vect
 	return &"right" if flat_facing.dot(flat_right) > 0.0 else &"left"
 
 
+## Animation base name for the current state; subclasses refine this for
+## their sub-states (e.g. Brave chopping vs. walking while in GATHER).
+func _anim_base() -> StringName:
+	match state:
+		State.MOVE, State.PANIC:
+			return &"walk"
+		State.ATTACK:
+			return &"attack"
+		State.CAST:
+			return &"cast"
+		_:
+			return &"idle"
+
+
 func _apply_animation(restart: bool) -> void:
 	if _sprite == null or _sprite.sprite_frames == null:
 		return
-	var base: StringName
-	match state:
-		State.MOVE, State.PANIC:
-			base = &"walk"
-		State.ATTACK:
-			base = &"attack"
-		State.CAST:
-			base = &"cast"
-		_:
-			base = &"idle"
-	var anim: StringName = _pick_animation(base)
+	var anim: StringName = _pick_animation(_anim_base())
 	if anim == &"":
 		return
 	if _sprite.animation == anim:

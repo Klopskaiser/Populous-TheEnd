@@ -6,7 +6,10 @@ extends Node3D
 ## access in _ready().
 
 const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
+const SITE_SCENE: PackedScene = preload("res://scenes/buildings/reincarnation_site.tscn")
 const START_BRAVES: int = 10
+const START_WOOD: int = 100
+const TREE_COUNT: int = 60
 
 ## Debug: spawn a small marker at the terrain raycast hit on left-click, to
 ## verify the HeightMapShape3D offset (marker must sit exactly under the cursor).
@@ -15,7 +18,12 @@ const START_BRAVES: int = 10
 @onready var _terrain: Terrain = $Terrain
 @onready var _camera_rig: CameraRig = $CameraRig
 @onready var _unit_manager: UnitManager = $UnitManager
+@onready var _building_manager: BuildingManager = $BuildingManager
+@onready var _tree_manager: TreeManager = $TreeManager
+@onready var _tribe_commands: TribeCommands = $TribeCommands
 @onready var _selection: SelectionManager = $UI/SelectionManager
+@onready var _hud: Hud = $UI/Hud
+@onready var _build_menu: BuildMenu = $UI/BuildMenu
 @onready var _route_visualizer: RouteVisualizer = $RouteVisualizer
 
 var _marker: MeshInstance3D = null
@@ -31,15 +39,44 @@ func _ready() -> void:
 
 	var nav: NavGrid = NavGrid.new(td)
 	GameState.nav_grid = nav
-	_unit_manager.setup(td, nav)
-	_selection.setup(_unit_manager)
+
+	# Tribes: 0 = player (blue), 1 = AI (red) — identical instances.
+	var tribes: Array[Tribe] = []
+	for i in range(2):
+		var tribe: Tribe = Tribe.new(i, Unit.TRIBE_COLORS[i])
+		tribe.wood = START_WOOD  # start resources (initialisation, not gameplay)
+		tribes.append(tribe)
+	GameState.tribes = tribes
+
+	_unit_manager.setup(td, nav, tribes, _tree_manager)
+	_building_manager.setup(td, nav, _unit_manager)
+	_tree_manager.setup(td, nav)
+	_tribe_commands.setup(nav, _building_manager, _unit_manager, _tree_manager)
+	_selection.setup(_unit_manager, _tribe_commands, _build_menu)
+	_build_menu.setup(_tribe_commands, nav, self, tribes[GameState.PLAYER_TRIBE])
+	_hud.setup(tribes[GameState.PLAYER_TRIBE])
 	_route_visualizer.setup(_selection, td)
 
+	_tree_manager.spawn_trees(TREE_COUNT, GameState.ISLAND_SEED)
+	_place_start_site(tribes[GameState.PLAYER_TRIBE], nav)
 	_spawn_start_units(td, nav)
 
 	# Start the camera over the island centre.
 	var center: float = TerrainData.SIZE * 0.5
 	_camera_rig.global_position = Vector3(center, td.get_height(center, center), center)
+
+
+## Pre-places the player's reincarnation site (free, fully built) on the first
+## valid footprint near the island centre.
+func _place_start_site(tribe: Tribe, nav: NavGrid) -> void:
+	var fp: Vector2i = ReincarnationSite.FOOTPRINT
+	var center: Vector2i = Vector2i(TerrainData.SIZE / 2 + 6, TerrainData.SIZE / 2)
+	for radius in range(0, TerrainData.SIZE / 2):
+		for cell in _ring_cells(center, radius):
+			if _tribe_commands.can_place_at(cell, fp):
+				_building_manager.place(SITE_SCENE, tribe, cell, true)
+				return
+	push_warning("No valid spot for the start reincarnation site found")
 
 
 ## Spawns the starting Braves (player tribe) on walkable cells near the island

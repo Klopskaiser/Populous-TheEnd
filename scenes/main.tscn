@@ -1,4 +1,4 @@
-[gd_scene load_steps=8 format=3]
+[gd_scene load_steps=12 format=3]
 
 [ext_resource type="Script" uid="uid://cuuacyf8ijxs2" path="res://scripts/core/main.gd" id="1_main"]
 [ext_resource type="PackedScene" path="res://scenes/terrain.tscn" id="2_terrain"]
@@ -6,6 +6,11 @@
 [ext_resource type="Script" path="res://scripts/core/unit_manager.gd" id="4_units"]
 [ext_resource type="Script" path="res://scripts/ui/selection_manager.gd" id="5_sel"]
 [ext_resource type="Script" path="res://scripts/ui/route_visualizer.gd" id="6_route"]
+[ext_resource type="Script" path="res://scripts/core/building_manager.gd" id="7_buildings"]
+[ext_resource type="Script" path="res://scripts/core/tree_manager.gd" id="8_trees"]
+[ext_resource type="Script" path="res://scripts/core/tribe_commands.gd" id="9_commands"]
+[ext_resource type="PackedScene" path="res://scenes/ui/hud.tscn" id="10_hud"]
+[ext_resource type="Script" path="res://scripts/ui/build_menu.gd" id="11_build"]
 
 [sub_resource type="Environment" id="Environment_1"]
 background_mode = 1
@@ -30,6 +35,15 @@ far = 2000.0
 [node name="UnitManager" type="Node" parent="."]
 script = ExtResource("4_units")
 
+[node name="BuildingManager" type="Node" parent="."]
+script = ExtResource("7_buildings")
+
+[node name="TreeManager" type="Node" parent="."]
+script = ExtResource("8_trees")
+
+[node name="TribeCommands" type="Node" parent="."]
+script = ExtResource("9_commands")
+
 [node name="RouteVisualizer" type="Node3D" parent="."]
 script = ExtResource("6_route")
 
@@ -40,6 +54,14 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 mouse_filter = 2
 script = ExtResource("5_sel")
+
+[node name="Hud" parent="UI" instance=ExtResource("10_hud")]
+
+[node name="BuildMenu" type="Control" parent="UI"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+script = ExtResource("11_build")
 
 [node name="Sun" type="DirectionalLight3D" parent="."]
 rotation_degrees = Vector3(-55, -35, 0)

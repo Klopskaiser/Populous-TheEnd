@@ -108,6 +108,103 @@ Richtungs-Sprites).
 
 ---
 
-## Phase 3 — Gebäude, Wirtschaft, HUD (offen)
+## Phase 3 — Gebäude, Wirtschaft, HUD (umgesetzt)
 
-*(bei Umsetzung ergänzen)*
+**Gebaut:**
+- `scripts/core/tribe.gd` — `Tribe` (RefCounted): `id`, `color`, `wood`, `mana`,
+  `units`/`buildings` (typisierte Arrays), `shaman` (Phase 5). Abgeleitet als **Methoden**:
+  `population()`, `housing_capacity()` (Summe `Building.housing_capacity()`),
+  `praying_braves()` (zählt `Unit.is_praying()`). `tick(delta)`:
+  `mana += (pop * MANA_BASE_RATE(0.1) + betende * MANA_PRAY_BONUS(0.5)) * delta`.
+  Eigene Mutations-API: `add_wood`, `spend_wood` (false ohne Seiteneffekt),
+  `add/remove_unit`, `add/remove_building`, `notify_housing_changed`. Events-Bus-Lookup
+  über `Engine.get_main_loop()` mit Guard (headless-Tests ohne Autoloads laufen).
+- `scripts/core/tribe_commands.gd` — `TribeCommands` (Node, einzige Mutations-API):
+  `place_building(tribe, scene, cell) -> Building` (Probe-Instanz für Kosten/Footprint,
+  `can_place_at` + `spend_wood`, ungültig → `null` ohne Seiteneffekt),
+  `can_place_at(cell, footprint)` (Walkability + baumfrei), `order_move` (mit
+  Formations-Streuung, von SelectionManager hierher gezogen), `order_gather/build/pray`
+  (Braves → Task, andere Einheiten → Move). `formation_offset()` jetzt statisch hier.
+- `scripts/buildings/building.gd` — `Building` (Node3D-Basis): `tribe_id/tribe`, HP,
+  `wood_cost`, `footprint`, `cell` (Footprint-Top-Left), `rally_point`,
+  `under_construction`/`build_progress`, `add_build_progress()` → `finish_construction()`
+  (Signal `construction_finished`, Kapazität wird erst danach wirksam), `take_damage`/
+  `destroy()` (NavGrid-Footprint freigeben, `Events.building_destroyed`),
+  `tick(delta)` → `_tick_active()` für Subklassen, `center_world()`, `interact_range()`,
+  `edge_spawn_position()` (begehbare Perimeterzelle), Klick-Body (StaticBody3D,
+  **Layer 2**, Meta `"building"`), Baustellen-Visual = Y-gestauchtes `MeshRoot`.
+- `scripts/buildings/hut.gd` + `scenes/buildings/hut.tscn` — `Hut`: Kosten 20 Holz,
+  Footprint 2×2, `CAPACITY = 100`, `SPAWN_INTERVAL = 10 s`; Spawn-Timer läuft nur bei
+  freier Kapazität, neuer Brave läuft zum `rally_point` (Default: begehbare Zelle südlich,
+  von BuildingManager gesetzt). Brauner PrismMesh + Stammfarben-Fahne.
+- `scripts/buildings/reincarnation_site.gd` + Szene — `ReincarnationSite`: kostenlos,
+  3×3, `PRAY_RADIUS = 5`; in Phase 3 nur Gebetsplatz (Respawn folgt Phase 5).
+  Flacher Torus-Ring + Stein + Fahne.
+- `scripts/core/tree_resource.gd` + `scenes/tree_resource.tscn` — `TreeResource`:
+  `wood_remaining` (40), `harvest(amount) -> int` (nie mehr als vorhanden, einmaliges
+  Signal `depleted`), Klick-Body **Layer 3** (Wert 4), Meta `"tree_resource"`.
+  Bäume blockieren das NavGrid **nicht** (bewusst: dünne Hindernisse).
+- `scripts/core/tree_manager.gd` — `TreeManager` (Node): Registry + Zellindex,
+  `spawn_trees(count, seed)` (deterministisch, Mindestabstand 2 Zellen, nur begehbare
+  Zellen), `nearest_tree(pos)`, `has_tree_at(cell)` (blockt Bauplätze); `depleted` →
+  deregistrieren + `queue_free` (nur wenn im Baum; Standalone-Testknoten bleiben beim
+  Ersteller).
+- `scripts/core/building_manager.gd` — `BuildingManager` (Node): Registry, tickt alle
+  Gebäude aus `_physics_process`, `place(scene, tribe, cell, pre_built)` (Injektion,
+  Position/Y aus Terrain, `fill_solid_region`, Default-Rally); Validierung liegt bewusst
+  in TribeCommands.
+- `scripts/units/brave.gd` — GATHER (Baum suchen → hinlaufen → hacken 2 Holz/s →
+  Tribe gutschreiben → nächster Baum, keiner mehr → IDLE), BUILD (`BUILD_RATE = 0.2`/s,
+  bei Fertigstellung sofort IDLE), PRAY (`is_praying()` = angekommen; Tribe-Tick zählt).
+  Gemeinsamer `_seek(target, range, delta)`-Helfer (Replan bei Zielwechsel, unerreichbar
+  → IDLE), `_working`-Subzustand steuert Animation (`attack` beim Hacken/Bauen).
+- `scripts/units/unit.gd` (erweitert): `tribe`-Referenz, `is_praying()` (Basis false),
+  Bewegung refaktoriert in `_advance_path(delta) -> bool` + `_plan_path_to(target)`
+  (State-frei, von Brave-Tasks mitbenutzt), `_anim_base()` als überschreibbarer Hook.
+- `scripts/core/game_state.gd`: `tribes: Array[Tribe]` (0 = Spieler/Blau, 1 = KI/Rot,
+  von Main erzeugt), tickt Tribes in `_process`, `get_tribe(id)`.
+- `scripts/core/unit_manager.gd`: `setup(td, nav, tribes, tree_manager)` (optionale
+  Parameter, alte Testaufrufe kompatibel); `spawn_unit` injiziert `tribe` +
+  `tree_manager` (via `set()`, nur Braves haben das Property) und registriert beim Tribe;
+  Tod → `tribe.remove_unit`.
+- `scripts/ui/selection_manager.gd`: Rechtsklick-Routing über Collider-Metas — Baum →
+  `order_gather`, eigene Baustelle → `order_build`, eigener Reinkarnationsplatz →
+  `order_pray`, sonst `order_move` über TribeCommands; ignoriert Maus komplett, solange
+  `BuildMenu.is_active()`.
+- `scripts/ui/build_menu.gd` — `BuildMenu` (Control, UI-Layer): Button „Hütte (20 Holz)
+  [H]“ + Input-Action `build_hut` (H, in project.godot); Ghost-BoxMesh folgt
+  Terrain-Raycast (**Maske 1** = nur Terrain), Footprint auf Zelle gerastert,
+  grün/rot je `can_place_at` + Holz; Linksklick platziert via
+  `TribeCommands.place_building`, Esc/Rechtsklick bricht ab; Events als handled markiert.
+- `scenes/ui/hud.tscn` + `scripts/ui/hud.gd` — `Hud`: „Holz/Mana/Bevölkerung x/y“
+  oben links, rein signalgetrieben (`wood_changed`, `mana_changed`, **neu:**
+  `population_changed(tribe_id, population, capacity)` in `events.gd`); Startwerte via
+  `setup(tribe)`.
+- `scripts/core/main.gd`: erzeugt 2 Tribes (Startholz je 100), verdrahtet alle Manager,
+  verteilt 60 Bäume (Seed 1337), platziert den Spieler-Reinkarnationsplatz vorgebaut
+  nahe der Inselmitte, spawnt danach die 10 Start-Braves.
+- Tests: `tests/test_economy.gd` (41 Checks: Mana-Formel, Harvest, Gather-Zyklus inkl.
+  Baum-Abmeldung, Hütten-Spawn bis Kapazität + Erweiterung, place_building-Validierung
+  auf echter Insel, Baufortschritt durch Brave inkl. „vorher kein Spawn“).
+
+**Extras/Abweichungen vom Plan:**
+- Kollisionslayer-Konvention: Terrain = 1, Gebäude = 2, Bäume = 4 (Bit 3);
+  Klickziel-Auflösung über Node-Metas (`"building"`, `"tree_resource"`).
+- Bäume blockieren das NavGrid nicht (Plan ließ das offen: „falls blockiert“).
+- Kein Holz-Tragen/Abliefern: Hacken schreibt direkt dem Tribe gut (wie geplant).
+
+**Erkenntnisse/Stolpersteine:**
+- Zirkuläre `class_name`-Referenzen (Unit ↔ Tribe ↔ Building) sind in Godot 4.7
+  problemlos (Ladecheck grün).
+- RefCounted-Klassen erreichen den Events-Bus über `Engine.get_main_loop()` →
+  `root.get_node_or_null("Events")` — mit Guard laufen dieselben Klassen headless im
+  Testrunner (dort keine Autoloads).
+- Zustandswechsel am Tick-Ende beachten: Test „Brave IDLE nach Bauende“ schlug fehl,
+  weil der Wechsel erst im Folge-Tick kam → Abschluss jetzt im selben Tick.
+- `_unhandled_input`-Reihenfolge (BuildMenu nach SelectionManager im Baum → wird zuerst
+  bedient) reicht nicht als Schutz allein; SelectionManager prüft zusätzlich explizit
+  `BuildMenu.is_active()`.
+
+**Verifikation:** Testsuite grün (109 Tests), `--headless --quit` fehlerfrei.
+Manuelle Prüfung (HUD-Live-Update, Ghost-Platzierung, Sammeln/Beten/Bauen per
+Rechtsklick, Umlaufen von Footprints): **ausstehend — bitte durch Nutzer prüfen.**

@@ -10,15 +10,20 @@ const HASH_CELL_SIZE: float = 4.0
 
 var terrain_data: TerrainData = null
 var nav_grid: NavGrid = null
+var tribes: Array[Tribe] = []
+var tree_manager: TreeManager = null
 
 var units: Array[Unit] = []
 var _hash: Dictionary[Vector2i, Array] = {}       # hash cell -> Array of Unit
 var _unit_cells: Dictionary[Unit, Vector2i] = {}  # unit -> current hash cell
 
 
-func setup(p_terrain_data: TerrainData, p_nav_grid: NavGrid) -> void:
+func setup(p_terrain_data: TerrainData, p_nav_grid: NavGrid,
+		p_tribes: Array[Tribe] = [], p_tree_manager: TreeManager = null) -> void:
 	terrain_data = p_terrain_data
 	nav_grid = p_nav_grid
+	tribes = p_tribes
+	tree_manager = p_tree_manager
 
 
 func _physics_process(delta: float) -> void:
@@ -52,6 +57,8 @@ func unregister(unit: Unit) -> void:
 
 func _on_unit_died(unit: Unit) -> void:
 	unregister(unit)
+	if unit.tribe != null:
+		unit.tribe.remove_unit(unit)
 	if is_inside_tree():
 		var events: Node = get_node_or_null("/root/Events")
 		if events != null:
@@ -65,11 +72,14 @@ func spawn_unit(scene: PackedScene, tribe_id: int, pos: Vector3) -> Unit:
 	unit.tribe_id = tribe_id
 	unit.terrain_data = terrain_data
 	unit.nav_grid = nav_grid
+	unit.set("tree_manager", tree_manager)  # only Braves have this property
 	unit.position = pos
 	if terrain_data != null:
 		unit.position.y = terrain_data.get_height(pos.x, pos.z)
 	add_child(unit)
 	register(unit)
+	if tribe_id >= 0 and tribe_id < tribes.size():
+		tribes[tribe_id].add_unit(unit)
 	return unit
 
 

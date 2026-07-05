@@ -10,7 +10,7 @@ Nach Abschluss einer Phase: Checkbox abhaken, committen, pushen.
 
 - [x] **Phase 1** — [01_project_terrain_camera.md](01_project_terrain_camera.md): Projektgerüst, verformbares Terrain, RTS-Kamera
 - [x] **Phase 2** — [02_units_selection_movement.md](02_units_selection_movement.md): Pathfinding, Unit-Basis, Selektion & Bewegung
-- [ ] **Phase 3** — [03_buildings_economy_hud.md](03_buildings_economy_hud.md): Gebäude, Wirtschaft (Holz/Hütten/Mana), HUD
+- [x] **Phase 3** — [03_buildings_economy_hud.md](03_buildings_economy_hud.md): Gebäude, Wirtschaft (Holz/Hütten/Mana), HUD
 - [ ] **Phase 4** — [04_training_combat_preacher.md](04_training_combat_preacher.md): Training, Rally Points, Kampf, Prediger
 - [ ] **Phase 5** — [05_shaman_spells.md](05_shaman_spells.md): Schamanin, Reinkarnation, alle 5 Zauber
 - [ ] **Phase 6** — [06_ai_win_conditions.md](06_ai_win_conditions.md): Skirmish-KI, Siegbedingungen

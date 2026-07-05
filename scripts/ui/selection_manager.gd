@@ -7,29 +7,32 @@ class_name SelectionManager extends Control
 ##   (camera.unproject_position); click on empty ground deselects.
 ## - Left drag: box select via rect.has_point(unproject) + is_position_behind
 ##   guard. The drag rect is drawn in _draw().
-## - Right click: terrain raycast -> order_move for the selection (scattered
-##   formation offsets so units do not stack). Shift+right-click appends a
-##   waypoint. Key P toggles patrol for the selection.
-##
-## From phase 3 on, orders go through TribeCommands instead of calling the
-## units directly.
+## - Right click: raycast -> context command via TribeCommands: tree = gather,
+##   own construction site = build, own reincarnation site = pray, otherwise
+##   move (scattered formation offsets so units do not stack).
+##   Shift+right-click appends a waypoint. Key P toggles patrol.
+## - While the BuildMenu is in placement mode, all mouse input is ignored here.
 
 const CLICK_RADIUS_PX: float = 24.0
 const DRAG_THRESHOLD_PX: float = 6.0
-const FORMATION_SPACING: float = 1.3
 const RAY_LENGTH: float = 1000.0
 
 var player_tribe_id: int = 0
 var selected: Array[Unit] = []
 
 var _unit_manager: UnitManager = null
+var _tribe_commands: TribeCommands = null
+var _build_menu: BuildMenu = null
 var _dragging: bool = false
 var _drag_start: Vector2 = Vector2.ZERO
 var _drag_current: Vector2 = Vector2.ZERO
 
 
-func setup(p_unit_manager: UnitManager) -> void:
+func setup(p_unit_manager: UnitManager, p_tribe_commands: TribeCommands = null,
+		p_build_menu: BuildMenu = null) -> void:
 	_unit_manager = p_unit_manager
+	_tribe_commands = p_tribe_commands
+	_build_menu = p_build_menu
 
 
 func _ready() -> void:
@@ -37,6 +40,9 @@ func _ready() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if _build_menu != null and _build_menu.is_active():
+		_dragging = false
+		return
 	if event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event
 		if mb.button_index == MOUSE_BUTTON_LEFT:
@@ -130,7 +136,7 @@ func _prune_selection() -> void:
 		return is_instance_valid(u) and u.state != Unit.State.DEAD)
 
 
-# --- Movement orders ----------------------------------------------------------------
+# --- Context commands (right-click) ---------------------------------------------------
 
 func _command_move(screen_pos: Vector2, queue_up: bool) -> void:
 	_prune_selection()
@@ -147,23 +153,39 @@ func _command_move(screen_pos: Vector2, queue_up: bool) -> void:
 	var hit: Dictionary = space.intersect_ray(query)
 	if hit.is_empty():
 		return
+
+	if _tribe_commands != null and _dispatch_context_command(hit):
+		return
+
 	var target: Vector3 = hit.position
+	if _tribe_commands != null:
+		_tribe_commands.order_move(selected, target, queue_up)
+		return
 	for i in range(selected.size()):
-		selected[i].order_move(target + _formation_offset(i), queue_up)
+		selected[i].order_move(target + TribeCommands.formation_offset(i), queue_up)
 
 
-## Deterministic scatter around the click target (centre, then rings of 6,
-## 12, 18, ... units) so units do not stack on one spot.
-static func _formation_offset(index: int) -> Vector3:
-	if index == 0:
-		return Vector3.ZERO
-	var ring: int = 1
-	var ring_count: int = 6
-	var i: int = index - 1
-	while i >= ring_count:
-		i -= ring_count
-		ring += 1
-		ring_count += 6
-	var angle: float = TAU * float(i) / float(ring_count)
-	var radius: float = FORMATION_SPACING * float(ring)
-	return Vector3(cos(angle) * radius, 0.0, sin(angle) * radius)
+## Tree -> gather, own construction site -> build, own reincarnation site ->
+## pray. Returns false when the click should be a plain move order.
+func _dispatch_context_command(hit: Dictionary) -> bool:
+	var collider: Object = hit.get("collider")
+	var node: Node = collider as Node
+	if node == null:
+		return false
+	if node.has_meta("tree_resource"):
+		var tree: TreeResource = node.get_meta("tree_resource") as TreeResource
+		if tree != null and tree.wood_remaining > 0:
+			_tribe_commands.order_gather(selected, tree)
+			return true
+		return false
+	if node.has_meta("building"):
+		var building: Building = node.get_meta("building") as Building
+		if building == null or building.tribe_id != player_tribe_id:
+			return false
+		if building.under_construction:
+			_tribe_commands.order_build(selected, building)
+			return true
+		if building is ReincarnationSite:
+			_tribe_commands.order_pray(selected, building)
+			return true
+	return false
