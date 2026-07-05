@@ -96,6 +96,40 @@ func wood_in_radius(pos: Vector3, radius: float) -> int:
 	return total
 
 
+## Nearest pile with free space within radius around pos (for consolidating
+## deliveries onto an existing pile). Null if none.
+func pile_with_space_near(pos: Vector3, radius: float) -> WoodPile:
+	var best: WoodPile = null
+	var best_dist: float = radius * radius
+	var flat: Vector2 = Vector2(pos.x, pos.z)
+	for pile in piles:
+		if pile.space_left() <= 0:
+			continue
+		var d: float = Vector2(pile.position.x, pile.position.z).distance_squared_to(flat)
+		if d <= best_dist:
+			best_dist = d
+			best = pile
+	return best
+
+
+## Total wood in piles that lie within radius of ANY of the given positions
+## (each pile counted once). Used for the "wood near own buildings" HUD readout.
+func wood_near_positions(positions: Array[Vector3], radius: float) -> int:
+	if positions.is_empty():
+		return 0
+	var r2: float = radius * radius
+	var total: int = 0
+	for pile in piles:
+		if pile.amount <= 0:
+			continue
+		var pf: Vector2 = Vector2(pile.position.x, pile.position.z)
+		for p in positions:
+			if pf.distance_squared_to(Vector2(p.x, p.z)) <= r2:
+				total += pile.amount
+				break
+	return total
+
+
 # --- Internals -----------------------------------------------------------------------
 
 func _drain(pile: WoodPile, want: int) -> int:

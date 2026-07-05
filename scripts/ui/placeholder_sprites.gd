@@ -24,6 +24,9 @@ const C_BODY: Color = Color(0.92, 0.92, 0.92)
 const C_LIMB: Color = Color(0.78, 0.78, 0.78)
 const C_EYE: Color = Color(0.12, 0.12, 0.12)
 const C_HAIR: Color = Color(0.5, 0.5, 0.5)
+## Carried log (matches the wood-pile colours).
+const C_WOOD: Color = Color(0.55, 0.36, 0.2)
+const C_WOOD_END: Color = Color(0.35, 0.22, 0.1)
 
 ## Casters get the "cast" animation (see CLAUDE.md par. 3).
 const CASTER_KINDS: Array[StringName] = [&"shaman", &"preacher"]
@@ -47,7 +50,8 @@ static func make_frames(unit_kind: StringName) -> SpriteFrames:
 	frames.remove_animation("default")
 	# "jump" is frame-driven by the hop visual (frame 0 = arms down on the
 	# ground, frame 1 = arms up in the air), not by the animation timer.
-	var anims: Array[StringName] = [&"idle", &"walk", &"attack", &"jump"]
+	var anims: Array[StringName] = [
+		&"idle", &"walk", &"attack", &"jump", &"carry", &"carry_walk"]
 	if unit_kind in CASTER_KINDS:
 		anims.append(&"cast")
 	for anim in anims:
@@ -70,7 +74,8 @@ static func build_atlas(kinds: Array[StringName]) -> Dictionary:
 	var images: Array[Image] = []
 	var table: Dictionary = {}
 	for kind in kinds:
-		var anims: Array[StringName] = [&"idle", &"walk", &"attack", &"jump"]
+		var anims: Array[StringName] = [
+			&"idle", &"walk", &"attack", &"jump", &"carry", &"carry_walk"]
 		if kind in CASTER_KINDS:
 			anims.append(&"cast")
 		var per_base: Dictionary = {}
@@ -103,7 +108,7 @@ static func build_atlas(kinds: Array[StringName]) -> Dictionary:
 
 static func _anim_fps(anim: StringName) -> float:
 	match anim:
-		&"walk":
+		&"walk", &"carry_walk":
 			return 8.0
 		&"attack":
 			return 6.0
@@ -128,6 +133,13 @@ static func _build_frames(anim: StringName, view: StringName) -> Array[Image]:
 			images = [_frame_stand(paint_view, 0), _frame_attack(paint_view)]
 		&"jump":
 			images = [_frame_stand(paint_view, 0), _frame_jump(paint_view)]
+		&"carry":
+			images = [_frame_carry(paint_view, 0), _frame_carry(paint_view, 1)]
+		&"carry_walk":
+			images = [
+				_frame_carry_walk(paint_view, 0), _frame_carry(paint_view, 0),
+				_frame_carry_walk(paint_view, 1), _frame_carry(paint_view, 0),
+			]
 		&"cast":
 			images = [_frame_stand(paint_view, 0), _frame_cast(paint_view)]
 		_:
@@ -185,6 +197,18 @@ static func _draw_legs_stand(img: Image) -> void:
 	img.fill_rect(Rect2i(9, 16, 2, 8), C_LIMB)
 
 
+## Draws one 2px-wide leg from a fixed hip (top) to a foot (bottom). When
+## hip_x == foot_x it is a straight leg; otherwise the leg pivots at the hip and
+## the foot swings — so walking swings the FEET, not the thighs.
+static func _draw_leg(img: Image, hip_x: int, foot_x: int, col: Color) -> void:
+	var y0: int = 16
+	var y1: int = 24
+	for y in range(y0, y1):
+		var t: float = float(y - y0) / float(y1 - 1 - y0)
+		var x: int = int(round(lerpf(float(hip_x), float(foot_x), t)))
+		img.fill_rect(Rect2i(x, y, 2, 1), col)
+
+
 # --- Frame builders ---------------------------------------------------------------
 
 static func _frame_stand(view: StringName, bob: int) -> Image:
@@ -201,12 +225,13 @@ static func _frame_walk(view: StringName, phase: int) -> Image:
 	_draw_torso(img, view, 0)
 	_draw_head(img, view, 0)
 	_draw_arms_side(img, view, 0)
+	# Hips fixed at x=5/9; the feet swing (alternating) — pivot at the hip.
 	if phase == 0:
-		img.fill_rect(Rect2i(3, 16, 3, 7), C_LIMB)    # left leg forward
-		img.fill_rect(Rect2i(10, 17, 3, 6), C_LIMB)   # right leg back
+		_draw_leg(img, 5, 3, C_LIMB)    # left foot swings out
+		_draw_leg(img, 9, 9, C_LIMB)    # right planted
 	else:
-		img.fill_rect(Rect2i(3, 17, 3, 6), C_LIMB)    # left leg back
-		img.fill_rect(Rect2i(10, 16, 3, 7), C_LIMB)   # right leg forward
+		_draw_leg(img, 5, 5, C_LIMB)    # left planted
+		_draw_leg(img, 9, 11, C_LIMB)   # right foot swings out
 	return img
 
 
@@ -236,6 +261,50 @@ static func _frame_jump(view: StringName) -> Image:
 	img.fill_rect(Rect2i(5, 16, 2, 5), C_LIMB)        # legs tucked mid-air
 	img.fill_rect(Rect2i(9, 16, 2, 5), C_LIMB)
 	return img
+
+
+## Standing while carrying a log (arms forward, a log held in front).
+static func _frame_carry(view: StringName, bob: int) -> Image:
+	var img: Image = _new_image()
+	_draw_torso(img, view, bob)
+	_draw_head(img, view, bob)
+	_draw_legs_stand(img)
+	_draw_carry_arms_and_log(img, view, bob)
+	return img
+
+
+## Walking while carrying a log.
+static func _frame_carry_walk(view: StringName, phase: int) -> Image:
+	var img: Image = _new_image()
+	_draw_torso(img, view, 0)
+	_draw_head(img, view, 0)
+	if phase == 0:
+		_draw_leg(img, 5, 3, C_LIMB)    # left foot swings out
+		_draw_leg(img, 9, 9, C_LIMB)    # right planted
+	else:
+		_draw_leg(img, 5, 5, C_LIMB)    # left planted
+		_draw_leg(img, 9, 11, C_LIMB)   # right foot swings out
+	_draw_carry_arms_and_log(img, view, 0)
+	return img
+
+
+static func _draw_carry_arms_and_log(img: Image, view: StringName, bob: int) -> void:
+	if view == &"right":
+		img.fill_rect(Rect2i(9, 10 + bob, 3, 2), C_LIMB)         # near arm forward
+		img.fill_rect(Rect2i(11, 9 + bob, 5, 4), C_WOOD)         # log jutting forward
+		img.fill_rect(Rect2i(11, 9 + bob, 1, 4), C_WOOD_END)
+		img.fill_rect(Rect2i(15, 9 + bob, 1, 4), C_WOOD_END)
+	elif view == &"back":
+		# Seen from behind, the wood is held in front and out of sight — just
+		# slightly shorter side arms (he is holding something).
+		img.fill_rect(Rect2i(2, 8 + bob, 2, 5), C_LIMB)
+		img.fill_rect(Rect2i(12, 8 + bob, 2, 5), C_LIMB)
+	else:
+		img.fill_rect(Rect2i(2, 10 + bob, 2, 3), C_LIMB)         # both arms forward
+		img.fill_rect(Rect2i(12, 10 + bob, 2, 3), C_LIMB)
+		img.fill_rect(Rect2i(3, 10 + bob, 10, 4), C_WOOD)        # log held across
+		img.fill_rect(Rect2i(3, 10 + bob, 1, 4), C_WOOD_END)
+		img.fill_rect(Rect2i(12, 10 + bob, 1, 4), C_WOOD_END)
 
 
 static func _frame_cast(view: StringName) -> Image:

@@ -153,6 +153,17 @@ func order_pray(units: Array[Unit], site: Building) -> void:
 		order_move(movers, site.center_world())
 
 
+## Offset for the index-th unit when assembling into 6-member groups around a
+## point (used by buildings so newly produced units gather in packs at the
+## rally point instead of standing around at random). Same ring layout as
+## order_move.
+static func group_slot_offset(index: int) -> Vector3:
+	var group: int = index / GROUP_SIZE
+	var member: int = index % GROUP_SIZE
+	var group_scale: float = GROUP_SPACING / FORMATION_SPACING
+	return formation_offset(group) * group_scale + MEMBER_OFFSETS[member]
+
+
 static func formation_offset(index: int) -> Vector3:
 	if index == 0:
 		return Vector3.ZERO

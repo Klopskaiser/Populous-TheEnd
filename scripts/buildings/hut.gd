@@ -31,6 +31,16 @@ func housing_capacity() -> int:
 	return 0 if under_construction else CAPACITY
 
 
+## Progress toward the next brave (drives the bar above the hut); -1 while under
+## construction or when the tribe is at its population cap (not producing).
+func production_progress() -> float:
+	if under_construction or tribe == null:
+		return -1.0
+	if tribe.population() >= tribe.housing_capacity():
+		return -1.0
+	return clampf(1.0 - spawn_timer / SPAWN_INTERVAL, 0.0, 1.0)
+
+
 ## Spawns Braves while the tribe is below its housing capacity. The timer only
 ## runs while there is room, so the first brave after reaching a new capacity
 ## takes a full interval.
@@ -46,15 +56,17 @@ func _tick_active(delta: float) -> void:
 		_spawn_brave()
 
 
-## Spawn position and rally target get a small deterministic scatter so new
-## braves do not stack on one spot at the entrance.
+## New braves spawn at the entrance (slightly scattered) and walk to a slot in
+## the usual 6-member group formation around the rally point, so they gather in
+## packs there instead of standing around at random.
 func _spawn_brave() -> void:
-	_spawn_counter += 1
 	var pos: Vector3 = edge_spawn_position() \
 		+ TribeCommands.formation_offset(_spawn_counter % 7) * 0.35
 	var brave: Unit = unit_manager.spawn_unit(BRAVE_SCENE, tribe_id, pos)
 	if brave != null and rally_point != Vector3.ZERO:
-		brave.order_move(rally_point + TribeCommands.formation_offset(_spawn_counter % 19))
+		# Slot cycles through a few groups so the pack stays near the rally.
+		brave.order_move(rally_point + TribeCommands.group_slot_offset(_spawn_counter % 36))
+	_spawn_counter += 1
 
 
 ## Authored with the entrance facing south (+z); the mesh root is rotated by
@@ -71,7 +83,9 @@ func _create_visuals() -> void:
 
 	var roof: MeshInstance3D = MeshInstance3D.new()
 	var prism: PrismMesh = PrismMesh.new()
-	prism.size = Vector3(float(footprint.x) * 0.95, 1.2, float(footprint.y) * 0.95)
+	# Flush with the walls (no overhang) so it does not clip the heads of
+	# braves standing right at the hut.
+	prism.size = Vector3(float(footprint.x) * 0.85, 1.2, float(footprint.y) * 0.85)
 	roof.mesh = prism
 	roof.material_override = _make_material(Color(0.42, 0.26, 0.12))
 	roof.position.y = 2.2

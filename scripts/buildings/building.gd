@@ -49,6 +49,14 @@ var wood_stalled: bool = false
 ## Worker braves currently assigned to this construction site.
 var workers: Array[Brave] = []
 
+## Selection state (buildings are selectable: left-click; right-click then sets
+## the rally point). `hovered` is set by the SelectionManager on mouse-over.
+var selected: bool = false
+var hovered: bool = false
+
+## Height of the info overlay (production bar) above the building origin.
+const OVERLAY_Y: float = 4.4
+
 ## Injected by BuildingManager.place() (or directly by tests).
 var terrain_data: TerrainData = null
 var nav_grid: NavGrid = null
@@ -56,6 +64,10 @@ var unit_manager: UnitManager = null
 var wood_pile_manager: WoodPileManager = null
 
 var _mesh_root: Node3D = null
+var _selection_ring: MeshInstance3D = null
+var _rally_marker: Node3D = null
+var _overlay_sprite: Sprite3D = null
+var _overlay_progress: float = -1.0
 var _flatten_remaining: Dictionary[Vector2i, bool] = {}
 var _flatten_claims: Dictionary[Vector2i, int] = {}
 var _dirty: Rect2i = Rect2i()
@@ -138,6 +150,9 @@ func _ready() -> void:
 	if _mesh_root != null:
 		_mesh_root.rotation.y = float(orientation) * PI * 0.5
 	_create_click_body()
+	_create_selection_ring()
+	_create_rally_marker()
+	_create_overlay()
 	_update_construction_visual()
 
 
@@ -171,6 +186,127 @@ func tick(delta: float) -> void:
 		_tick_construction(delta)
 	else:
 		_tick_active(delta)
+	_update_overlay()
+	_update_rally_marker()
+
+
+## 0..1 progress toward the next produced/trained unit, or -1 when the building
+## is not currently producing (base: none). Drives the bar above the building.
+func production_progress() -> float:
+	return -1.0
+
+
+# --- Selection & overlay --------------------------------------------------------
+
+func set_selected(p_selected: bool) -> void:
+	selected = p_selected
+	if _selection_ring != null:
+		_selection_ring.visible = p_selected
+
+
+func set_hovered(p_hovered: bool) -> void:
+	hovered = p_hovered
+
+
+func _create_selection_ring() -> void:
+	_selection_ring = MeshInstance3D.new()
+	_selection_ring.name = "SelectionRing"
+	var torus: TorusMesh = TorusMesh.new()
+	var r: float = float(maxi(footprint.x, footprint.y)) * 0.5 + 0.4
+	torus.inner_radius = r - 0.18
+	torus.outer_radius = r
+	_selection_ring.mesh = torus
+	var mat: StandardMaterial3D = StandardMaterial3D.new()
+	mat.albedo_color = Color(0.98, 0.85, 0.45)
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_selection_ring.material_override = mat
+	_selection_ring.position.y = 0.12
+	_selection_ring.visible = false
+	add_child(_selection_ring)
+
+
+## Rally-point marker (ring + little pole), shown only while the building is
+## selected. Positioned in world at the rally point each tick.
+func _create_rally_marker() -> void:
+	_rally_marker = Node3D.new()
+	_rally_marker.name = "RallyMarker"
+	_rally_marker.visible = false
+	add_child(_rally_marker)
+	var mat: StandardMaterial3D = StandardMaterial3D.new()
+	mat.albedo_color = Color(0.98, 0.85, 0.45)
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+
+	var ring: MeshInstance3D = MeshInstance3D.new()
+	var torus: TorusMesh = TorusMesh.new()
+	torus.inner_radius = 0.45
+	torus.outer_radius = 0.6
+	ring.mesh = torus
+	ring.material_override = mat
+	ring.position.y = 0.06
+	_rally_marker.add_child(ring)
+
+	var pole: MeshInstance3D = MeshInstance3D.new()
+	var cyl: CylinderMesh = CylinderMesh.new()
+	cyl.top_radius = 0.05
+	cyl.bottom_radius = 0.05
+	cyl.height = 1.2
+	pole.mesh = cyl
+	pole.material_override = mat
+	pole.position.y = 0.6
+	_rally_marker.add_child(pole)
+
+
+func _update_rally_marker() -> void:
+	if _rally_marker == null:
+		return
+	var show: bool = selected and rally_point != Vector3.ZERO
+	_rally_marker.visible = show
+	if show:
+		_rally_marker.position = rally_point - position
+
+
+func _create_overlay() -> void:
+	_overlay_sprite = Sprite3D.new()
+	_overlay_sprite.name = "ProductionBar"
+	_overlay_sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	_overlay_sprite.shaded = false
+	_overlay_sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	_overlay_sprite.set_draw_flag(SpriteBase3D.FLAG_DISABLE_DEPTH_TEST, true)
+	_overlay_sprite.pixel_size = 0.07
+	_overlay_sprite.position.y = OVERLAY_Y
+	_overlay_sprite.visible = false
+	add_child(_overlay_sprite)
+
+
+## Shows a progress bar above the building — only while it is selected or
+## hovered (and actually producing). Texture is only rebuilt when the value
+## moves.
+func _update_overlay() -> void:
+	if _overlay_sprite == null:
+		return
+	var p: float = production_progress() if (selected or hovered) else -1.0
+	if p < 0.0:
+		if _overlay_sprite.visible:
+			_overlay_sprite.visible = false
+		_overlay_progress = -1.0
+		return
+	_overlay_sprite.visible = true
+	if absf(p - _overlay_progress) < 0.02:
+		return
+	_overlay_progress = p
+	_overlay_sprite.texture = _make_bar_texture(p)
+
+
+## Dark bar background with a gold fill proportional to progress.
+static func _make_bar_texture(progress: float) -> ImageTexture:
+	var w: int = 32
+	var h: int = 6
+	var img: Image = Image.create_empty(w, h, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0.09, 0.06, 0.03, 0.9))
+	var fill: int = clampi(int(round(clampf(progress, 0.0, 1.0) * float(w - 2))), 0, w - 2)
+	if fill > 0:
+		img.fill_rect(Rect2i(1, 1, fill, h - 2), Color(0.85, 0.68, 0.30))
+	return ImageTexture.create_from_image(img)
 
 
 func _tick_construction(delta: float) -> void:

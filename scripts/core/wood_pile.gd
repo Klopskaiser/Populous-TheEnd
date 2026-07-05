@@ -41,6 +41,11 @@ func _ready() -> void:
 
 
 func _update_visual() -> void:
+	# The whole pile grows with its wood count. The sprite's feet sit at the
+	# pile origin (offset == half height), so uniform scaling keeps the base on
+	# the ground while the pile gets visibly bigger.
+	var t: float = clampf(float(amount - 1) / float(MAX_AMOUNT - 1), 0.0, 1.0)
+	scale = Vector3.ONE * lerpf(0.8, 1.45, t)
 	if not is_inside_tree():
 		return
 	if _sprite == null:

@@ -1,12 +1,13 @@
 class_name BuildMenu extends Control
 
-## Build UI (German labels): a button/hotkey enters placement mode, a ghost
-## mesh (including an entrance marker) follows the mouse over the terrain
-## (green = valid, red = invalid), R rotates the entrance side, left click
-## places the construction site via TribeCommands.place_building(), Esc or
-## right click cancels. No wood is paid up front — braves deliver it to the
-## site. While placement mode is active the SelectionManager ignores mouse
-## input (it checks is_active()).
+## Placement controller (no buttons of its own — the Sidebar's building tab and
+## the H hotkey drive it via start_placement()). A ghost mesh (including an
+## entrance marker) follows the mouse over the terrain (green = valid, red =
+## invalid), R rotates the entrance side, left click places the construction
+## site via TribeCommands.place_building(), Esc or right click cancels. No wood
+## is paid up front — braves deliver it to the site. While placement mode is
+## active the SelectionManager ignores mouse input (it checks is_active());
+## clicks that fall over the sidebar are ignored (Sidebar.is_mouse_over_ui()).
 
 const RAY_LENGTH: float = 1000.0
 const TERRAIN_MASK: int = 1   # ghost snaps to terrain only
@@ -44,26 +45,15 @@ func is_active() -> bool:
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var bar: HBoxContainer = HBoxContainer.new()
-	bar.name = "Bar"
-	bar.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	bar.position = Vector2(12, -52)
-	add_child(bar)
-	var hut_button: Button = Button.new()
-	hut_button.text = "Hütte (%d Holz) [H]" % Hut.WOOD_COST
-	hut_button.tooltip_text = "R = Eingang drehen, Esc = abbrechen"
-	hut_button.pressed.connect(_on_hut_button)
-	bar.add_child(hut_button)
 
 
-func _on_hut_button() -> void:
+## Enters placement mode for the given building scene (called by the Sidebar's
+## building tab). Re-selecting while active cancels first, then re-enters.
+func start_placement(scene: PackedScene) -> void:
+	if scene == null:
+		return
 	if is_active():
-		_exit_build_mode()
-	else:
-		_enter_build_mode(HUT_SCENE)
-
-
-func _enter_build_mode(scene: PackedScene) -> void:
+		cancel()
 	var probe: Building = scene.instantiate() as Building
 	if probe == null:
 		return
@@ -73,12 +63,20 @@ func _enter_build_mode(scene: PackedScene) -> void:
 	_create_ghost()
 
 
-func _exit_build_mode() -> void:
+## Leaves placement mode and removes the ghost.
+func cancel() -> void:
 	_build_scene = null
 	if _ghost != null:
 		_ghost.queue_free()
 		_ghost = null
 		_entrance_marker = null
+
+
+func _toggle_hut() -> void:
+	if is_active():
+		cancel()
+	else:
+		start_placement(HUT_SCENE)
 
 
 func _create_ghost() -> void:
@@ -126,6 +124,10 @@ func _process(_delta: float) -> void:
 	var camera: Camera3D = get_viewport().get_camera_3d()
 	if camera == null:
 		return
+	if Sidebar.is_mouse_over_ui():
+		_ghost.visible = false
+		_ghost_valid = false
+		return
 	var mouse: Vector2 = get_viewport().get_mouse_position()
 	var from: Vector3 = camera.project_ray_origin(mouse)
 	var dir: Vector3 = camera.project_ray_normal(mouse)
@@ -152,7 +154,7 @@ func _process(_delta: float) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("build_hut"):
-		_on_hut_button()
+		_toggle_hut()
 		get_viewport().set_input_as_handled()
 		return
 	if not is_active():
@@ -163,16 +165,18 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed("ui_cancel"):
-		_exit_build_mode()
+		cancel()
 		get_viewport().set_input_as_handled()
 		return
 	if event is InputEventMouseButton and (event as InputEventMouseButton).pressed:
 		var mb: InputEventMouseButton = event
+		if Sidebar.is_mouse_over_ui():
+			return  # clicks over the sidebar never place/cancel
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			if _ghost_valid:
 				_tribe_commands.place_building(_tribe, _build_scene, _ghost_cell, _orientation)
-				_exit_build_mode()
+				cancel()
 			get_viewport().set_input_as_handled()
 		elif mb.button_index == MOUSE_BUTTON_RIGHT:
-			_exit_build_mode()
+			cancel()
 			get_viewport().set_input_as_handled()

@@ -66,6 +66,36 @@ func test_y_snapping_follows_terrain() -> void:
 	unit.free()
 
 
+func test_carry_animation_base() -> void:
+	var td: TerrainData = _flat_terrain()
+	var brave: Brave = Brave.new()
+	brave.terrain_data = td
+	brave.state = Unit.State.GATHER
+	brave._working = false
+	brave.carried_wood = 0
+	brave._path = PackedVector3Array()
+	brave._path_index = 0
+	check(brave._anim_base() == &"idle", "not carrying + standing -> idle")
+	brave.carried_wood = 2
+	check(brave._anim_base() == &"carry", "carrying + standing -> carry")
+	brave._path = PackedVector3Array([Vector3(5.0, 0.0, 0.0)])
+	brave._path_index = 0
+	check(brave._anim_base() == &"carry_walk", "carrying + moving -> carry_walk")
+	brave.carried_wood = 0
+	check(brave._anim_base() == &"walk", "not carrying + moving -> walk")
+	brave.free()
+
+
+func test_group_slot_offset() -> void:
+	check(TribeCommands.group_slot_offset(0) == Vector3.ZERO, "first slot at the centre")
+	var within: float = TribeCommands.group_slot_offset(3).length()
+	var new_group: float = TribeCommands.group_slot_offset(6).length()
+	check(new_group > within, "index 6 starts a new group farther out than members 1..5")
+	for i in range(1, TribeCommands.GROUP_SIZE):
+		check(TribeCommands.group_slot_offset(i).length() < TribeCommands.GROUP_SPACING,
+			"member %d stays tight within its group" % i)
+
+
 func test_waypoint_queue_in_order() -> void:
 	var td: TerrainData = _flat_terrain()
 	var unit: Unit = _make_unit(td)

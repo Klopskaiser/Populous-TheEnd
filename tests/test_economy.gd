@@ -510,3 +510,65 @@ func test_manual_chop_delivers_to_nearest_building() -> void:
 	check(wpm.wood_in_radius(hut.entrance_world(), 5.0) == 3,
 		"the wood was carried to the hut entrance")
 	_free_world(w)
+
+
+func test_manual_chop_one_piece_per_trip() -> void:
+	var w: Dictionary = _make_world()
+	var wpm: WoodPileManager = w.wood_pile_manager
+	var hut: Hut = w.building_manager.place(
+		HUT_SCENE, w.tribe, Vector2i(70, 60), 0, true) as Hut
+	var tree: TreeResource = w.tree_manager.spawn_tree(Vector2i(60, 60), 3)   # 3 wood
+	var brave: Brave = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(58, 60))) as Brave
+	brave.order_chop(tree)
+
+	var max_carried: int = 0
+	var ticks: int = 0
+	while brave.state != Unit.State.IDLE and ticks < MAX_TICKS:
+		brave.tick(TICK)
+		max_carried = maxi(max_carried, brave.carried_wood)
+		ticks += 1
+	check(max_carried == 1, "manual gather carries at most one wood at a time (got %d)" % max_carried)
+	check(wpm.total_wood() == 3, "all three wood delivered over separate trips")
+	check(wpm.wood_in_radius(hut.entrance_world(), 5.0) == 3,
+		"the wood consolidated near the hut")
+	_free_world(w)
+
+
+func test_hut_production_progress() -> void:
+	var w: Dictionary = _make_world()
+	var hut: Hut = w.building_manager.place(
+		HUT_SCENE, w.tribe, Vector2i(60, 60), 0, true) as Hut   # prebuilt, producing
+	hut.spawn_timer = Hut.SPAWN_INTERVAL
+	check_near(hut.production_progress(), 0.0, "fresh spawn timer -> 0 progress")
+	hut.spawn_timer = Hut.SPAWN_INTERVAL * 0.5
+	check_near(hut.production_progress(), 0.5, "half-elapsed timer -> 0.5 progress")
+	hut.spawn_timer = 0.0
+	check_near(hut.production_progress(), 1.0, "timer done -> full progress")
+
+	var site: Hut = w.building_manager.place(
+		HUT_SCENE, w.tribe, Vector2i(70, 70), 0, false) as Hut   # under construction
+	check(site.production_progress() < 0.0, "under-construction hut has no production bar")
+	_free_world(w)
+
+
+func test_wood_pile_manager_near_queries() -> void:
+	var w: Dictionary = _make_world()
+	var wpm: WoodPileManager = w.wood_pile_manager
+	wpm.deposit(Vector3(30.0, 0.0, 30.0), 3)   # pile A
+	wpm.deposit(Vector3(80.0, 0.0, 80.0), 2)   # pile B, far away
+
+	# wood_near_positions counts only piles within radius of a given position.
+	check(wpm.wood_near_positions([Vector3(31.0, 0.0, 31.0)], 5.0) == 3,
+		"counts only the nearby pile")
+	check(wpm.wood_near_positions([Vector3(0.0, 0.0, 0.0)], 5.0) == 0,
+		"no piles near the position -> 0")
+	check(wpm.wood_near_positions([Vector3(31.0, 0.0, 31.0), Vector3(81.0, 0.0, 81.0)], 5.0) == 5,
+		"both piles counted across multiple positions")
+
+	# pile_with_space_near finds a pile with room within radius.
+	var p: WoodPile = wpm.pile_with_space_near(Vector3(31.0, 0.0, 31.0), 5.0)
+	check(p != null and p.amount == 3, "finds the nearby pile with space")
+	check(wpm.pile_with_space_near(Vector3(0.0, 0.0, 0.0), 5.0) == null,
+		"no pile in radius -> null")
+	_free_world(w)

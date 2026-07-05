@@ -17,6 +17,15 @@ const PIXEL_SIZE: float = 0.06
 const KINDS: Array[StringName] = [&"brave"]
 ## Sprite Y offset while airborne selects the arms-up jump frame.
 const HOP_FRAME_THRESHOLD: float = 0.12
+## Small extra depth nudge toward the camera (metres) so a sprite standing on
+## a step/next to a foundation lip is not z-fought / buried by the ground.
+const DEPTH_BIAS: float = 0.35
+## Multiplier on each row's true world elevation when computing depth. 1.0 =
+## physically correct (head sits at its real depth): a unit in front of a
+## building is fully visible, a unit behind it is occluded, with no overshoot.
+## Values >1 pull heads further toward the camera but make them poke through
+## roofs/walls when the unit is actually behind — so keep this at 1.0.
+const ELEVATION_GAIN: float = 1.0
 
 const SHADER_CODE: String = """
 shader_type spatial;
@@ -24,6 +33,8 @@ render_mode unshaded, cull_disabled, shadows_disabled;
 
 uniform sampler2D atlas : source_color, filter_nearest;
 uniform vec2 frame_uv;
+uniform float depth_bias;
+uniform float elevation_gain;
 
 varying vec4 tint;
 varying vec2 uv_offset;
@@ -31,10 +42,27 @@ varying vec2 uv_offset;
 void vertex() {
 	tint = COLOR;
 	uv_offset = INSTANCE_CUSTOM.xy;
-	// Billboard: camera basis, instance origin.
-	MODELVIEW_MATRIX = VIEW_MATRIX * mat4(
+	// Camera-facing (spherical) billboard: the quad axes follow the camera so
+	// the sprite never foreshortens. This is used for the on-screen SHAPE.
+	mat4 mv = VIEW_MATRIX * mat4(
 		INV_VIEW_MATRIX[0], INV_VIEW_MATRIX[1], INV_VIEW_MATRIX[2], MODEL_MATRIX[3]);
-	MODELVIEW_NORMAL_MATRIX = mat3(MODELVIEW_MATRIX);
+	vec4 vp = mv * vec4(VERTEX, 1.0);
+	vec4 clip = PROJECTION_MATRIX * vp;
+
+	// A spherical billboard puts the whole quad at ONE depth (the unit's ground
+	// point), so the head is drawn too far back and nearby elevated geometry
+	// (building roofs, flattened-terrain lips) wrongly occludes it. Instead
+	// derive the DEPTH as if the sprite stood vertically in the world: raise
+	// each row by its true world height (VERTEX.y along world up) plus a small
+	// bias toward the camera. Only the depth changes; x/y keep the spherical
+	// projection, so there is no shear or screen shift.
+	vec3 up_view = (VIEW_MATRIX * vec4(0.0, 1.0, 0.0, 0.0)).xyz;
+	vec4 vp_depth = vp;
+	vp_depth.z += up_view.z * VERTEX.y * elevation_gain + depth_bias;
+	vec4 clip_depth = PROJECTION_MATRIX * vp_depth;
+
+	POSITION = clip;
+	POSITION.z = clip_depth.z / clip_depth.w * clip.w;
 }
 
 void fragment() {
@@ -70,6 +98,8 @@ func _ready() -> void:
 	material.shader = shader
 	material.set_shader_parameter("atlas", atlas.texture)
 	material.set_shader_parameter("frame_uv", atlas.frame_uv)
+	material.set_shader_parameter("depth_bias", DEPTH_BIAS)
+	material.set_shader_parameter("elevation_gain", ELEVATION_GAIN)
 	quad.material = material
 
 	_multimesh = MultiMesh.new()

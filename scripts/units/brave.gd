@@ -18,6 +18,9 @@ class_name Brave extends Unit
 enum Task {NONE, FLATTEN, CHOP, PICKUP, DELIVER, CONSTRUCT}
 
 const CARRY_CAPACITY: int = 3
+## When delivering loose wood, prefer merging onto an existing pile within this
+## radius of the target building instead of starting a new one.
+const DROP_CONSOLIDATE_RADIUS: float = 5.0
 const CHOP_RANGE: float = 1.5
 const WORK_RANGE: float = 1.7       # flatten-spot range
 const DELIVER_RANGE: float = 2.0
@@ -133,6 +136,9 @@ func tick(delta: float) -> void:
 			_tick_pray(delta)
 		_:
 			super.tick(delta)
+	# Keep walk/idle/carry in sync with actual motion and carried wood without
+	# restarting the timer (cheap: only updates when the base actually changes).
+	_apply_animation(false)
 
 
 # --- Construction job ---------------------------------------------------------------
@@ -314,9 +320,9 @@ func _end_subtask() -> void:
 
 
 # --- Loose chopping (manual order, no job) ----------------------------------------
-## Harvest until the hands are full (or the trees run out), carry the wood to
-## the nearest own building and pile it at its entrance, then return to the
-## chopping spot and continue with nearby trees.
+## Chop ONE piece of wood, carry it to the nearest own building (preferring an
+## existing pile there), then return to the chopping spot and take the next
+## piece — one at a time, not a full load.
 
 func _tick_loose_chop(delta: float) -> void:
 	if not _tree_valid(task_tree):
@@ -333,25 +339,19 @@ func _tick_loose_chop(delta: float) -> void:
 	_face_toward(task_tree.position)
 	_chop_timer -= delta
 	if _chop_timer <= 0.0:
-		if tree_manager != null:
-			carried_wood += tree_manager.harvest_tree(task_tree)
+		var got: int = tree_manager.harvest_tree(task_tree) if tree_manager != null else 0
+		carried_wood += got
 		_loose_return_pos = position
-		if carried_wood >= CARRY_CAPACITY:
-			if tree_manager != null and _tree_valid(task_tree):
-				tree_manager.release_claim(task_tree, self)
-			task_tree = null
-			_start_loose_deliver()
-			return
-		if _tree_valid(task_tree):
-			_chop_timer = task_tree.chop_time()  # keep working the same tree
-			return
+		# One piece per trip: release the tree and carry this single wood back
+		# to the drop-off, then come back for the next piece.
+		if tree_manager != null and _tree_valid(task_tree):
+			tree_manager.release_claim(task_tree, self)
 		task_tree = null
 		_set_working(false)
-		if not _next_loose_tree():
-			if carried_wood > 0:
-				_start_loose_deliver()
-			else:
-				_stop_all()
+		if carried_wood > 0:
+			_start_loose_deliver()
+		elif not _next_loose_tree():
+			_stop_all()
 
 
 func _start_loose_deliver() -> void:
@@ -376,7 +376,7 @@ func _tick_loose_deliver(delta: float) -> void:
 		if not _next_loose_tree():
 			_stop_all()
 		return
-	if not _seek(building.entrance_world(), DELIVER_RANGE, delta):
+	if not _seek(_loose_drop_target(building), DELIVER_RANGE, delta):
 		return
 	if wood_pile_manager != null:
 		wood_pile_manager.deposit(position, carried_wood)
@@ -384,6 +384,18 @@ func _tick_loose_deliver(delta: float) -> void:
 	task = Task.CHOP
 	if not _next_loose_tree():
 		_stop_all()
+
+
+## Preferred drop-off near a building: an existing pile with space close to the
+## entrance (so wood consolidates onto it), otherwise the entrance itself.
+func _loose_drop_target(building: Building) -> Vector3:
+	var entrance: Vector3 = building.entrance_world()
+	if wood_pile_manager != null:
+		var pile: WoodPile = wood_pile_manager.pile_with_space_near(
+			entrance, DROP_CONSOLIDATE_RADIUS)
+		if pile != null:
+			return pile.position
+	return entrance
 
 
 func _nearest_own_building() -> Building:
@@ -554,10 +566,22 @@ func _anim_base() -> StringName:
 		State.BUILD:
 			if _working and task == Task.FLATTEN:
 				return &"jump"
-			return &"attack" if _working else &"walk"
+			if _working:
+				return &"attack"
+			return _carry_or(&"walk" if _has_path() else &"idle")
 		State.GATHER:
-			return &"attack" if _working else &"walk"
+			if _working:
+				return &"attack"
+			return _carry_or(&"walk" if _has_path() else &"idle")
 		State.PRAY:
-			return &"idle" if _working else &"walk"
+			return &"idle" if _working else (&"walk" if _has_path() else &"idle")
 		_:
 			return super._anim_base()
+
+
+## Swaps a walk/idle base for its wood-carrying variant when the brave is
+## carrying wood (a distinct sprite; can stand or walk while carrying).
+func _carry_or(base: StringName) -> StringName:
+	if carried_wood <= 0:
+		return base
+	return &"carry_walk" if base == &"walk" else &"carry"

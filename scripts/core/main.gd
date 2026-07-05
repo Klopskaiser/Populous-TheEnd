@@ -33,7 +33,7 @@ const STRESS_ANCHORS: Array[Vector2i] = [
 @onready var _wood_pile_manager: WoodPileManager = $WoodPileManager
 @onready var _tribe_commands: TribeCommands = $TribeCommands
 @onready var _selection: SelectionManager = $UI/SelectionManager
-@onready var _hud: Hud = $UI/Hud
+@onready var _sidebar: Sidebar = $UI/Sidebar
 @onready var _build_menu: BuildMenu = $UI/BuildMenu
 @onready var _route_visualizer: RouteVisualizer = $RouteVisualizer
 @onready var _ring_renderer: SelectionRingRenderer = $SelectionRingRenderer
@@ -70,7 +70,9 @@ func _ready() -> void:
 	_selection.setup(_unit_manager, _tribe_commands, _build_menu)
 	_ring_renderer.setup(_selection)
 	_build_menu.setup(_tribe_commands, nav, self, tribes[GameState.PLAYER_TRIBE])
-	_hud.setup(tribes[GameState.PLAYER_TRIBE], _wood_pile_manager.total_wood())
+	_sidebar.setup(tribes, GameState.PLAYER_TRIBE, _unit_manager, _building_manager,
+		_tree_manager, _wood_pile_manager, _tribe_commands, _build_menu, _selection,
+		_camera_rig, td)
 	_route_visualizer.setup(_selection, td)
 
 	# Terrain deformations (foundation flattening, later Landbridge) rebuild

@@ -17,8 +17,16 @@ const CLICK_RADIUS_PX: float = 24.0
 const DRAG_THRESHOLD_PX: float = 6.0
 const RAY_LENGTH: float = 1000.0
 
+const BUILDING_MASK: int = 2   # building click bodies
+const TERRAIN_MASK: int = 1
+
 var player_tribe_id: int = 0
 var selected: Array[Unit] = []
+## Selected own building (mutually exclusive with unit selection). Right-click
+## then sets its rally point.
+var selected_building: Building = null
+## Building currently under the mouse (drives its production-bar visibility).
+var _hovered_building: Building = null
 
 var _unit_manager: UnitManager = null
 var _tribe_commands: TribeCommands = null
@@ -45,6 +53,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event
+		# Clicks that START over the sidebar are ignored; a drag that started on
+		# the map is still allowed to finish over the sidebar.
+		if mb.pressed and Sidebar.is_mouse_over_ui():
+			return
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			if mb.pressed:
 				_dragging = true
@@ -58,10 +70,16 @@ func _unhandled_input(event: InputEvent) -> void:
 					_box_select(_drag_rect(mb.position))
 			queue_redraw()
 		elif mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
-			_command_move(mb.position, mb.shift_pressed)
-	elif event is InputEventMouseMotion and _dragging:
-		_drag_current = (event as InputEventMouseMotion).position
-		queue_redraw()
+			if selected_building != null and is_instance_valid(selected_building):
+				_set_rally(mb.position)
+			else:
+				_command_move(mb.position, mb.shift_pressed)
+	elif event is InputEventMouseMotion:
+		var mm: InputEventMouseMotion = event
+		_update_hover(mm.position)
+		if _dragging:
+			_drag_current = mm.position
+			queue_redraw()
 	elif event.is_action_pressed("toggle_patrol"):
 		_prune_selection()
 		for unit in selected:
@@ -88,6 +106,15 @@ func _click_select(screen_pos: Vector2) -> void:
 	var camera: Camera3D = get_viewport().get_camera_3d()
 	if camera == null or _unit_manager == null:
 		return
+	# A building under the cursor takes priority: select it (own only).
+	var hit: Dictionary = _raycast(screen_pos, BUILDING_MASK)
+	if not hit.is_empty():
+		var node: Node = hit.get("collider") as Node
+		if node != null and node.has_meta("building"):
+			var b: Building = node.get_meta("building") as Building
+			if b != null and b.tribe_id == player_tribe_id:
+				_select_building(b)
+				return
 	var best: Unit = null
 	var best_dist: float = CLICK_RADIUS_PX
 	for unit in _unit_manager.get_units_of_tribe(player_tribe_id):
@@ -122,13 +149,72 @@ func _box_select(rect: Rect2) -> void:
 	_set_selection(picked)
 
 
+## Public selection setter (used by the sidebar's "select idle braves" button).
+func select_units(units: Array[Unit]) -> void:
+	_set_selection(units)
+
+
 func _set_selection(units: Array[Unit]) -> void:
+	_clear_selected_building()
 	_prune_selection()
 	for unit in selected:
 		unit.set_selected(false)
 	selected = units
 	for unit in selected:
 		unit.set_selected(true)
+
+
+## Selects an own building (clears any unit/building selection first).
+func _select_building(building: Building) -> void:
+	_set_selection([])
+	selected_building = building
+	building.set_selected(true)
+
+
+func _clear_selected_building() -> void:
+	if selected_building != null and is_instance_valid(selected_building):
+		selected_building.set_selected(false)
+	selected_building = null
+
+
+## Sets the selected building's rally point to the clicked terrain position.
+func _set_rally(screen_pos: Vector2) -> void:
+	var hit: Dictionary = _raycast(screen_pos, TERRAIN_MASK)
+	if hit.is_empty():
+		return
+	selected_building.rally_point = hit.position
+
+
+## Tracks the building under the cursor so it can show its production bar on
+## hover (in addition to when selected).
+func _update_hover(screen_pos: Vector2) -> void:
+	var building: Building = null
+	if not Sidebar.is_mouse_over_ui():
+		var hit: Dictionary = _raycast(screen_pos, BUILDING_MASK)
+		if not hit.is_empty():
+			var node: Node = hit.get("collider") as Node
+			if node != null and node.has_meta("building"):
+				building = node.get_meta("building") as Building
+	if building == _hovered_building:
+		return
+	if _hovered_building != null and is_instance_valid(_hovered_building):
+		_hovered_building.set_hovered(false)
+	_hovered_building = building
+	if building != null:
+		building.set_hovered(true)
+
+
+func _raycast(screen_pos: Vector2, mask: int) -> Dictionary:
+	var camera: Camera3D = get_viewport().get_camera_3d()
+	if camera == null:
+		return {}
+	var from: Vector3 = camera.project_ray_origin(screen_pos)
+	var dir: Vector3 = camera.project_ray_normal(screen_pos)
+	var space: PhysicsDirectSpaceState3D = camera.get_world_3d().direct_space_state
+	var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(
+		from, from + dir * RAY_LENGTH)
+	query.collision_mask = mask
+	return space.intersect_ray(query)
 
 
 func _prune_selection() -> void:

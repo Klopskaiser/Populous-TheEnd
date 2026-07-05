@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/sidebar.gd" id="1_sidebar"]
+
+[node name="Sidebar" type="Control"]
+anchor_bottom = 1.0
+anchor_right = 1.0
+mouse_filter = 2
+script = ExtResource("1_sidebar")

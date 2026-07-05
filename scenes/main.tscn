@@ -9,7 +9,7 @@
 [ext_resource type="Script" path="res://scripts/core/building_manager.gd" id="7_buildings"]
 [ext_resource type="Script" path="res://scripts/core/tree_manager.gd" id="8_trees"]
 [ext_resource type="Script" path="res://scripts/core/tribe_commands.gd" id="9_commands"]
-[ext_resource type="PackedScene" path="res://scenes/ui/hud.tscn" id="10_hud"]
+[ext_resource type="PackedScene" path="res://scenes/ui/sidebar.tscn" id="10_sidebar"]
 [ext_resource type="Script" path="res://scripts/ui/build_menu.gd" id="11_build"]
 [ext_resource type="Script" path="res://scripts/core/wood_pile_manager.gd" id="12_piles"]
 [ext_resource type="Script" path="res://scripts/ui/selection_ring_renderer.gd" id="13_rings"]
@@ -67,7 +67,7 @@ anchor_bottom = 1.0
 mouse_filter = 2
 script = ExtResource("5_sel")
 
-[node name="Hud" parent="UI" instance=ExtResource("10_hud")]
+[node name="Sidebar" parent="UI" instance=ExtResource("10_sidebar")]
 
 [node name="BuildMenu" type="Control" parent="UI"]
 anchor_right = 1.0
