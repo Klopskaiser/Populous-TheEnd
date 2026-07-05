@@ -2,10 +2,11 @@ class_name Hut extends Building
 
 ## Hut: houses population and spawns new Braves over time. Deliberate
 ## deviation from the original game: one hut provides room for 100 population
-## (see CLAUDE.md par. 5).
+## (see CLAUDE.md par. 5). Built by braves: foundation flattening first, then
+## construction with delivered wood.
 
 const WOOD_COST: int = 20
-const FOOTPRINT: Vector2i = Vector2i(2, 2)
+const FOOTPRINT: Vector2i = Vector2i(4, 4)
 const CAPACITY: int = 100
 const SPAWN_INTERVAL: float = 10.0   # seconds per new brave
 
@@ -51,13 +52,33 @@ func _spawn_brave() -> void:
 		brave.order_move(rally_point)
 
 
+## Authored with the entrance facing south (+z); the mesh root is rotated by
+## the Building base according to `orientation`.
 func _create_visuals() -> void:
 	super._create_visuals()
+	var body: MeshInstance3D = MeshInstance3D.new()
+	var box: BoxMesh = BoxMesh.new()
+	box.size = Vector3(float(footprint.x) * 0.85, 1.6, float(footprint.y) * 0.85)
+	body.mesh = box
+	body.material_override = _make_material(Color(0.52, 0.36, 0.2))
+	body.position.y = 0.8
+	_mesh_root.add_child(body)
+
 	var roof: MeshInstance3D = MeshInstance3D.new()
 	var prism: PrismMesh = PrismMesh.new()
-	prism.size = Vector3(float(footprint.x) * 0.9, 1.6, float(footprint.y) * 0.9)
+	prism.size = Vector3(float(footprint.x) * 0.95, 1.2, float(footprint.y) * 0.95)
 	roof.mesh = prism
-	roof.material_override = _make_material(Color(0.45, 0.3, 0.15))
-	roof.position.y = 0.8
+	roof.material_override = _make_material(Color(0.42, 0.26, 0.12))
+	roof.position.y = 2.2
 	_mesh_root.add_child(roof)
+
+	# Entrance door on the south side.
+	var door: MeshInstance3D = MeshInstance3D.new()
+	var door_box: BoxMesh = BoxMesh.new()
+	door_box.size = Vector3(0.8, 1.2, 0.15)
+	door.mesh = door_box
+	door.material_override = _make_material(Color(0.2, 0.13, 0.07))
+	door.position = Vector3(0.0, 0.6, float(footprint.y) * 0.425)
+	_mesh_root.add_child(door)
+
 	_add_flag()

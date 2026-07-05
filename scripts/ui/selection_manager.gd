@@ -174,8 +174,8 @@ func _dispatch_context_command(hit: Dictionary) -> bool:
 		return false
 	if node.has_meta("tree_resource"):
 		var tree: TreeResource = node.get_meta("tree_resource") as TreeResource
-		if tree != null and tree.wood_remaining > 0:
-			_tribe_commands.order_gather(selected, tree)
+		if tree != null and not tree.felled_flag:
+			_tribe_commands.order_chop(selected, tree)
 			return true
 		return false
 	if node.has_meta("building"):

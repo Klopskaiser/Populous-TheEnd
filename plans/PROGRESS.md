@@ -206,5 +206,91 @@ Richtungs-Sprites).
   `BuildMenu.is_active()`.
 
 **Verifikation:** Testsuite grün (109 Tests), `--headless --quit` fehlerfrei.
-Manuelle Prüfung (HUD-Live-Update, Ghost-Platzierung, Sammeln/Beten/Bauen per
-Rechtsklick, Umlaufen von Footprints): **ausstehend — bitte durch Nutzer prüfen.**
+Manuelle Prüfung durch Nutzer bestanden („grundsätzlich klappt es“); danach folgte
+der Wirtschafts-Umbau unten.
+
+---
+
+## Phase 3b — Original-nähere Wirtschaft (Umbau auf Nutzerwunsch)
+
+**Kernänderungen gegenüber Phase 3:**
+- **Kein Holz-Lager mehr.** `Tribe.wood`/`add_wood`/`spend_wood` und
+  `Events.wood_changed` sind **entfernt**. Holz existiert nur physisch:
+  `WoodPile` (`scripts/core/wood_pile.gd` + `scenes/wood_pile.tscn`, max. **5**
+  Holz je Stapel, Klötzchen-Visual) verwaltet vom `WoodPileManager`
+  (`scripts/core/wood_pile_manager.gd`: `deposit` (verschmilzt in Stapel im
+  2,5-m-Radius), `take_from_radius`, `take_from_pile`, `nearest_pile` (mit
+  Ausschlusszone), `wood_in_radius`, `total_wood`; leere Stapel verschwinden).
+  HUD-„Holz“ = `Events.stockpile_changed(total)` (Summe aller Stapel).
+- **Bäume wachsen:** `TreeResource` hat 4 Stufen (klein → mittelklein →
+  mittelgroß → groß, Skalierung als Visual), Ertrag **1/1/2/3**, Fällzeit
+  1,5–3 s. Gefällt wird der ganze Baum (`TreeManager.fell_tree` → Ertrag,
+  `felled_flag` gegen Doppel-Fällen). Wachstum (`GROWTH_TIME` 75 s/Stufe) und
+  **Vermehrung** tickt der TreeManager: alle 5 s Stichprobe, Spross-Chance
+  superlinear zur Nachbarzahl (`0.004 * n^1.5`, Radius 8 Zellen); Anti-Wuchern
+  über Dichtelimit (max. 6 Nachbarn), globalen Deckel (250) und Mindestabstand.
+  Sprösslinge starten immer klein; nur Startbäume (Seed) sind zufällig groß.
+- **Holz wird nur für Bauaufträge gesammelt.** Kein Sammel-Dauerzustand mehr;
+  Rechtsklick auf Baum = `order_chop`: fällen, Holz als Stapel **vor Ort**
+  ablegen, benachbarte Bäume (8 m) weiterfällen, dann IDLE.
+- **Gebäude größer + Bauablauf in 2 Phasen** (`Building` stark umgebaut):
+  Hütte jetzt **4×4** (Box + Prismendach + **Tür**), `orientation` 0–3 =
+  Eingangsseite (S/E/N/W; MeshRoot wird rotiert, `entrance_cell()` außen
+  mittig). Platzierung: **kein Holz nötig**, aber Höhenspanne der
+  Footprint-Vertices ≤ `MAX_LEVEL_DIFF` (3 m, TribeCommands), Land + gebäude-/
+  baumfrei. Ghost zeigt **Eingangs-Marker**, Taste **R** rotiert
+  (Input-Action `rotate_building`).
+  - **Phase 1 Fundament:** Arbeiter planieren Zellen auf die
+    Durchschnittshöhe (`work_flatten`, 1 m/s je Arbeiter, parallele Zellen,
+    Mehrfachbelegung möglich; Sprite **hüpft** via `Unit.hop_visual`).
+    Terrain-/Nav-Updates gebatcht (0,25 s), Mesh über neues Signal
+    `Events.terrain_deformed(rect)` → `Terrain.apply_deformation` (Main).
+    Gleichzeitig fällen freie Arbeiter Bäume (Suchradius 30 m um die
+    Baustelle) und stapeln das Holz am **Eingang**.
+  - **Phase 2 Bau:** Stapel im 5-m-Radius des Eingangs werden automatisch
+    absorbiert (`wood_delivered`); `build_progress` ist **gedeckelt auf
+    wood_delivered/wood_cost** — fertig nur mit vollem Holz. Gebäude „wächst
+    aus dem Boden“ (Y-Skalierung). Bei Fertigstellung `position.y` auf
+    Planierhöhe.
+- **Selbstorganisierte Bautrupps:** Braves wählen ihre Teilaufgabe selbst
+  (`Brave.Task`: FLATTEN → CHOP/PICKUP (ferne Stapel holen, Tragekapazität 3)
+  → DELIVER → CONSTRUCT; getragenes Holz wird bei Unterbrechung als Stapel
+  fallen gelassen). Baum-Claims über `TreeManager.claim_nearest_tree`,
+  Zell-Claims im Building. **Max. 10 Arbeiter je Baustelle**
+  (`Building.MAX_WORKERS`, `join/leave`). Der `BuildingManager` **rekrutiert
+  jede Sekunde untätige (IDLE) Braves** im 30-m-Radius — Einheiten mit
+  Befehlen/Aufgaben werden nie eingezogen.
+- **Bugfix aus Nutzertest:** „Hackanimation läuft weiter, Baum weg“ +
+  `Invalid type in function '_tree_valid' … previously freed`: Baum-Referenzen
+  (`task_tree`/`task_pile`) sind jetzt **untypisiert** (`Object`), `_tree_valid`
+  nimmt `Object` und prüft `is_instance_valid` + `felled_flag`; Task-System
+  beendet Teilaufgaben sauber (`_end_subtask`/`_interrupt_tasks`).
+
+**Neue/geänderte Dateien:** `wood_pile.gd`, `wood_pile_manager.gd`,
+`scenes/wood_pile.tscn` (neu); `tree_resource.gd`, `tree_manager.gd`,
+`building.gd`, `brave.gd`, `tribe_commands.gd`, `building_manager.gd`,
+`hut.gd`, `build_menu.gd` (weitgehend neu); `tribe.gd`, `events.gd`,
+`nav_grid.gd` (`is_cell_blocked_by_building`), `unit.gd` (`hop_visual`,
+`_advance_path`-Nutzung), `unit_manager.gd`, `selection_manager.gd`, `hud.gd`,
+`main.gd`, `main.tscn`, `project.godot` (Action `rotate_building` = R).
+
+**Erkenntnisse:**
+- Referenzen auf Objekte, die andere Systeme freigeben können, **untypisiert**
+  halten: Die Übergabe einer freigegebenen Instanz an einen **typisierten**
+  Parameter wirft einen Script-Error (`is not a subclass of the expected
+  argument class`) — `is_instance_valid` muss vor jeder typisierten Verwendung
+  laufen.
+- Footprint-Zellen sind nav-solid → Arbeiter erreichen innere Planier-Zellen
+  über einen Direktlauf-Fallback im `_seek` (Pfadende nahe Ziel → letztes
+  Stück gerade laufen).
+- `const` ist in GDScript nur auf Klassenebene erlaubt (nicht im
+  Funktionskörper).
+
+**Verifikation:** Testsuite grün (**132 Tests**, `test_economy.gd` komplett neu:
+Wachstum/Ertrag, Vermehrung inkl. Deckel, Stapel-Mechanik, Platzierungs-
+validierung inkl. Unebenheits-Limit + Orientierung, kompletter Bau-Flow
+Planieren→Fällen→Liefern→Bauen, Baustopp ohne Holz + Fortsetzung nach
+Lieferung, Hütten-Spawn, Rekrutierung nur IDLE, manuelles Kettenfällen),
+`--headless --quit` fehlerfrei. Manuelle Prüfung: **ausstehend — bitte durch
+Nutzer prüfen** (Ghost mit Eingang/R-Rotation, Planier-Hüpfen, Holzkette,
+Baumvermehrung über längere Spielzeit).

@@ -6,6 +6,10 @@ extends Node
 
 signal unit_died(unit: Node)
 signal building_destroyed(building: Node)
-signal wood_changed(tribe_id: int, amount: int)
+## Total wood lying around in piles (there is no per-tribe wood stock).
+signal stockpile_changed(total: int)
 signal mana_changed(tribe_id: int, amount: float)
 signal population_changed(tribe_id: int, population: int, capacity: int)
+## Terrain heights changed in this cell rect (flattening, later Landbridge);
+## Main rebuilds the affected mesh chunks + collision.
+signal terrain_deformed(rect: Rect2i)

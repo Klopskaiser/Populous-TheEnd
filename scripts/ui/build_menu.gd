@@ -1,10 +1,12 @@
 class_name BuildMenu extends Control
 
 ## Build UI (German labels): a button/hotkey enters placement mode, a ghost
-## mesh follows the mouse over the terrain (green = valid, red = invalid),
-## left click places the building via TribeCommands.place_building(), Esc or
-## right click cancels. While placement mode is active the SelectionManager
-## ignores mouse input (it checks is_active()).
+## mesh (including an entrance marker) follows the mouse over the terrain
+## (green = valid, red = invalid), R rotates the entrance side, left click
+## places the construction site via TribeCommands.place_building(), Esc or
+## right click cancels. No wood is paid up front — braves deliver it to the
+## site. While placement mode is active the SelectionManager ignores mouse
+## input (it checks is_active()).
 
 const RAY_LENGTH: float = 1000.0
 const TERRAIN_MASK: int = 1   # ghost snaps to terrain only
@@ -19,10 +21,11 @@ var _world_root: Node3D = null   # parent for the ghost mesh
 var _tribe: Tribe = null
 
 var _build_scene: PackedScene = null
-var _build_cost: int = 0
 var _build_footprint: Vector2i = Vector2i.ONE
+var _orientation: int = 0        # entrance side, rotated with R
 var _ghost: MeshInstance3D = null
 var _ghost_material: StandardMaterial3D = null
+var _entrance_marker: MeshInstance3D = null
 var _ghost_cell: Vector2i = Vector2i.ZERO
 var _ghost_valid: bool = false
 
@@ -48,6 +51,7 @@ func _ready() -> void:
 	add_child(bar)
 	var hut_button: Button = Button.new()
 	hut_button.text = "Hütte (%d Holz) [H]" % Hut.WOOD_COST
+	hut_button.tooltip_text = "R = Eingang drehen, Esc = abbrechen"
 	hut_button.pressed.connect(_on_hut_button)
 	bar.add_child(hut_button)
 
@@ -63,7 +67,6 @@ func _enter_build_mode(scene: PackedScene) -> void:
 	var probe: Building = scene.instantiate() as Building
 	if probe == null:
 		return
-	_build_cost = probe.wood_cost
 	_build_footprint = probe.footprint
 	probe.free()
 	_build_scene = scene
@@ -75,6 +78,7 @@ func _exit_build_mode() -> void:
 	if _ghost != null:
 		_ghost.queue_free()
 		_ghost = null
+		_entrance_marker = null
 
 
 func _create_ghost() -> void:
@@ -92,6 +96,28 @@ func _create_ghost() -> void:
 	_ghost.material_override = _ghost_material
 	_ghost.visible = false
 	_world_root.add_child(_ghost)
+
+	# Entrance marker: a small block on the entrance side of the footprint.
+	_entrance_marker = MeshInstance3D.new()
+	var marker_box: BoxMesh = BoxMesh.new()
+	marker_box.size = Vector3(0.8, 0.5, 0.8)
+	_entrance_marker.mesh = marker_box
+	var marker_mat: StandardMaterial3D = StandardMaterial3D.new()
+	marker_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	marker_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	marker_mat.albedo_color = Color(1.0, 0.9, 0.2, 0.8)
+	_entrance_marker.material_override = marker_mat
+	_ghost.add_child(_entrance_marker)
+	_update_entrance_marker()
+
+
+func _update_entrance_marker() -> void:
+	if _entrance_marker == null:
+		return
+	var dirs: Array[Vector3] = [
+		Vector3(0, 0, 1), Vector3(1, 0, 0), Vector3(0, 0, -1), Vector3(-1, 0, 0)]
+	var dist: float = float(maxi(_build_footprint.x, _build_footprint.y)) * 0.5 + 0.5
+	_entrance_marker.position = dirs[_orientation] * dist + Vector3(0.0, -0.55, 0.0)
 
 
 func _process(_delta: float) -> void:
@@ -115,8 +141,7 @@ func _process(_delta: float) -> void:
 	# Centre the footprint on the cursor cell.
 	var hit_cell: Vector2i = _nav_grid.world_to_cell(hit.position)
 	_ghost_cell = hit_cell - _build_footprint / 2
-	_ghost_valid = _tribe_commands.can_place_at(_ghost_cell, _build_footprint) \
-		and _tribe != null and _tribe.wood >= _build_cost
+	_ghost_valid = _tribe_commands.can_place_at(_ghost_cell, _build_footprint)
 	_ghost_material.albedo_color = COLOR_VALID if _ghost_valid else COLOR_INVALID
 	var wx: float = (float(_ghost_cell.x) + float(_build_footprint.x) * 0.5) * TerrainData.CELL_SIZE
 	var wz: float = (float(_ghost_cell.y) + float(_build_footprint.y) * 0.5) * TerrainData.CELL_SIZE
@@ -132,6 +157,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if not is_active():
 		return
+	if event.is_action_pressed("rotate_building"):
+		_orientation = (_orientation + 1) % 4
+		_update_entrance_marker()
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed("ui_cancel"):
 		_exit_build_mode()
 		get_viewport().set_input_as_handled()
@@ -140,7 +170,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		var mb: InputEventMouseButton = event
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			if _ghost_valid:
-				_tribe_commands.place_building(_tribe, _build_scene, _ghost_cell)
+				_tribe_commands.place_building(_tribe, _build_scene, _ghost_cell, _orientation)
 				_exit_build_mode()
 			get_viewport().set_input_as_handled()
 		elif mb.button_index == MOUSE_BUTTON_RIGHT:

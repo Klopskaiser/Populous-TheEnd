@@ -1,9 +1,9 @@
 class_name Tribe extends RefCounted
 
 ## One tribe (player or AI). Player and AI are identical Tribe instances —
-## all mutations go through TribeCommands (or the tribe's own methods below);
-## raw writes like `tribe.wood += x` outside TribeCommands are forbidden
-## (exceptions: TribeCommands itself and tests).
+## all mutations go through TribeCommands (or the tribe's own methods below).
+## There is NO tribe wood stock: wood exists only physically as piles on the
+## ground (WoodPileManager) and gets delivered to construction sites.
 ##
 ## Pure data class (no Node dependency) so it is headless-testable. Signals go
 ## through the Events autoload; the lookup is guarded so tests without
@@ -16,7 +16,6 @@ const MANA_PRAY_BONUS: float = 0.5
 
 var id: int = 0
 var color: Color = Color.WHITE
-var wood: int = 0
 var mana: float = 0.0
 var units: Array[Unit] = []
 var buildings: Array[Building] = []
@@ -61,25 +60,6 @@ func tick(delta: float) -> void:
 	_emit_mana()
 
 
-# --- Wood -----------------------------------------------------------------------
-
-func add_wood(amount: int) -> void:
-	if amount <= 0:
-		return
-	wood += amount
-	_emit_wood()
-
-
-## Deducts wood if enough is available; returns false (without side effect)
-## otherwise.
-func spend_wood(amount: int) -> bool:
-	if wood < amount:
-		return false
-	wood -= amount
-	_emit_wood()
-	return true
-
-
 # --- Unit / building registry ---------------------------------------------------
 
 func add_unit(unit: Unit) -> void:
@@ -122,12 +102,6 @@ func _bus() -> Node:
 		if loop is SceneTree:
 			_events = (loop as SceneTree).root.get_node_or_null("Events")
 	return _events
-
-
-func _emit_wood() -> void:
-	var bus: Node = _bus()
-	if bus != null:
-		bus.wood_changed.emit(id, wood)
 
 
 func _emit_mana() -> void:

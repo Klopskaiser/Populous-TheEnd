@@ -1,25 +1,52 @@
 class_name TreeResource extends Node3D
 
-## Wild tree: the only physical resource source. Braves chop it via harvest();
-## when it is empty it emits `depleted` and the TreeManager deregisters it.
-## Trees do not block the NavGrid (thin obstacles), so no cells are reserved.
+## Wild tree with four growth stages (klein -> mittelklein -> mittelgroß ->
+## groß). Braves fell the whole tree (chop timer) and carry away its yield;
+## growth and reproduction are driven by the TreeManager. Trees do not block
+## the NavGrid (thin obstacles).
 
-signal depleted(tree: TreeResource)
+const MAX_STAGE: int = 3
+## Wood yield per stage: klein/mittelklein = 1, mittelgroß = 2, groß = 3.
+const YIELDS: Array[int] = [1, 1, 2, 3]
+const STAGE_SCALES: Array[float] = [0.35, 0.55, 0.8, 1.0]
+## Seconds per growth stage.
+const GROWTH_TIME: float = 75.0
 
-var wood_remaining: int = 40
+var stage: int = 0
+var growth_timer: float = GROWTH_TIME
+## Worker (Brave) that reserved this tree; untyped because it may be freed.
+var claimed_by: Object = null
+## Set once when the tree is felled — guards against double felling when two
+## braves were sent to the same tree.
+var felled_flag: bool = false
 
 
-## Takes up to `amount` wood; returns how much was actually taken. Emits
-## `depleted` once when the tree runs out. Callers must not touch the tree
-## after a depleting harvest (the manager may free it).
-func harvest(amount: int) -> int:
-	if wood_remaining <= 0:
-		return 0
-	var taken: int = mini(amount, wood_remaining)
-	wood_remaining -= taken
-	if wood_remaining <= 0:
-		depleted.emit(self)
-	return taken
+func wood_yield() -> int:
+	return YIELDS[stage]
+
+
+## Bigger trees take longer to fell.
+func chop_time() -> float:
+	return 1.5 + 0.5 * float(stage)
+
+
+func is_claimed() -> bool:
+	return claimed_by != null and is_instance_valid(claimed_by)
+
+
+func set_stage(p_stage: int) -> void:
+	stage = clampi(p_stage, 0, MAX_STAGE)
+	scale = Vector3.ONE * STAGE_SCALES[stage]
+
+
+## Called by the TreeManager tick; grows one stage when the timer runs out.
+func grow_tick(delta: float) -> void:
+	if stage >= MAX_STAGE:
+		return
+	growth_timer -= delta
+	if growth_timer <= 0.0:
+		growth_timer += GROWTH_TIME
+		set_stage(stage + 1)
 
 
 func _ready() -> void:

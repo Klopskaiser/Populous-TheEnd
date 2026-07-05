@@ -8,7 +8,6 @@ extends Node3D
 const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
 const SITE_SCENE: PackedScene = preload("res://scenes/buildings/reincarnation_site.tscn")
 const START_BRAVES: int = 10
-const START_WOOD: int = 100
 const TREE_COUNT: int = 60
 
 ## Debug: spawn a small marker at the terrain raycast hit on left-click, to
@@ -20,6 +19,7 @@ const TREE_COUNT: int = 60
 @onready var _unit_manager: UnitManager = $UnitManager
 @onready var _building_manager: BuildingManager = $BuildingManager
 @onready var _tree_manager: TreeManager = $TreeManager
+@onready var _wood_pile_manager: WoodPileManager = $WoodPileManager
 @onready var _tribe_commands: TribeCommands = $TribeCommands
 @onready var _selection: SelectionManager = $UI/SelectionManager
 @onready var _hud: Hud = $UI/Hud
@@ -43,19 +43,22 @@ func _ready() -> void:
 	# Tribes: 0 = player (blue), 1 = AI (red) — identical instances.
 	var tribes: Array[Tribe] = []
 	for i in range(2):
-		var tribe: Tribe = Tribe.new(i, Unit.TRIBE_COLORS[i])
-		tribe.wood = START_WOOD  # start resources (initialisation, not gameplay)
-		tribes.append(tribe)
+		tribes.append(Tribe.new(i, Unit.TRIBE_COLORS[i]))
 	GameState.tribes = tribes
 
-	_unit_manager.setup(td, nav, tribes, _tree_manager)
-	_building_manager.setup(td, nav, _unit_manager)
+	_unit_manager.setup(td, nav, tribes, _tree_manager, _wood_pile_manager)
+	_building_manager.setup(td, nav, _unit_manager, _wood_pile_manager)
 	_tree_manager.setup(td, nav)
+	_wood_pile_manager.setup(td)
 	_tribe_commands.setup(nav, _building_manager, _unit_manager, _tree_manager)
 	_selection.setup(_unit_manager, _tribe_commands, _build_menu)
 	_build_menu.setup(_tribe_commands, nav, self, tribes[GameState.PLAYER_TRIBE])
-	_hud.setup(tribes[GameState.PLAYER_TRIBE])
+	_hud.setup(tribes[GameState.PLAYER_TRIBE], _wood_pile_manager.total_wood())
 	_route_visualizer.setup(_selection, td)
+
+	# Terrain deformations (foundation flattening, later Landbridge) rebuild
+	# the affected mesh chunks + collision here.
+	Events.terrain_deformed.connect(_terrain.apply_deformation)
 
 	_tree_manager.spawn_trees(TREE_COUNT, GameState.ISLAND_SEED)
 	_place_start_site(tribes[GameState.PLAYER_TRIBE], nav)
@@ -74,7 +77,7 @@ func _place_start_site(tribe: Tribe, nav: NavGrid) -> void:
 	for radius in range(0, TerrainData.SIZE / 2):
 		for cell in _ring_cells(center, radius):
 			if _tribe_commands.can_place_at(cell, fp):
-				_building_manager.place(SITE_SCENE, tribe, cell, true)
+				_building_manager.place(SITE_SCENE, tribe, cell, 0, true)
 				return
 	push_warning("No valid spot for the start reincarnation site found")
 

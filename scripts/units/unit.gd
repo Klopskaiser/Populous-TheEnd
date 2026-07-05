@@ -35,6 +35,8 @@ var speed: float = 4.0
 var state: State = State.IDLE
 var waypoint_queue: Array[Vector3] = []
 var patrol: bool = false
+## Visual-only: the sprite bounces (used by braves flattening terrain).
+var hop_visual: bool = false
 
 ## Movement direction on the XZ plane (kept when the unit stops); drives the
 ## choice of the four sprite views. Default: facing the camera side (south).
@@ -78,6 +80,18 @@ func _physics_process(delta: float) -> void:
 
 func _process(_delta: float) -> void:
 	_update_sprite_view()
+	_update_hop()
+
+
+## Small sprite bounce while hop_visual is set (visual only).
+func _update_hop() -> void:
+	if _sprite == null:
+		return
+	var base: float = PlaceholderSprites.H * SPRITE_PIXEL_SIZE * 0.5
+	var offset: float = 0.0
+	if hop_visual:
+		offset = absf(sin(float(Time.get_ticks_msec()) * 0.012)) * 0.35
+	_sprite.position.y = base + offset
 
 
 # --- Core logic (testable without scene tree) ---------------------------------

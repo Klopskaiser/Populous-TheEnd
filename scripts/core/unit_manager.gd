@@ -12,6 +12,7 @@ var terrain_data: TerrainData = null
 var nav_grid: NavGrid = null
 var tribes: Array[Tribe] = []
 var tree_manager: TreeManager = null
+var wood_pile_manager: WoodPileManager = null
 
 var units: Array[Unit] = []
 var _hash: Dictionary[Vector2i, Array] = {}       # hash cell -> Array of Unit
@@ -19,11 +20,13 @@ var _unit_cells: Dictionary[Unit, Vector2i] = {}  # unit -> current hash cell
 
 
 func setup(p_terrain_data: TerrainData, p_nav_grid: NavGrid,
-		p_tribes: Array[Tribe] = [], p_tree_manager: TreeManager = null) -> void:
+		p_tribes: Array[Tribe] = [], p_tree_manager: TreeManager = null,
+		p_wood_pile_manager: WoodPileManager = null) -> void:
 	terrain_data = p_terrain_data
 	nav_grid = p_nav_grid
 	tribes = p_tribes
 	tree_manager = p_tree_manager
+	wood_pile_manager = p_wood_pile_manager
 
 
 func _physics_process(delta: float) -> void:
@@ -72,7 +75,9 @@ func spawn_unit(scene: PackedScene, tribe_id: int, pos: Vector3) -> Unit:
 	unit.tribe_id = tribe_id
 	unit.terrain_data = terrain_data
 	unit.nav_grid = nav_grid
-	unit.set("tree_manager", tree_manager)  # only Braves have this property
+	# Worker references — only Braves have these properties.
+	unit.set("tree_manager", tree_manager)
+	unit.set("wood_pile_manager", wood_pile_manager)
 	unit.position = pos
 	if terrain_data != null:
 		unit.position.y = terrain_data.get_height(pos.x, pos.z)

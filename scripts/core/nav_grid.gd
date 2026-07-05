@@ -69,6 +69,12 @@ func is_cell_walkable(cell: Vector2i) -> bool:
 	return terrain.in_bounds(cell) and not _astar.is_point_solid(cell)
 
 
+## True when the cell is reserved by a building footprint (steep-but-empty
+## cells are not "blocked" in this sense — they can be flattened).
+func is_cell_blocked_by_building(cell: Vector2i) -> bool:
+	return _building_cells.has(cell)
+
+
 ## Nearest walkable cell via outward ring search; (-1, -1) if none in range.
 func nearest_walkable_cell(cell: Vector2i) -> Vector2i:
 	cell = Vector2i(

@@ -2,19 +2,28 @@ class_name BuildingManager extends Node
 
 ## Registry for all buildings (child of Main) and the low-level placement
 ## used by TribeCommands.place_building(). Drives the building ticks from
-## _physics_process (tests call tick() manually).
+## _physics_process (tests call tick() manually) and recruits idle braves as
+## workers for construction sites (only braves without any other task/order
+## help; max Building.MAX_WORKERS per site).
+
+const RECRUIT_RADIUS: float = 30.0
+const RECRUIT_INTERVAL: float = 1.0
 
 var terrain_data: TerrainData = null
 var nav_grid: NavGrid = null
 var unit_manager: UnitManager = null
+var wood_pile_manager: WoodPileManager = null
 
 var buildings: Array[Building] = []
+var _recruit_timer: float = RECRUIT_INTERVAL
 
 
-func setup(p_terrain_data: TerrainData, p_nav_grid: NavGrid, p_unit_manager: UnitManager) -> void:
+func setup(p_terrain_data: TerrainData, p_nav_grid: NavGrid,
+		p_unit_manager: UnitManager, p_wood_pile_manager: WoodPileManager = null) -> void:
 	terrain_data = p_terrain_data
 	nav_grid = p_nav_grid
 	unit_manager = p_unit_manager
+	wood_pile_manager = p_wood_pile_manager
 
 
 func _physics_process(delta: float) -> void:
@@ -24,13 +33,17 @@ func _physics_process(delta: float) -> void:
 func tick(delta: float) -> void:
 	for building in buildings:
 		building.tick(delta)
+	_recruit_timer -= delta
+	if _recruit_timer <= 0.0:
+		_recruit_timer += RECRUIT_INTERVAL
+		_recruit_workers()
 
 
 ## Instantiates and registers a building at a footprint top-left cell.
-## Validation (cost, walkability) happens in TribeCommands — this only
-## executes the placement. pre_built skips the construction phase (used for
-## the start reincarnation sites).
-func place(scene: PackedScene, tribe: Tribe, cell: Vector2i, pre_built: bool = false) -> Building:
+## Validation happens in TribeCommands — this only executes the placement.
+## pre_built skips the flatten/wood phases (used for the start sites).
+func place(scene: PackedScene, tribe: Tribe, cell: Vector2i,
+		orientation: int = 0, pre_built: bool = false) -> Building:
 	var building: Building = scene.instantiate() as Building
 	if building == null:
 		return null
@@ -38,7 +51,9 @@ func place(scene: PackedScene, tribe: Tribe, cell: Vector2i, pre_built: bool = f
 	building.terrain_data = terrain_data
 	building.nav_grid = nav_grid
 	building.unit_manager = unit_manager
+	building.wood_pile_manager = wood_pile_manager
 	building.cell = cell
+	building.orientation = orientation
 	building.position = _placement_position(building)
 	add_child(building)
 	register(building, tribe)
@@ -47,6 +62,8 @@ func place(scene: PackedScene, tribe: Tribe, cell: Vector2i, pre_built: bool = f
 	building.rally_point = _default_rally_point(building)
 	if pre_built:
 		building.finish_construction()
+	else:
+		building.init_construction()
 	return building
 
 
@@ -70,6 +87,23 @@ func _on_building_destroyed(building: Building) -> void:
 	buildings.erase(building)
 
 
+## Sends idle braves of the owning tribe to under-construction sites nearby.
+func _recruit_workers() -> void:
+	if unit_manager == null:
+		return
+	for building in buildings:
+		if not building.under_construction:
+			continue
+		if building.workers.size() >= Building.MAX_WORKERS:
+			continue
+		for unit in unit_manager.get_units_in_radius(building.center_world(), RECRUIT_RADIUS):
+			if building.workers.size() >= Building.MAX_WORKERS:
+				break
+			if unit is Brave and unit.tribe_id == building.tribe_id \
+					and unit.state == Unit.State.IDLE:
+				(unit as Brave).order_build(building)
+
+
 func _placement_position(building: Building) -> Vector3:
 	var wx: float = (float(building.cell.x) + float(building.footprint.x) * 0.5) * TerrainData.CELL_SIZE
 	var wz: float = (float(building.cell.y) + float(building.footprint.y) * 0.5) * TerrainData.CELL_SIZE
@@ -77,11 +111,10 @@ func _placement_position(building: Building) -> Vector3:
 	return Vector3(wx, wy, wz)
 
 
-## Default rally point: walkable cell south of the footprint.
+## Default rally point: walkable cell at (or near) the entrance.
 func _default_rally_point(building: Building) -> Vector3:
-	var south: Vector2i = building.cell + Vector2i(building.footprint.x / 2, building.footprint.y + 1)
 	if nav_grid != null:
-		var c: Vector2i = nav_grid.nearest_walkable_cell(south)
+		var c: Vector2i = nav_grid.nearest_walkable_cell(building.entrance_cell())
 		if c.x >= 0:
 			return nav_grid.cell_to_world(c)
-	return building.center_world() + Vector3(0.0, 0.0, float(building.footprint.y) * 0.5 + 1.5)
+	return building.entrance_world()
