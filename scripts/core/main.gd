@@ -1,15 +1,21 @@
 extends Node3D
 
 ## Root of the main scene. Creates the TerrainData (fixed seed), builds the
-## Terrain, and positions the camera over the island. Must be headless-robust:
-## no viewport-texture access in _ready().
+## Terrain, creates the NavGrid, positions the camera over the island and
+## spawns the starting units. Must be headless-robust: no viewport-texture
+## access in _ready().
+
+const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
+const START_BRAVES: int = 10
 
 ## Debug: spawn a small marker at the terrain raycast hit on left-click, to
 ## verify the HeightMapShape3D offset (marker must sit exactly under the cursor).
-@export var debug_click_marker: bool = true
+@export var debug_click_marker: bool = false
 
 @onready var _terrain: Terrain = $Terrain
 @onready var _camera_rig: CameraRig = $CameraRig
+@onready var _unit_manager: UnitManager = $UnitManager
+@onready var _selection: SelectionManager = $UI/SelectionManager
 
 var _marker: MeshInstance3D = null
 
@@ -22,9 +28,49 @@ func _ready() -> void:
 
 	_terrain.build(td)
 
+	var nav: NavGrid = NavGrid.new(td)
+	GameState.nav_grid = nav
+	_unit_manager.setup(td, nav)
+	_selection.setup(_unit_manager)
+
+	_spawn_start_units(td, nav)
+
 	# Start the camera over the island centre.
 	var center: float = TerrainData.SIZE * 0.5
 	_camera_rig.global_position = Vector3(center, td.get_height(center, center), center)
+
+
+## Spawns the starting Braves (player tribe) on walkable cells near the island
+## centre, spread out via a spiral ring search.
+func _spawn_start_units(td: TerrainData, nav: NavGrid) -> void:
+	var center: Vector2i = Vector2i(TerrainData.SIZE / 2, TerrainData.SIZE / 2)
+	var spawned: int = 0
+	for radius in range(0, TerrainData.SIZE / 2):
+		for cell in _ring_cells(center, radius):
+			if spawned >= START_BRAVES:
+				return
+			if not nav.is_cell_walkable(cell):
+				continue
+			if (cell.x + cell.y) % 2 != 0:
+				continue  # every other cell, for spacing
+			_unit_manager.spawn_unit(BRAVE_SCENE, GameState.PLAYER_TRIBE, nav.cell_to_world(cell))
+			spawned += 1
+	if spawned < START_BRAVES:
+		push_warning("Only %d of %d start braves spawned" % [spawned, START_BRAVES])
+
+
+func _ring_cells(center: Vector2i, radius: int) -> Array[Vector2i]:
+	var cells: Array[Vector2i] = []
+	if radius == 0:
+		cells.append(center)
+		return cells
+	for dx in range(-radius, radius + 1):
+		cells.append(center + Vector2i(dx, -radius))
+		cells.append(center + Vector2i(dx, radius))
+	for dz in range(-radius + 1, radius):
+		cells.append(center + Vector2i(-radius, dz))
+		cells.append(center + Vector2i(radius, dz))
+	return cells
 
 
 func _unhandled_input(event: InputEvent) -> void:

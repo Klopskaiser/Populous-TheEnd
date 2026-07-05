@@ -7,11 +7,16 @@ extends Node
 
 var terrain_data: TerrainData = null
 var terrain: Node3D = null   # the Terrain node (set by Main on startup)
+var nav_grid: NavGrid = null
 
 ## Fixed seed for the skirmish island (kept here so all systems agree on it).
 const ISLAND_SEED: int = 1337
+
+## Tribe id of the human player.
+const PLAYER_TRIBE: int = 0
 
 
 func reset() -> void:
 	terrain_data = null
 	terrain = null
+	nav_grid = null
