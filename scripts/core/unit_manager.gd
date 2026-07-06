@@ -200,6 +200,7 @@ func register(unit: Unit) -> void:
 	units.append(unit)
 	unit.died.connect(_on_unit_died)
 	unit.corpse_expired.connect(_on_corpse_expired)
+	unit.converted.connect(_on_unit_converted)
 	_update_hash_cell(unit)
 	if unit_renderer != null:
 		unit_renderer.register_unit(unit)
@@ -211,6 +212,8 @@ func unregister(unit: Unit) -> void:
 		unit.died.disconnect(_on_unit_died)
 	if unit.corpse_expired.is_connected(_on_corpse_expired):
 		unit.corpse_expired.disconnect(_on_corpse_expired)
+	if unit.converted.is_connected(_on_unit_converted):
+		unit.converted.disconnect(_on_unit_converted)
 	if _hash.has(unit._hash_cell):
 		_hash[unit._hash_cell].erase(unit)
 	unit._hash_cell = Vector2i(2147483647, 2147483647)
@@ -243,6 +246,12 @@ func _on_unit_died(unit: Unit) -> void:
 func _on_corpse_expired(unit: Unit) -> void:
 	unregister(unit)
 	unit.queue_free()
+
+
+## Preacher conversion switched the unit's tribe: refresh its rendered colour.
+func _on_unit_converted(unit: Unit) -> void:
+	if unit_renderer != null:
+		unit_renderer.update_unit_color(unit)
 
 
 # --- Spawning -------------------------------------------------------------------

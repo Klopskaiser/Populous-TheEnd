@@ -35,6 +35,11 @@ const TERRAIN_MASK: int = 1
 ## screen-space box off the units and produced empty/blinking selections.
 static var drag_active: bool = false
 
+## Empty-ground click deselects are suppressed this long after a box select:
+## bounced/duplicated clicks right after a fast drag cleared fresh selections
+## ("rings flash briefly, then everything is deselected").
+const DESELECT_GRACE_S: float = 0.3
+
 var player_tribe_id: int = 0
 var selected: Array[Unit] = []
 ## Selected own building (mutually exclusive with unit selection). Right-click
@@ -49,6 +54,11 @@ var _build_menu: BuildMenu = null
 var _dragging: bool = false
 var _drag_start: Vector2 = Vector2.ZERO
 var _drag_current: Vector2 = Vector2.ZERO
+## Farthest the cursor got from the press point during this drag. A fast
+## out-and-back drag can RELEASE near the start again — without this it would
+## degrade into a click on empty ground and wipe the selection.
+var _drag_max_dist: float = 0.0
+var _last_box_select_ms: int = -100000
 
 
 func setup(p_unit_manager: UnitManager, p_tribe_commands: TribeCommands = null,
@@ -64,11 +74,13 @@ func _ready() -> void:
 
 func _process(_delta: float) -> void:
 	# Safety net: if the release event was swallowed elsewhere (e.g. dropped
-	# over the sidebar panel), end the drag as soon as the button is up so
-	# drag_active cannot stick and keep the edge scroll suspended.
+	# over the sidebar panel), FINALIZE the drag from the last known cursor
+	# position instead of dropping it — a completed box must still select.
 	if _dragging and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 		_dragging = false
 		drag_active = false
+		if _drag_max_dist >= DRAG_THRESHOLD_PX:
+			_box_select(_drag_rect(_drag_current))
 		queue_redraw()
 
 
@@ -89,10 +101,15 @@ func _unhandled_input(event: InputEvent) -> void:
 				drag_active = true
 				_drag_start = mb.position
 				_drag_current = mb.position
+				_drag_max_dist = 0.0
 			elif _dragging:
 				_dragging = false
 				drag_active = false
-				if _drag_start.distance_to(mb.position) < DRAG_THRESHOLD_PX:
+				_drag_max_dist = maxf(_drag_max_dist, _drag_start.distance_to(mb.position))
+				# Once a real box was drawn (max extent counts, not just the
+				# release point), it stays a box — a fast out-and-back drag must
+				# never degrade into a deselecting ground click.
+				if _drag_max_dist < DRAG_THRESHOLD_PX:
 					_click_select(mb.position)
 				else:
 					_box_select(_drag_rect(mb.position))
@@ -107,6 +124,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		_update_hover(mm.position)
 		if _dragging:
 			_drag_current = mm.position
+			_drag_max_dist = maxf(_drag_max_dist, _drag_start.distance_to(mm.position))
 			queue_redraw()
 	elif event.is_action_pressed("toggle_patrol"):
 		_prune_selection()
@@ -146,7 +164,10 @@ func _click_select(screen_pos: Vector2) -> void:
 	var best: Unit = _pick_unit_at(screen_pos, camera, player_tribe_id)
 	if best != null:
 		_set_selection([best])
-	else:
+		return
+	# Ground click deselects — but not right after a box select: bounced or
+	# duplicated clicks in that window wiped fresh selections.
+	if Time.get_ticks_msec() - _last_box_select_ms > int(DESELECT_GRACE_S * 1000.0):
 		_set_selection([])
 
 
@@ -166,6 +187,7 @@ func _box_select(rect: Rect2) -> void:
 	if picked.is_empty():
 		return
 	_set_selection(picked)
+	_last_box_select_ms = Time.get_ticks_msec()
 
 
 ## Screen rect the unit's billboard sprite covers (feet->head projected,
@@ -286,13 +308,15 @@ func _raycast(screen_pos: Vector2, mask: int) -> Dictionary:
 	return space.intersect_ray(query)
 
 
-## Drops freed or dead units from the selection. Uses an explicit loop with an
-## is_instance_valid guard before any typed use — passing a freed instance to a
-## typed lambda parameter would itself raise a script error.
+## Drops freed, dead or no-longer-own units (e.g. converted away by an enemy
+## preacher) from the selection. Uses an explicit loop with an is_instance_valid
+## guard before any typed use — passing a freed instance to a typed lambda
+## parameter would itself raise a script error.
 func _prune_selection() -> void:
 	var kept: Array[Unit] = []
 	for u in selected:
-		if is_instance_valid(u) and u.state != Unit.State.DEAD:
+		if is_instance_valid(u) and u.state != Unit.State.DEAD \
+				and u.tribe_id == player_tribe_id:
 			kept.append(u)
 	selected = kept
 

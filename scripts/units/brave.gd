@@ -167,7 +167,9 @@ func cancel_training() -> void:
 
 # --- Tick ----------------------------------------------------------------------
 
-func tick(delta: float) -> void:
+## Worker-state dispatch; everything else (incl. the walk/idle/carry animation
+## sync at the end of every tick) runs in the Unit base tick.
+func _tick_state(delta: float) -> void:
 	match state:
 		State.GATHER:
 			if task == Task.DELIVER:
@@ -181,10 +183,7 @@ func tick(delta: float) -> void:
 		State.TRAIN:
 			_tick_train(delta)
 		_:
-			super.tick(delta)
-	# Keep walk/idle/carry in sync with actual motion and carried wood without
-	# restarting the timer (cheap: only updates when the base actually changes).
-	_apply_animation(false)
+			super._tick_state(delta)
 
 
 # --- Construction job ---------------------------------------------------------------

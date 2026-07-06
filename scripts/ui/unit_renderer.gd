@@ -164,6 +164,16 @@ func unregister_unit(unit: Unit) -> void:
 	_multimesh.visible_instance_count = _units.size()
 
 
+## Re-applies the tribe colour of a unit's instance (after a preacher
+## conversion switched its tribe).
+func update_unit_color(unit: Unit) -> void:
+	if unit._render_index < 0:
+		return
+	unit._render_alpha = 1.0
+	_multimesh.set_instance_color(unit._render_index,
+		Unit.TRIBE_COLORS[unit.tribe_id % Unit.TRIBE_COLORS.size()])
+
+
 # --- Per-frame update -------------------------------------------------------------------
 
 func _process(_delta: float) -> void:

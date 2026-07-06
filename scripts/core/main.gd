@@ -13,6 +13,7 @@ const FIREWARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/fire
 const TEMPLE_SCENE: PackedScene = preload("res://scenes/buildings/temple.tscn")
 const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
 const FIREWARRIOR_SCENE: PackedScene = preload("res://scenes/units/firewarrior.tscn")
+const PREACHER_SCENE: PackedScene = preload("res://scenes/units/preacher.tscn")
 const START_BRAVES: int = 20
 const TREE_COUNT: int = 60
 ## Max player count — one tribe per player, all identical instances.
@@ -173,7 +174,8 @@ func _setup_sparring(tribes: Array[Tribe], nav: NavGrid) -> void:
 
 func _spawn_sparring_units(red: Tribe, anchor: Vector2i, nav: NavGrid) -> void:
 	var plan: Array = [
-		[BRAVE_SCENE, 4], [WARRIOR_SCENE, 3], [FIREWARRIOR_SCENE, 2]]
+		[BRAVE_SCENE, 4], [WARRIOR_SCENE, 3], [FIREWARRIOR_SCENE, 2],
+		[PREACHER_SCENE, 2]]   # enemy preachers: conversion + priest duel (5c)
 	var placed: int = 0
 	for entry in plan:
 		var scene: PackedScene = entry[0]

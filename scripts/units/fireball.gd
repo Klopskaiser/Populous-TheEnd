@@ -25,10 +25,14 @@ var _dest: Vector3 = Vector3.ZERO
 var _age: float = 0.0
 
 
+var _launch_from: Vector3 = Vector3.ZERO
+
+
 func setup(p_shooter, p_target, from: Vector3) -> void:
 	shooter = p_shooter
 	target = p_target
 	position = from
+	_launch_from = from
 	_dest = p_target.position + Vector3(0.0, TARGET_HEIGHT, 0.0)
 
 
@@ -45,12 +49,27 @@ func tick(delta: float) -> void:
 
 ## Applies the damage exactly once — only if the target is still alive and the
 ## ball actually reached it (a lifetime fizzle or a dead/freed target does no
-## damage).
+## damage). A hit also shoves the target back (stacking with rapid follow-up
+## hits, see Unit.apply_knockback) and interrupts a running conversion.
 func _impact() -> void:
 	done = true
-	if _target_alive() and position.distance_to(
-			target.position + Vector3(0.0, TARGET_HEIGHT, 0.0)) <= HIT_RANGE * 2.0:
-		target.take_damage(Unit.FIREBALL_DAMAGE, shooter)
+	if not _target_alive() or position.distance_to(
+			target.position + Vector3(0.0, TARGET_HEIGHT, 0.0)) > HIT_RANGE * 2.0:
+		return
+	target.take_damage(Unit.FIREBALL_DAMAGE, shooter)
+	if not _target_alive():
+		return   # the hit killed it
+	# Knockback away from the shooter (fallback: along the flight direction).
+	var dir: Vector3
+	if shooter != null and is_instance_valid(shooter):
+		dir = target.position - shooter.position
+	else:
+		dir = target.position - _launch_from
+	target.apply_knockback(dir)
+	# Fire interrupts a preacher's conversion: progress is lost, the unit
+	# stands back up (phase 5c).
+	if target.state == Unit.State.SIT:
+		target.reset_conversion()
 
 
 func _target_alive() -> bool:

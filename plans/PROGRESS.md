@@ -997,3 +997,85 @@ Feuerkrieger-Fernkampf, Leichen und Selektion funktionieren; es bleiben
 **kleinere Unschärfen** (nicht näher spezifiziert), Feinschliff dafür in
 5d bzw. Phase 8. **Sub-Phase 5b abgeschlossen** — weiter mit 5c
 (Fernkampf-Rückstoß, Prediger-Konvertierung).
+
+---
+
+## Phase 5c — Fernkampf-Rückstoß & Prediger (umgesetzt)
+
+**Gebaut:**
+- **Feuerball-Rückstoß mit Akkumulator (`unit.gd`, `fireball.gd`):**
+  `Unit.apply_knockback(dir)` schiebt das Ziel flach weg
+  (`KNOCKBACK_BASE 0,7 m` + `KNOCKBACK_STACK_BONUS 0,5 m` × Akkumulator);
+  `knockback_accum` (+1 je Treffer, Zerfall `0,8/s`) lässt **Salven stärker
+  schleudern**. Verschiebung wird in `_tick_knockback` mit 10 m/s abgespielt
+  (Walkability-Clamp — niemand wird ins Wasser geschoben; Roll-Auslöser
+  hookt hier in 5d ein). **Tick-Refactor:** `Unit.tick` = Knockback →
+  `_tick_state(delta)` (neuer virtueller Dispatch, Brave überschreibt jetzt
+  diesen statt `tick`) → `_apply_animation(false)` — Querschnittssysteme
+  laufen damit für alle Subklassen. `Fireball._impact` wendet Schaden +
+  Knockback (Richtung Schütze→Ziel) an.
+- **Hand-Feuerball-Toggle:** `throw`-Frames getauscht (Frame 0 = gerade
+  abgefeuert, **Hand leer**; Frame 1 = nachgeladen, Feuerball wieder über
+  der Hand). Anim startet je Schuss neu → Ball verschwindet exakt beim
+  Abwurf, erscheint mitten im Cooldown wieder.
+- **Prediger-Konvertierung (`preacher.gd` neu geschrieben, Sitz-Logik in
+  `unit.gd`):** `CONVERT_RANGE 5 m` (bewusst < FIRE_RANGE 6 m),
+  Konvertierzeit zufällig 4–9 s je Ziel, `FIGHT_INERTIA_CHANCE 0,4`
+  (bereits kämpfende setzen sich pro Versuch nur mit 60 %). Prediger:
+  IDLE-Scan bevorzugt Konvertieren (immune Ziele → Nahkampf), `State.CAST`
+  = channeln + Anlaufen aufs Fokusziel (`_refresh_conversion` im
+  Scan-Takt), `order_attack`-Override (Rechtsklick auf normalen Feind =
+  konvertieren, auf Prediger/Schamanin = prügeln). **Ziel-Seite (`Unit`):**
+  neuer `State.SIT` (ans Enum-Ende), `begin_conversion` (Interrupt +
+  hinsetzen), `_tick_sit` (Fortschritt nur solange der Prediger in
+  Reichweite **castet**; Prediger im ATTACK = **Duell → Trance bricht, die
+  Freigelassenen greifen den Prediger an**), `convert_to_tribe`
+  (Tribe-Listen umhängen, `tribe_id`, Angreifer-Slots lösen, Signal
+  `converted` → UnitManager → `UnitRenderer.update_unit_color`).
+  `is_conversion_immune()` (Schamanin/Prediger). Sitzende sind **kein
+  Aggro-Ziel** (`_scan_for_enemy` überspringt SIT — schützt Konvertierungen
+  vor eigenen Kampfeinheiten); `_tick_attack`/`_maybe_retaliate` droppen
+  Ziele der **eigenen** Farbe (frisch Konvertierte werden nicht weiter
+  verprügelt).
+- **Priester-Duell:** feindlicher Prediger ≤ CONVERT_RANGE → `_begin_attack`
+  (Nahkampf); die Sitzenden stehen auf und kämpfen mit (via `_tick_sit`).
+- **Feuerkrieger-Reset:** `Fireball._impact` ruft auf sitzenden Zielen
+  `reset_conversion()` (Fortschritt = 0, Ziel steht auf). Friendly-Fire
+  löst keine Vergeltung aus (`_maybe_retaliate` prüft Tribe).
+- **`sit`-Placeholder-Animation** (alle Kinds, 2 Frames mit Atem-Bob,
+  gesenkter Kopf + gefaltete Beine; keine Ausrüstungs-Overlays wie bei
+  `dead`).
+- **Sparring:** rote Basis bekommt **2 Prediger** (Konvertierung/Duell
+  manuell testbar). Selektion: `_prune_selection` wirft auch Einheiten
+  raus, die **nicht mehr dem Spieler gehören** (wegkonvertiert).
+
+**Auswahllogik (Nutzerreport „Rahmen blitzt kurz, dann abgewählt", v. a.
+bei schnellen Rahmen) — drei Restursachen gefixt (`selection_manager.gd`):**
+1. **Hin-und-zurück-Drags:** Release < 6 px vom Start wurde als Boden-Klick
+   gewertet (→ Abwahl), obwohl ein Rahmen sichtbar war. Jetzt zählt die
+   **maximale Drag-Ausdehnung** (`_drag_max_dist`) — einmal Rahmen, immer
+   Rahmen.
+2. **Preller-/Doppelklicks direkt nach dem Box-Select:** Boden-Klick-Abwahl
+   ist für `DESELECT_GRACE_S = 0,3 s` nach einem erfolgreichen Box-Select
+   gesperrt.
+3. **Über der Sidebar geschlucktes Release:** das `_process`-Sicherheitsnetz
+   **finalisiert** den Rahmen jetzt mit der letzten bekannten Mausposition
+   statt ihn zu verwerfen.
+
+**Erkenntnisse:**
+- Vergeltung + Knockback im selben Tick: das Ziel läuft nach dem Treffer
+  sofort auf den Schützen zu — Tests müssen die Verschiebung direkt nach
+  einem Tick messen, sonst überwiegt die Laufbewegung.
+- Zirkulärer Verweis `Unit._tick_sit` → `Preacher.CONVERT_RANGE` ist wie
+  gehabt unkritisch (Ladecheck grün).
+
+**Verifikation:** Testsuite grün (**389 Tests**, +30 in `test_combat.gd`:
+Knockback-Stapelung + Zerfall, Fireball-Knockback, Konvertierung komplett
+(Sitzen → Fortschritt → Tribe-Wechsel inkl. Listen), Immunität
+(Prediger), Priester-Duell bricht Trance + Freigelassene kämpfen mit,
+Feuerball-Reset, `sit` im Atlas). `--headless --import`/`--quit`/
+`--quit-after 240` fehlerfrei. **Manuelle Prüfung durch Nutzer:
+ausstehend** (Feuerball-Rückstoß sichtbar/Salven stärker, Hand-Feuerball
+verschwindet beim Wurf; rote Einheiten setzen sich vor dem eigenen
+Prediger und werden blau; Duell mit rotem Prediger; Selektion stabil bei
+schnellen Rahmen).

@@ -30,7 +30,7 @@ func _is_combatant() -> bool:
 ## stand and throw fireballs between MELEE_RANGE and FIRE_RANGE; approach when
 ## farther out.
 func _tick_attack(delta: float) -> void:
-	if not _target_valid(attack_target):
+	if not _target_valid(attack_target) or attack_target.tribe_id == tribe_id:
 		_retarget_or_idle()
 		return
 	var target: Unit = attack_target

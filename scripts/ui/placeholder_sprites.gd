@@ -58,7 +58,7 @@ static var _cache: Dictionary[StringName, SpriteFrames] = {}
 static func _anims_for(kind: StringName) -> Array[StringName]:
 	var anims: Array[StringName] = [
 		&"idle", &"walk", &"attack", &"jump", &"carry", &"carry_walk",
-		&"punch", &"kick", &"shove", &"dead"]
+		&"punch", &"kick", &"shove", &"dead", &"sit"]
 	if kind in CASTER_KINDS:
 		anims.append(&"cast")
 	if kind == &"firewarrior":
@@ -190,11 +190,18 @@ static func _build_frames(kind: StringName, anim: StringName, view: StringName) 
 			images = [_frame_shove(paint_view, 0), _frame_shove(paint_view, 1)]
 			bobs = [0, 0]
 		&"throw":
-			images = [_frame_throw(paint_view, 0), _frame_throw(paint_view, 1)]
+			# Frame 0 = just fired (arm forward, that hand EMPTY), frame 1 =
+			# reloaded (fireball back above the raised hand). The anim restarts
+			# on each shot, so the hand-fireball vanishes exactly at launch and
+			# reappears mid-cooldown ("reloading", phase 5c).
+			images = [_frame_throw(paint_view, 1), _frame_throw(paint_view, 0)]
 			bobs = [0, 0]
 		&"dead":
 			images = [_frame_dead(paint_view)]
 			bobs = [0]
+		&"sit":
+			images = [_frame_sit(paint_view, 0), _frame_sit(paint_view, 1)]
+			bobs = [0, 1]
 		&"cast":
 			images = [_frame_stand(paint_view, 0), _frame_cast(paint_view)]
 			bobs = [0, 0]
@@ -207,9 +214,9 @@ static func _build_frames(kind: StringName, anim: StringName, view: StringName) 
 	if view == &"left":
 		for img in images:
 			img.flip_x()
-	# No accents on the corpse: the shield/helmet/hood positions assume a
-	# standing body and would float over the crumpled figure.
-	if anim != &"dead":
+	# No accents on the corpse or the sitting pose: the shield/helmet/hood
+	# positions assume a standing body and would float next to the figure.
+	if anim != &"dead" and anim != &"sit":
 		for i in range(images.size()):
 			_decorate(images[i], kind, view, bobs[i])
 	return images
@@ -529,6 +536,28 @@ static func _frame_dead(_view: StringName) -> Image:
 	img.fill_rect(Rect2i(0, 18, 2, 3), C_LIMB)       # arm sticking out
 	img.fill_rect(Rect2i(7, 18, 2, 3), C_LIMB)       # bent leg poking up
 	img.fill_rect(Rect2i(9, 23, 5, 1), C_LIMB)       # outstretched leg
+	return img
+
+
+## Pacified unit sitting on the ground: lowered head and torso, legs folded in
+## front — clearly distinct from standing at any zoom. Two frames breathe via
+## the bob offset.
+static func _frame_sit(view: StringName, bob: int) -> Image:
+	var img: Image = _new_image()
+	if view == &"right":
+		img.fill_rect(Rect2i(5, 13 + bob, 6, 7), C_BODY)   # lowered torso
+	else:
+		img.fill_rect(Rect2i(4, 13 + bob, 8, 7), C_BODY)
+	img.fill_rect(Rect2i(5, 7 + bob, 6, 6), C_HEAD)        # head sits lower
+	match view:
+		&"front":
+			img.fill_rect(Rect2i(6, 9 + bob, 1, 1), C_EYE)
+			img.fill_rect(Rect2i(9, 9 + bob, 1, 1), C_EYE)
+		&"back":
+			img.fill_rect(Rect2i(5, 7 + bob, 6, 2), C_HAIR)
+		&"right":
+			img.fill_rect(Rect2i(9, 9 + bob, 1, 1), C_EYE)
+	img.fill_rect(Rect2i(3, 20, 10, 3), C_LIMB)            # folded legs
 	return img
 
 

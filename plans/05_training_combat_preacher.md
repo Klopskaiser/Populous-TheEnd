@@ -319,7 +319,7 @@ Priester-Duell und Feuerkrieger-Reset. Referenz: „Fernkampf“ + „Prediger-V
 
 ### Definition of Done 5c
 
-- [ ] Testsuite grün, `--headless --quit` fehlerfrei
+- [x] Testsuite grün, `--headless --quit` fehlerfrei
 - [ ] Manuell: Feuerkrieger beschießen aus Distanz mit sichtbaren Feuerbällen (Rückstoß, bei
   Salven stärker), prügeln sich im Nahkampf; rote Einheiten setzen sich vor dem Prediger hin und
   werden blau; feindlicher Prediger löst Duell aus; Feuerangriff setzt Bekehrung zurück

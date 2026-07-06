@@ -11,6 +11,7 @@ const MAX_TICKS: int = 400
 const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
 const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
 const FIREWARRIOR_SCENE: PackedScene = preload("res://scenes/units/firewarrior.tscn")
+const PREACHER_SCENE: PackedScene = preload("res://scenes/units/preacher.tscn")
 
 
 func _flat_terrain(h: float = 5.0) -> TerrainData:
@@ -299,6 +300,7 @@ func test_strike_anims_in_atlas() -> void:
 	check(not table[&"brave"].has(&"throw"), "throw is firewarrior-only")
 	for kind: StringName in [&"brave", &"warrior", &"firewarrior"]:
 		check(table[kind].has(&"dead"), "%s has a dead (corpse) sprite" % kind)
+		check(table[kind].has(&"sit"), "%s has a sit (pacified) animation" % kind)
 	var views: Array = table[&"brave"][&"punch"]
 	check(views.size() == 4, "punch exists in all four views")
 	check(int(views[0][1]) == 4, "punch alternates both fists (4 frames)")
@@ -320,6 +322,149 @@ func test_strike_sets_matching_anim() -> void:
 	var strike_anims: Array[StringName] = [&"punch", &"kick", &"shove"]
 	check(attacker.anim_base_name in strike_anims,
 		"after a strike the anim base is the rolled strike animation")
+	_free_world(w)
+
+
+# --- Knockback (phase 5c) -------------------------------------------------------
+
+## A knockback shoves the unit along the given direction; rapid successive
+## hits stack the accumulator and shove progressively harder; the accumulator
+## decays over time.
+func test_knockback_accumulates_and_decays() -> void:
+	var w: Dictionary = _make_world()
+	var unit: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
+	unit.apply_knockback(Vector3(1, 0, 0))
+	check(unit.knockback_accum >= 1.0, "first hit charges the accumulator")
+	for i in range(3):
+		unit.tick(TICK)
+	var dx1: float = unit.position.x - 30.0
+	check(dx1 > 0.3, "the unit was shoved along +x")
+
+	var before_second: float = unit.position.x
+	unit.apply_knockback(Vector3(1, 0, 0))
+	for i in range(3):
+		unit.tick(TICK)
+	var dx2: float = unit.position.x - before_second
+	check(dx2 > dx1, "a rapid follow-up hit shoves farther (stacked)")
+
+	for i in range(60):
+		unit.tick(TICK)
+	check(unit.knockback_accum == 0.0, "the accumulator decays back to zero")
+	_free_world(w)
+
+
+## A fireball impact knocks the target away from the shooter.
+func test_fireball_applies_knockback() -> void:
+	var w: Dictionary = _make_world()
+	var shooter: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(26, 30))
+	var enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
+	enemy.max_health = 1000
+	enemy.health = 1000
+	var ball: Fireball = Fireball.new()
+	ball.setup(shooter, enemy, shooter.position + Vector3(0.0, 1.1, 0.0))
+	var ticks: int = 0
+	while not ball.done and ticks < 200:
+		ball.tick(TICK)
+		ticks += 1
+	check(ball.done, "fireball impacted")
+	# One tick: the knockback (10 m/s) plays out fully, before the retaliation
+	# walk toward the shooter can outweigh the 0.7 m shove.
+	enemy.tick(TICK)
+	check(enemy.position.x > 30.2, "the target was knocked back away from the shooter")
+	check(enemy.knockback_accum > 0.0, "the hit charged the knockback accumulator")
+	ball.free()
+	_free_world(w)
+
+
+# --- Preacher conversion (phase 5c) ------------------------------------------------
+
+## A preacher near an enemy brave makes it sit, the progress runs, and on
+## completion the unit has switched tribes (lists, tribe_id, colour signal).
+func test_conversion_converts_enemy() -> void:
+	var w: Dictionary = _make_world()
+	var preacher: Unit = _spawn(w, PREACHER_SCENE, 0, Vector2(30, 30))
+	var enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(33, 30))  # in convert range
+	var pair: Array = [preacher, enemy]
+
+	_run(w, pair, func() -> bool: return enemy.state == Unit.State.SIT)
+	check(enemy.state == Unit.State.SIT, "the enemy brave sits down")
+	check(preacher.state == Unit.State.CAST, "the preacher channels (CAST)")
+	check(enemy.converting_preacher == preacher, "the brave is bound to the preacher")
+
+	var progressed: bool = false
+	for i in range(20):
+		for u: Unit in pair:
+			u.tick(TICK)
+		w.unit_manager.tick(TICK)
+		if enemy.conversion_progress > 0.0:
+			progressed = true
+	check(progressed, "conversion progress accumulates while sitting")
+
+	_run(w, pair, func() -> bool: return enemy.tribe_id == 0)
+	check(enemy.tribe_id == 0, "the unit switched to the preacher's tribe")
+	check(enemy in w.tribe0.units, "listed in the new tribe")
+	check(enemy not in w.tribe1.units, "removed from the old tribe")
+	check(enemy.state != Unit.State.SIT, "the convert stands up afterwards")
+	_free_world(w)
+
+
+## Preachers (and shamans) can never be converted.
+func test_conversion_immune_targets() -> void:
+	var w: Dictionary = _make_world()
+	var preacher: Unit = _spawn(w, PREACHER_SCENE, 0, Vector2(30, 30))
+	var enemy_preacher: Unit = _spawn(w, PREACHER_SCENE, 1, Vector2(33, 30))
+	check(enemy_preacher.is_conversion_immune(), "preachers are conversion-immune")
+	check(not enemy_preacher.begin_conversion(preacher, 5.0),
+		"begin_conversion refuses an immune target")
+	check(enemy_preacher.state != Unit.State.SIT, "the enemy preacher never sits")
+	_free_world(w)
+
+
+## An enemy preacher in range triggers a melee priest duel; the trance breaks
+## and the released unit joins the fight against the converting preacher.
+func test_priest_duel_breaks_trance() -> void:
+	var w: Dictionary = _make_world()
+	var preacher: Unit = _spawn(w, PREACHER_SCENE, 0, Vector2(30, 30))
+	var enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(32, 30))
+	var units: Array = [preacher, enemy]
+	_run(w, units, func() -> bool: return enemy.state == Unit.State.SIT)
+	check(enemy.state == Unit.State.SIT, "the brave sits before the duel")
+
+	# An enemy preacher walks into range: duel instead of channeling.
+	var rival: Unit = _spawn(w, PREACHER_SCENE, 1, Vector2(33, 30))
+	units.append(rival)
+	_run(w, units, func() -> bool:
+		return preacher.state == Unit.State.ATTACK and enemy.state != Unit.State.SIT)
+	check(preacher.state == Unit.State.ATTACK, "the preacher switches to the duel")
+	check(preacher.attack_target == rival, "the duel targets the rival preacher")
+	check(enemy.state == Unit.State.ATTACK, "the released brave fights back")
+	check(enemy.attack_target == preacher, "the released brave attacks the preacher")
+	_free_world(w)
+
+
+## A fireball hit on a sitting unit resets its conversion progress and it
+## stands back up.
+func test_fireball_resets_conversion() -> void:
+	var w: Dictionary = _make_world()
+	var preacher: Unit = _spawn(w, PREACHER_SCENE, 0, Vector2(30, 30))
+	var enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(33, 30))
+	enemy.max_health = 1000
+	enemy.health = 1000
+	var pair: Array = [preacher, enemy]
+	_run(w, pair, func() -> bool: return enemy.conversion_progress > 0.5)
+	check(enemy.state == Unit.State.SIT, "the target sits with progress > 0.5")
+
+	var shooter: Unit = _spawn(w, FIREWARRIOR_SCENE, 1, Vector2(26, 30))
+	var ball: Fireball = Fireball.new()
+	ball.setup(shooter, enemy, shooter.position + Vector3(0.0, 1.1, 0.0))
+	var ticks: int = 0
+	while not ball.done and ticks < 200:
+		ball.tick(TICK)
+		ticks += 1
+	check(ball.done, "the fireball reached the sitting unit")
+	check(enemy.conversion_progress == 0.0, "the conversion progress was reset")
+	check(enemy.state != Unit.State.SIT, "the unit stands back up")
+	ball.free()
 	_free_world(w)
 
 

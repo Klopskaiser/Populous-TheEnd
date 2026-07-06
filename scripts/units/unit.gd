@@ -14,10 +14,13 @@ class_name Unit extends Node3D
 ## state (anim_base_name + anim_start_ms) and render cache fields.
 
 ## Later phases fill in the behaviour for GATHER/PRAY/BUILD/ATTACK/TRAIN/
-## PANIC/CAST/THROWN.
-enum State {IDLE, MOVE, GATHER, PRAY, BUILD, ATTACK, TRAIN, PANIC, CAST, THROWN, DEAD}
+## PANIC/CAST/THROWN. SIT = pacified by an enemy preacher (conversion, 5c).
+enum State {IDLE, MOVE, GATHER, PRAY, BUILD, ATTACK, TRAIN, PANIC, CAST, THROWN, DEAD, SIT}
 
 signal died(unit: Unit)
+## Fired after this unit switched tribes (preacher conversion) — the
+## UnitManager refreshes the renderer's instance colour.
+signal converted(unit: Unit)
 ## Fired once when the corpse has finished fading; the UnitManager then removes
 ## and frees the node.
 signal corpse_expired(unit: Unit)
@@ -69,6 +72,17 @@ const FIREBALL_DAMAGE: int = 7
 ## this long, then dissolves over CORPSE_FADE_DURATION and is removed.
 const CORPSE_DURATION: float = 5.0
 const CORPSE_FADE_DURATION: float = 1.0
+
+# --- Knockback (fireball, phase 5c) --------------------------------------------
+## Shove distance of a single un-stacked fireball hit (metres)...
+const KNOCKBACK_BASE: float = 0.7
+## ...plus this much extra per accumulated stack: rapid successive hits shove
+## progressively harder (the accumulator decays over time).
+const KNOCKBACK_STACK_BONUS: float = 0.5
+## How fast the pending displacement is played out (m/s).
+const KNOCKBACK_SPEED: float = 10.0
+## Accumulator stacks lost per second.
+const KNOCKBACK_ACCUM_DECAY: float = 0.8
 
 var tribe_id: int = 0
 ## Owning tribe, injected by UnitManager.spawn_unit()/Tribe.add_unit().
@@ -147,6 +161,19 @@ var _corpse_done: bool = false
 ## Instance alpha last written to the renderer (corpse fade), managed there.
 var _render_alpha: float = 1.0
 
+# --- Knockback state (fireball, phase 5c) ---------------------------------------
+## Hit-density accumulator: +1 per fireball hit, decays over time; scales the
+## shove distance of follow-up hits (salvos throw harder).
+var knockback_accum: float = 0.0
+## Pending displacement, played out at KNOCKBACK_SPEED in _tick_knockback.
+var _knockback_remaining: Vector3 = Vector3.ZERO
+
+# --- Conversion state (preacher, phase 5c) ---------------------------------------
+## Enemy preacher currently pacifying this unit (untyped: may be freed).
+var converting_preacher = null
+var conversion_progress: float = 0.0
+var conversion_time: float = 0.0
+
 
 ## Silhouette key for PlaceholderSprites; overridden by subclasses.
 func unit_kind() -> StringName:
@@ -179,6 +206,14 @@ func _on_combat_interrupt() -> void:
 # --- Core logic (testable without scene tree) ---------------------------------
 
 func tick(delta: float) -> void:
+	_tick_knockback(delta)
+	_tick_state(delta)
+	_apply_animation(false)
+
+
+## State dispatch; subclasses override this (NOT tick) so cross-state systems
+## like knockback keep running for them too.
+func _tick_state(delta: float) -> void:
 	match state:
 		State.MOVE:
 			_tick_move(delta)
@@ -186,11 +221,12 @@ func tick(delta: float) -> void:
 			_tick_attack(delta)
 		State.IDLE:
 			_tick_idle(delta)
+		State.SIT:
+			_tick_sit(delta)
 		State.DEAD:
 			_tick_dead(delta)
 		_:
 			pass
-	_apply_animation(false)
 
 
 func _tick_move(delta: float) -> void:
@@ -397,6 +433,131 @@ func corpse_alpha() -> float:
 		1.0 - (_corpse_timer - CORPSE_DURATION) / CORPSE_FADE_DURATION, 0.0, 1.0)
 
 
+# --- Knockback (fireball, phase 5c) ----------------------------------------------
+
+## Shoves the unit along dir (flat). The hit-density accumulator makes rapid
+## successive hits shove progressively harder; it decays in _tick_knockback.
+## (The downhill ROLL trigger hooks in here in phase 5d.)
+func apply_knockback(dir: Vector3) -> void:
+	if state == State.DEAD:
+		return
+	var flat: Vector3 = Vector3(dir.x, 0.0, dir.z)
+	if flat.length_squared() < 0.000001:
+		return
+	var dist: float = KNOCKBACK_BASE + knockback_accum * KNOCKBACK_STACK_BONUS
+	knockback_accum += 1.0
+	_knockback_remaining += flat.normalized() * dist
+
+
+## Plays out pending knockback displacement and decays the accumulator. Runs
+## for every state except DEAD (a shove interrupts nothing by itself).
+func _tick_knockback(delta: float) -> void:
+	if knockback_accum > 0.0:
+		knockback_accum = maxf(knockback_accum - KNOCKBACK_ACCUM_DECAY * delta, 0.0)
+	if _knockback_remaining == Vector3.ZERO or state == State.DEAD:
+		return
+	var step_len: float = minf(KNOCKBACK_SPEED * delta, _knockback_remaining.length())
+	var step: Vector3 = _knockback_remaining.normalized() * step_len
+	_knockback_remaining -= step
+	if _knockback_remaining.length_squared() < 0.0001:
+		_knockback_remaining = Vector3.ZERO
+	var nx: float = position.x + step.x
+	var nz: float = position.z + step.z
+	# Never shove anyone into water/obstacles (overview risk 6).
+	if nav_grid != null and not nav_grid.is_cell_walkable(
+			nav_grid.world_to_cell(Vector3(nx, 0.0, nz))):
+		_knockback_remaining = Vector3.ZERO
+		return
+	position.x = nx
+	position.z = nz
+	_snap_to_ground()
+
+
+# --- Conversion (preacher, phase 5c) ----------------------------------------------
+
+## Shamans and preachers can never be converted (original rule).
+func is_conversion_immune() -> bool:
+	return unit_kind() == &"shaman" or unit_kind() == &"preacher"
+
+
+## Pacified by an enemy preacher: stop everything and sit down. The conversion
+## completes after `duration` seconds of uninterrupted channeling (_tick_sit).
+## Returns false when this unit cannot be converted.
+func begin_conversion(preacher: Unit, duration: float) -> bool:
+	if state == State.DEAD or state == State.SIT or is_conversion_immune():
+		return false
+	_on_combat_interrupt()
+	_end_attack()
+	waypoint_queue.clear()
+	_clear_path()
+	converting_preacher = preacher
+	conversion_time = maxf(duration, 0.1)
+	conversion_progress = 0.0
+	_set_state(State.SIT)
+	return true
+
+
+## Sitting under a preacher's spell: progress while the preacher keeps
+## channeling in range; stand up when the spell breaks. If the preacher got
+## drawn into a fight (priest duel), the released units join in against him.
+func _tick_sit(delta: float) -> void:
+	var p = converting_preacher
+	if p == null or not is_instance_valid(p) or p.state == State.DEAD:
+		_stand_up(false)
+		return
+	if p.state == State.ATTACK:
+		_stand_up(true)   # trance broken by a duel -> fight the preacher
+		return
+	if p.state != State.CAST \
+			or _flat_dist(position, p.position) > Preacher.CONVERT_RANGE * 1.3:
+		_stand_up(false)
+		return
+	conversion_progress += delta
+	if conversion_progress >= conversion_time and p.tribe != null:
+		convert_to_tribe(p.tribe)
+
+
+## A firewarrior's fireball hit interrupts the conversion: the progress is
+## lost and the unit stands back up (combatants re-aggro on their own).
+func reset_conversion() -> void:
+	if state != State.SIT:
+		return
+	conversion_progress = 0.0
+	_stand_up(false)
+
+
+func _stand_up(fight_preacher: bool) -> void:
+	var p = converting_preacher
+	converting_preacher = null
+	conversion_progress = 0.0
+	_set_state(State.IDLE)
+	if fight_preacher and p != null and is_instance_valid(p) and p.state != State.DEAD:
+		_begin_attack(p)
+
+
+## Switches this unit to `new_tribe` (conversion complete): tribe lists are
+## re-hung, colour follows via the converted signal (UnitManager -> renderer),
+## running orders are gone and everyone attacking it drops the (now friendly)
+## target.
+func convert_to_tribe(new_tribe: Tribe) -> void:
+	if tribe != null:
+		tribe.remove_unit(self)
+	tribe_id = new_tribe.id
+	new_tribe.add_unit(self)
+	converting_preacher = null
+	conversion_progress = 0.0
+	last_attacker = null
+	_end_attack()
+	for a in melee_attackers.duplicate():
+		if is_instance_valid(a):
+			a._on_target_died(self)   # drops the target and retargets
+	melee_attackers.clear()
+	incoming_attackers = 0
+	selected = false
+	_set_state(State.IDLE)
+	converted.emit(self)
+
+
 ## Idle combatants scan for a nearby enemy (throttled) and engage it.
 func _tick_idle(delta: float) -> void:
 	if not _is_combatant():
@@ -409,7 +570,8 @@ func _tick_idle(delta: float) -> void:
 
 ## Pursues the current target and strikes it when in range and holding a slot.
 func _tick_attack(delta: float) -> void:
-	if not _target_valid(attack_target):
+	# A converted target became friendly mid-fight -> drop it.
+	if not _target_valid(attack_target) or attack_target.tribe_id == tribe_id:
 		_retarget_or_idle()
 		return
 	var target: Unit = attack_target
@@ -554,6 +716,8 @@ func _retarget_or_idle() -> void:
 func _maybe_retaliate(attacker) -> void:
 	if attacker == null or not is_instance_valid(attacker) or attacker.state == State.DEAD:
 		return
+	if attacker.tribe_id == tribe_id:
+		return   # friendly fire (e.g. a rescue fireball) is not retaliated
 	if attack_target != null and is_instance_valid(attack_target):
 		return
 	if state == State.IDLE or state == State.MOVE:
@@ -570,6 +734,8 @@ func _scan_for_enemy(radius: float) -> Unit:
 	for u in path_service.get_units_in_radius(position, radius):
 		if u == self or u.state == State.DEAD or u.tribe_id == tribe_id:
 			continue
+		if u.state == State.SIT:
+			continue   # sitting converts are no threat (and shall keep sitting)
 		var d: float = Vector2(u.position.x, u.position.z).distance_to(flat)
 		# Commitment count dominates the score so free enemies are picked first
 		# (1v1 preference), even before anyone is in striking range.
@@ -734,6 +900,8 @@ func _anim_base() -> StringName:
 			return attack_anim if _in_melee else &"walk"
 		State.CAST:
 			return &"cast"
+		State.SIT:
+			return &"sit"
 		State.DEAD:
 			return &"dead"
 		_:
