@@ -318,6 +318,14 @@ func _is_ranged() -> bool:
 	return false
 
 
+## Radius at which an idle/marching combatant engages enemies on its own (and
+## re-targets). Melee units use AGGRO_RADIUS; ranged units (firewarrior) see
+## farther so they react to threats near their fire range — including an enemy
+## shooting a neighbour — instead of only enemies right on top of them.
+func aggro_radius() -> float:
+	return AGGRO_RADIUS
+
+
 ## Melee damage multiplier (Warrior returns 3.0; everyone else brawls at 1.0).
 func melee_strength() -> float:
 	return 1.0
@@ -1124,7 +1132,7 @@ func _tick_idle(delta: float) -> void:
 func _engage_on_sight(delta: float) -> bool:
 	if not _due_to_scan(delta):
 		return false
-	var enemy: Unit = _scan_for_enemy(AGGRO_RADIUS)
+	var enemy: Unit = _scan_for_enemy(aggro_radius())
 	if enemy == null:
 		return false
 	_begin_attack(enemy)
@@ -1146,7 +1154,7 @@ func _tick_attack(delta: float) -> void:
 		# wait around the fight until a slot opens (checked, not per-frame).
 		_in_melee = false
 		if _due_to_scan(delta):
-			var alt: Unit = _scan_for_enemy(AGGRO_RADIUS)
+			var alt: Unit = _scan_for_enemy(aggro_radius())
 			if alt != null and alt != target and alt.active_melee_attacker_count() \
 					< MAX_MELEE_ATTACKERS:
 				_begin_attack(alt)
@@ -1299,7 +1307,7 @@ func _on_target_died(target) -> void:
 func _retarget_or_idle() -> void:
 	_end_attack()
 	if _is_combatant():
-		var enemy: Unit = _scan_for_enemy(AGGRO_RADIUS)
+		var enemy: Unit = _scan_for_enemy(aggro_radius())
 		if enemy != null:
 			_begin_attack(enemy)
 			return

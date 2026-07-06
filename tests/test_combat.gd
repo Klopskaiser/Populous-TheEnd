@@ -307,6 +307,23 @@ func test_firewarrior_kites_when_crowded() -> void:
 	_free_world(w)
 
 
+## A firewarrior reacts to enemies beyond the melee aggro radius (so it defends
+## a neighbour being shot from fire range), then closes in and fires.
+func test_firewarrior_aggro_reaches_past_melee_radius() -> void:
+	var w: Dictionary = _make_world()
+	var fw: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(30, 30))
+	var enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(40, 30))  # 10 m away
+	enemy.max_health = 1000
+	enemy.health = 1000
+	check(10.0 > Unit.AGGRO_RADIUS, "the enemy is beyond the melee aggro radius (8)")
+	check(10.0 < Firewarrior.RANGED_AGGRO, "but within the firewarrior's ranged aggro")
+	var hp0: int = enemy.health
+	_run(w, [fw], func() -> bool: return enemy.health < hp0)
+	check(enemy.health < hp0,
+		"an idle firewarrior engages and fires on an enemy past the melee aggro range")
+	_free_world(w)
+
+
 # --- Hill movement & rolling (phase 5d) ------------------------------------------------
 
 ## Climbing a slope is slower than walking on flat ground.

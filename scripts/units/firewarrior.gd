@@ -8,12 +8,16 @@ class_name Firewarrior extends Unit
 ## piling into melee and standing around waiting for a slot (which let a few
 ## enemy priests convert whole armies). Approaches only when out of fire range.
 
-## Medium range: well above melee (1.2), below the aggro radius (8).
+## Medium range: well above melee (1.2), below the aggro radius.
 const FIRE_RANGE: float = 7.0
 ## Enemies closer than this make the firewarrior step back (kite) while firing.
 const KITE_MIN_DIST: float = 3.5
 ## Seconds between fireballs (the throw animation cycle matches this).
 const FIRE_COOLDOWN: float = 1.5
+## Larger than the melee aggro (8) and above FIRE_RANGE: a firewarrior turns to
+## fire on threats out to here — including an enemy shooting a neighbour — and
+## then closes to fire range, instead of only reacting to enemies right on top.
+const RANGED_AGGRO: float = 13.0
 
 
 func _init() -> void:
@@ -32,6 +36,10 @@ func _is_combatant() -> bool:
 
 func _is_ranged() -> bool:
 	return true
+
+
+func aggro_radius() -> float:
+	return RANGED_AGGRO
 
 
 ## Ranged kiter: approach when out of fire range; otherwise fire on cooldown,

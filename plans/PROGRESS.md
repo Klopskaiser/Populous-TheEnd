@@ -2248,3 +2248,12 @@ neu, `_retreat_from`, `_is_ranged()`). `TribeCommands.order_attack` verteilt
 Fernkämpfer nicht mehr über das 3-Nahkämpfer-Limit um (alle feuern auf das
 befohlene Ziel). Test `test_firewarrior_brawls_in_melee` → `…_kites_when_crowded`
 umgestellt. Tests: **1040 grün**.
+
+**Feinschliff (Nutzerfeedback — Feuerkrieger-Aggro-Radius):** Der Aggro-Radius
+ist jetzt pro Einheit überschreibbar (`Unit.aggro_radius()`, Default `AGGRO_RADIUS`
+8 m); der Feuerkrieger sieht mit `RANGED_AGGRO 13 m` deutlich weiter — er dreht
+auf Bedrohungen jenseits der Feuerreichweite (7 m) ein, verteidigt also auch
+einen beschossenen Nachbarn, statt nur auf Gegner direkt neben sich zu
+reagieren. Alle Selbst-Aggro-/Retarget-Scans (`_engage_on_sight`,
+`_retarget_or_idle`, Alt-Scan im Nahkampf) nutzen jetzt `aggro_radius()`. Test
+`test_firewarrior_aggro_reaches_past_melee_radius`. Tests: **1043 grün**.
