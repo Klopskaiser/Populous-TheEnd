@@ -2268,3 +2268,15 @@ Nahkampf an, während ihr Ziel weiter weg steht, drehen sie auf den
 Nahkampf-Angreifer (`_melee_threat`). `Firewarrior._tick_attack` neu
 (`_retreat_from`/`KITE_MIN_DIST` entfernt). Tests: `test_firewarrior_brawls_in_melee`
 (Nahkampf-Wehr) + `test_firewarrior_reserve_row_fires_when_slots_full`. **1047 grün.**
+
+**Feinschliff (Nutzerwunsch — Feuerkrieger priorisieren Prediger):** Feuerkrieger
+zielen bevorzugt auf feindliche Prediger in Reichweite (die bekehren ganze
+Trupps): `Firewarrior._scan_for_enemy` gibt zuerst den nächsten feindlichen
+Prediger im Radius zurück (`_nearest_enemy_priest`), sonst die normale
+Zielwahl — greift bei Idle-/Attack-Move-Aggro und beim Retarget nach einem Kill.
+Zusätzlich schaltet ein Feuerkrieger mitten im Gefecht (throttled) auf einen
+Prediger in Reichweite um, solange er nicht gerade im Nahkampf steht
+(Selbstverteidigung im Nahkampf hat weiter Vorrang). Tests
+`test_firewarrior_prioritises_enemy_priests` + `…_switches_to_priest_midfight`.
+Tests: **1053 grün** (test_unit_control-Kampf-Tests bleiben durch unseeded randf
+gelegentlich flaky — nicht durch diese Änderung).

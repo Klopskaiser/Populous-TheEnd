@@ -356,6 +356,33 @@ func test_firewarrior_stands_still_to_fire() -> void:
 	_free_world(w)
 
 
+## Firewarriors prioritise enemy preachers: given a nearer brave and a farther
+## priest (both in range), the target scan returns the priest.
+func test_firewarrior_prioritises_enemy_priests() -> void:
+	var w: Dictionary = _make_world()
+	var fw: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(30, 30))
+	_spawn(w, BRAVE_SCENE, 1, Vector2(33, 30))            # 3 m: nearer
+	var priest: Unit = _spawn(w, PREACHER_SCENE, 1, Vector2(38, 30))  # 8 m: farther, in range
+	w.unit_manager.tick(TICK)   # refresh the spatial hash
+	var target: Unit = fw._scan_for_enemy(fw.aggro_radius())
+	check(target == priest, "firewarrior targets the enemy priest over a nearer brave")
+	_free_world(w)
+
+
+## A firewarrior already fighting a brave switches to an enemy priest that comes
+## into range (mid-fight priest priority).
+func test_firewarrior_switches_to_priest_midfight() -> void:
+	var w: Dictionary = _make_world()
+	var fw: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(30, 30))
+	var brave_enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(35, 30))  # 5 m
+	var priest: Unit = _spawn(w, PREACHER_SCENE, 1, Vector2(36, 30))    # 6 m
+	fw.order_attack(brave_enemy)
+	check(fw.attack_target == brave_enemy, "starts on the ordered brave")
+	_run(w, [fw], func() -> bool: return fw.attack_target == priest)
+	check(fw.attack_target == priest, "switches to the priest once it is in range")
+	_free_world(w)
+
+
 ## A firewarrior reacts to enemies beyond the melee aggro radius (so it defends
 ## a neighbour being shot from fire range), then closes in and fires.
 func test_firewarrior_aggro_reaches_past_melee_radius() -> void:

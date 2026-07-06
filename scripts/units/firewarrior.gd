@@ -49,12 +49,19 @@ func _tick_attack(delta: float) -> void:
 		return
 	if _breaks_off_vs_sitting(attack_target):
 		return
-	# Self-defence: an enemy on top of us takes priority. If the current target
-	# is out of melee range but something is meleeing us, turn to fight it.
+	# Self-defence FIRST: an enemy on top of us takes priority. If the current
+	# target is out of melee range but something is meleeing us, turn to fight it.
 	if _flat_dist(position, attack_target.position) > MELEE_RANGE:
 		var threat: Unit = _melee_threat()
 		if threat != null:
 			_begin_attack(threat)
+	# Priest priority (throttled): while not brawling, switch to an enemy
+	# preacher in range — killing it stops mass conversions.
+	if _due_to_scan(delta) and attack_target.unit_kind() != &"preacher" \
+			and _flat_dist(position, attack_target.position) > MELEE_RANGE:
+		var priest: Unit = _nearest_enemy_priest(aggro_radius())
+		if priest != null and priest != attack_target:
+			_begin_attack(priest)
 	var target: Unit = attack_target
 	var dist: float = _flat_dist(position, target.position)
 	if dist <= MELEE_RANGE:
@@ -81,6 +88,34 @@ func _tick_attack(delta: float) -> void:
 		_attack_cooldown = FIRE_COOLDOWN
 		anim_start_ms = Time.get_ticks_msec()   # sync the throw with the shot
 		_throw_fireball(target)
+
+
+## Target selection prefers an enemy preacher in range (firewarriors hunt
+## priests, which convert whole squads); otherwise the base nearest-enemy logic.
+## Used by the idle/attack-move engage and by re-targeting after a kill.
+func _scan_for_enemy(radius: float) -> Unit:
+	var priest: Unit = _nearest_enemy_priest(radius)
+	if priest != null:
+		return priest
+	return super._scan_for_enemy(radius)
+
+
+## Nearest living enemy preacher within `radius`; null when none is in range.
+func _nearest_enemy_priest(radius: float) -> Unit:
+	if path_service == null:
+		return null
+	var best: Unit = null
+	var best_d: float = INF
+	for u in path_service.get_units_in_radius(position, radius):
+		if u.tribe_id == tribe_id or u.state == Unit.State.DEAD:
+			continue
+		if u.unit_kind() != &"preacher":
+			continue
+		var d: float = _flat_dist(position, u.position)
+		if d < best_d:
+			best_d = d
+			best = u
+	return best
 
 
 ## Nearest living enemy within melee range (the immediate threat to defend
