@@ -334,6 +334,10 @@ func _tick_state(delta: float) -> void:
 func _tick_move(delta: float) -> void:
 	if _pending_target != Vector3.INF:
 		return  # waiting for the path queue
+	# Attack-move (like the original): combat units engage enemies they pass
+	# on the way instead of marching through the opposing army.
+	if _is_combatant() and _engage_on_sight(delta):
+		return
 	if _advance_path(delta):
 		_on_path_finished()
 
@@ -1017,10 +1021,20 @@ func convert_to_tribe(new_tribe: Tribe) -> void:
 func _tick_idle(delta: float) -> void:
 	if not _is_combatant():
 		return
-	if _due_to_scan(delta):
-		var enemy: Unit = _scan_for_enemy(AGGRO_RADIUS)
-		if enemy != null:
-			_begin_attack(enemy)
+	_engage_on_sight(delta)
+
+
+## Throttled enemy scan + engage; used from IDLE and while marching (MOVE,
+## attack-move). Returns true when the unit switched into a fight. The
+## preacher overrides this to prefer converting over brawling.
+func _engage_on_sight(delta: float) -> bool:
+	if not _due_to_scan(delta):
+		return false
+	var enemy: Unit = _scan_for_enemy(AGGRO_RADIUS)
+	if enemy == null:
+		return false
+	_begin_attack(enemy)
+	return true
 
 
 ## Pursues the current target and strikes it when in range and holding a slot.

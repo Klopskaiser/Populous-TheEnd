@@ -265,12 +265,29 @@ func _setup_debug_battle(nav: NavGrid) -> void:
 	var red_anchor: Vector2i = center + Vector2i(DEBUG_ARMY_OFFSET, 0)
 	_spawn_debug_army(0, blue_anchor, nav)
 	_spawn_debug_army(1, red_anchor, nav)
+	# Each army brings its shaman (behind the lines) with FULL spell charges.
+	_spawn_debug_shaman(0, blue_anchor + Vector2i(-6, 0), nav)
+	_spawn_debug_shaman(1, red_anchor + Vector2i(6, 0), nav)
 	# March each army at the enemy anchor; the path queue spreads the A* load.
+	# Attack-move takes over on contact (combatants engage while marching).
 	_tribe_commands.order_move(
 		_unit_manager.get_units_of_tribe(0), nav.cell_to_world(red_anchor))
 	_tribe_commands.order_move(
 		_unit_manager.get_units_of_tribe(1), nav.cell_to_world(blue_anchor))
 	print("Debugschlacht: %d Einheiten gesamt" % _unit_manager.units.size())
+
+
+## Spawns the tribe's shaman for the debug battle and fills every spell to
+## its maximum charges (spell testing in the brawl).
+func _spawn_debug_shaman(tribe_id: int, anchor: Vector2i, nav: NavGrid) -> void:
+	var cell: Vector2i = _find_walkable_near(anchor, nav, 0)
+	if cell.x < 0:
+		return
+	_unit_manager.spawn_unit(SHAMAN_SCENE, tribe_id, nav.cell_to_world(cell))
+	var tribe: Tribe = GameState.get_tribe(tribe_id)
+	if tribe != null:
+		for spell in tribe.spells:
+			spell.charges = spell.max_charges
 
 
 ## Fills walkable cells ring by ring around the anchor: warriors first (inner

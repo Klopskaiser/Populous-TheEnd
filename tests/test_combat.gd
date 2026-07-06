@@ -215,6 +215,20 @@ func test_prefers_free_target_1v1() -> void:
 
 # --- Aggro & retaliation ------------------------------------------------------------
 
+## Attack-move: combatants ordered across the map engage enemies they pass
+## instead of marching through them (armies fight on contact).
+func test_marching_combatants_engage_on_contact() -> void:
+	var w: Dictionary = _make_world()
+	var blue: Unit = _spawn(w, WARRIOR_SCENE, 0, Vector2(30, 30))
+	var red: Unit = _spawn(w, WARRIOR_SCENE, 1, Vector2(44, 30))
+	blue.order_move(Vector3(58, 0, 30))   # straight past/through the enemy
+	red.order_move(Vector3(16, 0, 30))
+	var ticks: int = _run(w, [blue, red], func() -> bool:
+		return blue.state == Unit.State.ATTACK or red.state == Unit.State.ATTACK)
+	check(ticks < MAX_TICKS, "marching combatants engage on contact")
+	_free_world(w)
+
+
 func test_combatant_aggros_idle_enemy() -> void:
 	var w: Dictionary = _make_world()
 	var warrior: Unit = _spawn(w, WARRIOR_SCENE, 0, Vector2(30, 30))

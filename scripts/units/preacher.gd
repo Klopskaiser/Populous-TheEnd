@@ -47,19 +47,21 @@ func _tick_state(delta: float) -> void:
 		super._tick_state(delta)
 
 
-## Idle: prefer converting over brawling — normal enemies pull the preacher
-## into CAST (approach + channel); preachers/shamans are attacked in melee.
-func _tick_idle(delta: float) -> void:
+## Prefer converting over brawling — normal enemies pull the preacher into
+## CAST (approach + channel); preachers/shamans are attacked in melee. Runs
+## from IDLE and while marching (attack-move, Unit._tick_move).
+func _engage_on_sight(delta: float) -> bool:
 	if not _due_to_scan(delta):
-		return
+		return false
 	var enemy: Unit = _scan_for_enemy(AGGRO_RADIUS)
 	if enemy == null:
-		return
+		return false
 	if enemy.is_conversion_immune():
 		_begin_attack(enemy)   # priest duel (or shaman) -> melee
 	else:
 		_convert_target = enemy
 		_set_state(State.CAST)
+	return true
 
 
 ## Explicit attack order: convertible enemies are converted (walk into range,

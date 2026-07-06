@@ -1473,4 +1473,22 @@ Ladungsschub beim Gegner → Respawn-Countdown im Porträt).
   Godot-Default (1152×648) wäre die höhere Sidebar unten übergelaufen (sie
   war schon vorher praktisch voll).
 - Suite 643 grün, `--quit-after 240` fehlerfrei (Porträt baut auch headless).
-  **Manuelle Prüfung: ausstehend.**
+
+**Manuelle Prüfung durch Nutzer: BESTANDEN** („ok, passt" — Zauber, Landbrücke,
+Tornado, Blitz, Schamanin-Sprite, Porträt). **Phase 6 abgeschlossen**,
+Checkbox in der Overview abgehakt.
+
+**Nachtrag (Nutzerwunsch): Debugschlacht + Attack-Move.**
+- **Attack-Move (Verhaltensänderung, gilt überall):** Kampfeinheiten scannen
+  jetzt auch im MOVE-State (gedrosselt, `Unit._engage_on_sight` — von IDLE
+  und MOVE genutzt) und greifen Feinde im Aggro-Radius an, statt durch die
+  gegnerische Armee hindurchzumarschieren. Der Prediger überschreibt den
+  Hook (Konvertieren vor Prügeln, wie sein Idle-Verhalten); Braves bleiben
+  passiv (nur Vergeltung). Damit kämpfen die Debugschlacht-Armeen beim
+  Aufeinandertreffen, statt aneinander vorbeizulaufen. Bewusste Konsequenz:
+  auch spielerbefohlene Märsche von Kampfeinheiten enden im Kampf, wenn
+  Feinde auf dem Weg stehen (Rückzug erst außerhalb des 8-m-Radius).
+- **Debugschlacht mit Schamaninnen:** beide Armeen bringen ihre Schamanin
+  hinter der Front mit (`_spawn_debug_shaman`), **alle Zauber voll geladen**
+  (max_charges) für Zaubertests in der Massenschlacht.
+- Neuer Test `test_marching_combatants_engage_on_contact`; Suite **644 grün**.
