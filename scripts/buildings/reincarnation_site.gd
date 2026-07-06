@@ -1,13 +1,24 @@
 class_name ReincarnationSite extends Building
 
 ## Reincarnation Site: prayer place for Braves (they count as praying_braves
-## for the mana bonus while nearby) and — from phase 5 on — the shaman's
-## respawn location. Exactly one per tribe, pre-placed at match start.
+## for the mana bonus while nearby) and the shaman's respawn location. Exactly
+## one per tribe, pre-placed at match start. While the tribe's shaman is dead,
+## the site counts down respawn_timer and then spawns exactly one new shaman
+## at its edge. No site (destroyed) or a damaged site (not usable) -> no
+## respawn: losing it is a real risk.
 
 const WOOD_COST: int = 0
 const FOOTPRINT: Vector2i = Vector2i(3, 3)
 ## Radius around the centre in which a brave counts as praying.
 const PRAY_RADIUS: float = 5.0
+## Seconds between the shaman's death and her reincarnation.
+const RESPAWN_TIME: float = 20.0
+
+const SHAMAN_SCENE: PackedScene = preload("res://scenes/units/shaman.tscn")
+
+var respawn_timer: float = 0.0
+## True while a respawn countdown is running (shaman dead).
+var respawn_pending: bool = false
 
 
 func _init() -> void:
@@ -19,6 +30,30 @@ func _init() -> void:
 
 func display_name() -> String:
 	return "Reinkarnationsplatz"
+
+
+## Remaining respawn wait for UI countdowns; -1 while the shaman lives.
+func respawn_remaining() -> float:
+	return respawn_timer if respawn_pending else -1.0
+
+
+## Runs only while the site is usable (Building.tick gates on is_usable) —
+## a wrecked or destroyed site cannot reincarnate the shaman.
+func _tick_active(delta: float) -> void:
+	if tribe == null or unit_manager == null:
+		return
+	var shaman: Unit = tribe.shaman
+	if shaman != null and is_instance_valid(shaman) and shaman.state != Unit.State.DEAD:
+		respawn_pending = false   # never a second shaman
+		return
+	if not respawn_pending:
+		respawn_pending = true
+		respawn_timer = RESPAWN_TIME
+		return
+	respawn_timer -= delta
+	if respawn_timer <= 0.0:
+		respawn_pending = false
+		unit_manager.spawn_unit(SHAMAN_SCENE, tribe_id, edge_spawn_position())
 
 
 func _create_visuals() -> void:

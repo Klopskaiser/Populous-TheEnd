@@ -66,7 +66,7 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
 
 | Einheit | Rolle |
 |---|---|
-| **Schamanin** | Wichtigste Einheit, einzige Zauberwirkerin. Stirbt sie, **respawnt** sie nach einer Wartezeit am **Reinkarnationsplatz** (Reincarnation Site). Pro Stamm genau eine. |
+| **Schamanin** | Wichtigste Einheit, einzige Zauberwirkerin. **HP = 4 × Brave**, **Nahkampfschaden = 2 × Brave**. Stirbt sie, **respawnt** sie nach einer Wartezeit am **Reinkarnationsplatz** (Reincarnation Site); der Stamm des Tötenden erhält einen **einmaligen 15-%-Manaboost in Ladungen**. Pro Stamm genau eine. |
 | **Brave (Gefolgsmann)** | Basis-Einheit. Sammelt **passiv Holz**, baut Gebäude aus, generiert durch **Beten Mana**. Wird von Hütten gespawnt. |
 | **Krieger** | Nahkampf-Einheit. Ausbildung in der **Kaserne** (Krieger-Trainingslager). |
 | **Feuerkrieger** | Fernkampf-Einheit (Feuerbälle). Ausbildung im **Feuertempel** (Feuerkrieger-Trainingslager). |
@@ -93,6 +93,14 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
   10 Holz/4 s), **Tempel** (Prediger, 5 Holz/5 s). Ablauf: Brave betritt das Gebäude → kommt
   nach Ausbildungszeit als entsprechende Kampfeinheit heraus → läuft zum Rally Point.
 - **Reinkarnationsplatz:** Respawn-Ort der Schamanin (siehe §4).
+- **Gebäudezerstörung (4 Zerstörungsstufen):** Stufe 0 = intakt. Stufen 1–3 (ab 30 % /
+  60 % / 90 % Schaden): Gebäude **nicht nutzbar (keinerlei Produktion)**, per Rechtsklick
+  durch Arbeiter **reparierbar** — die Reparatur kostet **Holz proportional zum
+  reparierten Schaden** (`floor(Schadensanteil × Holzkosten)`, z. B. 90 % Schaden an der
+  Hütte → 90 % der Hütten-Holzkosten, abgerundet); visuell brechen mit steigendem Schaden
+  mehr Stücke aus dem Modell. Stufe 4 (100 %): Gebäude **versinkt im Boden** und ist
+  zerstört, der Bauplatz ist wieder normal betretbar/bebaubar.
+  Details: `plans\06_shaman_spells.md`.
 
 ## 6. Magiesystem
 
@@ -103,13 +111,16 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
   Ladungen, es gibt keinen separaten Cooldown. Anzeige als Ladungs-Pips in der Zauberleiste.
 - **Zaubersprüche** (bewusst reduziertes Set):
 
-| # | Zauber | Effekt |
-|---|---|---|
-| 1 | **Blast (Druckwelle)** | Wirft feindliche Einheiten physisch zurück (**Knockback**). |
-| 2 | **Lightning (Blitz)** | Tötet eine einzelne feindliche Einheit **sofort**. |
-| 3 | **Swarm (Insektenschwarm)** | Betroffene gegnerische Einheiten laufen **panisch und unkontrollierbar** umher. |
-| 4 | **Landbridge (Landbrücke)** | **Hebt Terrain an**, um Wasser oder Schluchten passierbar zu machen (→ Laufzeit-Terrainverformung, §3). |
-| 5 | **Tornado** | **Zerstört Gebäude** und wirft Einheiten in die Luft. |
+| # | Zauber | Ladungen | Effekt |
+|---|---|---|---|
+| 1 | **Feuerball** | 4 | Flächenschaden am Einschlag (½ Brave-Leben, kleiner Umkreis), Direkttreffer 1 × Brave-Leben. Getroffene werden **zurückgeschleudert und in die Luft gehoben** (kleiner Bogen), landen im Rollzustand und kommen ohne Hang schnell zum Stehen. |
+| 2 | **Lightning (Blitz)** | 4 | Trifft Einheiten (**4 × Brave-Leben** Schaden; angrenzende Einheiten kommen kurz ins Rollen) oder Gebäude (**+2 Zerstörungsstufen**). |
+| 3 | **Swarm (Insektenschwarm)** | 4 | Spawnt einen **zufällig wandernden Schwarm (10 s)**; Gegner in der Nähe geraten in **Panik (6 s)** und erleiden leichten Schaden. Schamanin ist gegen den Panikeffekt immun. |
+| 4 | **Landbridge (Landbrücke)** | 4 | Kein Schaden. Hebt Terrain in **breiter Linie** an: über Wasser auf Küstenniveau, sonst auf das Niveau des Zielpunkts; bei Höhendifferenz entsteht eine **begehbare Schräge** (→ Laufzeit-Terrainverformung, §3). |
+| 5 | **Tornado** | 3 | Windhose (8 s), wandert zufällig; über Gebäuden **+1 Zerstörungsstufe alle 2 s**. Einheiten im Weg werden zur Spitze **hochgewirbelt**, kurz mitgetragen und mit hoher Geschwindigkeit **weggeschleudert** (Sturzschaden ½ Brave-Leben + Rollschaden; ins Wasser = Sofort-Tod). |
+
+**Neue Mechaniken durch die Zauber:** Panik, Umherschleudern von Einheiten
+(Wurf-Parabel → Rollen bis zum Ausrollen), Gebäudezerstörung in Stufen (§5).
 
 ## 7. Skirmish-KI
 

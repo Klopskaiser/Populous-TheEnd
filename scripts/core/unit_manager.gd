@@ -85,11 +85,12 @@ func tick(delta: float) -> void:
 # --- Projectiles -------------------------------------------------------------------
 
 ## Registers a projectile (e.g. a Fireball); it is ticked here until `done`
-## flips, then freed. Added to the tree (visible) when the manager is in-game.
+## flips, then freed. Always added as a child: in-game it enters the tree
+## (visible, _ready builds the visual); in headless tests the manager stays
+## outside the tree, so _ready never runs and the child is freed with it.
 func register_projectile(projectile: Node3D) -> void:
 	projectiles.append(projectile)
-	if is_inside_tree():
-		add_child(projectile)
+	add_child(projectile)
 
 
 func _tick_projectiles(delta: float) -> void:

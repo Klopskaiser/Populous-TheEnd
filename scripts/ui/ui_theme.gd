@@ -92,7 +92,7 @@ static func icon(key: StringName) -> ImageTexture:
 			_draw_people(img)
 		&"warrior_camp":
 			_draw_sword(img)
-		&"firewarrior_camp", &"blast":
+		&"firewarrior_camp", &"fireball":
 			_draw_flame(img)
 		&"temple":
 			_draw_temple(img)

@@ -24,14 +24,13 @@ const FOLLOWER_INTERVAL: float = 0.3
 ## buildings (delivered/stacked wood at the base), not the whole map.
 const WOOD_NEAR_RADIUS: float = 12.0
 
-## Follower rows: kind key -> German label. Brave/warrior/firewarrior/preacher
-## are active from phase 5; the shaman row stays greyed until phase 6.
+## Follower rows: kind key -> German label.
 const FOLLOWER_ROWS: Array[Dictionary] = [
 	{"kind": &"brave", "name": "Gefolgsleute", "active": true},
 	{"kind": &"warrior", "name": "Krieger", "active": true},
 	{"kind": &"firewarrior", "name": "Feuerkrieger", "active": true},
 	{"kind": &"preacher", "name": "Prediger", "active": true},
-	{"kind": &"shaman", "name": "Schamanin", "active": false},
+	{"kind": &"shaman", "name": "Schamanin", "active": true},
 ]
 
 const HUT_SCENE: PackedScene = preload("res://scenes/buildings/hut.tscn")
@@ -49,6 +48,8 @@ var _wood_pile_manager: WoodPileManager = null
 var _tribe_commands: TribeCommands = null
 var _build_menu: BuildMenu = null
 var _selection: SelectionManager = null
+var _spell_targeting: SpellTargeting = null
+var _camera_rig: Node3D = null
 
 # --- Widgets ----------------------------------------------------------------
 var _panel: PanelContainer = null
@@ -63,6 +64,7 @@ var _spell_ui: Dictionary = {}       # id -> {"button": Button, "pips": Array[Co
 var _follower_labels: Dictionary = {}  # kind -> Label
 var _idle_button: Button = null
 var _pause_menu: Control = null
+var _portrait: Button = null
 
 var _follower_timer: float = 0.0
 
@@ -128,13 +130,19 @@ static func default_build_entries() -> Array[Dictionary]:
 	]
 
 
+## Order matches SpellTargeting.HOTKEY_SPELLS (hotkeys 1-5).
 static func default_spell_entries() -> Array[Dictionary]:
 	return [
-		{"id": &"blast", "name": "Druckwelle", "icon": &"blast", "max_charges": 5},
-		{"id": &"lightning", "name": "Blitz", "icon": &"lightning", "max_charges": 3},
-		{"id": &"swarm", "name": "Schwarm", "icon": &"swarm", "max_charges": 3},
-		{"id": &"landbridge", "name": "Landbrücke", "icon": &"landbridge", "max_charges": 2},
-		{"id": &"tornado", "name": "Tornado", "icon": &"tornado", "max_charges": 1},
+		{"id": &"fireball", "name": "Feuerball", "icon": &"fireball",
+			"max_charges": 4, "hotkey": "1"},
+		{"id": &"lightning", "name": "Blitz", "icon": &"lightning",
+			"max_charges": 4, "hotkey": "2"},
+		{"id": &"swarm", "name": "Insektenschwarm", "icon": &"swarm",
+			"max_charges": 4, "hotkey": "3"},
+		{"id": &"landbridge", "name": "Landbrücke", "icon": &"landbridge",
+			"max_charges": 4, "hotkey": "4"},
+		{"id": &"tornado", "name": "Tornado", "icon": &"tornado",
+			"max_charges": 3, "hotkey": "5"},
 	]
 
 
@@ -153,6 +161,7 @@ func _ready() -> void:
 		events.population_changed.connect(_on_population_changed)
 		events.mana_changed.connect(_on_mana_changed)
 		events.stockpile_changed.connect(_on_stockpile_changed)
+		events.spell_charges_changed.connect(_on_spell_charges_changed)
 
 
 func _exit_tree() -> void:
@@ -166,7 +175,8 @@ func setup(p_tribes: Array[Tribe], p_player_id: int, p_unit_manager: UnitManager
 		p_building_manager: BuildingManager, p_tree_manager: TreeManager,
 		p_wood_pile_manager: WoodPileManager, p_tribe_commands: TribeCommands,
 		p_build_menu: BuildMenu, p_selection: SelectionManager,
-		p_camera_rig: Node3D, p_terrain_data: TerrainData) -> void:
+		p_camera_rig: Node3D, p_terrain_data: TerrainData,
+		p_spell_targeting: SpellTargeting = null) -> void:
 	_tribes = p_tribes
 	_player_id = p_player_id
 	_unit_manager = p_unit_manager
@@ -176,6 +186,8 @@ func setup(p_tribes: Array[Tribe], p_player_id: int, p_unit_manager: UnitManager
 	_tribe_commands = p_tribe_commands
 	_build_menu = p_build_menu
 	_selection = p_selection
+	_spell_targeting = p_spell_targeting
+	_camera_rig = p_camera_rig
 
 	_minimap.setup(p_terrain_data, p_unit_manager, p_building_manager,
 		p_tree_manager, p_camera_rig)
@@ -185,9 +197,8 @@ func setup(p_tribes: Array[Tribe], p_player_id: int, p_unit_manager: UnitManager
 		_set_population(player.population(), player.housing_capacity())
 		_set_mana(player.mana)
 	_refresh_wood_near_base()
-	# Initialise all spell pips empty (wired up in phase 6).
-	for entry in default_spell_entries():
-		set_spell_state(entry["id"], 0, entry["max_charges"], 0.0, false)
+	_refresh_spells()
+	_refresh_portrait()
 
 
 func _process(delta: float) -> void:
@@ -196,6 +207,8 @@ func _process(delta: float) -> void:
 		_follower_timer = FOLLOWER_INTERVAL
 		_refresh_followers()
 		_refresh_wood_near_base()
+		_refresh_spells()
+		_refresh_portrait()
 
 
 # --- UI construction --------------------------------------------------------
@@ -272,13 +285,14 @@ func _build_header(root: Control) -> void:
 	top.add_theme_constant_override("separation", 6)
 	vb.add_child(top)
 
-	# Shaman portrait button (disabled — wired up in phase 6).
-	var portrait: Button = Button.new()
-	portrait.icon = UiTheme.icon(&"shaman")
-	portrait.disabled = true
-	portrait.tooltip_text = "Schamanin (ab Phase 6)"
-	UiTheme.style_button(portrait)
-	top.add_child(portrait)
+	# Shaman portrait: click selects/jumps to her; shows the respawn countdown
+	# while she is dead.
+	_portrait = Button.new()
+	_portrait.icon = UiTheme.icon(&"shaman")
+	_portrait.tooltip_text = "Schamanin auswählen"
+	UiTheme.style_button(_portrait)
+	_portrait.pressed.connect(_on_portrait_pressed)
+	top.add_child(_portrait)
 
 	# Per-tribe population bars.
 	var bars: VBoxContainer = VBoxContainer.new()
@@ -394,10 +408,12 @@ func _make_spell_cell(entry: Dictionary) -> Control:
 
 	var b: Button = Button.new()
 	b.icon = UiTheme.icon(entry["icon"])
-	b.tooltip_text = "%s (ab Phase 6)" % entry["name"]
-	b.disabled = true
+	b.tooltip_text = "%s  [%s]" % [entry["name"], entry.get("hotkey", "")]
+	b.disabled = true   # enabled by set_spell_state once a charge is stored
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	UiTheme.style_button(b)
+	var spell_id: StringName = entry["id"]
+	b.pressed.connect(func() -> void: _on_spell_pressed(spell_id))
 	cell.add_child(b)
 
 	_spell_ui[entry["id"]] = {"button": b, "pips": pips}
@@ -605,7 +621,87 @@ func _refresh_followers() -> void:
 			lbl.text = "%s: %d" % [row["name"], counts[kind]]
 
 
-# --- Spell display API (phase 6 wires the charge system to this) -------------
+# --- Spells & shaman portrait (phase 6) ----------------------------------------
+
+func _player_tribe() -> Tribe:
+	if _player_id >= 0 and _player_id < _tribes.size():
+		return _tribes[_player_id]
+	return null
+
+
+func _player_shaman_alive() -> bool:
+	var player: Tribe = _player_tribe()
+	if player == null:
+		return false
+	var shaman: Unit = player.shaman
+	return shaman != null and is_instance_valid(shaman) \
+		and shaman.state != Unit.State.DEAD
+
+
+func _on_spell_charges_changed(tribe_id: int) -> void:
+	if tribe_id == _player_id:
+		_refresh_spells()
+
+
+## Feeds the charge system into the pip display: castable = stored charge +
+## living shaman.
+func _refresh_spells() -> void:
+	var player: Tribe = _player_tribe()
+	if player == null:
+		return
+	if player.spells.is_empty():
+		for entry in default_spell_entries():
+			set_spell_state(entry["id"], 0, entry["max_charges"], 0.0, false)
+		return
+	var alive: bool = _player_shaman_alive()
+	for spell in player.spells:
+		set_spell_state(spell.id, spell.charges, spell.max_charges,
+			spell.charge_progress, alive and spell.charges > 0)
+
+
+func _on_spell_pressed(spell_id: StringName) -> void:
+	if _spell_targeting != null:
+		_spell_targeting.toggle_targeting(spell_id)
+
+
+## Portrait click: select the shaman and jump the camera to her.
+func _on_portrait_pressed() -> void:
+	var player: Tribe = _player_tribe()
+	if player == null or not _player_shaman_alive():
+		return
+	var shaman: Unit = player.shaman
+	if _selection != null:
+		_selection.select_units([shaman] as Array[Unit])
+	if _camera_rig != null:
+		_camera_rig.global_position = shaman.position
+
+
+## Portrait shows the respawn countdown while the shaman is dead.
+func _refresh_portrait() -> void:
+	if _portrait == null:
+		return
+	if _player_shaman_alive():
+		_portrait.disabled = false
+		_portrait.text = ""
+		_portrait.tooltip_text = "Schamanin auswählen"
+		return
+	_portrait.disabled = true
+	var remaining: float = -1.0
+	var player: Tribe = _player_tribe()
+	if player != null:
+		for b in player.buildings:
+			if b is ReincarnationSite and is_instance_valid(b):
+				remaining = (b as ReincarnationSite).respawn_remaining()
+				break
+	if remaining >= 0.0:
+		_portrait.text = "%ds" % int(ceil(remaining))
+		_portrait.tooltip_text = "Schamanin kehrt in %d s zurück" % int(ceil(remaining))
+	else:
+		_portrait.text = "tot"
+		_portrait.tooltip_text = "Kein Reinkarnationsplatz — keine Wiederkehr"
+
+
+# --- Spell display API ---------------------------------------------------------
 
 func set_spell_state(id: StringName, charges: int, max_charges: int,
 		charge_progress: float, castable: bool) -> void:
@@ -630,6 +726,8 @@ func set_spell_state(id: StringName, charges: int, max_charges: int,
 # --- Button actions ---------------------------------------------------------
 
 func _on_build_pressed(scene: PackedScene) -> void:
+	if _spell_targeting != null and _spell_targeting.is_active():
+		_spell_targeting.cancel()   # only one target mode at a time
 	if _build_menu != null and scene != null:
 		_build_menu.start_placement(scene)
 
@@ -656,8 +754,11 @@ func _toggle_pause() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not event.is_action_pressed("ui_cancel"):
 		return
-	# While placing a building, Esc cancels the placement (handled by BuildMenu).
+	# While placing a building or targeting a spell, Esc cancels that mode
+	# (handled by BuildMenu / SpellTargeting) instead of pausing.
 	if _build_menu != null and _build_menu.is_active():
+		return
+	if _spell_targeting != null and _spell_targeting.is_active():
 		return
 	_toggle_pause()
 	get_viewport().set_input_as_handled()

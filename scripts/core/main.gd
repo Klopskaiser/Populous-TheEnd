@@ -14,6 +14,7 @@ const TEMPLE_SCENE: PackedScene = preload("res://scenes/buildings/temple.tscn")
 const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
 const FIREWARRIOR_SCENE: PackedScene = preload("res://scenes/units/firewarrior.tscn")
 const PREACHER_SCENE: PackedScene = preload("res://scenes/units/preacher.tscn")
+const SHAMAN_SCENE: PackedScene = preload("res://scenes/units/shaman.tscn")
 const START_BRAVES: int = 20
 const TREE_COUNT: int = 60
 ## Max player count — one tribe per player, all identical instances.
@@ -51,6 +52,7 @@ const DEBUG_ARMY_OFFSET: int = 26
 @onready var _selection: SelectionManager = $UI/SelectionManager
 @onready var _sidebar: Sidebar = $UI/Sidebar
 @onready var _build_menu: BuildMenu = $UI/BuildMenu
+@onready var _spell_targeting: SpellTargeting = $UI/SpellTargeting
 @onready var _route_visualizer: RouteVisualizer = $RouteVisualizer
 @onready var _ring_renderer: SelectionRingRenderer = $SelectionRingRenderer
 
@@ -83,12 +85,23 @@ func _ready() -> void:
 	_tree_manager.setup(td, nav)
 	_wood_pile_manager.setup(td)
 	_tribe_commands.setup(nav, _building_manager, _unit_manager, _tree_manager)
-	_selection.setup(_unit_manager, _tribe_commands, _build_menu)
+	# Phase 6: spell world access + one spell set (own charges) per tribe.
+	var spell_ctx: SpellContext = SpellContext.new()
+	spell_ctx.terrain_data = td
+	spell_ctx.nav_grid = nav
+	spell_ctx.unit_manager = _unit_manager
+	spell_ctx.building_manager = _building_manager
+	_tribe_commands.spell_context = spell_ctx
+	for tribe in tribes:
+		tribe.set_spells(Spell.create_default_set())
+	_selection.setup(_unit_manager, _tribe_commands, _build_menu, _spell_targeting)
 	_ring_renderer.setup(_selection)
 	_build_menu.setup(_tribe_commands, nav, self, tribes[GameState.PLAYER_TRIBE])
+	_spell_targeting.setup(_tribe_commands, tribes[GameState.PLAYER_TRIBE], self,
+		_build_menu)
 	_sidebar.setup(tribes, GameState.PLAYER_TRIBE, _unit_manager, _building_manager,
 		_tree_manager, _wood_pile_manager, _tribe_commands, _build_menu, _selection,
-		_camera_rig, td)
+		_camera_rig, td, _spell_targeting)
 	_route_visualizer.setup(_selection, td)
 
 	# Phase 5d overlays/audio (created in code — no scene entries needed).
@@ -123,16 +136,37 @@ func _ready() -> void:
 
 
 ## Pre-places the player's reincarnation site (free, fully built) on the first
-## valid footprint near the island centre.
+## valid footprint near the island centre, plus the blue shaman next to it.
 func _place_start_site(tribe: Tribe, nav: NavGrid) -> void:
-	var fp: Vector2i = ReincarnationSite.FOOTPRINT
 	var center: Vector2i = Vector2i(TerrainData.SIZE / 2 + 6, TerrainData.SIZE / 2)
+	var site: Building = _place_site_near(tribe, center)
+	_spawn_shaman_near(tribe, site, center, nav)
+
+
+## First valid footprint near `anchor` gets the tribe's reincarnation site.
+func _place_site_near(tribe: Tribe, anchor: Vector2i) -> Building:
+	var fp: Vector2i = ReincarnationSite.FOOTPRINT
 	for radius in range(0, TerrainData.SIZE / 2):
-		for cell in _ring_cells(center, radius):
+		for cell in _ring_cells(anchor, radius):
 			if _tribe_commands.can_place_at(cell, fp):
-				_building_manager.place(SITE_SCENE, tribe, cell, 0, true)
-				return
-	push_warning("No valid spot for the start reincarnation site found")
+				return _building_manager.place(SITE_SCENE, tribe, cell, 0, true)
+	push_warning("No valid spot for a reincarnation site near %s found" % anchor)
+	return null
+
+
+## Spawns the tribe's shaman at the site's edge (fallback: walkable cell near
+## the anchor).
+func _spawn_shaman_near(tribe: Tribe, site: Building, anchor: Vector2i, nav: NavGrid) -> void:
+	var pos: Vector3
+	if site != null:
+		pos = site.edge_spawn_position()
+	else:
+		var cell: Vector2i = _find_walkable_near(anchor, nav, 0)
+		if cell.x < 0:
+			push_warning("No spawn spot for the shaman of tribe %d" % tribe.id)
+			return
+		pos = nav.cell_to_world(cell)
+	_unit_manager.spawn_unit(SHAMAN_SCENE, tribe.id, pos)
 
 
 ## Spawns the starting Braves (player tribe) on walkable cells near the island
@@ -193,6 +227,10 @@ func _setup_sparring(tribes: Array[Tribe], nav: NavGrid) -> void:
 	var camp_cell: Vector2i = _find_plot(anchor + Vector2i(-8, 0), WarriorCamp.FOOTPRINT, nav)
 	if camp_cell.x >= 0:
 		_building_manager.place(WARRIOR_CAMP_SCENE, red, camp_cell, 0, true)
+	# Red reincarnation site + shaman (phase 6): the enemy shaman exists and
+	# respawns just like the player's.
+	var red_site: Building = _place_site_near(red, anchor + Vector2i(8, 8))
+	_spawn_shaman_near(red, red_site, anchor + Vector2i(8, 8), nav)
 	# A small starting force spread around the anchor.
 	_spawn_sparring_units(red, anchor, nav)
 

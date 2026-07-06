@@ -15,7 +15,7 @@ class_name Brave extends Unit
 ## All logic runs in tick(delta) and works without the scene tree. References
 ## to trees/piles are kept untyped because they may be freed by other workers.
 
-enum Task {NONE, FLATTEN, CHOP, PICKUP, DELIVER, CONSTRUCT}
+enum Task {NONE, FLATTEN, CHOP, PICKUP, DELIVER, CONSTRUCT, REPAIR}
 
 const CARRY_CAPACITY: int = 3
 ## When delivering loose wood, prefer merging onto an existing pile within this
@@ -31,6 +31,7 @@ const TRAIN_SLOT_RANGE: float = 0.7   # how close to a queue slot counts as "in 
 const DIRECT_WALK_RANGE: float = 4.5
 const FLATTEN_RATE: float = 0.5     # metres of vertex adjustment per second
 const BUILD_RATE: float = 0.2       # build_progress per second
+const REPAIR_RATE: float = 10.0     # building HP repaired per second per worker
 const JOB_TREE_RADIUS: float = 40.0 # tree search radius around the site
 const CHOP_CHAIN_RADIUS: float = 8.0
 const TASK_RETRY: float = 0.6
@@ -134,6 +135,24 @@ func order_build(building: Building) -> void:
 	_set_state(State.BUILD)
 
 
+## Repair a damaged building: join it as a worker. Wood for the repair
+## (floor(damage * wood_cost), see Building.repair) is fetched with the same
+## CHOP/PICKUP/DELIVER pipeline as construction (State.BUILD job system).
+func order_repair(building: Building) -> void:
+	if not can_take_orders():
+		return
+	if building == null or not is_instance_valid(building) or building.under_construction:
+		return
+	if building.health <= 0 or building.health >= building.max_health:
+		return
+	_interrupt_tasks()
+	if not building.join(self):
+		return
+	job = building
+	_retry_timer = 0.0
+	_set_state(State.BUILD)
+
+
 func order_pray(site: Building) -> void:
 	if not can_take_orders():
 		return
@@ -147,7 +166,7 @@ func order_pray(site: Building) -> void:
 func order_train(building: TrainingBuilding) -> void:
 	if not can_take_orders():
 		return
-	if building == null or not is_instance_valid(building) or building.under_construction:
+	if building == null or not is_instance_valid(building) or not building.is_usable():
 		return
 	_interrupt_tasks()
 	building.add_trainee(self)
@@ -197,7 +216,7 @@ func _tick_state(delta: float) -> void:
 # --- Construction job ---------------------------------------------------------------
 
 func _tick_job(delta: float) -> void:
-	if job == null or not is_instance_valid(job) or not job.under_construction:
+	if job == null or not is_instance_valid(job) or not _job_active():
 		_interrupt_tasks()
 		_set_state(State.IDLE)
 		return
@@ -217,6 +236,15 @@ func _tick_job(delta: float) -> void:
 			_tick_deliver(delta)
 		Task.CONSTRUCT:
 			_tick_construct(delta)
+		Task.REPAIR:
+			_tick_repair(delta)
+
+
+## A job binds its workers while the building is under construction or (for
+## repair jobs) damaged; a finished/fully repaired building releases them.
+func _job_active() -> bool:
+	return job.under_construction \
+		or (job.health > 0 and job.health < job.max_health)
 
 
 ## Workers pick their own sensible sub-task: deliver carried wood first; then
@@ -228,30 +256,15 @@ func _choose_job_task() -> void:
 		task = Task.DELIVER
 		_reset_seek()
 		return
+	if not job.under_construction:
+		_choose_repair_task()
+		return
 	if job.needs_flatten() and job.has_unclaimed_flatten_cell():
 		if _claim_flatten():
 			return
 	if job.wants_more_wood():
-		# Wood lying around is used FIRST — only fell trees when no pile
-		# is left (piles inside the absorb radius are excluded, the site
-		# swallows those by itself).
-		if wood_pile_manager != null:
-			var pile: WoodPile = wood_pile_manager.nearest_pile(
-				position, job.entrance_world(), Building.ABSORB_RADIUS)
-			if pile != null:
-				task_pile = pile
-				task = Task.PICKUP
-				_reset_seek()
-				return
-		if tree_manager != null:
-			var tree: TreeResource = tree_manager.claim_nearest_tree(
-				job.center_world(), JOB_TREE_RADIUS, self)
-			if tree != null:
-				task_tree = tree
-				_chop_timer = tree.chop_time()
-				task = Task.CHOP
-				_reset_seek()
-				return
+		if _try_fetch_wood():
+			return
 	if job.needs_flatten():
 		if _claim_flatten():
 			return
@@ -267,6 +280,44 @@ func _choose_job_task() -> void:
 		_reset_seek()
 		return
 	# Nothing to do right now: wait and re-check via the retry timer.
+
+
+## Repair job: fetch wood while the damage still owes some (delivered piles are
+## absorbed into the building's repair buffer), hammer otherwise. No source at
+## all -> the site stalls like a construction site out of wood.
+func _choose_repair_task() -> void:
+	if job.wants_more_repair_wood() and _try_fetch_wood():
+		return
+	if job.repair_wood > 0 or job.repair_wood_missing() == 0:
+		task = Task.REPAIR
+		_reset_seek()
+		return
+	job.mark_wood_stalled()
+	_stop_all()
+
+
+## Wood lying around is used FIRST — only fell trees when no pile is left
+## (piles inside the absorb radius are excluded, the site swallows those by
+## itself). Returns true when a fetch sub-task was set.
+func _try_fetch_wood() -> bool:
+	if wood_pile_manager != null:
+		var pile: WoodPile = wood_pile_manager.nearest_pile(
+			position, job.entrance_world(), Building.ABSORB_RADIUS)
+		if pile != null:
+			task_pile = pile
+			task = Task.PICKUP
+			_reset_seek()
+			return true
+	if tree_manager != null:
+		var tree: TreeResource = tree_manager.claim_nearest_tree(
+			job.center_world(), JOB_TREE_RADIUS, self)
+		if tree != null:
+			task_tree = tree
+			_chop_timer = tree.chop_time()
+			task = Task.CHOP
+			_reset_seek()
+			return true
+	return false
 
 
 func _claim_flatten() -> bool:
@@ -308,7 +359,7 @@ func _tick_job_chop(delta: float) -> void:
 	if _chop_timer <= 0.0:
 		carried_wood += tree_manager.harvest_tree(task_tree)
 		if carried_wood >= CARRY_CAPACITY or not _tree_valid(task_tree) \
-				or not job.wants_more_wood():
+				or not _job_wants_wood():
 			if tree_manager != null and _tree_valid(task_tree):
 				tree_manager.release_claim(task_tree, self)
 			task_tree = null
@@ -361,6 +412,28 @@ func _tick_construct(delta: float) -> void:
 		_retry_timer = 2.0
 		if job.wants_more_wood():
 			_end_subtask()
+
+
+## Hammers repair HP into the (damaged, finished) job building. Building.repair
+## returns false when it runs dry of delivered wood — then re-choose (fetch
+## more or stall). Full repair releases the worker via the _job_active guard.
+func _tick_repair(delta: float) -> void:
+	if job.under_construction or job.health <= 0 or job.health >= job.max_health:
+		_end_subtask()
+		return
+	if not _seek(job.center_world(), job.interact_range(), delta):
+		return
+	_set_working(true)
+	_face_toward(job.center_world())
+	if not job.repair(REPAIR_RATE * delta):
+		_end_subtask()
+
+
+## Wood demand of the current job (construction vs. repair).
+func _job_wants_wood() -> bool:
+	if job == null or not is_instance_valid(job):
+		return false
+	return job.wants_more_wood() if job.under_construction else job.wants_more_repair_wood()
 
 
 func _end_subtask() -> void:
@@ -502,7 +575,7 @@ func _tick_pray(delta: float) -> void:
 ## standing in it (recomputed each tick, so it drops when the slot shifts as the
 ## queue advances). The building admits the front brave on its own tick.
 func _tick_train(delta: float) -> void:
-	if not is_instance_valid(train_target) or train_target.under_construction:
+	if not is_instance_valid(train_target) or not train_target.is_usable():
 		cancel_training()
 		return
 	var slot: Vector3 = train_slot_pos

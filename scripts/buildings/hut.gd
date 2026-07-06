@@ -27,14 +27,15 @@ func display_name() -> String:
 	return "Hütte"
 
 
+## Damaged huts (stage >= 1) house nobody until repaired.
 func housing_capacity() -> int:
-	return 0 if under_construction else CAPACITY
+	return CAPACITY if is_usable() else 0
 
 
 ## Progress toward the next brave (drives the bar above the hut); -1 while under
-## construction or when the tribe is at its population cap (not producing).
+## construction/damaged or when the tribe is at its population cap.
 func production_progress() -> float:
-	if under_construction or tribe == null:
+	if not is_usable() or tribe == null:
 		return -1.0
 	if tribe.population() >= tribe.housing_capacity():
 		return -1.0

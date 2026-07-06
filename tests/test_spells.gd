@@ -1,0 +1,494 @@
+extends TestBase
+
+## Headless tests for phase 6: the spell framework (charge system, round-robin
+## mana conversion, cast flow via the shaman) and the shaman kill bonus.
+## Spell-effect tests (landbridge, fireball, ...) are added per spell.
+
+const TICK: float = 0.1
+const MAX_TICKS: int = 400
+
+const SHAMAN_SCENE: PackedScene = preload("res://scenes/units/shaman.tscn")
+const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
+const BRAVE_SCENE_T: PackedScene = preload("res://scenes/units/brave.tscn")
+
+
+## Controllable spell for framework tests.
+class DummySpell extends Spell:
+	var executed: int = 0
+	var succeed: bool = true
+
+	func _init(p_id: StringName, cost: float, p_max: int) -> void:
+		id = p_id
+		charge_cost = cost
+		max_charges = p_max
+
+	func execute(_tribe: Tribe, _target: Vector3, _ctx: SpellContext) -> bool:
+		if not succeed:
+			return false
+		executed += 1
+		return true
+
+
+func _flat_terrain(h: float = 5.0) -> TerrainData:
+	var td: TerrainData = TerrainData.new()
+	for i in range(td.heights.size()):
+		td.heights[i] = h
+	return td
+
+
+func _make_world() -> Dictionary:
+	var td: TerrainData = _flat_terrain()
+	var nav: NavGrid = NavGrid.new(td)
+	var tribe0: Tribe = Tribe.new(0)
+	var tribe1: Tribe = Tribe.new(1)
+	var um: UnitManager = UnitManager.new()
+	um.setup(td, nav, [tribe0, tribe1] as Array[Tribe])
+	var tc: TribeCommands = TribeCommands.new()
+	tc.setup(nav, null, um)
+	var ctx: SpellContext = SpellContext.new()
+	ctx.terrain_data = td
+	ctx.nav_grid = nav
+	ctx.unit_manager = um
+	tc.spell_context = ctx
+	return {"td": td, "nav": nav, "tribe0": tribe0, "tribe1": tribe1,
+		"unit_manager": um, "tc": tc, "ctx": ctx}
+
+
+func _free_world(w: Dictionary) -> void:
+	w.tc.free()
+	w.unit_manager.free()
+
+
+func _run(w: Dictionary, units: Array, done: Callable) -> int:
+	for i in range(MAX_TICKS):
+		if done.call():
+			return i
+		for u in units:
+			if is_instance_valid(u) and u.state != Unit.State.DEAD:
+				u.tick(TICK)
+		w.unit_manager.tick(TICK)
+	return MAX_TICKS
+
+
+# --- Charge system -------------------------------------------------------------
+
+func test_no_charge_without_enough_mana() -> void:
+	var tribe: Tribe = Tribe.new(0)
+	var spell: DummySpell = DummySpell.new(&"dummy", 10.0, 4)
+	tribe.set_spells([spell] as Array[Spell])
+	tribe.mana = 5.0
+	tribe.tick(0.0)
+	check(spell.charges == 0, "not enough mana -> no charge")
+	check_near(tribe.mana, 5.0, "mana untouched below the charge cost")
+	check_near(spell.charge_progress, 0.5, "partial fill shown on the pip")
+	check(not spell.cast(tribe, Vector3.ZERO, null), "cast without charge fails")
+	check(spell.executed == 0, "failed cast has no side effect")
+
+
+func test_charging_over_ticks_until_full() -> void:
+	var tribe: Tribe = Tribe.new(0)
+	var spell: DummySpell = DummySpell.new(&"dummy", 10.0, 2)
+	tribe.set_spells([spell] as Array[Spell])
+	tribe.mana = 25.0
+	tribe.tick(0.0)
+	check(spell.charges == 2, "mana converts into charges up to max_charges")
+	check_near(tribe.mana, 5.0, "each conversion costs charge_cost")
+	tribe.mana += 20.0
+	tribe.tick(0.0)
+	check(spell.charges == 2, "full spell takes no more charges")
+	check_near(tribe.mana, 25.0, "surplus mana accumulates unused")
+
+
+func test_round_robin_serves_spells_fairly() -> void:
+	var tribe: Tribe = Tribe.new(0)
+	var cheap: DummySpell = DummySpell.new(&"cheap", 10.0, 4)
+	var pricey: DummySpell = DummySpell.new(&"pricey", 20.0, 4)
+	# Install in reverse order: set_spells sorts cheapest first.
+	tribe.set_spells([pricey, cheap] as Array[Spell])
+	tribe.mana = 30.0
+	tribe.tick(0.0)
+	check(cheap.charges == 1 and pricey.charges == 1,
+		"one round serves both spells, cheapest first")
+	check_near(tribe.mana, 0.0, "all mana converted")
+	# Next round starts at the cheapest again...
+	tribe.mana = 10.0
+	tribe.tick(0.0)
+	check(cheap.charges == 2 and pricey.charges == 1,
+		"next round serves the cheap spell first")
+	# ...but the expensive spell is NOT starved: the pointer now waits on it
+	# until its cost has accumulated, instead of feeding the cheap one again.
+	tribe.mana += 10.0
+	tribe.tick(0.0)
+	check(cheap.charges == 2 and pricey.charges == 1,
+		"pointer waits on the expensive spell while mana is short")
+	tribe.mana += 10.0
+	tribe.tick(0.0)
+	check(pricey.charges == 2, "expensive spell gets its turn once affordable")
+
+
+func test_cast_consumes_exactly_one_charge() -> void:
+	var tribe: Tribe = Tribe.new(0)
+	var spell: DummySpell = DummySpell.new(&"dummy", 10.0, 4)
+	tribe.set_spells([spell] as Array[Spell])
+	spell.charges = 2
+	tribe.mana = 7.0
+	check(spell.cast(tribe, Vector3.ZERO, null), "cast with stored charge succeeds")
+	check(spell.charges == 1, "exactly one charge consumed")
+	check_near(tribe.mana, 7.0, "mana unchanged by the cast")
+	check(spell.executed == 1, "effect executed once")
+
+
+func test_failed_execute_keeps_charge() -> void:
+	var tribe: Tribe = Tribe.new(0)
+	var spell: DummySpell = DummySpell.new(&"dummy", 10.0, 4)
+	tribe.set_spells([spell] as Array[Spell])
+	spell.charges = 2
+	spell.succeed = false
+	check(not spell.cast(tribe, Vector3.ZERO, null), "failed effect -> cast false")
+	check(spell.charges == 2, "charge kept when the effect fails")
+
+
+# --- Cast flow via TribeCommands / shaman ------------------------------------------
+
+func test_cast_spell_without_shaman_or_charge_fails() -> void:
+	var w: Dictionary = _make_world()
+	var spell: DummySpell = DummySpell.new(&"dummy", 10.0, 4)
+	w.tribe0.set_spells([spell] as Array[Spell])
+	check(not w.tc.cast_spell(w.tribe0, &"dummy", Vector3(30, 0, 30)),
+		"no charge -> no cast order")
+	spell.charges = 1
+	check(not w.tc.cast_spell(w.tribe0, &"dummy", Vector3(30, 0, 30)),
+		"no shaman -> no cast order")
+	check(not w.tc.cast_spell(w.tribe0, &"missing", Vector3.ZERO),
+		"unknown spell id -> false")
+	_free_world(w)
+
+
+func test_dead_shaman_blocks_casting() -> void:
+	var w: Dictionary = _make_world()
+	var shaman: Unit = w.unit_manager.spawn_unit(SHAMAN_SCENE, 0, Vector3(30, 0, 30))
+	check(w.tribe0.shaman == shaman, "tribe.shaman set on spawn")
+	var spell: DummySpell = DummySpell.new(&"dummy", 10.0, 4)
+	w.tribe0.set_spells([spell] as Array[Spell])
+	spell.charges = 1
+	shaman.take_damage(9999)
+	check(shaman.state == Unit.State.DEAD, "shaman died")
+	check(w.tribe0.shaman == null, "tribe.shaman cleared on death")
+	check(not w.tc.cast_spell(w.tribe0, &"dummy", Vector3(30, 0, 30)),
+		"dead shaman -> no cast")
+	check(spell.charges == 1, "charge kept")
+	_free_world(w)
+
+
+func test_shaman_walks_into_range_then_casts() -> void:
+	var w: Dictionary = _make_world()
+	var shaman: Unit = w.unit_manager.spawn_unit(SHAMAN_SCENE, 0, Vector3(20, 0, 20))
+	var spell: DummySpell = DummySpell.new(&"dummy", 10.0, 4)
+	w.tribe0.set_spells([spell] as Array[Spell])
+	spell.charges = 2
+	var target: Vector3 = Vector3(50, 0, 20)   # far beyond CAST_RANGE
+	check(w.tc.cast_spell(w.tribe0, &"dummy", target), "cast order accepted")
+	check(shaman.state == Unit.State.CAST, "shaman enters CAST")
+	var ticks: int = _run(w, [shaman], func() -> bool: return spell.executed > 0)
+	check(ticks < MAX_TICKS, "spell released after walking into range")
+	check(shaman._flat_dist(shaman.position, target) <= Shaman.CAST_RANGE + 0.5,
+		"shaman moved into cast range first")
+	check(spell.charges == 1, "exactly one charge consumed on release")
+	check(shaman.state == Unit.State.IDLE, "shaman idles after the cast")
+	_free_world(w)
+
+
+func test_move_order_cancels_pending_cast_and_keeps_charge() -> void:
+	var w: Dictionary = _make_world()
+	var shaman: Unit = w.unit_manager.spawn_unit(SHAMAN_SCENE, 0, Vector3(20, 0, 20))
+	var spell: DummySpell = DummySpell.new(&"dummy", 10.0, 4)
+	w.tribe0.set_spells([spell] as Array[Spell])
+	spell.charges = 1
+	check(w.tc.cast_spell(w.tribe0, &"dummy", Vector3(60, 0, 60)), "cast order accepted")
+	shaman.order_move(Vector3(22, 0, 20))
+	check(shaman.state != Unit.State.CAST, "move order cancels the cast")
+	for i in range(30):
+		shaman.tick(TICK)
+	check(spell.executed == 0, "cancelled cast never fires")
+	check(spell.charges == 1, "charge kept on cancel")
+	_free_world(w)
+
+
+# --- Shaman kill bonus ----------------------------------------------------------------
+
+func test_shaman_kill_grants_charge_bonus() -> void:
+	var w: Dictionary = _make_world()
+	var shaman: Unit = w.unit_manager.spawn_unit(SHAMAN_SCENE, 0, Vector3(30, 0, 30))
+	var killer: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 1, Vector3(31, 0, 30))
+	# Killer tribe capacity: 20 * 10 = 200 -> bonus 15% = 30 -> 1 charge + 10 mana.
+	var spell: DummySpell = DummySpell.new(&"dummy", 20.0, 10)
+	w.tribe1.set_spells([spell] as Array[Spell])
+	shaman.take_damage(9999, killer)
+	check(shaman.state == Unit.State.DEAD, "shaman died")
+	check(spell.charges == 1, "kill bonus converted into a stored charge")
+	check_near(w.tribe1.mana, 10.0, "bonus remainder stays as mana")
+	_free_world(w)
+
+
+func test_shaman_death_without_attacker_grants_nothing() -> void:
+	var w: Dictionary = _make_world()
+	var shaman: Unit = w.unit_manager.spawn_unit(SHAMAN_SCENE, 0, Vector3(30, 0, 30))
+	var spell: DummySpell = DummySpell.new(&"dummy", 20.0, 10)
+	w.tribe1.set_spells([spell] as Array[Spell])
+	shaman.take_damage(9999)
+	check(spell.charges == 0, "no attacker -> no bonus")
+	check_near(w.tribe1.mana, 0.0, "no bonus mana either")
+	_free_world(w)
+
+
+# --- Spell effects -------------------------------------------------------------------
+
+func _make_world_with_buildings() -> Dictionary:
+	var w: Dictionary = _make_world()
+	var bm: BuildingManager = BuildingManager.new()
+	bm.setup(w.td, w.nav, w.unit_manager)
+	w["bm"] = bm
+	w.ctx.building_manager = bm
+	return w
+
+
+func _free_world_with_buildings(w: Dictionary) -> void:
+	w.bm.free()
+	_free_world(w)
+
+
+func test_default_set_charge_counts() -> void:
+	var spells: Array[Spell] = Spell.create_default_set()
+	check(spells.size() == 5, "five spells in the default set")
+	var expected: Dictionary = {
+		&"fireball": 4, &"lightning": 4, &"swarm": 4, &"landbridge": 4, &"tornado": 3}
+	for spell in spells:
+		check(expected.has(spell.id), "known spell id: %s" % spell.id)
+		check(spell.max_charges == expected.get(spell.id, -1),
+			"%s has %d max charges" % [spell.id, expected.get(spell.id, -1)])
+		check(spell.charges == 0, "%s starts uncharged" % spell.id)
+
+
+## Water channel (columns 60..66 below sea level) splitting two land halves.
+func _channel_terrain(east_height: float = 5.0) -> TerrainData:
+	var td: TerrainData = _flat_terrain()
+	for vz in range(TerrainData.VERTS):
+		for vx in range(TerrainData.VERTS):
+			if vx >= 60 and vx <= 66:
+				td.set_vertex_height(vx, vz, 0.0)
+			elif vx > 66:
+				td.set_vertex_height(vx, vz, east_height)
+	return td
+
+
+func test_landbridge_opens_water_crossing() -> void:
+	var td: TerrainData = _channel_terrain()
+	var nav: NavGrid = NavGrid.new(td)
+	var tribe: Tribe = Tribe.new(0)
+	var um: UnitManager = UnitManager.new()
+	um.setup(td, nav, [tribe] as Array[Tribe])
+	var shaman: Unit = um.spawn_unit(SHAMAN_SCENE, 0, Vector3(57, 0, 64))
+	check(shaman != null, "shaman spawned")
+	var ctx: SpellContext = SpellContext.new()
+	ctx.terrain_data = td
+	ctx.nav_grid = nav
+	ctx.unit_manager = um
+	check(not nav.is_cell_walkable(Vector2i(63, 64)), "channel starts unwalkable")
+	check(nav.find_path(Vector3(56, 0, 64), Vector3(70, 0, 64)).is_empty(),
+		"no path across the water before the cast")
+	var spell: LandbridgeSpell = LandbridgeSpell.new()
+	check(spell.execute(tribe, Vector3(68, 0, 64), ctx), "landbridge cast succeeds")
+	check(nav.is_cell_walkable(Vector2i(63, 64)), "bridge cell walkable after the cast")
+	check(td.get_height(63.0, 64.0) > TerrainData.SEA_LEVEL,
+		"terrain raised above the water line")
+	check(not nav.find_path(Vector3(56, 0, 64), Vector3(70, 0, 64)).is_empty(),
+		"path leads across the new bridge")
+	um.free()
+
+
+func test_landbridge_builds_walkable_ramp() -> void:
+	# East side sits 4 m higher: the corridor must become a walkable slope.
+	var td: TerrainData = _channel_terrain(9.0)
+	var nav: NavGrid = NavGrid.new(td)
+	var tribe: Tribe = Tribe.new(0)
+	var um: UnitManager = UnitManager.new()
+	um.setup(td, nav, [tribe] as Array[Tribe])
+	um.spawn_unit(SHAMAN_SCENE, 0, Vector3(57, 0, 64))
+	var ctx: SpellContext = SpellContext.new()
+	ctx.terrain_data = td
+	ctx.nav_grid = nav
+	ctx.unit_manager = um
+	var spell: LandbridgeSpell = LandbridgeSpell.new()
+	check(spell.execute(tribe, Vector3(69, 0, 64), ctx), "ramp cast succeeds")
+	for x in range(58, 69):
+		check(nav.is_cell_walkable(Vector2i(x, 64)),
+			"ramp cell (%d, 64) is walkable (slope below limit)" % x)
+	check(not nav.find_path(Vector3(56, 0, 64), Vector3(70, 0, 64)).is_empty(),
+		"path climbs the ramp onto the higher side")
+	um.free()
+
+
+func test_fireball_damage_and_throw() -> void:
+	var w: Dictionary = _make_world()
+	w.unit_manager.spawn_unit(SHAMAN_SCENE, 0, Vector3(30, 0, 30))
+	var target: Vector3 = Vector3(40, 0, 30)
+	var direct: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, target)
+	var splash: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, Vector3(41.5, 0, 30))
+	var friend: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 0, Vector3(40.5, 0, 30.8))
+	var spell: FireballSpell = FireballSpell.new()
+	check(spell.execute(w.tribe0, target, w.ctx), "fireball launches")
+	check(w.unit_manager.projectiles.size() == 1, "bolt registered as projectile")
+	var bolt: FireballBolt = w.unit_manager.projectiles[0]
+	var ticks: int = _run(w, [], func() -> bool: return bolt.done)
+	check(ticks < MAX_TICKS, "bolt reaches the target point")
+	check(direct.state == Unit.State.DEAD, "direct hit kills a brave (60 dmg)")
+	check(splash.health == 30, "splash hit takes half a brave life")
+	check(splash.state == Unit.State.THROWN, "survivor is thrown into the air")
+	check(friend.health == 60 and friend.state != Unit.State.THROWN,
+		"own units are unaffected")
+	var start_pos: Vector3 = Vector3(41.5, 0, 30)
+	ticks = _run(w, [splash], func() -> bool:
+		return splash.state == Unit.State.IDLE or splash.state == Unit.State.DEAD)
+	check(ticks < MAX_TICKS, "thrown unit lands, rolls out and stands up")
+	if splash.state == Unit.State.IDLE:
+		check(splash._flat_dist(splash.position, start_pos) > 0.8,
+			"landed away from where it stood")
+		check(w.nav.is_cell_walkable(w.nav.world_to_cell(splash.position)),
+			"landing position is walkable")
+	_free_world(w)
+
+
+func test_lightning_kills_unit_and_rolls_neighbors() -> void:
+	var w: Dictionary = _make_world_with_buildings()
+	w.unit_manager.spawn_unit(SHAMAN_SCENE, 0, Vector3(30, 0, 30))
+	var victim: Unit = w.unit_manager.spawn_unit(SHAMAN_SCENE, 1, Vector3(40, 0, 30))
+	var neighbor: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, Vector3(41, 0, 30))
+	var own: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 0, Vector3(39, 0, 30))
+	var spell: LightningSpell = LightningSpell.new()
+	check(spell.execute(w.tribe0, Vector3(40.2, 0, 30), w.ctx), "lightning strikes")
+	check(victim.state == Unit.State.DEAD, "240 damage kills even a full shaman")
+	check(neighbor.state == Unit.State.ROLL, "adjacent enemy knocked into a roll")
+	check(own.state != Unit.State.ROLL, "own unit next to the strike stays up")
+	# No target at all -> the cast fails (charge would be kept).
+	check(not spell.execute(w.tribe0, Vector3(90, 0, 90), w.ctx),
+		"no target in range -> execute fails")
+	_free_world_with_buildings(w)
+
+
+func test_lightning_wrecks_building_two_stages() -> void:
+	var w: Dictionary = _make_world_with_buildings()
+	var tribe1: Tribe = w.tribe1
+	var hut: Building = w.bm.place(preload("res://scenes/buildings/hut.tscn"),
+		tribe1, Vector2i(50, 50), 0, true)
+	var spell: LightningSpell = LightningSpell.new()
+	check(spell.execute(w.tribe0, hut.center_world(), w.ctx), "strike on the hut")
+	check(hut.destruction_stage() == 2, "lightning = +2 destruction stages")
+	check(not hut.is_usable(), "hut unusable after the strike")
+	_free_world_with_buildings(w)
+
+
+func test_swarm_panics_enemies_not_shaman() -> void:
+	var w: Dictionary = _make_world()
+	var brave: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, Vector3(41, 0, 30))
+	var enemy_shaman: Unit = w.unit_manager.spawn_unit(SHAMAN_SCENE, 1, Vector3(41.5, 0, 30))
+	var own: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 0, Vector3(40.5, 0, 30.5))
+	var spell: SwarmSpell = SwarmSpell.new()
+	check(spell.execute(w.tribe0, Vector3(40.5, 0, 30), w.ctx), "swarm spawned")
+	var cloud: SwarmCloud = w.unit_manager.projectiles[0]
+	var start_pos: Vector3 = brave.position
+	var ticks: int = _run(w, [brave, enemy_shaman, own],
+		func() -> bool: return brave.state == Unit.State.PANIC)
+	check(ticks < MAX_TICKS, "enemy brave panics near the swarm")
+	# Panicked units ignore orders and scramble around.
+	brave.order_move(Vector3(60, 0, 60))
+	check(brave.state == Unit.State.PANIC, "orders are ignored while panicking")
+	_run(w, [brave, enemy_shaman, own], func() -> bool:
+		return brave._flat_dist(brave.position, start_pos) > 1.0)
+	check(brave._flat_dist(brave.position, start_pos) > 1.0, "panicked brave scrambles away")
+	check(enemy_shaman.state != Unit.State.PANIC, "enemy shaman is panic-immune")
+	check(own.state != Unit.State.PANIC, "own units are unaffected")
+	# Light damage near the swarm (the immobile shaman keeps getting stung).
+	_run(w, [brave, enemy_shaman, own],
+		func() -> bool: return enemy_shaman.health < enemy_shaman.max_health)
+	check(enemy_shaman.health < enemy_shaman.max_health, "swarm stings nearby enemies")
+	# The cloud expires after its lifetime, the panic after its own duration.
+	ticks = _run(w, [brave, enemy_shaman, own], func() -> bool:
+		return cloud.done and brave.state != Unit.State.PANIC)
+	check(ticks < MAX_TICKS, "cloud despawns and the panic wears off")
+	check(brave.state != Unit.State.PANIC, "brave controllable again")
+	brave.order_move(Vector3(60, 0, 60))
+	check(brave.state == Unit.State.MOVE, "orders work again after the panic")
+	_free_world(w)
+
+
+func test_tornado_wrecks_building_stage_by_stage() -> void:
+	var w: Dictionary = _make_world_with_buildings()
+	var hut: Building = w.bm.place(preload("res://scenes/buildings/hut.tscn"),
+		w.tribe1, Vector2i(50, 50), 0, true)
+	var spell: TornadoSpell = TornadoSpell.new()
+	check(spell.execute(w.tribe0, hut.center_world(), w.ctx), "tornado spawned")
+	var vortex: TornadoVortex = w.unit_manager.projectiles[0]
+	# Pin the vortex over the hut (its drift is random) to test the cadence.
+	vortex._redirect = 999.0
+	vortex._drift = Vector3.ZERO
+	w.unit_manager.tick(0.1)   # first stage fires immediately
+	check(hut.destruction_stage() == 1, "+1 stage on contact")
+	w.unit_manager.tick(2.0)
+	check(hut.destruction_stage() == 2, "+2 stages after ~2 s")
+	w.unit_manager.tick(2.0)
+	check(hut.destruction_stage() == 3, "+3 stages after ~4 s")
+	w.unit_manager.tick(2.0)
+	check(hut.health == 0, "fourth stage destroys the hut within the 8 s lifetime")
+	check(w.nav.is_cell_walkable(Vector2i(51, 51)), "footprint free after the wreck")
+	_free_world_with_buildings(w)
+
+
+func test_tornado_lifts_carries_and_flings_units() -> void:
+	var w: Dictionary = _make_world_with_buildings()
+	var brave: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, Vector3(40.5, 0, 40.5))
+	var spell: TornadoSpell = TornadoSpell.new()
+	check(spell.execute(w.tribe0, Vector3(40, 0, 40), w.ctx), "tornado spawned")
+	var vortex: TornadoVortex = w.unit_manager.projectiles[0]
+	vortex._redirect = 999.0
+	vortex._drift = Vector3.ZERO
+	var ticks: int = _run(w, [brave],
+		func() -> bool: return brave.state == Unit.State.THROWN)
+	check(ticks < MAX_TICKS, "unit in the path is whirled up")
+	var ground: float = w.td.get_height(brave.position.x, brave.position.z)
+	_run(w, [brave], func() -> bool: return brave.position.y > ground + 3.0)
+	check(brave.position.y > ground + 3.0, "rider gains height toward the tip")
+	ticks = _run(w, [brave], func() -> bool:
+		return brave.state == Unit.State.IDLE or brave.state == Unit.State.DEAD)
+	check(ticks < MAX_TICKS, "flung unit lands and finishes its tumble")
+	if brave.state == Unit.State.IDLE:
+		check(brave._flat_dist(brave.position, Vector3(40, 0, 40)) > 3.0,
+			"flung well away from the vortex")
+		check(brave.health <= brave.max_health - TornadoVortex.FALL_DAMAGE,
+			"fall damage (1/2 brave life) plus roll damage applied")
+	_free_world_with_buildings(w)
+
+
+func test_thrown_into_water_dies_instantly() -> void:
+	var td: TerrainData = _channel_terrain()
+	var nav: NavGrid = NavGrid.new(td)
+	var tribe: Tribe = Tribe.new(0)
+	var um: UnitManager = UnitManager.new()
+	um.setup(td, nav, [tribe] as Array[Tribe])
+	var brave: Unit = um.spawn_unit(BRAVE_SCENE_T, 0, Vector3(58, 0, 64))
+	brave.throw_airborne(Vector3(8.0, 4.0, 0.0))   # arcs into the channel
+	for i in range(100):
+		brave.tick(TICK)
+		if brave.state == Unit.State.DEAD:
+			break
+	check(brave.state == Unit.State.DEAD, "landing in water is instant death")
+	um.free()
+
+
+func test_shaman_stats() -> void:
+	var w: Dictionary = _make_world()
+	var shaman: Unit = w.unit_manager.spawn_unit(SHAMAN_SCENE, 0, Vector3(30, 0, 30))
+	check(shaman.max_health == 240, "shaman HP = 4x brave (240)")
+	check_near(shaman.melee_strength(), 2.0, "shaman melee = 2x brave")
+	check(shaman.is_panic_immune(), "shaman is panic-immune")
+	check(shaman.is_conversion_immune(), "shaman cannot be converted")
+	_free_world(w)

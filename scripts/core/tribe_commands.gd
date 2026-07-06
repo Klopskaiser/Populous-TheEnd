@@ -30,6 +30,8 @@ var nav_grid: NavGrid = null
 var building_manager: BuildingManager = null
 var unit_manager: UnitManager = null
 var tree_manager: TreeManager = null
+## World access for spell effects, injected by Main (tests build their own).
+var spell_context: SpellContext = null
 
 
 func setup(p_nav_grid: NavGrid, p_building_manager: BuildingManager,
@@ -153,16 +155,54 @@ func order_pray(units: Array[Unit], site: Building) -> void:
 		order_move(movers, site.center_world())
 
 
-## Sends braves to a training building to be trained into combat units. Only
-## own, living braves are enrolled; the building rejects them while it is still
-## under construction. UI and AI both call this.
-func order_train(building: TrainingBuilding, units: Array[Unit]) -> void:
+## Braves repair the damaged (finished) building; non-braves just walk there.
+## The wood cost — floor(damage fraction * wood_cost) — is fetched/absorbed by
+## the same pipeline as construction wood.
+func order_repair(units: Array[Unit], building: Building) -> void:
 	if building == null or not is_instance_valid(building) or building.under_construction:
+		return
+	if building.health <= 0 or building.health >= building.max_health:
+		return
+	var movers: Array[Unit] = []
+	for unit in units:
+		if unit.state == Unit.State.DEAD:
+			continue
+		if unit is Brave and unit.tribe_id == building.tribe_id:
+			(unit as Brave).order_repair(building)
+		else:
+			movers.append(unit)
+	if not movers.is_empty():
+		order_move(movers, building.center_world())
+
+
+## Sends braves to a training building to be trained into combat units. Only
+## own, living braves are enrolled; the building rejects them while it is
+## under construction or damaged (stage >= 1). UI and AI both call this.
+func order_train(building: TrainingBuilding, units: Array[Unit]) -> void:
+	if building == null or not is_instance_valid(building) or not building.is_usable():
 		return
 	for unit in units:
 		if unit is Brave and unit.state != Unit.State.DEAD \
 				and unit.tribe_id == building.tribe_id:
 			(unit as Brave).order_train(building)
+
+
+## Orders the tribe's shaman to cast `spell_id` at the target position. Fails
+## without side effects when no charge is stored or the shaman is dead/absent.
+## The charge itself is consumed when the shaman finishes the cast (walking
+## into range first if needed); a failed effect keeps the charge. UI and AI
+## both call this.
+func cast_spell(tribe: Tribe, spell_id: StringName, target: Vector3) -> bool:
+	if tribe == null:
+		return false
+	var spell: Spell = tribe.get_spell(spell_id)
+	if spell == null or spell.charges <= 0:
+		return false
+	var shaman: Unit = tribe.shaman
+	if shaman == null or not is_instance_valid(shaman) \
+			or shaman.state == Unit.State.DEAD or not (shaman is Shaman):
+		return false
+	return (shaman as Shaman).order_cast(spell, target, spell_context)
 
 
 ## Right-click attack: selected units melee the clicked enemy. Units distribute

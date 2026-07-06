@@ -19,7 +19,14 @@ var color: Color = Color.WHITE
 var mana: float = 0.0
 var units: Array[Unit] = []
 var buildings: Array[Building] = []
-var shaman: Unit = null   # set in phase 5
+## The tribe's single spell caster; kept in sync by add_unit/remove_unit
+## (null while she is dead — the reincarnation site respawns her).
+var shaman: Unit = null
+## Spell set (charge system), installed via set_spells (cost-sorted).
+var spells: Array[Spell] = []
+## Round-robin pointer into `spells`: the pointed spell is the next to
+## receive a charge once enough mana has accumulated.
+var _charge_index: int = 0
 
 var _events: Node = null
 var _events_resolved: bool = false
@@ -57,7 +64,82 @@ func praying_braves() -> int:
 func tick(delta: float) -> void:
 	mana += (float(population()) * MANA_BASE_RATE
 		+ float(praying_braves()) * MANA_PRAY_BONUS) * delta
+	_convert_mana_to_charges()
 	_emit_mana()
+
+
+# --- Spell charges (phase 6) ---------------------------------------------------
+
+## Installs the spell set, cost-sorted so the round-robin serves the cheapest
+## spell first within each round.
+func set_spells(p_spells: Array[Spell]) -> void:
+	spells = p_spells.duplicate()
+	spells.sort_custom(func(a: Spell, b: Spell) -> bool:
+		return a.charge_cost < b.charge_cost)
+	_charge_index = 0
+
+
+func get_spell(spell_id: StringName) -> Spell:
+	for spell in spells:
+		if spell.id == spell_id:
+			return spell
+	return null
+
+
+## Total mana the charge stores can hold (sum over all spells); basis of the
+## 15% shaman-kill bonus.
+func charge_capacity_mana() -> float:
+	var total: float = 0.0
+	for spell in spells:
+		total += spell.charge_cost * float(spell.max_charges)
+	return total
+
+
+## One-time mana injection (e.g. the shaman-kill bonus), converted into spell
+## charges immediately through the regular charging path.
+func grant_bonus_mana(amount: float) -> void:
+	if amount <= 0.0:
+		return
+	mana += amount
+	_convert_mana_to_charges()
+	_emit_mana()
+
+
+## Converts available mana into stored charges: round-robin over the
+## (cost-sorted) spells, one charge per turn. A spell that is not affordable
+## yet blocks its turn until the mana accumulated (fairness — cheap spells
+## cannot starve expensive ones). All spells full -> mana keeps accumulating.
+func _convert_mana_to_charges() -> void:
+	if spells.is_empty():
+		return
+	var converted: bool = false
+	while true:
+		var skipped: int = 0
+		while skipped < spells.size() and spells[_charge_index].is_full():
+			_charge_index = (_charge_index + 1) % spells.size()
+			skipped += 1
+		if skipped >= spells.size():
+			break   # all full
+		var spell: Spell = spells[_charge_index]
+		if mana < spell.charge_cost:
+			break   # this spell is served next, once the mana is there
+		mana -= spell.charge_cost
+		spell.charges += 1
+		converted = true
+		_charge_index = (_charge_index + 1) % spells.size()
+	_update_charge_progress()
+	if converted:
+		_emit_spell_charges()
+
+
+## The pips show one charge filling at a time: the round-robin spell currently
+## waiting for mana; every other spell shows no partial fill.
+func _update_charge_progress() -> void:
+	for spell in spells:
+		spell.charge_progress = 0.0
+	var current: Spell = spells[_charge_index]
+	if not current.is_full():
+		current.charge_progress = clampf(mana / current.charge_cost, 0.0, 1.0)
 
 
 # --- Unit / building registry ---------------------------------------------------
@@ -67,11 +149,15 @@ func add_unit(unit: Unit) -> void:
 		return
 	units.append(unit)
 	unit.tribe = self
+	if unit.unit_kind() == &"shaman":
+		shaman = unit
 	_emit_population()
 
 
 func remove_unit(unit: Unit) -> void:
 	units.erase(unit)
+	if shaman == unit:
+		shaman = null
 	_emit_population()
 
 
@@ -114,3 +200,9 @@ func _emit_population() -> void:
 	var bus: Node = _bus()
 	if bus != null:
 		bus.population_changed.emit(id, population(), housing_capacity())
+
+
+func _emit_spell_charges() -> void:
+	var bus: Node = _bus()
+	if bus != null:
+		bus.spell_charges_changed.emit(id)

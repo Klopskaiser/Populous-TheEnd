@@ -16,3 +16,6 @@ signal terrain_deformed(rect: Rect2i)
 ## A combat hit landed (kind: punch/kick/shove/fireball); CombatAudio plays a
 ## matching procedural sound at the position.
 signal combat_hit(kind: StringName, pos: Vector3)
+## A tribe's stored spell-charge counts changed (conversion or cast); the
+## sidebar refreshes its charge pips.
+signal spell_charges_changed(tribe_id: int)

@@ -13,8 +13,8 @@ class_name UnitRenderer extends MultiMeshInstance3D
 const MAX_UNITS: int = 4096
 const VISUAL_SLICES: int = 3
 const PIXEL_SIZE: float = 0.06
-## Kinds baked into the atlas (shaman is added in phase 6).
-const KINDS: Array[StringName] = [&"brave", &"warrior", &"firewarrior", &"preacher"]
+## Kinds baked into the atlas.
+const KINDS: Array[StringName] = [&"brave", &"warrior", &"firewarrior", &"preacher", &"shaman"]
 ## Sprite Y offset while airborne selects the arms-up jump frame.
 const HOP_FRAME_THRESHOLD: float = 0.12
 ## Small extra depth nudge toward the camera (metres) so a sprite standing on

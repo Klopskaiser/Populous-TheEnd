@@ -1228,3 +1228,174 @@ bei Hunderten Kämpfern auf engem Raum, Projektil-/Roll-Massen, GPU-seitig
 weiterhin die bekannten Punkte aus Phase 3e/3f). **Sub-Phase 5d und damit
 Phase 5 KOMPLETT abgeschlossen** — als Nächstes Phase 6 (Schamanin,
 Reinkarnation, Zauber).
+
+---
+
+## Phase 6 — Schamanin, Zauber, Panik/Schleuderphysik, Gebäudezerstörung (umgesetzt)
+
+Plan wurde vor der Umsetzung überarbeitet (Nutzerwunsch 2026-07-06): Feuerball
+statt Blast, neue Ladungs-/Schadenswerte relativ zum Brave-Leben (60 HP),
+Schamanin-Kill-Bonus, drei neue Kernmechaniken. Details + dokumentierte
+Auslegungen: [06_shaman_spells.md](06_shaman_spells.md).
+
+**Spell-Framework (`scripts/spells/spell.gd`, `spell_context.gd`):**
+- `Spell` (RefCounted): `id`, `display_name_de`, `charge_cost`, `max_charges`,
+  `charges`, `charge_progress`; `execute(tribe, target, ctx) -> bool` (virtuell),
+  `cast(...)` (verbraucht genau 1 Ladung nur bei Erfolg),
+  `Spell.create_default_set()` (je Tribe eigene Instanzen; Kosten-Startwerte
+  Feuerball 40 / Schwarm 50 / Blitz 60 / Landbrücke 60 / Tornado 90, Ladungen
+  4/4/4/4/3 — Feinbalance Phase 8).
+- **Aufladung in `Tribe.tick`** (`_convert_mana_to_charges`): Round-Robin über
+  die kostensortierten Zauber, **der Zeiger wartet auf den teuren Zauber**
+  (keine Aushungerung); alle voll → Mana sammelt sich. **Pip-Anzeige: es lädt
+  immer genau EIN Zauber** (der am Zeiger), `charge_progress` = Mana/Kosten.
+  Neu auf Tribe: `set_spells`, `get_spell`, `charge_capacity_mana`,
+  `grant_bonus_mana` (sofortige Umwandlung); `tribe.shaman` wird in
+  `add_unit`/`remove_unit` gepflegt (Tod → null). Neues Signal
+  `Events.spell_charges_changed(tribe_id)`.
+- `SpellContext` (RefCounted): TerrainData/NavGrid/UnitManager/BuildingManager;
+  `apply_terrain_change(rect)` = NavGrid-Update + `Events.terrain_deformed`
+  (Mesh/Kollision/Minimap über Main). **Abweichung vom Plan:** ctx hält keine
+  Terrain-Node-Referenz — der Event-Weg existierte schon (3b) und hält die
+  Minimap aktuell; der `HeightMapShape3D.map_data`-Check ist damit nur manuell
+  prüfbar (headless testen TerrainData + NavGrid).
+- `TribeCommands.cast_spell(tribe, spell_id, target)`: prüft Ladung + lebende
+  Schamanin, delegiert an `Shaman.order_cast` — **die Ladung wird erst beim
+  Auslösen verbraucht** (Schamanin läuft in Reichweite; Fehleffekt = Ladung
+  bleibt). `TribeCommands.spell_context` von Main injiziert.
+
+**Schamanin (`scripts/units/shaman.gd` + Szene):** 240 HP (4× Brave),
+`melee_strength 2.0`, panik-/konvertierungsimmun, kein Auto-Aggro (wie Brave).
+`order_cast` → `State.CAST`: `_approach` bis `CAST_RANGE 9 m`, Wind-up
+`CAST_TIME 0,6 s` (Cast-Anim nur in Reichweite, sonst walk), dann
+`Spell.cast`. Move-Order bricht den Cast ab (Ladung bleibt). **Kill-Bonus:**
+`_die()` zahlt dem Stamm des `last_attacker` einmalig
+`15 % × charge_capacity_mana()` als Bonus-Mana direkt in die Umwandlung; ohne
+Attacker (Wasser) kein Bonus. Kind `shaman` in `UnitRenderer.KINDS` ergänzt
+(Cast-Anim existierte seit Phase 2). Beide Start-Tribes bekommen Schamanin +
+Reinkarnationsplatz (`main.gd`: `_place_site_near`/`_spawn_shaman_near`, auch
+für Rot beim Sparring-Setup).
+
+**Respawn (`reincarnation_site.gd`):** `_tick_active` zählt `respawn_timer`
+(`RESPAWN_TIME 20 s`) nur solange die Schamanin tot ist, spawnt dann genau
+EINE neue am Platzrand; `respawn_remaining()` für den Porträt-Countdown.
+Läuft nur bei `is_usable()` → **beschädigter/zerstörter Platz respawnt nicht**
+(erst nach Reparatur weiter).
+
+**Gebäudezerstörung (`building.gd` + Subklassen):**
+- `destruction_stage()` aus dem Schadensanteil (≥30/60/90 % → Stufe 1–3,
+  0 HP → 4), `is_usable()` (fertig + Stufe 0) gate-t **alle** Produktion:
+  Hütten-Spawn/-Kapazität, Training (inkl. `rally_training_building`,
+  `order_train`, Brave-`_tick_train`), Respawn; `production_progress` → −1.
+- `apply_destruction_stages(n)` = n × 30 % Max-HP (Blitz +2, Tornado +1/2 s).
+- Übergang auf Stufe ≥ 1 ruft Hook `_on_disabled()`: **TrainingBuilding wirft
+  den Trainee lebend wieder aus** (zurück in Registry/Welt + `cancel_training`,
+  Population ±0) und entlässt die Warteschlange — `destroy()` tötet den
+  Trainee weiterhin (Gebäude kollabiert).
+- **Stufe 4:** `destroy()` sofort spielmechanisch (NavGrid-Footprint frei,
+  Tribe/Manager-Abmeldung, ClickBody weg), das Wrack **versinkt visuell** über
+  `_process` (`SINK_DURATION 2 s`, nur in-game) und `queue_free`t sich.
+- **Schadens-Visual:** je Stufe erscheinen 2 dunkle „herausgebrochene“
+  Klötze am Placeholder-Mesh (`_create_damage_holes`, deterministisch,
+  Cache über `_visual_stage`) — echte Texturen können den Stufen-Hook nutzen.
+- **Reparatur:** Holzkosten = `floor(Schadensanteil × wood_cost)`;
+  `repair_wood`-Puffer wird wie beim Bau aus Stapeln am Eingang absorbiert
+  (`_tick_repair_absorb`, inkl. `wood_stalled`-Recheck); `repair(amount)`
+  schaltet Arbeit über den Puffer frei (1 Holz = `max_health/wood_cost` HP),
+  der **abgerundete Rest repariert holzfrei** (deckt exakt die
+  floor-Semantik); `wood_cost 0` (Reinkarnationsplatz) repariert gratis.
+- **Brave-Task REPAIR** über das bestehende Job-System (`State.BUILD`):
+  `order_repair` (Brave + TribeCommands), `_choose_repair_task` (Holz holen ↔
+  hämmern ↔ `mark_wood_stalled`), gemeinsamer Helfer `_try_fetch_wood()`
+  (aus dem Bau-Zweig extrahiert), `_job_wants_wood()` (Bau vs. Reparatur),
+  `REPAIR_RATE 10 HP/s`. **Rechtsklick** auf eigenes beschädigtes Gebäude →
+  Reparatur (SelectionManager; nutzbare Trainings-/Gebetsgebäude behalten
+  ihre Funktion, solange Stufe 0).
+
+**Schleuderphysik & Panik (`unit.gd`):**
+- **THROWN:** `throw_airborne(velocity, fall_damage)` — skriptete Parabel
+  (`THROW_GRAVITY 18`), kein Y-Snap, keine Befehle/Separation; Mehrfachwürfe
+  stapeln. Landung: Wasser = Sofort-Tod, Gebäudezellen → nächste begehbare
+  Zelle, Sturzschaden, dann **Momentum-Roll**.
+- **ROLL erweitert:** `start_roll(dir, duration, initial_speed)` — Anfangs-
+  geschwindigkeit klingt über `ROLL_FRICTION 6 m/s²` ab (Ende erst unter
+  `ROLL_STOP_SPEED 1`), auf Ebenem schnelles Ausrollen, an Hängen übernimmt
+  die 5d-Falllinie; Rollschaden/Wasser-Tod unverändert.
+- **Träger-Mechanik für den Tornado:** `throw_carrier` (untypisiert) friert
+  `_tick_thrown` ein, solange der Träger lebt; `fling_from_carry(velocity)`
+  löst den Wurf; verschwindet der Träger, fällt die Einheit normal.
+- **PANIC:** `start_panic(source, 6 s)` (Refresh bei erneuter Nähe),
+  Zufallsflucht von der Quelle weg (Direkt-Wegpunkte, kein A*), keine Befehle
+  (`can_take_orders` false, auch für THROWN), kein Zurückschlagen; Schamanin
+  immun (`is_panic_immune`). Walk-Anim; THROWN nutzt die Roll-Anim.
+
+**Zauber (`scripts/spells/…`):**
+- **Feuerball** (`fireball_spell.gd` + `fireball_bolt.gd` — Name „Bolt“, weil
+  `scripts/units/fireball.gd` das Feuerkrieger-Projektil ist): Projektil
+  fliegt in flachem Bogen zum ZielPUNKT (kein Homing), Explosion: Direkt ≤
+  0,8 m = 60, Fläche ≤ 2,5 m = 30; Überlebende werden im kleinen Bogen
+  weggeschleudert (THROWN → Roll). Attacker = Schamanin (Vergeltung/Kill-Credit).
+- **Landbrücke** (`landbridge.gd` + **`TerrainData.raise_line`**): breiter
+  Korridor (Halbbreite 1,6 + 1,5 Blend) von der Schamanin zum Ziel, Profil
+  lerp(Starthöhe→Zielhöhe), Wasserenden auf Küstenniveau (`SEA_LEVEL + 1,2`);
+  **hebt nur an**, Rampe bleibt begehbar; danach `apply_terrain_change`
+  (NavGrid + terrain_deformed, EIN Update pro Cast).
+- **Blitz** (`lightning.gd`, innere Klasse `LightningBeam` als kurzer weißer
+  Strahl): Gebäude am Klickpunkt (Footprint +1 gewachsen, da der Terrain-Ray
+  neben den Wänden landet) → **+2 Stufen**; sonst nächste Feindeinheit ≤ 3 m
+  → **240 Schaden** (tötet auch eine volle Schamanin exakt), Nachbarn ≤ 1,5 m
+  → Mini-Rolle; kein Ziel → `execute` false (Ladung bleibt).
+- **Schwarm** (`swarm.gd` + `swarm_cloud.gd`): 10 s Lebenszeit, Zufallsdrift
+  1,5 m/s, alle 0,4 s Panik-Refresh (6 s) + **3 Schaden/s** an Feinden ≤ 3 m;
+  Schamaninnen nur gegen die Panik immun.
+- **Tornado** (`tornado.gd` + `tornado_vortex.gd`): 8 s, Drift 2,5 m/s;
+  Gebäude unter dem Wirbel **+1 Stufe sofort bei Kontakt, dann alle 2 s**
+  (sonst wären in 8 s nur 3 Stufen möglich — ein geparkter Tornado zerlegt
+  ein Gebäude damit komplett). Feinde ≤ 2,2 m werden gefangen
+  (`throw_carrier`), spiralen in 0,9 s zur Spitze (6 m), reiten 0,6 s mit und
+  werden mit 12 m/s + Sturzschaden 30 weggeschleudert (Landung → Momentum-
+  Roll); Ablauf/Despawn schleudert Rest-Reiter ab.
+- **Alle Schadens-/Kontrollzauber treffen nur Feinde** (dokumentierte
+  Auslegung im Plan).
+
+**UI (`spell_targeting.gd` neu, `sidebar.gd`, `selection_manager.gd`,
+`ui_theme.gd`, `main.tscn`):**
+- `SpellTargeting` (Control im UI-Layer, analog BuildMenu): goldener
+  Ring-Cursor am Terrain, Hotkeys 1–5 togglen (`cast_spell_1..5`, Reihenfolge
+  = `default_spell_entries`), Linksklick → `cast_spell` (Erfolg beendet den
+  Zielmodus), Esc/Rechtsklick bricht ab; startet nur mit Ladung + lebender
+  Schamanin; BuildMenu und Zielmodus schließen sich gegenseitig aus;
+  SelectionManager ignoriert Eingaben solange aktiv; Esc-Priorität vor dem
+  Pausemenü (Sidebar-Guard).
+- Sidebar: `default_spell_entries` auf **Feuerball**/4-4-4-4-3 umgestellt
+  (Icon-Key `blast` → `fireball`, Flammen-Icon), Buttons feuern
+  `toggle_targeting`; `_refresh_spells` (throttled + `spell_charges_changed`)
+  füttert `set_spell_state` (castable = Ladung > 0 UND Schamanin lebt).
+  **Porträt aktiv:** Klick selektiert die Schamanin + springt mit der Kamera
+  hin; tot → disabled mit **Respawn-Countdown** („12s“ bzw. „tot“ ohne Platz).
+  Gefolgsleute-Zeile „Schamanin“ aktiv.
+- `UnitManager.register_projectile` hängt Projektile jetzt **immer** als Kind
+  ein (vorher nur in-tree): headless werden sie mit dem Manager freigegeben
+  (Leak-Fix — `queue_free` läuft im Testrunner nie), `_ready`/Visuals laufen
+  weiterhin nur in-game.
+
+**Erkenntnisse/Stolpersteine:**
+- `queue_free` außerhalb des Szenenbaums wird im Testrunner nie ausgeführt →
+  Projektile leakten, bis sie Kinder des UnitManagers wurden.
+- Tornado-Stufentakt: „alle 2 s“ ab Kontakt gerechnet (erster Schlag sofort),
+  sonst schafft die 8-s-Lebenszeit nur 3 der 4 Stufen.
+- Der Round-Robin-Zeiger darf nach einer Umwandlung NICHT auf den billigsten
+  zurückspringen — er wartet am teuren Zauber, sonst verhungert dieser.
+- Reparatur-Floor-Semantik sauber über „Puffer + holzfreier Rest“: 90 %
+  Schaden an der 15-Holz-Hütte kosten exakt 13 Holz, Vollreparatur inklusive.
+
+**Verifikation:** Testsuite grün (**627 Tests**; neu: `test_spells.gd` 124,
+`test_building_destruction.gd` 48, `test_shaman_respawn.gd` 17 — Framework/
+Round-Robin/Kill-Bonus/Cast-Flow, alle 5 Zaubereffekte inkl. Landbrücken-Rampe
+und Wasser-Tod, Stufen/Reparatur/Trainee-Auswurf, Respawn inkl. beschädigter
+Platz). `--headless --import`, `--headless --quit` und `--quit-after 240`
+fehlerfrei. **Manuelle Prüfung durch Nutzer: ausstehend** (siehe Plan §Manuelle
+Prüfung: Zauber-Tab/Pips/Hotkeys, Landbrücke im Live-Spiel inkl. Raycast auf
+neuer Höhe, Feuerball-Bogen, Blitz auf Gebäude + Reparatur per Rechtsklick,
+Schwarm-Panik, Tornado inkl. Hochwirbeln/Versinken, Schamanin-Tod →
+Ladungsschub beim Gegner → Respawn-Countdown im Porträt).

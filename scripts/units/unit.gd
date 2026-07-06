@@ -107,6 +107,18 @@ const STEEP_ROLL_SLOPE: float = 1.0
 ## ...with this chance per second.
 const STEEP_ROLL_CHANCE_PER_SEC: float = 0.6
 
+# --- Throw & panic (phase 6) ---------------------------------------------------------
+## Gravity of scripted throw arcs (slightly snappy for gameplay feel).
+const THROW_GRAVITY: float = 18.0
+## Friction (m/s^2) that bleeds off a landing throw's roll speed on flat
+## ground — thrown units tumble on and quickly come to a stop.
+const ROLL_FRICTION: float = 6.0
+## A speed-driven roll may end once its momentum decayed below this.
+const ROLL_STOP_SPEED: float = 1.0
+## Panic effect duration (swarm) and how often a new flee direction is picked.
+const PANIC_DURATION: float = 6.0
+const PANIC_REDIRECT_INTERVAL: float = 0.5
+
 # --- Melee shove (phase 5d) --------------------------------------------------------
 ## A shove always displaces the target slightly (the brawl shifts around)...
 const SHOVE_DISPLACE: float = 0.35
@@ -230,6 +242,20 @@ var roll_dir: Vector3 = Vector3.ZERO
 var _roll_time: float = 0.0
 var _roll_min_time: float = 0.0
 var _roll_damage_frac: float = 0.0
+## Momentum of a throw-landing roll (0 = plain constant-speed roll).
+var _roll_init_speed: float = 0.0
+
+# --- Throw / panic state (phase 6) ----------------------------------------------------
+var _throw_velocity: Vector3 = Vector3.ZERO
+var _throw_fall_damage: int = 0
+## While set (untyped: may be freed), an external carrier (the tornado)
+## controls this thrown unit's position; _tick_thrown idles until the carrier
+## releases it via fling_from_carry.
+var throw_carrier = null
+## Position the panicked unit flees from (the swarm).
+var panic_source: Vector3 = Vector3.ZERO
+var _panic_time: float = 0.0
+var _panic_redirect: float = 0.0
 
 # --- Regeneration / stars state (phase 5d) --------------------------------------------
 ## Seconds since the last combat involvement; regen starts past REGEN_DELAY.
@@ -295,6 +321,10 @@ func _tick_state(delta: float) -> void:
 			_tick_sit(delta)
 		State.ROLL:
 			_tick_roll(delta)
+		State.THROWN:
+			_tick_thrown(delta)
+		State.PANIC:
+			_tick_panic(delta)
 		State.DEAD:
 			_tick_dead(delta)
 		_:
@@ -389,10 +419,11 @@ func _on_path_finished() -> void:
 
 ## While pacified by an enemy preacher (SIT) the unit accepts NO orders at all —
 ## it stays sitting until the preacher is attacked (priest duel), interrupted
-## (fireball reset, out of range, death) or the conversion completes. Rolling
-## units are equally beyond control until they land.
+## (fireball reset, out of range, death) or the conversion completes. Rolling,
+## airborne (thrown) and panicking units are equally beyond control.
 func can_take_orders() -> bool:
-	return state != State.SIT and state != State.DEAD and state != State.ROLL
+	return state != State.SIT and state != State.DEAD and state != State.ROLL \
+		and state != State.THROWN and state != State.PANIC
 
 
 ## Move order. queue_up appends the target as an additional waypoint
@@ -599,9 +630,12 @@ func _tick_knockback(delta: float) -> void:
 
 ## Starts (or extends) a roll along `dir`. Mini rolls on flat ground end after
 ## `duration`; on steep slopes the roll follows the fall line downhill until
-## the ground flattens. Rolling suspends all orders and separation; rolling
+## the ground flattens. `initial_speed` > 0 gives the roll momentum (throw
+## landings) that bleeds off via ROLL_FRICTION — the unit tumbles on and only
+## stands up once slow. Rolling suspends all orders and separation; rolling
 ## into water kills instantly; roll damage kills only at the roll's end.
-func start_roll(dir: Vector3, duration: float = MINI_ROLL_DURATION) -> void:
+func start_roll(dir: Vector3, duration: float = MINI_ROLL_DURATION,
+		initial_speed: float = 0.0) -> void:
 	if state == State.DEAD:
 		return
 	var flat: Vector3 = Vector3(dir.x, 0.0, dir.z)
@@ -613,6 +647,7 @@ func start_roll(dir: Vector3, duration: float = MINI_ROLL_DURATION) -> void:
 	if state == State.ROLL:
 		# Another hit while tumbling (e.g. a follow-up fireball): extend.
 		_roll_min_time = maxf(_roll_min_time, _roll_time + duration)
+		_roll_init_speed = maxf(_roll_init_speed, initial_speed)
 		return
 	_on_combat_interrupt()
 	_end_attack()
@@ -624,6 +659,7 @@ func start_roll(dir: Vector3, duration: float = MINI_ROLL_DURATION) -> void:
 	_roll_time = 0.0
 	_roll_min_time = duration
 	_roll_damage_frac = 0.0
+	_roll_init_speed = initial_speed
 	_set_state(State.ROLL)
 
 
@@ -640,7 +676,13 @@ func _tick_roll(delta: float) -> void:
 	var slope: float = down.length()
 	if slope > ROLL_END_SLOPE:
 		roll_dir = down.normalized()
-	var step: float = ROLL_SPEED * (1.0 + slope * 0.4) * delta
+	# Momentum rolls (throw landings) use their decaying speed instead of the
+	# constant tumble speed.
+	var speed_now: float = ROLL_SPEED
+	if _roll_init_speed > 0.0:
+		speed_now = _roll_init_speed
+		_roll_init_speed = maxf(_roll_init_speed - ROLL_FRICTION * delta, 0.0)
+	var step: float = speed_now * (1.0 + slope * 0.4) * delta
 	var nx: float = position.x + roll_dir.x * step
 	var nz: float = position.z + roll_dir.z * step
 	# Buildings stop the roll; steep/unwalkable open ground is rolled across.
@@ -658,7 +700,8 @@ func _tick_roll(delta: float) -> void:
 		var dmg: int = int(_roll_damage_frac)
 		_roll_damage_frac -= float(dmg)
 		health -= dmg
-	if slope <= ROLL_END_SLOPE and _roll_time >= _roll_min_time:
+	if slope <= ROLL_END_SLOPE and _roll_time >= _roll_min_time \
+			and _roll_init_speed <= ROLL_STOP_SPEED:
 		_end_roll()
 
 
@@ -679,6 +722,156 @@ func _end_roll() -> void:
 		_die()
 		return
 	_set_state(State.IDLE)
+
+
+# --- Throw (phase 6) --------------------------------------------------------------------
+
+## Launches the unit into a scripted arc (State.THROWN: no Y snapping, no
+## orders, no separation). `velocity` is the initial world velocity (Y up).
+## On landing the unit takes `fall_damage`, then tumbles on with the throw's
+## horizontal speed (momentum roll) until it decays; landing or rolling into
+## water kills instantly. Another throw mid-flight stacks onto the velocity.
+func throw_airborne(velocity: Vector3, fall_damage: int = 0) -> void:
+	if state == State.DEAD:
+		return
+	if state == State.THROWN:
+		_throw_velocity += velocity
+		_throw_fall_damage = maxi(_throw_fall_damage, fall_damage)
+		return
+	_on_combat_interrupt()
+	_end_attack()
+	converting_preacher = null
+	conversion_progress = 0.0
+	waypoint_queue.clear()
+	_clear_path()
+	hop_visual = false
+	_no_combat_timer = 0.0
+	_throw_velocity = velocity
+	_throw_fall_damage = fall_damage
+	_set_state(State.THROWN)
+
+
+func _tick_thrown(delta: float) -> void:
+	if throw_carrier != null:
+		if is_instance_valid(throw_carrier):
+			return   # the carrier moves us
+		throw_carrier = null   # carrier vanished mid-air: fall from here
+	_throw_velocity.y -= THROW_GRAVITY * delta
+	position += _throw_velocity * delta
+	var flat: Vector3 = Vector3(_throw_velocity.x, 0.0, _throw_velocity.z)
+	if flat.length_squared() > 0.000001:
+		facing = flat.normalized()
+	var ground: float = 0.0
+	if terrain_data != null:
+		ground = terrain_data.get_height(position.x, position.z)
+	if position.y > ground and _throw_velocity.y > 0.0:
+		return
+	if position.y > ground:
+		return   # still falling
+	position.y = ground
+	_land_from_throw(ground)
+
+
+## The carrier (tornado) flings the carried unit away: it resumes the normal
+## throw arc with the given velocity (fall damage was set at capture).
+func fling_from_carry(velocity: Vector3) -> void:
+	if state != State.THROWN:
+		return
+	throw_carrier = null
+	_throw_velocity = velocity
+
+
+## Landing: water kills instantly; building footprints are snapped out of;
+## fall damage applies, then the momentum roll takes over.
+func _land_from_throw(ground: float) -> void:
+	var fall_damage: int = _throw_fall_damage
+	_throw_fall_damage = 0
+	var momentum: Vector3 = Vector3(_throw_velocity.x, 0.0, _throw_velocity.z)
+	_throw_velocity = Vector3.ZERO
+	if terrain_data != null and ground <= TerrainData.SEA_LEVEL + 0.05:
+		health = 0
+		_die()
+		return
+	if nav_grid != null:
+		var cell: Vector2i = nav_grid.world_to_cell(position)
+		if nav_grid.is_cell_blocked_by_building(cell):
+			var near: Vector2i = nav_grid.nearest_walkable_cell(cell)
+			if near.x >= 0:
+				var wpos: Vector3 = nav_grid.cell_to_world(near)
+				position.x = wpos.x
+				position.z = wpos.z
+	_snap_to_ground()
+	if fall_damage > 0:
+		take_damage(fall_damage)
+		if state == State.DEAD:
+			return
+	start_roll(momentum, MINI_ROLL_DURATION, momentum.length())
+
+
+# --- Panic (phase 6) --------------------------------------------------------------------
+
+## Panics the unit (swarm effect): it flees in randomly changing directions
+## away from `source_pos`, accepts no orders and does not fight back, until
+## the effect runs out. Re-panicking refreshes the timer. Shamans are immune;
+## thrown/rolling units finish their tumble first.
+func start_panic(source_pos: Vector3, duration: float = PANIC_DURATION) -> void:
+	if state == State.DEAD or state == State.THROWN or state == State.ROLL:
+		return
+	if is_panic_immune():
+		return
+	panic_source = source_pos
+	if state == State.PANIC:
+		_panic_time = maxf(_panic_time, duration)
+		return
+	_on_combat_interrupt()
+	_end_attack()
+	converting_preacher = null
+	conversion_progress = 0.0
+	waypoint_queue.clear()
+	_clear_path()
+	hop_visual = false
+	_panic_time = duration
+	_panic_redirect = 0.0
+	_set_state(State.PANIC)
+
+
+func _tick_panic(delta: float) -> void:
+	_panic_time -= delta
+	if _panic_time <= 0.0:
+		_clear_path()
+		_set_state(State.IDLE)
+		return
+	_panic_redirect -= delta
+	if _panic_redirect <= 0.0 or not _has_path():
+		_panic_redirect = PANIC_REDIRECT_INTERVAL + randf() * 0.3
+		_pick_panic_target()
+	_advance_path(delta)
+
+
+## Short random flight hop, biased away from the panic source; clamped onto a
+## walkable cell (direct waypoint, no A* — panic is headless scrambling).
+func _pick_panic_target() -> void:
+	var away: Vector3 = Vector3(
+		position.x - panic_source.x, 0.0, position.z - panic_source.z)
+	var base_angle: float
+	if away.length_squared() > 0.01:
+		base_angle = atan2(away.z, away.x)
+	else:
+		base_angle = randf() * TAU
+	var angle: float = base_angle + randf_range(-1.2, 1.2)
+	var dist: float = randf_range(2.0, 4.0)
+	var target: Vector3 = position + Vector3(cos(angle) * dist, 0.0, sin(angle) * dist)
+	if nav_grid != null:
+		var cell: Vector2i = nav_grid.world_to_cell(target)
+		if not nav_grid.is_cell_walkable(cell):
+			var near: Vector2i = nav_grid.nearest_walkable_cell(cell)
+			if near.x < 0:
+				return
+			target = nav_grid.cell_to_world(near)
+	elif terrain_data != null:
+		target.y = terrain_data.get_height(target.x, target.z)
+	_path = PackedVector3Array([target])
+	_path_index = 0
 
 
 ## Downhill direction at the current position; the vector length is the slope
@@ -704,7 +897,7 @@ func _tick_regen(delta: float) -> void:
 			_recent_damage - float(STARS_DAMAGE_THRESHOLD) * delta / STARS_WINDOW, 0.0)
 	if state == State.DEAD:
 		return
-	if state == State.ROLL:
+	if state == State.ROLL or state == State.THROWN:
 		_no_combat_timer = 0.0
 		return
 	_no_combat_timer += delta
@@ -735,6 +928,11 @@ func has_stars() -> bool:
 ## Shamans and preachers can never be converted (original rule).
 func is_conversion_immune() -> bool:
 	return unit_kind() == &"shaman" or unit_kind() == &"preacher"
+
+
+## Shamans are immune to the swarm's panic effect (phase 6, Shaman overrides).
+func is_panic_immune() -> bool:
+	return false
 
 
 ## Pacified by an enemy preacher: stop everything and sit down. The conversion
@@ -1209,7 +1407,7 @@ func _anim_base() -> StringName:
 			return &"cast"
 		State.SIT:
 			return &"sit"
-		State.ROLL:
+		State.ROLL, State.THROWN:
 			return &"roll"
 		State.DEAD:
 			return &"dead"

@@ -101,6 +101,61 @@ func raise_area(center: Vector2, radius: float, amount: float) -> Rect2i:
 		cell_max_x - cell_min_x + 1, cell_max_z - cell_min_z + 1)
 
 
+## Raises a corridor from `from` to `to` (world XZ) onto a height profile
+## interpolated between height_from and height_to — a walkable ramp when the
+## two differ. Terrain is only ever RAISED, never lowered; beyond half_width
+## the lift blends out smoothly over `edge` metres. Returns the affected cell
+## rect (like raise_area). Core of the Landbridge spell.
+func raise_line(from: Vector2, to: Vector2, half_width: float,
+		height_from: float, height_to: float, edge: float = 1.5) -> Rect2i:
+	var axis: Vector2 = to - from
+	var len2: float = axis.length_squared()
+	var reach: float = half_width + edge
+	var min_vx: int = clampi(int(floor((minf(from.x, to.x) - reach) / CELL_SIZE)), 0, VERTS - 1)
+	var max_vx: int = clampi(int(ceil((maxf(from.x, to.x) + reach) / CELL_SIZE)), 0, VERTS - 1)
+	var min_vz: int = clampi(int(floor((minf(from.y, to.y) - reach) / CELL_SIZE)), 0, VERTS - 1)
+	var max_vz: int = clampi(int(ceil((maxf(from.y, to.y) + reach) / CELL_SIZE)), 0, VERTS - 1)
+
+	var changed_min_x: int = VERTS
+	var changed_min_z: int = VERTS
+	var changed_max_x: int = -1
+	var changed_max_z: int = -1
+
+	for vz in range(min_vz, max_vz + 1):
+		for vx in range(min_vx, max_vx + 1):
+			var p: Vector2 = Vector2(float(vx) * CELL_SIZE, float(vz) * CELL_SIZE)
+			var t: float = 0.0
+			if len2 > 0.000001:
+				t = clampf((p - from).dot(axis) / len2, 0.0, 1.0)
+			var d: float = p.distance_to(from + axis * t)
+			if d > reach:
+				continue
+			var profile: float = lerpf(height_from, height_to, t)
+			var blend: float = 1.0
+			if d > half_width:
+				var e: float = clampf((reach - d) / edge, 0.0, 1.0)
+				blend = e * e * (3.0 - 2.0 * e)  # smoothstep to the old terrain
+			var idx: int = vz * VERTS + vx
+			var current: float = heights[idx]
+			var nh: float = maxf(current, lerpf(current, profile, blend))
+			if nh <= current + 0.0001:
+				continue
+			heights[idx] = nh
+			changed_min_x = mini(changed_min_x, vx)
+			changed_min_z = mini(changed_min_z, vz)
+			changed_max_x = maxi(changed_max_x, vx)
+			changed_max_z = maxi(changed_max_z, vz)
+
+	if changed_max_x < 0:
+		return Rect2i()
+	var cell_min_x: int = clampi(changed_min_x - 1, 0, SIZE - 1)
+	var cell_min_z: int = clampi(changed_min_z - 1, 0, SIZE - 1)
+	var cell_max_x: int = clampi(changed_max_x, 0, SIZE - 1)
+	var cell_max_z: int = clampi(changed_max_z, 0, SIZE - 1)
+	return Rect2i(cell_min_x, cell_min_z,
+		cell_max_x - cell_min_x + 1, cell_max_z - cell_min_z + 1)
+
+
 # --- Walkability -------------------------------------------------------------
 
 func in_bounds(cell: Vector2i) -> bool:

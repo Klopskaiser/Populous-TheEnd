@@ -51,6 +51,7 @@ var _hovered_building: Building = null
 var _unit_manager: UnitManager = null
 var _tribe_commands: TribeCommands = null
 var _build_menu: BuildMenu = null
+var _spell_targeting: SpellTargeting = null
 var _dragging: bool = false
 var _drag_start: Vector2 = Vector2.ZERO
 var _drag_current: Vector2 = Vector2.ZERO
@@ -62,10 +63,11 @@ var _last_box_select_ms: int = -100000
 
 
 func setup(p_unit_manager: UnitManager, p_tribe_commands: TribeCommands = null,
-		p_build_menu: BuildMenu = null) -> void:
+		p_build_menu: BuildMenu = null, p_spell_targeting: SpellTargeting = null) -> void:
 	_unit_manager = p_unit_manager
 	_tribe_commands = p_tribe_commands
 	_build_menu = p_build_menu
+	_spell_targeting = p_spell_targeting
 
 
 func _ready() -> void:
@@ -86,6 +88,10 @@ func _process(_delta: float) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if _build_menu != null and _build_menu.is_active():
+		_dragging = false
+		drag_active = false
+		return
+	if _spell_targeting != null and _spell_targeting.is_active():
 		_dragging = false
 		drag_active = false
 		return
@@ -382,10 +388,16 @@ func _dispatch_context_command(hit: Dictionary) -> bool:
 		if building.under_construction:
 			_tribe_commands.order_build(selected, building)
 			return true
-		if building is ReincarnationSite:
-			_tribe_commands.order_pray(selected, building)
-			return true
-		if building is TrainingBuilding:
-			_tribe_commands.order_train(building, selected)
+		if building.is_usable():
+			if building is ReincarnationSite:
+				_tribe_commands.order_pray(selected, building)
+				return true
+			if building is TrainingBuilding:
+				_tribe_commands.order_train(building, selected)
+				return true
+		if building.health < building.max_health and building.health > 0:
+			# Damaged building (huts at any damage, others once unusable):
+			# workers repair it.
+			_tribe_commands.order_repair(selected, building)
 			return true
 	return false

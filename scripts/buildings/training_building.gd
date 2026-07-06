@@ -204,11 +204,26 @@ static func _dist_point_seg(p: Vector2, a: Vector2, b: Vector2) -> float:
 
 
 ## Progress toward the next graduating unit (drives the bar above the building);
-## -1 while under construction or when nobody is inside training.
+## -1 while under construction/damaged or when nobody is inside training.
 func production_progress() -> float:
-	if under_construction or trainee == null:
+	if not is_usable() or trainee == null:
 		return -1.0
 	return clampf(1.0 - _train_timer / training_time, 0.0, 1.0)
+
+
+## Damaged into stage >= 1: training stops — the trainee steps back out into
+## the world (alive, back in the registry) and the queued braves are released.
+func _on_disabled() -> void:
+	if is_instance_valid(trainee):
+		trainee.position = edge_spawn_position()
+		if unit_manager != null:
+			unit_manager.register(trainee)
+		trainee.cancel_training()
+	trainee = null
+	for brave in incoming:
+		if is_instance_valid(brave):
+			brave.cancel_training()
+	incoming.clear()
 
 
 ## Frees the trainee and releases the queued braves when destroyed.

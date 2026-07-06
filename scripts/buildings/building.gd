@@ -28,6 +28,17 @@ const FLATTEN_EPS: float = 0.02
 ## becomes available for workers again (they re-check for new wood/trees).
 const WOOD_RECHECK_INTERVAL: float = 30.0
 
+# --- Destruction stages & repair (phase 6) ------------------------------------
+## Damage fraction per destruction stage: stage 1 at >= 30%, 2 at >= 60%,
+## 3 at >= 90%, 4 (destroyed) at 100%. From stage 1 on the building is
+## unusable (no production, no capacity) until repaired.
+const STAGE_DAMAGE: float = 0.3
+## Destroyed buildings sink into the ground (visual only), then free themselves.
+const SINK_DURATION: float = 2.0
+const SINK_DEPTH: float = 5.0
+## Placeholder damage visual: dark "broken out" chunks, 2 shown per stage.
+const MAX_DAMAGE_HOLES: int = 6
+
 var tribe_id: int = 0
 var tribe: Tribe = null
 var max_health: int = 300
@@ -46,6 +57,17 @@ var flatten_target: float = 0.0
 ## True while the site waits for wood with no source in reach: workers left
 ## and recruiting pauses until the re-check timer expires (or wood arrives).
 var wood_stalled: bool = false
+## Wood delivered for repairs and not yet consumed (absorbed from piles near
+## the entrance while the building is damaged).
+var repair_wood: int = 0
+## Repair HP already paid for by consumed wood but not yet worked off.
+var _repair_hp_pool: float = 0.0
+## Sub-HP repair work accumulator.
+var _repair_hp_frac: float = 0.0
+var _destroyed: bool = false
+var _sink_time: float = 0.0
+var _damage_holes: Array[MeshInstance3D] = []
+var _visual_stage: int = -1
 ## Worker braves currently assigned to this construction site.
 var workers: Array[Brave] = []
 
@@ -136,7 +158,7 @@ func rally_training_building() -> TrainingBuilding:
 		int(floor(rally_point.x / TerrainData.CELL_SIZE)),
 		int(floor(rally_point.z / TerrainData.CELL_SIZE)))
 	for b in tribe.buildings:
-		if b is TrainingBuilding and is_instance_valid(b) and not b.under_construction:
+		if b is TrainingBuilding and is_instance_valid(b) and b.is_usable():
 			if Rect2i(b.cell, b.footprint).has_point(rc):
 				return b as TrainingBuilding
 	return null
@@ -162,6 +184,7 @@ func edge_spawn_position() -> Vector3:
 
 
 func _ready() -> void:
+	set_process(false)   # only enabled for the destruction sink
 	_create_visuals()
 	if _mesh_root != null:
 		_mesh_root.rotation.y = float(orientation) * PI * 0.5
@@ -170,6 +193,7 @@ func _ready() -> void:
 	_create_rally_marker()
 	_create_overlay()
 	_update_construction_visual()
+	_update_damage_visual()
 
 
 # --- Construction setup (called by BuildingManager.place) --------------------------
@@ -201,9 +225,126 @@ func tick(delta: float) -> void:
 	if under_construction:
 		_tick_construction(delta)
 	else:
-		_tick_active(delta)
+		if health > 0 and health < max_health:
+			_tick_repair_absorb(delta)
+		if is_usable():
+			_tick_active(delta)
 	_update_overlay()
 	_update_rally_marker()
+
+
+# --- Destruction stages & repair (phase 6) ----------------------------------------
+
+## Current destruction stage from the damage fraction: 0 = intact/usable,
+## 1..3 = increasingly wrecked (unusable, repairable), 4 = destroyed.
+func destruction_stage() -> int:
+	if health <= 0:
+		return 4
+	var damage: float = 1.0 - float(health) / float(max_health)
+	if damage >= STAGE_DAMAGE * 3.0:
+		return 3
+	if damage >= STAGE_DAMAGE * 2.0:
+		return 2
+	if damage >= STAGE_DAMAGE:
+		return 1
+	return 0
+
+
+## Usable = finished, alive and below stage 1 damage. Gates all production
+## (hut spawns, training) and the housing capacity.
+func is_usable() -> bool:
+	return not under_construction and health > 0 and destruction_stage() == 0
+
+
+## Damage worth `count` destruction stages (30% of max HP each) — lightning
+## (+2) and the tornado (+1 every 2 s) deal damage in these steps.
+func apply_destruction_stages(count: int) -> void:
+	if count <= 0:
+		return
+	take_damage(int(ceil(STAGE_DAMAGE * float(max_health))) * count)
+
+
+## HP of repair work one delivered wood pays for.
+func repair_hp_per_wood() -> float:
+	if wood_cost <= 0:
+		return float(max_health)
+	return float(max_health) / float(wood_cost)
+
+
+## Wood the CURRENT damage still requires beyond what was already delivered:
+## floor(damage fraction * wood_cost) — e.g. a hut repaired from 90% damage
+## costs 90% of its wood cost, rounded down.
+func repair_wood_missing() -> int:
+	if wood_cost <= 0 or under_construction or health <= 0:
+		return 0
+	var damage: float = 1.0 - float(health) / float(max_health)
+	return maxi(0, int(floor(damage * float(wood_cost))) - repair_wood)
+
+
+## True while repair workers should still fetch more wood (analogous to
+## wants_more_wood for construction; wood_incoming counts carried/claimed
+## wood and piles near the entrance).
+func wants_more_repair_wood() -> bool:
+	return not under_construction and health > 0 and health < max_health \
+		and repair_wood_missing() > wood_incoming()
+
+
+## Applies `amount` HP of repair work (from a worker). Work consumes the
+## repair-wood buffer (1 wood per repair_hp_per_wood() HP); once the buffer is
+## empty it only continues while the remaining damage rounds down to 0 owed
+## wood (the floored total cost). Returns false when the repair stalls for
+## wood — the worker then fetches more (or the site stalls).
+func repair(amount: float) -> bool:
+	if under_construction or health <= 0 or health >= max_health:
+		return false
+	if wood_cost > 0:
+		while _repair_hp_pool < amount and repair_wood > 0:
+			repair_wood -= 1
+			_repair_hp_pool += repair_hp_per_wood()
+		if _repair_hp_pool <= 0.0:
+			if repair_wood_missing() > 0:
+				return false   # wood still owed and none delivered
+			_repair_hp_pool = amount   # sub-wood remainder repairs for free
+		amount = minf(amount, _repair_hp_pool)
+		_repair_hp_pool -= amount
+	_repair_hp_frac += amount
+	var whole: int = int(_repair_hp_frac)
+	if whole > 0:
+		_repair_hp_frac -= float(whole)
+		health = mini(health + whole, max_health)
+		if health >= max_health:
+			_repair_hp_pool = 0.0
+			_repair_hp_frac = 0.0
+		_update_damage_visual()
+	return true
+
+
+## Hook: the building just crossed into stage >= 1 (unusable). Subclasses
+## release occupants (training buildings eject the trainee and the queue).
+func _on_disabled() -> void:
+	pass
+
+
+## While damaged: absorb wood piles near the entrance into the repair buffer
+## and run the wood-stall re-check (mirrors _tick_construction).
+func _tick_repair_absorb(delta: float) -> void:
+	if wood_stalled:
+		_wood_recheck_timer -= delta
+		if _wood_recheck_timer <= 0.0:
+			wood_stalled = false
+	_absorb_timer -= delta
+	if _absorb_timer > 0.0:
+		return
+	_absorb_timer = ABSORB_INTERVAL
+	if wood_pile_manager == null:
+		return
+	var need: int = repair_wood_missing()
+	if need <= 0:
+		return
+	var taken: int = wood_pile_manager.take_from_radius(entrance_world(), ABSORB_RADIUS, need)
+	if taken > 0:
+		repair_wood += taken
+		wood_stalled = false
 
 
 ## 0..1 progress toward the next produced/trained unit, or -1 when the building
@@ -537,23 +678,59 @@ func finish_construction() -> void:
 func take_damage(amount: int) -> void:
 	if health <= 0:
 		return
+	var was_usable: bool = is_usable()
 	health -= amount
 	if health <= 0:
 		health = 0
 		destroy()
+		return
+	if was_usable and not is_usable():
+		_on_disabled()
+	_update_damage_visual()
 
 
-## Frees the NavGrid footprint, deregisters from the tribe and removes the node.
+## Frees the NavGrid footprint (the plot becomes buildable/walkable again),
+## deregisters from the tribe and removes the building. In-game the wreck
+## sinks into the ground first (visual only, _process) before freeing itself;
+## outside the tree (headless tests) the owner frees the node.
 func destroy() -> void:
+	if _destroyed:
+		return
+	_destroyed = true
+	health = 0
 	if nav_grid != null:
 		nav_grid.fill_solid_region(footprint_rect(), false)
 	if tribe != null:
 		tribe.remove_building(self)
+	set_selected(false)
 	destroyed.emit(self)
 	if is_inside_tree():
 		var events: Node = get_node_or_null("/root/Events")
 		if events != null:
 			events.building_destroyed.emit(self)
+		_begin_sinking()
+
+
+## Visual-only sink of the destroyed building; all gameplay registration is
+## already gone at this point (no clicks, no ticks).
+func _begin_sinking() -> void:
+	_sink_time = 0.0
+	var body: Node = get_node_or_null("ClickBody")
+	if body != null:
+		body.queue_free()
+	if _selection_ring != null:
+		_selection_ring.visible = false
+	if _overlay_sprite != null:
+		_overlay_sprite.visible = false
+	if _rally_marker != null:
+		_rally_marker.visible = false
+	set_process(true)
+
+
+func _process(delta: float) -> void:
+	_sink_time += delta
+	position.y -= SINK_DEPTH / SINK_DURATION * delta
+	if _sink_time >= SINK_DURATION:
 		queue_free()
 
 
@@ -620,3 +797,41 @@ func _update_construction_visual() -> void:
 		return
 	var s: float = 1.0 if not under_construction else 0.1 + 0.9 * build_progress
 	_mesh_root.scale = Vector3(1.0, maxf(s, 0.05), 1.0)
+
+
+## Placeholder damage visual: per destruction stage, two more dark chunks
+## appear "broken out" of the model (real damage textures can replace this
+## later via the same stage hook). Cached on the current stage.
+func _update_damage_visual() -> void:
+	if _mesh_root == null:
+		return
+	var stage: int = mini(destruction_stage(), 3)
+	if stage == _visual_stage:
+		return
+	_visual_stage = stage
+	if _damage_holes.is_empty():
+		if stage == 0:
+			return
+		_create_damage_holes()
+	for i in range(_damage_holes.size()):
+		_damage_holes[i].visible = i < stage * 2
+
+
+func _create_damage_holes() -> void:
+	var mat: StandardMaterial3D = _make_material(Color(0.07, 0.05, 0.03))
+	var w: float = float(footprint.x)
+	var d: float = float(footprint.y)
+	for i in range(MAX_DAMAGE_HOLES):
+		var hole: MeshInstance3D = MeshInstance3D.new()
+		var box: BoxMesh = BoxMesh.new()
+		var s: float = 0.5 + 0.18 * float(i % 3)
+		box.size = Vector3(s, s, s)
+		hole.mesh = box
+		hole.material_override = mat
+		var angle: float = TAU * float(i) / float(MAX_DAMAGE_HOLES) + 0.7
+		hole.position = Vector3(
+			cos(angle) * w * 0.38, 0.5 + 0.35 * float(i % 4), sin(angle) * d * 0.38)
+		hole.rotation = Vector3(0.4 * float(i), 0.9 * float(i), 0.0)
+		hole.visible = false
+		_mesh_root.add_child(hole)
+		_damage_holes.append(hole)
