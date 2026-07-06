@@ -94,7 +94,10 @@ func can_place_at(cell: Vector2i, footprint: Vector2i) -> bool:
 ## Move order in packs of GROUP_SIZE: the selection is sorted spatially so
 ## nearby units end up in the same group, group centres get deterministic
 ## formation offsets (rings), members stand tightly around their centre.
-func order_move(units: Array[Unit], target: Vector3, queue_up: bool = false) -> void:
+## `aggressive` = attack-move (combatants engage enemies on the way);
+## default is the plain (passive) move — also used to flee a fight.
+func order_move(units: Array[Unit], target: Vector3, queue_up: bool = false,
+		aggressive: bool = false) -> void:
 	var alive: Array[Unit] = []
 	for unit in units:
 		if unit.state != Unit.State.DEAD:
@@ -109,7 +112,7 @@ func order_move(units: Array[Unit], target: Vector3, queue_up: bool = false) -> 
 		var group_index: int = g / GROUP_SIZE
 		var group_target: Vector3 = target + formation_offset(group_index) * group_scale
 		for m in range(g, mini(g + GROUP_SIZE, alive.size())):
-			alive[m].order_move(group_target + MEMBER_OFFSETS[m - g], queue_up)
+			alive[m].order_move(group_target + MEMBER_OFFSETS[m - g], queue_up, aggressive)
 
 
 ## Braves fell the tree (and keep chopping nearby ones); non-braves just walk

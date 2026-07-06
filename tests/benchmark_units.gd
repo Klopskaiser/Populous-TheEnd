@@ -32,7 +32,11 @@ func _initialize() -> void:
 		var cell: Vector2i = Vector2i(rng.randi_range(20, 107), rng.randi_range(20, 107))
 		if not nav.is_cell_walkable(cell):
 			continue
-		um.spawn_unit(BRAVE_SCENE, spawned % 4, nav.cell_to_world(cell))
+		# ONE tribe on purpose: this benchmark measures movement/hash/
+		# separation/idle cost. Mixed tribes stacked on one point would turn it
+		# into a 4000-man brawl since phase 7b (brave idle aggro) — melee slot
+		# contention is a separate phase 8 topic.
+		um.spawn_unit(BRAVE_SCENE, 0, nav.cell_to_world(cell))
 		spawned += 1
 	print("Spawned %d units in %.1f ms" % [
 		UNIT_COUNT, float(Time.get_ticks_usec() - spawn_start) / 1000.0])
@@ -66,6 +70,7 @@ func _initialize() -> void:
 		var t3: int = Time.get_ticks_usec()
 		path_us += t3 - t2
 		um._apply_separation(TICK)
+		um._apply_idle_regroup(TICK)   # phase 7b: guard scan + 6-pack drift
 		var t4: int = Time.get_ticks_usec()
 		sep_us += t4 - t3
 		var took: int = t4 - tick_start

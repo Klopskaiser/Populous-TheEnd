@@ -221,8 +221,9 @@ func test_marching_combatants_engage_on_contact() -> void:
 	var w: Dictionary = _make_world()
 	var blue: Unit = _spawn(w, WARRIOR_SCENE, 0, Vector2(30, 30))
 	var red: Unit = _spawn(w, WARRIOR_SCENE, 1, Vector2(44, 30))
-	blue.order_move(Vector3(58, 0, 30))   # straight past/through the enemy
-	red.order_move(Vector3(16, 0, 30))
+	# Attack-move (aggressive) — a plain move marches past since phase 7b.
+	blue.order_move(Vector3(58, 0, 30), false, true)
+	red.order_move(Vector3(16, 0, 30), false, true)
 	var ticks: int = _run(w, [blue, red], func() -> bool:
 		return blue.state == Unit.State.ATTACK or red.state == Unit.State.ATTACK)
 	check(ticks < MAX_TICKS, "marching combatants engage on contact")
@@ -709,8 +710,10 @@ func test_fireball_resets_conversion() -> void:
 func test_brave_retaliates_but_does_not_aggro() -> void:
 	var w: Dictionary = _make_world()
 	var brave: Unit = _spawn(w, BRAVE_SCENE, 0, Vector2(30, 30))
-	var enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(33, 30))
-	# A brave never seeks out enemies on its own.
+	# 5 m away: outside the brave's small 3 m idle guard radius (phase 7b) —
+	# the close-range aggro case is covered in test_unit_control.gd.
+	var enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(35, 30))
+	# A brave never seeks out distant enemies on its own.
 	for i in range(10):
 		brave.tick(TICK)
 		w.unit_manager.tick(TICK)

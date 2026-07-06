@@ -384,12 +384,12 @@ func _setup_debug_battle(nav: NavGrid) -> void:
 	# Each army brings its shaman (behind the lines) with FULL spell charges.
 	_spawn_debug_shaman(0, blue_anchor + Vector2i(-6, 0), nav)
 	_spawn_debug_shaman(1, red_anchor + Vector2i(6, 0), nav)
-	# March each army at the enemy anchor; the path queue spreads the A* load.
-	# Attack-move takes over on contact (combatants engage while marching).
+	# March each army at the enemy anchor (attack-move: combatants engage on
+	# contact); the path queue spreads the A* load.
 	_tribe_commands.order_move(
-		_unit_manager.get_units_of_tribe(0), nav.cell_to_world(red_anchor))
+		_unit_manager.get_units_of_tribe(0), nav.cell_to_world(red_anchor), false, true)
 	_tribe_commands.order_move(
-		_unit_manager.get_units_of_tribe(1), nav.cell_to_world(blue_anchor))
+		_unit_manager.get_units_of_tribe(1), nav.cell_to_world(blue_anchor), false, true)
 	print("Debugschlacht: %d Einheiten gesamt" % _unit_manager.units.size())
 
 

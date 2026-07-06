@@ -48,6 +48,11 @@ var selected_building: Building = null
 ## Building currently under the mouse (drives its production-bar visibility).
 var _hovered_building: Building = null
 
+## Attack-move armed (key A): the NEXT right-click issues an aggressive move
+## (combatants engage enemies on the way). Esc or any right-click clears it.
+## Static (like drag_active) so the CameraRig can suppress the A-pan.
+static var attack_arm_active: bool = false
+
 var _unit_manager: UnitManager = null
 var _tribe_commands: TribeCommands = null
 var _build_menu: BuildMenu = null
@@ -103,6 +108,14 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			if mb.pressed:
+				# Double click on an own unit: select every unit of that kind
+				# currently on screen (phase 7b).
+				if mb.double_click:
+					_dragging = false
+					drag_active = false
+					_double_click_select(mb.position)
+					queue_redraw()
+					return
 				_dragging = true
 				drag_active = true
 				_drag_start = mb.position
@@ -124,10 +137,15 @@ func _unhandled_input(event: InputEvent) -> void:
 			if selected_building != null and is_instance_valid(selected_building):
 				_set_rally(mb.position)
 			else:
-				_command_move(mb.position, mb.shift_pressed)
+				var aggressive: bool = attack_arm_active
+				attack_arm_active = false
+				queue_redraw()
+				_command_move(mb.position, mb.shift_pressed, aggressive)
 	elif event is InputEventMouseMotion:
 		var mm: InputEventMouseMotion = event
 		_update_hover(mm.position)
+		if attack_arm_active:
+			queue_redraw()   # the armed cursor marker follows the mouse
 		if _dragging:
 			_drag_current = mm.position
 			_drag_max_dist = maxf(_drag_max_dist, _drag_start.distance_to(mm.position))
@@ -136,9 +154,29 @@ func _unhandled_input(event: InputEvent) -> void:
 		_prune_selection()
 		for unit in selected:
 			unit.patrol = not unit.patrol
+	elif event.is_action_pressed("attack_move_arm"):
+		# Key A arms the attack-move; the next right-click fires it.
+		_prune_selection()
+		if not selected.is_empty():
+			attack_arm_active = true
+			queue_redraw()
+	elif event.is_action_pressed("ui_cancel") and attack_arm_active:
+		attack_arm_active = false
+		queue_redraw()
+		get_viewport().set_input_as_handled()
 
 
 func _draw() -> void:
+	# Armed attack-move: red crosshair marker + label at the cursor.
+	if attack_arm_active:
+		var mouse: Vector2 = get_global_mouse_position()
+		var red: Color = Color(0.95, 0.25, 0.15, 0.9)
+		draw_arc(mouse + Vector2(14, -14), 8.0, 0.0, TAU, 20, red, 2.0)
+		draw_line(mouse + Vector2(14, -22), mouse + Vector2(14, -6), red, 2.0)
+		draw_line(mouse + Vector2(6, -14), mouse + Vector2(22, -14), red, 2.0)
+		draw_string(get_theme_default_font(), mouse + Vector2(26, -10),
+			"Angriff", HORIZONTAL_ALIGNMENT_LEFT, -1,
+			get_theme_default_font_size(), red)
 	if not _dragging:
 		return
 	if _drag_start.distance_to(_drag_current) < DRAG_THRESHOLD_PX:
@@ -240,6 +278,39 @@ func _pick_unit_at(screen_pos: Vector2, camera: Camera3D, tribe_id: int) -> Unit
 	return best
 
 
+## Double click on an own unit: select all own units of the same kind whose
+## sprite is currently on screen (phase 7b).
+func _double_click_select(screen_pos: Vector2) -> void:
+	var camera: Camera3D = get_viewport().get_camera_3d()
+	if camera == null or _unit_manager == null:
+		return
+	var clicked: Unit = _pick_unit_at(screen_pos, camera, player_tribe_id)
+	if clicked == null:
+		return
+	var candidates: Array[Unit] = filter_units_of_kind(
+		_unit_manager.get_units_of_tribe(player_tribe_id), clicked.unit_kind())
+	var viewport_rect: Rect2 = Rect2(Vector2.ZERO, get_viewport().get_visible_rect().size)
+	var picked: Array[Unit] = []
+	for unit in candidates:
+		var sprite: Rect2 = _unit_screen_rect(unit, camera)
+		if sprite.size.y > 0.0 and viewport_rect.intersects(sprite):
+			picked.append(unit)
+	if not picked.is_empty():
+		_set_selection(picked)
+		_last_box_select_ms = Time.get_ticks_msec()
+
+
+## Pure kind filter for the double-click selection (headless-testable; the
+## on-screen check happens in _double_click_select).
+static func filter_units_of_kind(units: Array[Unit], kind: StringName) -> Array[Unit]:
+	var result: Array[Unit] = []
+	for unit in units:
+		if is_instance_valid(unit) and unit.state != Unit.State.DEAD \
+				and unit.unit_kind() == kind:
+			result.append(unit)
+	return result
+
+
 ## Public selection setter (used by the sidebar's "select idle braves" button).
 func select_units(units: Array[Unit]) -> void:
 	_set_selection(units)
@@ -329,7 +400,7 @@ func _prune_selection() -> void:
 
 # --- Context commands (right-click) ---------------------------------------------------
 
-func _command_move(screen_pos: Vector2, queue_up: bool) -> void:
+func _command_move(screen_pos: Vector2, queue_up: bool, aggressive: bool = false) -> void:
 	_prune_selection()
 	if selected.is_empty():
 		return
@@ -351,15 +422,17 @@ func _command_move(screen_pos: Vector2, queue_up: bool) -> void:
 	if hit.is_empty():
 		return
 
-	if _tribe_commands != null and _dispatch_context_command(hit):
+	# An armed attack-move is always a march order — context commands
+	# (chop/build/pray/train) would be surprising with the attack cursor up.
+	if not aggressive and _tribe_commands != null and _dispatch_context_command(hit):
 		return
 
 	var target: Vector3 = hit.position
 	if _tribe_commands != null:
-		_tribe_commands.order_move(selected, target, queue_up)
+		_tribe_commands.order_move(selected, target, queue_up, aggressive)
 		return
 	for i in range(selected.size()):
-		selected[i].order_move(target + TribeCommands.formation_offset(i), queue_up)
+		selected[i].order_move(target + TribeCommands.formation_offset(i), queue_up, aggressive)
 
 
 ## Enemy (non-player) unit under the cursor, or null. Same sprite-rect pick as

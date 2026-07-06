@@ -63,10 +63,10 @@ func order_cast(spell: Spell, target: Vector3, ctx: SpellContext) -> bool:
 
 
 ## Movement orders cancel a pending cast (the charge is kept).
-func order_move(target: Vector3, queue_up: bool = false) -> void:
+func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = false) -> void:
 	if state == State.CAST:
 		_cancel_cast()
-	super.order_move(target, queue_up)
+	super.order_move(target, queue_up, aggressive)
 
 
 func _cancel_cast() -> void:

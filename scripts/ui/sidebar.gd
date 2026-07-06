@@ -822,11 +822,13 @@ func _toggle_pause() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not event.is_action_pressed("ui_cancel"):
 		return
-	# While placing a building or targeting a spell, Esc cancels that mode
-	# (handled by BuildMenu / SpellTargeting) instead of pausing.
+	# While placing a building, targeting a spell or with an armed attack-move,
+	# Esc cancels that mode (handled there) instead of pausing.
 	if _build_menu != null and _build_menu.is_active():
 		return
 	if _spell_targeting != null and _spell_targeting.is_active():
+		return
+	if SelectionManager.attack_arm_active:
 		return
 	_toggle_pause()
 	get_viewport().set_input_as_handled()

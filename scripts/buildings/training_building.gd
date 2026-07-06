@@ -20,6 +20,11 @@ const QUEUE_MARGIN: float = 0.9
 const QUEUE_SPACING: float = 1.0
 ## Offset of the first (front) slot from the entrance, along the edge to the left.
 const QUEUE_START_OFFSET: float = 0.9
+## Once the line has wrapped all the way around the building it continues in
+## the NEXT winding (a snake coiling around the building, phase 7b): each
+## winding runs this much farther out. Capped so the search stays bounded.
+const QUEUE_WINDING_SPACING: float = 1.0
+const QUEUE_MAX_WINDINGS: int = 3
 
 ## Combat unit spawned when a brave finishes training.
 var produces: PackedScene = null
@@ -122,13 +127,27 @@ func _finish_one() -> void:
 
 ## World position of the index-th queue slot: a single-file line running along
 ## the building's outer edge, starting just left of the entrance (when facing it
-## from outside) and continuing around the corners for a long queue.
+## from outside) and continuing around the corners. Once a winding is full
+## (one lap around the building) the line continues on the NEXT winding
+## farther out — a snake coiling around the building instead of piling up.
 func queue_slot_world(index: int) -> Vector3:
 	var cs: float = TerrainData.CELL_SIZE
-	var min_x: float = float(cell.x) * cs - QUEUE_MARGIN
-	var max_x: float = float(cell.x + footprint.x) * cs + QUEUE_MARGIN
-	var min_z: float = float(cell.y) * cs - QUEUE_MARGIN
-	var max_z: float = float(cell.y + footprint.y) * cs + QUEUE_MARGIN
+	var dist: float = QUEUE_START_OFFSET + float(index) * QUEUE_SPACING
+	# Walk the distance winding by winding: each lap consumes one perimeter.
+	var winding: int = 0
+	var margin: float = QUEUE_MARGIN
+	while winding < QUEUE_MAX_WINDINGS:
+		margin = QUEUE_MARGIN + float(winding) * QUEUE_WINDING_SPACING
+		var perimeter: float = 2.0 * ((float(footprint.x) * cs + 2.0 * margin)
+			+ (float(footprint.y) * cs + 2.0 * margin))
+		if dist < perimeter:
+			break
+		dist -= perimeter
+		winding += 1
+	var min_x: float = float(cell.x) * cs - margin
+	var max_x: float = float(cell.x + footprint.x) * cs + margin
+	var min_z: float = float(cell.y) * cs - margin
+	var max_z: float = float(cell.y + footprint.y) * cs + margin
 	var cx: float = (min_x + max_x) * 0.5
 	var cz: float = (min_z + max_z) * 0.5
 	# Outward entrance normal and the "left" tangent (cross(out, up)) that the
@@ -145,7 +164,6 @@ func queue_slot_world(index: int) -> Vector3:
 		_:
 			out2 = Vector2(-1.0, 0.0); start = Vector2(min_x, cz)
 	var left2: Vector2 = Vector2(-out2.y, out2.x)
-	var dist: float = QUEUE_START_OFFSET + float(index) * QUEUE_SPACING
 	var p: Vector2 = _rect_perimeter_point(
 		Vector2(min_x, min_z), Vector2(max_x, max_z), start, left2, dist)
 	var pos: Vector3 = Vector3(p.x, 0.0, p.y)

@@ -66,6 +66,7 @@ func _init() -> void:
 	max_health = 60
 	health = 60
 	speed = 4.0
+	idle_aggro = IDLE_AGGRO_RADIUS   # small village-guard radius (phase 7b)
 	died.connect(func(_unit: Unit) -> void: _interrupt_tasks())
 
 
@@ -97,10 +98,16 @@ func claimed_tree_yield() -> int:
 
 ## Move orders interrupt any running task (claims are released, carried wood
 ## is dropped as a pile).
-func order_move(target: Vector3, queue_up: bool = false) -> void:
+func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = false) -> void:
 	if state == State.GATHER or state == State.BUILD or state == State.PRAY:
 		_interrupt_tasks()
-	super.order_move(target, queue_up)
+	super.order_move(target, queue_up, aggressive)
+
+
+## Braves keep a small guard radius even while idling (phase 7b): enemies
+## walking right into the village get attacked; farther ones are ignored.
+## Applied to Unit.idle_aggro in _init (a field, not a virtual — hot path).
+const IDLE_AGGRO_RADIUS: float = 3.0
 
 
 ## Manual chop order (right-click on a tree): harvest it unit by unit, drop

@@ -44,11 +44,19 @@ const COMBAT_DIRECT_RANGE: float = 2.5
 ## Combat units auto-attack enemies within this radius while idle. Braves do NOT
 ## (they only retaliate when attacked — see _maybe_retaliate).
 const AGGRO_RADIUS: float = 8.0
+## Fleeing (passive move while being hit in melee): every this many hits the
+## unit falls back into fighting (self-defence) — escaping a brawl works, but
+## not always on the first try. Deterministic, not per-frame random.
+const FLEE_RETALIATE_HITS: int = 3
+## An attacker counts as "in melee" for the flee rule within this range.
+const FLEE_MELEE_RANGE: float = MELEE_RANGE * 1.5
 ## Seconds between melee strikes.
 const ATTACK_COOLDOWN: float = 0.8
 ## Base target (re)search interval; a small per-unit offset staggers the scans
 ## so they never all fire on the same frame (never per-frame — see _due_to_scan).
 const TARGET_SEARCH_INTERVAL: float = 0.25
+## Max candidate units one enemy scan examines (crowd cost cap).
+const SCAN_MAX_CANDIDATES: int = 24
 ## Max simultaneous melee attackers on one target; extras wait and back-fill.
 const MAX_MELEE_ATTACKERS: int = 3
 ## Radius of the ring the (up to 3) attackers stand on around their target.
@@ -153,6 +161,23 @@ var speed: float = 4.0
 var state: State = State.IDLE
 var waypoint_queue: Array[Vector3] = []
 var patrol: bool = false
+## Move mode of the current route: aggressive (attack-move — combatants engage
+## enemies they pass) or passive (plain move/flee: march through, only the
+## throttled flee rule pulls the unit back into a fight). Set by order_move.
+var move_aggressive: bool = false
+## Melee hits taken while fleeing (passive move); see FLEE_RETALIATE_HITS.
+var _flee_hits: int = 0
+## Seconds spent in the current IDLE stretch (reset on every state change);
+## drives the idle regrouping into 6-packs (UnitManager, phase 7b).
+var idle_seconds: float = 0.0
+## Auto-attack radius while idling for NON-combatants (0 = fully passive).
+## A FIELD, not a virtual getter — this sits in the per-unit per-tick hot
+## path, and one extra virtual call costs ~5 ms/tick with 4000 units. The
+## brave sets its small 3 m guard radius in _init; the shaman stays 0.
+var idle_aggro: float = 0.0
+## Separation passes this unit spent tightly stacked inside another unit;
+## past a threshold the UnitManager sends it to a free nearby cell.
+var overlap_ticks: int = 0
 ## Visual-only: the sprite bounces (used by braves flattening terrain).
 var hop_visual: bool = false
 
@@ -334,9 +359,10 @@ func _tick_state(delta: float) -> void:
 func _tick_move(delta: float) -> void:
 	if _pending_target != Vector3.INF:
 		return  # waiting for the path queue
-	# Attack-move (like the original): combat units engage enemies they pass
-	# on the way instead of marching through the opposing army.
-	if _is_combatant() and _engage_on_sight(delta):
+	# Attack-move: combat units engage enemies they pass on the way. A plain
+	# (passive) move marches through — fleeing a fight is possible; only the
+	# flee rule (_maybe_retaliate) can pull the unit back in.
+	if move_aggressive and _is_combatant() and _engage_on_sight(delta):
 		return
 	if _advance_path(delta):
 		_on_path_finished()
@@ -431,11 +457,15 @@ func can_take_orders() -> bool:
 
 
 ## Move order. queue_up appends the target as an additional waypoint
-## (Shift+right-click), otherwise the current route is replaced.
-func order_move(target: Vector3, queue_up: bool = false) -> void:
+## (Shift+right-click), otherwise the current route is replaced. `aggressive`
+## selects attack-move (engage enemies on the way) vs. plain move (default —
+## also the flee order: breaks off the current fight).
+func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = false) -> void:
 	if not can_take_orders():
 		return
 	_end_attack()
+	move_aggressive = aggressive
+	_flee_hits = 0
 	if not queue_up:
 		waypoint_queue.clear()
 		waypoint_queue.append(target)
@@ -1018,10 +1048,12 @@ func convert_to_tribe(new_tribe: Tribe) -> void:
 
 
 ## Idle combatants scan for a nearby enemy (throttled) and engage it.
+## Deliberately NOTHING else here — this is the hottest per-unit path with
+## thousands idle. The 7b idle features (idle_seconds for regrouping, the
+## brave's small guard scan) run in the UnitManager's sliced regroup pass.
 func _tick_idle(delta: float) -> void:
-	if not _is_combatant():
-		return
-	_engage_on_sight(delta)
+	if _is_combatant():
+		_engage_on_sight(delta)
 
 
 ## Throttled enemy scan + engage; used from IDLE and while marching (MOVE,
@@ -1230,7 +1262,10 @@ func _breaks_off_vs_sitting(target: Unit) -> bool:
 
 
 ## Braves fight back when hit (from idle/moving only — busy workers keep working);
-## combatants already have a target, so this is mostly a brave hook.
+## combatants already have a target, so this is mostly a brave hook. FLEEING
+## units (passive move) only fall back into the fight after every
+## FLEE_RETALIATE_HITS-th melee hit — escaping a brawl usually works, but a
+## cornered unit sometimes has to defend itself.
 func _maybe_retaliate(attacker) -> void:
 	if attacker == null or not is_instance_valid(attacker) or attacker.state == State.DEAD:
 		return
@@ -1238,18 +1273,33 @@ func _maybe_retaliate(attacker) -> void:
 		return   # friendly fire (e.g. a rescue fireball) is not retaliated
 	if attack_target != null and is_instance_valid(attack_target):
 		return
-	if state == State.IDLE or state == State.MOVE:
+	if state == State.IDLE:
+		_begin_attack(attacker)
+		return
+	if state != State.MOVE:
+		return
+	if move_aggressive:
+		_begin_attack(attacker)
+		return
+	# Fleeing: only melee-range pressure counts, and only every n-th hit.
+	if _flat_dist(position, attacker.position) > FLEE_MELEE_RANGE:
+		return
+	_flee_hits += 1
+	if _flee_hits >= FLEE_RETALIATE_HITS:
+		_flee_hits = 0
 		_begin_attack(attacker)
 
 
 ## Nearest enemy in radius, preferring targets with fewer attackers (1v1 bias).
+## The candidate query is capped: in a mega-crowd an uncapped scan per unit
+## per 0.25 s dominated the tick (measured 60 ms with 4000 stacked units).
 func _scan_for_enemy(radius: float) -> Unit:
 	if path_service == null:
 		return null
 	var flat: Vector2 = Vector2(position.x, position.z)
 	var best: Unit = null
 	var best_score: float = INF
-	for u in path_service.get_units_in_radius(position, radius):
+	for u in path_service.get_units_in_radius(position, radius, SCAN_MAX_CANDIDATES):
 		if u == self or u.state == State.DEAD or u.tribe_id == tribe_id:
 			continue
 		if u.state == State.SIT:
@@ -1374,6 +1424,7 @@ func _set_state(new_state: State) -> void:
 	if new_state == state:
 		return
 	state = new_state
+	idle_seconds = 0.0
 	state_changed.emit(self, new_state)
 	_update_animation()
 

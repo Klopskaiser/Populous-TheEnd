@@ -308,7 +308,7 @@ func _tick_attack() -> void:
 	if _shaman_alive() and shaman.state != Unit.State.CAST:
 		squad.append(shaman)
 	if not squad.is_empty():
-		commands.order_move(squad, target)
+		commands.order_move(squad, target, false, true)   # attack-move
 
 
 # --- DEFEND ------------------------------------------------------------------------
@@ -357,7 +357,7 @@ func _tick_defend(threat: Dictionary) -> void:
 	if _shaman_alive() and shaman.state != Unit.State.CAST:
 		defenders.append(shaman)
 	if not defenders.is_empty():
-		commands.order_move(defenders, threat.get("pos"))
+		commands.order_move(defenders, threat.get("pos"), false, true)   # attack-move
 	# Militia only when the army alone is outnumbered.
 	if core_power < float(enemy_count) and not braves.is_empty():
 		var enemy: Unit = threat.get("enemy")

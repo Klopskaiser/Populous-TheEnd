@@ -15,7 +15,7 @@ Nach Abschluss einer Phase: Checkbox abhaken, committen, pushen.
 - [x] **Phase 5** — [05_training_combat_preacher.md](05_training_combat_preacher.md): Training, Rally Points, Kampf, Prediger *(Sub-Phasen 5a–5d, siehe Plandatei)*
 - [x] **Phase 6** — [06_shaman_spells.md](06_shaman_spells.md): Schamanin, Reinkarnation, alle 5 Zauber, Panik/Schleuderphysik, Gebäudezerstörung *(überarbeitet 2026-07-06)*
 - [x] **Phase 7** — [07_ai_win_conditions.md](07_ai_win_conditions.md): Hauptmenü (Vollbild, Skirmish-Setup), Multi-KI (bis zu 3 KIs / 4 Spieler), Siegbedingungen *(umgesetzt 2026-07-06, manuelle Prüfung ausstehend)*
-- [ ] **Phase 7b** — [07b_unit_control_behavior.md](07b_unit_control_behavior.md): Steuerung & Einheitenverhalten (Move/Attack-Split + Hotkeys, Fliehen, Brave-Idle-Aggro, Idle-6er-Gruppen, Warteschlangen, Anti-Stacking, Doppelklick-Selektion)
+- [x] **Phase 7b** — [07b_unit_control_behavior.md](07b_unit_control_behavior.md): Steuerung & Einheitenverhalten (Move/Attack-Split + Hotkeys, Fliehen, Brave-Idle-Aggro, Idle-6er-Gruppen, Warteschlangen, Anti-Stacking, Doppelklick-Selektion) *(umgesetzt 2026-07-06, manuelle Prüfung ausstehend)*
 - [ ] **Phase 8** — [08_performance_polish.md](08_performance_polish.md): Performance, Balance, Feinschliff
 
 Die Phasen sind **strikt sequenziell** — jede baut auf den Artefakten der vorherigen auf.

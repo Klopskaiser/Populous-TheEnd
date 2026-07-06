@@ -29,6 +29,23 @@ const SEPARATION_MAX_CHECKS: int = 20
 ## frames via the path queue instead of stalling one frame).
 const PATHS_PER_TICK: int = 48
 
+## Idle regrouping (phase 7b): units idle for this long drift toward the
+## centre of up to 5 idle tribemates in IDLE_REGROUP_RADIUS — loose 6-packs
+## form on their own. Only tiny steps (STEP per pass, ~1 pass/s per unit);
+## whoever already stands close enough stays put.
+const IDLE_REGROUP_DELAY: float = 2.5
+const IDLE_REGROUP_RADIUS: float = 2.2
+const IDLE_REGROUP_STEP: float = 0.25
+const IDLE_REGROUP_ARRIVED: float = 0.5
+## Every unit is regroup-checked about once per this many ticks (sliced).
+const IDLE_REGROUP_SPREAD_TICKS: int = 30
+
+## Anti-stacking fallback: a unit found tightly inside another for this many
+## separation passes gets sent to a free nearby cell (soft separation could
+## not free it — e.g. walled in by a crowd; visible as sprite flicker).
+const OVERLAP_ESCAPE_PASSES: int = 8
+const OVERLAP_TIGHT_FACTOR: float = 0.35
+
 var terrain_data: TerrainData = null
 var nav_grid: NavGrid = null
 var tribes: Array[Tribe] = []
@@ -44,6 +61,7 @@ var _hash: Dictionary[Vector2i, Array] = {}   # hash cell -> Array of Unit
 var _path_requests: Array[Unit] = []
 var _path_head: int = 0
 var _separation_phase: int = 0
+var _regroup_index: int = 0
 
 
 func setup(p_terrain_data: TerrainData, p_nav_grid: NavGrid,
@@ -79,6 +97,7 @@ func tick(delta: float) -> void:
 			_move_hash_cell(unit, new_cell)
 	_drain_path_queue()
 	_apply_separation(delta)
+	_apply_idle_regroup(delta)
 	_tick_projectiles(delta)
 
 
@@ -153,6 +172,7 @@ func _apply_separation(delta: float) -> void:
 		var push: Vector2 = Vector2.ZERO
 		var pos: Vector3 = unit.position
 		var checks: int = SEPARATION_MAX_CHECKS
+		var tight: bool = false
 		var min_key: Vector2i = hash_key(pos - Vector3(SEPARATION_RADIUS, 0.0, SEPARATION_RADIUS))
 		var max_key: Vector2i = hash_key(pos + Vector3(SEPARATION_RADIUS, 0.0, SEPARATION_RADIUS))
 		for kz in range(min_key.y, max_key.y + 1):
@@ -167,6 +187,8 @@ func _apply_separation(delta: float) -> void:
 					var away: Vector2 = Vector2(pos.x - other.position.x, pos.z - other.position.z)
 					var dist: float = away.length()
 					if dist < SEPARATION_RADIUS:
+						if dist < SEPARATION_RADIUS * OVERLAP_TIGHT_FACTOR:
+							tight = true   # visibly stacked (sprite flicker)
 						if dist < 0.001:
 							# Full overlap: deterministic per-unit direction.
 							var angle: float = float(unit.get_instance_id() % 628) * 0.01
@@ -179,6 +201,19 @@ func _apply_separation(delta: float) -> void:
 					break
 			if checks <= 0:
 				break
+		# Anti-stacking fallback: soft separation could not free the unit for
+		# several passes (walled in) -> walk it to a free nearby cell.
+		if tight:
+			unit.overlap_ticks += 1
+			if unit.overlap_ticks >= OVERLAP_ESCAPE_PASSES \
+					and unit.state == Unit.State.IDLE:
+				unit.overlap_ticks = 0
+				var free_cell: Vector2i = find_free_cell_near(pos)
+				if free_cell.x >= 0 and nav_grid != null:
+					unit.order_move(nav_grid.cell_to_world(free_cell))
+				continue
+		else:
+			unit.overlap_ticks = 0
 		if push == Vector2.ZERO:
 			continue
 		if push.length() > max_step:
@@ -193,6 +228,97 @@ func _apply_separation(delta: float) -> void:
 		if terrain_data != null:
 			unit.position.y = terrain_data.get_height(nx, nz)
 	_separation_phase = (_separation_phase + 1) % slices
+
+
+# --- Idle regrouping (phase 7b) ---------------------------------------------------
+
+## Sliced idle pass (phase 7b) — every unit gets a turn about once per
+## IDLE_REGROUP_SPREAD_TICKS ticks, so the cost never spikes and the per-unit
+## tick stays untouched. Does two things for IDLE units:
+## 1. brave guard scan (small idle_aggro radius),
+## 2. drift toward the centre of up to 5 idle tribemates (loose 6-packs).
+func _apply_idle_regroup(delta: float) -> void:
+	if units.is_empty():
+		return
+	var per_tick: int = maxi(1, int(ceil(float(units.size())
+		/ float(IDLE_REGROUP_SPREAD_TICKS))))
+	for i in range(per_tick):
+		_regroup_index = (_regroup_index + 1) % units.size()
+		var unit: Unit = units[_regroup_index]
+		if unit.state != Unit.State.IDLE:
+			continue
+		# idle_seconds advances here (one visit per SPREAD interval on average).
+		unit.idle_seconds += delta * float(IDLE_REGROUP_SPREAD_TICKS)
+		# Village guard (braves): engage enemies inside the small idle radius.
+		if unit.idle_aggro > 0.0:
+			var enemy: Unit = unit._scan_for_enemy(unit.idle_aggro)
+			if enemy != null:
+				unit._begin_attack(enemy)
+				continue
+		if unit.idle_seconds < IDLE_REGROUP_DELAY:
+			continue
+		var step: Vector2 = regroup_step(unit, get_units_in_radius(
+			unit.position, IDLE_REGROUP_RADIUS, 12))
+		if step == Vector2.ZERO:
+			continue
+		var nx: float = unit.position.x + step.x
+		var nz: float = unit.position.z + step.y
+		if nav_grid != null and not nav_grid.is_cell_walkable(
+				nav_grid.world_to_cell(Vector3(nx, 0.0, nz))):
+			continue
+		unit.position.x = nx
+		unit.position.z = nz
+		if terrain_data != null:
+			unit.position.y = terrain_data.get_height(nx, nz)
+
+
+## Drift step toward the centroid of the unit's group (itself + up to 5
+## nearest long-idle tribemates from `neighbours`). Zero when alone, already
+## close enough, or nothing to do. Static-ish (pure on its inputs) for tests.
+static func regroup_step(unit: Unit, neighbours: Array[Unit]) -> Vector2:
+	var mates: Array[Unit] = []
+	for other in neighbours:
+		if other == unit or other.tribe_id != unit.tribe_id:
+			continue
+		if other.state != Unit.State.IDLE or other.idle_seconds < IDLE_REGROUP_DELAY:
+			continue
+		mates.append(other)
+	if mates.is_empty():
+		return Vector2.ZERO
+	var flat: Vector2 = Vector2(unit.position.x, unit.position.z)
+	mates.sort_custom(func(a: Unit, b: Unit) -> bool:
+		return Vector2(a.position.x, a.position.z).distance_squared_to(flat) \
+			< Vector2(b.position.x, b.position.z).distance_squared_to(flat))
+	var centroid: Vector2 = flat
+	var count: int = 1
+	for m in range(mini(TribeCommands.GROUP_SIZE - 1, mates.size())):
+		centroid += Vector2(mates[m].position.x, mates[m].position.z)
+		count += 1
+	centroid /= float(count)
+	var to_centre: Vector2 = centroid - flat
+	if to_centre.length() <= IDLE_REGROUP_ARRIVED:
+		return Vector2.ZERO
+	return to_centre.limit_length(IDLE_REGROUP_STEP)
+
+
+## Nearest walkable cell with room to stand (fewer than 2 units within the
+## cell's centre) — the anti-stacking escape target.
+func find_free_cell_near(pos: Vector3) -> Vector2i:
+	if nav_grid == null:
+		return Vector2i(-1, -1)
+	var start: Vector2i = nav_grid.world_to_cell(pos)
+	for radius in range(1, 7):
+		for dz in range(-radius, radius + 1):
+			for dx in range(-radius, radius + 1):
+				if maxi(absi(dx), absi(dz)) != radius:
+					continue   # ring only
+				var cell: Vector2i = start + Vector2i(dx, dz)
+				if not nav_grid.is_cell_walkable(cell):
+					continue
+				var centre: Vector3 = nav_grid.cell_to_world(cell)
+				if get_units_in_radius(centre, 0.6, 2).size() < 2:
+					return cell
+	return Vector2i(-1, -1)
 
 
 # --- Registry -------------------------------------------------------------------
@@ -301,8 +427,10 @@ func _move_hash_cell(unit: Unit, new_cell: Vector2i) -> void:
 	unit._hash_cell = new_cell
 
 
-## All units within radius (XZ distance) around pos.
-func get_units_in_radius(pos: Vector3, radius: float) -> Array[Unit]:
+## All units within radius (XZ distance) around pos. `max_count` > 0 caps the
+## result (early out) — in a mega-crowd on one spot an uncapped query builds
+## a thousands-entry array PER CALLER and dominates the tick.
+func get_units_in_radius(pos: Vector3, radius: float, max_count: int = 0) -> Array[Unit]:
 	var result: Array[Unit] = []
 	var min_key: Vector2i = hash_key(pos - Vector3(radius, 0.0, radius))
 	var max_key: Vector2i = hash_key(pos + Vector3(radius, 0.0, radius))
@@ -314,6 +442,8 @@ func get_units_in_radius(pos: Vector3, radius: float) -> Array[Unit]:
 				var flat: Vector2 = Vector2(unit.position.x, unit.position.z)
 				if flat.distance_to(flat_pos) <= radius:
 					result.append(unit)
+					if max_count > 0 and result.size() >= max_count:
+						return result
 	return result
 
 

@@ -1724,3 +1724,107 @@ Wellen, alle Zauber.**
   weiter stufenweise", Wellenwachstum inkl. `army_target`-Übergänge,
   endlose Skalierung (Camp-Ziel wächst mit Hütten, Housing-Pressure),
   Expansion zum entfernten Wald).
+
+---
+
+## Phase 7b — Steuerung & Einheitenverhalten (umgesetzt)
+
+Plan: [07b_unit_control_behavior.md](07b_unit_control_behavior.md).
+
+**1. Move/Attack-Split (`unit.gd`, `tribe_commands.gd`, `selection_manager.gd`):**
+- `Unit.move_aggressive` (gesetzt von `order_move(target, queue_up,
+  aggressive)`; Signatur auch auf Brave/Schamanin/TribeCommands erweitert):
+  **passiver Move** (Default) marschiert an Feinden vorbei — `_tick_move`
+  ruft `_engage_on_sight` nur noch bei `move_aggressive`. **Attack-Move**
+  = bisheriges Verhalten (Kämpfer greifen unterwegs an).
+- **Tastenbelegung wie abgestimmt:** Rechtsklick = passiver Move; Taste
+  **A** schärft den Attack-Move (`attack_move_arm`, nur mit Selektion),
+  der nächste Rechtsklick löst ihn aus; **roter Fadenkreuz-Cursor +
+  „Angriff"-Label** solange geschärft; Esc bricht ab (Vorrang vor dem
+  Pausemenü, Sidebar-Guard). Geschärfter Attack-Move überspringt
+  Kontextbefehle (Fällen/Bauen/Beten) — er ist immer ein Marschbefehl.
+- **A-Konflikt mit WASD-Kamera gelöst:** `SelectionManager.attack_arm_active`
+  ist statisch (Muster `drag_active`); das CameraRig unterdrückt den
+  Links-Pan solange geschärft. Ohne Selektion bleibt A reines Kamera-Pan.
+- **KI & Debugschlacht** marschieren jetzt explizit aggressiv
+  (`order_move(..., true)` in AIController-Angriff/-Verteidigung und im
+  Debugschlacht-Setup); Rally-/Eskorten-Läufe bleiben passiv.
+
+**2. Fliehen (`unit.gd`):** Ein passiver Move bricht den Kampf sofort ab
+(`_end_attack`). **Rückfall-Regel deterministisch:** Während der Flucht
+zählt nur Nahkampfdruck (Angreifer ≤ `FLEE_MELEE_RANGE` = 1,5×
+Nahkampfreichweite); jeder **3. Treffer** (`FLEE_RETALIATE_HITS`) zwingt
+die Einheit zurück in den Kampf (Selbstverteidigung). Fernbeschuss bricht
+eine Flucht nie. `_flee_hits` wird je Move-Befehl zurückgesetzt.
+
+**3. Brave-Idle-Aggro 3 m (`brave.gd`, `unit_manager.gd`):** Braves
+greifen im Leerlauf Feinde im **3-m-Radius** an (`Unit.idle_aggro`-FELD,
+von Brave im `_init` gesetzt — bewusst kein virtueller Getter, s.
+Performance unten). Der Wach-Scan läuft im geslicten Manager-Pass
+(~1 Prüfung/s je Einheit), nicht im Unit-Tick.
+
+**4. Idle-6er-Grüppchen (`unit_manager.gd`):** Einheiten, die
+`IDLE_REGROUP_DELAY` (2,5 s) untätig sind, **driften** mit Mini-Schritten
+(max. 0,25 m je Durchgang) zum Zentrum von bis zu 5 idle Stammesgenossen
+im 2,2-m-Radius; unter 0,5 m Abstand steht das Grüppchen still (die
+Separation hält den 0,44-m-Mindestabstand dagegen → lockere 6er-Pulks wie
+beim Original). `UnitManager.regroup_step` ist pur/testbar;
+`Unit.idle_seconds` zählt der Manager-Pass hoch (Reset bei jedem
+Statewechsel).
+- **Gemeinsamer geslicter Idle-Pass** (`_apply_idle_regroup`): jede
+  Einheit kommt ~1×/s dran (`IDLE_REGROUP_SPREAD_TICKS` 30) — Wach-Scan +
+  idle_seconds + Drift, ohne den heißen Unit-Tick anzufassen.
+
+**5. Anti-Stacking (`unit_manager.gd`):** Die Separation zählt jetzt
+„eng gestapelt" (< 35 % des Separationsradius) pro Einheit
+(`Unit.overlap_ticks`); wer `OVERLAP_ESCAPE_PASSES` (8) Durchgänge
+eingekeilt bleibt und IDLE ist, bekommt per `find_free_cell_near`
+(Ring-Suche: begehbar + < 2 Einheiten in 0,6 m) einen **echten
+Ausweich-Move** auf eine freie Zelle.
+
+**6. Warteschlangen-Windungen (`training_building.gd`):**
+`queue_slot_world` verbraucht die Slot-Distanz **Windung für Windung**:
+ist eine Runde ums Gebäude voll (Umfang der aktuellen Windung), läuft die
+Schlange auf der nächsten Windung 1 m weiter außen weiter (max. 3
+Windungen) — die Schlange wickelt sich ums Gebäude statt sich am
+Clamp-Punkt zu knäueln.
+
+**7. Doppelklick-Typselektion (`selection_manager.gd`):** Doppelklick auf
+eine eigene Einheit selektiert **alle eigenen Einheiten desselben
+`unit_kind()` im Sichtfenster** (Sprite-Rect gegen Viewport);
+`filter_units_of_kind` ist statisch/testbar.
+
+**Performance-Erkenntnisse (wichtig für spätere Arbeit):**
+- **GDScript-Callkosten im Per-Unit-Per-Tick-Pfad sind massiv:** 1–2
+  zusätzliche (virtuelle) Aufrufe pro Einheit und Tick kosten bei 4000
+  Einheiten ~5–10 ms/Tick. Deshalb: `idle_aggro` als Feld statt Getter,
+  Idle-Features im geslicten Manager-Pass statt im Unit-Tick.
+- **`get_units_in_radius` hat jetzt einen `max_count`-Cap** (early out) —
+  ohne Cap baute jede Abfrage im 4000er-Klumpen ein 4000er-Array pro
+  Aufrufer; `_scan_for_enemy` prüft max. 24 Kandidaten
+  (`SCAN_MAX_CANDIDATES`), Regroup 12, Zellsuche 2.
+- **Benchmark auf EINEN Tribe umgestellt:** Seit dem Brave-Idle-Aggro
+  wurden die gestapelten 4-Tribes-Braves im Benchmark zur
+  4000-Mann-Schlacht (Messgröße verfälscht; Slot-Kontention ist ein
+  eigenes Phase-8-Thema). A/B-Messung: 7b (Ø 40,0 ms) ≈ Stand davor
+  (Ø 37,8 ms) im Worst-Case „alle 4000 auf einen Punkt" — **keine
+  Regression**; die historischen 19 ms stammen aus Phase 3f vor den
+  Kampf-/Regen-Systemen im Unit-Tick.
+
+**Verifikation:** Testsuite grün (**745 Tests**, +26 in
+`tests/test_unit_control.gd`: passiver Move ignoriert Feinde /
+Attack-Move greift, Flucht bricht ab + 3.-Treffer-Regel +
+Fernbeschuss zählt nicht, 3-m-Wache (nah/fern), `regroup_step`
+(Drift/allein/beschäftigte Nachbarn/fertiger Pulk), Ausweichzelle,
+Windungs-Slots (außen + paarweise verschieden), Doppelklick-Filter;
+2 Alt-Tests an die neue Semantik angepasst). `--headless --quit`
+fehlerfrei, Benchmark ohne Regression, 1v1-KI-Sim konvergiert weiter
+(aggressive Orders der KI verifiziert).
+
+**Manuelle Prüfung durch Nutzer: AUSSTEHEND** — Rechtsklick-Move läuft an
+Feinden vorbei; A+Rechtsklick greift unterwegs an (roter Cursor, Esc
+bricht ab; A ohne Selektion pant weiter die Kamera); Flucht aus dem
+Nahkampf; Braves verteidigen das Dorf im 3-m-Umkreis; 6er-Grüppchen nach
+kurzer Idle-Zeit; geordnete Schlange in mehreren Windungen um die
+Kaserne; kein Sprite-Flackern in dichten Mengen; Doppelklick wählt alle
+sichtbaren Einheiten des Typs.
