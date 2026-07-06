@@ -64,7 +64,11 @@ var _spell_ui: Dictionary = {}       # id -> {"button": Button, "pips": Array[Co
 var _follower_labels: Dictionary = {}  # kind -> Label
 var _idle_button: Button = null
 var _pause_menu: Control = null
-var _portrait: Button = null
+## Shaman portrait (below the minimap, Populous style): full live-animated
+## figure + health bar; click centres the camera on her and selects ONLY her.
+var _portrait_sprite: AnimatedSprite2D = null
+var _portrait_hp: ProgressBar = null
+var _portrait_status: Label = null
 
 var _follower_timer: float = 0.0
 
@@ -230,6 +234,7 @@ func _build_ui() -> void:
 	_panel.add_child(root)
 
 	_build_minimap(root)
+	_build_shaman_portrait(root)
 	_build_tab_bar(root)
 	_build_header(root)
 	_build_tab_content(root)
@@ -249,6 +254,59 @@ func _build_minimap(root: Control) -> void:
 	var wrap: CenterContainer = CenterContainer.new()
 	wrap.add_child(_minimap)
 	root.add_child(wrap)
+
+
+## Populous-style shaman portrait below the minimap: the whole figure with her
+## CURRENT animation (front view, tribe-coloured) over a health bar. While she
+## is dead it shows the corpse pose and the respawn countdown. Clicking it
+## centres the camera on her and selects ONLY her.
+func _build_shaman_portrait(root: Control) -> void:
+	var panel: PanelContainer = PanelContainer.new()
+	panel.name = "ShamanPortrait"
+	panel.add_theme_stylebox_override("panel", UiTheme.inset_style())
+	panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	panel.tooltip_text = "Schamanin: Klick zentriert die Kamera und wählt nur sie aus"
+	panel.gui_input.connect(_on_portrait_gui_input)
+	root.add_child(panel)
+
+	var vb: VBoxContainer = VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 2)
+	vb.mouse_filter = Control.MOUSE_FILTER_IGNORE   # clicks land on the panel
+	panel.add_child(vb)
+
+	# Stage for the animated figure (AnimatedSprite2D is a Node2D, so it lives
+	# inside a plain Control and is re-centred whenever the stage resizes).
+	var stage: Control = Control.new()
+	stage.custom_minimum_size = Vector2(0, 80)
+	stage.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vb.add_child(stage)
+	_portrait_sprite = AnimatedSprite2D.new()
+	_portrait_sprite.sprite_frames = PlaceholderSprites.make_frames(&"shaman")
+	_portrait_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_portrait_sprite.scale = Vector2(3.0, 3.0)
+	_portrait_sprite.animation = &"idle_front"
+	_portrait_sprite.play()
+	stage.add_child(_portrait_sprite)
+	stage.resized.connect(func() -> void:
+		_portrait_sprite.position = stage.size * 0.5)
+
+	_portrait_hp = ProgressBar.new()
+	_portrait_hp.show_percentage = false
+	_portrait_hp.custom_minimum_size = Vector2(0, 8)
+	_portrait_hp.max_value = 1.0
+	_portrait_hp.value = 1.0
+	_portrait_hp.add_theme_stylebox_override("background", UiTheme.inset_style())
+	var hp_fill: StyleBoxFlat = StyleBoxFlat.new()
+	hp_fill.bg_color = Color(0.35, 0.8, 0.3)
+	hp_fill.set_corner_radius_all(2)
+	_portrait_hp.add_theme_stylebox_override("fill", hp_fill)
+	vb.add_child(_portrait_hp)
+
+	_portrait_status = Label.new()
+	_portrait_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_portrait_status.add_theme_color_override("font_color", UiTheme.TEXT)
+	_portrait_status.text = ""
+	vb.add_child(_portrait_status)
 
 
 func _build_tab_bar(root: Control) -> void:
@@ -281,24 +339,11 @@ func _build_header(root: Control) -> void:
 	vb.add_theme_constant_override("separation", 3)
 	header.add_child(vb)
 
-	var top: HBoxContainer = HBoxContainer.new()
-	top.add_theme_constant_override("separation", 6)
-	vb.add_child(top)
-
-	# Shaman portrait: click selects/jumps to her; shows the respawn countdown
-	# while she is dead.
-	_portrait = Button.new()
-	_portrait.icon = UiTheme.icon(&"shaman")
-	_portrait.tooltip_text = "Schamanin auswählen"
-	UiTheme.style_button(_portrait)
-	_portrait.pressed.connect(_on_portrait_pressed)
-	top.add_child(_portrait)
-
 	# Per-tribe population bars.
 	var bars: VBoxContainer = VBoxContainer.new()
 	bars.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bars.add_theme_constant_override("separation", 2)
-	top.add_child(bars)
+	vb.add_child(bars)
 	for i in range(Unit.TRIBE_COLORS.size()):
 		var pb: ProgressBar = _make_tribe_bar(Unit.TRIBE_COLORS[i])
 		bars.add_child(pb)
@@ -664,7 +709,14 @@ func _on_spell_pressed(spell_id: StringName) -> void:
 		_spell_targeting.toggle_targeting(spell_id)
 
 
-## Portrait click: select the shaman and jump the camera to her.
+func _on_portrait_gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and (event as InputEventMouseButton).pressed \
+			and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
+		_on_portrait_pressed()
+
+
+## Portrait click: centre the camera on the shaman and select ONLY her
+## (select_units replaces the whole selection and clears any building).
 func _on_portrait_pressed() -> void:
 	var player: Tribe = _player_tribe()
 	if player == null or not _player_shaman_alive():
@@ -676,29 +728,42 @@ func _on_portrait_pressed() -> void:
 		_camera_rig.global_position = shaman.position
 
 
-## Portrait shows the respawn countdown while the shaman is dead.
+## Mirrors the shaman into the portrait: her current animation (front view),
+## tribe colour, health bar; corpse pose + respawn countdown while dead.
 func _refresh_portrait() -> void:
-	if _portrait == null:
+	if _portrait_sprite == null:
 		return
-	if _player_shaman_alive():
-		_portrait.disabled = false
-		_portrait.text = ""
-		_portrait.tooltip_text = "Schamanin auswählen"
-		return
-	_portrait.disabled = true
-	var remaining: float = -1.0
 	var player: Tribe = _player_tribe()
+	if player != null:
+		_portrait_sprite.modulate = player.color
+	if _player_shaman_alive():
+		var shaman: Unit = player.shaman
+		_set_portrait_anim(StringName("%s_front" % shaman.anim_base_name))
+		_portrait_hp.value = float(shaman.health) / float(maxi(shaman.max_health, 1))
+		_portrait_status.text = ""
+		return
+	_set_portrait_anim(&"dead_front")
+	_portrait_hp.value = 0.0
+	var remaining: float = -1.0
 	if player != null:
 		for b in player.buildings:
 			if b is ReincarnationSite and is_instance_valid(b):
 				remaining = (b as ReincarnationSite).respawn_remaining()
 				break
 	if remaining >= 0.0:
-		_portrait.text = "%ds" % int(ceil(remaining))
-		_portrait.tooltip_text = "Schamanin kehrt in %d s zurück" % int(ceil(remaining))
+		_portrait_status.text = "Wiederkehr in %d s" % int(ceil(remaining))
 	else:
-		_portrait.text = "tot"
-		_portrait.tooltip_text = "Kein Reinkarnationsplatz — keine Wiederkehr"
+		_portrait_status.text = "Keine Wiederkehr"
+
+
+func _set_portrait_anim(anim: StringName) -> void:
+	var frames: SpriteFrames = _portrait_sprite.sprite_frames
+	if frames == null:
+		return
+	if not frames.has_animation(anim):
+		anim = &"idle_front"
+	if _portrait_sprite.animation != anim or not _portrait_sprite.is_playing():
+		_portrait_sprite.play(anim)
 
 
 # --- Spell display API ---------------------------------------------------------

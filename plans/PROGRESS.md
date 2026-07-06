@@ -1455,3 +1455,22 @@ Ladungsschub beim Gegner → Respawn-Countdown im Porträt).
 - Neuer Test: Land-Cast planiert einen unbegehbaren Grat zur begehbaren
   Geraden. Suite **643 grün**, `--quit-after 240` fehlerfrei.
   **Manuelle Prüfung: ausstehend.**
+
+**Erweiterung (Nutzerwunsch): Populous-Stil-Schamanin-Porträt.**
+- Neues Porträt-Panel **unter der Minimap, über den Menü-Tabs**
+  (`Sidebar._build_shaman_portrait`): zeigt die **ganze Figur live animiert**
+  (AnimatedSprite2D mit `PlaceholderSprites.make_frames("shaman")`,
+  Frontansicht, 3×-Pixelskalierung, Stammfarbe via modulate; die Animation
+  spiegelt `shaman.anim_base_name` im 0,3-s-Refresh), darunter ein grüner
+  **Lebensbalken** und eine Statuszeile. Tot → Leichen-Pose +
+  „Wiederkehr in N s" (bzw. „Keine Wiederkehr" ohne Platz).
+- **Klick aufs Porträt:** Kamera zentriert auf die Schamanin und **nur sie
+  ist selektiert** (`select_units([shaman])` ersetzt die komplette Auswahl
+  inkl. Gebäude-Abwahl).
+- Der bisherige kleine Porträt-Button im Kopfbereich ist ersatzlos entfallen
+  (Countdown lebt jetzt im großen Porträt).
+- **Fenstergröße:** `display/window/size` auf **1280×800** gesetzt — mit dem
+  Godot-Default (1152×648) wäre die höhere Sidebar unten übergelaufen (sie
+  war schon vorher praktisch voll).
+- Suite 643 grün, `--quit-after 240` fehlerfrei (Porträt baut auch headless).
+  **Manuelle Prüfung: ausstehend.**

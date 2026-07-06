@@ -15,6 +15,11 @@ config/icon="res://icon.svg"
 GameState="*res://scripts/core/game_state.gd"
 Events="*res://scripts/core/events.gd"
 
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=800
+
 [input]
 
 camera_forward={
