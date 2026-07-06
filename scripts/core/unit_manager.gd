@@ -42,6 +42,11 @@ const IDLE_GROUP_JOIN_RADIUS: float = 4.0
 const IDLE_GROUP_LEAVE_RADIUS: float = 6.0
 ## Founding needs this many loose idle mates nearby (3-unit core minimum).
 const IDLE_GROUP_MIN_NEIGHBOURS: int = 2
+## Mates this close already stand IN formation (e.g. after a group move
+## order lands in its 6-pack pattern): the cluster is adopted as a group
+## in place — NOBODY moves. Member offsets are ~0.55 m, so 1.5 m covers a
+## settled pack including separation wiggle.
+const IDLE_GROUP_SETTLED_RADIUS: float = 1.5
 ## Every unit is regroup-checked about once per this many ticks (sliced).
 const IDLE_REGROUP_SPREAD_TICKS: int = 30
 
@@ -280,15 +285,21 @@ func _apply_idle_regroup(delta: float) -> void:
 		_join_or_found_group(unit)
 
 
-## Ungrouped long-idle unit: join the first group with a free slot in range
-## (actively WALKING to its slot). When only FULL groups are nearby, do
-## nothing — founding a new group right next to an existing one made units
-## hop back and forth. With no group around and enough loose idle mates,
-## found a new group at the unit's own spot (it stays put as slot 0).
+## Ungrouped long-idle unit, in priority order:
+## 1. A cluster of idle mates ALREADY standing tight (e.g. a group move
+##    landed in its 6-pack formation): adopt it as a group IN PLACE —
+##    nobody moves (the pack was already perfect, just not registered).
+## 2. Join the first group with a free slot in range (actively WALKING
+##    to its slot).
+## 3. Only full groups nearby: do nothing (founding a new group right next
+##    to one made units hop back and forth).
+## 4. No group around and enough loose idle mates: found one at the unit's
+##    own spot (it stays put as slot 0); the mates walk over in their turns.
 func _join_or_found_group(unit: Unit) -> void:
 	var group_nearby: bool = false
 	var open_group: IdleGroup = null
 	var loose_mates: int = 0
+	var settled: Array[Unit] = []
 	for other in get_units_in_radius(unit.position, IDLE_GROUP_JOIN_RADIUS, 12):
 		if other == unit or other.tribe_id != unit.tribe_id:
 			continue
@@ -298,9 +309,20 @@ func _join_or_found_group(unit: Unit) -> void:
 			if open_group == null and not group.is_full() \
 					and group.anchor.distance_to(unit.position) <= IDLE_GROUP_LEAVE_RADIUS:
 				open_group = group
-		elif other.state == Unit.State.IDLE \
-				and other.idle_seconds >= IDLE_REGROUP_DELAY:
-			loose_mates += 1
+		elif other.state == Unit.State.IDLE:
+			if other.position.distance_to(unit.position) <= IDLE_GROUP_SETTLED_RADIUS:
+				settled.append(other)   # already standing in formation
+			if other.idle_seconds >= IDLE_REGROUP_DELAY:
+				loose_mates += 1
+	if not group_nearby and settled.size() >= IDLE_GROUP_MIN_NEIGHBOURS:
+		var adopted: IdleGroup = IdleGroup.new()
+		adopted.anchor = unit.position
+		join_idle_group(unit, adopted, false)
+		for mate in settled:
+			if adopted.is_full():
+				break
+			join_idle_group(mate, adopted, false)
+		return
 	if open_group != null:
 		join_idle_group(unit, open_group)
 		return
@@ -312,13 +334,16 @@ func _join_or_found_group(unit: Unit) -> void:
 		join_idle_group(unit, group)
 
 
-## Adds the unit on the group's next slot and actively WALKS it there (a
-## real move order — no sliding). Public for tests.
-func join_idle_group(unit: Unit, group: IdleGroup) -> void:
+## Adds the unit on the group's next slot. With `walk` it actively WALKS
+## there (a real move order — no sliding); without (adopting a cluster that
+## already stands in formation) it just registers. Public for tests.
+func join_idle_group(unit: Unit, group: IdleGroup, walk: bool = true) -> void:
 	group.members.append(unit)
 	unit.idle_group = group
 	var slot: int = mini(group.next_slot, TribeCommands.MEMBER_OFFSETS.size() - 1)
 	group.next_slot += 1
+	if not walk:
+		return
 	var target: Vector3 = group.anchor + TribeCommands.MEMBER_OFFSETS[slot]
 	if Vector2(target.x - unit.position.x, target.z - unit.position.z).length() > 0.3:
 		unit.order_move(target)

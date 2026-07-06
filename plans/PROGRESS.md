@@ -1853,3 +1853,18 @@ Mengen; Doppelklick wählt alle sichtbaren Einheiten des Typs.
   gemeinsame Gruppe, keine Neugründung neben voller Gruppe + sticky,
   aktiver Slot-Anlauf + Ankunft, Prune fern/Einzelauflösung). Benchmark
   Ø 35,6 ms (unter der HEAD-Referenz 37,8), Ladecheck + 1v1-Sim sauber.
+
+**Nachbesserung 2 (Nutzerfeedback): Adopt-in-Place.** Nach einem
+Formations-Move standen die Leute am Wegpunkt bereits perfekt im
+6er-Muster — der Gruppenfinder gründete dann trotzdem eine Gruppe am
+Standort des Gründers und ließ alle auf Slots ANLAUFEN (unnötige
+Bewegung). Jetzt hat der Finder eine vorgelagerte Stufe: Stehen ≥ 2 idle
+Stammesgenossen bereits **eng beieinander** (`IDLE_GROUP_SETTLED_RADIUS`
+1,5 m — deckt das gelandete 6er-Muster ab), wird der Klumpen **an Ort und
+Stelle als Gruppe adoptiert** (`join_idle_group(..., walk = false)`):
+niemand bewegt sich, die Formation wird nur registriert (und ist damit
+sticky — auch eine nicht ganz volle „perfekte" Gruppe bleibt stehen).
+Gelaufen wird nur noch beim Beitritt zu einer offenen Gruppe oder bei
+einer Neugründung mit verstreuten Nachbarn. Tests: **772 grün**
+(+ Adopt-Test: gemeinsame Gruppe, keine Move-Orders, Positionen exakt
+unverändert).

@@ -170,6 +170,31 @@ func test_idle_group_formation() -> void:
 	_free_world(w)
 
 
+func test_idle_group_adopts_settled_formation_in_place() -> void:
+	var w: Dictionary = _make_world()
+	# Four braves already standing tight (like a landed group move order).
+	var anchor: Vector3 = w.nav.cell_to_world(Vector2i(60, 60))
+	var offsets: Array[Vector3] = [Vector3.ZERO, Vector3(0.7, 0, 0),
+		Vector3(0, 0, 0.7), Vector3(0.7, 0, 0.7)]
+	var mates: Array[Unit] = []
+	var before: Array[Vector3] = []
+	for offset in offsets:
+		var brave: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, anchor + offset)
+		brave.idle_seconds = UnitManager.IDLE_REGROUP_DELAY + 1.0
+		mates.append(brave)
+		before.append(brave.position)
+	_run_ticks(w, mates, 2.0)
+	var group = mates[0].idle_group
+	check(group != null, "the settled cluster was adopted as a group")
+	for i in range(mates.size()):
+		check(mates[i].idle_group == group, "all settled mates share the group")
+		check(mates[i].state == Unit.State.IDLE,
+			"adoption never issues move orders (unit %d stays idle)" % i)
+		check(mates[i].position.distance_to(before[i]) < 0.05,
+			"unit %d did not move (was already perfectly placed)" % i)
+	_free_world(w)
+
+
 func test_idle_group_membership_is_sticky() -> void:
 	var w: Dictionary = _make_world()
 	# An existing FULL group...
