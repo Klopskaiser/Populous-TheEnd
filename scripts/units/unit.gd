@@ -68,6 +68,11 @@ const SHOVE_CHANCE: float = 0.15
 ## firewarrior from medium range, see Firewarrior/Fireball).
 const FIREBALL_DAMAGE: int = 7
 
+## When an attack target sits down under a preacher's spell, its attackers
+## break off — only this chance (rolled ONCE per attacker per sitting spell)
+## keeps one fighting.
+const SIT_ATTACK_CONTINUE_CHANCE: float = 0.05
+
 ## A defeated unit stays lying on the ground (dead sprite, no interaction) for
 ## this long, then dissolves over CORPSE_FADE_DURATION and is removed.
 const CORPSE_DURATION: float = 5.0
@@ -153,6 +158,9 @@ var _in_melee: bool = false
 ## Animation base of the current strike (punch/kick/shove — set per rolled
 ## attack kind in _do_strike; the firewarrior sets "throw" while firing).
 var attack_anim: StringName = &"punch"
+## Target this attacker rolled "keep fighting although it sits" for (untyped:
+## may be freed) — the 5% roll happens once per sitting spell, not per tick.
+var _sit_decision_target = null
 ## Cached A* goal while approaching a target (replanned when it drifts).
 var _combat_goal: Vector3 = Vector3.INF
 ## Corpse decay: seconds since death; corpse_expired fires once at the end.
@@ -583,6 +591,8 @@ func _tick_attack(delta: float) -> void:
 	if not _target_valid(attack_target) or attack_target.tribe_id == tribe_id:
 		_retarget_or_idle()
 		return
+	if _breaks_off_vs_sitting(attack_target):
+		return
 	var target: Unit = attack_target
 	var slot: int = target.request_melee_slot(self)
 	if slot < 0:
@@ -720,6 +730,23 @@ func _retarget_or_idle() -> void:
 			_begin_attack(enemy)
 			return
 	_set_state(State.IDLE)
+
+
+## While a target is being converted (sitting), attackers break off — only a
+## SIT_ATTACK_CONTINUE_CHANCE roll (once per attacker per sitting spell) keeps
+## one fighting. Returns true when the attack was dropped.
+func _breaks_off_vs_sitting(target: Unit) -> bool:
+	if target.state != State.SIT:
+		if _sit_decision_target == target:
+			_sit_decision_target = null   # target stood up: fresh roll next time
+		return false
+	if _sit_decision_target == target:
+		return false   # already rolled "keep fighting" for this spell
+	if randf() < SIT_ATTACK_CONTINUE_CHANCE:
+		_sit_decision_target = target
+		return false
+	_retarget_or_idle()
+	return true
 
 
 ## Braves fight back when hit (from idle/moving only — busy workers keep working);

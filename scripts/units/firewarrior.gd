@@ -33,6 +33,8 @@ func _tick_attack(delta: float) -> void:
 	if not _target_valid(attack_target) or attack_target.tribe_id == tribe_id:
 		_retarget_or_idle()
 		return
+	if _breaks_off_vs_sitting(attack_target):
+		return
 	var target: Unit = attack_target
 	var dist: float = _flat_dist(position, target.position)
 	if dist <= MELEE_RANGE:

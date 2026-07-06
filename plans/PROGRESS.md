@@ -1093,3 +1093,13 @@ Konvertieren vom Nutzer bestätigt („klappt"). Zwei Anpassungen:
   `_stand_up` setzt IDLE vor dem Gegenangriff → Duell-Freilassung
   funktioniert weiter. Test `test_sitting_unit_refuses_orders`
   (Gesamt **397** grün).
+- **Angreifer lassen von Sitzenden ab:** Setzt sich das Angriffsziel unter
+  den Prediger-Bann (SIT), brechen seine Angreifer ab — nur mit
+  `SIT_ATTACK_CONTINUE_CHANCE = 5 %` kämpft einer weiter. Der Wurf fällt
+  **einmal pro Angreifer und Sitz-Phase** (`_sit_decision_target`, wird
+  beim Aufstehen zurückgesetzt → neue Phase = neuer Wurf), eingehängt in
+  `Unit._tick_attack` **und** den Feuerkrieger-Override
+  (`_breaks_off_vs_sitting`). Abbrecher scannen neu (Sitzende bleiben
+  ausgenommen) oder gehen auf IDLE. Test
+  `test_attackers_break_off_vs_sitting_target` (statistisch: ≥3 von 5
+  brechen ab; Gesamt **399** grün).

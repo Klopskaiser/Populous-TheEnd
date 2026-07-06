@@ -442,6 +442,42 @@ func test_priest_duel_breaks_trance() -> void:
 	_free_world(w)
 
 
+## Own units break off their attack when the target sits down under the own
+## preacher's spell (only a 5% roll keeps an attacker fighting).
+func test_attackers_break_off_vs_sitting_target() -> void:
+	var w: Dictionary = _make_world()
+	var preacher: Unit = _spawn(w, PREACHER_SCENE, 0, Vector2(30, 30))
+	var enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(33, 30))
+	enemy.max_health = 1000000
+	enemy.health = 1000000
+	var attackers: Array = []
+	var offs: Array[Vector2] = [Vector2(0.9, 0), Vector2(-0.9, 0), Vector2(0, 0.9),
+		Vector2(0, -0.9), Vector2(0.7, 0.7)]
+	for o in offs:
+		var a: Unit = _spawn(w, WARRIOR_SCENE, 0, Vector2(33, 30) + o)
+		a.order_attack(enemy)
+		attackers.append(a)
+
+	var units: Array = [preacher, enemy]
+	units.append_array(attackers)
+	_run(w, units, func() -> bool: return enemy.state == Unit.State.SIT)
+	check(enemy.state == Unit.State.SIT, "the target sits despite being attacked")
+	# Let every attacker run its one-time roll.
+	for i in range(5):
+		for u: Unit in units:
+			if u.state != Unit.State.DEAD:
+				u.tick(TICK)
+		w.unit_manager.tick(TICK)
+	var still_fighting: int = 0
+	for a: Unit in attackers:
+		if a.attack_target == enemy:
+			still_fighting += 1
+	# 5% keep-fighting chance: statistically at least 3 of 5 break off
+	# (P(fail) ~0.1%); usually all 5 do.
+	check(still_fighting <= 2, "attackers break off against the sitting target")
+	_free_world(w)
+
+
 ## A sitting (pacified) unit accepts no orders at all: it keeps sitting and
 ## converting until the preaching is interrupted.
 func test_sitting_unit_refuses_orders() -> void:
