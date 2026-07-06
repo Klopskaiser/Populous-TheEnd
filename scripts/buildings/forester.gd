@@ -322,25 +322,28 @@ func _create_visuals() -> void:
 	door.position = Vector3(0.0, 0.5, span * 0.35)
 	_mesh_root.add_child(door)
 
-	# A couple of saplings out front (decorative sticks with a leaf tuft).
-	for sx in [-1.0, 1.0]:
+	# Two little trees growing ON THE ROOF (the forester's signature — so the
+	# lodge reads clearly as a building, not a stand of wild trees). They sit on
+	# the ridge, raised above the roof peak.
+	var roof_top: float = 2.05 + 0.45   # prism centre + half its height
+	for sx in [-0.7, 0.7]:
 		var stem: MeshInstance3D = MeshInstance3D.new()
 		var scyl: CylinderMesh = CylinderMesh.new()
-		scyl.top_radius = 0.05
-		scyl.bottom_radius = 0.07
-		scyl.height = 0.7
+		scyl.top_radius = 0.06
+		scyl.bottom_radius = 0.08
+		scyl.height = 0.8
 		stem.mesh = scyl
 		stem.material_override = _make_material(Color(0.4, 0.27, 0.15))
-		stem.position = Vector3(sx, 0.35, span * 0.5)
+		stem.position = Vector3(sx, roof_top + 0.4, 0.0)
 		_mesh_root.add_child(stem)
 		var leaf: MeshInstance3D = MeshInstance3D.new()
 		var cone: CylinderMesh = CylinderMesh.new()
 		cone.top_radius = 0.0
-		cone.bottom_radius = 0.28
-		cone.height = 0.5
+		cone.bottom_radius = 0.34
+		cone.height = 0.7
 		leaf.mesh = cone
 		leaf.material_override = _make_material(C_LEAF)
-		leaf.position = Vector3(sx, 0.85, span * 0.5)
+		leaf.position = Vector3(sx, roof_top + 1.05, 0.0)
 		_mesh_root.add_child(leaf)
 
 	_add_flag()
