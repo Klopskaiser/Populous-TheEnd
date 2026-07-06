@@ -336,6 +336,26 @@ func test_firewarrior_reserve_row_fires_when_slots_full() -> void:
 	_free_world(w)
 
 
+## A firewarrior must STAND STILL to fire: within fire range it holds position
+## (clears its path) and throws — it does not move while shooting. It only moves
+## to close the distance when the target is beyond FIRE_RANGE.
+func test_firewarrior_stands_still_to_fire() -> void:
+	var w: Dictionary = _make_world()
+	var fw: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(30, 30))
+	var enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(35, 30))  # 5 m: fire range
+	enemy.max_health = 1000000
+	enemy.health = 1000000
+	fw.order_attack(enemy)
+	var start: Vector2 = Vector2(fw.position.x, fw.position.z)
+	var hp0: int = enemy.health
+	_run(w, [fw], func() -> bool: return enemy.health < hp0)
+	check(enemy.health < hp0, "firewarrior fired from fire range")
+	var moved: float = Vector2(fw.position.x, fw.position.z).distance_to(start)
+	check(moved < 0.3, "firewarrior stood still to fire (moved %.2f m)" % moved)
+	check(not fw._has_path(), "no pending movement path while firing")
+	_free_world(w)
+
+
 ## A firewarrior reacts to enemies beyond the melee aggro radius (so it defends
 ## a neighbour being shot from fire range), then closes in and fires.
 func test_firewarrior_aggro_reaches_past_melee_radius() -> void:
