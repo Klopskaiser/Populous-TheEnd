@@ -2236,3 +2236,15 @@ Baum, fällt sonst auf den nächsten zurück). Neue Helfer in `brave.gd`:
 `_best_safe_pile`, `_claim_safe_tree`/`_nearest_claimable_tree`, `_enemies_near`
 (nutzt `path_service.get_units_in_radius`). Regressionstest
 `test_workers_skip_enemy_guarded_piles` in `test_economy.gd`. Tests: **1041 grün**.
+
+**Fix (Nutzerfeedback — Feuerkrieger-Fernkampf):** Große Feuerkrieger-Trupps
+liefen in den Nahkampf und blieben dort stehen (nur 3 bekamen einen
+Nahkampf-Slot, der Rest wartete untätig) — ganze Armeen wurden so von wenigen
+Predigern bekehrt, weil die Feuerkrieger nicht schossen. Feuerkrieger sind
+jetzt echte **Kiter**: sie feuern auf alles in `FIRE_RANGE`, halten Abstand
+(weichen zurück, wenn ein Gegner näher als `KITE_MIN_DIST 3,5 m` kommt) und
+prügeln nicht mehr / belegen keinen Nahkampf-Slot (`Firewarrior._tick_attack`
+neu, `_retreat_from`, `_is_ranged()`). `TribeCommands.order_attack` verteilt
+Fernkämpfer nicht mehr über das 3-Nahkämpfer-Limit um (alle feuern auf das
+befohlene Ziel). Test `test_firewarrior_brawls_in_melee` → `…_kites_when_crowded`
+umgestellt. Tests: **1040 grün**.

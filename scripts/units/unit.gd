@@ -312,6 +312,12 @@ func _is_combatant() -> bool:
 	return false
 
 
+## True for ranged units (firewarrior): any number may fire at one target, so
+## the 3-attacker melee cap and its target redistribution do not apply to them.
+func _is_ranged() -> bool:
+	return false
+
+
 ## Melee damage multiplier (Warrior returns 3.0; everyone else brawls at 1.0).
 func melee_strength() -> float:
 	return 1.0

@@ -284,20 +284,26 @@ func test_fireball_hits_exactly_once() -> void:
 	_free_world(w)
 
 
-## Inside melee range the firewarrior throws nothing and brawls at brave level.
-func test_firewarrior_brawls_in_melee() -> void:
+## When an enemy closes inside KITE_MIN_DIST the firewarrior does NOT brawl: it
+## backs off (kiting) while still throwing fireballs, so it keeps dealing ranged
+## damage instead of standing in melee.
+func test_firewarrior_kites_when_crowded() -> void:
 	var w: Dictionary = _make_world()
 	var fw: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(30, 30))
-	var enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30.8, 30))  # melee range
+	var enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30.8, 30))  # right on top
 	enemy.max_health = 1000000
 	enemy.health = 1000000
 	fw.order_attack(enemy)
+	var start_dist: float = Vector2(fw.position.x, fw.position.z).distance_to(
+		Vector2(enemy.position.x, enemy.position.z))
 	var hp0: int = enemy.health
 	_run(w, [fw], func() -> bool: return enemy.health < hp0)
-	check(enemy.health < hp0, "melee damage applied")
-	check(w.unit_manager.projectiles.is_empty(), "no fireballs thrown in melee range")
-	check(fw.melee_strength() == 1.0, "firewarrior brawls at brave strength")
-	check(fw.attack_anim != &"throw", "melee uses a strike anim, not throw")
+	check(enemy.health == hp0 - Unit.FIREBALL_DAMAGE,
+		"firewarrior throws a fireball even at close quarters (no brawl)")
+	check(fw.attack_anim == &"throw", "it plays the throw animation, not a melee strike")
+	var dist: float = Vector2(fw.position.x, fw.position.z).distance_to(
+		Vector2(enemy.position.x, enemy.position.z))
+	check(dist > start_dist, "the firewarrior backed off (kited) from the close enemy")
 	_free_world(w)
 
 

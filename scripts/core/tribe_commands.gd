@@ -245,7 +245,10 @@ func order_attack(units: Array[Unit], enemy: Unit) -> void:
 		if unit.tribe_id == enemy.tribe_id:
 			continue   # never attack own tribe
 		var target: Unit = enemy
-		if enemy.active_melee_attacker_count() >= Unit.MAX_MELEE_ATTACKERS:
+		# Ranged units (firewarriors) all fire at the ordered target — the
+		# 3-attacker melee cap and its redistribution only apply to brawlers.
+		if not unit._is_ranged() \
+				and enemy.active_melee_attacker_count() >= Unit.MAX_MELEE_ATTACKERS:
 			var alt: Unit = _nearest_free_enemy_near(enemy, unit)
 			if alt != null:
 				target = alt
