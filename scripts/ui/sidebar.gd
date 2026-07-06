@@ -487,11 +487,30 @@ func _build_pause_menu() -> void:
 	volume.value_changed.connect(_on_volume_changed)
 	vb.add_child(volume)
 
+	var battle: Button = Button.new()
+	battle.text = "Debugschlacht"
+	UiTheme.style_button(battle)
+	battle.pressed.connect(_start_debug_battle)
+	vb.add_child(battle)
+
 	var quit: Button = Button.new()
 	quit.text = "Beenden"
 	UiTheme.style_button(quit)
 	quit.pressed.connect(func() -> void: get_tree().quit())
 	vb.add_child(quit)
+
+
+## Reloads the map as the debug battle scenario (two 800-unit armies meeting
+## in the middle; Main._ready consumes the flag).
+func _start_debug_battle() -> void:
+	var gs: Node = get_node_or_null("/root/GameState")
+	if gs == null:
+		return
+	gs.debug_battle = true
+	# No GameState.reset() here: the old scene still runs until the deferred
+	# reload, and Main._ready re-populates everything anyway.
+	get_tree().paused = false
+	get_tree().reload_current_scene()
 
 
 ## Master-bus volume from the pause-menu slider (0..100; 0 mutes).

@@ -27,6 +27,15 @@ const STRESS_SPAWNS_PER_FRAME: int = 40
 const STRESS_ANCHORS: Array[Vector2i] = [
 	Vector2i(44, 44), Vector2i(84, 44), Vector2i(44, 84), Vector2i(84, 84)]
 
+## Debug battle (pause-menu "Debugschlacht"): two armies of this size meet in
+## the middle of the island. Blue (tribe 0) stays player-controllable.
+const DEBUG_ARMY_SIZE: int = 800
+## Share of warriors per army; the rest are firewarriors (spawned in the back
+## rows, since the outer spawn rings fill last).
+const DEBUG_WARRIOR_SHARE: float = 0.7
+## Army anchor offset from the island centre (cells, along x).
+const DEBUG_ARMY_OFFSET: int = 26
+
 ## Debug: spawn a small marker at the terrain raycast hit on left-click, to
 ## verify the HeightMapShape3D offset (marker must sit exactly under the cursor).
 @export var debug_click_marker: bool = false
@@ -95,11 +104,18 @@ func _ready() -> void:
 	# the affected mesh chunks + collision here.
 	Events.terrain_deformed.connect(_terrain.apply_deformation)
 
-	_tree_manager.spawn_trees(TREE_COUNT, GameState.ISLAND_SEED)
-	_place_start_site(tribes[GameState.PLAYER_TRIBE], nav)
-	_setup_player_base(tribes[GameState.PLAYER_TRIBE], nav)
-	_spawn_start_units(td, nav)
-	_setup_sparring(tribes, nav)
+	if GameState.debug_battle:
+		# Debug battle (one-shot flag from the pause menu): no bases, no start
+		# braves — just two armies marching at each other.
+		GameState.debug_battle = false
+		_tree_manager.spawn_trees(TREE_COUNT, GameState.ISLAND_SEED)
+		_setup_debug_battle(nav)
+	else:
+		_tree_manager.spawn_trees(TREE_COUNT, GameState.ISLAND_SEED)
+		_place_start_site(tribes[GameState.PLAYER_TRIBE], nav)
+		_setup_player_base(tribes[GameState.PLAYER_TRIBE], nav)
+		_spawn_start_units(td, nav)
+		_setup_sparring(tribes, nav)
 
 	# Start the camera over the island centre.
 	var center: float = TerrainData.SIZE * 0.5
@@ -193,6 +209,45 @@ func _spawn_sparring_units(red: Tribe, anchor: Vector2i, nav: NavGrid) -> void:
 			if cell.x >= 0:
 				_unit_manager.spawn_unit(scene, red.id, nav.cell_to_world(cell))
 			placed += 1
+
+
+# --- Debug battle (pause menu) ---------------------------------------------------
+
+## Two armies of DEBUG_ARMY_SIZE units each (blue = tribe 0, player-controlled;
+## red = tribe 1) spawn left/right of the island centre and march at each
+## other's anchor — the aggro system takes over on contact.
+func _setup_debug_battle(nav: NavGrid) -> void:
+	var center: Vector2i = Vector2i(TerrainData.SIZE / 2, TerrainData.SIZE / 2)
+	var blue_anchor: Vector2i = center + Vector2i(-DEBUG_ARMY_OFFSET, 0)
+	var red_anchor: Vector2i = center + Vector2i(DEBUG_ARMY_OFFSET, 0)
+	_spawn_debug_army(0, blue_anchor, nav)
+	_spawn_debug_army(1, red_anchor, nav)
+	# March each army at the enemy anchor; the path queue spreads the A* load.
+	_tribe_commands.order_move(
+		_unit_manager.get_units_of_tribe(0), nav.cell_to_world(red_anchor))
+	_tribe_commands.order_move(
+		_unit_manager.get_units_of_tribe(1), nav.cell_to_world(blue_anchor))
+	print("Debugschlacht: %d Einheiten gesamt" % _unit_manager.units.size())
+
+
+## Fills walkable cells ring by ring around the anchor: warriors first (inner
+## rows), firewarriors behind them (outer rows).
+func _spawn_debug_army(tribe_id: int, anchor: Vector2i, nav: NavGrid) -> void:
+	var warriors: int = int(float(DEBUG_ARMY_SIZE) * DEBUG_WARRIOR_SHARE)
+	var spawned: int = 0
+	for radius in range(0, 40):
+		for cell in _ring_cells(anchor, radius):
+			if spawned >= DEBUG_ARMY_SIZE:
+				return
+			if not nav.is_cell_walkable(cell):
+				continue
+			var scene: PackedScene = WARRIOR_SCENE if spawned < warriors \
+				else FIREWARRIOR_SCENE
+			_unit_manager.spawn_unit(scene, tribe_id, nav.cell_to_world(cell))
+			spawned += 1
+	if spawned < DEBUG_ARMY_SIZE:
+		push_warning("Debugschlacht: nur %d von %d Einheiten für Stamm %d gespawnt"
+			% [spawned, DEBUG_ARMY_SIZE, tribe_id])
 
 
 ## Ring-searches outward from `center` for the first buildable footprint.

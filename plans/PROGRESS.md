@@ -1212,3 +1212,11 @@ Kaserne → Braves stellen sich zur Ausbildung an).
   sitzt zwischen „Fortsetzen" und „Beenden", sessionweit.
 - Testsuite **438 grün** (Audio-Test um throw/preach + Ein-Datei-Regel
   erweitert).
+- **Pausemenü: „Debugschlacht"** — lädt die Karte neu als Schlacht-Szenario:
+  `GameState.debug_battle` (One-Shot-Flag, von `Main._ready` konsumiert) →
+  statt Basen/Start-Braves/Sparring spawnen **zwei Armeen à 800 Einheiten**
+  (70 % Krieger innen, 30 % Feuerkrieger in den hinteren Reihen; Ring-Füllung
+  begehbarer Zellen) links/rechts der Inselmitte (±26 Zellen) und marschieren
+  auf den jeweils gegnerischen Anker — Aggro übernimmt beim Kontakt. Blau
+  (Stamm 0) bleibt spielersteuerbar. Headless-Funktionstest: 1600 Einheiten,
+  600 Frames fehlerfrei.

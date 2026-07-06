@@ -19,6 +19,11 @@ const ISLAND_SEED: int = 1337
 ## Tribe id of the human player.
 const PLAYER_TRIBE: int = 0
 
+## One-shot flag (consumed by Main._ready): the next scene load builds the
+## debug battle scenario (two 800-unit armies clashing) instead of the
+## normal skirmish start. Set by the pause menu's "Debugschlacht" button.
+var debug_battle: bool = false
+
 
 func _process(delta: float) -> void:
 	for tribe in tribes:
