@@ -8,16 +8,18 @@ class_name AIState extends RefCounted
 
 enum State { BUILD, TRAIN, ATTACK }
 
-## BUILD -> TRAIN once the base stands: this many usable huts ...
+## Full base the AI keeps building toward (in the background, in EVERY state).
 const TARGET_HUTS: int = 3
-## ... all three training buildings (warrior camp, firewarrior camp, temple) ...
 const TARGET_CAMPS: int = 3
-## ... and at least this population.
-const POP_FOR_TRAIN: int = 18
+## BUILD -> TRAIN already when the essentials stand (training starts early,
+## the remaining buildings go up in parallel).
+const MIN_HUTS_FOR_TRAIN: int = 2
+const MIN_CAMPS_FOR_TRAIN: int = 1
+const POP_FOR_TRAIN: int = 12
 
 ## TRAIN -> ATTACK at this army size (warriors + firewarriors + preachers),
 ## with the shaman alive.
-const ARMY_ATTACK_SIZE: int = 12
+const ARMY_ATTACK_SIZE: int = 8
 ## ATTACK -> fallback when the army drops below this (decimated) or the
 ## shaman dies.
 const ARMY_RETREAT_SIZE: int = 4
@@ -36,8 +38,9 @@ static func make_snapshot(population: int, braves: int, army: int, huts: int,
 	}
 
 
-## Threshold transitions incl. fallback. Deliberately conservative: one step
-## per tick, unknown states fall back to BUILD.
+## Threshold transitions incl. fallback. Construction runs in EVERY state
+## (the controller builds toward the full base in the background); the state
+## only gates training and attacking.
 static func next_state(state: State, snap: Dictionary) -> State:
 	var huts: int = snap.get("huts", 0)
 	var camps: int = snap.get("camps", 0)
@@ -45,30 +48,29 @@ static func next_state(state: State, snap: Dictionary) -> State:
 	var shaman_alive: bool = snap.get("shaman_alive", false)
 	match state:
 		State.BUILD:
-			if huts >= TARGET_HUTS and camps >= TARGET_CAMPS \
+			if huts >= MIN_HUTS_FOR_TRAIN and camps >= MIN_CAMPS_FOR_TRAIN \
 					and snap.get("population", 0) >= POP_FOR_TRAIN:
 				return State.TRAIN
 			return State.BUILD
 		State.TRAIN:
-			# Losses (destroyed base buildings) send the AI back to building.
-			if huts < TARGET_HUTS or camps < TARGET_CAMPS:
+			# Losing the essentials (destroyed base) sends the AI back to BUILD.
+			if huts < 1 or camps < 1:
 				return State.BUILD
 			if army >= ARMY_ATTACK_SIZE and shaman_alive:
 				return State.ATTACK
 			return State.TRAIN
 		State.ATTACK:
 			if army < ARMY_RETREAT_SIZE or not shaman_alive:
-				if huts < TARGET_HUTS or camps < TARGET_CAMPS:
+				if huts < 1 or camps < 1:
 					return State.BUILD
 				return State.TRAIN
 			return State.ATTACK
 	return State.BUILD
 
 
-## Which combat unit the TRAIN state wants next, from the current counts and
-## the target mix (50% warriors, 30% firewarriors, 20% preachers): the kind
-## with the biggest relative deficit. Pure -> testable.
-static func next_training_kind(warriors: int, firewarriors: int, preachers: int) -> StringName:
+## Training kinds sorted by their deficit vs. the target mix (50% warriors,
+## 30% firewarriors, 20% preachers), biggest deficit first. Pure -> testable.
+static func training_kind_order(warriors: int, firewarriors: int, preachers: int) -> Array[StringName]:
 	var total: float = float(warriors + firewarriors + preachers) + 1.0
 	var deficits: Array = [
 		[0.5 - float(warriors) / total, &"warrior"],
@@ -77,4 +79,12 @@ static func next_training_kind(warriors: int, firewarriors: int, preachers: int)
 	]
 	deficits.sort_custom(func(a: Array, b: Array) -> bool:
 		return float(a[0]) > float(b[0]))
-	return deficits[0][1]
+	var order: Array[StringName] = []
+	for entry in deficits:
+		order.append(entry[1])
+	return order
+
+
+## The single most-wanted kind (biggest deficit).
+static func next_training_kind(warriors: int, firewarriors: int, preachers: int) -> StringName:
+	return training_kind_order(warriors, firewarriors, preachers)[0]

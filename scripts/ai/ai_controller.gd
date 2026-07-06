@@ -16,14 +16,27 @@ const TEMPLE_SCENE: PackedScene = preload("res://scenes/buildings/temple.tscn")
 const TICK_INTERVAL: float = 1.0
 ## Braves kept praying at the reincarnation site (mana income).
 const PRAY_BRAVES: int = 4
-## Braves sent into training per tick (at most).
-const TRAIN_BATCH: int = 2
-## The attack order is re-issued every this many ticks (path thrash guard).
+## Braves sent into training per tick (at most), spread over the camps by
+## deficit so all three unit kinds get trained.
+const TRAIN_BATCH: int = 3
+## The attack/defend order is re-issued every this many ticks (path thrash guard).
 const ATTACK_ORDER_TICKS: int = 4
+## Parallel construction sites: one per this many braves (capped below).
+const BRAVES_PER_SITE: int = 8
+const MAX_PARALLEL_SITES: int = 3
 ## Spell heuristic ranges.
 const SPELL_SCAN_RADIUS: float = 12.0
 const CLUSTER_RADIUS: float = 3.0
-const CLUSTER_MIN_ENEMIES: int = 4
+const CLUSTER_MIN_ENEMIES: int = 3
+## Enemies this close to the base anchor trigger the defence reaction.
+const DEFEND_RADIUS: float = 32.0
+## Effective combat weight of the shaman / a militia brave in the
+## chance-of-success estimate.
+const SHAMAN_POWER: float = 4.0
+const BRAVE_POWER: float = 0.5
+## Defend only when own power >= enemy count * this (no hopeless suicides —
+## the shaman keeps casting from the base instead).
+const DEFEND_CHANCE_FACTOR: float = 0.4
 
 var tribe: Tribe = null
 var commands: TribeCommands = null
@@ -68,24 +81,32 @@ func tick_ai() -> void:
 	var snap: Dictionary = make_snapshot()
 	_tick_count += 1
 	if debug_log and _tick_count % 60 == 0:
-		print("KI %d [%s] Pop %d, Braves %d, Armee %d, Hütten %d, Lager %d, Baustelle %s" % [
+		print("KI %d [%s] Pop %d, Braves %d, Armee %d, Hütten %d, Lager %d, Baustellen %d" % [
 			tribe.id, AIState.State.keys()[state], snap.get("population", 0),
 			snap.get("braves", 0), snap.get("army", 0), snap.get("huts", 0),
-			snap.get("camps", 0), str(_has_construction_site())])
+			snap.get("camps", 0), _construction_site_count()])
 	var next: AIState.State = AIState.next_state(state, snap)
 	if next != state:
 		print("KI %d: %s -> %s (Pop %d, Armee %d)" % [tribe.id,
 			AIState.State.keys()[state], AIState.State.keys()[next],
 			snap.get("population", 0), snap.get("army", 0)])
 		state = next
+	# Economy and magic run in EVERY state: pray, keep building toward the
+	# full base, cast spells whenever enemies are near the shaman.
 	_keep_praying()
+	_tick_build(snap)
+	_cast_spells()
+	# An attack on the own village takes priority over everything else.
+	var threat: Dictionary = _detect_threat()
+	if not threat.is_empty():
+		_tick_defend(threat)
 	match state:
-		AIState.State.BUILD:
-			_tick_build(snap)
 		AIState.State.TRAIN:
 			_tick_train(snap)
 		AIState.State.ATTACK:
-			_tick_attack()
+			_tick_train(snap)   # keep reinforcements coming
+			if threat.is_empty():
+				_tick_attack()
 
 
 ## Live tribe snapshot in the AIState format.
@@ -104,13 +125,16 @@ func make_snapshot() -> Dictionary:
 		_usable_hut_count(), _usable_camp_kind_count(), _shaman_alive())
 
 
-# --- BUILD -------------------------------------------------------------------------
+# --- BUILD (runs in every state) ------------------------------------------------------
 
-## Builds the base up: one construction site at a time (the BuildingManager
-## recruits nearby idle braves as workers on its own); next missing building =
-## huts up to target, then the three training buildings.
+## Builds toward the full base: several construction sites in parallel (one
+## per BRAVES_PER_SITE braves — the BuildingManager recruits nearby idle
+## braves as workers on its own); next missing building = huts up to target,
+## then the three training buildings. One new site per tick at most.
 func _tick_build(snap: Dictionary) -> void:
-	if _has_construction_site():
+	var max_sites: int = clampi(snap.get("braves", 0) / BRAVES_PER_SITE,
+		1, MAX_PARALLEL_SITES)
+	if _construction_site_count() >= max_sites:
 		return
 	var scene: PackedScene = _next_building_scene(snap)
 	if scene == null:
@@ -123,12 +147,30 @@ func _tick_build(snap: Dictionary) -> void:
 		commands.place_building(tribe, scene, cell)
 
 
-func _next_building_scene(snap: Dictionary) -> PackedScene:
-	if snap.get("huts", 0) < AIState.TARGET_HUTS:
+## Decides what to place next. Counts PLANNED buildings (construction sites
+## included) — with parallel sites the usable count alone would over-build.
+func _next_building_scene(_snap: Dictionary) -> PackedScene:
+	var huts: int = 0
+	var kinds: Dictionary = {}
+	for building in tribe.buildings:
+		if not is_instance_valid(building) or building.health <= 0:
+			continue
+		if building is Hut:
+			huts += 1
+		elif building is WarriorCamp:
+			kinds[&"warrior_camp"] = true
+		elif building is FirewarriorCamp:
+			kinds[&"firewarrior_camp"] = true
+		elif building is Temple:
+			kinds[&"temple"] = true
+	# The first camp goes up right after the first hut (early training),
+	# the remaining huts and camps follow.
+	if huts < 1:
 		return HUT_SCENE
-	var kinds: Dictionary = _usable_camp_kinds()
 	if not kinds.has(&"warrior_camp"):
 		return WARRIOR_CAMP_SCENE
+	if huts < AIState.TARGET_HUTS:
+		return HUT_SCENE
 	if not kinds.has(&"firewarrior_camp"):
 		return FIREWARRIOR_CAMP_SCENE
 	if not kinds.has(&"temple"):
@@ -138,8 +180,10 @@ func _next_building_scene(snap: Dictionary) -> PackedScene:
 
 # --- TRAIN -------------------------------------------------------------------------
 
-## Sends idle braves into the training building whose unit kind has the
-## biggest deficit vs. the target mix; keeps a minimum economy crew.
+## Sends idle braves into training, spread over the camps by deficit vs. the
+## target mix (warriors AND firewarriors AND preachers get trained — the
+## counts are advanced per assignment, so one batch rotates through the
+## kinds); keeps a minimum economy crew.
 func _tick_train(_snap: Dictionary) -> void:
 	var idle: Array[Unit] = _idle_braves()
 	var brave_count: int = 0
@@ -150,25 +194,32 @@ func _tick_train(_snap: Dictionary) -> void:
 	var spare: int = brave_count - AIState.MIN_ECONOMY_BRAVES
 	if spare <= 0 or idle.is_empty():
 		return
-	var kind: StringName = AIState.next_training_kind(
-		_count_kind(&"warrior"), _count_kind(&"firewarrior"), _count_kind(&"preacher"))
-	var building: TrainingBuilding = _usable_camp_for(kind)
-	if building == null:
-		return
-	var batch: Array[Unit] = []
-	for unit in idle:
-		if batch.size() >= mini(TRAIN_BATCH, spare):
+	var counts: Dictionary = {
+		&"warrior": _count_kind(&"warrior"),
+		&"firewarrior": _count_kind(&"firewarrior"),
+		&"preacher": _count_kind(&"preacher"),
+	}
+	var batch_size: int = mini(mini(TRAIN_BATCH, spare), idle.size())
+	for i in range(batch_size):
+		var order: Array[StringName] = AIState.training_kind_order(
+			counts[&"warrior"], counts[&"firewarrior"], counts[&"preacher"])
+		# Biggest deficit whose camp actually stands and is usable.
+		for kind in order:
+			var building: TrainingBuilding = _usable_camp_for(kind)
+			if building == null:
+				continue
+			var brave: Unit = idle.pop_back()
+			commands.order_train(building, [brave] as Array[Unit])
+			counts[kind] += 1
 			break
-		batch.append(unit)
-	commands.order_train(building, batch)
 
 
 # --- ATTACK ------------------------------------------------------------------------
 
 ## Marches the army (attack-move engages on contact) at the nearest enemy
-## building — fallback: nearest enemy unit — and casts spells situationally.
+## building — fallback: nearest enemy unit. Spells are cast by the global
+## per-tick heuristic.
 func _tick_attack() -> void:
-	_cast_spells()
 	_attack_order_countdown -= 1
 	if _attack_order_countdown > 0:
 		return
@@ -182,6 +233,72 @@ func _tick_attack() -> void:
 		squad.append(shaman)
 	if not squad.is_empty():
 		commands.order_move(squad, target)
+
+
+# --- DEFEND ------------------------------------------------------------------------
+
+## Enemies near the base anchor: nearest enemy unit + head count. Empty
+## dictionary when the village is safe.
+func _detect_threat() -> Dictionary:
+	if unit_manager == null or nav_grid == null:
+		return {}
+	var anchor_world: Vector3 = nav_grid.cell_to_world(base_anchor)
+	var nearest: Unit = null
+	var nearest_dist: float = INF
+	var count: int = 0
+	for unit in unit_manager.get_units_in_radius(anchor_world, DEFEND_RADIUS):
+		if unit.tribe_id == tribe.id or unit.state == Unit.State.DEAD:
+			continue
+		count += 1
+		var d: float = unit.position.distance_to(anchor_world)
+		if d < nearest_dist:
+			nearest_dist = d
+			nearest = unit
+	if nearest == null:
+		return {}
+	return {"enemy": nearest, "count": count, "pos": nearest.position}
+
+
+## Defends the village when there is a fighting chance: army + shaman move in
+## (attack-move engages), and when they alone are outnumbered, praying/idle
+## braves join as militia (explicit attack order — braves have no aggro).
+## Hopeless odds: no suicide charge, the shaman keeps casting from the base.
+func _tick_defend(threat: Dictionary) -> void:
+	_attack_order_countdown -= 1
+	if _attack_order_countdown > 0:
+		return
+	_attack_order_countdown = ATTACK_ORDER_TICKS
+	var army: Array[Unit] = _army_units()
+	var braves: Array[Unit] = _militia_braves()
+	var enemy_count: int = threat.get("count", 1)
+	var core_power: float = float(army.size()) \
+		+ (SHAMAN_POWER if _shaman_alive() else 0.0)
+	var full_power: float = core_power + float(braves.size()) * BRAVE_POWER
+	if full_power < float(enemy_count) * DEFEND_CHANCE_FACTOR:
+		return   # hopeless — spells only
+	var defenders: Array[Unit] = army.duplicate()
+	var shaman: Unit = tribe.shaman
+	if _shaman_alive() and shaman.state != Unit.State.CAST:
+		defenders.append(shaman)
+	if not defenders.is_empty():
+		commands.order_move(defenders, threat.get("pos"))
+	# Militia only when the army alone is outnumbered.
+	if core_power < float(enemy_count) and not braves.is_empty():
+		var enemy: Unit = threat.get("enemy")
+		if enemy != null and is_instance_valid(enemy):
+			commands.order_attack(braves, enemy)
+
+
+## Braves available as militia: idle or praying (never pulls workers off
+## construction sites or trainees out of the queue).
+func _militia_braves() -> Array[Unit]:
+	var militia: Array[Unit] = []
+	for unit in tribe.units:
+		if not is_instance_valid(unit) or not (unit is Brave):
+			continue
+		if unit.state == Unit.State.IDLE or unit.state == Unit.State.PRAY:
+			militia.append(unit)
+	return militia
 
 
 ## Nearest enemy building (to the base anchor); no buildings left -> nearest
@@ -337,11 +454,12 @@ func _shaman_alive() -> bool:
 		and tribe.shaman.state != Unit.State.DEAD
 
 
-func _has_construction_site() -> bool:
+func _construction_site_count() -> int:
+	var count: int = 0
 	for building in tribe.buildings:
 		if is_instance_valid(building) and building.under_construction:
-			return true
-	return false
+			count += 1
+	return count
 
 
 func _usable_hut_count() -> int:

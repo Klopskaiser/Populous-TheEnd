@@ -11,6 +11,7 @@ const HUT_SCENE: PackedScene = preload("res://scenes/buildings/hut.tscn")
 const SITE_SCENE: PackedScene = preload("res://scenes/buildings/reincarnation_site.tscn")
 const WARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/warrior_camp.tscn")
 const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
+const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
 
 
 func _flat_terrain(h: float = 5.0) -> TerrainData:
@@ -64,10 +65,10 @@ func test_state_transitions() -> void:
 	check(AIState.next_state(AIState.State.BUILD, low) == AIState.State.BUILD,
 		"low population/buildings keeps BUILD")
 
-	var built: Dictionary = AIState.make_snapshot(AIState.POP_FOR_TRAIN, 18, 0,
-		AIState.TARGET_HUTS, AIState.TARGET_CAMPS, true)
+	var built: Dictionary = AIState.make_snapshot(AIState.POP_FOR_TRAIN, 12, 0,
+		AIState.MIN_HUTS_FOR_TRAIN, AIState.MIN_CAMPS_FOR_TRAIN, true)
 	check(AIState.next_state(AIState.State.BUILD, built) == AIState.State.TRAIN,
-		"base complete + population -> TRAIN")
+		"essentials standing + population -> TRAIN (base finishes in parallel)")
 
 	var army_ready: Dictionary = AIState.make_snapshot(30, 15, AIState.ARMY_ATTACK_SIZE,
 		AIState.TARGET_HUTS, AIState.TARGET_CAMPS, true)
@@ -80,16 +81,16 @@ func test_state_transitions() -> void:
 		"dead shaman blocks the attack")
 
 	var lost_huts: Dictionary = AIState.make_snapshot(30, 15, 5,
-		AIState.TARGET_HUTS - 1, AIState.TARGET_CAMPS, true)
+		0, AIState.TARGET_CAMPS, true)
 	check(AIState.next_state(AIState.State.TRAIN, lost_huts) == AIState.State.BUILD,
-		"lost hut sends TRAIN back to BUILD")
+		"losing every hut sends TRAIN back to BUILD")
 
 	var decimated: Dictionary = AIState.make_snapshot(20, 10, AIState.ARMY_RETREAT_SIZE - 1,
 		AIState.TARGET_HUTS, AIState.TARGET_CAMPS, true)
 	check(AIState.next_state(AIState.State.ATTACK, decimated) == AIState.State.TRAIN,
 		"decimated army falls back to TRAIN (base intact)")
 
-	var decimated_no_base: Dictionary = AIState.make_snapshot(20, 10, 0, 1, 1, false)
+	var decimated_no_base: Dictionary = AIState.make_snapshot(20, 10, 0, 0, 0, false)
 	check(AIState.next_state(AIState.State.ATTACK, decimated_no_base) == AIState.State.BUILD,
 		"decimated army + wrecked base falls back to BUILD")
 
@@ -106,6 +107,9 @@ func test_training_mix() -> void:
 		"warrior surplus -> firewarrior next")
 	check(AIState.next_training_kind(5, 3, 0) == &"preacher",
 		"warrior+firewarrior covered -> preacher next")
+	var order: Array[StringName] = AIState.training_kind_order(6, 0, 0)
+	check(order.size() == 3 and order[0] == &"firewarrior",
+		"training_kind_order sorts all three kinds by deficit")
 
 
 # --- Symmetry: the AI cannot cheat ----------------------------------------------------
@@ -170,10 +174,107 @@ func test_build_tick_places_and_prays() -> void:
 
 	ai.tick_ai()
 	check(ai_tribe.buildings.size() == buildings_before + 1,
-		"only one construction site at a time")
+		"10 braves support only one construction site at a time")
+
+	# More braves allow parallel sites: the next tick opens a second one
+	# (a warrior camp — the first camp follows right after the first hut).
+	for i in range(10):
+		w.unit_manager.spawn_unit(BRAVE_SCENE, 1,
+			w.nav.cell_to_world(anchor + Vector2i(-6, i - 4)))
+	ai.tick_ai()
+	check(ai_tribe.buildings.size() == buildings_before + 2,
+		"20 braves support a second parallel construction site")
+	var second: Building = ai_tribe.buildings[ai_tribe.buildings.size() - 1]
+	check(second is WarriorCamp,
+		"the first training camp goes up right after the first hut")
+	ai.tick_ai()
+	check(ai_tribe.buildings.size() == buildings_before + 2,
+		"the parallel-site cap holds (no third site with 20 braves)")
 
 	ai.free()
 	_free_world(w)
+
+
+# --- Defence ---------------------------------------------------------------------
+
+func test_defense_militia() -> void:
+	var w: Dictionary = _make_world()
+	var ai_tribe: Tribe = w.tribes[1]
+	var anchor: Vector2i = Vector2i(64, 64)
+	w.building_manager.place(SITE_SCENE, ai_tribe, anchor, 0, true)
+	for i in range(5):
+		w.unit_manager.spawn_unit(BRAVE_SCENE, 1,
+			w.nav.cell_to_world(anchor + Vector2i(6, i)))
+	# One enemy warrior walks into the village.
+	var enemy: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 0,
+		w.nav.cell_to_world(anchor + Vector2i(2, 6)))
+	var ai: AIController = _make_ai(w, ai_tribe, anchor)
+
+	ai.tick_ai()
+	var attacking: int = 0
+	for unit in ai_tribe.units:
+		if unit.state == Unit.State.ATTACK:
+			attacking += 1
+	check(attacking > 0,
+		"a lone raider triggers the brave militia (explicit attack order)")
+	check(is_instance_valid(enemy), "the enemy itself is untouched by the order")
+
+	ai.free()
+	_free_world(w)
+
+
+func test_defense_hopeless_no_suicide() -> void:
+	var w: Dictionary = _make_world()
+	var ai_tribe: Tribe = w.tribes[1]
+	var anchor: Vector2i = Vector2i(64, 64)
+	for i in range(10):
+		w.unit_manager.spawn_unit(WARRIOR_SCENE, 0,
+			w.nav.cell_to_world(anchor + Vector2i(2 + (i % 3), 4 + i / 3)))
+	var brave: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1,
+		w.nav.cell_to_world(anchor + Vector2i(-4, 0)))
+	var ai: AIController = _make_ai(w, ai_tribe, anchor)
+
+	ai.tick_ai()
+	check(brave.state != Unit.State.ATTACK,
+		"hopeless odds: the lone brave is not sent into a suicide defence")
+
+	ai.free()
+	_free_world(w)
+
+
+# --- Wood piles: only near the site -------------------------------------------------
+
+func test_wood_pile_only_near_site() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var site_cell: Vector2i = Vector2i(60, 60)
+	var hut: Building = w.commands.place_building(tribe, HUT_SCENE, site_cell)
+	check(hut != null, "construction site placed")
+	var brave: Brave = w.unit_manager.spawn_unit(BRAVE_SCENE, 1,
+		w.nav.cell_to_world(site_cell + Vector2i(4, 0))) as Brave
+	brave.order_build(hut)
+
+	# A far pile (way beyond JOB_TREE_RADIUS — e.g. in an enemy base) must be
+	# ignored; with a tree nearby the brave chops instead.
+	w.wood_pile_manager.deposit(w.nav.cell_to_world(Vector2i(120, 120)), 3)
+	w.tree_manager.spawn_tree(Vector2i(66, 66), TreeResource.MAX_STAGE)
+	check(brave._try_fetch_wood(), "a wood source is found")
+	check(brave.task == Brave.Task.CHOP,
+		"the distant pile is ignored — the nearby tree wins")
+
+	# A pile near the site takes priority again (leftovers get used first).
+	w.wood_pile_manager.deposit(w.nav.cell_to_world(Vector2i(70, 60)), 3)
+	check(brave._try_fetch_wood(), "a wood source is found again")
+	check(brave.task == Brave.Task.PICKUP,
+		"a pile near the site is preferred over the tree")
+
+	ai_cleanup_brave(brave)
+	_free_world(w)
+
+
+## Releases claims so freeing the world does not warn (tree claims etc.).
+func ai_cleanup_brave(brave: Brave) -> void:
+	brave._interrupt_tasks()
 
 
 # --- TRAIN tick -----------------------------------------------------------------------

@@ -1619,3 +1619,45 @@ alle 60 Ticks). Beschleunigt mit `--fixed-fps 60 --quit-after <frames>`:
 1–3 KIs, Startmission, Debugschlacht, Optionen/Lautstärke, Beenden),
 komplettes Match gegen 1 KI (KI baut/trainiert/greift an, Zauber), beide
 Endscreens (Sieg/Niederlage → „Zurück zum Menü"), 4-Spieler-Match flüssig.
+
+**Nachbesserung (Nutzerfeedback, erste Runde):**
+- **Hauptmenü zentriert:** Die Seiten-Panels liegen jetzt in einem
+  `CenterContainer` (voller Rect) statt `PRESET_CENTER` auf dem Panel —
+  mit dem Anchor-Preset allein wuchs das nachträglich befüllte Panel vom
+  Bildschirmmittelpunkt nach rechts unten (sichtbar außermittig, v. a. im
+  Fenstermodus).
+- **KI baut parallel:** bis zu **3 Baustellen gleichzeitig** (1 je 8 Braves,
+  `BRAVES_PER_SITE`/`MAX_PARALLEL_SITES`); `_next_building_scene` zählt
+  **geplante** Gebäude (inkl. Baustellen), sonst überbaut der Parallelbau.
+  Reihenfolge: 1. Hütte → **Kaserne** (frühes Training) → restliche Hütten →
+  Feuertempel → Tempel. **Bauen läuft jetzt in JEDEM State** (auch
+  TRAIN/ATTACK — die Basis wird im Hintergrund vollendet).
+- **Früher angreifen:** TRAIN ab 2 Hütten + 1 Lager + Pop 12 (vorher
+  3/3/18), ATTACK ab **Armee 8** (vorher 12); TRAIN läuft im ATTACK weiter
+  (Nachschub marschiert mit der nächsten Order zur Front). Rückfall zu BUILD
+  nur noch bei Verlust der Essentials (keine Hütte/kein Lager).
+- **Voller Einheitenmix:** `AIState.training_kind_order` (Defizite sortiert);
+  `_tick_train` vergibt den Batch (jetzt 3/Tick) **rotierend** über die
+  Defizit-Reihenfolge und weicht auf vorhandene Lager aus — Krieger,
+  Feuerkrieger UND Prediger werden trainiert, sobald ihre Gebäude stehen.
+- **Zauber jeden Tick:** `_cast_spells` läuft in jedem State (vorher nur im
+  ATTACK — beim Überfall aufs eigene Dorf castete die Schamanin nie);
+  Feuerball-Cluster ab 3 Feinden (vorher 4).
+- **Verteidigung:** `_detect_threat` (Feinde im 32-m-Radius um den
+  Basis-Anker) hat Vorrang vor dem Angriff: Armee + Schamanin rücken aus
+  (Attack-Move), **Braves als Miliz** (expliziter `order_attack` — Braves
+  haben kein Aggro) nur wenn die Kerntruppe unterlegen ist.
+  **Chancen-Heuristik:** verteidigt nur, wenn eigene Kampfkraft
+  (Armee + 4×Schamanin + 0,5×Miliz-Brave) ≥ 0,4 × Feindzahl — sonst kein
+  Suizid-Ausfall, die Schamanin castet aus der Basis weiter.
+- **Holzstapel nur noch im eigenen Dorf:** `WoodPileManager.nearest_pile`
+  um `within_pos/within_radius` erweitert; `Brave._try_fetch_wood` zählt
+  Stapel nur noch im **`JOB_TREE_RADIUS` (40 m) um die Baustelle** (gleicher
+  Radius wie die Baumsuche) — ein Stapel quer über die Insel oder in der
+  Gegnerbasis lockt keine Arbeiter mehr weg. Gilt für Spieler UND KI.
+- Tests: **704 grün** (+12: neue Übergangs-Schwellwerte, Parallelbau-Deckel
+  inkl. Kaserne-nach-erster-Hütte, Miliz-Verteidigung, Hoffnungslos-Fall
+  ohne Suizid, Stapel-Radius nah/fern, `training_kind_order`).
+- Sim-Läufe: 1v1 entschieden **innerhalb 20 min Spielzeit** mit mehreren
+  Angriffs-/Verteidigungszyklen (vorher: TRAIN erst nach ~10 min, Sieg nach
+  ~25+); 4-Spieler-Lauf fehlerfrei.

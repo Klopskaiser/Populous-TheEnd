@@ -13,6 +13,7 @@ const MAPS: Array[Dictionary] = [
 ]
 
 var _pages: Array[Control] = []
+var _center: CenterContainer = null
 var _ai_count_option: OptionButton = null
 var _map_option: OptionButton = null
 
@@ -25,6 +26,12 @@ func _ready() -> void:
 	background.set_anchors_preset(Control.PRESET_FULL_RECT)
 	background.color = Color(0.09, 0.06, 0.04)
 	add_child(background)
+
+	# The pages live in a CenterContainer: panels stay centred at any window
+	# size (an anchor preset alone lets the growing panel expand down-right).
+	_center = CenterContainer.new()
+	_center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(_center)
 
 	_pages.append(_build_root_page())
 	_pages.append(_build_skirmish_page())
@@ -45,9 +52,8 @@ func _ready() -> void:
 func _make_page(title_text: String) -> VBoxContainer:
 	var page: PanelContainer = PanelContainer.new()
 	page.add_theme_stylebox_override("panel", UiTheme.panel_style())
-	page.set_anchors_preset(Control.PRESET_CENTER)
 	page.custom_minimum_size = Vector2(340, 0)
-	add_child(page)
+	_center.add_child(page)
 
 	var vb: VBoxContainer = VBoxContainer.new()
 	vb.add_theme_constant_override("separation", 10)

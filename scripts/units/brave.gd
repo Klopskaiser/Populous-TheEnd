@@ -298,11 +298,14 @@ func _choose_repair_task() -> void:
 
 ## Wood lying around is used FIRST — only fell trees when no pile is left
 ## (piles inside the absorb radius are excluded, the site swallows those by
-## itself). Returns true when a fetch sub-task was set.
+## itself). Only piles near the site count (JOB_TREE_RADIUS, same as the tree
+## search): a stray pile across the island — or inside an enemy base — must
+## not lure workers away. Returns true when a fetch sub-task was set.
 func _try_fetch_wood() -> bool:
 	if wood_pile_manager != null:
 		var pile: WoodPile = wood_pile_manager.nearest_pile(
-			position, job.entrance_world(), Building.ABSORB_RADIUS)
+			position, job.entrance_world(), Building.ABSORB_RADIUS,
+			job.center_world(), JOB_TREE_RADIUS)
 		if pile != null:
 			task_pile = pile
 			task = Task.PICKUP

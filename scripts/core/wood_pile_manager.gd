@@ -66,21 +66,30 @@ func take_from_pile(pile: WoodPile, want: int) -> int:
 
 ## Nearest non-empty pile that is NOT within exclude_radius of exclude_pos
 ## (piles that close to a site get absorbed automatically — hauling them is
-## pointless). Pass exclude_radius 0.0 to search all piles.
+## pointless). Pass exclude_radius 0.0 to search all piles. With a
+## within_radius > 0, only piles within that range of within_pos count —
+## workers must not trek across the island (or into an enemy base) for wood.
 func nearest_pile(pos: Vector3, exclude_pos: Vector3 = Vector3.INF,
-		exclude_radius: float = 0.0) -> WoodPile:
+		exclude_radius: float = 0.0, within_pos: Vector3 = Vector3.INF,
+		within_radius: float = 0.0) -> WoodPile:
 	var best: WoodPile = null
 	var best_dist: float = INF
 	var flat: Vector2 = Vector2(pos.x, pos.z)
 	for pile in piles:
 		if pile.amount <= 0:
 			continue
+		var pile_flat: Vector2 = Vector2(pile.position.x, pile.position.z)
 		if exclude_radius > 0.0 and exclude_pos != Vector3.INF:
-			var to_excluded: float = Vector2(pile.position.x, pile.position.z).distance_to(
+			var to_excluded: float = pile_flat.distance_to(
 				Vector2(exclude_pos.x, exclude_pos.z))
 			if to_excluded <= exclude_radius:
 				continue
-		var d: float = Vector2(pile.position.x, pile.position.z).distance_squared_to(flat)
+		if within_radius > 0.0 and within_pos != Vector3.INF:
+			var to_center: float = pile_flat.distance_to(
+				Vector2(within_pos.x, within_pos.z))
+			if to_center > within_radius:
+				continue
+		var d: float = pile_flat.distance_squared_to(flat)
 		if d < best_dist:
 			best_dist = d
 			best = pile
