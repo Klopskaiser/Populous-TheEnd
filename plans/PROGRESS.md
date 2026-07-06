@@ -2102,3 +2102,8 @@ zerplatzende Gebäude, Absinken-Flutung, KI castet die neuen Zauber).
   `SINK_DEPTH` unter die Oberfläche ab (Vertex-Y-Offset) — die Kruste
   taucht sichtbar ins Terrain ab.
 - Tests: 988 grün, `--quit-after 240` fehlerfrei.
+
+**Manuelle Prüfung durch Nutzer: BESTANDEN** („ok, das funktioniert gut") —
+Zauber, Integritätsregeln, Lava-/Brandmechanik, Vulkan-Eruption,
+Erdbeben-Bruchkante. **Phase 7c abgeschlossen**, Checkbox in der Overview
+abgehakt.
