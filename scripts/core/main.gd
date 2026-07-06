@@ -17,8 +17,17 @@ const PREACHER_SCENE: PackedScene = preload("res://scenes/units/preacher.tscn")
 const SHAMAN_SCENE: PackedScene = preload("res://scenes/units/shaman.tscn")
 const START_BRAVES: int = 20
 const TREE_COUNT: int = 60
-## Max player count — one tribe per player, all identical instances.
-const TRIBE_COUNT: int = 4
+
+## Skirmish (phase 7): base anchors sit evenly spaced on this circle around
+## the island centre (cells) — 2 players = opposite sides, 3 = triangle,
+## 4 = quadrants.
+const SKIRMISH_BASE_RADIUS: float = 26.0
+## Every skirmish base is guaranteed this many trees within reach, so all
+## start positions can build (wood is delivered physically). A full base
+## needs ~65 wood (3 huts + 3 training camps); big trees yield 3 each and
+## regrow, so 16 covers it with margin.
+const SKIRMISH_BASE_TREES: int = 16
+const SKIRMISH_TREE_RADIUS: float = 20.0
 
 ## Stress test (key F9): spawns this many braves per tribe per press,
 ## staggered over frames so the spawn itself does not hitch.
@@ -55,6 +64,7 @@ const DEBUG_ARMY_OFFSET: int = 26
 @onready var _spell_targeting: SpellTargeting = $UI/SpellTargeting
 @onready var _route_visualizer: RouteVisualizer = $RouteVisualizer
 @onready var _ring_renderer: SelectionRingRenderer = $SelectionRingRenderer
+@onready var _end_screen: EndScreen = $UI/EndScreen
 
 var _marker: MeshInstance3D = null
 var _stress_pending: Array[int] = []   # tribe ids of queued stress spawns
@@ -72,9 +82,17 @@ func _ready() -> void:
 	var nav: NavGrid = NavGrid.new(td)
 	GameState.nav_grid = nav
 
-	# Tribes: 0 = player (blue), 1-3 = AI — identical instances (max 4 players).
+	# Match configuration (set by the main menu); direct scene starts (tests,
+	# headless checks) fall back to the start mission — today's behaviour.
+	var config: MatchConfig = GameState.match_config
+	if config == null:
+		config = MatchConfig.start_mission()
+		GameState.match_config = config
+	GameState.stop_win_tracking()
+
+	# Tribes: 0 = player (blue), rest = AI — identical instances.
 	var tribes: Array[Tribe] = []
-	for i in range(TRIBE_COUNT):
+	for i in range(config.tribe_count()):
 		tribes.append(Tribe.new(i, Unit.TRIBE_COLORS[i]))
 	GameState.tribes = tribes
 	_stress_rng.seed = GameState.ISLAND_SEED
@@ -122,22 +140,32 @@ func _ready() -> void:
 	# the affected mesh chunks + collision here.
 	Events.terrain_deformed.connect(_terrain.apply_deformation)
 
-	if GameState.debug_battle:
-		# Debug battle (one-shot flag from the pause menu): no bases, no start
-		# braves — just two armies marching at each other.
-		GameState.debug_battle = false
-		_tree_manager.spawn_trees(TREE_COUNT, GameState.ISLAND_SEED)
-		_setup_debug_battle(nav)
-	else:
-		_tree_manager.spawn_trees(TREE_COUNT, GameState.ISLAND_SEED)
-		_place_start_site(tribes[GameState.PLAYER_TRIBE], nav)
-		_setup_player_base(tribes[GameState.PLAYER_TRIBE], nav)
-		_spawn_start_units(td, nav)
-		_setup_sparring(tribes, nav)
+	# End screen (phase 7): shows Sieg/Niederlage once the match is decided.
+	GameState.match_ended.connect(_end_screen.show_result)
+	GameState.tribe_defeated.connect(func(id: int) -> void:
+		print("Stamm %d ist besiegt" % id))
+	GameState.match_ended.connect(func(id: int) -> void:
+		print("Match beendet — Sieger: Stamm %d" % id))
 
-	# Start the camera over the island centre.
-	var center: float = TerrainData.SIZE * 0.5
-	_camera_rig.global_position = Vector3(center, td.get_height(center, center), center)
+	var center_cell: Vector2i = Vector2i(TerrainData.SIZE / 2, TerrainData.SIZE / 2)
+	var camera_anchor: Vector2i = center_cell
+	_tree_manager.spawn_trees(TREE_COUNT, GameState.ISLAND_SEED)
+	match config.mode:
+		MatchConfig.Mode.DEBUG_BATTLE:
+			# Sandbox: two armies clashing, no bases and no win tracking.
+			_setup_debug_battle(nav)
+		MatchConfig.Mode.START_MISSION:
+			_place_start_site(tribes[GameState.PLAYER_TRIBE], nav)
+			_setup_player_base(tribes[GameState.PLAYER_TRIBE], nav)
+			_spawn_braves_near(GameState.PLAYER_TRIBE, center_cell, START_BRAVES, nav)
+			_setup_sparring(tribes, nav)
+			GameState.start_win_tracking()
+		MatchConfig.Mode.SKIRMISH:
+			camera_anchor = _setup_skirmish(tribes, nav)
+			GameState.start_win_tracking()
+
+	# Start the camera over the player's base (skirmish) or the island centre.
+	_camera_rig.global_position = nav.cell_to_world(camera_anchor)
 
 
 ## Pre-places the player's reincarnation site (free, fully built) on the first
@@ -174,23 +202,102 @@ func _spawn_shaman_near(tribe: Tribe, site: Building, anchor: Vector2i, nav: Nav
 	_unit_manager.spawn_unit(SHAMAN_SCENE, tribe.id, pos)
 
 
-## Spawns the starting Braves (player tribe) on walkable cells near the island
-## centre, spread out via a spiral ring search.
-func _spawn_start_units(td: TerrainData, nav: NavGrid) -> void:
-	var center: Vector2i = Vector2i(TerrainData.SIZE / 2, TerrainData.SIZE / 2)
+## Spawns `count` braves for a tribe on walkable cells around `center`,
+## spread out via a spiral ring search.
+func _spawn_braves_near(tribe_id: int, center: Vector2i, count: int, nav: NavGrid) -> void:
 	var spawned: int = 0
 	for radius in range(0, TerrainData.SIZE / 2):
 		for cell in _ring_cells(center, radius):
-			if spawned >= START_BRAVES:
+			if spawned >= count:
 				return
 			if not nav.is_cell_walkable(cell):
 				continue
 			if (cell.x + cell.y) % 2 != 0:
 				continue  # every other cell, for spacing
-			_unit_manager.spawn_unit(BRAVE_SCENE, GameState.PLAYER_TRIBE, nav.cell_to_world(cell))
+			_unit_manager.spawn_unit(BRAVE_SCENE, tribe_id, nav.cell_to_world(cell))
 			spawned += 1
-	if spawned < START_BRAVES:
-		push_warning("Only %d of %d start braves spawned" % [spawned, START_BRAVES])
+	if spawned < count:
+		push_warning("Only %d of %d start braves spawned (tribe %d)"
+			% [spawned, count, tribe_id])
+
+
+# --- Skirmish setup (phase 7) ---------------------------------------------------
+
+## Places one identical starter base per tribe (reincarnation site + shaman +
+## hut + start braves + trees in reach) evenly spread on a circle around the
+## island centre, and attaches one AIController per AI tribe. Returns the
+## player's base anchor (camera start).
+func _setup_skirmish(tribes: Array[Tribe], nav: NavGrid) -> Vector2i:
+	# Headless sim hook: `-- ai-player` lets an AI drive the player tribe too
+	# (full AI-vs-AI integration run, see the phase 7 plan).
+	var ai_player: bool = OS.get_cmdline_user_args().has("ai-player")
+	for tribe in tribes:
+		var anchor: Vector2i = _skirmish_anchor(tribe.id, tribes.size())
+		_setup_skirmish_base(tribe, anchor, nav)
+		if tribe.id != GameState.PLAYER_TRIBE or ai_player:
+			var ai: AIController = AIController.new()
+			ai.name = "AIController%d" % tribe.id
+			ai.debug_log = OS.get_cmdline_user_args().has("ai-log")
+			add_child(ai)
+			ai.setup(tribe, _tribe_commands, _unit_manager, _building_manager,
+				_tree_manager, nav, anchor)
+	return _skirmish_anchor(GameState.PLAYER_TRIBE, tribes.size())
+
+
+## Base anchor of the index-th tribe: evenly spaced on the circle, the player
+## starting in the south.
+func _skirmish_anchor(index: int, count: int) -> Vector2i:
+	var center: float = float(TerrainData.SIZE) * 0.5
+	var angle: float = TAU * float(index) / float(maxi(count, 1)) + PI * 0.5
+	return Vector2i(
+		int(round(center + cos(angle) * SKIRMISH_BASE_RADIUS)),
+		int(round(center + sin(angle) * SKIRMISH_BASE_RADIUS)))
+
+
+## One symmetric starter kit — the SAME for player and AI (no cheats).
+func _setup_skirmish_base(tribe: Tribe, anchor: Vector2i, nav: NavGrid) -> void:
+	var site: Building = _place_site_near(tribe, anchor)
+	_spawn_shaman_near(tribe, site, anchor, nav)
+	var hut_cell: Vector2i = _find_plot(anchor + Vector2i(-8, -3), Hut.FOOTPRINT, nav)
+	if hut_cell.x >= 0:
+		_building_manager.place(HUT_SCENE, tribe, hut_cell, 0, true)
+	_spawn_braves_near(tribe.id, anchor + Vector2i(0, 6), START_BRAVES, nav)
+	_ensure_trees_near(anchor, nav)
+
+
+## Tops up the woods around a base anchor to SKIRMISH_BASE_TREES (big trees),
+## respecting the tree manager's minimum spacing.
+func _ensure_trees_near(anchor: Vector2i, nav: NavGrid) -> void:
+	var anchor_world: Vector3 = nav.cell_to_world(anchor)
+	var have: int = 0
+	for tree in _tree_manager.trees:
+		if tree.position.distance_to(anchor_world) <= SKIRMISH_TREE_RADIUS:
+			have += 1
+	var missing: int = SKIRMISH_BASE_TREES - have
+	if missing <= 0:
+		return
+	var step: int = 0
+	for radius in range(10, int(SKIRMISH_TREE_RADIUS)):
+		for cell in _ring_cells(anchor, radius):
+			if missing <= 0:
+				return
+			step += 1
+			if step % 3 != 0:
+				continue  # every third candidate, so the wood is loose
+			if not nav.is_cell_walkable(cell):
+				continue
+			if _tree_too_close(cell):
+				continue
+			_tree_manager.spawn_tree(cell, TreeResource.MAX_STAGE)
+			missing -= 1
+
+
+func _tree_too_close(cell: Vector2i) -> bool:
+	for dz in range(-TreeManager.MIN_SPACING, TreeManager.MIN_SPACING + 1):
+		for dx in range(-TreeManager.MIN_SPACING, TreeManager.MIN_SPACING + 1):
+			if _tree_manager.has_tree_at(cell + Vector2i(dx, dz)):
+				return true
+	return false
 
 
 ## Pre-places the player's starting base (fully built): two huts and all three

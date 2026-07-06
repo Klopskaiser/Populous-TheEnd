@@ -542,10 +542,8 @@ func _build_pause_menu() -> void:
 	volume.max_value = 100.0
 	volume.step = 5.0
 	volume.custom_minimum_size = Vector2(180, 20)
-	var master: int = AudioServer.get_bus_index("Master")
-	volume.value = clampf(
-		db_to_linear(AudioServer.get_bus_volume_db(master)) * 100.0, 0.0, 100.0)
-	volume.value_changed.connect(_on_volume_changed)
+	volume.value = AudioSettings.master_volume_percent()
+	volume.value_changed.connect(AudioSettings.set_master_volume_percent)
 	vb.add_child(volume)
 
 	var battle: Button = Button.new()
@@ -553,6 +551,12 @@ func _build_pause_menu() -> void:
 	UiTheme.style_button(battle)
 	battle.pressed.connect(_start_debug_battle)
 	vb.add_child(battle)
+
+	var menu: Button = Button.new()
+	menu.text = "Hauptmenü"
+	UiTheme.style_button(menu)
+	menu.pressed.connect(_back_to_main_menu)
+	vb.add_child(menu)
 
 	var quit: Button = Button.new()
 	quit.text = "Beenden"
@@ -562,26 +566,25 @@ func _build_pause_menu() -> void:
 
 
 ## Reloads the map as the debug battle scenario (two 800-unit armies meeting
-## in the middle; Main._ready consumes the flag).
+## in the middle; Main._ready consumes GameState.match_config).
 func _start_debug_battle() -> void:
 	var gs: Node = get_node_or_null("/root/GameState")
 	if gs == null:
 		return
-	gs.debug_battle = true
+	gs.match_config = MatchConfig.debug_battle()
 	# No GameState.reset() here: the old scene still runs until the deferred
 	# reload, and Main._ready re-populates everything anyway.
 	get_tree().paused = false
 	get_tree().reload_current_scene()
 
 
-## Master-bus volume from the pause-menu slider (0..100; 0 mutes).
-func _on_volume_changed(value: float) -> void:
-	var master: int = AudioServer.get_bus_index("Master")
-	if value <= 0.0:
-		AudioServer.set_bus_mute(master, true)
-		return
-	AudioServer.set_bus_mute(master, false)
-	AudioServer.set_bus_volume_db(master, linear_to_db(value / 100.0))
+## Leaves the running match and returns to the full-screen main menu.
+func _back_to_main_menu() -> void:
+	get_tree().paused = false
+	var gs: Node = get_node_or_null("/root/GameState")
+	if gs != null:
+		gs.reset()
+	get_tree().change_scene_to_file("res://scenes/ui/main_menu.tscn")
 
 
 # --- Tab switching ----------------------------------------------------------

@@ -1492,3 +1492,130 @@ Checkbox in der Overview abgehakt.
   hinter der Front mit (`_spawn_debug_shaman`), **alle Zauber voll geladen**
   (max_charges) für Zaubertests in der Massenschlacht.
 - Neuer Test `test_marching_combatants_engage_on_contact`; Suite **644 grün**.
+
+---
+
+## Phase 7 — Hauptmenü, Multi-KI & Siegbedingungen (umgesetzt)
+
+Plan: [07_ai_win_conditions.md](07_ai_win_conditions.md) (vor der Umsetzung um
+Hauptmenü/Multi-KI erweitert; Steuerungs-/Verhaltenspunkte ausgegliedert nach
+[07b](07b_unit_control_behavior.md)).
+
+**Match-Konfiguration & Hauptmenü:**
+- `scripts/core/match_config.gd` — `MatchConfig` (RefCounted): `mode`
+  (SKIRMISH / START_MISSION / DEBUG_BATTLE), `ai_count` (1–3, geklemmt),
+  `map_id` (nur `"island"`), `tribe_count()`. Gehalten in
+  `GameState.match_config`; **ersetzt das alte One-Shot-Flag
+  `GameState.debug_battle`** (Sidebar-Debugschlacht setzt jetzt
+  `match_config = MatchConfig.debug_battle()` und lädt neu).
+- `scenes/ui/main_menu.tscn` + `scripts/ui/main_menu.gd` — **neue Hauptszene**
+  (`project.godot run/main_scene`): Vollbild-Control mit drei Code-gebauten
+  Seiten in UiTheme-Optik — Hauptseite („Neues Skirmish", „Startmission",
+  „Debugschlacht", „Optionen", „Beenden"), Skirmish-Setup (OptionButtons:
+  1–3 KIs, Karte) und Optionen (Master-Lautstärke). `start_match` über
+  `_launch(config)` → `change_scene_to_file(main.tscn)`.
+- `scripts/core/audio_settings.gd` — `AudioSettings` (statisch):
+  `master_volume_percent()` / `set_master_volume_percent()`; gemeinsame
+  Quelle für Menü-Optionen UND Pausemenü (dort Duplikat entfernt).
+- **Pausemenü ergänzt:** Button „Hauptmenü" (verlässt das Match →
+  `GameState.reset()` + Szenenwechsel).
+- `Main._ready()` konsumiert `GameState.match_config`; **ohne Config
+  (Direktstart von main.tscn, Tests, Headless-Checks) Fallback =
+  Startmission** — bisheriges Verhalten, Ladecheck bleibt grün.
+
+**Multi-KI-Skirmish (bis 4 Spieler):**
+- `Main` erzeugt **exakt `config.tribe_count()` Tribes** (statt fix 4);
+  Startmission/Debugschlacht laufen wie bisher mit 2.
+- `_setup_skirmish()`: je Tribe ein **identisches Starterkit** (kein Cheat):
+  Reinkarnationsplatz + Schamanin + vorgebaute Hütte + 20 Start-Braves +
+  **16 garantierte große Bäume im Umkreis** (`_ensure_trees_near`; eine
+  volle Basis braucht ~65 Holz — mit 10 Bäumen stallten die
+  Trainingslager-Baustellen im Sim-Lauf). Basen-Anker gleichmäßig auf einem
+  **Kreis (Radius 26 Zellen)** um die Inselmitte (2 = gegenüber, 3 = Dreieck,
+  4 = Quadranten), Spieler im Süden; Kamera startet über der Spielerbasis.
+  `_spawn_start_units` generalisiert zu `_spawn_braves_near(tribe_id, …)`.
+- **Ein `AIController` pro KI-Tribe** (Kind von Main, unabhängige Instanzen).
+
+**Skirmish-KI (`scripts/ai/`):**
+- `ai_state.gd` — `AIState`: reine State-Machine (`BUILD/TRAIN/ATTACK`),
+  `next_state(state, snapshot)` mit Schwellwerten (3 Hütten + 3 Lagerarten +
+  Pop ≥ 18 → TRAIN; Armee ≥ 12 + Schamanin lebt → ATTACK; Armee < 4 oder
+  Schamanin tot → Rückfall TRAIN/BUILD; Gebäudeverlust → BUILD) und
+  `next_training_kind()` (größtes Defizit ggü. Mix 50 % Krieger / 30 %
+  Feuerkrieger / 20 % Prediger). Snapshots sind Dictionaries → headless
+  testbar ohne Szenenbaum.
+- `ai_controller.gd` — `AIController` (Node): tickt **1×/s** (Akkumulator,
+  `tick_ai()` direkt aufrufbar), handelt **ausschließlich über
+  TribeCommands**. BUILD: **eine Baustelle zugleich** (Arbeiter rekrutiert
+  der BuildingManager selbst), Reihenfolge Hütten → Kaserne → Feuertempel →
+  Tempel, Ringsuche um den Basis-Anker via `can_place_at`. Immer: 4 Braves
+  beten am Platz (`_keep_praying`). TRAIN: 2 Braves/Tick ins Defizit-Lager,
+  **Mindest-Wirtschaftscrew 8 Braves**. ATTACK: Armee + Schamanin per
+  `order_move` (Attack-Move greift unterwegs) aufs **nächste Feindgebäude**
+  (Fallback nächste Feindeinheit), Order nur alle 4 Ticks (Pfad-Thrash);
+  Zauber-Heuristik: Blitz auf feindliche Schamanin → **Blitz auf nächstes
+  Feindgebäude in Scanreichweite** → Feuerball auf dichtesten
+  Einheiten-Cluster (≥ 4 in 3 m). Statuswechsel werden geloggt (`print`),
+  Detail-Log über User-Arg `ai-log`.
+- **Wichtige Erkenntnis:** Normale Einheiten können Gebäude NICHT angreifen —
+  Gebäudezerstörung geht nur über Zauber. Ohne die Gebäude-Blitz-Heuristik
+  konvergierte kein KI-Match (Armee tötete Einheiten, Hütten spawnten nach).
+
+**Siegbedingung & Endscreen:**
+- `game_state.gd`: Signale `tribe_defeated(tribe_id)` / `match_ended(winner_id)`,
+  `start/stop_win_tracking()` (Main aktiviert es NACH dem Basenaufbau;
+  Debugschlacht = Sandbox ohne Tracking), gedrosselte Prüfung (1 s) in
+  `_process` + öffentliches `check_defeats()`; `match_over`-Flag.
+- **`is_tribe_defeated` (statisch):** keine lebende Einheit UND kein
+  **nutzbares** spawnfähiges Gebäude. **Abweichung vom Planwortlaut:** nur
+  Hütte/Reinkarnationsplatz zählen als spawnfähig, Trainingsgebäude NICHT —
+  sie brauchen einen lebenden Brave; ein Stamm mit 0 Einheiten und leerer
+  Kaserne könnte sonst nie besiegt werden (Match hinge fest). Beschädigte
+  (Stufe ≥ 1) und Baustellen-Gebäude retten ebenfalls nicht (niemand kann
+  reparieren/fertigbauen). Die gedrosselte Prüfung deckt auch reine
+  Schadensereignisse ab (Tornado macht letzte Hütte unbrauchbar, ohne dass
+  ein Event feuert).
+- **N-Tribes:** besiegte KIs scheiden aus, das Match läuft weiter; Ende erst
+  wenn **nur ein Stamm übrig** ist (Sieg, falls Spieler) oder der
+  **Spieler-Tribe fällt** (sofortige Niederlage). Keine Diplomatie.
+- `scripts/ui/end_screen.gd` — `EndScreen`: Vollbild-Overlay „Sieg!" /
+  „Niederlage" + „Zurück zum Menü" / „Beenden", pausiert das Spiel
+  (`process_mode = ALWAYS`). **Abweichung:** als Code-Node in `main.tscn`
+  (Muster BuildMenu/SpellTargeting) statt eigener `.tscn`.
+
+**Headless-Testhooks (User-Args nach `--`):** `skirmish=N` (Menü überspringen,
+Skirmish mit N KIs sofort starten), `ai-player` (auch Tribe 0 bekommt einen
+AIController → KI-gegen-KI-Integrationslauf), `ai-log` (Statuszeile je KI
+alle 60 Ticks). Beschleunigt mit `--fixed-fps 60 --quit-after <frames>`:
+
+```powershell
+& $GODOT --path D:\game\Populous-TheEnd --headless --fixed-fps 60 `
+  --quit-after 108000 -- skirmish=1 ai-player ai-log   # 30 min Spielzeit
+```
+
+**Verifikation:**
+- Testsuite grün (**692 Tests**, +48 in `tests/test_ai.gd`: State-Übergänge,
+  Trainings-Mix, **Symmetrie/kein Cheat** (ungültige Platzierung ohne
+  Seiteneffekt, Cast ohne Ladung/Schamanin schlägt fehl, Ladung bleibt),
+  BUILD-Tick (platziert genau eine Baustelle via TribeCommands + 4 Beter),
+  TRAIN-Tick (2 Braves in der Lager-Queue, Wirtschafts-Mindestcrew),
+  Siegbedingung (Einheit/Hütte/Site/Kaserne-Fälle), N-Tribe-Ende (1 von 3
+  besiegt → läuft weiter; Sieg; Spieler-Niederlage), MatchConfig-Klemmen.
+  `game_state.gd` wird dafür als Skript instanziert (Autoloads fehlen im
+  Runner).
+- `--headless --import`, `--headless --quit` (lädt jetzt das Hauptmenü) und
+  `main.tscn` direkt (`--quit-after 240`, Fallback Startmission) fehlerfrei.
+- **KI-gegen-KI-Simulationsläufe** (fixed-fps): 1v1 über 30 min Spielzeit →
+  beide KIs bauen (3 Hütten + 3 Lager), trainieren, greifen an, fallen nach
+  Verlusten zurück; am Ende **genau ein `tribe_defeated` + `match_ended`**
+  (Basis per Blitz zerlegt). 4-Spieler-Lauf (3 KIs + KI-Spieler, 25 min):
+  alle vier Basen wachsen, mehrere Angriffs-/Rückfall-Zyklen, fehlerfrei.
+- **Beobachtung:** Beim harten Exit (`--quit-after`) mitten im Kampf meldet
+  Godot 4–11 geleakte ObjectDB-Instanzen; bei ruhigen Läufen nicht.
+  Vermutlich vorbestehend (Kampf-/Wurfobjekte, Phase 5/6) — für Phase 8
+  notiert, kein Gameplay-Einfluss.
+
+**Manuelle Prüfung durch Nutzer: AUSSTEHEND** — Menü-Flow (Skirmish-Setup
+1–3 KIs, Startmission, Debugschlacht, Optionen/Lautstärke, Beenden),
+komplettes Match gegen 1 KI (KI baut/trainiert/greift an, Zauber), beide
+Endscreens (Sieg/Niederlage → „Zurück zum Menü"), 4-Spieler-Match flüssig.
