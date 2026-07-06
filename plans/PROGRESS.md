@@ -2226,3 +2226,13 @@ jetzt über diesen garantiert erreichbaren Punkt: `Brave._tick_deliver` /
 Punkt auf. Regressionstest `test_delivery_survives_unreachable_entrance` in
 `test_economy.gd` (Eingang per Nav-Solid blockiert → Bau wird trotzdem fertig).
 Tests: **1037 grün**, Ladecheck fehlerfrei.
+
+**Änderung (Nutzerwunsch — Baumaterialwahl mit Feindmeidung):** Bauarbeiter
+bevorzugen Holzstapel jetzt nur noch, wenn der Stapel **nah am Bauplatz**
+(`Brave.PILE_PREFER_RADIUS 24 m`) **und feindfrei** ist (kein Gegner im
+`WOOD_ENEMY_RADIUS 8 m`). Steht ein Feind am Stapel, wird stattdessen ein Baum
+**ohne Feinde in der Nähe** gefällt (`_claim_safe_tree` bevorzugt einen sicheren
+Baum, fällt sonst auf den nächsten zurück). Neue Helfer in `brave.gd`:
+`_best_safe_pile`, `_claim_safe_tree`/`_nearest_claimable_tree`, `_enemies_near`
+(nutzt `path_service.get_units_in_radius`). Regressionstest
+`test_workers_skip_enemy_guarded_piles` in `test_economy.gd`. Tests: **1041 grün**.

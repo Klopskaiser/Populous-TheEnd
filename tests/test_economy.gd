@@ -440,6 +440,41 @@ func test_delivery_survives_unreachable_entrance() -> void:
 	_free_world(w)
 
 
+## A close wood pile is preferred over chopping — but ONLY when it is safe. A
+## pile guarded by an enemy is skipped in favour of a tree in a safer spot.
+func test_workers_skip_enemy_guarded_piles() -> void:
+	var w: Dictionary = _make_world()
+	var hut: Hut = w.commands.place_building(w.tribe, HUT_SCENE, Vector2i(60, 60)) as Hut
+	hut._flatten_remaining.clear()
+	hut.foundation_done = true
+
+	# A pile close to the site, but an enemy stands right next to it.
+	var pile_pos: Vector3 = w.nav.cell_to_world(Vector2i(62, 72))
+	w.wood_pile_manager.deposit(pile_pos, Hut.WOOD_COST)
+	w.unit_manager.spawn_unit(BRAVE_SCENE, 1, w.nav.cell_to_world(Vector2i(63, 72)))
+	# A safe tree on the other side of the site (no enemies).
+	var tree: TreeResource = w.tree_manager.spawn_tree(Vector2i(56, 55), 4)
+	check(tree != null, "safe tree spawned")
+
+	var worker: Brave = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(58, 60))) as Brave
+	worker.order_build(hut)
+	w.unit_manager.tick(TICK)   # refresh the spatial hash so the enemy is seen
+
+	var ticks: int = 0
+	while worker.task == Brave.Task.NONE and ticks < 200:
+		w.building_manager.tick(TICK)
+		worker.tick(TICK)
+		w.unit_manager.tick(TICK)
+		ticks += 1
+	check(worker.task == Brave.Task.CHOP,
+		"worker chops the safe tree instead of the enemy-guarded pile")
+	check(is_instance_valid(worker.task_tree), "a tree was claimed")
+	# The safe tree, not the pile.
+	check(worker.task_pile == null, "no pile was chosen")
+	_free_world(w)
+
+
 func test_wood_stall_recheck_timer() -> void:
 	var w: Dictionary = _make_world()
 	var hut: Hut = w.commands.place_building(w.tribe, HUT_SCENE, Vector2i(60, 60)) as Hut

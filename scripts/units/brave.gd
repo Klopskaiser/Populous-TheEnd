@@ -43,6 +43,12 @@ const REPAIR_RATE: float = 10.0     # building HP repaired per second per worker
 const JOB_TREE_RADIUS: float = 40.0 # tree search radius around the site
 const CHOP_CHAIN_RADIUS: float = 8.0
 const TASK_RETRY: float = 0.6
+## A wood pile is only preferred over chopping when it lies within this radius
+## of the construction site (otherwise fetching it is not worth it) AND no enemy
+## is within WOOD_ENEMY_RADIUS of it — a pile guarded by enemies is skipped in
+## favour of a tree in a safer spot.
+const PILE_PREFER_RADIUS: float = 24.0
+const WOOD_ENEMY_RADIUS: float = 8.0
 
 ## Injected by UnitManager.spawn_unit() (or directly by tests).
 var tree_manager: TreeManager = null
@@ -373,29 +379,95 @@ func _choose_repair_task() -> void:
 	_stop_all()
 
 
-## Wood lying around is used FIRST — only fell trees when no pile is left
-## (piles inside the absorb radius are excluded, the site swallows those by
-## itself). Only piles near the site count (JOB_TREE_RADIUS, same as the tree
-## search): a stray pile across the island — or inside an enemy base — must
-## not lure workers away. Returns true when a fetch sub-task was set.
+## Chooses a wood source. A lying wood pile is used FIRST, but ONLY when it is
+## close to the site AND enemy-free (see _best_safe_pile). If the nearby piles
+## are threatened by enemies, a tree in a safer spot is chopped instead
+## (_claim_safe_tree prefers an enemy-free tree, falling back to any). Returns
+## true when a fetch sub-task was set.
 func _try_fetch_wood() -> bool:
 	if wood_pile_manager != null:
-		var pile: WoodPile = wood_pile_manager.nearest_pile(
-			position, job.entrance_world(), Building.ABSORB_RADIUS,
-			job.center_world(), JOB_TREE_RADIUS)
+		var pile: WoodPile = _best_safe_pile()
 		if pile != null:
 			task_pile = pile
 			task = Task.PICKUP
 			_reset_seek()
 			return true
 	if tree_manager != null:
-		var tree: TreeResource = tree_manager.claim_nearest_tree(
-			job.center_world(), JOB_TREE_RADIUS, self)
+		var tree: TreeResource = _claim_safe_tree()
 		if tree != null:
 			task_tree = tree
 			_chop_timer = tree.chop_time()
 			task = Task.CHOP
 			_reset_seek()
+			return true
+	return false
+
+
+## Nearest wood pile (to the worker) that is close to the site, not already in
+## the site's absorb radius (those get swallowed anyway) and has no enemy within
+## WOOD_ENEMY_RADIUS. Null when no such safe, close pile exists.
+func _best_safe_pile() -> WoodPile:
+	if wood_pile_manager == null or job == null or not is_instance_valid(job):
+		return null
+	var site: Vector2 = Vector2(job.center_world().x, job.center_world().z)
+	var entrance: Vector2 = Vector2(job.entrance_world().x, job.entrance_world().z)
+	var worker: Vector2 = Vector2(position.x, position.z)
+	var best: WoodPile = null
+	var best_d: float = INF
+	for pile in wood_pile_manager.piles:
+		if not is_instance_valid(pile) or pile.amount <= 0:
+			continue
+		var pf: Vector2 = Vector2(pile.position.x, pile.position.z)
+		if pf.distance_to(entrance) <= Building.ABSORB_RADIUS:
+			continue   # the site absorbs these on its own
+		if pf.distance_to(site) > PILE_PREFER_RADIUS:
+			continue   # too far to be worth fetching over chopping
+		if _enemies_near(pile.position, WOOD_ENEMY_RADIUS):
+			continue   # guarded by enemies -> chop a tree instead
+		var d: float = pf.distance_squared_to(worker)
+		if d < best_d:
+			best_d = d
+			best = pile
+	return best
+
+
+## Claims the nearest chopable tree near the site, preferring one with no enemy
+## within WOOD_ENEMY_RADIUS; if every reachable tree is contested, falls back to
+## the nearest one anyway (better than stalling). Null when none is chopable.
+func _claim_safe_tree() -> TreeResource:
+	var tree: TreeResource = _nearest_claimable_tree(true)
+	if tree == null:
+		tree = _nearest_claimable_tree(false)
+	if tree != null:
+		tree.add_claimer(self)
+	return tree
+
+
+func _nearest_claimable_tree(require_safe: bool) -> TreeResource:
+	if tree_manager == null or job == null or not is_instance_valid(job):
+		return null
+	var origin: Vector2 = Vector2(job.center_world().x, job.center_world().z)
+	var best: TreeResource = null
+	var best_d: float = JOB_TREE_RADIUS * JOB_TREE_RADIUS
+	for tree in tree_manager.trees:
+		if not is_instance_valid(tree) or not tree.can_claim():
+			continue
+		var d: float = Vector2(tree.position.x, tree.position.z).distance_squared_to(origin)
+		if d > best_d:
+			continue
+		if require_safe and _enemies_near(tree.position, WOOD_ENEMY_RADIUS):
+			continue
+		best_d = d
+		best = tree
+	return best
+
+
+## True when a living enemy of another tribe stands within `radius` of `pos`.
+func _enemies_near(pos: Vector3, radius: float) -> bool:
+	if path_service == null:
+		return false
+	for u in path_service.get_units_in_radius(pos, radius):
+		if u.tribe_id != tribe_id and u.state != Unit.State.DEAD:
 			return true
 	return false
 
