@@ -2364,3 +2364,15 @@ stehende/laufende Einheiten aller Typen drehen → 8 klar unterscheidbare
 Ansichten, kein Flackern an den 22,5°-Sektorgrenzen, kein Frame-Neustart beim
 Ansichtswechsel; F9-Stresstest → keine Perf-Regression.
 
+**Korrektur (Nutzertest — Diagonal-Accessoires saßen daneben):** Krieger- und
+Feuerkrieger-Deko lag in den Diagonalen auf der **Profil**-Handposition (Einhand,
+x7), während der 3/4-Körper zwei Arme an x4 (fern) / x11–12 (nah) hat → Feuerball
+schwebte, obwohl zwei Hände sichtbar waren. Fix: Diagonalen zeigen jetzt **beide**
+Accessoires an den echten Handpositionen des 3/4-Frames (Feuerkrieger: zwei
+Feuerbälle an beiden Händen; Krieger: Schwert an der Nah-, Schild an der
+Fernhand). Umgesetzt, indem Diagonalen in ihrer **Rechts-Form vor dem Spiegeln**
+dekoriert werden (`DIAGONAL_PAINT_VIEWS`), sodass `flip_x` Körper UND Accessoires
+gemeinsam auf die Links-Diagonalen mappt — die Kardinal-Seitenansichten bleiben
+wie bisher (spiegeln zuerst, dekorieren dann in der realen View). Tests weiter
+**1079 grün**, Ladecheck fehlerfrei. Erneute manuelle Optik-Prüfung ausstehend.
+

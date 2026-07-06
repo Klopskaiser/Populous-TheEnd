@@ -55,6 +55,10 @@ const VIEWS: Array[StringName] = [
 ## The three views drawn as the mirror of their right-side counterpart.
 const MIRRORED_VIEWS: Array[StringName] = [&"left", &"front_left", &"back_left"]
 
+## The two right-side diagonal paint views (left diagonals mirror these). Their
+## accents are painted BEFORE the mirror so body and accents flip together.
+const DIAGONAL_PAINT_VIEWS: Array[StringName] = [&"front_right", &"back_right"]
+
 
 ## One shared SpriteFrames per kind — building the frames is expensive and
 ## AnimatedSprite3D instances can share the resource (each keeps its own
@@ -237,17 +241,28 @@ static func _build_frames(kind: StringName, anim: StringName, view: StringName) 
 		_:
 			images = [_frame_stand(paint_view, 0), _frame_stand(paint_view, 1)]
 			bobs = [0, 1]
-	# Mirror the plain body first, THEN paint the accents in the REAL view — the
-	# side views are not just mirror images (a warrior shows the shield on one
-	# side and the sword on the other).
-	if view in MIRRORED_VIEWS:
-		for img in images:
-			img.flip_x()
 	# No accents on the corpse, the sitting pose or the tumbling ball: the
 	# shield/helmet/hood positions assume a standing body.
-	if not (anim in [&"dead", &"sit", &"roll"]):
-		for i in range(images.size()):
-			_decorate(images[i], kind, view, bobs[i])
+	var decorate: bool = not (anim in [&"dead", &"sit", &"roll"])
+	if paint_view in DIAGONAL_PAINT_VIEWS:
+		# Diagonals show BOTH accessories at both (asymmetric) hands, so mirroring
+		# body and accents together is correct — decorate first, then flip.
+		if decorate:
+			for i in range(images.size()):
+				_decorate(images[i], kind, paint_view, bobs[i])
+		if view in MIRRORED_VIEWS:
+			for img in images:
+				img.flip_x()
+	else:
+		# Cardinal side views are NOT mirror images (a warrior shows the shield on
+		# one side, the sword on the other), so mirror the plain body first, then
+		# paint the accents in the REAL view.
+		if view in MIRRORED_VIEWS:
+			for img in images:
+				img.flip_x()
+		if decorate:
+			for i in range(images.size()):
+				_decorate(images[i], kind, view, bobs[i])
 	return images
 
 
@@ -255,23 +270,18 @@ static func _build_frames(kind: StringName, anim: StringName, view: StringName) 
 ## view (after the mirror) and shifted by the frame's upper-body bob so they
 ## animate with the unit. Only the brave stays plain.
 static func _decorate(img: Image, kind: StringName, view: StringName, bob: int) -> void:
-	# Diagonals reuse their near side's accents (the image is already mirrored
-	# for left-side views), so the decorators only ever see the cardinal views.
-	var deco_view: StringName = view
-	match view:
-		&"front_right", &"back_right":
-			deco_view = &"right"
-		&"front_left", &"back_left":
-			deco_view = &"left"
+	# view is a cardinal (front/back/right/left) or a right-side diagonal
+	# (front_right/back_right); left diagonals are decorated in their right form
+	# and mirrored afterwards by the caller.
 	match kind:
 		&"warrior":
-			_decorate_warrior(img, deco_view, bob)
+			_decorate_warrior(img, view, bob)
 		&"firewarrior":
-			_decorate_firewarrior(img, deco_view, bob)
+			_decorate_firewarrior(img, view, bob)
 		&"preacher":
-			_decorate_preacher(img, deco_view, bob)
+			_decorate_preacher(img, view, bob)
 		&"shaman":
-			_decorate_shaman(img, deco_view, bob)
+			_decorate_shaman(img, view, bob)
 		_:
 			pass
 
@@ -287,6 +297,12 @@ static func _decorate_warrior(img: Image, view: StringName, bob: int) -> void:
 			img.fill_rect(Rect2i(6, 10 + bob, 3, 1), C_HELMET)   # crossguard at the grip
 		&"left":
 			img.fill_rect(Rect2i(4, 9 + bob, 5, 6), C_SHIELD)    # shield in front
+		&"front_right", &"back_right":
+			# 3/4 view: sword in the near (right) hand at x11-12, shield at the
+			# far (left) hand at x4 — both raised at the hands, not the profile.
+			img.fill_rect(Rect2i(12, 1 + bob, 2, 13), C_BLADE)   # sword up from the near hand
+			img.fill_rect(Rect2i(11, 8 + bob, 4, 1), C_HELMET)   # crossguard at the near grip
+			img.fill_rect(Rect2i(3, 9 + bob, 4, 6), C_SHIELD)    # shield at the far hand
 		_:
 			img.fill_rect(Rect2i(2, 9 + bob, 4, 6), C_SHIELD)    # shield, left arm
 			img.fill_rect(Rect2i(12, 1 + bob, 2, 13), C_BLADE)   # sword, right hand
@@ -302,6 +318,10 @@ static func _decorate_firewarrior(img: Image, view: StringName, bob: int) -> voi
 			img.fill_rect(Rect2i(7, 11 + bob, 3, 3), C_FIRE)    # fireball in the near hand
 		&"left":
 			img.fill_rect(Rect2i(6, 11 + bob, 3, 3), C_FIRE)    # fireball in the near hand
+		&"front_right", &"back_right":
+			# 3/4 view shows BOTH hands: a fireball at each (far x4, near x11-12).
+			img.fill_rect(Rect2i(2, 11 + bob, 3, 3), C_FIRE)    # far (left) hand
+			img.fill_rect(Rect2i(11, 11 + bob, 3, 3), C_FIRE)   # near (right) hand
 		_:
 			img.fill_rect(Rect2i(1, 11 + bob, 3, 3), C_FIRE)    # fireball, left hand
 			img.fill_rect(Rect2i(12, 11 + bob, 3, 3), C_FIRE)   # fireball, right hand
