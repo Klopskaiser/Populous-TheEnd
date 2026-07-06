@@ -312,6 +312,51 @@ func _cheby(pos: Vector3, centre: Vector3) -> float:
 	return maxf(absf(pos.x - centre.x), absf(pos.z - centre.z))
 
 
+# --- Combat pursuit stays on walkable ground -------------------------------------------
+
+func test_combat_step_blocked_by_water() -> void:
+	# Flat island with a sunken strip (below sea level) at x >= 68.
+	var td: TerrainData = _flat_terrain()
+	for vz in range(0, TerrainData.SIZE + 1):
+		for vx in range(68, 74):
+			td.set_vertex_height(vx, vz, 0.0)
+	var nav: NavGrid = NavGrid.new(td)
+	var tribes: Array[Tribe] = [Tribe.new(0), Tribe.new(1)]
+	var um: UnitManager = UnitManager.new()
+	um.setup(td, nav, tribes)
+	var chaser: Unit = um.spawn_unit(WARRIOR_SCENE, 1, nav.cell_to_world(Vector2i(64, 60)))
+	# Direct combat step toward a point across the water: must stop at the shore.
+	for i in range(200):
+		chaser._step_toward(nav.cell_to_world(Vector2i(80, 60)), 0.1)
+	check(chaser.position.x < 68.5,
+		"the direct combat chase stops at the water (x = %.1f)" % chaser.position.x)
+	check(nav.is_cell_walkable(nav.world_to_cell(chaser.position)),
+		"the chaser still stands on walkable ground")
+	um.free()
+
+
+func test_wait_near_stands_when_close() -> void:
+	var w: Dictionary = _make_world()
+	var target: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 0,
+		w.nav.cell_to_world(Vector2i(60, 60)))
+	var waiter: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 1,
+		target.position + Vector3(1.5, 0, 0))   # already near the fight
+	var before: Vector3 = waiter.position
+	for i in range(30):
+		waiter._wait_near(target, 0.1)
+	check(waiter.position.distance_to(before) < 0.01,
+		"a waiter already near the fight stands still (no ring-point chasing)")
+
+	var far_waiter: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 1,
+		target.position + Vector3(6.0, 0, 0))
+	var far_before: Vector3 = far_waiter.position
+	for i in range(10):
+		far_waiter._wait_near(target, 0.1)
+	check(far_waiter.position.distance_to(far_before) > 0.5,
+		"a waiter too far out closes up on the fight")
+	_free_world(w)
+
+
 # --- Double-click kind filter ---------------------------------------------------------
 
 func test_double_click_kind_filter() -> void:

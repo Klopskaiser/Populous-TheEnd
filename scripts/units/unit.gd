@@ -1372,19 +1372,26 @@ func _approach(dest: Vector3, delta: float) -> void:
 	_step_toward(dest, delta)
 
 
-## Overflow attacker waits on a ring around the target (deterministic angle per
-## unit so they spread out) until a slot frees.
+## Overflow attacker waits near the target until a slot frees. Standing
+## ANYWHERE close enough is fine: chasing an exact ring point that moves
+## with the target coupled the movements (waiter follows its ring point,
+## the pursuer follows the waiter's slot, ...) — whole blocks of units
+## jogged after each other forever, never striking. Only units too far out
+## close up (to a deterministic per-unit ring point, so they spread).
 func _wait_near(target: Unit, delta: float) -> void:
-	var angle: float = float(get_instance_id() % 628) * 0.01
-	var dest: Vector3 = target.position + Vector3(
-		cos(angle) * MELEE_WAIT_RADIUS, 0.0, sin(angle) * MELEE_WAIT_RADIUS)
-	if _flat_dist(position, dest) > 0.25:
+	if _flat_dist(position, target.position) > MELEE_WAIT_RADIUS + 0.6:
+		var angle: float = float(get_instance_id() % 628) * 0.01
+		var dest: Vector3 = target.position + Vector3(
+			cos(angle) * MELEE_WAIT_RADIUS, 0.0, sin(angle) * MELEE_WAIT_RADIUS)
 		_step_toward(dest, delta)
 	_face_point(target.position)
 
 
 ## Moves directly toward a point on the XZ plane (no pathing), snapping Y.
-## Uphill slopes slow the step like regular path movement.
+## Uphill slopes slow the step like regular path movement. The step is
+## dropped when it would leave walkable ground — direct combat pursuit must
+## not drag brawls into the sea or off the map (the A* branch of _approach
+## avoids those on its own; this is the short-range chase).
 func _step_toward(point: Vector3, delta: float) -> void:
 	var flat: Vector2 = Vector2(position.x, position.z)
 	var flat_target: Vector2 = Vector2(point.x, point.z)
@@ -1392,6 +1399,9 @@ func _step_toward(point: Vector3, delta: float) -> void:
 	if to_target.length_squared() > 0.000001:
 		facing = Vector3(to_target.x, 0.0, to_target.y).normalized()
 	var next: Vector2 = flat.move_toward(flat_target, _slope_speed(_slope_ahead(to_target)) * delta)
+	if nav_grid != null and not nav_grid.is_cell_walkable(
+			nav_grid.world_to_cell(Vector3(next.x, 0.0, next.y))):
+		return
 	position.x = next.x
 	position.z = next.y
 	_snap_to_ground()

@@ -1868,3 +1868,25 @@ Gelaufen wird nur noch beim Beitritt zu einer offenen Gruppe oder bei
 einer Neugründung mit verstreuten Nachbarn. Tests: **772 grün**
 (+ Adopt-Test: gemeinsame Gruppe, keine Move-Orders, Positionen exakt
 unverändert).
+
+**Kampf-Bugfix (Nutzerreport): wandernde Einheitenblöcke.** Symptom: Ein
+Block Gegner „drückte sich vor dem Kampf" und wanderte endlos — auch
+durch Wasser und über den Kartenrand. Ursache war eine
+**Bewegungs-Rückkopplung** in der Nahkampf-Logik: Ein Angreifer ohne
+freien Slot verfolgte in `_wait_near` einen **exakten Ringpunkt um sein
+Ziel** (Punkt wandert mit dem Ziel mit); das Ziel wiederum verfolgte die
+Slot-Position SEINES Ziels — die Ziele hingen aneinander, alle liefen
+einander mit identischem Tempo ewig hinterher, niemand kam je in
+Schlagreichweite. Und die direkte Kampfverfolgung (`_step_toward`) hatte
+**keinen Begehbarkeits-Check** (A* läuft nur > 2,5 m) → der Zug lief
+ungebremst ins Meer/über den Rand. Fixes:
+- `_wait_near`: Wartende **stehen**, sobald sie nah genug am Kampf sind
+  (≤ Warteradius + 0,6 m) — nur zu weit entfernte rücken nach. Bricht die
+  Kopplung: der „Flüchtende" bleibt stehen, der Verfolger holt auf und
+  schlägt zu.
+- `_step_toward`: Schritte, die auf unbegehbaren Boden führen (Wasser,
+  Kartenrand — `world_to_cell` clampt auf die Meer-Randzellen), werden
+  verworfen.
+- Tests: **776 grün** (+4: Direktverfolgung stoppt am Wasser und bleibt
+  auf begehbarem Boden; naher Wartender steht still, ferner rückt nach).
+  KI-Sim konvergiert unverändert.
