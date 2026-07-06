@@ -288,9 +288,18 @@ func _on_path_finished() -> void:
 
 # --- Orders --------------------------------------------------------------------
 
+## While pacified by an enemy preacher (SIT) the unit accepts NO orders at all —
+## it stays sitting until the preacher is attacked (priest duel), interrupted
+## (fireball reset, out of range, death) or the conversion completes.
+func can_take_orders() -> bool:
+	return state != State.SIT and state != State.DEAD
+
+
 ## Move order. queue_up appends the target as an additional waypoint
 ## (Shift+right-click), otherwise the current route is replaced.
 func order_move(target: Vector3, queue_up: bool = false) -> void:
+	if not can_take_orders():
+		return
 	_end_attack()
 	if not queue_up:
 		waypoint_queue.clear()
@@ -661,6 +670,8 @@ func melee_damage(kind: StringName) -> int:
 ## Starts (or switches to) meleeing `enemy`. Releases any previous slot and lets
 ## the current activity clean up (Brave releases worker claims).
 func _begin_attack(enemy: Unit) -> void:
+	if not can_take_orders():
+		return   # a sitting (pacified) unit cannot be sent into a fight
 	if enemy == null or not is_instance_valid(enemy) or enemy.state == State.DEAD:
 		return
 	if attack_target == enemy:

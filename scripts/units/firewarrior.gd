@@ -7,7 +7,7 @@ class_name Firewarrior extends Unit
 ## accumulator and the hand-sprite toggle follow in phase 5c.
 
 ## Medium range: well above melee (1.2), below the aggro radius (8).
-const FIRE_RANGE: float = 6.0
+const FIRE_RANGE: float = 7.0
 ## Seconds between fireballs (the throw animation cycle matches this).
 const FIRE_COOLDOWN: float = 1.5
 

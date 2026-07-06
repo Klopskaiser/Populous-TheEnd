@@ -106,6 +106,8 @@ func order_move(target: Vector3, queue_up: bool = false) -> void:
 ## the wood on the spot, then continue with nearby trees. Player orders always
 ## count, even when the tree's harvest slots are full.
 func order_chop(tree: TreeResource) -> void:
+	if not can_take_orders():
+		return
 	if tree == null or not is_instance_valid(tree) or tree.felled_flag:
 		return
 	_interrupt_tasks()
@@ -120,6 +122,8 @@ func order_chop(tree: TreeResource) -> void:
 ## Join a construction site as a worker (fails silently when the site already
 ## has MAX_WORKERS helpers).
 func order_build(building: Building) -> void:
+	if not can_take_orders():
+		return
 	if building == null or not is_instance_valid(building) or not building.under_construction:
 		return
 	_interrupt_tasks()
@@ -131,6 +135,8 @@ func order_build(building: Building) -> void:
 
 
 func order_pray(site: Building) -> void:
+	if not can_take_orders():
+		return
 	_interrupt_tasks()
 	target_building = site
 	_set_state(State.PRAY)
@@ -139,6 +145,8 @@ func order_pray(site: Building) -> void:
 ## Queue up at a training building to be trained into a combat unit. The building
 ## assigns a slot each tick and admits the front brave when its bay is free.
 func order_train(building: TrainingBuilding) -> void:
+	if not can_take_orders():
+		return
 	if building == null or not is_instance_valid(building) or building.under_construction:
 		return
 	_interrupt_tasks()

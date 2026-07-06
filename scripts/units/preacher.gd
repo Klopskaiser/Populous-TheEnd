@@ -61,6 +61,8 @@ func _tick_idle(delta: float) -> void:
 ## Explicit attack order: convertible enemies are converted (walk into range,
 ## then channel); enemy preachers/shamans get the normal melee attack.
 func order_attack(enemy: Unit) -> void:
+	if not can_take_orders():
+		return
 	if enemy != null and is_instance_valid(enemy) and enemy.state != State.DEAD \
 			and enemy.tribe_id != tribe_id and not enemy.is_conversion_immune():
 		_end_attack()

@@ -1079,3 +1079,17 @@ ausstehend** (Feuerball-Rückstoß sichtbar/Salven stärker, Hand-Feuerball
 verschwindet beim Wurf; rote Einheiten setzen sich vor dem eigenen
 Prediger und werden blau; Duell mit rotem Prediger; Selektion stabil bei
 schnellen Rahmen).
+
+**Nachbesserung (Nutzerfeedback): Reichweite + Befehlssperre beim Sitzen.**
+Konvertieren vom Nutzer bestätigt („klappt"). Zwei Anpassungen:
+- **Feuerkrieger-Reichweite** `FIRE_RANGE` 6 → **7 m**.
+- **Sitzende nehmen keinerlei Befehle an:** neuer Guard
+  `Unit.can_take_orders()` (false bei SIT/DEAD) in `order_move` und
+  `_begin_attack` (deckt `order_attack` ab) sowie in allen Brave-Befehlen
+  (`order_chop/build/pray/train`) und im Prediger-`order_attack`-Override.
+  Sitzende bleiben sitzen, bis der gegnerische Prediger angegriffen wird
+  (Duell), das Predigen anderweitig unterbrochen wird (Feuerball-Reset,
+  außer Reichweite, Tod) oder die Konvertierung abschließt.
+  `_stand_up` setzt IDLE vor dem Gegenangriff → Duell-Freilassung
+  funktioniert weiter. Test `test_sitting_unit_refuses_orders`
+  (Gesamt **397** grün).

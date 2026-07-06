@@ -442,6 +442,34 @@ func test_priest_duel_breaks_trance() -> void:
 	_free_world(w)
 
 
+## A sitting (pacified) unit accepts no orders at all: it keeps sitting and
+## converting until the preaching is interrupted.
+func test_sitting_unit_refuses_orders() -> void:
+	var w: Dictionary = _make_world()
+	var preacher: Unit = _spawn(w, PREACHER_SCENE, 0, Vector2(30, 30))
+	var enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(33, 30))
+	var other: Unit = _spawn(w, BRAVE_SCENE, 0, Vector2(40, 30))
+	var pair: Array = [preacher, enemy]
+	_run(w, pair, func() -> bool: return enemy.state == Unit.State.SIT)
+	check(enemy.state == Unit.State.SIT, "the brave sits")
+	check(not enemy.can_take_orders(), "a sitting unit reports it takes no orders")
+
+	enemy.order_move(Vector3(50, 0, 30))
+	check(enemy.state == Unit.State.SIT, "order_move is ignored while sitting")
+	check(enemy.get_remaining_path().is_empty() and enemy.waypoint_queue.is_empty(),
+		"no route was accepted while sitting")
+	enemy.order_attack(other)
+	check(enemy.state == Unit.State.SIT, "order_attack is ignored while sitting")
+	check(enemy.attack_target == null, "no attack target was accepted while sitting")
+	(enemy as Brave).order_chop(null)   # harmless no-op, must not throw
+	check(enemy.state == Unit.State.SIT, "worker orders are ignored while sitting")
+
+	# The spell still completes despite the ignored orders.
+	_run(w, pair, func() -> bool: return enemy.tribe_id == 0)
+	check(enemy.tribe_id == 0, "conversion still completes afterwards")
+	_free_world(w)
+
+
 ## A fireball hit on a sitting unit resets its conversion progress and it
 ## stands back up.
 func test_fireball_resets_conversion() -> void:
