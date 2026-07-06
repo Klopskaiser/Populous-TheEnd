@@ -29,16 +29,32 @@ const SEPARATION_MAX_CHECKS: int = 20
 ## frames via the path queue instead of stalling one frame).
 const PATHS_PER_TICK: int = 48
 
-## Idle regrouping (phase 7b): units idle for this long drift toward the
-## centre of up to 5 idle tribemates in IDLE_REGROUP_RADIUS — loose 6-packs
-## form on their own. Only tiny steps (STEP per pass, ~1 pass/s per unit);
-## whoever already stands close enough stays put.
+## Idle 6-packs (phase 7b, reworked on user feedback): EXPLICIT groups with
+## sticky membership — the earlier centroid drift made units hop between
+## packs. A long-idle ungrouped unit joins an existing group with a free
+## slot in range (actively WALKING to its slot), or founds a new group at
+## its own spot when enough loose idle tribemates are around and NO group
+## (full or not) exists nearby. Members never switch groups.
 const IDLE_REGROUP_DELAY: float = 2.5
-const IDLE_REGROUP_RADIUS: float = 2.2
-const IDLE_REGROUP_STEP: float = 0.25
-const IDLE_REGROUP_ARRIVED: float = 0.5
+## Search/join range for groups and loose mates.
+const IDLE_GROUP_JOIN_RADIUS: float = 4.0
+## A member farther than this from its group anchor is dropped (ordered away).
+const IDLE_GROUP_LEAVE_RADIUS: float = 6.0
+## Founding needs this many loose idle mates nearby (3-unit core minimum).
+const IDLE_GROUP_MIN_NEIGHBOURS: int = 2
 ## Every unit is regroup-checked about once per this many ticks (sliced).
 const IDLE_REGROUP_SPREAD_TICKS: int = 30
+
+
+## One idle 6-pack: a fixed anchor and monotonically assigned member slots
+## (TribeCommands.MEMBER_OFFSETS). Slots are never re-used — no churn.
+class IdleGroup extends RefCounted:
+	var anchor: Vector3 = Vector3.ZERO
+	var next_slot: int = 0
+	var members: Array = []   # untyped: entries may be freed
+
+	func is_full() -> bool:
+		return next_slot >= TribeCommands.GROUP_SIZE
 
 ## Anti-stacking fallback: a unit found tightly inside another for this many
 ## separation passes gets sent to a free nearby cell (soft separation could
@@ -236,7 +252,7 @@ func _apply_separation(delta: float) -> void:
 ## IDLE_REGROUP_SPREAD_TICKS ticks, so the cost never spikes and the per-unit
 ## tick stays untouched. Does two things for IDLE units:
 ## 1. brave guard scan (small idle_aggro radius),
-## 2. drift toward the centre of up to 5 idle tribemates (loose 6-packs).
+## 2. sticky idle 6-packs (join an existing group / found one).
 func _apply_idle_regroup(delta: float) -> void:
 	if units.is_empty():
 		return
@@ -257,48 +273,77 @@ func _apply_idle_regroup(delta: float) -> void:
 				continue
 		if unit.idle_seconds < IDLE_REGROUP_DELAY:
 			continue
-		var step: Vector2 = regroup_step(unit, get_units_in_radius(
-			unit.position, IDLE_REGROUP_RADIUS, 12))
-		if step == Vector2.ZERO:
+		if unit.idle_group != null:
+			# Sticky membership: members never switch; just keep it tidy.
+			_prune_idle_group(unit.idle_group as IdleGroup)
 			continue
-		var nx: float = unit.position.x + step.x
-		var nz: float = unit.position.z + step.y
-		if nav_grid != null and not nav_grid.is_cell_walkable(
-				nav_grid.world_to_cell(Vector3(nx, 0.0, nz))):
-			continue
-		unit.position.x = nx
-		unit.position.z = nz
-		if terrain_data != null:
-			unit.position.y = terrain_data.get_height(nx, nz)
+		_join_or_found_group(unit)
 
 
-## Drift step toward the centroid of the unit's group (itself + up to 5
-## nearest long-idle tribemates from `neighbours`). Zero when alone, already
-## close enough, or nothing to do. Static-ish (pure on its inputs) for tests.
-static func regroup_step(unit: Unit, neighbours: Array[Unit]) -> Vector2:
-	var mates: Array[Unit] = []
-	for other in neighbours:
+## Ungrouped long-idle unit: join the first group with a free slot in range
+## (actively WALKING to its slot). When only FULL groups are nearby, do
+## nothing — founding a new group right next to an existing one made units
+## hop back and forth. With no group around and enough loose idle mates,
+## found a new group at the unit's own spot (it stays put as slot 0).
+func _join_or_found_group(unit: Unit) -> void:
+	var group_nearby: bool = false
+	var open_group: IdleGroup = null
+	var loose_mates: int = 0
+	for other in get_units_in_radius(unit.position, IDLE_GROUP_JOIN_RADIUS, 12):
 		if other == unit or other.tribe_id != unit.tribe_id:
 			continue
-		if other.state != Unit.State.IDLE or other.idle_seconds < IDLE_REGROUP_DELAY:
+		if other.idle_group != null:
+			var group: IdleGroup = other.idle_group as IdleGroup
+			group_nearby = true
+			if open_group == null and not group.is_full() \
+					and group.anchor.distance_to(unit.position) <= IDLE_GROUP_LEAVE_RADIUS:
+				open_group = group
+		elif other.state == Unit.State.IDLE \
+				and other.idle_seconds >= IDLE_REGROUP_DELAY:
+			loose_mates += 1
+	if open_group != null:
+		join_idle_group(unit, open_group)
+		return
+	if group_nearby:
+		return
+	if loose_mates >= IDLE_GROUP_MIN_NEIGHBOURS:
+		var group: IdleGroup = IdleGroup.new()
+		group.anchor = unit.position
+		join_idle_group(unit, group)
+
+
+## Adds the unit on the group's next slot and actively WALKS it there (a
+## real move order — no sliding). Public for tests.
+func join_idle_group(unit: Unit, group: IdleGroup) -> void:
+	group.members.append(unit)
+	unit.idle_group = group
+	var slot: int = mini(group.next_slot, TribeCommands.MEMBER_OFFSETS.size() - 1)
+	group.next_slot += 1
+	var target: Vector3 = group.anchor + TribeCommands.MEMBER_OFFSETS[slot]
+	if Vector2(target.x - unit.position.x, target.z - unit.position.z).length() > 0.3:
+		unit.order_move(target)
+
+
+## Drops freed/dead members and everyone busy elsewhere or ordered far away
+## (beyond LEAVE_RADIUS). A group shrunk to one member dissolves, so a fresh
+## group can form there later.
+func _prune_idle_group(group: IdleGroup) -> void:
+	var kept: Array = []
+	for m in group.members:
+		if not is_instance_valid(m) or m.state == Unit.State.DEAD:
 			continue
-		mates.append(other)
-	if mates.is_empty():
-		return Vector2.ZERO
-	var flat: Vector2 = Vector2(unit.position.x, unit.position.z)
-	mates.sort_custom(func(a: Unit, b: Unit) -> bool:
-		return Vector2(a.position.x, a.position.z).distance_squared_to(flat) \
-			< Vector2(b.position.x, b.position.z).distance_squared_to(flat))
-	var centroid: Vector2 = flat
-	var count: int = 1
-	for m in range(mini(TribeCommands.GROUP_SIZE - 1, mates.size())):
-		centroid += Vector2(mates[m].position.x, mates[m].position.z)
-		count += 1
-	centroid /= float(count)
-	var to_centre: Vector2 = centroid - flat
-	if to_centre.length() <= IDLE_REGROUP_ARRIVED:
-		return Vector2.ZERO
-	return to_centre.limit_length(IDLE_REGROUP_STEP)
+		var unit: Unit = m as Unit
+		var busy: bool = unit.state != Unit.State.IDLE and unit.state != Unit.State.MOVE
+		var far: bool = unit.position.distance_to(group.anchor) > IDLE_GROUP_LEAVE_RADIUS
+		if busy or far:
+			unit.idle_group = null
+			continue
+		kept.append(unit)
+	if kept.size() <= 1:
+		for m in kept:
+			(m as Unit).idle_group = null
+		kept = []
+	group.members = kept
 
 
 ## Nearest walkable cell with room to stand (fewer than 2 units within the

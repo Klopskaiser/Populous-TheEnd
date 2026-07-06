@@ -67,9 +67,7 @@ func _handle_pan(delta: float) -> void:
 		input.y -= 1.0
 	if Input.is_action_pressed("camera_right"):
 		input.x += 1.0
-	# Key A doubles as the attack-move arm hotkey (with units selected); the
-	# camera must not pan left while that mode is armed.
-	if Input.is_action_pressed("camera_left") and not SelectionManager.attack_arm_active:
+	if Input.is_action_pressed("camera_left"):
 		input.x -= 1.0
 
 	input += _edge_scroll_vector()

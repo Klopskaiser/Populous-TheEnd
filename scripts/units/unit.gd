@@ -170,6 +170,10 @@ var _flee_hits: int = 0
 ## Seconds spent in the current IDLE stretch (reset on every state change);
 ## drives the idle regrouping into 6-packs (UnitManager, phase 7b).
 var idle_seconds: float = 0.0
+## The idle 6-pack this unit belongs to (UnitManager.IdleGroup, untyped for
+## freed-safety). Membership is STICKY — members never hop between groups;
+## the manager's prune drops them when they leave/are ordered away.
+var idle_group: RefCounted = null
 ## Auto-attack radius while idling for NON-combatants (0 = fully passive).
 ## A FIELD, not a virtual getter — this sits in the per-unit per-tick hot
 ## path, and one extra virtual call costs ~5 ms/tick with 4000 units. The

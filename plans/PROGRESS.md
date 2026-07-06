@@ -1822,9 +1822,34 @@ fehlerfrei, Benchmark ohne Regression, 1v1-KI-Sim konvergiert weiter
 (aggressive Orders der KI verifiziert).
 
 **Manuelle Prüfung durch Nutzer: AUSSTEHEND** — Rechtsklick-Move läuft an
-Feinden vorbei; A+Rechtsklick greift unterwegs an (roter Cursor, Esc
-bricht ab; A ohne Selektion pant weiter die Kamera); Flucht aus dem
-Nahkampf; Braves verteidigen das Dorf im 3-m-Umkreis; 6er-Grüppchen nach
-kurzer Idle-Zeit; geordnete Schlange in mehreren Windungen um die
-Kaserne; kein Sprite-Flackern in dichten Mengen; Doppelklick wählt alle
-sichtbaren Einheiten des Typs.
+Feinden vorbei; F+Rechtsklick greift unterwegs an (roter Cursor, Esc
+bricht ab); Flucht aus dem Nahkampf; Braves verteidigen das Dorf im
+3-m-Umkreis; 6er-Grüppchen nach kurzer Idle-Zeit; geordnete Schlange in
+mehreren Windungen um die Kaserne; kein Sprite-Flackern in dichten
+Mengen; Doppelklick wählt alle sichtbaren Einheiten des Typs.
+
+**Nachbesserung (Nutzerfeedback): feste Idle-Gruppen + Taste F.**
+- **Idle-Gruppen komplett umgebaut** — der Zentroid-Drift ließ Leute
+  zwischen Gruppen hin- und herwechseln und „rutschen" statt laufen.
+  Jetzt **explizite Gruppen mit fester Mitgliedschaft**
+  (`UnitManager.IdleGroup`: Anker + monoton vergebene Slots auf den
+  `MEMBER_OFFSETS`, `Unit.idle_group`):
+  - Ungruppierte Langzeit-Idle-Einheit (≥ 2,5 s) **tritt der ersten
+    offenen Gruppe im 4-m-Umkreis bei** und **läuft aktiv** (echter
+    Move-Befehl, Walk-Animation) auf ihren freien Slot; dort bleibt sie.
+  - **Keine Neugründung neben bestehenden Gruppen:** Sind (auch volle)
+    Gruppen in Reichweite, aber keine offen, bleibt die Einheit einfach
+    stehen — genau das verhinderte das Hin-und-her-Switchen.
+  - Neugründung nur ohne Gruppe in Reichweite und mit ≥ 2 losen
+    Idle-Nachbarn; der Gründer bleibt an Ort und Stelle (Slot 0).
+  - Mitglieder wechseln NIE die Gruppe; `_prune_idle_group` entfernt nur
+    Tote/Beschäftigte/Weggeschickte (> 6 m vom Anker); auf 1 Mitglied
+    geschrumpfte Gruppen lösen sich auf. Slots werden nicht recycelt
+    (kein Nachrück-Gewusel).
+- **Attack-Move-Taste A → F** (Nutzerwunsch; A kollidierte mit dem
+  WASD-Kamera-Pan): Input-Action auf F umgehängt, die
+  Kamera-Sonderbehandlung für A ersatzlos entfernt.
+- Tests: **759 grün** (Gruppen-Tests ersetzen die Drift-Tests: Bildung +
+  gemeinsame Gruppe, keine Neugründung neben voller Gruppe + sticky,
+  aktiver Slot-Anlauf + Ankunft, Prune fern/Einzelauflösung). Benchmark
+  Ø 35,6 ms (unter der HEAD-Referenz 37,8), Ladecheck + 1v1-Sim sauber.

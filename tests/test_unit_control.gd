@@ -147,45 +147,97 @@ func test_brave_idle_aggro_radius() -> void:
 	_free_world(w)
 
 
-# --- Idle 6-pack regrouping ---------------------------------------------------------
+# --- Idle 6-packs (sticky groups) -----------------------------------------------------
 
-func test_idle_regroup_step() -> void:
-	var units: Array[Brave] = []
+func test_idle_group_formation() -> void:
+	var w: Dictionary = _make_world()
+	var mates: Array[Unit] = []
 	for i in range(3):
-		var brave: Brave = Brave.new()
-		brave.state = Unit.State.IDLE
+		var brave: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1,
+			w.nav.cell_to_world(Vector2i(60 + i * 2, 60)))
+		mates.append(brave)
+	# Long idle + several manager passes: a group forms, members walk to
+	# their slots and settle there.
+	for brave in mates:
 		brave.idle_seconds = UnitManager.IDLE_REGROUP_DELAY + 1.0
-		units.append(brave)
-	units[0].position = Vector3(0, 0, 0)
-	units[1].position = Vector3(1.6, 0, 0)
-	units[2].position = Vector3(0, 0, 1.6)
+	_run_ticks(w, mates, 4.0)
+	var group = mates[0].idle_group
+	check(group != null, "long-idle mates found a group")
+	for brave in mates:
+		check(brave.idle_group == group, "all three joined the SAME group")
+	check((group as UnitManager.IdleGroup).members.size() == 3,
+		"the group tracks its three members")
+	_free_world(w)
 
-	var step: Vector2 = UnitManager.regroup_step(units[0],
-		[units[1], units[2]] as Array[Unit])
-	check(step != Vector2.ZERO, "an idle unit with idle mates drifts")
-	check(step.length() <= UnitManager.IDLE_REGROUP_STEP + 0.001,
-		"the drift is a tiny step (max %s m)" % UnitManager.IDLE_REGROUP_STEP)
-	check(step.x > 0.0 and step.y > 0.0, "the drift points at the group centre")
 
-	check(UnitManager.regroup_step(units[0], [] as Array[Unit]) == Vector2.ZERO,
-		"a lone unit stays where it is")
+func test_idle_group_membership_is_sticky() -> void:
+	var w: Dictionary = _make_world()
+	# An existing FULL group...
+	var full: UnitManager.IdleGroup = UnitManager.IdleGroup.new()
+	full.anchor = w.nav.cell_to_world(Vector2i(60, 60))
+	full.next_slot = TribeCommands.GROUP_SIZE
+	var members: Array[Unit] = []
+	for i in range(TribeCommands.GROUP_SIZE):
+		var brave: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1,
+			full.anchor + TribeCommands.MEMBER_OFFSETS[i])
+		brave.idle_seconds = 10.0
+		brave.idle_group = full
+		full.members.append(brave)
+		members.append(brave)
+	# ...and one loose long-idle brave right next to it.
+	var loner: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1,
+		w.nav.cell_to_world(Vector2i(62, 60)))
+	loner.idle_seconds = 10.0
 
-	units[1].idle_seconds = 0.0   # freshly busy neighbour does not count
-	units[2].state = Unit.State.MOVE
-	check(UnitManager.regroup_step(units[0],
-		[units[1], units[2]] as Array[Unit]) == Vector2.ZERO,
-		"busy or freshly-idle neighbours do not attract")
+	_run_ticks(w, [loner] as Array[Unit], 3.0)
+	check(loner.idle_group == null,
+		"no NEW group forms right next to an existing (full) one")
+	check(loner.state == Unit.State.IDLE, "the loner just stays put")
+	for brave in members:
+		check(brave.idle_group == full, "members never switch groups")
+	_free_world(w)
 
-	# Already packed tightly: no more drifting (the pack stands calm).
-	units[1].idle_seconds = 10.0
-	units[1].state = Unit.State.IDLE
-	units[1].position = Vector3(0.4, 0, 0)
-	check(UnitManager.regroup_step(units[0],
-		[units[1]] as Array[Unit]) == Vector2.ZERO,
-		"a formed pack stops drifting")
 
-	for brave in units:
-		brave.free()
+func test_idle_group_join_walks_to_slot() -> void:
+	var w: Dictionary = _make_world()
+	var group: UnitManager.IdleGroup = UnitManager.IdleGroup.new()
+	group.anchor = w.nav.cell_to_world(Vector2i(60, 60))
+	var walker: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1,
+		w.nav.cell_to_world(Vector2i(63, 60)))
+	w.unit_manager.join_idle_group(walker, group)
+	check(walker.idle_group == group, "the unit joined the group")
+	check(walker.state == Unit.State.MOVE,
+		"joining is an ACTIVE walk to the slot (no sliding)")
+	_run_ticks(w, [walker] as Array[Unit], 3.0)
+	check(walker.state == Unit.State.IDLE, "the member settles on its slot")
+	check(walker.position.distance_to(group.anchor) < 1.5,
+		"the member stands at the group anchor")
+	_free_world(w)
+
+
+func test_idle_group_prune() -> void:
+	var w: Dictionary = _make_world()
+	var group: UnitManager.IdleGroup = UnitManager.IdleGroup.new()
+	group.anchor = w.nav.cell_to_world(Vector2i(60, 60))
+	var members: Array[Unit] = []
+	for i in range(3):
+		var brave: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1,
+			group.anchor + TribeCommands.MEMBER_OFFSETS[i])
+		brave.idle_seconds = 10.0
+		brave.idle_group = group
+		group.members.append(brave)
+		members.append(brave)
+	# One member gets ordered far away -> dropped on the next prune.
+	members[2].position = group.anchor + Vector3(20, 0, 0)
+	w.unit_manager._prune_idle_group(group)
+	check(members[2].idle_group == null, "a member ordered far away is dropped")
+	check(group.members.size() == 2, "the group keeps the two remaining members")
+	# Shrinking to one dissolves the group entirely.
+	members[1].position = group.anchor + Vector3(20, 0, 0)
+	w.unit_manager._prune_idle_group(group)
+	check(members[0].idle_group == null and group.members.is_empty(),
+		"a one-member group dissolves")
+	_free_world(w)
 
 
 # --- Anti-stacking escape -----------------------------------------------------------

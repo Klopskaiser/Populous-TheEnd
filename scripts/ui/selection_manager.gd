@@ -48,9 +48,9 @@ var selected_building: Building = null
 ## Building currently under the mouse (drives its production-bar visibility).
 var _hovered_building: Building = null
 
-## Attack-move armed (key A): the NEXT right-click issues an aggressive move
+## Attack-move armed (key F): the NEXT right-click issues an aggressive move
 ## (combatants engage enemies on the way). Esc or any right-click clears it.
-## Static (like drag_active) so the CameraRig can suppress the A-pan.
+## Static (like drag_active) so the sidebar's Esc guard can check it.
 static var attack_arm_active: bool = false
 
 var _unit_manager: UnitManager = null
@@ -155,7 +155,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		for unit in selected:
 			unit.patrol = not unit.patrol
 	elif event.is_action_pressed("attack_move_arm"):
-		# Key A arms the attack-move; the next right-click fires it.
+		# Key F arms the attack-move; the next right-click fires it.
 		_prune_selection()
 		if not selected.is_empty():
 			attack_arm_active = true
