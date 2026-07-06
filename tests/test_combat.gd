@@ -284,26 +284,55 @@ func test_fireball_hits_exactly_once() -> void:
 	_free_world(w)
 
 
-## When an enemy closes inside KITE_MIN_DIST the firewarrior does NOT brawl: it
-## backs off (kiting) while still throwing fireballs, so it keeps dealing ranged
-## damage instead of standing in melee.
-func test_firewarrior_kites_when_crowded() -> void:
+## In melee range with a free slot the firewarrior must DEFEND in melee (no
+## fireballs, brave-level brawl) — it does not kite away.
+func test_firewarrior_brawls_in_melee() -> void:
 	var w: Dictionary = _make_world()
 	var fw: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(30, 30))
-	var enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30.8, 30))  # right on top
+	var enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30.8, 30))  # melee range
 	enemy.max_health = 1000000
 	enemy.health = 1000000
 	fw.order_attack(enemy)
-	var start_dist: float = Vector2(fw.position.x, fw.position.z).distance_to(
-		Vector2(enemy.position.x, enemy.position.z))
 	var hp0: int = enemy.health
 	_run(w, [fw], func() -> bool: return enemy.health < hp0)
-	check(enemy.health == hp0 - Unit.FIREBALL_DAMAGE,
-		"firewarrior throws a fireball even at close quarters (no brawl)")
-	check(fw.attack_anim == &"throw", "it plays the throw animation, not a melee strike")
-	var dist: float = Vector2(fw.position.x, fw.position.z).distance_to(
-		Vector2(enemy.position.x, enemy.position.z))
-	check(dist > start_dist, "the firewarrior backed off (kited) from the close enemy")
+	check(enemy.health < hp0, "melee damage applied")
+	check(w.unit_manager.projectiles.is_empty(), "no fireballs thrown while brawling in melee")
+	check(fw.attack_anim != &"throw", "melee uses a strike anim, not throw")
+	_free_world(w)
+
+
+## When all three melee slots on the target are taken, a firewarrior that is
+## itself in melee range does NOT stand idle as an overflow attacker — it fires
+## fireballs as a reserve row.
+func test_firewarrior_reserve_row_fires_when_slots_full() -> void:
+	var w: Dictionary = _make_world()
+	var enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
+	enemy.max_health = 1000000
+	enemy.health = 1000000
+	# Fill the enemy's three melee slots with brawler stubs.
+	var stubs: Array[Brave] = []
+	for i in range(Unit.MAX_MELEE_ATTACKERS):
+		var s: Brave = Brave.new()
+		s.attack_target = enemy
+		s.state = Unit.State.ATTACK
+		enemy.request_melee_slot(s)
+		stubs.append(s)
+	check(enemy.active_melee_attacker_count() == Unit.MAX_MELEE_ATTACKERS,
+		"all three melee slots are taken")
+
+	var fw: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(30.8, 30))  # melee range
+	fw.order_attack(enemy)
+	var hp0: int = enemy.health
+	# The three brawler stubs are not ticked, so ONLY the firewarrior's fireball
+	# can damage the enemy — any HP loss proves the reserve fired (a 4th melee
+	# attacker gets no slot and would deal nothing).
+	_run(w, [fw], func() -> bool: return enemy.health < hp0)
+	check(enemy.health < hp0, "the reserve firewarrior fires when the melee slots are full")
+	check(fw.attack_anim == &"throw", "reserve row plays the throw animation")
+	check(enemy.active_melee_attacker_count() == Unit.MAX_MELEE_ATTACKERS,
+		"the reserve firewarrior did not take a melee slot")
+	for s in stubs:
+		s.free()
 	_free_world(w)
 
 

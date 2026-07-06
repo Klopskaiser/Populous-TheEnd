@@ -2257,3 +2257,14 @@ einen beschossenen Nachbarn, statt nur auf Gegner direkt neben sich zu
 reagieren. Alle Selbst-Aggro-/Retarget-Scans (`_engage_on_sight`,
 `_retarget_or_idle`, Alt-Scan im Nahkampf) nutzen jetzt `aggro_radius()`. Test
 `test_firewarrior_aggro_reaches_past_melee_radius`. Tests: **1043 grün**.
+
+**Korrektur (Nutzerfeedback — Feuerkrieger kiten war zu stark):** Kein Kiting
+mehr. Feuerkrieger halten die Stellung: In Nahkampfreichweite **müssen** sie sich
+im Nahkampf wehren, wenn ein Slot frei ist (brave-starker Prügel, kein
+Zurückweichen); nur die **Ersatzreihe** (alle 3 Nahkampf-Slots am Ziel belegt)
+**feuert** statt untätig zu warten. Zwischen Nahkampf- und Feuerreichweite wird
+gefeuert, jenseits `FIRE_RANGE` angerückt. Zusätzlich: greift ein Gegner sie im
+Nahkampf an, während ihr Ziel weiter weg steht, drehen sie auf den
+Nahkampf-Angreifer (`_melee_threat`). `Firewarrior._tick_attack` neu
+(`_retreat_from`/`KITE_MIN_DIST` entfernt). Tests: `test_firewarrior_brawls_in_melee`
+(Nahkampf-Wehr) + `test_firewarrior_reserve_row_fires_when_slots_full`. **1047 grün.**
