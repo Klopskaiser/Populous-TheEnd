@@ -70,6 +70,7 @@ func tick(delta: float) -> void:
 	if _pickup_timer <= 0.0:
 		_pickup_timer = 0.2
 		_pick_up_units()
+		_shred_trees_and_scatter_piles()
 	_tick_riders(delta)
 
 
@@ -107,6 +108,45 @@ func _wreck_buildings() -> void:
 			continue
 		if b.footprint_rect().grow(1).has_point(cell):
 			b.apply_destruction_stages(1)
+
+
+## Trees caught by the twister are shredded (destroyed outright); wood piles are
+## spat out — flung to a walkable spot beyond the funnel, keeping ALL their wood
+## (only the position changes). Phase 7d.
+func _shred_trees_and_scatter_piles() -> void:
+	if unit_manager == null:
+		return
+	var tm: TreeManager = unit_manager.tree_manager
+	var wpm: WoodPileManager = unit_manager.wood_pile_manager
+	if tm != null:
+		tm.destroy_in_radius(position, RADIUS)
+	if wpm == null:
+		return
+	for pile in wpm.piles_in_radius(position, RADIUS):
+		var amount: int = pile.amount
+		if amount <= 0:
+			continue
+		var landing: Vector3 = _scatter_landing()
+		wpm.remove_pile(pile)
+		wpm.deposit(landing, amount)
+
+
+## A landing spot flung just outside the funnel, on dry ground where possible
+## (a few tries), clamped to the map. Keeps scattered wood off the sea.
+func _scatter_landing() -> Vector3:
+	var limit: float = float(TerrainData.SIZE) * TerrainData.CELL_SIZE - 1.0
+	var best: Vector3 = position
+	for attempt in range(4):
+		var angle: float = randf() * TAU
+		var dist: float = RADIUS + 2.0 + randf() * 3.0
+		var p: Vector3 = position + Vector3(cos(angle) * dist, 0.0, sin(angle) * dist)
+		p.x = clampf(p.x, 1.0, limit)
+		p.z = clampf(p.z, 1.0, limit)
+		best = p
+		if terrain_data == null \
+				or terrain_data.get_height(p.x, p.z) > TerrainData.SEA_LEVEL + 0.1:
+			break
+	return best
 
 
 ## Whirls up ANY unit in the pickup radius (not already airborne) — the

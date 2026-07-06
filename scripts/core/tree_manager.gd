@@ -12,8 +12,9 @@ const TREE_SCENE: PackedScene = preload("res://scenes/tree_resource.tscn")
 
 ## Minimum cell distance between two trees.
 const MIN_SPACING: int = 2
-## Hard global limit.
-const MAX_TREES: int = 250
+## Hard global limit (raised for phase 7d so several foresters do not starve
+## each other; natural reproduction shares the same cap unobtrusively).
+const MAX_TREES: int = 400
 const REPRO_INTERVAL: float = 5.0
 const REPRO_BASE_CHANCE: float = 0.004
 ## Neighbourhood radius (cells, Chebyshev) for density/chance.
@@ -44,7 +45,15 @@ func _physics_process(delta: float) -> void:
 
 
 func tick(delta: float) -> void:
-	for tree in trees:
+	# Burning trees are destroyed when they finish burning; the rest grow.
+	# Snapshot so removing a spent tree mid-loop does not skip entries.
+	for tree in trees.duplicate():
+		if not is_instance_valid(tree):
+			continue
+		if tree.is_burning():
+			if tree.burn_tick(delta):
+				_remove_tree(tree)
+			continue
 		tree.grow_tick(delta)
 	_repro_timer -= delta
 	if _repro_timer <= 0.0:
@@ -110,6 +119,9 @@ func _reproduce() -> void:
 		if trees.size() >= MAX_TREES:
 			return
 		var parent: TreeResource = trees[_rng.randi_range(0, trees.size() - 1)]
+		# Saplings (stage 0) and burning trees do not reproduce.
+		if parent.stage <= 0 or parent.is_burning():
+			continue
 		var parent_cell: Vector2i = _tree_cells.get(parent, Vector2i(-1, -1))
 		if parent_cell.x < 0:
 			continue
@@ -148,7 +160,9 @@ func _sprout_near(parent_cell: Vector2i) -> void:
 			continue
 		if _too_close(c):
 			continue
-		spawn_tree(c, 0)  # new trees always start small
+		# Natural sprouts start as a small grown tree (stage 1) — the sapling
+		# stage 0 is reserved for forester plantings.
+		spawn_tree(c, 1)
 		return
 
 
@@ -206,13 +220,75 @@ func harvest_tree(tree: TreeResource) -> int:
 		return 0
 	var wood: int = tree.harvest_one()
 	if tree.felled_flag:
-		trees.erase(tree)
-		var c: Vector2i = _tree_cells.get(tree, Vector2i(-1, -1))
-		_tree_cells.erase(tree)
-		if c.x >= 0:
-			_occupied.erase(c)
-		if tree.is_inside_tree():
-			tree.queue_free()
-		else:
-			tree.free()
+		_remove_tree(tree)
 	return wood
+
+
+## Deregisters a tree (registry, cell index) and frees the node. Used by
+## harvesting, burning down and the tornado.
+func _remove_tree(tree: TreeResource) -> void:
+	if not (tree in trees):
+		return
+	trees.erase(tree)
+	var c: Vector2i = _tree_cells.get(tree, Vector2i(-1, -1))
+	_tree_cells.erase(tree)
+	if c.x >= 0:
+		_occupied.erase(c)
+	if tree.is_inside_tree():
+		tree.queue_free()
+	else:
+		tree.free()
+
+
+# --- Forester queries (phase 7d) --------------------------------------------
+
+## Number of standing trees whose cell lies within `radius` (Chebyshev cells)
+## of `center` cell — the forester's local density readout.
+func trees_in_area(center: Vector2i, radius: int) -> int:
+	var count: int = 0
+	for c: Vector2i in _occupied.keys():
+		if maxi(absi(c.x - center.x), absi(c.y - center.y)) <= radius:
+			count += 1
+	return count
+
+
+## True when a sapling may be planted on `cell`: walkable (excludes water,
+## steep ground and building footprints), free of trees and with no tree within
+## `spacing` cells (forester plantings may pack denser than the wild MIN_SPACING).
+func can_plant_at(cell: Vector2i, spacing: int) -> bool:
+	if nav_grid == null or not nav_grid.is_cell_walkable(cell):
+		return false
+	if _occupied.has(cell):
+		return false
+	for dz in range(-spacing, spacing + 1):
+		for dx in range(-spacing, spacing + 1):
+			if _occupied.has(cell + Vector2i(dx, dz)):
+				return false
+	return true
+
+
+# --- Fire & tornado (phase 7d) ----------------------------------------------
+
+## Ignites every standing tree within `radius` (world XZ) — fire spells and
+## lava call this. Returns how many trees were freshly set alight.
+func ignite_in_radius(pos: Vector3, radius: float) -> int:
+	var flat: Vector2 = Vector2(pos.x, pos.z)
+	var count: int = 0
+	for tree in trees:
+		if not is_instance_valid(tree) or tree.felled_flag or tree.is_burning():
+			continue
+		if Vector2(tree.position.x, tree.position.z).distance_to(flat) <= radius:
+			tree.ignite()
+			count += 1
+	return count
+
+
+## Destroys every standing tree within `radius` (world XZ) outright — the
+## tornado shreds trees (no wood, no burn).
+func destroy_in_radius(pos: Vector3, radius: float) -> void:
+	var flat: Vector2 = Vector2(pos.x, pos.z)
+	for tree in trees.duplicate():
+		if not is_instance_valid(tree):
+			continue
+		if Vector2(tree.position.x, tree.position.z).distance_to(flat) <= radius:
+			_remove_tree(tree)

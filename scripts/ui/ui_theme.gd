@@ -96,6 +96,8 @@ static func icon(key: StringName) -> ImageTexture:
 			_draw_flame(img)
 		&"temple":
 			_draw_temple(img)
+		&"forester":
+			_draw_seedling(img)
 		&"lightning":
 			_draw_lightning(img)
 		&"swarm":
@@ -204,6 +206,17 @@ static func _draw_temple(img: Image) -> void:
 	_rect(img, 11, 11, 2, 8, I_LIGHT)
 	_rect(img, 16, 11, 2, 8, I_LIGHT)
 	_rect(img, 4, 19, 16, 2, I_GOLD)
+
+
+static func _draw_seedling(img: Image) -> void:
+	# A little sapling: mound of earth, a stem and two leaves (forester).
+	const C_LEAF: Color = Color(0.3, 0.65, 0.28)
+	const C_STEM: Color = Color(0.5, 0.36, 0.2)
+	_rect(img, 4, 18, 16, 3, I_DARK)          # earth
+	_rect(img, 11, 8, 2, 10, C_STEM)          # stem
+	_disc(img, 8, 10, 3, C_LEAF)              # left leaf
+	_disc(img, 16, 9, 3, C_LEAF)              # right leaf
+	_disc(img, 12, 6, 2, C_LEAF)              # tip
 
 
 static func _draw_lightning(img: Image) -> void:

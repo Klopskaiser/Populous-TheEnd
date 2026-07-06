@@ -25,6 +25,13 @@ func _init() -> void:
 func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:
 	if ctx == null or tribe == null:
 		return false
+	# Lightning also sets trees and wood piles at the strike point alight
+	# (phase 7d) — independent of hitting a unit or building.
+	var burned: int = 0
+	if ctx.tree_manager != null:
+		burned += ctx.tree_manager.ignite_in_radius(target, TARGET_RADIUS)
+	if ctx.wood_pile_manager != null:
+		burned += ctx.wood_pile_manager.ignite_in_radius(target, TARGET_RADIUS)
 	var building: Building = _building_at(tribe, target, ctx)
 	if building != null:
 		building.apply_destruction_stages(BUILDING_STAGES)
@@ -32,6 +39,10 @@ func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:
 		return true
 	var victim: Unit = _nearest_enemy(tribe, target, ctx)
 	if victim == null:
+		# No unit/building, but the bolt still torched flammables -> a hit.
+		if burned > 0:
+			_spawn_beam(target, ctx)
+			return true
 		return false
 	var caster = tribe.shaman if is_instance_valid(tribe.shaman) else null
 	_spawn_beam(victim.position, ctx)

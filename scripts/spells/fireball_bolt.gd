@@ -55,6 +55,11 @@ func _explode() -> void:
 	done = true
 	if unit_manager == null:
 		return
+	# Fire sets nearby trees and wood piles alight (phase 7d).
+	if unit_manager.tree_manager != null:
+		unit_manager.tree_manager.ignite_in_radius(target_pos, SPLASH_RADIUS)
+	if unit_manager.wood_pile_manager != null:
+		unit_manager.wood_pile_manager.ignite_in_radius(target_pos, SPLASH_RADIUS)
 	for u in unit_manager.get_units_in_radius(target_pos, SPLASH_RADIUS):
 		if u.state == Unit.State.DEAD or u.tribe_id == tribe_id:
 			continue

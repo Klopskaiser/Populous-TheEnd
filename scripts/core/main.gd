@@ -24,9 +24,9 @@ const TREE_COUNT: int = 60
 const SKIRMISH_BASE_RADIUS: float = 26.0
 ## Every skirmish base is guaranteed this many trees within reach, so all
 ## start positions can build (wood is delivered physically). A full base
-## needs ~65 wood (3 huts + 3 training camps); big trees yield 3 each and
-## regrow, so 16 covers it with margin.
-const SKIRMISH_BASE_TREES: int = 16
+## needs ~65 wood (3 huts + 3 training camps); big trees now yield 4 each
+## (phase 7d) and regrow, so 12 covers it with margin.
+const SKIRMISH_BASE_TREES: int = 12
 const SKIRMISH_TREE_RADIUS: float = 20.0
 
 ## Stress test (key F9): spawns this many braves per tribe per press,

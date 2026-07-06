@@ -186,6 +186,23 @@ func order_repair(units: Array[Unit], building: Building) -> void:
 		order_move(movers, building.center_world())
 
 
+## Assigns braves to a forester's worker slots; non-braves just walk there.
+## The forester ignores braves when all slots are taken (no queue).
+func order_forester(units: Array[Unit], forester: Forester) -> void:
+	if forester == null or not is_instance_valid(forester) or not forester.is_usable():
+		return
+	var movers: Array[Unit] = []
+	for unit in units:
+		if unit.state == Unit.State.DEAD:
+			continue
+		if unit is Brave and unit.tribe_id == forester.tribe_id:
+			(unit as Brave).order_forester(forester)
+		else:
+			movers.append(unit)
+	if not movers.is_empty():
+		order_move(movers, forester.center_world())
+
+
 ## Sends braves to a training building to be trained into combat units. Only
 ## own, living braves are enrolled; the building rejects them while it is
 ## under construction or damaged (stage >= 1). UI and AI both call this.

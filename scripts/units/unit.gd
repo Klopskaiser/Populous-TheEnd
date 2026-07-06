@@ -16,7 +16,9 @@ class_name Unit extends Node3D
 ## Later phases fill in the behaviour for GATHER/PRAY/BUILD/PANIC/CAST/THROWN.
 ## SIT = pacified by an enemy preacher (conversion, 5c); ROLL = tumbling
 ## downhill / knocked over (5d).
-enum State {IDLE, MOVE, GATHER, PRAY, BUILD, ATTACK, TRAIN, PANIC, CAST, THROWN, DEAD, SIT, ROLL}
+## FORESTER = assigned to a forester (housed inside, or briefly out planting a
+## sapling, phase 7d).
+enum State {IDLE, MOVE, GATHER, PRAY, BUILD, ATTACK, TRAIN, PANIC, CAST, THROWN, DEAD, SIT, ROLL, FORESTER}
 
 signal died(unit: Unit)
 ## Fired after this unit switched tribes (preacher conversion) — the

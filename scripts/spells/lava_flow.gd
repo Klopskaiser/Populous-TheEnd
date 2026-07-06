@@ -122,6 +122,8 @@ func _downhill(at: Vector3) -> Vector3:
 func _ignite_touching_units() -> void:
 	if unit_manager == null:
 		return
+	var tm: TreeManager = unit_manager.tree_manager
+	var wpm: WoodPileManager = unit_manager.wood_pile_manager
 	for seg in _segments:
 		if seg.cooled:
 			continue
@@ -129,6 +131,11 @@ func _ignite_touching_units() -> void:
 			if u.state == Unit.State.DEAD or u.state == Unit.State.THROWN:
 				continue   # airborne units pass over the lava
 			u.ignite(seg.pos)
+		# Lava also sets trees and wood piles alight (phase 7d).
+		if tm != null:
+			tm.ignite_in_radius(seg.pos, CONTACT_RADIUS)
+		if wpm != null:
+			wpm.ignite_in_radius(seg.pos, CONTACT_RADIUS)
 
 
 # --- Ribbon visual (in-game only) ----------------------------------------------------

@@ -94,26 +94,31 @@ func test_mana_formula() -> void:
 func test_tree_growth_and_yield() -> void:
 	var tree: TreeResource = TREE_SCENE.instantiate() as TreeResource
 	tree.set_stage(0)
-	check(tree.wood_yield() == 1, "small tree yields 1 wood")
-	tree.grow_tick(TreeResource.GROWTH_TIME + 0.1)
-	check(tree.stage == 1, "tree grows to stage 1 after GROWTH_TIME")
-	check(tree.wood_yield() == 1, "stage 1 tree yields 1 wood")
-	tree.grow_tick(TreeResource.GROWTH_TIME + 0.1)
-	check(tree.stage == 2, "tree grows to stage 2")
-	check(tree.wood_yield() == 2, "stage 2 tree yields 2 wood")
-	tree.grow_tick(TreeResource.GROWTH_TIME + 0.1)
-	check(tree.stage == 3, "tree grows to stage 3 (max)")
-	check(tree.wood_yield() == 3, "big tree yields 3 wood")
-	tree.grow_tick(TreeResource.GROWTH_TIME * 5.0)
-	check(tree.stage == 3, "tree never grows past the max stage")
-	check(tree.chop_time() > 2.9, "big trees take longer to fell")
+	check(tree.wood_yield() == 0, "sapling (stage 0) holds no wood")
+	check(not tree.can_claim(), "a sapling cannot be harvested")
+	# A step >= (1 + GROWTH_SPREAD) * GROWTH_TIME always crosses the randomised
+	# interval, so one grow_tick call advances exactly one stage.
+	var step: float = TreeResource.GROWTH_TIME * 2.0
+	tree.grow_tick(step)
+	check(tree.stage == 1, "sapling grows to stage 1")
+	check(tree.wood_yield() == 1, "stage 1 yields 1 wood")
+	tree.grow_tick(step)
+	check(tree.stage == 2 and tree.wood_yield() == 2, "stage 2 yields 2 wood")
+	tree.grow_tick(step)
+	check(tree.stage == 3 and tree.wood_yield() == 3, "stage 3 yields 3 wood")
+	tree.grow_tick(step)
+	check(tree.stage == 4 and tree.wood_yield() == 4, "big tree (stage 4) yields 4 wood")
+	tree.grow_tick(step * 5.0)
+	check(tree.stage == 4, "tree never grows past the max stage")
+	check(tree.chop_time() > 3.4, "big trees take longer to fell")
 
-	# Harvesting takes one wood at a time and drops the tree a stage.
+	# Harvesting takes one wood at a time and drops the tree a stage; a big tree
+	# needs four trips (4 -> 3 -> 2 -> 1 -> gone).
 	check(tree.harvest_one() == 1, "harvest takes exactly one wood")
-	check(tree.stage == 2, "big tree drops to stage 2 after one harvest")
-	check(tree.harvest_one() == 1, "second harvest takes one wood")
-	check(tree.stage == 1, "tree drops to stage 1")
-	check(tree.harvest_one() == 1, "third harvest takes the last wood")
+	check(tree.stage == 3, "big tree drops to stage 3 after one harvest")
+	check(tree.harvest_one() == 1 and tree.stage == 2, "drops to stage 2")
+	check(tree.harvest_one() == 1 and tree.stage == 1, "drops to stage 1")
+	check(tree.harvest_one() == 1, "fourth harvest takes the last wood")
 	check(tree.felled_flag, "tree is gone after its last wood")
 	check(tree.harvest_one() == 0, "a felled tree yields nothing")
 	tree.free()
@@ -122,23 +127,23 @@ func test_tree_growth_and_yield() -> void:
 func test_tree_parallel_harvest_slots() -> void:
 	var w: Dictionary = _make_world()
 	var tm: TreeManager = w.tree_manager
-	var big: TreeResource = tm.spawn_tree(Vector2i(60, 60), 3)
+	var big: TreeResource = tm.spawn_tree(Vector2i(60, 60), 4)   # 4 wood
 
 	var workers: Array[Brave] = []
-	for i in range(4):
+	for i in range(5):
 		workers.append(Brave.new())
-	# A big tree (3 wood) supports up to 3 parallel harvesters.
-	for i in range(3):
+	# A big tree (4 wood) supports up to 4 parallel harvesters.
+	for i in range(4):
 		check(tm.claim_nearest_tree(Vector3(60, 5, 60), 10.0, workers[i]) == big,
 			"harvest slot %d on the big tree" % (i + 1))
-	check(tm.claim_nearest_tree(Vector3(60, 5, 60), 10.0, workers[3]) == null,
-		"a big tree has no fourth harvest slot")
+	check(tm.claim_nearest_tree(Vector3(60, 5, 60), 10.0, workers[4]) == null,
+		"a big tree has no fifth harvest slot")
 	tm.release_claim(big, workers[0])
-	check(tm.claim_nearest_tree(Vector3(60, 5, 60), 10.0, workers[3]) == big,
+	check(tm.claim_nearest_tree(Vector3(60, 5, 60), 10.0, workers[4]) == big,
 		"released slot can be claimed again")
 
-	# A small tree (1 wood) supports only one harvester.
-	var small: TreeResource = tm.spawn_tree(Vector2i(80, 80), 0)
+	# A small tree (stage 1, 1 wood) supports only one harvester.
+	var small: TreeResource = tm.spawn_tree(Vector2i(80, 80), 1)
 	check(tm.claim_nearest_tree(Vector3(80, 5, 80), 5.0, workers[0]) == small,
 		"single slot on a small tree")
 	check(tm.claim_nearest_tree(Vector3(80, 5, 80), 5.0, workers[1]) == null,
@@ -162,12 +167,16 @@ func test_tree_reproduction() -> void:
 		tm.tick(TICK)
 	check(tm.trees.size() > initial, "a dense wood seeds new trees over time")
 	check(tm.trees.size() <= TreeManager.MAX_TREES, "global tree cap holds")
-	# New trees always sprout small.
+	# Natural sprouts start as small grown trees (stage 1), never as saplings.
 	var found_small: bool = false
+	var found_sapling: bool = false
 	for tree in tm.trees:
-		if tree.stage == 0:
+		if tree.stage == 1:
 			found_small = true
-	check(found_small, "sprouted trees start at stage 0")
+		elif tree.stage == 0:
+			found_sapling = true
+	check(found_small, "sprouted trees start at stage 1")
+	check(not found_sapling, "natural reproduction never makes saplings")
 	_free_world(w)
 
 

@@ -1,29 +1,45 @@
 class_name TreeResource extends Node3D
 
-## Wild tree with four growth stages (klein -> mittelklein -> mittelgroß ->
-## groß). Wood is harvested ONE unit at a time: each harvest drops the tree a
-## growth stage (a big tree takes three trips); the last unit removes it.
-## Several workers may harvest the same tree at once (as many as it has wood,
-## so max 3 on a big tree). Growth and reproduction are driven by the
-## TreeManager. Trees do not block the NavGrid (thin obstacles).
+## Wild/planted tree with five growth stages: stage 0 is a SAPLING (0 wood, a
+## bare vertical stick planted by the forester) that cannot reproduce; stages
+## 1..4 are the four grown stages (klein -> groß) yielding 1/2/3/4 wood. Wood is
+## harvested ONE unit at a time: each harvest drops the tree a growth stage (a
+## big tree takes four trips); the last unit removes it. Several workers may
+## harvest the same tree at once (as many as it has wood, so max 4 on a big
+## tree). Growth and reproduction are driven by the TreeManager. Growth happens
+## at RANDOM intervals around GROWTH_TIME (the average is unchanged). Trees do
+## not block the NavGrid (thin obstacles). Fire (spells, lava) IGNITES a tree:
+## it burns down and is destroyed completely, yielding no wood.
 
-const MAX_STAGE: int = 3
-## Remaining wood per stage: klein/mittelklein = 1, mittelgroß = 2, groß = 3.
-const YIELDS: Array[int] = [1, 1, 2, 3]
-const STAGE_SCALES: Array[float] = [0.35, 0.55, 0.8, 1.0]
-## Seconds per growth stage.
+const MAX_STAGE: int = 4
+## Remaining wood per stage: 0 = sapling (0), then 1/2/3/4.
+const YIELDS: Array[int] = [0, 1, 2, 3, 4]
+## Stage 0 is a small stick; stages 1..4 scale up like before.
+const STAGE_SCALES: Array[float] = [0.28, 0.35, 0.55, 0.8, 1.0]
+## Average seconds per growth stage; the actual per-stage interval is randomised
+## around this mean (see _next_growth_time).
 const GROWTH_TIME: float = 75.0
+## Spread factor for the randomised growth interval (mean stays GROWTH_TIME).
+const GROWTH_SPREAD: float = 0.5
+## How long a burning tree stays alight before it is destroyed.
+const BURN_TIME: float = 1.8
 
 var stage: int = 0
 var growth_timer: float = GROWTH_TIME
 ## Workers currently harvesting this tree; untyped entries (may be freed).
 var claimers: Array = []
-## Set once when the last wood is taken — guards late references while the
-## node awaits queue_free.
+## Set once when the last wood is taken (or when it burns) — guards late
+## references while the node awaits queue_free.
 var felled_flag: bool = false
+## Burning countdown (> 0 while alight); the TreeManager destroys it at the end.
+var _burn_time: float = 0.0
+
+var _crown: MeshInstance3D = null
+var _trunk_mat: StandardMaterial3D = null
+var _crown_mat: StandardMaterial3D = null
 
 
-## Wood still in the tree.
+## Wood still in the tree (a sapling holds none).
 func wood_yield() -> int:
 	return YIELDS[stage]
 
@@ -33,10 +49,10 @@ func chop_time() -> float:
 	return 1.5 + 0.5 * float(stage)
 
 
-## Takes one unit of wood: the tree drops a growth stage (3 wood -> stage 2
-## -> stage 1); the last unit marks it felled (the TreeManager removes it).
+## Takes one unit of wood: the tree drops a growth stage; the last unit marks it
+## felled (the TreeManager removes it). A sapling / burning tree yields nothing.
 func harvest_one() -> int:
-	if felled_flag:
+	if felled_flag or wood_yield() <= 0:
 		return 0
 	if wood_yield() > 1:
 		set_stage(stage - 1)
@@ -47,10 +63,11 @@ func harvest_one() -> int:
 
 # --- Claims (parallel harvesting) ---------------------------------------------
 
-## A tree supports as many parallel harvesters as it has wood (max 3).
+## A tree supports as many parallel harvesters as it has wood (max 4); a sapling
+## (0 wood) and a burning tree cannot be claimed.
 func can_claim() -> bool:
 	_prune_claimers()
-	return not felled_flag and claimers.size() < wood_yield()
+	return not felled_flag and not is_burning() and claimers.size() < wood_yield()
 
 
 func add_claimer(worker: Object) -> void:
@@ -70,21 +87,70 @@ func _prune_claimers() -> void:
 func set_stage(p_stage: int) -> void:
 	stage = clampi(p_stage, 0, MAX_STAGE)
 	scale = Vector3.ONE * STAGE_SCALES[stage]
+	# The sapling (stage 0) is a bare stick — no crown yet.
+	if _crown != null:
+		_crown.visible = stage >= 1
 
 
-## Called by the TreeManager tick; grows one stage when the timer runs out.
+## Called by the TreeManager tick; grows one stage when the (randomised) timer
+## runs out. Saplings grow like any other tree — they just have one extra stage.
 func grow_tick(delta: float) -> void:
 	if stage >= MAX_STAGE:
 		return
 	growth_timer -= delta
 	if growth_timer <= 0.0:
-		growth_timer += GROWTH_TIME
+		growth_timer += _next_growth_time()
 		set_stage(stage + 1)
+
+
+## Randomised interval around the mean GROWTH_TIME (uniform, so the average
+## growth rate is unchanged from the old fixed cadence).
+func _next_growth_time() -> float:
+	return GROWTH_TIME * (1.0 + randf_range(-GROWTH_SPREAD, GROWTH_SPREAD))
+
+
+# --- Burning (fire spells / lava) ---------------------------------------------
+
+func is_burning() -> bool:
+	return _burn_time > 0.0
+
+
+## Sets the tree alight (fireball, firestorm, lightning, lava). It stops being
+## harvestable at once (claimers drop), plays a short burn and is then destroyed
+## by the TreeManager (no wood). Re-igniting an already burning tree does nothing.
+func ignite() -> void:
+	if felled_flag or is_burning():
+		return
+	_burn_time = BURN_TIME
+	claimers.clear()
+	if _crown_mat != null:
+		_crown_mat.albedo_color = Color(0.55, 0.2, 0.08)
+		_crown_mat.emission_enabled = true
+		_crown_mat.emission = Color(1.0, 0.45, 0.08)
+		_crown_mat.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
+
+
+## Advances the burn; returns true once the tree is spent (ready to remove).
+## Driven by the TreeManager tick.
+func burn_tick(delta: float) -> bool:
+	if _burn_time <= 0.0:
+		return false
+	_burn_time -= delta
+	# Shrink and flicker while burning down.
+	var t: float = clampf(_burn_time / BURN_TIME, 0.0, 1.0)
+	scale = Vector3.ONE * STAGE_SCALES[stage] * maxf(t, 0.05)
+	if _crown_mat != null:
+		_crown_mat.emission_energy_multiplier = 1.5 + randf() * 1.5
+	if _burn_time <= 0.0:
+		felled_flag = true
+		return true
+	return false
 
 
 func _ready() -> void:
 	_create_visuals()
 	_create_click_body()
+	set_stage(stage)   # apply crown visibility now that the mesh exists
 
 
 func _create_visuals() -> void:
@@ -94,23 +160,23 @@ func _create_visuals() -> void:
 	cyl.bottom_radius = 0.16
 	cyl.height = 1.0
 	trunk.mesh = cyl
-	var trunk_mat: StandardMaterial3D = StandardMaterial3D.new()
-	trunk_mat.albedo_color = Color(0.4, 0.27, 0.15)
-	trunk.material_override = trunk_mat
+	_trunk_mat = StandardMaterial3D.new()
+	_trunk_mat.albedo_color = Color(0.4, 0.27, 0.15)
+	trunk.material_override = _trunk_mat
 	trunk.position.y = 0.5
 	add_child(trunk)
 
-	var crown: MeshInstance3D = MeshInstance3D.new()
+	_crown = MeshInstance3D.new()
 	var cone: CylinderMesh = CylinderMesh.new()
 	cone.top_radius = 0.0
 	cone.bottom_radius = 0.8
 	cone.height = 1.8
-	crown.mesh = cone
-	var crown_mat: StandardMaterial3D = StandardMaterial3D.new()
-	crown_mat.albedo_color = Color(0.15, 0.4, 0.16)
-	crown.material_override = crown_mat
-	crown.position.y = 1.9
-	add_child(crown)
+	_crown.mesh = cone
+	_crown_mat = StandardMaterial3D.new()
+	_crown_mat.albedo_color = Color(0.15, 0.4, 0.16)
+	_crown.material_override = _crown_mat
+	_crown.position.y = 1.9
+	add_child(_crown)
 
 
 ## StaticBody3D on layer 3 (value 4) so right-clicks can target the tree.

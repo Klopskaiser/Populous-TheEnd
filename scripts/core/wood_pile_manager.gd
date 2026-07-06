@@ -16,6 +16,62 @@ func setup(p_terrain_data: TerrainData) -> void:
 	terrain_data = p_terrain_data
 
 
+## In-game driver: advances burning piles. Tests drive tick() manually.
+func _physics_process(delta: float) -> void:
+	tick(delta)
+
+
+## Burns down ignited piles and removes the spent ones. Snapshot iteration so a
+## removed pile does not skip entries.
+func tick(delta: float) -> void:
+	var changed: bool = false
+	for pile in piles.duplicate():
+		if not is_instance_valid(pile) or not pile.is_burning():
+			continue
+		if pile.burn_tick(delta):
+			remove_pile(pile)
+			changed = true
+	if changed:
+		_emit_total()
+
+
+## Ignites every pile within `radius` (world XZ) — fire spells and lava call it.
+## Returns how many piles were freshly set alight.
+func ignite_in_radius(pos: Vector3, radius: float) -> int:
+	var flat: Vector2 = Vector2(pos.x, pos.z)
+	var count: int = 0
+	for pile in piles:
+		if not is_instance_valid(pile) or pile.is_burning():
+			continue
+		if Vector2(pile.position.x, pile.position.z).distance_to(flat) <= radius:
+			pile.ignite()
+			count += 1
+	return count
+
+
+## Piles whose position lies within `radius` (world XZ) of pos (snapshot copy).
+func piles_in_radius(pos: Vector3, radius: float) -> Array[WoodPile]:
+	var result: Array[WoodPile] = []
+	var flat: Vector2 = Vector2(pos.x, pos.z)
+	for pile in piles:
+		if is_instance_valid(pile) \
+				and Vector2(pile.position.x, pile.position.z).distance_to(flat) <= radius:
+			result.append(pile)
+	return result
+
+
+## Removes a pile from the registry and frees it (does not emit on its own —
+## callers batch the emit).
+func remove_pile(pile: WoodPile) -> void:
+	if not (pile in piles):
+		return
+	piles.erase(pile)
+	if pile.is_inside_tree():
+		pile.queue_free()
+	else:
+		pile.free()
+
+
 func total_wood() -> int:
 	var total: int = 0
 	for pile in piles:

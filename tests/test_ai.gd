@@ -344,6 +344,10 @@ func test_endless_building_scaling() -> void:
 		tribe, Vector2i(48, 50), 0, true)
 	w.building_manager.place(preload("res://scenes/buildings/temple.tscn"),
 		tribe, Vector2i(56, 50), 0, true)
+	# A forester too (phase 7d): with no trees near the base the AI wants one
+	# before expanding, so the "full base" must include it for this check.
+	w.building_manager.place(preload("res://scenes/buildings/forester.tscn"),
+		tribe, Vector2i(56, 58), 0, true)
 	check(ai._next_building_scene({}) == null,
 		"full base without housing pressure: nothing to build")
 

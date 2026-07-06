@@ -16,6 +16,14 @@ class_name Brave extends Unit
 ## to trees/piles are kept untyped because they may be freed by other workers.
 
 enum Task {NONE, FLATTEN, CHOP, PICKUP, DELIVER, CONSTRUCT, REPAIR}
+## Sub-phase of the forester job (State.FORESTER, phase 7d): walking in to be
+## housed, walking out to a plant spot, kneeling to plant, walking back in.
+enum ForesterPhase {JOIN, PLANT_GO, KNEEL, RETURN}
+
+## How long the brave kneels to plant a sapling.
+const PLANT_KNEEL_TIME: float = 0.8
+const FORESTER_RANGE: float = 1.2
+const PLANT_RANGE: float = 0.8
 
 const CARRY_CAPACITY: int = 3
 ## When delivering loose wood, prefer merging onto an existing pile within this
@@ -54,6 +62,15 @@ var train_target: TrainingBuilding = null
 var train_slot_pos: Vector3 = Vector3.INF
 var train_reached_slot: bool = false
 
+## Forester assignment (State.FORESTER, phase 7d). `forester_home` is the
+## forester whose worker slot this brave holds; `forester_inside` is true while
+## it is housed (removed from the world); otherwise it is walking in/out.
+var forester_home: Forester = null
+var forester_inside: bool = false
+var _forester_phase: ForesterPhase = ForesterPhase.JOIN
+var _plant_target: Vector3 = Vector3.INF
+var _kneel_timer: float = 0.0
+
 var _chop_timer: float = 0.0
 var _retry_timer: float = 0.0
 var _working: bool = false
@@ -78,7 +95,7 @@ func unit_kind() -> StringName:
 ## release its worker claims / drop carried wood so nothing is left stranded.
 func _on_combat_interrupt() -> void:
 	if state == State.GATHER or state == State.BUILD or state == State.PRAY \
-			or state == State.TRAIN:
+			or state == State.TRAIN or state == State.FORESTER:
 		_interrupt_tasks()
 
 
@@ -199,6 +216,57 @@ func cancel_training() -> void:
 	_stop_all()
 
 
+# --- Forester assignment (phase 7d) ---------------------------------------------
+
+## Assigns the brave to a forester's worker slot. It walks to the building and is
+## housed inside (removed from the world, still counted as population). Ignored
+## when no slot is free (no queue).
+func order_forester(forester: Forester) -> void:
+	if not can_take_orders():
+		return
+	if forester == null or not is_instance_valid(forester) or not forester.is_usable():
+		return
+	if not forester.has_free_slot():
+		return
+	_interrupt_tasks()
+	if not forester.reserve_slot(self):
+		return
+	forester_home = forester
+	forester_inside = false
+	_forester_phase = ForesterPhase.JOIN
+	_reset_seek()
+	_set_state(State.FORESTER)
+
+
+## Housed inside the forester: it is already removed from the world, so just
+## settle the state (it stops ticking until dispatched to plant).
+func enter_forester() -> void:
+	_clear_path()
+	_set_working(false)
+	set_selected(false)
+
+
+## Dispatched by the forester to plant a sapling at `target`: the brave steps
+## back into the world (already re-registered by the forester) and walks out.
+func begin_plant(target: Vector3) -> void:
+	forester_inside = false
+	_plant_target = target
+	_forester_phase = ForesterPhase.PLANT_GO
+	_reset_seek()
+	if state != State.FORESTER:
+		_set_state(State.FORESTER)
+
+
+## Released from the forester (ejected, building lost, or a new order): drop the
+## slot and go idle. forester_home is cleared FIRST so _interrupt_tasks does not
+## call back into the forester.
+func leave_forester() -> void:
+	forester_home = null
+	forester_inside = false
+	_plant_target = Vector3.INF
+	_stop_all()
+
+
 # --- Tick ----------------------------------------------------------------------
 
 ## Worker-state dispatch; everything else (incl. the walk/idle/carry animation
@@ -216,6 +284,8 @@ func _tick_state(delta: float) -> void:
 			_tick_pray(delta)
 		State.TRAIN:
 			_tick_train(delta)
+		State.FORESTER:
+			_tick_forester(delta)
 		_:
 			super._tick_state(delta)
 
@@ -596,6 +666,43 @@ func _tick_train(delta: float) -> void:
 		_face_toward(train_target.center_world())
 
 
+# --- Forester work (phase 7d) ------------------------------------------------------
+
+## Walks in to be housed, out to a plant spot (kneel, plant a sapling) and back
+## in — one dispatched worker at a time (the forester drives the dispatching).
+func _tick_forester(delta: float) -> void:
+	if forester_home == null or not is_instance_valid(forester_home) \
+			or not forester_home.is_usable():
+		leave_forester()
+		return
+	match _forester_phase:
+		ForesterPhase.JOIN:
+			if _seek(forester_home.entrance_world(), FORESTER_RANGE, delta, true):
+				forester_home.admit_worker(self)
+		ForesterPhase.PLANT_GO:
+			if _plant_target == Vector3.INF:
+				_forester_phase = ForesterPhase.RETURN
+				_reset_seek()
+				return
+			if _seek(_plant_target, PLANT_RANGE, delta, true):
+				_face_toward(_plant_target)
+				_set_working(true)
+				_kneel_timer = PLANT_KNEEL_TIME
+				_forester_phase = ForesterPhase.KNEEL
+		ForesterPhase.KNEEL:
+			_face_toward(_plant_target)
+			_kneel_timer -= delta
+			if _kneel_timer <= 0.0:
+				_set_working(false)
+				forester_home.on_worker_planted(self)
+				_plant_target = Vector3.INF
+				_forester_phase = ForesterPhase.RETURN
+				_reset_seek()
+		ForesterPhase.RETURN:
+			if _seek(forester_home.entrance_world(), FORESTER_RANGE, delta, true):
+				forester_home.reabsorb_worker(self)
+
+
 # --- Task bookkeeping --------------------------------------------------------------------
 
 ## Releases all claims, drops carried wood as a pile and leaves the job.
@@ -609,6 +716,8 @@ func _interrupt_tasks() -> void:
 		job.leave(self)
 	if train_target != null and is_instance_valid(train_target):
 		train_target.remove_trainee(self)
+	if forester_home != null and is_instance_valid(forester_home):
+		forester_home.release_worker(self)
 	job = null
 	task = Task.NONE
 	task_cell = Vector2i(-1, -1)
@@ -618,6 +727,9 @@ func _interrupt_tasks() -> void:
 	train_target = null
 	train_slot_pos = Vector3.INF
 	train_reached_slot = false
+	forester_home = null
+	forester_inside = false
+	_plant_target = Vector3.INF
 	hop_visual = false
 	_loose_return_pos = Vector3.INF
 	_set_working(false)
@@ -733,6 +845,10 @@ func _anim_base() -> StringName:
 			return _carry_or(&"walk" if _has_path() else &"idle")
 		State.PRAY:
 			return &"idle" if _working else (&"walk" if _has_path() else &"idle")
+		State.FORESTER:
+			if _forester_phase == ForesterPhase.KNEEL:
+				return &"attack"   # kneel/plant placeholder (crouch action)
+			return &"walk" if _has_path() else &"idle"
 		_:
 			return super._anim_base()
 

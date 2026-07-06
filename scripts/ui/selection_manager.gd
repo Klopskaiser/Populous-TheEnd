@@ -465,6 +465,9 @@ func _dispatch_context_command(hit: Dictionary) -> bool:
 			if building is ReincarnationSite:
 				_tribe_commands.order_pray(selected, building)
 				return true
+			if building is Forester:
+				_tribe_commands.order_forester(selected, building)
+				return true
 			if building is TrainingBuilding:
 				_tribe_commands.order_train(building, selected)
 				return true

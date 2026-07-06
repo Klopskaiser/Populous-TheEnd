@@ -37,6 +37,7 @@ const HUT_SCENE: PackedScene = preload("res://scenes/buildings/hut.tscn")
 const WARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/warrior_camp.tscn")
 const FIREWARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/firewarrior_camp.tscn")
 const TEMPLE_SCENE: PackedScene = preload("res://scenes/buildings/temple.tscn")
+const FORESTER_SCENE: PackedScene = preload("res://scenes/buildings/forester.tscn")
 
 # --- Injected references (setup) --------------------------------------------
 var _tribes: Array[Tribe] = []
@@ -64,6 +65,10 @@ var _spell_ui: Dictionary = {}       # id -> {"button": Button, "pips": Array[Co
 var _follower_labels: Dictionary = {}  # kind -> Label
 var _idle_button: Button = null
 var _pause_menu: Control = null
+## Forester inmate panel (shown while a forester is selected): 4 slot buttons;
+## clicking an occupied slot sends that worker back out.
+var _forester_panel: PanelContainer = null
+var _forester_slot_buttons: Array[Button] = []
 ## Shaman portrait (below the minimap, Populous style): full live-animated
 ## figure + health bar; click centres the camera on her and selects ONLY her.
 var _portrait_sprite: AnimatedSprite2D = null
@@ -131,6 +136,8 @@ static func default_build_entries() -> Array[Dictionary]:
 			"icon": &"firewarrior_camp", "wood_cost": FirewarriorCamp.WOOD_COST, "enabled": true},
 		{"id": &"temple", "name": "Tempel", "scene": TEMPLE_SCENE,
 			"icon": &"temple", "wood_cost": Temple.WOOD_COST, "enabled": true},
+		{"id": &"forester", "name": "Försterei", "scene": FORESTER_SCENE,
+			"icon": &"forester", "wood_cost": Forester.WOOD_COST, "enabled": true},
 	]
 
 
@@ -216,6 +223,7 @@ func setup(p_tribes: Array[Tribe], p_player_id: int, p_unit_manager: UnitManager
 
 
 func _process(delta: float) -> void:
+	_refresh_forester_panel()   # responsive to selection changes (cheap: 4 buttons)
 	_follower_timer -= delta
 	if _follower_timer <= 0.0:
 		_follower_timer = FOLLOWER_INTERVAL
@@ -248,6 +256,7 @@ func _build_ui() -> void:
 	_build_tab_bar(root)
 	_build_header(root)
 	_build_tab_content(root)
+	_build_forester_panel(root)
 
 	var spacer: Control = Control.new()
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -494,6 +503,72 @@ func _build_followers_tab() -> Control:
 	_idle_button.pressed.connect(_on_select_idle)
 	vb.add_child(_idle_button)
 	return vb
+
+
+## Inmate panel for a selected forester: title + four slot buttons. Hidden until
+## a forester is the selected building (polled in _process). Clicking an occupied
+## slot sends that worker back out.
+func _build_forester_panel(root: Control) -> void:
+	_forester_panel = PanelContainer.new()
+	_forester_panel.name = "ForesterPanel"
+	_forester_panel.add_theme_stylebox_override("panel", UiTheme.inset_style())
+	_forester_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	_forester_panel.visible = false
+	root.add_child(_forester_panel)
+
+	var vb: VBoxContainer = VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 3)
+	_forester_panel.add_child(vb)
+
+	var title: Label = Label.new()
+	title.text = "Försterei — Arbeiter"
+	title.add_theme_color_override("font_color", UiTheme.GOLD_BRIGHT)
+	vb.add_child(title)
+
+	for i in range(Forester.WORKER_SLOTS):
+		var b: Button = Button.new()
+		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		UiTheme.style_button(b)
+		var idx: int = i
+		b.pressed.connect(func() -> void: _on_forester_eject(idx))
+		vb.add_child(b)
+		_forester_slot_buttons.append(b)
+
+
+## Shows/updates the forester inmate panel from the current building selection.
+func _refresh_forester_panel() -> void:
+	if _forester_panel == null:
+		return
+	var forester: Forester = null
+	if _selection != null:
+		var b: Building = _selection.selected_building
+		if b is Forester and is_instance_valid(b):
+			forester = b as Forester
+	if forester == null:
+		if _forester_panel.visible:
+			_forester_panel.visible = false
+		return
+	_forester_panel.visible = true
+	for i in range(_forester_slot_buttons.size()):
+		var btn: Button = _forester_slot_buttons[i]
+		var occupied: bool = i < forester.occupants.size() \
+			and is_instance_valid(forester.occupants[i])
+		if occupied:
+			btn.text = "Platz %d: Arbeiter  (rausschicken)" % (i + 1)
+			btn.disabled = false
+		else:
+			btn.text = "Platz %d: frei" % (i + 1)
+			btn.disabled = true
+
+
+func _on_forester_eject(index: int) -> void:
+	if _selection == null:
+		return
+	var b: Building = _selection.selected_building
+	if b is Forester and is_instance_valid(b):
+		(b as Forester).eject_worker(index)
+		_refresh_forester_panel()
 
 
 func _build_menu_panel(root: Control) -> void:

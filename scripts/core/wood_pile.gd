@@ -22,13 +22,47 @@ const LOG_PIXELS: Array[Vector2i] = [
 const C_LOG: Color = Color(0.55, 0.36, 0.2)
 const C_LOG_END: Color = Color(0.35, 0.22, 0.1)
 
+## How long a pile burns before it is consumed (fire spells / lava).
+const BURN_TIME: float = 1.5
+
 var amount: int = 0
+## Burn countdown (> 0 while alight); the WoodPileManager removes it at the end.
+var _burn_time: float = 0.0
 
 var _sprite: Sprite3D = null
 
 
 func space_left() -> int:
 	return MAX_AMOUNT - amount
+
+
+# --- Burning (fire spells / lava) ---------------------------------------------
+
+func is_burning() -> bool:
+	return _burn_time > 0.0
+
+
+## Sets the pile alight; it burns down and is then removed by the manager
+## (the wood is lost). Re-igniting refreshes nothing.
+func ignite() -> void:
+	if is_burning():
+		return
+	_burn_time = BURN_TIME
+
+
+## Advances the burn; returns true once the pile is spent. Driven by the
+## WoodPileManager tick.
+func burn_tick(delta: float) -> bool:
+	if _burn_time <= 0.0:
+		return false
+	_burn_time -= delta
+	if _sprite != null:
+		# Flicker fiery while burning down, shrinking away.
+		var flick: float = 0.6 + randf() * 0.4
+		_sprite.modulate = Color(1.0, 0.5 * flick, 0.1 * flick)
+		var t: float = clampf(_burn_time / BURN_TIME, 0.05, 1.0)
+		_sprite.scale = Vector3.ONE * t
+	return _burn_time <= 0.0
 
 
 func set_amount(value: int) -> void:

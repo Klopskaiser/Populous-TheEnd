@@ -2107,3 +2107,108 @@ zerplatzende Gebäude, Absinken-Flutung, KI castet die neuen Zauber).
 Zauber, Integritätsregeln, Lava-/Brandmechanik, Vulkan-Eruption,
 Erdbeben-Bruchkante. **Phase 7c abgeschlossen**, Checkbox in der Overview
 abgehakt.
+
+---
+
+## Phase 7d — Wirtschaft: Försterei, Setzlinge, Baumertrag 1/2/3/4, Feuer & Tornado
+
+**Gebaut:**
+- **Baum-Ertrag & Setzling-Stufe** (`scripts/core/tree_resource.gd`): fünf
+  Stufen statt vier. `MAX_STAGE 4`, `YIELDS [0,1,2,3,4]`,
+  `STAGE_SCALES [0.28,0.35,0.55,0.8,1.0]`. **Stufe 0 = Setzling** (0 Holz, bloßer
+  senkrechter Stock — Krone via `_crown.visible = stage >= 1` ausgeblendet), nicht
+  claimbar. Stufen 1–4 = die bisherigen vier Wachstumsstufen mit Ertrag 1/2/3/4.
+  Großer Baum (Stufe 4) = **4 Ernten**, `chop_time` 1,5 + 0,5·stage.
+  **Randomisiertes Wachstum:** `_next_growth_time()` = `GROWTH_TIME·(1±0,5)`
+  (Mittelwert unverändert 75 s); `grow_tick` wächst weiter genau eine Stufe je
+  Auslösung. Neu `ignite()`/`is_burning()`/`burn_tick(delta)->bool` (Brand ~1,8 s,
+  danach zerstört, kein Holz).
+- **TreeManager** (`scripts/core/tree_manager.gd`): `MAX_TREES 250 → 400`.
+  `_reproduce` überspringt Stufe-0-/brennende Eltern; `_sprout_near` spross jetzt
+  **Stufe 1** (Setzling bleibt der Försterei vorbehalten → Wildwirtschaft
+  unverändert). `tick` brennt Bäume ab (`burn_tick` → `_remove_tree`). Neue APIs:
+  `trees_in_area(center, radius)` (Chebyshev-Zählung), `can_plant_at(cell, spacing)`
+  (walkable + frei + Mindestabstand), `ignite_in_radius(pos, r) -> int`,
+  `destroy_in_radius(pos, r)`, `_remove_tree` (Dereg + free).
+- **Försterei** (`scripts/buildings/forester.gd` + `scenes/buildings/forester.tscn`,
+  `extends Building`): `display_name "Försterei"`, **20 Holz**, Footprint **3×3**,
+  HP 250, **4 Arbeiterplätze** (`WORKER_SLOTS`). `_tick_active`: **Mana-Upkeep
+  2/s je aktivem Arbeiter** (`tribe.consume_mana`; bei knappem Mana werden Plätze
+  von hinten inaktiv, `_active_workers`); **Pflanztempo** über Arbeitssekunden
+  (`PLANT_WORK_PER_TREE 60` → 4 Arbeiter = 1 Setzling/15 s), Deckel **30 Bäume**
+  im **11×11-Feld** (`PLANT_RADIUS 5`), dichtere Pflanzung `PLANT_SPACING 1`. Ein
+  Arbeiter wird zum Pflanzen dispatcht: `_dispatch_plant` → `begin_plant`.
+  Slot-API: `reserve_slot`/`admit_worker`/`on_worker_planted`/`reabsorb_worker`/
+  `release_worker`/`eject_worker`; `_on_disabled`/`destroy` geben alle Insassen
+  frei. Bäume via `unit_manager.tree_manager` (keine neue Injektion nötig).
+- **Brave-Förster-Flow** (`scripts/units/brave.gd`): neuer `Unit.State.FORESTER`
+  (ans Enum-Ende angehängt → keine Ordinal-Verschiebung). `order_forester`
+  (reserviert Slot, läuft zum Eingang), Phasen `JOIN → PLANT_GO → KNEEL → RETURN`
+  (`_tick_forester`): hineingehen (aus Welt entfernt via
+  `unit_manager.remove_from_world`, zählt weiter zur Bevölkerung), zum Pflanzort
+  laufen, **kurz knien** (`attack`-Anim als Platzhalter, 0,8 s), Setzling setzen,
+  zurücklaufen, wieder hineingehen. `enter_forester`/`begin_plant`/`leave_forester`;
+  Hooks in `_interrupt_tasks`/`_on_combat_interrupt`/`_anim_base`.
+- **Holzstapel brennen** (`scripts/core/wood_pile.gd`): `ignite()`/`is_burning()`/
+  `burn_tick` (~1,5 s, flackert, dann entfernt). **WoodPileManager**
+  (`scripts/core/wood_pile_manager.gd`): `_physics_process`→`tick(delta)` brennt
+  Stapel ab; `ignite_in_radius(pos,r)->int`, `piles_in_radius`, `remove_pile`.
+- **Feuerquellen zünden Bäume/Stapel:** `FireballBolt._explode` (Splash-Radius),
+  `LavaFlow._ignite_touching_units` (Segment-Kontaktradius), `LightningSpell.execute`
+  (Einschlag-Radius, gilt auch ohne getroffene Einheit/Gebäude als Erfolg, wenn
+  etwas brannte), `FirestormSpell` automatisch über seine `FireballBolt`s. Alle
+  über `unit_manager.tree_manager`/`unit_manager.wood_pile_manager` bzw.
+  `ctx.*` — kein neues Durchreichen nötig.
+- **Tornado** (`scripts/spells/tornado_vortex.gd`): `_shred_trees_and_scatter_piles`
+  (im Pickup-Takt): Bäume im Radius werden **zerstört** (`destroy_in_radius`);
+  Holzstapel werden **herumgeschleudert ohne Holzverlust** (`remove_pile` +
+  `deposit` mit vollem Betrag an einer Zelle jenseits des Trichters, dry-ground-
+  Retry via `_scatter_landing`).
+- **UI** (`scripts/ui/sidebar.gd`, `scripts/ui/ui_theme.gd`): Baumenü-Eintrag
+  „Försterei (20 Holz)"; neues `forester`-Icon (`_draw_seedling`). **Insassen-Panel**
+  `_forester_panel` (4 Slot-Buttons), erscheint bei Auswahl einer Försterei
+  (`_refresh_forester_panel` jeden Frame); Klick auf besetzten Slot →
+  `eject_worker`. Rechtsklick eigener Braves auf die Försterei →
+  `TribeCommands.order_forester` (Routing in `selection_manager._dispatch_context_command`).
+- **KI** (`scripts/ai/ai_controller.gd`): `_next_building_scene` baut nach Hütte +
+  erster Kaserne eine **Försterei**, wenn `_wood_thin_near_base()` (< 6 Bäume im
+  22-m-Umkreis des Basis-Ankers) und noch keine existiert — VOR der Expansion.
+  `_staff_foresters()` hält bis zu 2 Braves je Försterei besetzt (nie unter
+  Wirtschafts-Minimum).
+- **Balance** (`scripts/core/main.gd`): `SKIRMISH_BASE_TREES 16 → 12` (4er-Bäume
+  liefern mehr Holz).
+
+**Abweichungen/Entscheidungen:**
+- Mana-Kosten der Arbeiter = **Dauer-Upkeep 2/s je aktivem Arbeiter** (mit dem
+  Nutzer geklärt), nicht per gepflanztem Baum.
+- Feuerquellen greifen auf die Manager über die bereits vorhandene
+  `UnitManager`-Referenz (`tree_manager`/`wood_pile_manager`) zu bzw. beim Blitz
+  über `SpellContext` — der Plan hatte optional zusätzliches Durchreichen
+  vorgesehen, das war nicht nötig.
+- **Knie-Animation** ist ein Platzhalter (`attack`-Frames); eine echte Crouch-Anim
+  gibt es noch nicht (Phase 7e/8).
+- Natürliche Vermehrung sprießt als Stufe 1 statt 0 — so bleibt die Wildwirtschaft
+  identisch zu vorher; der Setzling ist rein der Försterei vorbehalten.
+
+**Erkenntnisse/Stolpersteine:**
+- Housed Braves (aus der Welt entfernt) dürfen im Test **nicht** aus einer festen
+  Liste getickt werden — die Test-Tickschleife iteriert `unit_manager.units`
+  (die Live-Registry), damit ein Brave nur tickt, während er tatsächlich in der
+  Welt ist (JOIN/Pflanzen), nicht während er „drin" sitzt.
+- `test_endless_building_scaling` musste eine Försterei in die „volle Basis"
+  aufnehmen: ohne Bäume um die (Test-)Basis will die KI jetzt korrekt zuerst eine
+  Försterei — die alte Erwartung „nichts zu bauen" galt nur ohne die neue Regel.
+- Randomisiertes Wachstum in `test_economy` perturbiert die globale RNG-Sequenz;
+  die Kampf-Tests in `test_unit_control` sind wegen unseeded `randf()` ohnehin
+  leicht flaky (bekannt) — der Baum-Wachstums-Test nutzt jetzt deterministische
+  2×-`GROWTH_TIME`-Schritte (überquert jedes randomisierte Intervall sicher).
+
+**Verifikation:** Testsuite **1033 grün** (neu: `tests/test_forester.gd`, 43 Checks —
+Setzling-Pflanzung, Mana-Upkeep/aktive Arbeiter, Rausschicken, Zerstörung/Beschädigung
+gibt Insassen frei, Gebiets-Deckel, dichtere Pflanzung, Baumbrand, Holzstapelbrand,
+Radius-Zündung, Tornado-Baumschaden + Holzstapel-Wurf ohne Verlust; `test_economy`
+auf 5 Stufen umgestellt). `--headless --quit` fehlerfrei; 12-s-Headless-Skirmish
+(`-- ai-player`) ohne Script-Fehler. **Manuelle Prüfung durch Nutzer: ausstehend**
+(Förster bauen, Braves zuweisen → Arbeiter tritt heraus/kniet/pflanzt/geht zurück,
+Insassen-Pips + Rausschicken, Mana sinkt; Feuer/Blitz/Lava entzündet Wald + Stapel;
+Tornado zerstört Bäume und schleudert Stapel mit vollem Holz weg).

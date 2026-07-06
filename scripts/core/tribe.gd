@@ -95,6 +95,19 @@ func charge_capacity_mana() -> float:
 	return total
 
 
+## Spends up to `amount` mana from the pool (forester worker upkeep, phase 7d);
+## returns how much was actually taken. Competes with the charge conversion —
+## running foresters slow charge build-up (their intended cost).
+func consume_mana(amount: float) -> float:
+	if amount <= 0.0:
+		return 0.0
+	var take: float = minf(amount, mana)
+	mana -= take
+	if take > 0.0:
+		_emit_mana()
+	return take
+
+
 ## One-time mana injection (e.g. the shaman-kill bonus), converted into spell
 ## charges immediately through the regular charging path.
 func grant_bonus_mana(amount: float) -> void:

@@ -12,6 +12,7 @@ const HUT_SCENE: PackedScene = preload("res://scenes/buildings/hut.tscn")
 const WARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/warrior_camp.tscn")
 const FIREWARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/firewarrior_camp.tscn")
 const TEMPLE_SCENE: PackedScene = preload("res://scenes/buildings/temple.tscn")
+const FORESTER_SCENE: PackedScene = preload("res://scenes/buildings/forester.tscn")
 
 const TICK_INTERVAL: float = 1.0
 ## Braves kept praying at the reincarnation site (mana income).
@@ -33,6 +34,11 @@ const HUTS_PER_EXTRA_CAMP: int = 2
 ## the AI expands toward the nearest wood (bigger maps).
 const PLOT_TREE_RADIUS: float = 22.0
 const MIN_TREES_NEAR_PLOT: int = 3
+## Fewer than this many trees within PLOT_TREE_RADIUS of the base anchor and no
+## forester yet -> build a forester (sustainable wood) before expanding away.
+const FORESTER_MIN_TREES: int = 6
+## Braves the AI keeps working in each of its foresters.
+const FORESTER_WORKERS: int = 2
 const MAX_PLOT_CANDIDATES: int = 40
 ## Idle braves sent along to a remote expansion site (the BuildingManager
 ## only recruits workers within ~30 m of a site).
@@ -150,6 +156,7 @@ func tick_ai() -> void:
 	# full base, cast spells whenever enemies are near the shaman.
 	_keep_praying()
 	_tick_build(snap)
+	_staff_foresters()
 	_cast_spells()
 	# An attack on the own village takes priority over everything else.
 	var threat: Dictionary = _detect_threat()
@@ -215,11 +222,14 @@ func _tick_build(snap: Dictionary) -> void:
 ## HUTS_PER_EXTRA_CAMP additional huts.
 func _next_building_scene(_snap: Dictionary) -> PackedScene:
 	var huts: int = 0
+	var foresters: int = 0
 	var camps: Dictionary = {&"warrior_camp": 0, &"firewarrior_camp": 0, &"temple": 0}
 	for building in tribe.buildings:
 		if not is_instance_valid(building) or building.health <= 0:
 			continue
-		if building is Hut:
+		if building is Forester:
+			foresters += 1
+		elif building is Hut:
 			huts += 1
 		elif building is WarriorCamp:
 			camps[&"warrior_camp"] += 1
@@ -233,6 +243,10 @@ func _next_building_scene(_snap: Dictionary) -> PackedScene:
 		return HUT_SCENE
 	if camps[&"warrior_camp"] < 1:
 		return WARRIOR_CAMP_SCENE
+	# Wood around the base is running thin and there is no forester yet: build
+	# one (sustainable wood) BEFORE expanding to a distant grove.
+	if foresters < 1 and _wood_thin_near_base():
+		return FORESTER_SCENE
 	if huts < AIState.TARGET_HUTS:
 		return HUT_SCENE
 	if camps[&"firewarrior_camp"] < 1:
@@ -701,6 +715,43 @@ func _find_supplied_plot(anchor: Vector2i, footprint: Vector2i) -> Vector2i:
 			if checked >= MAX_PLOT_CANDIDATES:
 				return Vector2i(-1, -1)
 	return Vector2i(-1, -1)
+
+
+## True when fewer than FORESTER_MIN_TREES trees stand within PLOT_TREE_RADIUS
+## of the base anchor (no tree data -> false, so headless AI tests are stable).
+func _wood_thin_near_base() -> bool:
+	if tree_manager == null or nav_grid == null:
+		return false
+	var pos: Vector3 = nav_grid.cell_to_world(base_anchor)
+	var count: int = 0
+	for tree in tree_manager.trees:
+		if is_instance_valid(tree) and tree.position.distance_to(pos) <= PLOT_TREE_RADIUS:
+			count += 1
+	return count < FORESTER_MIN_TREES
+
+
+## Keeps up to FORESTER_WORKERS idle braves working in each usable forester
+## (never below the minimum economy crew). The forester ignores braves once
+## its slots are full.
+func _staff_foresters() -> void:
+	var foresters: Array[Forester] = []
+	for building in tribe.buildings:
+		if building is Forester and is_instance_valid(building) and building.is_usable():
+			foresters.append(building)
+	if foresters.is_empty():
+		return
+	var brave_count: int = 0
+	for unit in tribe.units:
+		if is_instance_valid(unit) and unit is Brave and unit.state != Unit.State.DEAD:
+			brave_count += 1
+	if brave_count <= AIState.MIN_ECONOMY_BRAVES:
+		return
+	var idle: Array[Unit] = _idle_braves()
+	var i: int = 0
+	for f in foresters:
+		while i < idle.size() and f.occupants.size() < FORESTER_WORKERS and f.has_free_slot():
+			commands.order_forester([idle[i]] as Array[Unit], f)
+			i += 1
 
 
 func _trees_near_cell(cell: Vector2i) -> int:
