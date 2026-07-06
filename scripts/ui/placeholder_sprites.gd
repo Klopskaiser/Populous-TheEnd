@@ -8,13 +8,16 @@ class_name PlaceholderSprites
 ## Image/ImageTexture work with the dummy RenderingServer, but core logic
 ## tests must not depend on texture contents).
 ##
-## Directional views: every animation exists in four variants named
-## "<anim>_<view>" with view in front/back/left/right (e.g. "walk_back").
+## Directional views: every animation exists in eight variants named
+## "<anim>_<view>" with view in front/back/right/left plus the four diagonals
+## front_right/front_left/back_right/back_left (e.g. "walk_back_right").
 ## The Unit picks the view from its facing relative to the camera. To replace
 ## the placeholders with real art later, provide a SpriteFrames resource with
 ## the same animation names — nothing else has to change.
 ## Placeholder telltales: front = two eyes, back = hair patch, side = one eye
-## (left is the mirrored right view).
+## (left is the mirrored right view); the diagonals are 3/4 profiles — the two
+## front diagonals show both eyes plus a back-of-head hair sliver, the two back
+## diagonals show the hair patch plus one near-cheek eye peeking under it.
 
 const W: int = 16
 const H: int = 24
@@ -44,7 +47,13 @@ const C_BELT: Color = Color(0.5, 0.44, 0.55)     # shaman belt/trim
 ## Casters get the "cast" animation (see CLAUDE.md par. 3).
 const CASTER_KINDS: Array[StringName] = [&"shaman", &"preacher"]
 
-const VIEWS: Array[StringName] = [&"front", &"back", &"right", &"left"]
+## Order MUST match Unit.view_index return values (0 front .. 7 back_left).
+const VIEWS: Array[StringName] = [
+	&"front", &"back", &"right", &"left",
+	&"front_right", &"front_left", &"back_right", &"back_left"]
+
+## The three views drawn as the mirror of their right-side counterpart.
+const MIRRORED_VIEWS: Array[StringName] = [&"left", &"front_left", &"back_left"]
 
 
 ## One shared SpriteFrames per kind — building the frames is expensive and
@@ -70,7 +79,7 @@ static func _anims_for(kind: StringName) -> Array[StringName]:
 
 
 ## Builds the SpriteFrames (idle/walk/attack/strikes, plus cast for casters),
-## each in all four directional views.
+## each in all eight directional views.
 static func make_frames(unit_kind: StringName) -> SpriteFrames:
 	if _cache.has(unit_kind):
 		return _cache[unit_kind]
@@ -90,8 +99,9 @@ static func make_frames(unit_kind: StringName) -> SpriteFrames:
 ##   texture:  ImageTexture with all frames in a grid
 ##   uvs:      PackedVector2Array — UV offset per global frame index
 ##   frame_uv: Vector2 — UV size of one frame
-##   table:    kind -> anim base -> Array[4 views] of [start, count, fps]
-##             (view order matches VIEWS: front, back, right, left)
+##   table:    kind -> anim base -> Array[8 views] of [start, count, fps]
+##             (view order matches VIEWS: front, back, right, left, then the
+##             four diagonals front_right/front_left/back_right/back_left)
 static func build_atlas(kinds: Array[StringName]) -> Dictionary:
 	var images: Array[Image] = []
 	var table: Dictionary = {}
@@ -153,7 +163,15 @@ static func _anim_fps(anim: StringName) -> float:
 ## silhouette accents (shield/sword, helmet/fireballs, hood/gown) are drawn on
 ## top of the shared body so each unit type is recognisable.
 static func _build_frames(kind: StringName, anim: StringName, view: StringName) -> Array[Image]:
-	var paint_view: StringName = &"right" if view == &"left" else view
+	# Left-side views are painted as their right-side twin, then mirrored below.
+	var paint_view: StringName = view
+	match view:
+		&"left":
+			paint_view = &"right"
+		&"front_left":
+			paint_view = &"front_right"
+		&"back_left":
+			paint_view = &"back_right"
 	var images: Array[Image] = []
 	## Upper-body vertical bob per frame (head/arms move; legs are fixed). The
 	## kind accents (helmet/hood/fireballs) follow this so they move WITH the
@@ -222,7 +240,7 @@ static func _build_frames(kind: StringName, anim: StringName, view: StringName) 
 	# Mirror the plain body first, THEN paint the accents in the REAL view — the
 	# side views are not just mirror images (a warrior shows the shield on one
 	# side and the sword on the other).
-	if view == &"left":
+	if view in MIRRORED_VIEWS:
 		for img in images:
 			img.flip_x()
 	# No accents on the corpse, the sitting pose or the tumbling ball: the
@@ -237,15 +255,23 @@ static func _build_frames(kind: StringName, anim: StringName, view: StringName) 
 ## view (after the mirror) and shifted by the frame's upper-body bob so they
 ## animate with the unit. Only the brave stays plain.
 static func _decorate(img: Image, kind: StringName, view: StringName, bob: int) -> void:
+	# Diagonals reuse their near side's accents (the image is already mirrored
+	# for left-side views), so the decorators only ever see the cardinal views.
+	var deco_view: StringName = view
+	match view:
+		&"front_right", &"back_right":
+			deco_view = &"right"
+		&"front_left", &"back_left":
+			deco_view = &"left"
 	match kind:
 		&"warrior":
-			_decorate_warrior(img, view, bob)
+			_decorate_warrior(img, deco_view, bob)
 		&"firewarrior":
-			_decorate_firewarrior(img, view, bob)
+			_decorate_firewarrior(img, deco_view, bob)
 		&"preacher":
-			_decorate_preacher(img, view, bob)
+			_decorate_preacher(img, deco_view, bob)
 		&"shaman":
-			_decorate_shaman(img, view, bob)
+			_decorate_shaman(img, deco_view, bob)
 		_:
 			pass
 
@@ -347,19 +373,37 @@ static func _new_image() -> Image:
 
 static func _draw_head(img: Image, view: StringName, bob: int) -> void:
 	img.fill_rect(Rect2i(5, 1 + bob, 6, 6), C_HEAD)
+	_paint_face(img, view, 1 + bob)
+
+
+## Draws the eyes / hair patch that tell a head's facing, relative to the head's
+## top row (so the sitting pose can reuse it at a lower position). Left-side
+## views never reach here — they are painted as their right-side twin and then
+## mirrored. Diagonals: front_* = both eyes shifted toward the near side + a
+## hair sliver on the far (back) side; back_* = hair patch + one near-cheek eye.
+static func _paint_face(img: Image, view: StringName, top: int) -> void:
 	match view:
 		&"front":
-			img.fill_rect(Rect2i(6, 3 + bob, 1, 1), C_EYE)
-			img.fill_rect(Rect2i(9, 3 + bob, 1, 1), C_EYE)
+			img.fill_rect(Rect2i(6, top + 2, 1, 1), C_EYE)
+			img.fill_rect(Rect2i(9, top + 2, 1, 1), C_EYE)
 		&"back":
-			img.fill_rect(Rect2i(5, 1 + bob, 6, 2), C_HAIR)
+			img.fill_rect(Rect2i(5, top, 6, 2), C_HAIR)
 		&"right":
-			img.fill_rect(Rect2i(9, 3 + bob, 1, 1), C_EYE)
+			img.fill_rect(Rect2i(9, top + 2, 1, 1), C_EYE)
+		&"front_right":
+			img.fill_rect(Rect2i(5, top, 2, 3), C_HAIR)      # back-left of the head
+			img.fill_rect(Rect2i(7, top + 2, 1, 1), C_EYE)
+			img.fill_rect(Rect2i(10, top + 2, 1, 1), C_EYE)  # near eye at the front edge
+		&"back_right":
+			img.fill_rect(Rect2i(5, top, 6, 2), C_HAIR)      # hair over the head
+			img.fill_rect(Rect2i(10, top + 2, 1, 1), C_EYE)  # near cheek peeking
 
 
 static func _draw_torso(img: Image, view: StringName, bob: int) -> void:
 	if view == &"right":
 		img.fill_rect(Rect2i(5, 7 + bob, 6, 9), C_BODY)  # narrower in profile
+	elif view == &"front_right" or view == &"back_right":
+		img.fill_rect(Rect2i(5, 7 + bob, 7, 9), C_BODY)  # 3/4 turn, between profile and frontal
 	else:
 		img.fill_rect(Rect2i(4, 7 + bob, 8, 9), C_BODY)
 
@@ -367,6 +411,9 @@ static func _draw_torso(img: Image, view: StringName, bob: int) -> void:
 static func _draw_arms_side(img: Image, view: StringName, bob: int) -> void:
 	if view == &"right":
 		img.fill_rect(Rect2i(7, 8 + bob, 2, 6), C_LIMB)  # only the near arm visible
+	elif view == &"front_right" or view == &"back_right":
+		img.fill_rect(Rect2i(4, 8 + bob, 1, 6), C_LIMB)   # far arm, mostly hidden
+		img.fill_rect(Rect2i(11, 8 + bob, 2, 6), C_LIMB)  # near arm forward of the body
 	else:
 		img.fill_rect(Rect2i(2, 8 + bob, 2, 6), C_LIMB)
 		img.fill_rect(Rect2i(12, 8 + bob, 2, 6), C_LIMB)
@@ -474,7 +521,7 @@ static func _draw_carry_arms_and_log(img: Image, view: StringName, bob: int) -> 
 		img.fill_rect(Rect2i(11, 9 + bob, 5, 4), C_WOOD)         # log jutting forward
 		img.fill_rect(Rect2i(11, 9 + bob, 1, 4), C_WOOD_END)
 		img.fill_rect(Rect2i(15, 9 + bob, 1, 4), C_WOOD_END)
-	elif view == &"back":
+	elif view == &"back" or view == &"back_right":
 		# Seen from behind, the wood is held in front and out of sight — just
 		# slightly shorter side arms (he is holding something).
 		img.fill_rect(Rect2i(2, 8 + bob, 2, 5), C_LIMB)
@@ -596,17 +643,12 @@ static func _frame_sit(view: StringName, bob: int) -> Image:
 	var img: Image = _new_image()
 	if view == &"right":
 		img.fill_rect(Rect2i(5, 13 + bob, 6, 7), C_BODY)   # lowered torso
+	elif view == &"front_right" or view == &"back_right":
+		img.fill_rect(Rect2i(5, 13 + bob, 7, 7), C_BODY)   # 3/4 turn
 	else:
 		img.fill_rect(Rect2i(4, 13 + bob, 8, 7), C_BODY)
 	img.fill_rect(Rect2i(5, 7 + bob, 6, 6), C_HEAD)        # head sits lower
-	match view:
-		&"front":
-			img.fill_rect(Rect2i(6, 9 + bob, 1, 1), C_EYE)
-			img.fill_rect(Rect2i(9, 9 + bob, 1, 1), C_EYE)
-		&"back":
-			img.fill_rect(Rect2i(5, 7 + bob, 6, 2), C_HAIR)
-		&"right":
-			img.fill_rect(Rect2i(9, 9 + bob, 1, 1), C_EYE)
+	_paint_face(img, view, 7 + bob)
 	img.fill_rect(Rect2i(3, 20, 10, 3), C_LIMB)            # folded legs
 	return img
 

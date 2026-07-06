@@ -1513,25 +1513,31 @@ func _update_animation() -> void:
 	_apply_animation(true)
 
 
-## Which of the four sprite views matches a facing direction, given the
+## Maps a 45-degree sector (0 = along camera forward = back view, +1 per 45 deg
+## clockwise toward camera-right) to the matching PlaceholderSprites.VIEWS index.
+## Index 0..3 stay front/back/right/left for compatibility; 4..7 are the
+## diagonals. Lookup table = pure arithmetic on the hot path (no branch cascade).
+const SECTOR_TO_VIEW: Array[int] = [1, 6, 2, 4, 0, 5, 3, 7]
+
+## Which of the eight sprite views matches a facing direction, given the
 ## camera's forward and right vectors. Returns an index into
-## PlaceholderSprites.VIEWS (0 = front, 1 = back, 2 = right, 3 = left).
-## Static + camera-free so it is headless-testable. Boundary (45 deg)
-## prefers front/back.
+## PlaceholderSprites.VIEWS (0 = front, 1 = back, 2 = right, 3 = left,
+## 4 = front_right, 5 = front_left, 6 = back_right, 7 = back_left).
+## Static + camera-free so it is headless-testable. Runs per unit per frame:
+## the sector comes from a single atan2 (22.5 deg boundaries), not a cascade.
 static func view_index(p_facing: Vector3, cam_forward: Vector3, cam_right: Vector3) -> int:
 	var flat_facing: Vector2 = Vector2(p_facing.x, p_facing.z)
 	var flat_forward: Vector2 = Vector2(cam_forward.x, cam_forward.z)
 	if flat_facing.length_squared() < 0.000001 or flat_forward.length_squared() < 0.000001:
 		return 0
-	flat_facing = flat_facing.normalized()
+	# Normalise the camera axes (the flattened forward loses length when the
+	# camera is pitched); the facing magnitude cancels inside atan2.
 	flat_forward = flat_forward.normalized()
-	var dot: float = flat_facing.dot(flat_forward)
-	if dot >= 0.7071:
-		return 1    # walking away from the camera -> back
-	if dot <= -0.7071:
-		return 0    # walking toward the camera -> front
-	var flat_right: Vector2 = Vector2(cam_right.x, cam_right.z)
-	return 2 if flat_facing.dot(flat_right) > 0.0 else 3
+	var flat_right: Vector2 = Vector2(cam_right.x, cam_right.z).normalized()
+	var dot_forward: float = flat_facing.dot(flat_forward)
+	var dot_right: float = flat_facing.dot(flat_right)
+	var sector: int = roundi(atan2(dot_right, dot_forward) / (PI / 4.0))
+	return SECTOR_TO_VIEW[(sector + 8) % 8]
 
 
 ## StringName variant of view_index (kept for tests/readability).

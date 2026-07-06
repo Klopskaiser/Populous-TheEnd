@@ -576,7 +576,7 @@ func test_strike_anims_in_atlas() -> void:
 		check(table[kind].has(&"sit"), "%s has a sit (pacified) animation" % kind)
 		check(table[kind].has(&"roll"), "%s has a roll (tumble) animation" % kind)
 	var views: Array = table[&"brave"][&"punch"]
-	check(views.size() == 4, "punch exists in all four views")
+	check(views.size() == 8, "punch exists in all eight views")
 	check(int(views[0][1]) == 4, "punch alternates both fists (4 frames)")
 
 

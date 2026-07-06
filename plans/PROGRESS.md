@@ -2295,3 +2295,72 @@ spawnt jetzt Debris (`_spawn_debris`) statt Stapel zu teleportieren; neue
 `TreeManager.uproot_in_radius` (entfernt Bäume, liefert Position + Holz). Tests:
 `test_tornado_whirls_trees_and_piles`, `test_tornado_debris_flight` (+ Setzling)
 in `test_forester.gd`. **1060 grün**, Ladecheck fehlerfrei.
+
+---
+
+## Phase 7e — 8 Sprite-Blickrichtungen (Diagonalen)
+
+**Gebaut:**
+- `scripts/units/unit.gd` — `view_index` von 4 auf **8 Sektoren** umgestellt:
+  ein `atan2(dot_right, dot_forward)` liefert den Winkel, `roundi(a / (PI/4))`
+  den 45°-Sektor (22,5°-Grenzen), eine Klassen-Konstante
+  `SECTOR_TO_VIEW = [1,6,2,4,0,5,3,7]` mappt den Sektor auf den View-Index —
+  **reine Arithmetik, keine Verzweigungskaskade** (läuft pro Einheit pro Frame,
+  Hot-Path-Regel 7b). Rückgabe **0–7**: 0 front, 1 back, 2 right, 3 left
+  (Kompatibilität), 4 front_right, 5 front_left, 6 back_right, 7 back_left.
+  Die flach projizierten Kamera-Achsen werden normalisiert (der geneigte
+  Forward-Vektor verliert beim Abflachen Länge); die Facing-Magnitude kürzt sich
+  in `atan2`. `view_suffix`-Wrapper unverändert.
+- `scripts/ui/placeholder_sprites.gd` — `VIEWS` auf 8 Einträge erweitert (Reihen-
+  folge = `view_index`-Rückgabe), neue Konstante `MIRRORED_VIEWS`
+  (`left`/`front_left`/`back_left` = gespiegelte Rechts-Zwillinge).
+  - **Diagonal-Frames prozedural:** Links-Diagonalen werden als ihr
+    Rechts-Zwilling gezeichnet und dann `flip_x`. Die Painter sind
+    diagonal-fähig: `_draw_torso`/`_draw_arms_side` zeichnen für `front_right`/
+    `back_right` eine **3/4-Silhouette** (7 px breiter Rumpf, prominenter
+    Nah-Arm + schmaler Fern-Arm) zwischen Profil und Frontal.
+  - **Kopf-Tells** in neuer Hilfsfunktion `_paint_face(img, view, top)` (von
+    `_draw_head` und `_frame_sit` gemeinsam genutzt, relativ zur Kopf-Oberkante,
+    damit die Sitz-Pose sie tiefer wiederverwenden kann): `front_*` = beide Augen
+    zur Nahseite versetzt + Haarsträhne an der abgewandten (hinteren) Kopfseite;
+    `back_*` = Haaransatz + **ein** Nah-Wangen-Auge, das unter dem Haar
+    hervorlugt.
+  - **Dekorationen:** `_decorate` normalisiert Diagonalen auf ihre Nahseite
+    (`front_right`/`back_right` → `right`, `front_left`/`back_left` → `left`),
+    da das Bild für Links-Views bereits gespiegelt ist — Krieger zeigt in der
+    Diagonale das Nahseiten-Accessoire (Schwert rechts / Schild links),
+    Feuerkrieger einen Nahhand-Feuerball, Prediger/Schamanin ihre Profil-Deko.
+    `back_right`-Trage-Pose versteckt das Holz (wie `back`).
+  - Nicht-diagonalfähige Sonderposen (`dead`/`roll`) sind view-agnostisch;
+    `sit` ist über `_paint_face` jetzt diagonal-fähig. Action-Frames
+    (attack/jump/punch/kick/shove/throw/cast) verzweigen weiter nur auf `right`
+    → Diagonalen laufen in ihren Frontal-Zweig, kombiniert mit diagonalem
+    Rumpf/Kopf/Deko (bewusst simpel; echte Sprites ersetzen später dieselben
+    Anim-Namen).
+- Atlas/`build_atlas`/`make_frames` unverändert im Aufbau — sie iterieren
+  `for view in VIEWS` und liefern damit automatisch **8** View-Einträge je Anim;
+  `UnitRenderer` indexiert `views[view]` mit 0–7 (kein Codeänderung, Atlas ~2×).
+
+**Tests:**
+- `tests/test_unit_logic.gd`: `test_view_index_diagonals` (4 Diagonal-Headings
+  → korrekte Views, Kardinal-Indizes bleiben 0–3, `SECTOR_TO_VIEW`/`VIEWS`
+  haben 8 Einträge), `test_view_index_sector_boundaries` (Sweep über alle 8
+  Sektorzentren via `fwd*cos+right*sin`, plus gedrehte Kamera). Bestehende
+  4-Richtungs-Tests (`test_view_suffix_directions`) laufen unverändert weiter.
+- `tests/test_combat.gd`: „punch exists in all **eight** views" (war 4).
+
+**Erkenntnisse:**
+- Der 8-Sektor-Lookup ersetzt die 4-fach-Schwellenkaskade durch eine
+  Konstanten-Tabelle → gleiche/geringere Hot-Path-Kosten (1× `atan2` + 2×
+  `normalized`, wie zuvor die 2 Normalisierungen der 4-Wege-Variante).
+- Weil die gesamte Atlas-Tabelle über `VIEWS` iteriert, genügt für 8 Views das
+  Erweitern der Konstante + diagonalfähige Painter; Renderer und Tabellenformat
+  bleiben unangetastet.
+
+**Verifikation:** Testsuite grün (**1079 Tests, 0 Fehler**),
+`--headless --quit` fehlerfrei (lädt den ~2× größeren Atlas ohne Fehler).
+**Manuelle Optik-Prüfung ausstehend** (durch Nutzer): Kamera per Q/E um
+stehende/laufende Einheiten aller Typen drehen → 8 klar unterscheidbare
+Ansichten, kein Flackern an den 22,5°-Sektorgrenzen, kein Frame-Neustart beim
+Ansichtswechsel; F9-Stresstest → keine Perf-Regression.
+

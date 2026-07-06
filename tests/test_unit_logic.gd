@@ -174,6 +174,58 @@ func test_view_suffix_directions() -> void:
 		"rotated camera: same heading -> back view")
 
 
+func test_view_index_diagonals() -> void:
+	# Camera looks north (-Z), its right vector points east (+X).
+	var fwd: Vector3 = Vector3(0, 0, -1)
+	var right: Vector3 = Vector3(1, 0, 0)
+	var s2: float = sqrt(0.5)
+	# The four diagonal headings sit exactly between their two cardinals.
+	check(Unit.view_suffix(Vector3(s2, 0, s2), fwd, right) == &"front_right",
+		"heading front+right -> front_right view")
+	check(Unit.view_suffix(Vector3(-s2, 0, s2), fwd, right) == &"front_left",
+		"heading front+left -> front_left view")
+	check(Unit.view_suffix(Vector3(s2, 0, -s2), fwd, right) == &"back_right",
+		"heading back+right -> back_right view")
+	check(Unit.view_suffix(Vector3(-s2, 0, -s2), fwd, right) == &"back_left",
+		"heading back+left -> back_left view")
+	# Cardinal indices are unchanged (0..3), diagonals are 4..7.
+	check(Unit.view_index(Vector3(0, 0, 1), fwd, right) == 0, "front index stays 0")
+	check(Unit.view_index(Vector3(0, 0, -1), fwd, right) == 1, "back index stays 1")
+	check(Unit.view_index(Vector3(1, 0, 0), fwd, right) == 2, "right index stays 2")
+	check(Unit.view_index(Vector3(-1, 0, 0), fwd, right) == 3, "left index stays 3")
+	# The table and VIEWS both hold eight views.
+	check(Unit.SECTOR_TO_VIEW.size() == 8, "sector table has 8 entries")
+	check(PlaceholderSprites.VIEWS.size() == 8, "VIEWS has 8 entries")
+
+
+func test_view_index_sector_boundaries() -> void:
+	# 22.5-degree sector boundaries: just inside a diagonal sector picks the
+	# diagonal, just past the boundary toward a cardinal picks the cardinal.
+	var fwd: Vector3 = Vector3(0, 0, -1)
+	var right: Vector3 = Vector3(1, 0, 0)
+	# Front (screen -Z here is "away"; +Z is toward camera = front at angle pi).
+	# Sweep the heading angle around and confirm every 45-deg centre resolves to
+	# the expected view, and that a small nudge past 22.5 deg flips the view.
+	var centres := {
+		0.0: &"back", 45.0: &"back_right", 90.0: &"right", 135.0: &"front_right",
+		180.0: &"front", 225.0: &"front_left", 270.0: &"left", 315.0: &"back_left"}
+	for deg in centres:
+		var a: float = deg_to_rad(deg)
+		# angle 0 = along camera forward (away). facing = forward*cos + right*sin.
+		var facing: Vector3 = fwd * cos(a) + right * sin(a)
+		check(Unit.view_suffix(facing, fwd, right) == centres[deg],
+			"sector centre %d deg -> %s" % [int(deg), centres[deg]])
+
+	# Rotated camera (looking east): a diagonal heading still maps correctly.
+	var fwd_e: Vector3 = Vector3(1, 0, 0)
+	var right_e: Vector3 = Vector3(0, 0, 1)
+	var s2: float = sqrt(0.5)
+	# Heading north-east, camera looking east: to the screen this is up-left of
+	# straight-away -> back_left.
+	check(Unit.view_suffix(Vector3(s2, 0, -s2), fwd_e, right_e) == &"back_left",
+		"rotated camera: NE heading -> back_left view")
+
+
 func test_facing_follows_movement() -> void:
 	var td: TerrainData = _flat_terrain()
 	var unit: Unit = _make_unit(td)
