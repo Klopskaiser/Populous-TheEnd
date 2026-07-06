@@ -411,12 +411,14 @@ static func _paint_face(img: Image, view: StringName, top: int) -> void:
 		&"right":
 			img.fill_rect(Rect2i(9, top + 2, 1, 1), C_EYE)
 		&"front_right":
-			img.fill_rect(Rect2i(5, top, 2, 3), C_HAIR)      # back-left of the head
-			img.fill_rect(Rect2i(7, top + 2, 1, 1), C_EYE)
-			img.fill_rect(Rect2i(10, top + 2, 1, 1), C_EYE)  # near eye at the front edge
+			# Eyes stay at x6/x9 (clear of the preacher's hood cheeks at x4-5 /
+			# x10-11), the turn is told by the hair patch on the far-left edge.
+			img.fill_rect(Rect2i(5, top, 2, 2), C_HAIR)      # back-left of the head, above the far eye
+			img.fill_rect(Rect2i(6, top + 2, 1, 1), C_EYE)   # far eye
+			img.fill_rect(Rect2i(9, top + 2, 1, 1), C_EYE)   # near eye toward the viewer's right
 		&"back_right":
 			img.fill_rect(Rect2i(5, top, 6, 2), C_HAIR)      # hair over the head
-			img.fill_rect(Rect2i(10, top + 2, 1, 1), C_EYE)  # near cheek peeking
+			img.fill_rect(Rect2i(9, top + 2, 1, 1), C_EYE)   # near cheek peeking under the hair
 
 
 static func _draw_torso(img: Image, view: StringName, bob: int) -> void:

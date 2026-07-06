@@ -2376,3 +2376,11 @@ gemeinsam auf die Links-Diagonalen mappt — die Kardinal-Seitenansichten bleibe
 wie bisher (spiegeln zuerst, dekorieren dann in der realen View). Tests weiter
 **1079 grün**, Ladecheck fehlerfrei. Erneute manuelle Optik-Prüfung ausstehend.
 
+**Korrektur 2 (Nutzertest — Prediger-Auge in den Front-Diagonalen verkehrt):**
+Bei `front_right` lag das **nahe** Auge auf x10 — genau unter der rechten
+Kapuzenwange (x10–11) und damit verdeckt; sichtbar blieb nur das **ferne** Auge
+(x7), das Gesicht wirkte falsch gedreht. `_paint_face` legt die Diagonal-Augen
+jetzt auf x6/x9 (frei von den Kapuzenwangen x4–5 / x10–11); die Drehung wird
+über den verkürzten Haaransatz an der Fernkante erzählt. `back_right`-Peek-Auge
+analog von x10 → x9. Tests **1079 grün**, Ladecheck fehlerfrei.
+
