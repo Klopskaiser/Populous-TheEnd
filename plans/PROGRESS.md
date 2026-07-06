@@ -1913,3 +1913,104 @@ ungebremst ins Meer/über den Rand. Fixes:
   Laufende werden nicht geprunt + volle Gruppe reserviert, Deserteur
   fliegt per Ziel-Distanz, gelandete Formation behält Gruppe und bewegt
   sich nicht mehr). Ladecheck + KI-Sim unverändert sauber.
+
+---
+
+## Phase 7c — Neue Zauber: Erdbeben, Vulkan, Feuerregen, Ebene, Absinken (umgesetzt)
+
+Plan: [07c_new_spells.md](07c_new_spells.md) (vor der Umsetzung um Ebene/
+Absinken + verbindliche Ladungszahlen erweitert). Zauberleiste jetzt 10 Slots.
+
+**Terrain-Integritätsregeln (`spell_context.gd`, gilt für ALLE Terrain-Zauber):**
+- `SpellContext.apply_terrain_change(rect)` ruft nach dem NavGrid-Update
+  `check_terrain_integrity(rect)` auf (läuft damit bei jedem Morph-Schritt):
+  - **(a) Fundament-Bruch:** Höhenspanne unter dem Footprint >
+    `FOUNDATION_BREAK_DIFF` (1,2 m) → `Building.shatter()` (sofortige
+    Zerstörung, Modell verschwindet, `BuildingDebris`-Trümmer fliegen in
+    Parabeln davon — neue Entität über die Projektil-Liste).
+  - **(b) Überflutung:** ≥ `FLOOD_FRACTION` (30 %) der Footprint-Zellen unter
+    `SEA_LEVEL` → `Building.slide_into_water(dir)` (Wrack rutscht seitlich
+    Richtung tiefster Ecke und versinkt; `SLIDE_SPEED` im Sink-`_process`).
+  - **(c) Ertrinken:** Einheiten (außer THROWN — deren Landung prüft selbst)
+    auf Boden ≤ `SEA_LEVEL + 0,05` → neues öffentliches `Unit.drown()`
+    (auch von `_land_from_throw` genutzt).
+  - **Dokumentierte Auslegung: Terrain-Gewalt ist stammesblind** — eigene
+    Gebäude/Anhänger sind genauso gefährdet (anders als die "nur Feinde"-
+    Doktrin der direkten Schadenszauber).
+- **`TerrainMorph` (neu, `terrain_morph.gd`) ersetzt `LandbridgeMorph`:**
+  generalisierter gradueller Morph auf eine Ziel-Höhenkarte
+  (`{indices, targets, rect}`), Dauer pro Zauber; Snap von Einheiten/Bäumen/
+  Stapeln/Gebäuden unverändert. Landbrücke nutzt ihn mit 3 s.
+- `UnitManager._tick_projectiles` als Index-Schleife: Projektile dürfen beim
+  Ticken NEUE Projektile registrieren (Feuerregen-Bolts, Trümmer).
+
+**Zauber (Startwerte; verbindliche Ladungszahlen laut Plan):**
+- **Erdbeben** (`earthquake.gd`, 80 Mana / **2** Ladungen / 10 m):
+  deterministische Vertex-Verwerfung ±1,5 m im 7-m-Radius (Seed aus
+  Zielzelle, Falloff), Morph 2 s; Feindgebäude im Radius +2 Stufen,
+  Feindeinheiten ¼ Brave-Leben + Mini-Rolle; Wasser-Klemme: Meeresboden wird
+  nie angehoben, Absenken unter die Seelinie erlaubt (flutet).
+- **Vulkan** (`volcano.gd` + `volcano_zone.gd`, 120 / **1** / 12 m):
+  permanenter Smoothstep-Kegel +6 m (Radius 5, Morph 3 s, Mittelhang
+  unbegehbar = gewollt) + 20-s-Lava-Zone: 10 Schaden/s an ALLEN Einheiten,
+  +1 Stufe alle 4 s an ALLEN Gebäuden im 5-m-Radius (Lava kennt keine
+  Freunde).
+- **Feuerregen** (`firestorm.gd`, 70 / **2** / 10 m): innere
+  Scheduler-Klasse `FirestormShower` spawnt 8 unveränderte `FireballBolt`s
+  über 3 s auf deterministisch gestreute Punkte (≤ 4 m, Seed aus Zielzelle).
+- **Ebene** (`flatten_spell.gd`, 70 / **3** / 10 m): Quadrat 9×9 m exakt auf
+  Zielpunkt-Höhe, HARTE Kanten (kein Falloff → Klippen), SCHNELL (0,5 s);
+  Einheiten auf der Fläche werden je nach Höhendelta geschleudert (Anheben →
+  Wurfparabel, Absenken → Sturz mit skalierendem Fallschaden); keine Klemme
+  nach unten (Zielpunkt unter See flutet die Fläche).
+- **Absinken** (`sink.gd`, 60 / **3** / 10 m): Gegenstück zur Landbrücke —
+  senkt 6-m-Radius um bis 3 m, weicher Smoothstep-Falloff, Morph 1,5 s,
+  Klemme auf Meeresboden (`FLOOR_LEVEL` 0,5); Küstenland flutet →
+  Integritätsregeln.
+- `Spell.create_default_set()` liefert 10 Zauber; Startladung-1-Regel aus
+  `main.gd` gilt automatisch mit.
+
+**UI:** Sidebar `default_spell_entries()` 10 Einträge (Reihenfolge =
+Hotkeys 1–9, 0), neue 24×24-Icons `earthquake`/`volcano`/`firestorm`/
+`flatten`/`sink` in `ui_theme.gd`; Input-Actions `cast_spell_6..10`
+(Tasten 6–9 und 0) in `project.godot`; `SpellTargeting.HOTKEY_SPELLS`
+erweitert, Cursor zeigt für **Ebene ein 9×9-Quadrat** statt des Rings
+(`_cursor_ring`/`_cursor_square`). Zauber-Tab bleibt 3-spaltig (10 Zellen =
+4 Reihen, passt in die 260-px-Sidebar).
+
+**KI (`ai_controller.gd`, `_cast_spells`-Leiter erweitert):** Blitz auf
+Feindschamanin (unverändert) → **Vulkan** ab 2 Feindgebäuden im
+5-m-Umkreis → **Absinken** auf küstennahe Gebäude (Bodenhöhe ≤ SEA+2) →
+**Ebene** neben Gebäuden an Höhenstufen (`_flatten_break_point`: 4
+Kardinal-Proben bei 5,5 m, Stufe > 1,5 m → Cast auf den Probepunkt,
+Quadratkante schneidet durchs Fundament) → Tornado → **Erdbeben** (neuer
+Gebäude-Fallback) → Blitz; bei Einheiten: Schwarm (≥5) → **Feuerregen**
+statt Feuerball ab ≥5 Feinden im 4-m-Cluster → Feuerball.
+
+**Erkenntnisse/Stolpersteine:**
+- Projektile, die beim Ticken neue Projektile registrieren, brauchen die
+  Index-Schleife — das alte `for p in projectiles` + `kept`-Rebuild hätte
+  mitten in der Iteration angehängte Einträge verlieren können.
+- Reihenfolge der Integritätsprüfung: Flut VOR Fundament-Bruch prüfen —
+  beim Absinken über einem Gebäude wächst die Spanne langsamer als die
+  Flutung (weicher Falloff), so rutscht es korrekt ins Wasser statt zu
+  zerplatzen; bei harten Kanten (Ebene) greift der Bruch.
+- Ein Gebäude NEBEN einem Vulkan überlebt nie den Kegel selbst (Fundament-
+  Bruch durch die Kegelflanke) — der Lava-Stufen-Takt ist deshalb separat
+  über eine direkt platzierte `VolcanoZone` getestet.
+
+**Verifikation:** Testsuite grün (**959 Tests**, +315: Integritätsregeln
+(Bruch-Schwelle, Flut-Rutschen, Ertrinken inkl. Trockengrenze), Erdbeben
+(Verwerfung im/außerhalb Radius, +2 Stufen, ¼-Schaden+Rolle nur Feinde,
+Wasser-Klemme), Vulkan (Kegel ≥ +5, Lava trifft Feind UND eigene, Berg
+bleibt nach Zonen-Despawn, 4-s-Stufentakt), Feuerregen (8 Bolts, Streuung
+≤ 4 m, Trefferwirkung), Ebene (exakte Planierung + harte Kante messbar,
+Schleudern, Gebäude-Zerplatzen + Trümmer, Flutung + Ertrinken), Absinken
+(Falloff, Meeresboden-Klemme, Küsten-Flut: Gebäude versinkt + Anhänger
+ertrinkt), Set-/UI-Abgleich (10 Zauber, Pips == max_charges, Hotkey-
+Reihenfolge), KI-Heuristiken (Vulkan/Absinken/Ebene/Feuerregen via
+`pending_spell`)). `--headless --import`, `--headless --quit` und
+`--quit-after 240` fehlerfrei. **Manuelle Prüfung durch Nutzer: ausstehend**
+(siehe Plan §Manuelle Prüfung: 10 Slots + Hotkeys 1–0, Quadrat-Vorschau,
+Erdbeben-Optik, Vulkan-Berg + Lava, Feuerregen-Salve, Ebene-Klippen +
+zerplatzende Gebäude, Absinken-Flutung, KI castet die neuen Zauber).

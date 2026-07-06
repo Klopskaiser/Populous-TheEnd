@@ -5,14 +5,16 @@ class_name LandbridgeSpell extends Spell
 ## over water it rises onto coast level (bridge), on land it forms a smooth
 ## straight ramp from start height to target height (dips filled, bumps
 ## shaved; a stretch that is already straight changes nothing and the cast
-## fails, keeping the charge). The change happens GRADUALLY over
-## LandbridgeMorph.DURATION; units/trees/piles/buildings ride along.
+## fails, keeping the charge). The change happens GRADUALLY over DURATION
+## (TerrainMorph); units/trees/piles/buildings ride along.
 
 ## Corridor half width (broad line) and the soft blend beyond it.
 const HALF_WIDTH: float = 1.6
 const EDGE: float = 1.5
 ## Bridge deck height above the water line (comfortably walkable).
 const COAST_MARGIN: float = 1.2
+## Seconds of gradual terraforming.
+const DURATION: float = 3.0
 
 
 func _init() -> void:
@@ -40,7 +42,7 @@ func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:
 	var plan: Dictionary = td.line_raise_targets(from, to, HALF_WIDTH, h_from, h_to, EDGE)
 	if (plan.indices as PackedInt32Array).is_empty():
 		return false
-	var morph: LandbridgeMorph = LandbridgeMorph.new()
-	morph.setup(ctx, plan)
+	var morph: TerrainMorph = TerrainMorph.new()
+	morph.setup(ctx, plan, DURATION)
 	ctx.unit_manager.register_projectile(morph)
 	return true

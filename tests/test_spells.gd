@@ -259,9 +259,13 @@ func _free_world_with_buildings(w: Dictionary) -> void:
 
 func test_default_set_charge_counts() -> void:
 	var spells: Array[Spell] = Spell.create_default_set()
-	check(spells.size() == 5, "five spells in the default set")
+	check(spells.size() == 10, "ten spells in the default set (phase 6 + 7c)")
+	# 7c charge counts are binding: volcano 1, firestorm/earthquake 2,
+	# flatten/sink 3 (see plans/07c_new_spells.md).
 	var expected: Dictionary = {
-		&"fireball": 4, &"lightning": 4, &"swarm": 4, &"landbridge": 4, &"tornado": 3}
+		&"fireball": 4, &"lightning": 4, &"swarm": 4, &"landbridge": 4,
+		&"tornado": 3, &"earthquake": 2, &"volcano": 1, &"firestorm": 2,
+		&"flatten": 3, &"sink": 3}
 	for spell in spells:
 		check(expected.has(spell.id), "known spell id: %s" % spell.id)
 		check(spell.max_charges == expected.get(spell.id, -1),
@@ -540,3 +544,268 @@ func test_shaman_stats() -> void:
 	check(shaman.is_panic_immune(), "shaman is panic-immune")
 	check(shaman.is_conversion_immune(), "shaman cannot be converted")
 	_free_world(w)
+
+
+# --- Phase 7c: terrain-integrity rules ---------------------------------------------
+
+const HUT_SCENE_T: PackedScene = preload("res://scenes/buildings/hut.tscn")
+
+
+func _has_debris(w: Dictionary) -> bool:
+	for p in w.unit_manager.projectiles:
+		if p is BuildingDebris:
+			return true
+	return false
+
+
+func test_integrity_foundation_break_shatters_building() -> void:
+	var w: Dictionary = _make_world_with_buildings()
+	var hut: Building = w.bm.place(HUT_SCENE_T, w.tribe1, Vector2i(50, 50), 0, true)
+	# A gentle dip under one corner stays below the break threshold.
+	w.td.set_vertex_height(50, 50, 4.0)
+	w.ctx.apply_terrain_change(Rect2i(49, 49, 3, 3))
+	check(hut.health > 0, "span below the threshold keeps the building standing")
+	check(not _has_debris(w), "no debris while the foundation holds")
+	# Tearing the corner further down breaks the foundation: instant burst.
+	w.td.set_vertex_height(50, 50, 3.0)
+	w.ctx.apply_terrain_change(Rect2i(49, 49, 3, 3))
+	check(hut.health == 0, "foundation span > threshold bursts the building")
+	check(hut not in w.bm.buildings, "burst building deregistered")
+	check(_has_debris(w), "debris pieces fly off the burst building")
+	_free_world_with_buildings(w)
+
+
+func test_integrity_flood_slides_building_and_drowns_units() -> void:
+	var w: Dictionary = _make_world_with_buildings()
+	var hut: Building = w.bm.place(HUT_SCENE_T, w.tribe1, Vector2i(50, 50), 0, true)
+	var wet: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, Vector3(49, 0, 49))
+	var dry: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, Vector3(30, 0, 30))
+	# The whole plot sinks below the sea line (as the sink spell would do).
+	for vz in range(47, 58):
+		for vx in range(47, 58):
+			w.td.set_vertex_height(vx, vz, 1.0)
+	w.ctx.apply_terrain_change(Rect2i(47, 47, 11, 11))
+	check(hut.health == 0, "mostly flooded building is destroyed (slides into the sea)")
+	check(not _has_debris(w), "flooding sinks the model instead of bursting it")
+	check(wet.state == Unit.State.DEAD, "follower on flooded ground drowns instantly")
+	check(dry.state != Unit.State.DEAD, "follower on dry ground is unaffected")
+	_free_world_with_buildings(w)
+
+
+# --- Phase 7c: earthquake -----------------------------------------------------------
+
+func test_earthquake_upheaval_buildings_and_units() -> void:
+	var w: Dictionary = _make_world_with_buildings()
+	w.unit_manager.spawn_unit(SHAMAN_SCENE, 0, Vector3(30, 0, 30))
+	var hut: Building = w.bm.place(HUT_SCENE_T, w.tribe1, Vector2i(38, 28), 0, true)
+	var enemy: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, Vector3(42, 0, 30))
+	var own: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 0, Vector3(41, 0, 31))
+	var far_off: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, Vector3(60, 0, 60))
+	var spell: EarthquakeSpell = EarthquakeSpell.new()
+	check(spell.execute(w.tribe0, Vector3(40, 5, 30), w.ctx), "earthquake cast succeeds")
+	check(hut.destruction_stage() >= 2 or hut.health == 0,
+		"building in the radius takes +2 destruction stages")
+	check(enemy.health == enemy.max_health - EarthquakeSpell.UNIT_DAMAGE,
+		"enemy takes 1/4 brave life")
+	check(enemy.state == Unit.State.ROLL, "enemy tumbles away from the epicentre")
+	check(own.health == own.max_health, "own units take no direct quake damage")
+	check(far_off.health == far_off.max_health, "units outside the radius untouched")
+	# The upheaval is gradual and stays inside the radius.
+	var outside_before: float = w.td.vertex_height(60, 60)
+	for i in range(25):
+		w.unit_manager.tick(0.1)
+	var moved: float = 0.0
+	for vz in range(25, 36):
+		for vx in range(35, 46):
+			moved = maxf(moved, absf(w.td.vertex_height(vx, vz) - 5.0))
+	check(moved > 0.3, "vertices inside the radius shifted after the morph")
+	check_near(w.td.vertex_height(60, 60), outside_before,
+		"vertices outside the radius unchanged")
+	_free_world_with_buildings(w)
+
+
+func test_earthquake_water_clamp() -> void:
+	var td: TerrainData = _channel_terrain()
+	var plan: Dictionary = EarthquakeSpell.upheaval_targets(td, Vector2(63, 64))
+	var indices: PackedInt32Array = plan.indices
+	var targets: PackedFloat32Array = plan.targets
+	check(not indices.is_empty(), "quake in the channel still lowers ground")
+	for i in range(indices.size()):
+		if td.heights[indices[i]] <= TerrainData.SEA_LEVEL:
+			check(targets[i] <= td.heights[indices[i]],
+				"sea-floor vertices are never lifted")
+
+
+# --- Phase 7c: volcano ---------------------------------------------------------------
+
+func test_volcano_cone_lava_and_permanence() -> void:
+	var w: Dictionary = _make_world_with_buildings()
+	var target: Vector3 = Vector3(40, 5, 40)
+	var enemy: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, Vector3(43, 0, 40))
+	var own: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 0, Vector3(37, 0, 40))
+	var spell: VolcanoSpell = VolcanoSpell.new()
+	check(spell.execute(w.tribe0, target, w.ctx), "volcano cast succeeds")
+	for i in range(35):
+		w.unit_manager.tick(0.1)   # cone morph (3 s) completes
+	check(w.td.get_height(40.0, 40.0) >= 5.0 + VolcanoSpell.PEAK - 1.0,
+		"cone tip rises to (nearly) peak height")
+	check(enemy.health < enemy.max_health, "lava burns enemy units")
+	check(own.health < own.max_health, "lava burns OWN units too (knows no friends)")
+	var peak_after_morph: float = w.td.get_height(40.0, 40.0)
+	for i in range(180):
+		w.unit_manager.tick(0.1)   # zone lifetime (20 s) expires
+	check(w.unit_manager.projectiles.is_empty(), "lava zone despawned after 20 s")
+	check_near(w.td.get_height(40.0, 40.0), peak_after_morph,
+		"the mountain is permanent (height unchanged after despawn)")
+	_free_world_with_buildings(w)
+
+
+func test_volcano_zone_building_cadence() -> void:
+	var w: Dictionary = _make_world_with_buildings()
+	var hut: Building = w.bm.place(HUT_SCENE_T, w.tribe1, Vector2i(50, 50), 0, true)
+	var zone: VolcanoZone = VolcanoZone.new()
+	zone.setup(0, hut.center_world(), w.unit_manager, w.td, w.bm)
+	w.unit_manager.register_projectile(zone)
+	for i in range(39):
+		w.unit_manager.tick(0.1)
+	check(hut.destruction_stage() == 0, "no stage before 4 s of lava contact")
+	for i in range(4):
+		w.unit_manager.tick(0.1)
+	check(hut.destruction_stage() == 1, "+1 stage after 4 s in the lava")
+	for i in range(40):
+		w.unit_manager.tick(0.1)
+	check(hut.destruction_stage() == 2, "+1 more stage after another 4 s")
+	_free_world_with_buildings(w)
+
+
+# --- Phase 7c: firestorm ---------------------------------------------------------------
+
+func test_firestorm_salvo_spread_and_damage() -> void:
+	var w: Dictionary = _make_world()
+	w.unit_manager.spawn_unit(SHAMAN_SCENE, 0, Vector3(30, 0, 30))
+	var target: Vector3 = Vector3(40, 5, 30)
+	var cluster: Array[Unit] = []
+	for offset in [Vector3(0, 0, 0), Vector3(1.2, 0, 0.5), Vector3(-1, 0, -0.8)]:
+		cluster.append(w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, target + offset))
+	var spell: FirestormSpell = FirestormSpell.new()
+	check(spell.execute(w.tribe0, target, w.ctx), "firestorm cast succeeds")
+	check(w.unit_manager.projectiles.size() == 1, "shower scheduler registered")
+	# Track every bolt the shower launches over its runtime.
+	var seen: Dictionary = {}
+	for i in range(80):
+		w.unit_manager.tick(0.1)
+		for p in w.unit_manager.projectiles:
+			if p is FireballBolt:
+				seen[p.get_instance_id()] = (p as FireballBolt).target_pos
+	check(seen.size() == FirestormSpell.BOLT_COUNT, "8 bolts launched over the salvo")
+	for pos: Vector3 in seen.values():
+		check(Vector2(pos.x - target.x, pos.z - target.z).length() \
+			<= FirestormSpell.SPREAD_RADIUS + 0.01,
+			"impact scattered within the spread radius")
+	var hurt: int = 0
+	for u in cluster:
+		if u.state == Unit.State.DEAD or u.health < u.max_health:
+			hurt += 1
+	check(hurt >= 2, "the salvo hits the crowd repeatedly")
+	check(w.unit_manager.projectiles.is_empty(), "shower and bolts all despawned")
+	_free_world(w)
+
+
+# --- Phase 7c: flatten ------------------------------------------------------------------
+
+func test_flatten_levels_square_with_hard_edges() -> void:
+	var w: Dictionary = _make_world_with_buildings()
+	# Hill east of the target; its west slope reaches into the flatten square.
+	for vz in range(27, 34):
+		for vx in range(42, 49):
+			w.td.set_vertex_height(vx, vz, 8.0)
+	var hut: Building = w.bm.place(HUT_SCENE_T, w.tribe1, Vector2i(44, 28), 0, true)
+	var on_hill: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, Vector3(43, 8, 30))
+	var outside: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, Vector3(50, 8, 30))
+	var target: Vector3 = Vector3(40, 5, 30)   # ground level 5.0
+	var spell: FlattenSpell = FlattenSpell.new()
+	check(spell.execute(w.tribe0, target, w.ctx), "flatten cast succeeds")
+	check(on_hill.state == Unit.State.THROWN,
+		"unit on the collapsing hill slope is flung")
+	for i in range(10):
+		w.unit_manager.tick(0.1)   # fast morph (0.5 s) completes
+	for vx in range(36, 45):
+		check_near(w.td.vertex_height(vx, 30), 5.0,
+			"square vertex (%d, 30) exactly on target level" % vx)
+	check_near(w.td.vertex_height(45, 30), 8.0,
+		"first vertex outside the square untouched (hard cliff edge)")
+	check(hut.health == 0, "building straddling the new cliff bursts apart")
+	check(_has_debris(w), "burst building spawned debris")
+	check(outside.state != Unit.State.THROWN and outside.health == outside.max_health,
+		"unit outside the square unaffected")
+	_free_world_with_buildings(w)
+
+
+func test_flatten_below_sea_floods_and_drowns() -> void:
+	var td: TerrainData = _channel_terrain()
+	var nav: NavGrid = NavGrid.new(td)
+	var tribe0: Tribe = Tribe.new(0)
+	var tribe1: Tribe = Tribe.new(1)
+	var um: UnitManager = UnitManager.new()
+	um.setup(td, nav, [tribe0, tribe1] as Array[Tribe])
+	var ctx: SpellContext = SpellContext.new()
+	ctx.terrain_data = td
+	ctx.nav_grid = nav
+	ctx.unit_manager = um
+	var victim: Unit = um.spawn_unit(BRAVE_SCENE_T, 1, Vector3(59.5, 5, 64))
+	var spell: FlattenSpell = FlattenSpell.new()
+	# Target in the water channel: the square flattens onto sea-floor level.
+	check(spell.execute(tribe0, Vector3(63, 0, 64), ctx), "flatten onto water level works")
+	for i in range(60):
+		um.tick(0.1)
+		if is_instance_valid(victim) and victim.state != Unit.State.DEAD:
+			victim.tick(0.1)
+	check(td.get_height(59.0, 64.0) <= TerrainData.SEA_LEVEL,
+		"former land inside the square now sits below the sea line")
+	check(victim.state == Unit.State.DEAD, "follower on the flooded square dies")
+	um.free()
+
+
+# --- Phase 7c: sink -----------------------------------------------------------------------
+
+func test_sink_lowers_with_falloff_and_floor_clamp() -> void:
+	var w: Dictionary = _make_world()
+	var spell: SinkSpell = SinkSpell.new()
+	check(spell.execute(w.tribe0, Vector3(40, 5, 40), w.ctx), "sink cast succeeds")
+	for i in range(20):
+		w.unit_manager.tick(0.1)
+	check_near(w.td.vertex_height(40, 40), 5.0 - SinkSpell.DEPTH,
+		"centre lowered by the full depth", 0.05)
+	var rim: float = w.td.vertex_height(44, 40)
+	check(rim > 5.0 - SinkSpell.DEPTH + 0.5 and rim < 5.0,
+		"rim lowered less than the centre (soft falloff)")
+	check_near(w.td.vertex_height(47, 40), 5.0, "outside the radius unchanged")
+	# Repeated casts never dig below the sea floor.
+	check(spell.execute(w.tribe0, Vector3(40, 2, 40), w.ctx), "second sink cast works")
+	for i in range(20):
+		w.unit_manager.tick(0.1)
+	check(w.td.vertex_height(40, 40) >= SinkSpell.FLOOR_LEVEL - 0.01,
+		"floor clamp: never below the sea floor")
+	_free_world(w)
+
+
+func test_sink_floods_coastal_building_and_units() -> void:
+	var w: Dictionary = _make_world_with_buildings()
+	# Low coastal shelf around the enemy plot.
+	for vz in range(30, 52):
+		for vx in range(30, 52):
+			w.td.set_vertex_height(vx, vz, 3.5)
+	var hut: Building = w.bm.place(HUT_SCENE_T, w.tribe1, Vector2i(38, 38), 0, true)
+	var victim: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, Vector3(41, 3.5, 41))
+	var dry: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, Vector3(60, 5, 60))
+	var spell: SinkSpell = SinkSpell.new()
+	check(spell.execute(w.tribe0, Vector3(40, 3.5, 40), w.ctx), "coastal sink cast succeeds")
+	for i in range(20):
+		w.unit_manager.tick(0.1)
+	check(w.td.cell_height(Vector2i(40, 40)) <= TerrainData.SEA_LEVEL,
+		"the plot sank below the sea line")
+	check(hut.health == 0, "mostly flooded building slides into the water")
+	check(not _has_debris(w), "flooded building sinks instead of bursting")
+	check(victim.state == Unit.State.DEAD, "follower on the flooded plot drowns")
+	check(dry.state != Unit.State.DEAD, "distant follower survives")
+	_free_world_with_buildings(w)

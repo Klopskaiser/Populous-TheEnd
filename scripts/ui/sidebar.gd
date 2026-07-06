@@ -134,7 +134,7 @@ static func default_build_entries() -> Array[Dictionary]:
 	]
 
 
-## Order matches SpellTargeting.HOTKEY_SPELLS (hotkeys 1-5).
+## Order matches SpellTargeting.HOTKEY_SPELLS (hotkeys 1-9 and 0 for slot 10).
 static func default_spell_entries() -> Array[Dictionary]:
 	return [
 		{"id": &"fireball", "name": "Feuerball", "icon": &"fireball",
@@ -147,6 +147,16 @@ static func default_spell_entries() -> Array[Dictionary]:
 			"max_charges": 4, "hotkey": "4"},
 		{"id": &"tornado", "name": "Tornado", "icon": &"tornado",
 			"max_charges": 3, "hotkey": "5"},
+		{"id": &"earthquake", "name": "Erdbeben", "icon": &"earthquake",
+			"max_charges": 2, "hotkey": "6"},
+		{"id": &"volcano", "name": "Vulkan", "icon": &"volcano",
+			"max_charges": 1, "hotkey": "7"},
+		{"id": &"firestorm", "name": "Feuerregen", "icon": &"firestorm",
+			"max_charges": 2, "hotkey": "8"},
+		{"id": &"flatten", "name": "Ebene", "icon": &"flatten",
+			"max_charges": 3, "hotkey": "9"},
+		{"id": &"sink", "name": "Absinken", "icon": &"sink",
+			"max_charges": 3, "hotkey": "0"},
 	]
 
 

@@ -149,7 +149,21 @@ func test_build_entries_training_buildings_active() -> void:
 
 
 func test_spell_entries_count() -> void:
-	check(Sidebar.default_spell_entries().size() == 5, "five spells registered")
+	var entries: Array[Dictionary] = Sidebar.default_spell_entries()
+	check(entries.size() == 10, "ten spells registered (phase 6 + 7c)")
+	# Entry order and max_charges must match the tribes' spell set — the UI
+	# builds its pips from these values.
+	var by_id: Dictionary = {}
+	for e in entries:
+		by_id[e["id"]] = e
+	for spell in Spell.create_default_set():
+		check(by_id.has(spell.id), "entry exists for %s" % spell.id)
+		check(int(by_id[spell.id]["max_charges"]) == spell.max_charges,
+			"%s entry pips match max_charges" % spell.id)
+	# Hotkey order matches the targeting hotkey list (keys 1-9, 0).
+	for i in range(entries.size()):
+		check(SpellTargeting.HOTKEY_SPELLS[i] == entries[i]["id"],
+			"hotkey slot %d wired to %s" % [i + 1, entries[i]["id"]])
 
 
 ## Regression: a selected unit may be freed while still referenced in the

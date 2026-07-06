@@ -11,10 +11,11 @@ class_name SpellTargeting extends Control
 const RAY_LENGTH: float = 1000.0
 const TERRAIN_MASK: int = 1   # the indicator snaps to terrain only
 
-## Hotkey order of the five spells (input actions cast_spell_1..5); matches
-## Sidebar.default_spell_entries().
+## Hotkey order of the ten spells (input actions cast_spell_1..10, keys 1-9
+## and 0); matches Sidebar.default_spell_entries().
 const HOTKEY_SPELLS: Array[StringName] = [
-	&"fireball", &"lightning", &"swarm", &"landbridge", &"tornado"]
+	&"fireball", &"lightning", &"swarm", &"landbridge", &"tornado",
+	&"earthquake", &"volcano", &"firestorm", &"flatten", &"sink"]
 
 var _tribe_commands: TribeCommands = null
 var _tribe: Tribe = null
@@ -23,6 +24,10 @@ var _build_menu: BuildMenu = null
 
 var _armed_spell: StringName = &""
 var _cursor: Node3D = null
+## Cursor variants: gold ring (default) vs. square outline (flatten spell —
+## its effect area is a hard-edged square).
+var _cursor_ring: Node3D = null
+var _cursor_square: Node3D = null
 ## Ring around the shaman showing the armed spell's cast range; follows her
 ## every frame (targets beyond it are allowed — she walks closer first).
 var _range_ring: MeshInstance3D = null
@@ -65,6 +70,10 @@ func start_targeting(spell_id: StringName) -> void:
 		_build_menu.cancel()
 	_armed_spell = spell_id
 	_ensure_cursor()
+	if _cursor_ring != null:
+		_cursor_ring.visible = spell_id != &"flatten"
+	if _cursor_square != null:
+		_cursor_square.visible = spell_id == &"flatten"
 	_show_range_ring(spell.cast_range)
 
 
@@ -92,6 +101,9 @@ func _ensure_cursor() -> void:
 	var mat: StandardMaterial3D = StandardMaterial3D.new()
 	mat.albedo_color = Color(0.98, 0.85, 0.45)
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_cursor_ring = Node3D.new()
+	_cursor_ring.name = "RingCursor"
+	_cursor.add_child(_cursor_ring)
 	var ring: MeshInstance3D = MeshInstance3D.new()
 	var torus: TorusMesh = TorusMesh.new()
 	torus.inner_radius = 1.0
@@ -99,7 +111,7 @@ func _ensure_cursor() -> void:
 	ring.mesh = torus
 	ring.material_override = mat
 	ring.position.y = 0.15
-	_cursor.add_child(ring)
+	_cursor_ring.add_child(ring)
 	var tip: MeshInstance3D = MeshInstance3D.new()
 	var sphere: SphereMesh = SphereMesh.new()
 	sphere.radius = 0.2
@@ -107,9 +119,33 @@ func _ensure_cursor() -> void:
 	tip.mesh = sphere
 	tip.material_override = mat
 	tip.position.y = 0.3
-	_cursor.add_child(tip)
+	_cursor_ring.add_child(tip)
+	_cursor_square = _make_square_cursor(mat)
+	_cursor.add_child(_cursor_square)
 	_cursor.visible = false
 	_world_root.add_child(_cursor)
+
+
+## Square outline (four thin bars) matching the flatten spell's area.
+func _make_square_cursor(mat: StandardMaterial3D) -> Node3D:
+	var square: Node3D = Node3D.new()
+	square.name = "SquareCursor"
+	var side: float = FlattenSpell.HALF_EXTENT * 2.0
+	var offsets: Array[Vector3] = [
+		Vector3(0.0, 0.15, -FlattenSpell.HALF_EXTENT),
+		Vector3(0.0, 0.15, FlattenSpell.HALF_EXTENT),
+		Vector3(-FlattenSpell.HALF_EXTENT, 0.15, 0.0),
+		Vector3(FlattenSpell.HALF_EXTENT, 0.15, 0.0)]
+	for i in range(4):
+		var bar: MeshInstance3D = MeshInstance3D.new()
+		var box: BoxMesh = BoxMesh.new()
+		box.size = Vector3(side, 0.12, 0.18) if i < 2 else Vector3(0.18, 0.12, side)
+		bar.mesh = box
+		bar.material_override = mat
+		bar.position = offsets[i]
+		square.add_child(bar)
+	square.visible = false
+	return square
 
 
 ## Builds (once) and sizes the range ring for the armed spell.

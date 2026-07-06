@@ -1,18 +1,20 @@
-class_name LandbridgeMorph extends Node3D
+class_name TerrainMorph extends Node3D
 
-## Gradual terraforming of a Landbridge cast: interpolates the affected
-## vertices from their start heights to the corridor's target profile
-## (TerrainData.line_raise_targets) over DURATION seconds, in throttled steps
-## (never per frame — chunk/collision rebuilds are batched per step). Trees,
-## wood piles and buildings inside the area are re-snapped to the moving
-## ground each step; units snap their own Y every tick anyway. Ticked via the
-## UnitManager projectile list.
+## Gradual terraforming shared by all terrain spells (landbridge, earthquake,
+## volcano, flatten, sink): interpolates the affected vertices from their
+## start heights to a target height map over `duration` seconds, in throttled
+## steps (never per frame — chunk/collision rebuilds are batched per step).
+## Trees, wood piles and buildings inside the area are re-snapped to the
+## moving ground each step; units snap their own Y every tick anyway. The
+## terrain-integrity rules (foundation break, flooding) run inside
+## ctx.apply_terrain_change per step. Ticked via the UnitManager projectile
+## list.
 
-const DURATION: float = 3.0
 const STEP_INTERVAL: float = 0.15
 
 var done: bool = false
 var ctx: SpellContext = null
+var duration: float = 3.0
 
 var _indices: PackedInt32Array = PackedInt32Array()
 var _from: PackedFloat32Array = PackedFloat32Array()
@@ -22,10 +24,13 @@ var _time: float = 0.0
 var _step_timer: float = 0.0
 
 
-## `plan` comes from TerrainData.line_raise_targets (indices/targets/rect);
-## start heights are captured now so the morph lerps from the cast moment.
-func setup(p_ctx: SpellContext, plan: Dictionary) -> void:
+## `plan` is a target height map {indices: PackedInt32Array, targets:
+## PackedFloat32Array, rect: Rect2i} (e.g. from TerrainData.line_raise_targets
+## or a spell's own planner); start heights are captured now so the morph
+## lerps from the cast moment.
+func setup(p_ctx: SpellContext, plan: Dictionary, p_duration: float) -> void:
 	ctx = p_ctx
+	duration = maxf(p_duration, 0.05)
 	_indices = plan.indices
 	_to = plan.targets
 	_rect = plan.rect
@@ -40,10 +45,10 @@ func tick(delta: float) -> void:
 		return
 	_time += delta
 	_step_timer -= delta
-	if _step_timer > 0.0 and _time < DURATION:
+	if _step_timer > 0.0 and _time < duration:
 		return
 	_step_timer = STEP_INTERVAL
-	var t: float = clampf(_time / DURATION, 0.0, 1.0)
+	var t: float = clampf(_time / duration, 0.0, 1.0)
 	var smooth: float = t * t * (3.0 - 2.0 * t)
 	var td: TerrainData = ctx.terrain_data
 	for i in range(_indices.size()):

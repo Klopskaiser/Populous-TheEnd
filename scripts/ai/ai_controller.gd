@@ -47,6 +47,18 @@ const CLUSTER_RADIUS: float = 3.0
 const CLUSTER_MIN_ENEMIES: int = 3
 ## Swarm (panic) is worth it from this many enemies in scan range.
 const SWARM_MIN_ENEMIES: int = 5
+## Firestorm replaces the single fireball from this many enemies around the
+## densest cluster (its spread radius).
+const FIRESTORM_MIN_ENEMIES: int = 5
+## Volcano is worth its single charge from this many enemy buildings within
+## its lava radius of the target building.
+const VOLCANO_MIN_BUILDINGS: int = 2
+## A building counts as coastal (sink floods it) below this ground height.
+const SINK_COAST_HEIGHT: float = TerrainData.SEA_LEVEL + 2.0
+## Offset of the flatten cast next to a slope building (square edge cuts
+## through the footprint) and the height step that promises a foundation break.
+const FLATTEN_OFFSET: float = 5.5
+const FLATTEN_MIN_STEP: float = SpellContext.FOUNDATION_BREAK_DIFF + 0.3
 ## Enemies this close to the base anchor trigger the defence reaction.
 const DEFEND_RADIUS: float = 32.0
 ## Effective combat weight of the shaman / a militia brave in the
@@ -433,7 +445,22 @@ func _cast_spells() -> void:
 		SPELL_SCAN_RADIUS)
 	if target_building != null:
 		var center: Vector3 = target_building.center_world()
+		# Building priorities (7c): volcano on clusters, sink floods coastal
+		# plots, flatten breaks foundations on slopes, then the old
+		# tornado/quake/lightning ladder.
+		if _enemy_buildings_near(center, VolcanoZone.RADIUS) >= VOLCANO_MIN_BUILDINGS:
+			if commands.cast_spell(tribe, &"volcano", center):
+				return
+		if center.y <= SINK_COAST_HEIGHT:
+			if commands.cast_spell(tribe, &"sink", center):
+				return
+		var flatten_at: Vector3 = _flatten_break_point(target_building)
+		if flatten_at != Vector3.INF:
+			if commands.cast_spell(tribe, &"flatten", flatten_at):
+				return
 		if commands.cast_spell(tribe, &"tornado", center):
+			return
+		if commands.cast_spell(tribe, &"earthquake", center):
 			return
 		if commands.cast_spell(tribe, &"lightning", center):
 			return
@@ -445,6 +472,11 @@ func _cast_spells() -> void:
 			return
 	var cluster: Vector3 = _densest_cluster(enemies)
 	if cluster != Vector3.INF:
+		# A big pile is worth the salvo; smaller ones get the single fireball.
+		if _count_enemies_near(enemies, cluster, FirestormSpell.SPREAD_RADIUS) \
+				>= FIRESTORM_MIN_ENEMIES:
+			if commands.cast_spell(tribe, &"firestorm", cluster):
+				return
 		commands.cast_spell(tribe, &"fireball", cluster)
 
 
@@ -464,6 +496,48 @@ func _nearest_enemy_building(pos: Vector3, radius: float) -> Building:
 			best_dist = d
 			best = building
 	return best
+
+
+## Number of enemy buildings whose centre lies within `radius` of `pos`.
+func _enemy_buildings_near(pos: Vector3, radius: float) -> int:
+	if building_manager == null:
+		return 0
+	var count: int = 0
+	for building in building_manager.buildings:
+		if not is_instance_valid(building) or building.tribe_id == tribe.id \
+				or building.health <= 0:
+			continue
+		if building.center_world().distance_to(pos) <= radius:
+			count += 1
+	return count
+
+
+func _count_enemies_near(enemies: Array[Unit], pos: Vector3, radius: float) -> int:
+	var count: int = 0
+	for enemy in enemies:
+		if enemy.position.distance_to(pos) <= radius:
+			count += 1
+	return count
+
+
+## Cast point for a foundation-breaking flatten next to a slope building: a
+## square centred here reaches into the footprint while its level differs
+## from the building's ground by more than the break threshold. INF when the
+## surroundings are level (flatten would change nothing).
+func _flatten_break_point(building: Building) -> Vector3:
+	var td: TerrainData = building.terrain_data
+	if td == null:
+		return Vector3.INF
+	var center: Vector3 = building.center_world()
+	var base_h: float = td.get_height(center.x, center.z)
+	for dir in [Vector3(1, 0, 0), Vector3(-1, 0, 0), Vector3(0, 0, 1), Vector3(0, 0, -1)]:
+		var probe: Vector3 = center + dir * FLATTEN_OFFSET
+		var h: float = td.get_height(probe.x, probe.z)
+		if h <= TerrainData.SEA_LEVEL:
+			continue   # flattening onto a water-level point is the sink's job
+		if absf(h - base_h) > FLATTEN_MIN_STEP:
+			return Vector3(probe.x, h, probe.z)
+	return Vector3.INF
 
 
 ## Centre of the first enemy that has CLUSTER_MIN_ENEMIES-1 more enemies

@@ -36,6 +36,8 @@ const STAGE_DAMAGE: float = 0.3
 ## Destroyed buildings sink into the ground (visual only), then free themselves.
 const SINK_DURATION: float = 2.0
 const SINK_DEPTH: float = 5.0
+## Sideways drift of a flooded wreck sliding into the water (7c integrity rule).
+const SLIDE_SPEED: float = 1.6
 ## Placeholder damage visual: dark "broken out" chunks, 2 shown per stage.
 const MAX_DAMAGE_HOLES: int = 6
 
@@ -66,6 +68,10 @@ var _repair_hp_pool: float = 0.0
 var _repair_hp_frac: float = 0.0
 var _destroyed: bool = false
 var _sink_time: float = 0.0
+## Destruction-visual variants (7c terrain integrity): burst wrecks vanish
+## instantly (debris replaces the model), flooded wrecks slide sideways.
+var _vanish_on_destroy: bool = false
+var _slide_dir: Vector3 = Vector3.ZERO
 var _damage_holes: Array[MeshInstance3D] = []
 var _visual_stage: int = -1
 ## Worker braves currently assigned to this construction site.
@@ -721,6 +727,22 @@ func destroy() -> void:
 		_begin_sinking()
 
 
+## Terrain integrity (7c): the foundation broke — the building is destroyed
+## outright and the model vanishes instantly (the caller spawns the debris
+## burst that replaces it).
+func shatter() -> void:
+	_vanish_on_destroy = true
+	destroy()
+
+
+## Terrain integrity (7c): mostly flooded — the wreck slides sideways into
+## the water while sinking below the waves.
+func slide_into_water(dir: Vector3) -> void:
+	var flat: Vector3 = Vector3(dir.x, 0.0, dir.z)
+	_slide_dir = flat.normalized() if flat.length_squared() > 0.000001 else Vector3(1, 0, 0)
+	destroy()
+
+
 ## Visual-only sink of the destroyed building; all gameplay registration is
 ## already gone at this point (no clicks, no ticks).
 func _begin_sinking() -> void:
@@ -734,12 +756,17 @@ func _begin_sinking() -> void:
 		_overlay_sprite.visible = false
 	if _rally_marker != null:
 		_rally_marker.visible = false
+	if _vanish_on_destroy:
+		visible = false
+		queue_free()
+		return
 	set_process(true)
 
 
 func _process(delta: float) -> void:
 	_sink_time += delta
 	position.y -= SINK_DEPTH / SINK_DURATION * delta
+	position += _slide_dir * SLIDE_SPEED * delta
 	if _sink_time >= SINK_DURATION:
 		queue_free()
 

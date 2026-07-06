@@ -819,6 +819,15 @@ func fling_from_carry(velocity: Vector3) -> void:
 	_throw_velocity = velocity
 
 
+## Instant water death: landing in the sea after a throw, or the ground
+## flooding away under the unit (terrain spells, 7c integrity rules).
+func drown() -> void:
+	if state == State.DEAD:
+		return
+	health = 0
+	_die()
+
+
 ## Landing: water kills instantly; building footprints are snapped out of;
 ## fall damage applies, then the momentum roll takes over.
 func _land_from_throw(ground: float) -> void:
@@ -827,8 +836,7 @@ func _land_from_throw(ground: float) -> void:
 	var momentum: Vector3 = Vector3(_throw_velocity.x, 0.0, _throw_velocity.z)
 	_throw_velocity = Vector3.ZERO
 	if terrain_data != null and ground <= TerrainData.SEA_LEVEL + 0.05:
-		health = 0
-		_die()
+		drown()
 		return
 	if nav_grid != null:
 		var cell: Vector2i = nav_grid.world_to_cell(position)

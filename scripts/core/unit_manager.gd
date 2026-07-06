@@ -133,19 +133,22 @@ func register_projectile(projectile: Node3D) -> void:
 	add_child(projectile)
 
 
+## Index loop instead of for-in: projectiles may register NEW projectiles
+## while being ticked (firestorm spawns bolts, integrity rules spawn debris)
+## — appended entries are picked up safely in the same pass.
 func _tick_projectiles(delta: float) -> void:
-	if projectiles.is_empty():
-		return
-	var kept: Array = []
-	for p in projectiles:
+	var i: int = 0
+	while i < projectiles.size():
+		var p = projectiles[i]
 		if not is_instance_valid(p):
+			projectiles.remove_at(i)
 			continue
 		p.tick(delta)
 		if p.done:
 			p.queue_free()
+			projectiles.remove_at(i)
 		else:
-			kept.append(p)
-	projectiles = kept
+			i += 1
 
 
 # --- Path queue -------------------------------------------------------------------

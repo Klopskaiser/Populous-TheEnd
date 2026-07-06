@@ -104,6 +104,16 @@ static func icon(key: StringName) -> ImageTexture:
 			_draw_landbridge(img)
 		&"tornado":
 			_draw_tornado(img)
+		&"earthquake":
+			_draw_earthquake(img)
+		&"volcano":
+			_draw_volcano(img)
+		&"firestorm":
+			_draw_firestorm(img)
+		&"flatten":
+			_draw_flatten(img)
+		&"sink":
+			_draw_sink(img)
 		&"shaman":
 			_draw_shaman(img)
 		&"pause":
@@ -231,6 +241,60 @@ static func _draw_tornado(img: Image) -> void:
 		var y: int = 4 + i * 2
 		var w: int = maxi(2, 12 - i)
 		_rect(img, 12 - w / 2, y, w, 1, I_LIGHT if i % 2 == 0 else I_GOLD)
+
+
+static func _draw_earthquake(img: Image) -> void:
+	# Ground slab split by a jagged crack.
+	_rect(img, 3, 12, 18, 8, I_DARK)
+	_rect(img, 3, 12, 18, 2, I_GOLD)
+	var crack: Array[Vector2i] = [
+		Vector2i(12, 12), Vector2i(11, 14), Vector2i(13, 15), Vector2i(11, 17),
+		Vector2i(12, 19)]
+	for p in crack:
+		_rect(img, p.x - 1, p.y, 3, 2, I_LIGHT)
+	# Debris flying above.
+	_disc(img, 7, 8, 1, I_GOLD)
+	_disc(img, 12, 6, 1, I_GOLD)
+	_disc(img, 17, 8, 1, I_GOLD)
+
+
+static func _draw_volcano(img: Image) -> void:
+	# Mountain triangle with a glowing crater.
+	for i in range(12):
+		var w: int = 2 + i * 2
+		_rect(img, 12 - w / 2, 8 + i, w, 1, I_DARK)
+	_rect(img, 10, 7, 4, 2, Color(0.9, 0.35, 0.1))
+	_rect(img, 11, 3, 2, 4, Color(0.9, 0.35, 0.1))
+	img.set_pixel(9, 4, I_GOLD)
+	img.set_pixel(14, 5, I_GOLD)
+
+
+static func _draw_firestorm(img: Image) -> void:
+	# Three small falling flames.
+	for base in [Vector2i(6, 9), Vector2i(13, 5), Vector2i(17, 12)]:
+		_disc(img, base.x, base.y + 4, 2, Color(0.9, 0.35, 0.1))
+		_disc(img, base.x, base.y + 3, 1, I_GOLD)
+		_rect(img, base.x, base.y - 1, 1, 3, I_LIGHT)   # falling trail
+	_rect(img, 4, 19, 16, 2, I_DARK)
+
+
+static func _draw_flatten(img: Image) -> void:
+	# A level plateau with hard cliff edges over rough ground.
+	_rect(img, 3, 16, 18, 4, I_DARK)
+	_rect(img, 6, 10, 12, 6, I_GOLD)      # raised flat slab
+	_rect(img, 6, 10, 12, 2, I_LIGHT)     # flat top highlight
+	_rect(img, 6, 10, 1, 6, I_LIGHT)      # hard left edge
+	_rect(img, 17, 10, 1, 6, I_LIGHT)     # hard right edge
+
+
+static func _draw_sink(img: Image) -> void:
+	# Land dipping into water with a down arrow.
+	_rect(img, 3, 15, 18, 5, Color(0.15, 0.35, 0.6))
+	_rect(img, 3, 12, 5, 3, Color(0.35, 0.55, 0.24))
+	_rect(img, 16, 12, 5, 3, Color(0.35, 0.55, 0.24))
+	_rect(img, 11, 4, 2, 8, I_GOLD)
+	for i in range(4):
+		_rect(img, 8 + i, 11 + i, 8 - i * 2, 1, I_GOLD)
 
 
 static func _draw_shaman(img: Image) -> void:

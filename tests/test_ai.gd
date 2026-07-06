@@ -12,6 +12,7 @@ const SITE_SCENE: PackedScene = preload("res://scenes/buildings/reincarnation_si
 const WARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/warrior_camp.tscn")
 const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
 const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
+const SHAMAN_SCENE: PackedScene = preload("res://scenes/units/shaman.tscn")
 
 
 func _flat_terrain(h: float = 5.0) -> TerrainData:
@@ -22,8 +23,8 @@ func _flat_terrain(h: float = 5.0) -> TerrainData:
 
 
 ## Standalone world with two tribes (0 = enemy/player stand-in, 1 = AI).
-func _make_world() -> Dictionary:
-	var td: TerrainData = _flat_terrain()
+func _make_world(height: float = 5.0) -> Dictionary:
+	var td: TerrainData = _flat_terrain(height)
 	var nav: NavGrid = NavGrid.new(td)
 	var tribes: Array[Tribe] = [Tribe.new(0), Tribe.new(1)]
 	var tm: TreeManager = TreeManager.new()
@@ -540,3 +541,87 @@ func test_match_config() -> void:
 		"start mission runs with 2 tribes")
 	check(MatchConfig.debug_battle().tribe_count() == 2,
 		"debug battle runs with 2 tribes")
+
+
+# --- Spell heuristics (7c) ----------------------------------------------------------------
+
+## Arms exactly one spell with a stored charge (all others stay empty), so a
+## successful cast proves the heuristic picked that spell.
+func _arm_only(tribe: Tribe, id: StringName) -> void:
+	if tribe.spells.is_empty():
+		tribe.set_spells(Spell.create_default_set())
+	for s in tribe.spells:
+		s.charges = 1 if s.id == id else 0
+
+
+func _pending_spell_id(tribe: Tribe) -> StringName:
+	var shaman = tribe.shaman
+	if shaman == null or not is_instance_valid(shaman) \
+			or (shaman as Shaman).pending_spell == null:
+		return &""
+	return (shaman as Shaman).pending_spell.id
+
+
+func test_ai_casts_volcano_on_building_cluster() -> void:
+	var w: Dictionary = _make_world()
+	var ai_tribe: Tribe = w.tribes[1]
+	var ai: AIController = _make_ai(w, ai_tribe, Vector2i(40, 40))
+	w.unit_manager.spawn_unit(SHAMAN_SCENE, 1, Vector3(40, 5, 40))
+	w.building_manager.place(HUT_SCENE, w.tribes[0], Vector2i(43, 38), 0, true)
+	w.building_manager.place(HUT_SCENE, w.tribes[0], Vector2i(43, 43), 0, true)
+	_arm_only(ai_tribe, &"volcano")
+	ai._cast_spells()
+	check(_pending_spell_id(ai_tribe) == &"volcano",
+		"two clustered enemy buildings -> volcano")
+	ai.free()
+	_free_world(w)
+
+
+func test_ai_casts_sink_on_coastal_building() -> void:
+	var w: Dictionary = _make_world(3.5)   # low coastal shelf
+	var ai_tribe: Tribe = w.tribes[1]
+	var ai: AIController = _make_ai(w, ai_tribe, Vector2i(40, 40))
+	w.unit_manager.spawn_unit(SHAMAN_SCENE, 1, Vector3(40, 3.5, 40))
+	w.building_manager.place(HUT_SCENE, w.tribes[0], Vector2i(43, 38), 0, true)
+	_arm_only(ai_tribe, &"sink")
+	ai._cast_spells()
+	check(_pending_spell_id(ai_tribe) == &"sink",
+		"coastal enemy building -> sink (flooding)")
+	ai.free()
+	_free_world(w)
+
+
+func test_ai_casts_flatten_on_slope_building() -> void:
+	var w: Dictionary = _make_world()
+	var ai_tribe: Tribe = w.tribes[1]
+	var ai: AIController = _make_ai(w, ai_tribe, Vector2i(40, 40))
+	w.unit_manager.spawn_unit(SHAMAN_SCENE, 1, Vector3(40, 5, 40))
+	var hut: Building = w.building_manager.place(HUT_SCENE, w.tribes[0],
+		Vector2i(43, 38), 0, true)
+	# Terrain step right next to the hut: a flatten there breaks the foundation.
+	for vz in range(37, 44):
+		for vx in range(48, 54):
+			w.td.set_vertex_height(vx, vz, 7.0)
+	check(hut.health > 0, "hut standing before the cast")
+	_arm_only(ai_tribe, &"flatten")
+	ai._cast_spells()
+	check(_pending_spell_id(ai_tribe) == &"flatten",
+		"building next to a height step -> flatten (foundation break)")
+	ai.free()
+	_free_world(w)
+
+
+func test_ai_casts_firestorm_on_big_cluster() -> void:
+	var w: Dictionary = _make_world()
+	var ai_tribe: Tribe = w.tribes[1]
+	var ai: AIController = _make_ai(w, ai_tribe, Vector2i(40, 40))
+	w.unit_manager.spawn_unit(SHAMAN_SCENE, 1, Vector3(40, 5, 40))
+	for i in range(5):
+		w.unit_manager.spawn_unit(BRAVE_SCENE, 0,
+			Vector3(44 + 0.6 * float(i % 3), 5, 40 + 0.6 * float(i % 2)))
+	_arm_only(ai_tribe, &"firestorm")
+	ai._cast_spells()
+	check(_pending_spell_id(ai_tribe) == &"firestorm",
+		"big enemy cluster -> firestorm before fireball")
+	ai.free()
+	_free_world(w)

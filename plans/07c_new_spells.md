@@ -132,7 +132,7 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
 
 ## Definition of Done
 
-- [ ] Testsuite grün, `--headless --quit` fehlerfrei
+- [x] Testsuite grün, `--headless --quit` fehlerfrei *(959 Tests, 2026-07-06)*
 - [ ] Manuelle Prüfung bestanden
-- [ ] PROGRESS.md ergänzt, Checkbox 7c in [00_overview.md](00_overview.md) abgehakt
-- [ ] `git add -A && git commit -m "Phase 7c: Erdbeben, Vulkan, Feuerregen, Ebene, Absinken" && git push`
+- [ ] PROGRESS.md ergänzt *(erledigt)*, Checkbox 7c in [00_overview.md](00_overview.md) abgehakt *(nach manueller Prüfung)*
+- [x] `git add -A && git commit -m "Phase 7c: Erdbeben, Vulkan, Feuerregen, Ebene, Absinken" && git push`
