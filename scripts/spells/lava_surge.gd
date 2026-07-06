@@ -12,8 +12,12 @@ class_name LavaSurge extends Node3D
 const EXPAND_SPEED: float = 3.2      # the front races down the flank
 const INNER_RADIUS: float = 0.5      # crater rim
 ## How long a band keeps glowing after the front passed it.
-const MOLTEN_TIME: float = 2.5
-const LIFETIME: float = 9.0
+const MOLTEN_TIME: float = 1.5
+const LIFETIME: float = 5.4
+## Over the last stretch of its life the sheet SINKS into the ground
+## instead of popping out of existence.
+const SINK_TIME: float = 1.2
+const SINK_DEPTH: float = 0.9
 const CHECK_INTERVAL: float = 0.2
 const VISUAL_INTERVAL: float = 0.1
 const ANGLE_STEPS: int = 24
@@ -123,11 +127,18 @@ func _rebuild_mesh() -> void:
 		im.surface_end()
 
 
+## Downward offset at the end of life: the crust sinks into the ground.
+func _sink_offset() -> float:
+	var t: float = clampf((_life - (LIFETIME - SINK_TIME)) / SINK_TIME, 0.0, 1.0)
+	return t * SINK_DEPTH
+
+
 func _sheet_point(dir: Vector3, r: float) -> Vector3:
 	var wx: float = position.x + dir.x * r
 	var wz: float = position.z + dir.z * r
 	return Vector3(wx - position.x,
-		terrain_data.get_height(wx, wz) + 0.08 - position.y, wz - position.z)
+		terrain_data.get_height(wx, wz) + 0.08 - _sink_offset() - position.y,
+		wz - position.z)
 
 
 func _ready() -> void:

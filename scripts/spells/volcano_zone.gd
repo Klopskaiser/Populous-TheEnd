@@ -65,12 +65,13 @@ func tick(delta: float) -> void:
 		_wreck_buildings()
 
 
-## Liquid lava wells up at the crater and races down every flank at once.
+## Liquid lava wells up at the crater and races down every flank at once,
+## reaching past the foot of the mountain (a ring around its base).
 func _spawn_surge() -> void:
 	if unit_manager == null:
 		return
 	var surge: LavaSurge = LavaSurge.new()
-	surge.setup(position, unit_manager, terrain_data, RADIUS + 0.5)
+	surge.setup(position, unit_manager, terrain_data, RADIUS + 2.5)
 	unit_manager.register_projectile(surge)
 
 

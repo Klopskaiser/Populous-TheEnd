@@ -17,6 +17,10 @@ const VISUAL_INTERVAL: float = 0.1
 ## Below this slope the lava pools and stops flowing.
 const MIN_SLOPE: float = 0.04
 const HALF_WIDTH: float = 0.5
+## Over the last stretch of its life the stream SINKS into the ground
+## instead of popping out of existence.
+const SINK_TIME: float = 1.0
+const SINK_DEPTH: float = 0.8
 
 var done: bool = false
 var unit_manager: UnitManager = null
@@ -159,13 +163,19 @@ func _rebuild_ribbon() -> void:
 		if i == points.size() - 1 and _flowing:
 			w *= 1.35   # bulbous advancing head
 		im.surface_set_color(_point_color(points[i]))
-		var y: float = p.y + 0.07
+		var y: float = p.y + 0.07 - _sink_offset()
 		var a: Vector3 = Vector3(p.x, y, p.z) + perp * w - position
 		var b: Vector3 = Vector3(p.x, y, p.z) - perp * w - position
 		im.surface_add_vertex(a)
 		im.surface_set_color(_point_color(points[i]))
 		im.surface_add_vertex(b)
 	im.surface_end()
+
+
+## Downward offset at the end of life: the stream sinks into the ground.
+func _sink_offset() -> float:
+	var t: float = clampf((_life - (lifetime - SINK_TIME)) / SINK_TIME, 0.0, 1.0)
+	return t * SINK_DEPTH
 
 
 func _point_color(seg: Dictionary) -> Color:

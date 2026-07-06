@@ -2091,3 +2091,14 @@ zerplatzende Gebäude, Absinken-Flutung, KI castet die neuen Zauber).
   die deterministischen Brand-Checks ergänzt — Decke trifft beide
   gegenüberliegenden Flanken-Einheiten). Ladecheck + `--quit-after 240`
   fehlerfrei. **Manuelle Prüfung durch Nutzer: ausstehend.**
+
+**Nachbesserung (Nutzerfeedback, dritte Runde — Lava-Feintuning):**
+- **Vulkan-Lava reicht bis über den Bergfuß:** Surge-Radius `RADIUS + 0,5`
+  → **`RADIUS + 2,5`** (7,5 m) — die Decke bildet einen Ring um die
+  Bergbasis. Dafür **Lavadauer × 0,6**: `LavaSurge.LIFETIME` 9 → 5,4 s,
+  `MOLTEN_TIME` 2,5 → 1,5 s.
+- **Lava versinkt im Boden statt zu verpuffen:** `LavaSurge` und `LavaFlow`
+  senken ihr Mesh in der letzten Lebensphase (`SINK_TIME` 1,2/1,0 s) um
+  `SINK_DEPTH` unter die Oberfläche ab (Vertex-Y-Offset) — die Kruste
+  taucht sichtbar ins Terrain ab.
+- Tests: 988 grün, `--quit-after 240` fehlerfrei.
