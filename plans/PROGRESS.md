@@ -2384,3 +2384,7 @@ jetzt auf x6/x9 (frei von den Kapuzenwangen x4–5 / x10–11); die Drehung wird
 über den verkürzten Haaransatz an der Fernkante erzählt. `back_right`-Peek-Auge
 analog von x10 → x9. Tests **1079 grün**, Ladecheck fehlerfrei.
 
+**Manuelle Optik-Prüfung durch Nutzer bestanden (2026-07-07):** 8 Ansichten klar
+unterscheidbar, Diagonal-Accessoires (Krieger Schwert/Schild, Feuerkrieger zwei
+Feuerbälle) und Prediger-Augen sitzen korrekt. Phase 7e abgeschlossen.
+
