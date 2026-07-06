@@ -44,6 +44,11 @@ func _process(_delta: float) -> void:
 			break
 		if not is_instance_valid(unit) or unit.state == Unit.State.DEAD:
 			continue
+		# The selected FLAG is authoritative: units can be deselected without
+		# leaving the selection list (e.g. a brave walking into a training
+		# building calls set_selected(false)) — no ring for those.
+		if not unit.selected:
+			continue
 		_multimesh.set_instance_transform(count, Transform3D(
 			Basis.IDENTITY, unit.position + Vector3(0.0, RING_HEIGHT, 0.0)))
 		count += 1
