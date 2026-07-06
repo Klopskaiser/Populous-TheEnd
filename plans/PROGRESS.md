@@ -2060,3 +2060,34 @@ zerplatzende Gebäude, Absinken-Flutung, KI castet die neuen Zauber).
   Panik/Reichweite/Abkühlung, Schamanin brennt ohne Panik).
   Ladecheck + `--quit-after 240` fehlerfrei.
   **Manuelle Prüfung durch Nutzer: ausstehend.**
+
+**Nachbesserung (Nutzerfeedback, zweite Runde — Lava-Optik & Vulkan-Eruption):**
+- **Lavaströme als zähflüssiges Band** (`lava_flow.gd` umgebaut): statt
+  einzelner orangefarbener Ovale zeichnet der Strom EIN durchgehendes,
+  terrainfolgendes Ribbon-Mesh (ImmediateMesh-Triangle-Strip über die
+  Segmentpunkte, throttled 0,1 s): Breite pulsiert viskos pro Punkt
+  (Sinus-Wobble), der vorrückende Kopf ist bauchig verdickt, die Farbe
+  altert vom glühenden Orange am Kopf über dunkles Zähflüssig-Rot zur
+  schwarzen Kruste am abgekühlten Ende (Vertex-Farben; Fault-Lava blendet
+  stattdessen aus). `FLOW_SPEED` 2,2 → 3,0, Segmentabstand 0,7 → 0,45
+  (glatterer Verlauf). Schadenslogik unverändert.
+- **Vulkan-Eruption über alle Flanken** (neue `lava_surge.gd`): statt
+  einzelner Ströme, die um den Berg herumkriechen, quillt die Lava jetzt am
+  Krater auf und läuft als **radiale Decke an ALLEN Seiten gleichzeitig**
+  schnell herunter (Front expandiert mit 3,2 m/s bis Radius 5,5; kegelan-
+  schmiegendes Radialmesh, 24 Sektoren, unregelmäßig vorbeulende Front,
+  Farbverlauf glühende Front → schwarze Kruste von innen nach außen).
+  Solange die Decke glüht, entzündet sie alles darunter (`Unit.ignite`);
+  die schwarze Kruste bleibt bis zum Ablauf (9 s) liegen. Eine Surge alle
+  4,5 s.
+- **Rauch erst ab Maximalhöhe + animiert** (`volcano_zone.gd`):
+  Eruptionen und Rauch starten erst, wenn der Kegel fertig ist
+  (`SURGE_START = VolcanoSpell.DURATION`); die Rauchsäule ist eine
+  Schleifen-Animation aus 5 phasenversetzten Puffs, die aus dem Krater
+  aufsteigen, anwachsen und ausblenden (leichtes seitliches Wabern).
+  Statischer Puff-Stapel und die alten Einzel-`LavaFlow`s des Vulkans sind
+  entfernt (das Erdbeben nutzt `LavaFlow` weiter).
+- Tests: **988 grün** (Vulkan-Test auf `LavaSurge` umgestellt und wieder um
+  die deterministischen Brand-Checks ergänzt — Decke trifft beide
+  gegenüberliegenden Flanken-Einheiten). Ladecheck + `--quit-after 240`
+  fehlerfrei. **Manuelle Prüfung durch Nutzer: ausstehend.**

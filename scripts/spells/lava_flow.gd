@@ -1,25 +1,28 @@
 class_name LavaFlow extends Node3D
 
-## A molten stream: spawns at a point, runs downhill for a short distance
-## (steered by the terrain gradient) and leaves a trail of lava segments.
-## Molten segments IGNITE every unit they touch — lava knows no friends
-## (Unit.ignite: contact damage + burn with panic). When a segment cools it
-## blackens the ground beneath it (scorch decal); the earthquake's fault lava
-## skips the scorch and simply vanishes. Ticked via the UnitManager
-## projectile list; visuals only exist in-game (in-tree).
+## A molten stream: spawns at a point, runs downhill (steered by the terrain
+## gradient) and leaves a trail of segments. Molten segments IGNITE every
+## unit they touch — lava knows no friends (Unit.ignite: contact damage +
+## burn with panic). Visual: ONE continuous terrain-hugging ribbon whose
+## width pulses viscously and whose colour ages from glowing orange at the
+## head to black scorch at the cooled tail (fault lava skips the scorch and
+## fades out instead). Ticked via the UnitManager projectile list; the
+## ribbon only exists in-game (in-tree).
 
-const FLOW_SPEED: float = 2.2
-const SEGMENT_SPACING: float = 0.7
+const FLOW_SPEED: float = 3.0
+const SEGMENT_SPACING: float = 0.45
 const CONTACT_RADIUS: float = 0.9
 const CHECK_INTERVAL: float = 0.2
+const VISUAL_INTERVAL: float = 0.1
 ## Below this slope the lava pools and stops flowing.
 const MIN_SLOPE: float = 0.04
+const HALF_WIDTH: float = 0.5
 
 var done: bool = false
 var unit_manager: UnitManager = null
 var terrain_data: TerrainData = null
-## Per-use tuning: the volcano flows far and scorches, the earthquake's
-## fault lava is short and vanishes quickly without a trace.
+## Per-use tuning: the volcano's flows scorch the ground black, the
+## earthquake's fault lava is short and vanishes quickly without a trace.
 var flow_range: float = 7.0
 var lifetime: float = 12.0
 var molten_time: float = 4.0
@@ -32,10 +35,10 @@ var _travelled: float = 0.0
 var _since_segment: float = 999.0   # first segment drops immediately
 var _life: float = 0.0
 var _check_timer: float = 0.0
-## Segment entries: {pos: Vector3, age: float, cooled: bool, node: MeshInstance3D|null}.
+var _visual_timer: float = 0.0
+## Segment entries: {pos: Vector3, age: float, cooled: bool}.
 var _segments: Array[Dictionary] = []
-var _molten_mat: StandardMaterial3D = null
-var _scorch_mat: StandardMaterial3D = null
+var _ribbon: MeshInstance3D = null
 
 
 func setup(at: Vector3, dir: Vector3, p_unit_manager: UnitManager,
@@ -68,11 +71,14 @@ func tick(delta: float) -> void:
 		seg.age += delta
 		if not seg.cooled and seg.age >= molten_time:
 			seg.cooled = true
-			_cool_visual(seg)
 	_check_timer -= delta
 	if _check_timer <= 0.0:
 		_check_timer = CHECK_INTERVAL
 		_ignite_touching_units()
+	_visual_timer -= delta
+	if _visual_timer <= 0.0:
+		_visual_timer = VISUAL_INTERVAL
+		_rebuild_ribbon()
 
 
 ## Head movement: steered toward the local downhill direction, stopping once
@@ -88,7 +94,7 @@ func _advance(delta: float) -> void:
 	_since_segment += FLOW_SPEED * delta
 	if _since_segment >= SEGMENT_SPACING:
 		_since_segment = 0.0
-		_add_segment(_head)
+		_segments.append({"pos": _head, "age": 0.0, "cooled": false})
 	if _travelled >= flow_range:
 		_flowing = false
 	elif _travelled > 1.0 and downhill == Vector3.ZERO:
@@ -109,33 +115,6 @@ func _downhill(at: Vector3) -> Vector3:
 	return grad.normalized()
 
 
-func _add_segment(at: Vector3) -> void:
-	var node: MeshInstance3D = null
-	if is_inside_tree() and _molten_mat != null:
-		node = MeshInstance3D.new()
-		var blob: SphereMesh = SphereMesh.new()
-		blob.radius = 0.45
-		blob.height = 0.5
-		node.mesh = blob
-		node.material_override = _molten_mat
-		add_child(node)
-		node.position = at - position + Vector3(0.0, 0.1, 0.0)
-	_segments.append({"pos": at, "age": 0.0, "cooled": false, "node": node})
-
-
-## Cooling: the volcano's lava blackens the ground (flattened dark decal),
-## the quick fault lava just disappears.
-func _cool_visual(seg: Dictionary) -> void:
-	var node = seg.node
-	if node == null or not is_instance_valid(node):
-		return
-	if scorch:
-		node.material_override = _scorch_mat
-		node.scale = Vector3(1.1, 0.12, 1.1)
-	else:
-		node.visible = false
-
-
 func _ignite_touching_units() -> void:
 	if unit_manager == null:
 		return
@@ -148,12 +127,64 @@ func _ignite_touching_units() -> void:
 			u.ignite(seg.pos)
 
 
+# --- Ribbon visual (in-game only) ----------------------------------------------------
+
+## One triangle strip along the path: width pulses viscously per point, the
+## colour fades from a glowing head over dark red to black (scorch) or to
+## transparent (fault lava) as the segments age. Cheap: <= ~40 points,
+## rebuilt at VISUAL_INTERVAL.
+func _rebuild_ribbon() -> void:
+	if _ribbon == null:
+		return
+	var im: ImmediateMesh = _ribbon.mesh
+	im.clear_surfaces()
+	var points: Array[Dictionary] = _segments.duplicate()
+	if _flowing:
+		points.append({"pos": _head, "age": -0.3, "cooled": false})
+	if points.size() < 2:
+		return
+	im.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP)
+	for i in range(points.size()):
+		var p: Vector3 = points[i].pos
+		var next: Vector3 = points[mini(i + 1, points.size() - 1)].pos
+		var prev: Vector3 = points[maxi(i - 1, 0)].pos
+		var along: Vector3 = Vector3(next.x - prev.x, 0.0, next.z - prev.z)
+		if along.length_squared() < 0.000001:
+			along = _dir
+		along = along.normalized()
+		var perp: Vector3 = Vector3(-along.z, 0.0, along.x)
+		# Viscous pulse: the molten body slowly swells and contracts.
+		var wobble: float = 0.8 + 0.2 * sin(_life * 4.0 + float(i) * 1.7)
+		var w: float = HALF_WIDTH * wobble
+		if i == points.size() - 1 and _flowing:
+			w *= 1.35   # bulbous advancing head
+		im.surface_set_color(_point_color(points[i]))
+		var y: float = p.y + 0.07
+		var a: Vector3 = Vector3(p.x, y, p.z) + perp * w - position
+		var b: Vector3 = Vector3(p.x, y, p.z) - perp * w - position
+		im.surface_add_vertex(a)
+		im.surface_set_color(_point_color(points[i]))
+		im.surface_add_vertex(b)
+	im.surface_end()
+
+
+func _point_color(seg: Dictionary) -> Color:
+	var t: float = clampf(float(seg.age) / molten_time, 0.0, 1.0)
+	if seg.cooled:
+		# Cooled: black scorch stays, fault lava fades away.
+		return Color(0.06, 0.05, 0.04, 1.0) if scorch \
+			else Color(0.3, 0.1, 0.03, maxf(0.0, 1.0 - (float(seg.age) - molten_time)))
+	# Glowing head -> dark viscous red as it ages.
+	return Color(1.0, 0.55, 0.08, 1.0).lerp(Color(0.55, 0.12, 0.02, 1.0), t)
+
+
 func _ready() -> void:
-	_molten_mat = StandardMaterial3D.new()
-	_molten_mat.albedo_color = Color(1.0, 0.42, 0.06)
-	_molten_mat.emission_enabled = true
-	_molten_mat.emission = Color(1.0, 0.3, 0.0)
-	_molten_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	_scorch_mat = StandardMaterial3D.new()
-	_scorch_mat.albedo_color = Color(0.06, 0.05, 0.04)
-	_scorch_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_ribbon = MeshInstance3D.new()
+	_ribbon.mesh = ImmediateMesh.new()
+	var mat: StandardMaterial3D = StandardMaterial3D.new()
+	mat.vertex_color_use_as_albedo = true
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_ribbon.material_override = mat
+	add_child(_ribbon)

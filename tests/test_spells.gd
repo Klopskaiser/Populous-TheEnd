@@ -768,22 +768,30 @@ func test_ignite_shaman_burns_without_panicking() -> void:
 func test_volcano_cone_lava_and_permanence() -> void:
 	var w: Dictionary = _make_world_with_buildings()
 	var target: Vector3 = Vector3(40, 5, 40)
+	var enemy: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, Vector3(43, 5, 40))
+	var own: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 0, Vector3(37, 5, 40))
 	var spell: VolcanoSpell = VolcanoSpell.new()
 	check(spell.execute(w.tribe0, target, w.ctx), "volcano cast succeeds")
 	for i in range(35):
 		w.unit_manager.tick(0.1)   # cone morph (3 s) completes
 	check(w.td.get_height(40.0, 40.0) >= 5.0 + VolcanoSpell.PEAK - 1.0,
 		"cone tip rises to (nearly) peak height")
-	var flows: int = 0
+	var surges: int = 0
 	for p in w.unit_manager.projectiles:
-		if p is LavaFlow:
-			flows += 1
-	check(flows >= 1, "lava streams out of the crater and down the flank")
+		if p is LavaSurge:
+			surges += 1
+	check(surges >= 1, "lava wells up once the cone is at max height")
+	for i in range(15):
+		w.unit_manager.tick(0.1)   # the sheet spreads over both flank units
+	check(enemy.state == Unit.State.DEAD or enemy.health < enemy.max_health,
+		"the surge covers ALL flanks: enemy on one side is burned")
+	check(own.state == Unit.State.DEAD or own.health < own.max_health,
+		"...and the own unit on the opposite side too (lava knows no friends)")
 	var peak_after_morph: float = w.td.get_height(40.0, 40.0)
 	for i in range(330):
-		w.unit_manager.tick(0.1)   # zone (20 s) + last lava flow (12 s) expire
+		w.unit_manager.tick(0.1)   # zone (20 s) + last surge (9 s) expire
 	check(w.unit_manager.projectiles.is_empty(),
-		"eruption over: zone and every lava flow despawned")
+		"eruption over: zone and every lava surge despawned")
 	check_near(w.td.get_height(40.0, 40.0), peak_after_morph,
 		"the mountain is permanent (height unchanged after the eruption)")
 	_free_world_with_buildings(w)

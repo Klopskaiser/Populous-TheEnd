@@ -1,21 +1,25 @@
 class_name VolcanoZone extends Node3D
 
-## The volcano's eruption controller: sits on the (growing) cone for
-## LIFETIME seconds and regularly releases LAVA FLOWS out of the crater that
-## run down the flanks (LavaFlow: ignites everything it touches — lava knows
-## no friends — and blackens the ground as it cools). Buildings in reach of
-## the eruption take +1 destruction stage every STAGE_INTERVAL (first hit
-## after one full interval of contact). Placeholder visual: a smoke column
-## above the crater. The mountain underneath is permanent and stays after
-## the zone despawns. Ticked via the UnitManager projectile list.
+## The volcano's eruption controller: sits on the growing cone for LIFETIME
+## seconds. Once the cone has reached its full height (the morph is done),
+## the crater starts to erupt: every SURGE_INTERVAL a LavaSurge wells up and
+## runs down ALL flanks simultaneously (ignites everything it covers — lava
+## knows no friends — and leaves a black scorch skirt), and an ANIMATED
+## smoke column rises from the crater (looping puffs that grow and fade;
+## in-game only). Buildings in reach take +1 destruction stage every
+## STAGE_INTERVAL. The mountain underneath is permanent and stays after the
+## zone despawns. Ticked via the UnitManager projectile list.
 
 const LIFETIME: float = 20.0
 const RADIUS: float = 5.0
 const STAGE_INTERVAL: float = 4.0
-## Lava flows: the first once the cone has some height, then regularly,
-## fanned out around the crater (deterministic base angle from the cell).
-const FLOW_START_DELAY: float = 1.5
-const FLOW_INTERVAL: float = 2.5
+## Eruptions start only once the cone is at max height (morph duration).
+const SURGE_START: float = VolcanoSpell.DURATION
+const SURGE_INTERVAL: float = 4.5
+## Smoke animation: puff cycle length, rise height and speed source values.
+const SMOKE_PUFFS: int = 5
+const SMOKE_CYCLE: float = 3.2
+const SMOKE_RISE: float = 4.5
 
 var done: bool = false
 var tribe_id: int = 0
@@ -23,11 +27,11 @@ var unit_manager: UnitManager = null
 var terrain_data: TerrainData = null
 var building_manager: BuildingManager = null
 
-var _life: float = LIFETIME
+var _time: float = 0.0
 var _stage_timer: float = STAGE_INTERVAL
-var _flow_timer: float = FLOW_START_DELAY
-var _flow_count: int = 0
-var _base_angle: float = 0.0
+var _surge_timer: float = 0.0
+var _smoke: Array[MeshInstance3D] = []
+var _smoke_mats: Array[StandardMaterial3D] = []
 
 
 func setup(p_tribe_id: int, at: Vector3, p_unit_manager: UnitManager,
@@ -37,41 +41,37 @@ func setup(p_tribe_id: int, at: Vector3, p_unit_manager: UnitManager,
 	unit_manager = p_unit_manager
 	terrain_data = p_terrain_data
 	building_manager = p_building_manager
-	var cell: Vector2i = Vector2i(int(floor(at.x)), int(floor(at.z)))
-	_base_angle = float((cell.x * 7 + cell.y * 13) % 16) * TAU / 16.0
 
 
 func tick(delta: float) -> void:
 	if done:
 		return
-	_life -= delta
-	if _life <= 0.0:
+	_time += delta
+	if _time >= LIFETIME:
 		done = true
 		return
-	# Ride the growing cone (the smoke column rises with the crater).
+	# Ride the growing cone (crater visuals rise with the tip).
 	if terrain_data != null:
 		position.y = terrain_data.get_height(position.x, position.z)
-	_flow_timer -= delta
-	if _flow_timer <= 0.0:
-		_flow_timer = FLOW_INTERVAL
-		_spawn_flow()
+	if _time >= SURGE_START:
+		_surge_timer -= delta
+		if _surge_timer <= 0.0:
+			_surge_timer = SURGE_INTERVAL
+			_spawn_surge()
+	_animate_smoke()
 	_stage_timer -= delta
 	if _stage_timer <= 0.0:
 		_stage_timer = STAGE_INTERVAL
 		_wreck_buildings()
 
 
-## One lava stream out of the crater, fanned around the tip so successive
-## flows cover different flanks; it steers itself downhill from there.
-func _spawn_flow() -> void:
+## Liquid lava wells up at the crater and races down every flank at once.
+func _spawn_surge() -> void:
 	if unit_manager == null:
 		return
-	var angle: float = _base_angle + TAU * float(_flow_count) / 7.0
-	_flow_count += 1
-	var dir: Vector3 = Vector3(cos(angle), 0.0, sin(angle))
-	var flow: LavaFlow = LavaFlow.new()
-	flow.setup(position + dir * 0.4, dir, unit_manager, terrain_data)
-	unit_manager.register_projectile(flow)
+	var surge: LavaSurge = LavaSurge.new()
+	surge.setup(position, unit_manager, terrain_data, RADIUS + 0.5)
+	unit_manager.register_projectile(surge)
 
 
 func _wreck_buildings() -> void:
@@ -86,20 +86,44 @@ func _wreck_buildings() -> void:
 			b.apply_destruction_stages(1)
 
 
+# --- Animated smoke column (in-game only) ----------------------------------------------
+
+## Looping puffs: each rises out of the crater, swells and fades, phase-
+## shifted against the others — a continuous column. Hidden until the cone
+## has reached its full height.
+func _animate_smoke() -> void:
+	if _smoke.is_empty():
+		return
+	var active: bool = _time >= SURGE_START
+	for i in range(_smoke.size()):
+		var puff: MeshInstance3D = _smoke[i]
+		puff.visible = active
+		if not active:
+			continue
+		var t: float = fposmod((_time - SURGE_START) / SMOKE_CYCLE
+			+ float(i) / float(SMOKE_PUFFS), 1.0)
+		puff.position = Vector3(
+			0.4 * sin(_time * 0.7 + float(i) * 2.1),
+			VolcanoSpell.PEAK + 0.4 + t * SMOKE_RISE,
+			0.4 * cos(_time * 0.6 + float(i) * 1.3))
+		var s: float = 0.5 + t * 1.6
+		puff.scale = Vector3(s, s, s)
+		_smoke_mats[i].albedo_color.a = 0.5 * (1.0 - t)
+
+
 func _ready() -> void:
-	# Placeholder smoke column above the crater: stacked grey puffs.
-	var mat: StandardMaterial3D = StandardMaterial3D.new()
-	mat.albedo_color = Color(0.35, 0.33, 0.32, 0.55)
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	for i in range(5):
+	for i in range(SMOKE_PUFFS):
+		var mat: StandardMaterial3D = StandardMaterial3D.new()
+		mat.albedo_color = Color(0.35, 0.33, 0.32, 0.5)
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		var puff: MeshInstance3D = MeshInstance3D.new()
 		var s: SphereMesh = SphereMesh.new()
-		var r: float = 0.6 + 0.35 * float(i)
-		s.radius = r
-		s.height = r * 1.6
+		s.radius = 0.7
+		s.height = 1.1
 		puff.mesh = s
 		puff.material_override = mat
-		puff.position = Vector3(0.25 * float(i % 3) - 0.25,
-			VolcanoSpell.PEAK + 0.6 + 1.1 * float(i), 0.2 * float(i % 2))
+		puff.visible = false
 		add_child(puff)
+		_smoke.append(puff)
+		_smoke_mats.append(mat)
