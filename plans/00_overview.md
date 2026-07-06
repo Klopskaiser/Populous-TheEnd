@@ -12,7 +12,7 @@ Nach Abschluss einer Phase: Checkbox abhaken, committen, pushen.
 - [x] **Phase 2** — [02_units_selection_movement.md](02_units_selection_movement.md): Pathfinding, Unit-Basis, Selektion & Bewegung
 - [x] **Phase 3** — [03_buildings_economy_hud.md](03_buildings_economy_hud.md): Gebäude, Wirtschaft (Holz/Hütten/Mana), HUD
 - [x] **Phase 4** — [04_ui.md](04_ui.md): Original-nahes UI (Sidebar, Minimap, Zauber-/Bau-Panels)
-- [ ] **Phase 5** — [05_training_combat_preacher.md](05_training_combat_preacher.md): Training, Rally Points, Kampf, Prediger *(Sub-Phasen 5a–5d, siehe Plandatei)*
+- [x] **Phase 5** — [05_training_combat_preacher.md](05_training_combat_preacher.md): Training, Rally Points, Kampf, Prediger *(Sub-Phasen 5a–5d, siehe Plandatei)*
 - [ ] **Phase 6** — [06_shaman_spells.md](06_shaman_spells.md): Schamanin, Reinkarnation, alle 5 Zauber
 - [ ] **Phase 7** — [07_ai_win_conditions.md](07_ai_win_conditions.md): Skirmish-KI, Siegbedingungen
 - [ ] **Phase 8** — [08_performance_polish.md](08_performance_polish.md): Performance, Balance, Feinschliff

@@ -1220,3 +1220,11 @@ Kaserne → Braves stellen sich zur Ausbildung an).
   auf den jeweils gegnerischen Anker — Aggro übernimmt beim Kontakt. Blau
   (Stamm 0) bleibt spielersteuerbar. Headless-Funktionstest: 1600 Einheiten,
   600 Frames fehlerfrei.
+
+**Manuelle Prüfung durch Nutzer: bestanden** („soweit erstmal in ordnung").
+**Bekannt/offen für Phase 8: Performancethemen** (vom Nutzer beobachtet,
+vermutlich Massenschlachten — Kandidaten: Kampf-Zielsuche/Slot-Kontention
+bei Hunderten Kämpfern auf engem Raum, Projektil-/Roll-Massen, GPU-seitig
+weiterhin die bekannten Punkte aus Phase 3e/3f). **Sub-Phase 5d und damit
+Phase 5 KOMPLETT abgeschlossen** — als Nächstes Phase 6 (Schamanin,
+Reinkarnation, Zauber).

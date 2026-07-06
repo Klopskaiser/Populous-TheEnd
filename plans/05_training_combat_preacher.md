@@ -363,8 +363,9 @@ Treffer-Ereignisse aus 5b/5c ein. Referenz: „Bewegung“ + „Leben, Regenerat
 ### Definition of Done 5d
 
 - [x] Testsuite grün, `--headless --quit` fehlerfrei
-- [ ] Manuell: Einheiten laufen bergauf langsamer; an sehr steilen Hängen / durch Feuerball-
+- [x] Manuell: Einheiten laufen bergauf langsamer; an sehr steilen Hängen / durch Feuerball-
   Rückstoß / (selten) Schubs rollen sie hinab; Rollen ins Wasser tötet sofort; Sterne bei viel
   Schaden; verletzte Einheiten heilen außerhalb des Kampfes; verschiedene Sounds je Angriffsart
-- [ ] Checkbox Phase 5 in [00_overview.md](00_overview.md) abgehakt (Phase 5 komplett)
-- [ ] `git add -A && git commit -m "Phase 5d: Bewegung, Rollen & Politur" && git push`
+  *(vom Nutzer bestätigt; **Performancethemen offen** → Phase 8)*
+- [x] Checkbox Phase 5 in [00_overview.md](00_overview.md) abgehakt (Phase 5 komplett)
+- [x] `git add -A && git commit -m "Phase 5d: Bewegung, Rollen & Politur" && git push`
