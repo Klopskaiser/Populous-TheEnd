@@ -17,6 +17,17 @@ const TARGET_HEIGHT: float = 0.8
 ## Safety net: after this many seconds the ball fizzles no matter what.
 const MAX_LIFETIME: float = 3.0
 
+## Chance that a hit knocks the target over into a short roll (phase 5d).
+## Low per ball — many projectiles raise the effective odds.
+const ROLL_CHANCE: float = 0.1
+## A target that is ALREADY rolling is easier to keep rolling: follow-up hits
+## (the balls are homing) extend the tumble with this higher chance.
+const ROLL_CHANCE_ROLLING: float = 0.4
+## In tight formations the knock-over can also topple adjacent units...
+const NEIGHBOR_ROLL_RADIUS: float = 0.9
+## ...each with this chance, for an even shorter tumble.
+const NEIGHBOR_ROLL_CHANCE: float = 0.5
+
 var shooter = null   # untyped: may be freed mid-flight
 var target = null    # untyped: may be freed mid-flight
 var done: bool = false
@@ -57,6 +68,11 @@ func _impact() -> void:
 			target.position + Vector3(0.0, TARGET_HEIGHT, 0.0)) > HIT_RANGE * 2.0:
 		return
 	target.take_damage(Unit.FIREBALL_DAMAGE, shooter)
+	# Impact sound via the Events bus (absent in headless tests).
+	if is_inside_tree():
+		var events: Node = get_node_or_null("/root/Events")
+		if events != null:
+			events.combat_hit.emit(&"fireball", position)
 	if not _target_alive():
 		return   # the hit killed it
 	# Knockback away from the shooter (fallback: along the flight direction).
@@ -66,8 +82,23 @@ func _impact() -> void:
 	else:
 		dir = target.position - _launch_from
 	target.apply_knockback(dir)
+	# Knock-over roll (phase 5d): low chance per ball, higher on targets that
+	# already tumble (extends the roll). A fresh knock-over can also topple
+	# adjacent units in tight formations, for an even shorter roll.
+	var was_rolling: bool = target.state == Unit.State.ROLL
+	var chance: float = ROLL_CHANCE_ROLLING if was_rolling else ROLL_CHANCE
+	if randf() < chance:
+		target.start_roll(dir, Unit.MINI_ROLL_DURATION)
+		if not was_rolling and target.path_service != null:
+			for u in target.path_service.get_units_in_radius(
+					target.position, NEIGHBOR_ROLL_RADIUS):
+				if u == target or u.state == Unit.State.DEAD \
+						or u.state == Unit.State.THROWN:
+					continue
+				if randf() < NEIGHBOR_ROLL_CHANCE:
+					u.start_roll(dir, Unit.NEIGHBOR_ROLL_DURATION)
 	# Fire interrupts a preacher's conversion: progress is lost, the unit
-	# stands back up (phase 5c).
+	# stands back up (phase 5c). A roll above already broke the trance.
 	if target.state == Unit.State.SIT:
 		target.reset_conversion()
 

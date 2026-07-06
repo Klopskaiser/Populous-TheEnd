@@ -82,6 +82,15 @@ func _ready() -> void:
 		_camera_rig, td)
 	_route_visualizer.setup(_selection, td)
 
+	# Phase 5d overlays/audio (created in code — no scene entries needed).
+	var stars: StarsRenderer = StarsRenderer.new()
+	stars.name = "StarsRenderer"
+	add_child(stars)
+	stars.setup(_unit_manager)
+	var combat_audio: CombatAudio = CombatAudio.new()
+	combat_audio.name = "CombatAudio"
+	add_child(combat_audio)
+
 	# Terrain deformations (foundation flattening, later Landbridge) rebuild
 	# the affected mesh chunks + collision here.
 	Events.terrain_deformed.connect(_terrain.apply_deformation)

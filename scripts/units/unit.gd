@@ -13,9 +13,10 @@ class_name Unit extends Node3D
 ## UnitRenderer (one MultiMesh draw call). The unit only keeps its animation
 ## state (anim_base_name + anim_start_ms) and render cache fields.
 
-## Later phases fill in the behaviour for GATHER/PRAY/BUILD/ATTACK/TRAIN/
-## PANIC/CAST/THROWN. SIT = pacified by an enemy preacher (conversion, 5c).
-enum State {IDLE, MOVE, GATHER, PRAY, BUILD, ATTACK, TRAIN, PANIC, CAST, THROWN, DEAD, SIT}
+## Later phases fill in the behaviour for GATHER/PRAY/BUILD/PANIC/CAST/THROWN.
+## SIT = pacified by an enemy preacher (conversion, 5c); ROLL = tumbling
+## downhill / knocked over (5d).
+enum State {IDLE, MOVE, GATHER, PRAY, BUILD, ATTACK, TRAIN, PANIC, CAST, THROWN, DEAD, SIT, ROLL}
 
 signal died(unit: Unit)
 ## Fired after this unit switched tribes (preacher conversion) — the
@@ -78,16 +79,58 @@ const SIT_ATTACK_CONTINUE_CHANCE: float = 0.05
 const CORPSE_DURATION: float = 5.0
 const CORPSE_FADE_DURATION: float = 1.0
 
-# --- Knockback (fireball, phase 5c) --------------------------------------------
+# --- Knockback (fireball, phase 5c; weakened in 5d for the roll chance) ---------
 ## Shove distance of a single un-stacked fireball hit (metres)...
-const KNOCKBACK_BASE: float = 0.7
+const KNOCKBACK_BASE: float = 0.35
 ## ...plus this much extra per accumulated stack: rapid successive hits shove
 ## progressively harder (the accumulator decays over time).
-const KNOCKBACK_STACK_BONUS: float = 0.5
+const KNOCKBACK_STACK_BONUS: float = 0.25
 ## How fast the pending displacement is played out (m/s).
 const KNOCKBACK_SPEED: float = 10.0
 ## Accumulator stacks lost per second.
 const KNOCKBACK_ACCUM_DECAY: float = 0.8
+
+# --- Rolling (phase 5d) ----------------------------------------------------------
+## Ground speed while rolling (slope adds a bit on top).
+const ROLL_SPEED: float = 5.5
+## Duration of a flat-ground mini roll (shove / fireball knock-over).
+const MINI_ROLL_DURATION: float = 0.35
+## Even shorter tumble for adjacent units knocked over by a fireball roll.
+const NEIGHBOR_ROLL_DURATION: float = 0.22
+## Rolling hurts a little, scaling with how long it lasts.
+const ROLL_DPS: float = 5.0
+## The roll keeps following the fall line while the downhill slope exceeds
+## this; on flatter ground it ends once the (mini) duration ran out.
+const ROLL_END_SLOPE: float = 0.5
+## Walking DOWN a slope steeper than this may trigger a roll on its own...
+const STEEP_ROLL_SLOPE: float = 1.0
+## ...with this chance per second.
+const STEEP_ROLL_CHANCE_PER_SEC: float = 0.6
+
+# --- Melee shove (phase 5d) --------------------------------------------------------
+## A shove always displaces the target slightly (the brawl shifts around)...
+const SHOVE_DISPLACE: float = 0.35
+## ...and sometimes knocks it over into a very short roll, even on flat ground.
+const SHOVE_ROLL_CHANCE: float = 0.2
+
+# --- Hill movement (phase 5d) ------------------------------------------------------
+## Speed factor lost per unit of uphill slope (rise per metre)...
+const UPHILL_SLOWDOWN: float = 0.45
+## ...clamped so steep climbs stay possible.
+const MIN_SPEED_FACTOR: float = 0.35
+
+# --- Regeneration (phase 5d) ---------------------------------------------------------
+## Seconds without ANY combat involvement (dealt/received damage, rolling)
+## before slow healing starts.
+const REGEN_DELAY: float = 8.0
+const REGEN_RATE: float = 2.0   # HP per second
+
+# --- Stars overlay (phase 5d) -------------------------------------------------------
+## Damage taken within STARS_WINDOW seconds that triggers the circling stars.
+## (HP is NEVER shown — the stars are the only damage feedback.)
+const STARS_DAMAGE_THRESHOLD: int = 12
+const STARS_WINDOW: float = 1.0
+const STARS_DURATION_MS: int = 1500
 
 var tribe_id: int = 0
 ## Owning tribe, injected by UnitManager.spawn_unit()/Tribe.add_unit().
@@ -182,6 +225,24 @@ var converting_preacher = null
 var conversion_progress: float = 0.0
 var conversion_time: float = 0.0
 
+# --- Roll state (phase 5d) ---------------------------------------------------------
+var roll_dir: Vector3 = Vector3.ZERO
+var _roll_time: float = 0.0
+var _roll_min_time: float = 0.0
+var _roll_damage_frac: float = 0.0
+
+# --- Regeneration / stars state (phase 5d) --------------------------------------------
+## Seconds since the last combat involvement; regen starts past REGEN_DELAY.
+var _no_combat_timer: float = 0.0
+var _regen_frac: float = 0.0
+## Stars overlay visible until this tick-time (see has_stars()).
+var stars_until_ms: int = 0
+## Damage taken recently (decays over STARS_WINDOW).
+var _recent_damage: float = 0.0
+## Cached Events bus (combat_hit emissions), resolved once when in-tree.
+var _events_node: Node = null
+var _events_checked: bool = false
+
 
 ## Silhouette key for PlaceholderSprites; overridden by subclasses.
 func unit_kind() -> StringName:
@@ -215,12 +276,13 @@ func _on_combat_interrupt() -> void:
 
 func tick(delta: float) -> void:
 	_tick_knockback(delta)
+	_tick_regen(delta)
 	_tick_state(delta)
 	_apply_animation(false)
 
 
 ## State dispatch; subclasses override this (NOT tick) so cross-state systems
-## like knockback keep running for them too.
+## like knockback and regeneration keep running for them too.
 func _tick_state(delta: float) -> void:
 	match state:
 		State.MOVE:
@@ -231,6 +293,8 @@ func _tick_state(delta: float) -> void:
 			_tick_idle(delta)
 		State.SIT:
 			_tick_sit(delta)
+		State.ROLL:
+			_tick_roll(delta)
 		State.DEAD:
 			_tick_dead(delta)
 		_:
@@ -245,7 +309,9 @@ func _tick_move(delta: float) -> void:
 
 
 ## Walks one step along the current path (also used by Brave sub-states that
-## are not State.MOVE). Returns true when the path is exhausted.
+## are not State.MOVE). Returns true when the path is exhausted. Uphill slopes
+## slow the step down; very steep DOWNHILL stretches can knock the unit into a
+## roll (phase 5d).
 func _advance_path(delta: float) -> bool:
 	if _path_index >= _path.size():
 		return true
@@ -255,13 +321,38 @@ func _advance_path(delta: float) -> bool:
 	var to_target: Vector2 = flat_target - flat_pos
 	if to_target.length_squared() > 0.000001:
 		facing = Vector3(to_target.x, 0.0, to_target.y).normalized()
-	var next: Vector2 = flat_pos.move_toward(flat_target, speed * delta)
+	var slope: float = _slope_ahead(to_target)
+	if slope < -STEEP_ROLL_SLOPE and randf() < STEEP_ROLL_CHANCE_PER_SEC * delta:
+		start_roll(Vector3(to_target.x, 0.0, to_target.y), MINI_ROLL_DURATION)
+		return false
+	var next: Vector2 = flat_pos.move_toward(flat_target, _slope_speed(slope) * delta)
 	position.x = next.x
 	position.z = next.y
 	_snap_to_ground()
 	if next.distance_to(flat_target) <= ARRIVE_EPS:
 		_path_index += 1
 	return _path_index >= _path.size()
+
+
+## Terrain slope (rise per metre) a short step ahead along move_dir; negative
+## = downhill. 0 without terrain (tests) or when standing still.
+func _slope_ahead(move_dir: Vector2) -> float:
+	if terrain_data == null or move_dir.length_squared() < 0.000001:
+		return 0.0
+	var d: Vector2 = move_dir.normalized()
+	var ahead: float = 0.6
+	var h0: float = terrain_data.get_height(position.x, position.z)
+	var h1: float = terrain_data.get_height(
+		position.x + d.x * ahead, position.z + d.y * ahead)
+	return (h1 - h0) / ahead
+
+
+## Effective speed for a given slope: full speed on flat/downhill, slowed
+## (clamped) while climbing.
+func _slope_speed(slope: float) -> float:
+	if slope <= 0.0:
+		return speed
+	return speed * clampf(1.0 - slope * UPHILL_SLOWDOWN, MIN_SPEED_FACTOR, 1.0)
 
 
 func _has_path() -> bool:
@@ -298,9 +389,10 @@ func _on_path_finished() -> void:
 
 ## While pacified by an enemy preacher (SIT) the unit accepts NO orders at all —
 ## it stays sitting until the preacher is attacked (priest duel), interrupted
-## (fireball reset, out of range, death) or the conversion completes.
+## (fireball reset, out of range, death) or the conversion completes. Rolling
+## units are equally beyond control until they land.
 func can_take_orders() -> bool:
-	return state != State.SIT and state != State.DEAD
+	return state != State.SIT and state != State.DEAD and state != State.ROLL
 
 
 ## Move order. queue_up appends the target as an additional waypoint
@@ -398,14 +490,19 @@ func is_praying() -> bool:
 
 ## Applies damage. `attacker` (untyped: may be a freed instance) drives brave
 ## retaliation. Lethal damage runs the combat cleanup and marks the unit DEAD;
-## the UnitManager deregisters it via the died signal.
+## the UnitManager deregisters it via the died signal. While ROLLing, death is
+## DEFERRED: the unit only dies once the roll ends (plan 5d).
 func take_damage(amount: int, attacker = null) -> void:
 	if state == State.DEAD:
 		return
 	health -= amount
+	_no_combat_timer = 0.0
+	_register_damage_for_stars(amount)
 	if attacker != null and is_instance_valid(attacker):
 		last_attacker = attacker
 	if health <= 0:
+		if state == State.ROLL:
+			return   # deferred: _end_roll finishes it
 		health = 0
 		_die()
 		return
@@ -452,18 +549,25 @@ func corpse_alpha() -> float:
 
 # --- Knockback (fireball, phase 5c) ----------------------------------------------
 
-## Shoves the unit along dir (flat). The hit-density accumulator makes rapid
-## successive hits shove progressively harder; it decays in _tick_knockback.
-## (The downhill ROLL trigger hooks in here in phase 5d.)
-func apply_knockback(dir: Vector3) -> void:
+## Small instant displacement along dir (played out via the knockback system);
+## used by fireball knockback and melee shoves.
+func displace(dir: Vector3, dist: float) -> void:
 	if state == State.DEAD:
 		return
 	var flat: Vector3 = Vector3(dir.x, 0.0, dir.z)
 	if flat.length_squared() < 0.000001:
 		return
+	_knockback_remaining += flat.normalized() * dist
+
+
+## Fireball knockback: the hit-density accumulator makes rapid successive hits
+## shove progressively harder; it decays in _tick_knockback.
+func apply_knockback(dir: Vector3) -> void:
+	if state == State.DEAD:
+		return
 	var dist: float = KNOCKBACK_BASE + knockback_accum * KNOCKBACK_STACK_BONUS
 	knockback_accum += 1.0
-	_knockback_remaining += flat.normalized() * dist
+	displace(dir, dist)
 
 
 ## Plays out pending knockback displacement and decays the accumulator. Runs
@@ -488,6 +592,141 @@ func _tick_knockback(delta: float) -> void:
 	position.x = nx
 	position.z = nz
 	_snap_to_ground()
+
+
+# --- Rolling (phase 5d) --------------------------------------------------------------
+
+## Starts (or extends) a roll along `dir`. Mini rolls on flat ground end after
+## `duration`; on steep slopes the roll follows the fall line downhill until
+## the ground flattens. Rolling suspends all orders and separation; rolling
+## into water kills instantly; roll damage kills only at the roll's end.
+func start_roll(dir: Vector3, duration: float = MINI_ROLL_DURATION) -> void:
+	if state == State.DEAD:
+		return
+	var flat: Vector3 = Vector3(dir.x, 0.0, dir.z)
+	if flat.length_squared() > 0.000001:
+		roll_dir = flat.normalized()
+	elif roll_dir == Vector3.ZERO:
+		roll_dir = facing
+	_no_combat_timer = 0.0
+	if state == State.ROLL:
+		# Another hit while tumbling (e.g. a follow-up fireball): extend.
+		_roll_min_time = maxf(_roll_min_time, _roll_time + duration)
+		return
+	_on_combat_interrupt()
+	_end_attack()
+	converting_preacher = null
+	conversion_progress = 0.0
+	waypoint_queue.clear()
+	_clear_path()
+	hop_visual = false
+	_roll_time = 0.0
+	_roll_min_time = duration
+	_roll_damage_frac = 0.0
+	_set_state(State.ROLL)
+
+
+func _tick_roll(delta: float) -> void:
+	_roll_time += delta
+	# Rolling into water is instant death (no deferral).
+	if terrain_data != null and terrain_data.get_height(position.x, position.z) \
+			<= TerrainData.SEA_LEVEL + 0.05:
+		health = 0
+		_die()
+		return
+	# Follow the fall line while the ground is steep.
+	var down: Vector3 = _downhill_vector()
+	var slope: float = down.length()
+	if slope > ROLL_END_SLOPE:
+		roll_dir = down.normalized()
+	var step: float = ROLL_SPEED * (1.0 + slope * 0.4) * delta
+	var nx: float = position.x + roll_dir.x * step
+	var nz: float = position.z + roll_dir.z * step
+	# Buildings stop the roll; steep/unwalkable open ground is rolled across.
+	if nav_grid != null and nav_grid.is_cell_blocked_by_building(
+			nav_grid.world_to_cell(Vector3(nx, 0.0, nz))):
+		_end_roll()
+		return
+	position.x = nx
+	position.z = nz
+	facing = roll_dir
+	_snap_to_ground()
+	# Rolling hurts over time; death is deferred to the roll's end.
+	_roll_damage_frac += ROLL_DPS * delta
+	if _roll_damage_frac >= 1.0:
+		var dmg: int = int(_roll_damage_frac)
+		_roll_damage_frac -= float(dmg)
+		health -= dmg
+	if slope <= ROLL_END_SLOPE and _roll_time >= _roll_min_time:
+		_end_roll()
+
+
+## Lands the unit: clamp onto a walkable cell (overview risk 6), then either
+## die (deferred roll damage) or get back up.
+func _end_roll() -> void:
+	if nav_grid != null:
+		var cell: Vector2i = nav_grid.world_to_cell(position)
+		if not nav_grid.is_cell_walkable(cell):
+			var near: Vector2i = nav_grid.nearest_walkable_cell(cell)
+			if near.x >= 0:
+				var w: Vector3 = nav_grid.cell_to_world(near)
+				position.x = w.x
+				position.z = w.z
+	_snap_to_ground()
+	if health <= 0:
+		health = 0
+		_die()
+		return
+	_set_state(State.IDLE)
+
+
+## Downhill direction at the current position; the vector length is the slope
+## (rise per metre). ZERO without terrain.
+func _downhill_vector() -> Vector3:
+	if terrain_data == null:
+		return Vector3.ZERO
+	var e: float = 0.5
+	var dx: float = terrain_data.get_height(position.x + e, position.z) \
+		- terrain_data.get_height(position.x - e, position.z)
+	var dz: float = terrain_data.get_height(position.x, position.z + e) \
+		- terrain_data.get_height(position.x, position.z - e)
+	return Vector3(-dx / (2.0 * e), 0.0, -dz / (2.0 * e))
+
+
+# --- Regeneration & stars (phase 5d) ---------------------------------------------------
+
+## Counts combat-free time and slowly heals past REGEN_DELAY; also decays the
+## recent-damage window for the stars overlay. Rolling counts as combat.
+func _tick_regen(delta: float) -> void:
+	if _recent_damage > 0.0:
+		_recent_damage = maxf(
+			_recent_damage - float(STARS_DAMAGE_THRESHOLD) * delta / STARS_WINDOW, 0.0)
+	if state == State.DEAD:
+		return
+	if state == State.ROLL:
+		_no_combat_timer = 0.0
+		return
+	_no_combat_timer += delta
+	if _no_combat_timer < REGEN_DELAY or health >= max_health:
+		return
+	_regen_frac += REGEN_RATE * delta
+	if _regen_frac >= 1.0:
+		var heal: int = int(_regen_frac)
+		_regen_frac -= float(heal)
+		health = mini(health + heal, max_health)
+
+
+## Heavy damage in a short window triggers the circling stars above the head
+## (drawn by the StarsRenderer; HP itself is never shown).
+func _register_damage_for_stars(amount: int) -> void:
+	_recent_damage += float(amount)
+	if _recent_damage >= float(STARS_DAMAGE_THRESHOLD):
+		stars_until_ms = Time.get_ticks_msec() + STARS_DURATION_MS
+		_recent_damage = 0.0
+
+
+func has_stars() -> bool:
+	return state != State.DEAD and Time.get_ticks_msec() < stars_until_ms
 
 
 # --- Conversion (preacher, phase 5c) ----------------------------------------------
@@ -633,8 +872,36 @@ func _do_strike(target: Unit) -> void:
 	attack_anim = kind_to_anim(kind)
 	anim_base_name = attack_anim
 	anim_start_ms = Time.get_ticks_msec()
+	_no_combat_timer = 0.0   # dealing damage also blocks regeneration
 	target.take_damage(melee_damage(kind), self)
-	# Shove/roll knockback and hit sounds are wired in phases 5b(shove)/5d.
+	if kind == &"shove" and is_instance_valid(target) and target.state != State.DEAD:
+		_apply_shove(target)
+	_emit_combat_hit(kind)
+
+
+## A shove always shifts the target slightly (the brawl moves around — the
+## attackers close up on their ring slots automatically) and sometimes knocks
+## it over into a very short roll, even on flat ground; on a slope the roll
+## then follows the fall line downhill.
+func _apply_shove(target: Unit) -> void:
+	var dir: Vector3 = Vector3(
+		target.position.x - position.x, 0.0, target.position.z - position.z)
+	if dir.length_squared() < 0.000001:
+		dir = facing
+	target.displace(dir, SHOVE_DISPLACE)
+	if randf() < SHOVE_ROLL_CHANCE:
+		target.start_roll(dir, MINI_ROLL_DURATION)
+
+
+## Emits the hit on the Events bus (CombatAudio plays a matching sound).
+## Guarded: absent in headless tests without autoloads.
+func _emit_combat_hit(kind: StringName) -> void:
+	if not _events_checked:
+		_events_checked = true
+		if is_inside_tree():
+			_events_node = get_node_or_null("/root/Events")
+	if _events_node != null:
+		_events_node.combat_hit.emit(kind, position)
 
 
 ## Animation base for an attack kind (the anim names match the kinds).
@@ -850,13 +1117,14 @@ func _wait_near(target: Unit, delta: float) -> void:
 
 
 ## Moves directly toward a point on the XZ plane (no pathing), snapping Y.
+## Uphill slopes slow the step like regular path movement.
 func _step_toward(point: Vector3, delta: float) -> void:
 	var flat: Vector2 = Vector2(position.x, position.z)
 	var flat_target: Vector2 = Vector2(point.x, point.z)
 	var to_target: Vector2 = flat_target - flat
 	if to_target.length_squared() > 0.000001:
 		facing = Vector3(to_target.x, 0.0, to_target.y).normalized()
-	var next: Vector2 = flat.move_toward(flat_target, speed * delta)
+	var next: Vector2 = flat.move_toward(flat_target, _slope_speed(_slope_ahead(to_target)) * delta)
 	position.x = next.x
 	position.z = next.y
 	_snap_to_ground()
@@ -940,6 +1208,8 @@ func _anim_base() -> StringName:
 			return &"cast"
 		State.SIT:
 			return &"sit"
+		State.ROLL:
+			return &"roll"
 		State.DEAD:
 			return &"dead"
 		_:

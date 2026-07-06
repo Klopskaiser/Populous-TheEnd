@@ -126,6 +126,22 @@ func interact_range() -> float:
 	return float(maxi(footprint.x, footprint.y)) * 0.5 * TerrainData.CELL_SIZE + 1.6
 
 
+## Finished training building of the OWN tribe whose footprint contains this
+## building's rally point — a rally point set onto e.g. the warrior camp makes
+## freshly produced braves queue up for training there (phase 5d).
+func rally_training_building() -> TrainingBuilding:
+	if rally_point == Vector3.ZERO or tribe == null:
+		return null
+	var rc: Vector2i = Vector2i(
+		int(floor(rally_point.x / TerrainData.CELL_SIZE)),
+		int(floor(rally_point.z / TerrainData.CELL_SIZE)))
+	for b in tribe.buildings:
+		if b is TrainingBuilding and is_instance_valid(b) and not b.under_construction:
+			if Rect2i(b.cell, b.footprint).has_point(rc):
+				return b as TrainingBuilding
+	return null
+
+
 ## Walkable world position for spawning units: entrance first, then the
 ## perimeter rings (the flattened footprint may leave a steep rim).
 func edge_spawn_position() -> Vector3:

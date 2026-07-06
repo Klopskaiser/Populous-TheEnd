@@ -362,7 +362,7 @@ Treffer-Ereignisse aus 5b/5c ein. Referenz: „Bewegung“ + „Leben, Regenerat
 
 ### Definition of Done 5d
 
-- [ ] Testsuite grün, `--headless --quit` fehlerfrei
+- [x] Testsuite grün, `--headless --quit` fehlerfrei
 - [ ] Manuell: Einheiten laufen bergauf langsamer; an sehr steilen Hängen / durch Feuerball-
   Rückstoß / (selten) Schubs rollen sie hinab; Rollen ins Wasser tötet sofort; Sterne bei viel
   Schaden; verletzte Einheiten heilen außerhalb des Kampfes; verschiedene Sounds je Angriffsart

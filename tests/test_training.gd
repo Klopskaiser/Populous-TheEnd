@@ -10,6 +10,7 @@ const MAX_TICKS: int = 4000
 const WARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/warrior_camp.tscn")
 const TEMPLE_SCENE: PackedScene = preload("res://scenes/buildings/temple.tscn")
 const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
+const HUT_SCENE: PackedScene = preload("res://scenes/buildings/hut.tscn")
 
 
 func _flat_terrain(h: float = 5.0) -> TerrainData:
@@ -186,6 +187,38 @@ func test_queue_slots_along_edge() -> void:
 	check(absf(Vector2(s1.x, s1.z).distance_to(Vector2(s2.x, s2.z))
 		- TrainingBuilding.QUEUE_SPACING) < 0.1, "slot 1->2 spacing matches")
 	check(s1.x < s0.x and s2.x < s1.x, "the line advances leftward along the edge")
+	_free_world(w)
+
+
+## A hut whose rally point sits ON a training building sends freshly spawned
+## braves straight into that building's training queue (phase 5d).
+func test_hut_rally_on_camp_trains_brave() -> void:
+	var w: Dictionary = _make_world()
+	var hut: Hut = w.building_manager.place(
+		HUT_SCENE, w.tribe, Vector2i(30, 30), 0, true) as Hut
+	var camp: WarriorCamp = w.building_manager.place(
+		WARRIOR_CAMP_SCENE, w.tribe, Vector2i(42, 30), 0, true) as WarriorCamp
+	hut.rally_point = camp.center_world()
+	check(hut.rally_training_building() == camp,
+		"the rally point resolves to the warrior camp")
+
+	# Tick the hut until it spawns its first brave.
+	for i in range(int(Hut.SPAWN_INTERVAL / TICK) + 5):
+		hut.tick(TICK)
+		if w.tribe.population() > 0:
+			break
+	check(w.tribe.population() == 1, "the hut spawned a brave")
+	var brave: Brave = null
+	for u: Unit in w.tribe.units:
+		if u is Brave:
+			brave = u as Brave
+	check(brave != null and brave.state == Unit.State.TRAIN,
+		"the new brave heads for training instead of the rally spot")
+	check(brave in camp.incoming, "the brave is queued at the camp")
+
+	# And it actually becomes a warrior.
+	var used: int = _run(w, camp, func() -> bool: return _warriors(w).size() >= 1)
+	check(used < MAX_TICKS, "the rally-trained brave graduates into a warrior")
 	_free_world(w)
 
 

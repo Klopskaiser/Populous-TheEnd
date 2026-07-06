@@ -58,14 +58,19 @@ func _tick_active(delta: float) -> void:
 
 ## New braves spawn at the entrance (slightly scattered) and walk to a slot in
 ## the usual 6-member group formation around the rally point, so they gather in
-## packs there instead of standing around at random.
+## packs there instead of standing around at random. A rally point set onto a
+## training building instead sends them straight into its training queue.
 func _spawn_brave() -> void:
 	var pos: Vector3 = edge_spawn_position() \
 		+ TribeCommands.formation_offset(_spawn_counter % 7) * 0.35
 	var brave: Unit = unit_manager.spawn_unit(BRAVE_SCENE, tribe_id, pos)
-	if brave != null and rally_point != Vector3.ZERO:
-		# Slot cycles through a few groups so the pack stays near the rally.
-		brave.order_move(rally_point + TribeCommands.group_slot_offset(_spawn_counter % 36))
+	if brave != null:
+		var camp: TrainingBuilding = rally_training_building()
+		if camp != null:
+			(brave as Brave).order_train(camp)
+		elif rally_point != Vector3.ZERO:
+			# Slot cycles through a few groups so the pack stays near the rally.
+			brave.order_move(rally_point + TribeCommands.group_slot_offset(_spawn_counter % 36))
 	_spawn_counter += 1
 
 

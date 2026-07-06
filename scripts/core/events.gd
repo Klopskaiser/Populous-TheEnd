@@ -13,3 +13,6 @@ signal population_changed(tribe_id: int, population: int, capacity: int)
 ## Terrain heights changed in this cell rect (flattening, later Landbridge);
 ## Main rebuilds the affected mesh chunks + collision.
 signal terrain_deformed(rect: Rect2i)
+## A combat hit landed (kind: punch/kick/shove/fireball); CombatAudio plays a
+## matching procedural sound at the position.
+signal combat_hit(kind: StringName, pos: Vector3)

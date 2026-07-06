@@ -1107,3 +1107,89 @@ Konvertieren vom Nutzer bestätigt („klappt"). Zwei Anpassungen:
 **Manuelle Prüfung durch Nutzer: bestanden** („das klappt" — Konvertieren,
 Duell, Rückstoß, Selektion). **Sub-Phase 5c abgeschlossen** — weiter mit 5d
 (Hügel-Bewegung, Rollen, Regeneration, Sterne-Overlay, Kampf-Sounds).
+
+---
+
+## Phase 5d — Bewegung, Rollen & Politur (+ Zusatzwünsche) (umgesetzt)
+
+**Bewegung (`unit.gd`):**
+- **Bergauf langsamer:** `_slope_ahead(dir)` (Höhendifferenz 0,6 m voraus) +
+  `_slope_speed(slope)` — bergauf Faktor `1 − slope·UPHILL_SLOWDOWN(0,45)`,
+  geklemmt auf `MIN_SPEED_FACTOR 0,35`; bergab/flach volle Geschwindigkeit.
+  Gilt für Pfadbewegung (`_advance_path`) **und** Kampf-Annäherung
+  (`_step_toward`).
+- **Steilhang-Rollauslöser:** beim Laufen **bergab** steiler als
+  `STEEP_ROLL_SLOPE 1,0` → Chance `0,6/s`, ins Rollen zu geraten.
+
+**Rollen (`State.ROLL`, ans Enum-Ende):**
+- `start_roll(dir, duration)` — startet **oder verlängert** (weiterer Treffer
+  während des Rollens → `_roll_min_time` wächst). Interrupt wie im Kampf
+  (Arbeits-Claims, Angriff, Sitzen/Konvertierung), keine Befehle
+  (`can_take_orders` false), Separation ausgesetzt (UnitManager).
+- `_tick_roll`: folgt der **Falllinie** (`_downhill_vector`, zentraler
+  Gradient), solange Hang > `ROLL_END_SLOPE 0,5`; auf flachem Boden endet die
+  Mini-Rolle nach Ablauf. `ROLL_SPEED 5,5` (+40 % je Hangeinheit).
+  **Wasser = Sofort-Tod**; Gebäudezellen stoppen die Rolle. **Rollschaden**
+  `ROLL_DPS 5` — **Tod aufgeschoben** bis zum Rollende (auch bei externem
+  Schaden während des Rollens, `take_damage`-Guard); `_end_roll` klemmt auf
+  begehbare Zelle und stirbt/steht auf.
+- **Roll-Animation:** 4 Frames (eingerollter Ball, heller Kopf-Block + dunkler
+  Glieder-Block kreisen, 10 fps), alle Kinds, ohne Ausrüstungs-Overlays.
+
+**Schubsen (Zusatzwunsch):** `_do_strike` → `_apply_shove`: Schubs
+**verschiebt immer** leicht (`SHOVE_DISPLACE 0,35 m`, über das
+Knockback-System → Kämpfe wandern, Angreifer rücken über ihre Ring-Slots
+automatisch nach) und löst mit `SHOVE_ROLL_CHANCE 0,2` eine **Mini-Rolle
+(0,35 s) auch auf ebenem Boden** aus; am Hang rollt sie bergab weiter.
+
+**Feuerball-Rückstoß überarbeitet (Zusatzwunsch, `fireball.gd`):**
+- **Schwächer:** `KNOCKBACK_BASE` 0,7 → **0,35**, `STACK_BONUS` 0,5 → 0,25.
+- **Dafür Rollchance:** `ROLL_CHANCE 0,1` je Ball (viele Projektile → höhere
+  effektive Chance); Ziel **rollt bereits** → `ROLL_CHANCE_ROLLING 0,4`
+  (homende Folgetreffer **verlängern** die Rolle). Frischer Umwurf kann in
+  engen Formationen **angrenzende Einheiten (0,9 m) mit 50 % mitreißen**
+  (noch kürzere Rolle 0,22 s).
+
+**Regeneration:** `_tick_regen` — nach `REGEN_DELAY 8 s` ohne Kampf
+(weder ausgeteilt noch eingesteckt, kein Rollen) heilt `REGEN_RATE 2 HP/s`
+bis `max_health`; jeder Treffer/Strike/Roll setzt den Timer zurück.
+
+**Sterne-Overlay:** `≥ STARS_DAMAGE_THRESHOLD 12` Schaden binnen 1 s →
+`stars_until_ms` (1,5 s). Neuer `StarsRenderer`
+(`scripts/ui/stars_renderer.gd`, MultiMesh-Billboard-Quads, prozedurale
+4-Frame-Textur mit 3 kreisenden Sternen, Alpha-Scissor, max. 256) über den
+Köpfen; **HP wird nie angezeigt**.
+
+**Kampf-Sounds:** `scripts/core/combat_audio.gd` — je Angriffsart
+(punch/kick/shove/fireball) **3 prozedurale `AudioStreamWAV`-Varianten**
+(gefilterte Rausch-Bursts, Art-spezifische Dauer/Glättung/Attack;
+`generate_samples` statisch + deterministisch = headless-testbar). Pool aus
+12 `AudioStreamPlayer3D` (positional), globale Drossel 45 ms. Anbindung über
+neues Signal **`Events.combat_hit(kind, pos)`** (emittiert von `_do_strike`
+und `Fireball._impact`, Events-Lookup geguardet/gecacht). StarsRenderer +
+CombatAudio werden von `main.gd` in Code erzeugt (keine Szenen-Änderung).
+
+**Rally → Ausbildung (Zusatzwunsch):** `Building.rally_training_building()`
+(fertiges eigenes Trainingsgebäude, dessen Footprint den Rally-Punkt
+enthält); `Hut._spawn_brave` schickt neue Braves dann per `order_train`
+**direkt in die Ausbildungs-Warteschlange** statt zum Sammelpunkt.
+
+**Erkenntnisse:**
+- `take_damage` während ROLL darf nicht töten (aufgeschobener Tod) — der
+  Guard sitzt in `take_damage` selbst, Rollschaden läuft daran vorbei
+  direkt über `health`.
+- Schubs-Verschiebung über das vorhandene Knockback-System (`displace`)
+  spart einen zweiten Bewegungs-Mechanismus; `apply_knockback` ist jetzt
+  ein dünner Wrapper darüber.
+
+**Verifikation:** Testsuite grün (**435 Tests**, +36: Bergauf-Verlangsamung,
+Mini-Rolle inkl. Befehlssperre/Ende/Anim, Roll-Verlängerung, Wasser-Tod,
+aufgeschobener Tod, Schubs-Verschiebung, Regeneration inkl. Reset, Sterne
+(schwer/leicht/tot), Audio-Sample-Daten (Varianten/Dauern), `roll` im
+Atlas, Rally→Training inkl. Abschluss zum Krieger).
+`--headless --import`/`--quit`/`--quit-after 240` fehlerfrei.
+**Manuelle Prüfung durch Nutzer: ausstehend** (bergauf langsamer; Rollen an
+Steilhängen/durch Schubs/Feuerball inkl. Ketten-Umwurf in Formationen und
+Verlängerung durch Folgetreffer; Rollen ins Wasser tötet; Sterne bei viel
+Schaden; Heilung außer Kampf; Sounds je Angriffsart; Hütten-Rally auf
+Kaserne → Braves stellen sich zur Ausbildung an).

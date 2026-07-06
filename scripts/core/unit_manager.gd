@@ -146,7 +146,8 @@ func _apply_separation(delta: float) -> void:
 	var max_step: float = SEPARATION_SPEED * delta * float(slices)
 	for index in range(_separation_phase, units.size(), slices):
 		var unit: Unit = units[index]
-		if unit.state == Unit.State.DEAD or unit.state == Unit.State.THROWN:
+		if unit.state == Unit.State.DEAD or unit.state == Unit.State.THROWN \
+				or unit.state == Unit.State.ROLL:
 			continue
 		var push: Vector2 = Vector2.ZERO
 		var pos: Vector3 = unit.position
@@ -158,7 +159,8 @@ func _apply_separation(delta: float) -> void:
 				var bucket: Array = _hash.get(Vector2i(kx, kz), [])
 				for other: Unit in bucket:
 					if other == unit or other.state == Unit.State.DEAD \
-							or other.state == Unit.State.THROWN:
+							or other.state == Unit.State.THROWN \
+							or other.state == Unit.State.ROLL:
 						continue
 					checks -= 1
 					var away: Vector2 = Vector2(pos.x - other.position.x, pos.z - other.position.z)

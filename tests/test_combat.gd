@@ -286,6 +286,162 @@ func test_firewarrior_brawls_in_melee() -> void:
 	_free_world(w)
 
 
+# --- Hill movement & rolling (phase 5d) ------------------------------------------------
+
+## Climbing a slope is slower than walking on flat ground.
+func test_uphill_slows_movement() -> void:
+	var w: Dictionary = _make_world()
+	var flat_unit: Unit = _spawn(w, BRAVE_SCENE, 0, Vector2(30, 30))
+	flat_unit.set_path(PackedVector3Array([Vector3(38, 0, 30)]))
+	for i in range(10):
+		flat_unit.tick(TICK)
+	var flat_travel: float = flat_unit.position.x - 30.0
+
+	var td: TerrainData = TerrainData.new()
+	for z in range(TerrainData.SIZE + 1):
+		for x in range(TerrainData.SIZE + 1):
+			td.set_vertex_height(x, z, 5.0 + float(x) * 1.2)   # steep +x climb
+	var climber: Unit = BRAVE_SCENE.instantiate() as Unit
+	climber.terrain_data = td
+	climber.position = Vector3(30, td.get_height(30, 30), 30)
+	climber.set_path(PackedVector3Array([Vector3(38, 0, 30)]))
+	for i in range(10):
+		climber.tick(TICK)
+	var climb_travel: float = climber.position.x - 30.0
+	check(flat_travel > 3.5, "flat unit walks at full speed")
+	check(climb_travel < flat_travel * 0.6, "climbing is clearly slower")
+	climber.free()
+	_free_world(w)
+
+
+## A mini roll suspends all orders and ends on flat ground after its duration.
+func test_mini_roll_runs_and_ends() -> void:
+	var w: Dictionary = _make_world()
+	var unit: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
+	unit.start_roll(Vector3(1, 0, 0), 0.3)
+	check(unit.state == Unit.State.ROLL, "the unit rolls")
+	check(unit.anim_base_name == &"roll", "roll animation is active")
+	check(not unit.can_take_orders(), "a rolling unit takes no orders")
+	unit.order_move(Vector3(50, 0, 30))
+	check(unit.state == Unit.State.ROLL, "order_move is ignored while rolling")
+	for i in range(6):
+		unit.tick(TICK)
+	check(unit.state == Unit.State.IDLE, "the flat-ground mini roll ends")
+	check(unit.position.x > 30.5, "the unit tumbled along the roll direction")
+	_free_world(w)
+
+
+## Another hit while rolling extends the tumble (homing fireballs).
+func test_roll_extension() -> void:
+	var w: Dictionary = _make_world()
+	var unit: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
+	unit.start_roll(Vector3(1, 0, 0), 0.2)
+	unit.tick(TICK)
+	unit.start_roll(Vector3(1, 0, 0), 1.0)   # extension mid-roll
+	for i in range(5):
+		unit.tick(TICK)   # 0.6 s total — past the original 0.2 s
+	check(unit.state == Unit.State.ROLL, "the extended roll is still running")
+	for i in range(7):
+		unit.tick(TICK)   # past 1.1 s minimum
+	check(unit.state == Unit.State.IDLE, "the extended roll ends afterwards")
+	_free_world(w)
+
+
+## Rolling into water kills instantly.
+func test_roll_into_water_dies() -> void:
+	var w: Dictionary = _make_world()
+	# Lower everything left of x=26 below the sea level.
+	for z in range(TerrainData.SIZE + 1):
+		for x in range(0, 27):
+			w.td.set_vertex_height(x, z, 1.0)
+	var unit: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
+	unit.start_roll(Vector3(-1, 0, 0), 5.0)
+	for i in range(40):
+		if unit.state == Unit.State.DEAD:
+			break
+		unit.tick(TICK)
+	check(unit.state == Unit.State.DEAD, "rolling into water is instant death")
+	_free_world(w)
+
+
+## Roll damage kills only at the END of the roll (deferred death).
+func test_roll_deferred_death() -> void:
+	var w: Dictionary = _make_world()
+	var unit: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
+	unit.health = 2
+	unit.start_roll(Vector3(1, 0, 0), 1.0)
+	for i in range(7):
+		unit.tick(TICK)   # 0.7 s: ~3 roll damage -> HP below zero mid-roll
+	check(unit.health <= 0, "roll damage took the HP below zero mid-roll")
+	check(unit.state == Unit.State.ROLL, "death is deferred while rolling")
+	for i in range(5):
+		unit.tick(TICK)   # past the 1.0 s minimum -> roll ends
+	check(unit.state == Unit.State.DEAD, "the unit dies at the end of the roll")
+	_free_world(w)
+
+
+## A shove always shifts the target slightly along the shove direction.
+func test_shove_displaces_target() -> void:
+	var w: Dictionary = _make_world()
+	var attacker: Unit = _spawn(w, WARRIOR_SCENE, 0, Vector2(30, 30))
+	var target: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30.8, 30))
+	target.max_health = 1000000
+	target.health = 1000000
+	attacker._apply_shove(target)
+	for i in range(6):
+		target.tick(TICK)
+	check(target.position.x > 30.95, "the shove shifted the target along +x")
+	_free_world(w)
+
+
+# --- Regeneration & stars (phase 5d) ---------------------------------------------------
+
+func test_regeneration_after_delay() -> void:
+	var w: Dictionary = _make_world()
+	var unit: Unit = _spawn(w, BRAVE_SCENE, 0, Vector2(30, 30))
+	unit.take_damage(20)
+	check(unit.health == 40, "damage applied")
+	for i in range(40):
+		unit.tick(TICK)   # 4 s < REGEN_DELAY
+	check(unit.health == 40, "no regeneration before the delay")
+	for i in range(60):
+		unit.tick(TICK)   # 10 s total: healing is running
+	check(unit.health > 40, "the unit heals after the combat-free delay")
+	# A fresh hit resets the timer.
+	var hp: int = unit.health
+	unit.take_damage(5)
+	for i in range(40):
+		unit.tick(TICK)
+	check(unit.health == hp - 5, "a new hit stops the regeneration again")
+	_free_world(w)
+
+
+func test_stars_on_heavy_damage() -> void:
+	var w: Dictionary = _make_world()
+	var unit: Unit = _spawn(w, BRAVE_SCENE, 0, Vector2(30, 30))
+	unit.take_damage(3)
+	check(not unit.has_stars(), "light damage shows no stars")
+	unit.take_damage(15)
+	check(unit.has_stars(), "heavy damage triggers the circling stars")
+	unit.take_damage(1000)
+	check(not unit.has_stars(), "corpses never show stars")
+	_free_world(w)
+
+
+# --- Combat audio data (phase 5d) -------------------------------------------------------
+
+func test_combat_audio_samples() -> void:
+	for kind: StringName in CombatAudio.KINDS:
+		var data: PackedByteArray = CombatAudio.generate_samples(kind, 0)
+		check(data.size() > 500, "%s sound has sample data" % kind)
+	check(CombatAudio.generate_samples(&"punch", 0)
+		!= CombatAudio.generate_samples(&"punch", 1),
+		"variants of the same kind differ")
+	check(CombatAudio.generate_samples(&"punch", 0).size()
+		< CombatAudio.generate_samples(&"fireball", 0).size(),
+		"kinds have distinct durations")
+
+
 # --- Strike animations ---------------------------------------------------------------
 
 ## Every kind carries the three strike animations; throw is firewarrior-only.
@@ -301,6 +457,7 @@ func test_strike_anims_in_atlas() -> void:
 	for kind: StringName in [&"brave", &"warrior", &"firewarrior"]:
 		check(table[kind].has(&"dead"), "%s has a dead (corpse) sprite" % kind)
 		check(table[kind].has(&"sit"), "%s has a sit (pacified) animation" % kind)
+		check(table[kind].has(&"roll"), "%s has a roll (tumble) animation" % kind)
 	var views: Array = table[&"brave"][&"punch"]
 	check(views.size() == 4, "punch exists in all four views")
 	check(int(views[0][1]) == 4, "punch alternates both fists (4 frames)")

@@ -58,7 +58,7 @@ static var _cache: Dictionary[StringName, SpriteFrames] = {}
 static func _anims_for(kind: StringName) -> Array[StringName]:
 	var anims: Array[StringName] = [
 		&"idle", &"walk", &"attack", &"jump", &"carry", &"carry_walk",
-		&"punch", &"kick", &"shove", &"dead", &"sit"]
+		&"punch", &"kick", &"shove", &"dead", &"sit", &"roll"]
 	if kind in CASTER_KINDS:
 		anims.append(&"cast")
 	if kind == &"firewarrior":
@@ -137,6 +137,8 @@ static func _anim_fps(anim: StringName) -> float:
 		# Throw: 2 frames over Firewarrior.FIRE_COOLDOWN (1.5 s).
 		&"throw":
 			return 4.0 / 3.0
+		&"roll":
+			return 10.0
 		&"cast":
 			return 4.0
 		_:
@@ -202,6 +204,12 @@ static func _build_frames(kind: StringName, anim: StringName, view: StringName) 
 		&"sit":
 			images = [_frame_sit(paint_view, 0), _frame_sit(paint_view, 1)]
 			bobs = [0, 1]
+		&"roll":
+			images = [
+				_frame_roll(paint_view, 0), _frame_roll(paint_view, 1),
+				_frame_roll(paint_view, 2), _frame_roll(paint_view, 3),
+			]
+			bobs = [0, 0, 0, 0]
 		&"cast":
 			images = [_frame_stand(paint_view, 0), _frame_cast(paint_view)]
 			bobs = [0, 0]
@@ -214,9 +222,9 @@ static func _build_frames(kind: StringName, anim: StringName, view: StringName) 
 	if view == &"left":
 		for img in images:
 			img.flip_x()
-	# No accents on the corpse or the sitting pose: the shield/helmet/hood
-	# positions assume a standing body and would float next to the figure.
-	if anim != &"dead" and anim != &"sit":
+	# No accents on the corpse, the sitting pose or the tumbling ball: the
+	# shield/helmet/hood positions assume a standing body.
+	if not (anim in [&"dead", &"sit", &"roll"]):
 		for i in range(images.size()):
 			_decorate(images[i], kind, view, bobs[i])
 	return images
@@ -558,6 +566,22 @@ static func _frame_sit(view: StringName, bob: int) -> Image:
 		&"right":
 			img.fill_rect(Rect2i(9, 9 + bob, 1, 1), C_EYE)
 	img.fill_rect(Rect2i(3, 20, 10, 3), C_LIMB)            # folded legs
+	return img
+
+
+## Tumbling unit: a curled-up ball low to the ground; a bright head block and
+## a dark limb block circle around the centre (4 phases) to sell the rotation.
+static func _frame_roll(_view: StringName, phase: int) -> Image:
+	var img: Image = _new_image()
+	var cx: int = 8
+	var cy: int = 18
+	img.fill_rect(Rect2i(4, 14, 8, 8), C_BODY)   # curled body ball
+	var offs: Array[Vector2i] = [
+		Vector2i(0, -4), Vector2i(4, 0), Vector2i(0, 4), Vector2i(-4, 0)]
+	var head_off: Vector2i = offs[phase % 4]
+	var limb_off: Vector2i = offs[(phase + 2) % 4]
+	img.fill_rect(Rect2i(cx - 2 + head_off.x, cy - 2 + head_off.y, 4, 4), C_HEAD)
+	img.fill_rect(Rect2i(cx - 1 + limb_off.x, cy - 1 + limb_off.y, 3, 3), C_LIMB)
 	return img
 
 
