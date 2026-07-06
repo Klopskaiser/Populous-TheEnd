@@ -20,7 +20,7 @@ Nach Abschluss einer Phase: Checkbox abhaken, committen, pushen.
 - [ ] **Phase 7d** — [07d_economy_forester.md](07d_economy_forester.md): Wirtschaft — Försterei (pflanzt Bäume nach), Baum-Ertrag 1/2/3/4
 - [ ] **Phase 7e** — [07e_sprite_directions.md](07e_sprite_directions.md): 8 Sprite-Blickrichtungen (Diagonalen)
 - [ ] **Phase 7g** — [07g_building_assault.md](07g_building_assault.md): Gebäudezerstörung durch Einheiten (Sturmangriff durch den Eingang, Insassen-Auswurf, Feuerkrieger-Fernbeschuss, 15/5-Nahkampf-Limits, Gebäude = niedrigste Scan-Priorität)
-- [ ] **Phase 7h** — [07h_watchtower.md](07h_watchtower.md): Wachturm (4 Holz, 2 Besatzungsplätze für Kampfeinheiten/Schamanin, +3 m Reichweite für Angriff/Bekehrung/Zauber)
+- [ ] **Phase 7h** — [07h_watchtower.md](07h_watchtower.md): Wachturm (4 Holz, 2 Besatzungsplätze für Kampfeinheiten/Schamanin; +3 m Reichweite für Fernkampf/Bekehrung/Zauber — Krieger ohne Bonus, nur geschützte Reserve)
 - [ ] **Phase 7f** — [07f_siege_workshop.md](07f_siege_workshop.md): Belagerungswaffe + Werkstatt (Belagerungs-Spezialist auf Basis des 7g-Targetings) — *bewusst nach 7g/7h*
 - [ ] **Phase 8** — [08_performance_polish.md](08_performance_polish.md): Performance, Balance, Feinschliff *(bewusst NACH den Feature-Phasen 7c–7f: Optimierung/Balance gegen den fertigen Feature-Stand — inkl. Balance der neuen Zauber, des Baumertrags/`SKIRMISH_BASE_TREES` und der Belagerungswaffe; bekannte Perf-Kandidaten siehe PROGRESS: Melee-Slot-Kontention, GPU-Rendering, Exit-Leaks)*
 
