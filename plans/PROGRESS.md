@@ -992,6 +992,8 @@ umgestellt). `--headless --import`/`--quit`/`--quit-after 240` fehlerfrei.
 
 **Verifikation (Stand nach allen Nachbesserungen):** Testsuite grün
 (**359 Tests**), `--headless --quit` + `--quit-after 240` fehlerfrei.
-**Manuelle Prüfung durch Nutzer: ausstehend** (gerade Feuerbälle, kein
-Hängenbleiben; zuverlässige Klick-/Box-Auswahl auf allen Zoomstufen, auch
-am Bildschirmrand).
+**Manuelle Prüfung durch Nutzer: bestanden** — Kampf, Strike-Anims,
+Feuerkrieger-Fernkampf, Leichen und Selektion funktionieren; es bleiben
+**kleinere Unschärfen** (nicht näher spezifiziert), Feinschliff dafür in
+5d bzw. Phase 8. **Sub-Phase 5b abgeschlossen** — weiter mit 5c
+(Fernkampf-Rückstoß, Prediger-Konvertierung).
