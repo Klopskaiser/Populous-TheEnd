@@ -1103,3 +1103,7 @@ Konvertieren vom Nutzer bestätigt („klappt"). Zwei Anpassungen:
   ausgenommen) oder gehen auf IDLE. Test
   `test_attackers_break_off_vs_sitting_target` (statistisch: ≥3 von 5
   brechen ab; Gesamt **399** grün).
+
+**Manuelle Prüfung durch Nutzer: bestanden** („das klappt" — Konvertieren,
+Duell, Rückstoß, Selektion). **Sub-Phase 5c abgeschlossen** — weiter mit 5d
+(Hügel-Bewegung, Rollen, Regeneration, Sterne-Overlay, Kampf-Sounds).
