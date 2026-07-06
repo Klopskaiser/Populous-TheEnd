@@ -16,7 +16,7 @@ Nach Abschluss einer Phase: Checkbox abhaken, committen, pushen.
 - [x] **Phase 6** — [06_shaman_spells.md](06_shaman_spells.md): Schamanin, Reinkarnation, alle 5 Zauber, Panik/Schleuderphysik, Gebäudezerstörung *(überarbeitet 2026-07-06)*
 - [x] **Phase 7** — [07_ai_win_conditions.md](07_ai_win_conditions.md): Hauptmenü (Vollbild, Skirmish-Setup), Multi-KI (bis zu 3 KIs / 4 Spieler), Siegbedingungen *(abgeschlossen 2026-07-06)*
 - [x] **Phase 7b** — [07b_unit_control_behavior.md](07b_unit_control_behavior.md): Steuerung & Einheitenverhalten (Move/Attack-Split + Hotkey F, Fliehen, Brave-Idle-Aggro, Idle-6er-Gruppen, Warteschlangen, Anti-Stacking, Doppelklick-Selektion) *(abgeschlossen 2026-07-06)*
-- [ ] **Phase 7c** — [07c_new_spells.md](07c_new_spells.md): Neue Zauber Erdbeben, Vulkan, Feuerregen (+ Zauberleiste auf 8 Slots, KI-Heuristik)
+- [ ] **Phase 7c** — [07c_new_spells.md](07c_new_spells.md): Neue Zauber Erdbeben, Vulkan, Feuerregen, Ebene, Absinken (+ Terrain-Integritätsregeln für Gebäude/Einheiten, Zauberleiste auf 10 Slots, KI-Heuristik)
 - [ ] **Phase 7d** — [07d_economy_forester.md](07d_economy_forester.md): Wirtschaft — Försterei (pflanzt Bäume nach), Baum-Ertrag 1/2/3/4
 - [ ] **Phase 7e** — [07e_sprite_directions.md](07e_sprite_directions.md): 8 Sprite-Blickrichtungen (Diagonalen)
 - [ ] **Phase 7g** — [07g_building_assault.md](07g_building_assault.md): Gebäudezerstörung durch Einheiten (Sturmangriff durch den Eingang, Insassen-Auswurf, Feuerkrieger-Fernbeschuss, 15/5-Nahkampf-Limits, Gebäude = niedrigste Scan-Priorität)
