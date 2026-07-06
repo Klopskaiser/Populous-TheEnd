@@ -123,9 +123,9 @@ ausführbar). Einmal mit 4 Tribes laufen lassen (Multi-KI-Stresstest).
 
 ## Definition of Done
 
-- [ ] Testsuite grün (inkl. Symmetrie-Check + N-Tribe-Sieg + MatchConfig-Aufbau),
+- [x] Testsuite grün (inkl. Symmetrie-Check + N-Tribe-Sieg + MatchConfig-Aufbau),
       `--headless --quit` fehlerfrei
-- [ ] Hauptmenü + Skirmish-Setup (1–3 KIs) manuell durchgespielt, 4-Spieler-Match lief
-- [ ] Komplettes Match manuell gespielt, beide Endscreens gesehen
-- [ ] Checkbox Phase 7 in [00_overview.md](00_overview.md) abgehakt
-- [ ] `git add -A && git commit -m "Phase 7: Hauptmenü, Multi-KI & Siegbedingungen" && git push`
+- [x] Hauptmenü + Skirmish-Setup (1–3 KIs) manuell durchgespielt, 4-Spieler-Match lief
+- [x] Komplettes Match manuell gespielt, beide Endscreens gesehen
+- [x] Checkbox Phase 7 in [00_overview.md](00_overview.md) abgehakt
+- [x] `git add -A && git commit -m "Phase 7: Hauptmenü, Multi-KI & Siegbedingungen" && git push`

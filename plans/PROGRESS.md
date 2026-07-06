@@ -1615,10 +1615,8 @@ alle 60 Ticks). Beschleunigt mit `--fixed-fps 60 --quit-after <frames>`:
   Vermutlich vorbestehend (Kampf-/Wurfobjekte, Phase 5/6) — für Phase 8
   notiert, kein Gameplay-Einfluss.
 
-**Manuelle Prüfung durch Nutzer: AUSSTEHEND** — Menü-Flow (Skirmish-Setup
-1–3 KIs, Startmission, Debugschlacht, Optionen/Lautstärke, Beenden),
-komplettes Match gegen 1 KI (KI baut/trainiert/greift an, Zauber), beide
-Endscreens (Sieg/Niederlage → „Zurück zum Menü"), 4-Spieler-Match flüssig.
+**Manuelle Prüfung durch Nutzer: BESTANDEN (2026-07-06)** — nach den
+Nachbesserungen unten; Phase 7 abgeschlossen.
 
 **Nachbesserung (Nutzerfeedback, erste Runde):**
 - **Hauptmenü zentriert:** Die Seiten-Panels liegen jetzt in einem
@@ -1821,12 +1819,10 @@ Windungs-Slots (außen + paarweise verschieden), Doppelklick-Filter;
 fehlerfrei, Benchmark ohne Regression, 1v1-KI-Sim konvergiert weiter
 (aggressive Orders der KI verifiziert).
 
-**Manuelle Prüfung durch Nutzer: AUSSTEHEND** — Rechtsklick-Move läuft an
-Feinden vorbei; F+Rechtsklick greift unterwegs an (roter Cursor, Esc
-bricht ab); Flucht aus dem Nahkampf; Braves verteidigen das Dorf im
-3-m-Umkreis; 6er-Grüppchen nach kurzer Idle-Zeit; geordnete Schlange in
-mehreren Windungen um die Kaserne; kein Sprite-Flackern in dichten
-Mengen; Doppelklick wählt alle sichtbaren Einheiten des Typs.
+**Manuelle Prüfung durch Nutzer: BESTANDEN (2026-07-06)** — nach den
+Nachbesserungen unten (feste Gruppen, Adopt-in-Place, Move-Gruppen ab
+Befehl, Taste F, Kampf-Wander-Bugfix, Selektionsring-Fix); Phase 7b
+abgeschlossen.
 
 **Nachbesserung (Nutzerfeedback): feste Idle-Gruppen + Taste F.**
 - **Idle-Gruppen komplett umgebaut** — der Zentroid-Drift ließ Leute

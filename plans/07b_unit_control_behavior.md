@@ -117,9 +117,10 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
 
 ## Definition of Done
 
-- [ ] Testsuite grün (neue Tests inkl. Move-Modus, Idle-Grüppchen, Warteschlangen-Slots,
+- [x] Testsuite grün (neue Tests inkl. Move-Modus, Idle-Grüppchen, Warteschlangen-Slots,
       Doppelklick-Filter), `--headless --quit` fehlerfrei, Benchmark im Budget
-- [ ] Manuelle Prüfung bestanden (alle Punkte oben)
-- [ ] Tastenbelegung (Rechtsklick=Move, `A`+Rechtsklick=Attack-Move) in `project.godot`
-- [ ] Checkbox Phase 7b in [00_overview.md](00_overview.md) abgehakt
-- [ ] `git add -A && git commit -m "Phase 7b: Steuerung & Einheitenverhalten" && git push`
+- [x] Manuelle Prüfung bestanden (alle Punkte oben; Nachbesserungen siehe PROGRESS.md)
+- [x] Tastenbelegung (Rechtsklick=Move, `F`+Rechtsklick=Attack-Move — von A auf F
+      geändert, A ist Kamera) in `project.godot`
+- [x] Checkbox Phase 7b in [00_overview.md](00_overview.md) abgehakt
+- [x] `git add -A && git commit -m "Phase 7b: Steuerung & Einheitenverhalten" && git push`
