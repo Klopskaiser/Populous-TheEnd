@@ -111,8 +111,16 @@ func order_move(units: Array[Unit], target: Vector3, queue_up: bool = false,
 	for g in range(0, alive.size(), GROUP_SIZE):
 		var group_index: int = g / GROUP_SIZE
 		var group_target: Vector3 = target + formation_offset(group_index) * group_scale
+		var batch: Array[Unit] = []
 		for m in range(g, mini(g + GROUP_SIZE, alive.size())):
 			alive[m].order_move(group_target + MEMBER_OFFSETS[m - g], queue_up, aggressive)
+			batch.append(alive[m])
+		# The formation 6-pack IS the idle group: register it right away so
+		# the walkers already count as members (slots reserved, and the idle
+		# finder never re-groups a landed formation). Attack marches end in
+		# combat — no point registering those.
+		if not aggressive and unit_manager != null:
+			unit_manager.register_move_group(batch, group_target)
 
 
 ## Braves fell the tree (and keep chopping nearby ones); non-braves just walk

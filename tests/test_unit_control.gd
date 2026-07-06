@@ -212,7 +212,7 @@ func test_idle_group_membership_is_sticky() -> void:
 	# ...and one loose long-idle brave right next to it.
 	var loner: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1,
 		w.nav.cell_to_world(Vector2i(62, 60)))
-	loner.idle_seconds = 10.0
+	loner.idle_seconds = UnitManager.IDLE_REGROUP_DELAY + 1.0
 
 	_run_ticks(w, [loner] as Array[Unit], 3.0)
 	check(loner.idle_group == null,
@@ -310,6 +310,75 @@ func test_queue_slot_windings() -> void:
 
 func _cheby(pos: Vector3, centre: Vector3) -> float:
 	return maxf(absf(pos.x - centre.x), absf(pos.z - centre.z))
+
+
+func test_move_order_registers_groups_up_front() -> void:
+	var w: Dictionary = _make_world()
+	var tc: TribeCommands = TribeCommands.new()
+	tc.setup(w.nav, w.building_manager, w.unit_manager, w.tree_manager)
+	var squad: Array[Unit] = []
+	for i in range(8):
+		squad.append(w.unit_manager.spawn_unit(BRAVE_SCENE, 1,
+			w.nav.cell_to_world(Vector2i(40 + i * 2, 40))))
+	var target: Vector3 = w.nav.cell_to_world(Vector2i(70, 70))
+	tc.order_move(squad, target)
+
+	# Groups exist IMMEDIATELY (units still walking): 6 + 2.
+	var groups: Dictionary = {}
+	for unit in squad:
+		check(unit.idle_group != null, "every mover is already a group member")
+		groups[unit.idle_group] = groups.get(unit.idle_group, 0) + 1
+	check(groups.size() == 2, "8 movers split into two groups (6 + 2)")
+	check(groups.values().has(6) and groups.values().has(2),
+		"group sizes match the formation batches")
+
+	# Walkers count by their DESTINATION: pruning drops nobody en route.
+	var full_group: UnitManager.IdleGroup = null
+	for group in groups:
+		if (group as UnitManager.IdleGroup).members.size() == 6:
+			full_group = group
+	w.unit_manager._prune_idle_group(full_group)
+	check(full_group.members.size() == 6,
+		"members en route to the formation are not pruned")
+	check(full_group.is_full(), "the 6-pack is full — nobody else can dock on")
+
+	# A member ordered somewhere far away is dropped on the next prune.
+	var deserter: Unit = full_group.members[0]
+	deserter.order_move(w.nav.cell_to_world(Vector2i(20, 20)))
+	deserter.idle_group = full_group   # order_move alone must not clear it...
+	w.unit_manager._prune_idle_group(full_group)
+	check(not (deserter in full_group.members),
+		"...but pruning drops a member whose destination is far away")
+
+	tc.free()
+	_free_world(w)
+
+
+func test_no_regrouping_after_formation_landed() -> void:
+	var w: Dictionary = _make_world()
+	var tc: TribeCommands = TribeCommands.new()
+	tc.setup(w.nav, w.building_manager, w.unit_manager, w.tree_manager)
+	var squad: Array[Unit] = []
+	for i in range(6):
+		squad.append(w.unit_manager.spawn_unit(BRAVE_SCENE, 1,
+			w.nav.cell_to_world(Vector2i(56 + i * 2, 56))))
+	tc.order_move(squad, w.nav.cell_to_world(Vector2i(64, 64)))
+	var group = squad[0].idle_group
+	# Let them arrive, then idle far past the (long) regroup delay.
+	_run_ticks(w, squad, 6.0)
+	for unit in squad:
+		unit.idle_seconds = UnitManager.IDLE_REGROUP_DELAY + 5.0
+	var landed: Array[Vector3] = []
+	for unit in squad:
+		landed.append(unit.position)
+	_run_ticks(w, squad, 3.0)
+	for i in range(squad.size()):
+		check(squad[i].idle_group == group,
+			"a landed formation keeps its original group (unit %d)" % i)
+		check(squad[i].position.distance_to(landed[i]) < 0.1,
+			"no re-grouping movement after landing (unit %d)" % i)
+	tc.free()
+	_free_world(w)
 
 
 # --- Combat pursuit stays on walkable ground -------------------------------------------

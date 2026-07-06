@@ -31,11 +31,11 @@ const PATHS_PER_TICK: int = 48
 
 ## Idle 6-packs (phase 7b, reworked on user feedback): EXPLICIT groups with
 ## sticky membership — the earlier centroid drift made units hop between
-## packs. A long-idle ungrouped unit joins an existing group with a free
-## slot in range (actively WALKING to its slot), or founds a new group at
-## its own spot when enough loose idle tribemates are around and NO group
-## (full or not) exists nearby. Members never switch groups.
-const IDLE_REGROUP_DELAY: float = 2.5
+## packs. Formation move orders REGISTER their 6-packs as groups right away
+## (see register_move_group — units walking to their spot already count as
+## members, slots are reserved). The idle finder below only picks up units
+## that ended up ungrouped (hut spawns etc.), and only after a LONG idle.
+const IDLE_REGROUP_DELAY: float = 30.0
 ## Search/join range for groups and loose mates.
 const IDLE_GROUP_JOIN_RADIUS: float = 4.0
 ## A member farther than this from its group anchor is dropped (ordered away).
@@ -334,10 +334,14 @@ func _join_or_found_group(unit: Unit) -> void:
 		join_idle_group(unit, group)
 
 
-## Adds the unit on the group's next slot. With `walk` it actively WALKS
-## there (a real move order — no sliding); without (adopting a cluster that
-## already stands in formation) it just registers. Public for tests.
+## Adds the unit on the group's next slot (leaving any previous group).
+## With `walk` it actively WALKS there (a real move order — no sliding);
+## without (adopting a cluster that already stands in formation, or a
+## formation move order that walks the unit itself) it just registers.
 func join_idle_group(unit: Unit, group: IdleGroup, walk: bool = true) -> void:
+	if unit.idle_group != null and unit.idle_group != group \
+			and unit.idle_group is IdleGroup:
+		(unit.idle_group as IdleGroup).members.erase(unit)
 	group.members.append(unit)
 	unit.idle_group = group
 	var slot: int = mini(group.next_slot, TribeCommands.MEMBER_OFFSETS.size() - 1)
@@ -349,18 +353,40 @@ func join_idle_group(unit: Unit, group: IdleGroup, walk: bool = true) -> void:
 		unit.order_move(target)
 
 
-## Drops freed/dead members and everyone busy elsewhere or ordered far away
-## (beyond LEAVE_RADIUS). A group shrunk to one member dissolves, so a fresh
-## group can form there later.
+## Registers one 6-pack of a formation move order as an idle group at the
+## formation centre: the units are still WALKING there, but they already
+## count as members — their slots are reserved (nobody else docks on) and
+## the idle finder leaves them alone once they arrive. Called by
+## TribeCommands.order_move for every (non-aggressive) group batch.
+func register_move_group(group_units: Array[Unit], anchor: Vector3) -> void:
+	if group_units.size() < 2:
+		return
+	var group: IdleGroup = IdleGroup.new()
+	group.anchor = anchor
+	for unit in group_units:
+		join_idle_group(unit, group, false)
+
+
+## Drops freed/dead members and everyone busy elsewhere or too far away.
+## Members still WALKING count by their move DESTINATION, not their current
+## position — units en route to the formation stay members (their slot is
+## reserved); a member ordered somewhere far is dropped right away. A group
+## shrunk to one member dissolves, so a fresh group can form there later.
 func _prune_idle_group(group: IdleGroup) -> void:
 	var kept: Array = []
 	for m in group.members:
 		if not is_instance_valid(m) or m.state == Unit.State.DEAD:
 			continue
 		var unit: Unit = m as Unit
+		if unit.idle_group != group:
+			continue   # switched groups meanwhile (e.g. a new move order)
 		var busy: bool = unit.state != Unit.State.IDLE and unit.state != Unit.State.MOVE
-		var far: bool = unit.position.distance_to(group.anchor) > IDLE_GROUP_LEAVE_RADIUS
-		if busy or far:
+		var anchor_dist: float
+		if unit.state == Unit.State.MOVE and not unit.waypoint_queue.is_empty():
+			anchor_dist = unit.waypoint_queue.back().distance_to(group.anchor)
+		else:
+			anchor_dist = unit.position.distance_to(group.anchor)
+		if busy or anchor_dist > IDLE_GROUP_LEAVE_RADIUS:
 			unit.idle_group = null
 			continue
 		kept.append(unit)

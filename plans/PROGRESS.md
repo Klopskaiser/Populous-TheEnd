@@ -1890,3 +1890,30 @@ ungebremst ins Meer/über den Rand. Fixes:
 - Tests: **776 grün** (+4: Direktverfolgung stoppt am Wasser und bleibt
   auf begehbarem Boden; naher Wartender steht still, ferner rückt nach).
   KI-Sim konvergiert unverändert.
+
+**Nachbesserung 3 (Nutzerfeedback): Gruppen entstehen beim Move-Befehl.**
+- **Formations-Moves registrieren ihre 6er-Päckchen SOFORT als Gruppen**
+  (`TribeCommands.order_move` → `UnitManager.register_move_group`, Anker =
+  Formationszentrum, `walk = false` — die Einheiten laufen ja ohnehin per
+  Move-Befehl auf ihre Plätze). Damit gilt ab Befehlserteilung:
+  - Alle Marschierer sind bereits Mitglieder → der Idle-Finder fasst eine
+    gelandete Formation **nie wieder an** (keine Neu-/Umgruppierung).
+  - **Slots sind ab Befehl reserviert:** Laufende zählen als künftige
+    Mitglieder — `_prune_idle_group` bewertet MOVE-Mitglieder nach ihrem
+    **Bewegungsziel** statt der aktuellen Position; niemand Fremdes dockt
+    an eine Gruppe an, die durch Ankommende gefüllt wird, und Mitglieder
+    einer werdenden Gruppe wandern nicht zu anderen ab.
+  - Ein Mitglied, das woandershin geschickt wird (Ziel fern vom Anker),
+    fliegt beim nächsten Prune raus; `join_idle_group` trägt beim
+    Gruppenwechsel sauber aus der alten Gruppe aus (Prune einer alten
+    Gruppe nullt keine neue Mitgliedschaft mehr).
+  - Aggressive Märsche (Attack-Move der KI/des Spielers) registrieren
+    keine Gruppen — sie enden im Kampf.
+- **Idle-Delay 2,5 s → 30 s** (`IDLE_REGROUP_DELAY`): Der Idle-Finder
+  (Adopt-in-Place, Beitritt, Neugründung) greift nur noch bei Einheiten,
+  die eine halbe Minute untätig herumstanden (Hütten-Spawns u. Ä.) —
+  Formations-Gruppen brauchen ihn nicht mehr.
+- Tests: **801 grün** (+25: Move registriert 6+2-Gruppen sofort,
+  Laufende werden nicht geprunt + volle Gruppe reserviert, Deserteur
+  fliegt per Ziel-Distanz, gelandete Formation behält Gruppe und bewegt
+  sich nicht mehr). Ladecheck + KI-Sim unverändert sauber.
