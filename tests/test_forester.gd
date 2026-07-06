@@ -275,29 +275,59 @@ func test_fire_only_ignites_in_radius() -> void:
 
 # --- Tornado: shred trees, scatter piles keeping their wood ----------------------
 
-func test_tornado_shreds_trees_and_keeps_pile_wood() -> void:
+func test_tornado_whirls_trees_and_piles() -> void:
 	var w: Dictionary = _make_world()
 	var pos: Vector3 = Vector3(60.5, 5.0, 60.5)
-	w.tree_manager.spawn_tree(Vector2i(60, 60), 3)   # inside the funnel
+	w.tree_manager.spawn_tree(Vector2i(60, 60), 3)   # big tree in the funnel (3 wood)
 	var far: TreeResource = w.tree_manager.spawn_tree(Vector2i(90, 90), 3)   # outside
-	w.wood_pile_manager.deposit(pos, 4)
-	var total_before: int = w.wood_pile_manager.total_wood()
+	w.wood_pile_manager.deposit(pos, 4)              # pile in the funnel (4 wood)
 
 	var vortex: TornadoVortex = TornadoVortex.new()
 	vortex.setup(0, pos, w.unit_manager, w.td, w.building_manager)
 	vortex._shred_trees_and_scatter_piles()
 
-	check(w.tree_manager.trees.size() == 1, "the tree under the funnel was shredded")
-	check(is_instance_valid(far) and (far in w.tree_manager.trees),
-		"the tree outside the funnel survives")
-	check(w.wood_pile_manager.total_wood() == total_before,
-		"a scattered pile keeps all its wood")
-	# The pile was flung out of the funnel (its new spot is beyond the radius).
-	var scattered: bool = true
-	for pile in w.wood_pile_manager.piles:
-		if Vector2(pile.position.x, pile.position.z).distance_to(Vector2(pos.x, pos.z)) \
-				<= TornadoVortex.RADIUS:
-			scattered = false
-	check(scattered, "the pile was spat out beyond the funnel")
+	check(w.tree_manager.trees.size() == 1 and (far in w.tree_manager.trees),
+		"only the tree in the funnel was uprooted")
+	check(w.wood_pile_manager.total_wood() == 0, "the pile is airborne (removed while flying)")
+	check(w.unit_manager.projectiles.size() == 2,
+		"two wood chunks are whirling (the uprooted tree + the pile)")
+
+	# Let the flying wood arc and slide to rest.
+	var ticks: int = 0
+	while not w.unit_manager.projectiles.is_empty() and ticks < 400:
+		w.unit_manager.tick(0.1)
+		ticks += 1
+	check(w.unit_manager.projectiles.is_empty(), "the whirled wood settled")
+	check(w.wood_pile_manager.total_wood() == 7,
+		"the tree became a 3-wood pile and the 4-wood pile kept its wood (3+4)")
 	vortex.free()
+	_free_world(w)
+
+
+## A flying wood chunk spirals up, arcs and slides to rest as a pile with its
+## wood; a sapling chunk (no wood) vanishes instead.
+func test_tornado_debris_flight() -> void:
+	var w: Dictionary = _make_world()
+	var d: TornadoDebris = TornadoDebris.new()
+	d.setup(Vector3(60, 5, 60), 2, w.td, w.wood_pile_manager, null, 0.0)
+	d.tick(0.1)
+	check(d.position.y > 5.0, "debris is whirled up off the ground")
+	var ticks: int = 0
+	while not d.done and ticks < 400:
+		d.tick(0.1)
+		ticks += 1
+	check(d.done, "debris finishes its flight")
+	check(w.wood_pile_manager.total_wood() == 2, "it settles into a pile with its wood")
+	d.free()
+
+	var sap: TornadoDebris = TornadoDebris.new()
+	sap.setup(Vector3(70, 5, 70), 0, w.td, w.wood_pile_manager, null, 0.0)
+	check(sap.vanish, "a no-wood chunk (sapling) is flagged to vanish")
+	ticks = 0
+	while not sap.done and ticks < 400:
+		sap.tick(0.1)
+		ticks += 1
+	check(sap.done, "sapling debris finishes")
+	check(w.wood_pile_manager.total_wood() == 2, "the sapling left no extra wood")
+	sap.free()
 	_free_world(w)

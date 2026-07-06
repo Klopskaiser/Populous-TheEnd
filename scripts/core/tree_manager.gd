@@ -292,3 +292,18 @@ func destroy_in_radius(pos: Vector3, radius: float) -> void:
 			continue
 		if Vector2(tree.position.x, tree.position.z).distance_to(flat) <= radius:
 			_remove_tree(tree)
+
+
+## Uproots every tree within `radius`: removes them and returns one entry per
+## tree {position, wood} (wood = its current yield) so the caller can whirl each
+## one away (the tornado turns them into flying wood — saplings carry 0 wood).
+func uproot_in_radius(pos: Vector3, radius: float) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var flat: Vector2 = Vector2(pos.x, pos.z)
+	for tree in trees.duplicate():
+		if not is_instance_valid(tree):
+			continue
+		if Vector2(tree.position.x, tree.position.z).distance_to(flat) <= radius:
+			out.append({"position": tree.position, "wood": tree.wood_yield()})
+			_remove_tree(tree)
+	return out

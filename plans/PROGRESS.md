@@ -2280,3 +2280,18 @@ Prediger in Reichweite um, solange er nicht gerade im Nahkampf steht
 `test_firewarrior_prioritises_enemy_priests` + `…_switches_to_priest_midfight`.
 Tests: **1053 grün** (test_unit_control-Kampf-Tests bleiben durch unseeded randf
 gelegentlich flaky — nicht durch diese Änderung).
+
+**Erweiterung (Nutzerwunsch — Tornado wirbelt Holz physikalisch):** Statt
+Holzstapel nur zu versetzen, wirbelt der Tornado Stapel UND getroffene Bäume wie
+Einheiten hoch. Neue Flug-Entität `scripts/spells/tornado_debris.gd`
+(`TornadoDebris`, projektil-getickt): spiralt am Trichter hoch (LIFT/CARRY),
+wird in einer Parabel weggeschleudert (FLING) und **rutscht** beim Aufprall mit
+Reibung aus (SLIDE), bis es als `WoodPile` mit unverändertem Holz zur Ruhe kommt
+(kein Rollen wie Einheiten). Ein getroffener Baum wird beim Anheben zum
+Holzstapel-Modell (Debris trägt `tree.wood_yield()`); ein zu kleiner Baum
+(Setzling, 0 Holz) wird umhergewirbelt und **verschwindet beim Aufprall**
+(`vanish`); Landung/Rutschen ins Wasser = Holz verloren. `TornadoVortex`
+spawnt jetzt Debris (`_spawn_debris`) statt Stapel zu teleportieren; neue
+`TreeManager.uproot_in_radius` (entfernt Bäume, liefert Position + Holz). Tests:
+`test_tornado_whirls_trees_and_piles`, `test_tornado_debris_flight` (+ Setzling)
+in `test_forester.gd`. **1060 grün**, Ladecheck fehlerfrei.

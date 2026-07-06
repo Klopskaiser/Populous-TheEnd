@@ -110,43 +110,34 @@ func _wreck_buildings() -> void:
 			b.apply_destruction_stages(1)
 
 
-## Trees caught by the twister are shredded (destroyed outright); wood piles are
-## spat out — flung to a walkable spot beyond the funnel, keeping ALL their wood
-## (only the position changes). Phase 7d.
+## Trees and wood piles caught by the twister are WHIRLED UP like units: each
+## becomes a flying TornadoDebris chunk (a tree's model turns into a wood pile as
+## it lifts) that spirals up, is flung out and slides to rest as a pile — a
+## sapling (no wood) vanishes on impact instead. Phase 7d / 7d-fix.
 func _shred_trees_and_scatter_piles() -> void:
 	if unit_manager == null:
 		return
 	var tm: TreeManager = unit_manager.tree_manager
 	var wpm: WoodPileManager = unit_manager.wood_pile_manager
 	if tm != null:
-		tm.destroy_in_radius(position, RADIUS)
-	if wpm == null:
+		for d in tm.uproot_in_radius(position, RADIUS):
+			_spawn_debris(d["position"], d["wood"])
+	if wpm != null:
+		for pile in wpm.piles_in_radius(position, RADIUS):
+			var amount: int = pile.amount
+			var at: Vector3 = pile.position
+			wpm.remove_pile(pile)
+			_spawn_debris(at, amount)
+
+
+## Launches one flying wood chunk from `at` carrying `wood` (0 = a sapling that
+## vanishes on landing).
+func _spawn_debris(at: Vector3, wood: int) -> void:
+	if unit_manager == null:
 		return
-	for pile in wpm.piles_in_radius(position, RADIUS):
-		var amount: int = pile.amount
-		if amount <= 0:
-			continue
-		var landing: Vector3 = _scatter_landing()
-		wpm.remove_pile(pile)
-		wpm.deposit(landing, amount)
-
-
-## A landing spot flung just outside the funnel, on dry ground where possible
-## (a few tries), clamped to the map. Keeps scattered wood off the sea.
-func _scatter_landing() -> Vector3:
-	var limit: float = float(TerrainData.SIZE) * TerrainData.CELL_SIZE - 1.0
-	var best: Vector3 = position
-	for attempt in range(4):
-		var angle: float = randf() * TAU
-		var dist: float = RADIUS + 2.0 + randf() * 3.0
-		var p: Vector3 = position + Vector3(cos(angle) * dist, 0.0, sin(angle) * dist)
-		p.x = clampf(p.x, 1.0, limit)
-		p.z = clampf(p.z, 1.0, limit)
-		best = p
-		if terrain_data == null \
-				or terrain_data.get_height(p.x, p.z) > TerrainData.SEA_LEVEL + 0.1:
-			break
-	return best
+	var debris: TornadoDebris = TornadoDebris.new()
+	debris.setup(at, wood, terrain_data, unit_manager.wood_pile_manager, self, randf() * TAU)
+	unit_manager.register_projectile(debris)
 
 
 ## Whirls up ANY unit in the pickup radius (not already airborne) — the
