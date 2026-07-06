@@ -123,9 +123,11 @@ func _ready() -> void:
 	_tribe_commands.spell_context = spell_ctx
 	for tribe in tribes:
 		tribe.set_spells(Spell.create_default_set())
-		# Start scenario: every spell begins with one stored charge.
-		for spell in tribe.spells:
-			spell.charges = 1
+		# Every spell begins with one stored charge — EXCEPT in skirmish, where
+		# both sides start with empty charges and must build mana up first.
+		if config.mode != MatchConfig.Mode.SKIRMISH:
+			for spell in tribe.spells:
+				spell.charges = 1
 	_selection.setup(_unit_manager, _tribe_commands, _build_menu, _spell_targeting)
 	_ring_renderer.setup(_selection)
 	_build_menu.setup(_tribe_commands, nav, self, tribes[GameState.PLAYER_TRIBE])
