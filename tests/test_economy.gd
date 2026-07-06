@@ -398,6 +398,48 @@ func test_workers_use_piles_before_trees() -> void:
 	_free_world(w)
 
 
+## Regression (phase 7d bugfix): when the entrance side is walled off, wood
+## delivery must fall back to a reachable perimeter spot instead of stranding
+## workers with wood (or dropping it back at the trees).
+func test_delivery_survives_unreachable_entrance() -> void:
+	var w: Dictionary = _make_world()
+	var hut: Hut = w.commands.place_building(w.tribe, HUT_SCENE, Vector2i(60, 60)) as Hut
+	# Skip the flatten phase; this is about delivery.
+	hut._flatten_remaining.clear()
+	hut.foundation_done = true
+	# Block the entrance approach with nav-solid cells (like a footprint —
+	# permanent, not undone by anything).
+	var ec: Vector2i = hut.entrance_cell()
+	w.nav.fill_solid_region(Rect2i(60, ec.y, 4, 3), true)
+	check(not w.nav.is_cell_walkable(ec), "the entrance cell is unreachable")
+	check(w.nav.is_cell_walkable(w.nav.world_to_cell(hut.delivery_point())),
+		"the delivery point falls back to a walkable perimeter cell")
+
+	# Big trees on the reachable (north) side; 4x4 = 16 wood >= 15 cost.
+	for c: Vector2i in [Vector2i(52, 56), Vector2i(56, 52), Vector2i(60, 52),
+			Vector2i(68, 56), Vector2i(64, 52)]:
+		w.tree_manager.spawn_tree(c, 4)
+	var braves: Array[Brave] = []
+	for i in range(3):
+		var b: Brave = w.unit_manager.spawn_unit(
+			BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(55 + i, 55))) as Brave
+		b.order_build(hut)
+		braves.append(b)
+
+	var ticks: int = 0
+	while hut.under_construction and ticks < MAX_TICKS:
+		w.building_manager.tick(TICK)
+		for b in braves:
+			if is_instance_valid(b):
+				b.tick(TICK)
+		w.tree_manager.tick(TICK)
+		w.unit_manager.tick(TICK)
+		ticks += 1
+	check(not hut.under_construction, "build finishes via the reachable delivery point")
+	check(hut.wood_delivered == Hut.WOOD_COST, "all wood was delivered and absorbed")
+	_free_world(w)
+
+
 func test_wood_stall_recheck_timer() -> void:
 	var w: Dictionary = _make_world()
 	var hut: Hut = w.commands.place_building(w.tribe, HUT_SCENE, Vector2i(60, 60)) as Hut

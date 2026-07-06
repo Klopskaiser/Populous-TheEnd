@@ -195,6 +195,15 @@ func edge_spawn_position() -> Vector3:
 	return entrance_world()
 
 
+## Guaranteed-walkable spot next to the building where workers drop wood and the
+## site absorbs it. Normally the entrance; if the entrance side is not reachable
+## (water / slope / blocked), the nearest walkable perimeter cell — so wood
+## delivery never gets stuck on an unreachable doorway (workers would otherwise
+## stand around holding wood, or drop it back at the trees).
+func delivery_point() -> Vector3:
+	return edge_spawn_position()
+
+
 func _ready() -> void:
 	set_process(false)   # only enabled for the destruction sink
 	_create_visuals()
@@ -401,7 +410,7 @@ func _tick_repair_absorb(delta: float) -> void:
 	var need: int = repair_wood_missing()
 	if need <= 0:
 		return
-	var taken: int = wood_pile_manager.take_from_radius(entrance_world(), ABSORB_RADIUS, need)
+	var taken: int = wood_pile_manager.take_from_radius(delivery_point(), ABSORB_RADIUS, need)
 	if taken > 0:
 		repair_wood += taken
 		wood_stalled = false
@@ -666,7 +675,7 @@ func wood_incoming() -> int:
 		if is_instance_valid(worker):
 			total += worker.carried_wood + worker.claimed_tree_yield()
 	if wood_pile_manager != null:
-		total += wood_pile_manager.wood_in_radius(entrance_world(), ABSORB_RADIUS)
+		total += wood_pile_manager.wood_in_radius(delivery_point(), ABSORB_RADIUS)
 	return total
 
 
@@ -698,7 +707,7 @@ func _absorb_piles() -> void:
 	var need: int = wood_needed_total()
 	if need <= 0:
 		return
-	var taken: int = wood_pile_manager.take_from_radius(entrance_world(), ABSORB_RADIUS, need)
+	var taken: int = wood_pile_manager.take_from_radius(delivery_point(), ABSORB_RADIUS, need)
 	if taken > 0:
 		wood_delivered += taken
 		wood_stalled = false  # fresh wood on site: back to work

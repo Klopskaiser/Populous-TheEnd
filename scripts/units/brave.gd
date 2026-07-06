@@ -467,8 +467,11 @@ func _tick_deliver(delta: float) -> void:
 	if carried_wood <= 0:
 		_end_subtask()
 		return
-	var target: Vector3 = job.entrance_world()
-	if not _seek(target, DELIVER_RANGE, delta):
+	# Deliver to a reachable spot at the site (entrance, or the nearest walkable
+	# perimeter cell if the doorway is walled off) — not the raw entrance, which
+	# may be unreachable (water/slope) and leave the worker stuck with the wood.
+	var target: Vector3 = job.delivery_point()
+	if not _seek(target, DELIVER_RANGE, delta, true):
 		return
 	if wood_pile_manager != null:
 		wood_pile_manager.deposit(position, carried_wood)
@@ -582,7 +585,7 @@ func _tick_loose_deliver(delta: float) -> void:
 		if not _next_loose_tree():
 			_stop_all()
 		return
-	if not _seek(_loose_drop_target(building), DELIVER_RANGE, delta):
+	if not _seek(_loose_drop_target(building), DELIVER_RANGE, delta, true):
 		return
 	if wood_pile_manager != null:
 		wood_pile_manager.deposit(position, carried_wood)
@@ -595,13 +598,15 @@ func _tick_loose_deliver(delta: float) -> void:
 ## Preferred drop-off near a building: an existing pile with space close to the
 ## entrance (so wood consolidates onto it), otherwise the entrance itself.
 func _loose_drop_target(building: Building) -> Vector3:
-	var entrance: Vector3 = building.entrance_world()
+	# Reachable drop spot (entrance or nearest walkable perimeter cell), so wood
+	# is not stranded at the trees when the doorway itself cannot be reached.
+	var drop: Vector3 = building.delivery_point()
 	if wood_pile_manager != null:
 		var pile: WoodPile = wood_pile_manager.pile_with_space_near(
-			entrance, DROP_CONSOLIDATE_RADIUS)
+			drop, DROP_CONSOLIDATE_RADIUS)
 		if pile != null:
 			return pile.position
-	return entrance
+	return drop
 
 
 func _nearest_own_building() -> Building:

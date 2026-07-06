@@ -2212,3 +2212,17 @@ auf 5 Stufen umgestellt). `--headless --quit` fehlerfrei; 12-s-Headless-Skirmish
 (Förster bauen, Braves zuweisen → Arbeiter tritt heraus/kniet/pflanzt/geht zurück,
 Insassen-Pips + Rausschicken, Mana sinkt; Feuer/Blitz/Lava entzündet Wald + Stapel;
 Tornado zerstört Bäume und schleudert Stapel mit vollem Holz weg).
+
+**Bugfix (Nutzerfeedback nach 7d — Holzablieferung an unerreichbaren Eingang):**
+Wurde eine Kaserne (oder ein anderes Gebäude) so gebaut, dass die Eingangszelle
+schlecht erreichbar war (Wasser/Hang/Blockade), scheiterte die Wegfindung zur
+Ablieferung: Bauarbeiter blieben mit dem Holz stehen (DELIVER-`_seek` schlug
+endlos fehl), manuelle Sammler ließen das Holz beim Baum fallen, und das letzte
+Holz kam nie an. Fix: neue `Building.delivery_point()` (= `edge_spawn_position()`
+— Eingang, sonst nächste begehbare Randzelle). Ablieferung UND Absorption laufen
+jetzt über diesen garantiert erreichbaren Punkt: `Brave._tick_deliver` /
+`_loose_drop_target` liefern dorthin (mit `allow_direct`), `Building._absorb_piles`/
+`_tick_repair_absorb`/`wood_incoming` nehmen Holz im `ABSORB_RADIUS` um diesen
+Punkt auf. Regressionstest `test_delivery_survives_unreachable_entrance` in
+`test_economy.gd` (Eingang per Nav-Solid blockiert → Bau wird trotzdem fertig).
+Tests: **1037 grün**, Ladecheck fehlerfrei.
