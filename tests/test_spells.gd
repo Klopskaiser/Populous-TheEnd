@@ -498,6 +498,7 @@ func test_tornado_wrecks_building_stage_by_stage() -> void:
 func test_tornado_lifts_carries_and_flings_units() -> void:
 	var w: Dictionary = _make_world_with_buildings()
 	var brave: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, Vector3(40.5, 0, 40.5))
+	var own: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 0, Vector3(39.5, 0, 39.5))
 	var spell: TornadoSpell = TornadoSpell.new()
 	check(spell.execute(w.tribe0, Vector3(40, 0, 40), w.ctx), "tornado spawned")
 	var vortex: TornadoVortex = w.unit_manager.projectiles[0]
@@ -506,6 +507,8 @@ func test_tornado_lifts_carries_and_flings_units() -> void:
 	var ticks: int = _run(w, [brave],
 		func() -> bool: return brave.state == Unit.State.THROWN)
 	check(ticks < MAX_TICKS, "unit in the path is whirled up")
+	check(own.state == Unit.State.THROWN,
+		"the twister is tribe-blind: OWN units in the way get whirled up too")
 	var ground: float = w.td.get_height(brave.position.x, brave.position.z)
 	_run(w, [brave], func() -> bool: return brave.position.y > ground + 3.0)
 	check(brave.position.y > ground + 3.0, "rider gains height toward the tip")
@@ -561,17 +564,39 @@ func _has_debris(w: Dictionary) -> bool:
 func test_integrity_foundation_break_shatters_building() -> void:
 	var w: Dictionary = _make_world_with_buildings()
 	var hut: Building = w.bm.place(HUT_SCENE_T, w.tribe1, Vector2i(50, 50), 0, true)
-	# A gentle dip under one corner stays below the break threshold.
-	w.td.set_vertex_height(50, 50, 4.0)
+	# A solid dip under one corner still stays below the break threshold
+	# (buildings are fairly sturdy against terrain changes).
+	w.td.set_vertex_height(50, 50, 3.2)
 	w.ctx.apply_terrain_change(Rect2i(49, 49, 3, 3))
 	check(hut.health > 0, "span below the threshold keeps the building standing")
 	check(not _has_debris(w), "no debris while the foundation holds")
 	# Tearing the corner further down breaks the foundation: instant burst.
-	w.td.set_vertex_height(50, 50, 3.0)
+	w.td.set_vertex_height(50, 50, 2.5)
 	w.ctx.apply_terrain_change(Rect2i(49, 49, 3, 3))
 	check(hut.health == 0, "foundation span > threshold bursts the building")
 	check(hut not in w.bm.buildings, "burst building deregistered")
 	check(_has_debris(w), "debris pieces fly off the burst building")
+	_free_world_with_buildings(w)
+
+
+func test_foundation_settles_after_surviving_terrain_change() -> void:
+	var w: Dictionary = _make_world_with_buildings()
+	var hut: Building = w.bm.place(HUT_SCENE_T, w.tribe1, Vector2i(50, 50), 0, true)
+	w.td.set_vertex_height(50, 50, 3.4)   # span 1.6 m: bent but standing
+	w.ctx.apply_terrain_change(Rect2i(49, 49, 3, 3))
+	check(hut.health > 0, "hut survives the 1.6 m step")
+	# The crooked foundation levels itself back over time.
+	for i in range(120):
+		w.bm.tick(0.1)
+	var lo: float = INF
+	var hi: float = -INF
+	for vz in range(50, 55):
+		for vx in range(50, 55):
+			var h: float = w.td.vertex_height(vx, vz)
+			lo = minf(lo, h)
+			hi = maxf(hi, h)
+	check(hi - lo < 0.1, "foundation settled back to a level plane")
+	check_near(hut.position.y, (lo + hi) * 0.5, "hut re-seated on the settled ground", 0.1)
 	_free_world_with_buildings(w)
 
 
@@ -636,27 +661,131 @@ func test_earthquake_water_clamp() -> void:
 				"sea-floor vertices are never lifted")
 
 
+func test_earthquake_forms_visible_fault_edge() -> void:
+	var td: TerrainData = _flat_terrain()
+	var plan: Dictionary = EarthquakeSpell.upheaval_targets(td, Vector2(40, 40))
+	var indices: PackedInt32Array = plan.indices
+	var targets: PackedFloat32Array = plan.targets
+	check(not indices.is_empty(), "fault plan is non-empty")
+	# Effective post-quake heights over the affected neighbourhood.
+	var height_of: Dictionary = {}
+	for i in range(indices.size()):
+		height_of[indices[i]] = targets[i]
+	var deepest: float = 0.0
+	var highest: float = 0.0
+	for i in range(indices.size()):
+		var delta: float = targets[i] - 5.0
+		deepest = minf(deepest, delta)
+		highest = maxf(highest, delta)
+	check(deepest <= -1.5, "the drop side sinks visibly")
+	check(highest >= 0.3, "the rise side piles up slightly")
+	# Somewhere along the line two ADJACENT vertices end up far apart: the
+	# visible scarp edge (unchanged neighbours count with their old height).
+	var edge_found: bool = false
+	for vz in range(34, 47):
+		for vx in range(34, 47):
+			var idx: int = vz * TerrainData.VERTS + vx
+			var h: float = height_of.get(idx, 5.0)
+			var h_right: float = height_of.get(idx + 1, 5.0)
+			var h_down: float = height_of.get(idx + TerrainData.VERTS, 5.0)
+			if absf(h - h_right) >= 1.2 or absf(h - h_down) >= 1.2:
+				edge_found = true
+	check(edge_found, "adjacent vertices jump >= 1.2 m: a visible broken edge")
+
+
+func test_earthquake_spawns_short_fault_lava() -> void:
+	var w: Dictionary = _make_world()
+	w.unit_manager.spawn_unit(SHAMAN_SCENE, 0, Vector3(30, 0, 30))
+	var spell: EarthquakeSpell = EarthquakeSpell.new()
+	check(spell.execute(w.tribe0, Vector3(40, 5, 40), w.ctx), "quake cast succeeds")
+	var flows: int = 0
+	for p in w.unit_manager.projectiles:
+		if p is LavaFlow:
+			flows += 1
+			check(not (p as LavaFlow).scorch, "fault lava leaves no scorch")
+			check((p as LavaFlow).lifetime <= 4.0, "fault lava vanishes quickly")
+	check(flows == 3, "three lava streams spill over the fresh scarp")
+	var ticks: int = 0
+	while not w.unit_manager.projectiles.is_empty() and ticks < 100:
+		w.unit_manager.tick(0.1)
+		ticks += 1
+	check(w.unit_manager.projectiles.is_empty(),
+		"morph and fault lava are gone shortly after the quake")
+	_free_world(w)
+
+
+# --- Phase 7c: lava & burning ---------------------------------------------------------
+
+func test_lava_flow_ignites_burns_and_panics() -> void:
+	var w: Dictionary = _make_world()
+	# Downhill slope in +x so the stream keeps flowing (on flat ground lava
+	# pools after ~1 m — that is intended behaviour).
+	for vz in range(34, 47):
+		for vx in range(40, 50):
+			w.td.set_vertex_height(vx, vz, 5.0 - 0.35 * float(vx - 40))
+	var victim: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, Vector3(43, 4, 40))
+	var flow: LavaFlow = LavaFlow.new()
+	flow.setup(Vector3(40, 5, 40), Vector3(1, 0, 0), w.unit_manager, w.td)
+	w.unit_manager.register_projectile(flow)
+	var panicked: bool = false
+	var contact_seen: bool = false
+	for i in range(120):
+		w.unit_manager.tick(0.1)
+		if is_instance_valid(victim) and victim.state != Unit.State.DEAD:
+			victim.tick(0.1)
+			if victim.state == Unit.State.PANIC:
+				panicked = true
+			if victim.health <= victim.max_health - Unit.LAVA_CONTACT_DAMAGE:
+				contact_seen = true
+	check(contact_seen, "lava contact costs half a brave life at once")
+	check(panicked, "the burning brave scrambles around in panic")
+	check(victim.state == Unit.State.DEAD, "contact + burn (2x brave life) kill a brave")
+	check(flow._travelled <= flow.flow_range + 0.5, "the stream only flows a short distance")
+	check((flow._segments[0] as Dictionary).cooled, "old segments have cooled (ground blackens)")
+	_free_world(w)
+
+
+func test_ignite_shaman_burns_without_panicking() -> void:
+	var w: Dictionary = _make_world()
+	var shaman: Unit = w.unit_manager.spawn_unit(SHAMAN_SCENE, 1, Vector3(40, 5, 40))
+	shaman.ignite(Vector3(41, 5, 40))
+	check(shaman.health == shaman.max_health - Unit.LAVA_CONTACT_DAMAGE,
+		"contact damage applies to the panic-immune shaman too")
+	check(shaman.state != Unit.State.PANIC, "the shaman burns without panicking")
+	check(shaman.is_burning(), "burn timer is running")
+	for i in range(45):
+		shaman.tick(0.1)
+	check(not shaman.is_burning(), "the burn wears off after its duration")
+	check(shaman.health <= shaman.max_health - Unit.LAVA_CONTACT_DAMAGE
+		- Unit.BURN_TOTAL_DAMAGE + 10,
+		"the full burn dealt ~2x brave life on top of the contact hit")
+	check(shaman.state != Unit.State.DEAD, "a full-health shaman survives one burn")
+	_free_world(w)
+
+
 # --- Phase 7c: volcano ---------------------------------------------------------------
 
 func test_volcano_cone_lava_and_permanence() -> void:
 	var w: Dictionary = _make_world_with_buildings()
 	var target: Vector3 = Vector3(40, 5, 40)
-	var enemy: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, Vector3(43, 0, 40))
-	var own: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 0, Vector3(37, 0, 40))
 	var spell: VolcanoSpell = VolcanoSpell.new()
 	check(spell.execute(w.tribe0, target, w.ctx), "volcano cast succeeds")
 	for i in range(35):
 		w.unit_manager.tick(0.1)   # cone morph (3 s) completes
 	check(w.td.get_height(40.0, 40.0) >= 5.0 + VolcanoSpell.PEAK - 1.0,
 		"cone tip rises to (nearly) peak height")
-	check(enemy.health < enemy.max_health, "lava burns enemy units")
-	check(own.health < own.max_health, "lava burns OWN units too (knows no friends)")
+	var flows: int = 0
+	for p in w.unit_manager.projectiles:
+		if p is LavaFlow:
+			flows += 1
+	check(flows >= 1, "lava streams out of the crater and down the flank")
 	var peak_after_morph: float = w.td.get_height(40.0, 40.0)
-	for i in range(180):
-		w.unit_manager.tick(0.1)   # zone lifetime (20 s) expires
-	check(w.unit_manager.projectiles.is_empty(), "lava zone despawned after 20 s")
+	for i in range(330):
+		w.unit_manager.tick(0.1)   # zone (20 s) + last lava flow (12 s) expire
+	check(w.unit_manager.projectiles.is_empty(),
+		"eruption over: zone and every lava flow despawned")
 	check_near(w.td.get_height(40.0, 40.0), peak_after_morph,
-		"the mountain is permanent (height unchanged after despawn)")
+		"the mountain is permanent (height unchanged after the eruption)")
 	_free_world_with_buildings(w)
 
 
@@ -692,12 +821,16 @@ func test_firestorm_salvo_spread_and_damage() -> void:
 	check(w.unit_manager.projectiles.size() == 1, "shower scheduler registered")
 	# Track every bolt the shower launches over its runtime.
 	var seen: Dictionary = {}
+	var from_sky: bool = true
 	for i in range(80):
 		w.unit_manager.tick(0.1)
 		for p in w.unit_manager.projectiles:
 			if p is FireballBolt:
 				seen[p.get_instance_id()] = (p as FireballBolt).target_pos
+				if (p as FireballBolt)._start.y < (p as FireballBolt).target_pos.y + 8.0:
+					from_sky = false
 	check(seen.size() == FirestormSpell.BOLT_COUNT, "8 bolts launched over the salvo")
+	check(from_sky, "every bolt dives out of the sky above its impact point")
 	for pos: Vector3 in seen.values():
 		check(Vector2(pos.x - target.x, pos.z - target.z).length() \
 			<= FirestormSpell.SPREAD_RADIUS + 0.01,

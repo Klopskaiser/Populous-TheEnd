@@ -1,13 +1,14 @@
 class_name TornadoVortex extends Node3D
 
-## The tornado entity: lives for LIFETIME seconds and drifts randomly. Enemy
-## buildings under the vortex take +1 destruction stage every STAGE_INTERVAL.
-## Enemy units in its path are whirled up to the tip (carried via
-## Unit.throw_carrier), briefly dragged along and then flung away at high
-## speed; they land with fall damage (1/2 brave life), tumble on with the
-## fling's momentum and stand up once slow — water kills instantly (all of
-## that is the normal THROWN/ROLL handling). Ticked via the UnitManager
-## projectile list; on expiry any remaining riders are flung.
+## The tornado entity: lives for LIFETIME seconds and drifts randomly. The
+## twister is TRIBE-BLIND (like all terrain violence): buildings under the
+## vortex — own ones included — take +1 destruction stage every
+## STAGE_INTERVAL, and ANY unit in its path is whirled up to the tip
+## (carried via Unit.throw_carrier), briefly dragged along and then flung
+## away at high speed; they land with fall damage (1/2 brave life), tumble
+## on with the fling's momentum and stand up once slow — water kills
+## instantly (all of that is the normal THROWN/ROLL handling). Ticked via
+## the UnitManager projectile list; on expiry any remaining riders are flung.
 
 const LIFETIME: float = 8.0
 const RADIUS: float = 2.2            # pickup / building-hit radius
@@ -93,8 +94,8 @@ func _tick_drift(delta: float) -> void:
 		position.y = terrain_data.get_height(position.x, position.z)
 
 
-## Enemy buildings whose (slightly grown) footprint contains the vortex take
-## one destruction stage per interval.
+## Buildings whose (slightly grown) footprint contains the vortex take one
+## destruction stage per interval — tribe-blind, own buildings included.
 func _wreck_buildings() -> void:
 	if building_manager == null:
 		return
@@ -102,21 +103,20 @@ func _wreck_buildings() -> void:
 		int(floor(position.x / TerrainData.CELL_SIZE)),
 		int(floor(position.z / TerrainData.CELL_SIZE)))
 	for b in building_manager.buildings.duplicate():
-		if not is_instance_valid(b) or b.tribe_id == tribe_id or b.health <= 0:
+		if not is_instance_valid(b) or b.health <= 0:
 			continue
 		if b.footprint_rect().grow(1).has_point(cell):
 			b.apply_destruction_stages(1)
 
 
-## Whirls up enemy units in the pickup radius (not already airborne). The fall
-## damage for the later landing is set at capture.
+## Whirls up ANY unit in the pickup radius (not already airborne) — the
+## twister doesn't care whose followers stand in its way. The fall damage
+## for the later landing is set at capture.
 func _pick_up_units() -> void:
 	if unit_manager == null:
 		return
 	for u in unit_manager.get_units_in_radius(position, RADIUS):
 		if u.state == Unit.State.DEAD or u.state == Unit.State.THROWN:
-			continue
-		if u.tribe_id == tribe_id:
 			continue
 		u.throw_airborne(Vector3.ZERO, FALL_DAMAGE)
 		if u.state != Unit.State.THROWN:

@@ -332,6 +332,7 @@ func _on_combat_interrupt() -> void:
 func tick(delta: float) -> void:
 	_tick_knockback(delta)
 	_tick_regen(delta)
+	_tick_burning(delta)
 	_tick_state(delta)
 	_apply_animation(false)
 
@@ -826,6 +827,47 @@ func drown() -> void:
 		return
 	health = 0
 	_die()
+
+
+# --- Burning (7c lava) --------------------------------------------------------------
+
+## Touching lava: instant contact damage, then the unit burns and scrambles
+## around in panic for the whole burn (panic-immune units burn standing).
+const LAVA_CONTACT_DAMAGE: int = 30    # half a brave life per touch
+const BURN_DURATION: float = 4.0
+const BURN_TOTAL_DAMAGE: int = 120     # 2x brave life spread over the burn
+
+var _burn_time: float = 0.0
+var _burn_frac: float = 0.0
+
+
+func is_burning() -> bool:
+	return _burn_time > 0.0
+
+
+## Lava contact. Re-touching while already alight refreshes the burn instead
+## of stacking it (and costs no second contact hit).
+func ignite(source_pos: Vector3) -> void:
+	if state == State.DEAD:
+		return
+	var fresh: bool = not is_burning()
+	_burn_time = BURN_DURATION
+	if fresh:
+		take_damage(LAVA_CONTACT_DAMAGE)
+		if state == State.DEAD:
+			return
+	start_panic(source_pos, BURN_DURATION)
+
+
+func _tick_burning(delta: float) -> void:
+	if _burn_time <= 0.0 or state == State.DEAD:
+		return
+	_burn_time -= delta
+	_burn_frac += float(BURN_TOTAL_DAMAGE) / BURN_DURATION * delta
+	var whole: int = int(_burn_frac)
+	if whole > 0:
+		_burn_frac -= float(whole)
+		take_damage(whole)
 
 
 ## Landing: water kills instantly; building footprints are snapped out of;

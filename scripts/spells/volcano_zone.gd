@@ -1,17 +1,21 @@
 class_name VolcanoZone extends Node3D
 
-## The volcano's lava zone: stationary on the (growing) cone for LIFETIME
-## seconds. Lava knows no friends (documented design): ALL units in the
-## radius take DPS damage per second — including the caster's own — and ALL
-## buildings in reach take +1 destruction stage every STAGE_INTERVAL (first
-## hit after one full interval of contact). The mountain underneath is
-## permanent and stays after the zone despawns. Ticked via the UnitManager
-## projectile list.
+## The volcano's eruption controller: sits on the (growing) cone for
+## LIFETIME seconds and regularly releases LAVA FLOWS out of the crater that
+## run down the flanks (LavaFlow: ignites everything it touches — lava knows
+## no friends — and blackens the ground as it cools). Buildings in reach of
+## the eruption take +1 destruction stage every STAGE_INTERVAL (first hit
+## after one full interval of contact). Placeholder visual: a smoke column
+## above the crater. The mountain underneath is permanent and stays after
+## the zone despawns. Ticked via the UnitManager projectile list.
 
 const LIFETIME: float = 20.0
 const RADIUS: float = 5.0
-const DPS: int = 10
 const STAGE_INTERVAL: float = 4.0
+## Lava flows: the first once the cone has some height, then regularly,
+## fanned out around the crater (deterministic base angle from the cell).
+const FLOW_START_DELAY: float = 1.5
+const FLOW_INTERVAL: float = 2.5
 
 var done: bool = false
 var tribe_id: int = 0
@@ -20,8 +24,10 @@ var terrain_data: TerrainData = null
 var building_manager: BuildingManager = null
 
 var _life: float = LIFETIME
-var _damage_timer: float = 1.0
 var _stage_timer: float = STAGE_INTERVAL
+var _flow_timer: float = FLOW_START_DELAY
+var _flow_count: int = 0
+var _base_angle: float = 0.0
 
 
 func setup(p_tribe_id: int, at: Vector3, p_unit_manager: UnitManager,
@@ -31,6 +37,8 @@ func setup(p_tribe_id: int, at: Vector3, p_unit_manager: UnitManager,
 	unit_manager = p_unit_manager
 	terrain_data = p_terrain_data
 	building_manager = p_building_manager
+	var cell: Vector2i = Vector2i(int(floor(at.x)), int(floor(at.z)))
+	_base_angle = float((cell.x * 7 + cell.y * 13) % 16) * TAU / 16.0
 
 
 func tick(delta: float) -> void:
@@ -40,26 +48,30 @@ func tick(delta: float) -> void:
 	if _life <= 0.0:
 		done = true
 		return
-	# Ride the growing cone.
+	# Ride the growing cone (the smoke column rises with the crater).
 	if terrain_data != null:
 		position.y = terrain_data.get_height(position.x, position.z)
-	_damage_timer -= delta
-	if _damage_timer <= 0.0:
-		_damage_timer = 1.0
-		_burn_units()
+	_flow_timer -= delta
+	if _flow_timer <= 0.0:
+		_flow_timer = FLOW_INTERVAL
+		_spawn_flow()
 	_stage_timer -= delta
 	if _stage_timer <= 0.0:
 		_stage_timer = STAGE_INTERVAL
 		_wreck_buildings()
 
 
-func _burn_units() -> void:
+## One lava stream out of the crater, fanned around the tip so successive
+## flows cover different flanks; it steers itself downhill from there.
+func _spawn_flow() -> void:
 	if unit_manager == null:
 		return
-	for u in unit_manager.get_units_in_radius(position, RADIUS):
-		if u.state == Unit.State.DEAD:
-			continue
-		u.take_damage(DPS)   # no tribe filter: lava burns everyone
+	var angle: float = _base_angle + TAU * float(_flow_count) / 7.0
+	_flow_count += 1
+	var dir: Vector3 = Vector3(cos(angle), 0.0, sin(angle))
+	var flow: LavaFlow = LavaFlow.new()
+	flow.setup(position + dir * 0.4, dir, unit_manager, terrain_data)
+	unit_manager.register_projectile(flow)
 
 
 func _wreck_buildings() -> void:
@@ -75,29 +87,19 @@ func _wreck_buildings() -> void:
 
 
 func _ready() -> void:
-	# Placeholder lava: a glowing dome plus a ring of ember blobs.
+	# Placeholder smoke column above the crater: stacked grey puffs.
 	var mat: StandardMaterial3D = StandardMaterial3D.new()
-	mat.albedo_color = Color(1.0, 0.45, 0.08, 0.85)
-	mat.emission_enabled = true
-	mat.emission = Color(1.0, 0.3, 0.0)
+	mat.albedo_color = Color(0.35, 0.33, 0.32, 0.55)
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	var dome: MeshInstance3D = MeshInstance3D.new()
-	var s: SphereMesh = SphereMesh.new()
-	s.radius = 1.1
-	s.height = 1.4
-	dome.mesh = s
-	dome.material_override = mat
-	dome.position.y = 0.4
-	add_child(dome)
-	for i in range(8):
-		var blob: MeshInstance3D = MeshInstance3D.new()
-		var bs: SphereMesh = SphereMesh.new()
-		bs.radius = 0.3
-		bs.height = 0.45
-		blob.mesh = bs
-		blob.material_override = mat
-		var angle: float = TAU * float(i) / 8.0
-		var r: float = 1.8 + 0.9 * float(i % 3)
-		blob.position = Vector3(cos(angle) * r, 0.15, sin(angle) * r)
-		add_child(blob)
+	for i in range(5):
+		var puff: MeshInstance3D = MeshInstance3D.new()
+		var s: SphereMesh = SphereMesh.new()
+		var r: float = 0.6 + 0.35 * float(i)
+		s.radius = r
+		s.height = r * 1.6
+		puff.mesh = s
+		puff.material_override = mat
+		puff.position = Vector3(0.25 * float(i % 3) - 0.25,
+			VolcanoSpell.PEAK + 0.6 + 1.1 * float(i), 0.2 * float(i % 2))
+		add_child(puff)

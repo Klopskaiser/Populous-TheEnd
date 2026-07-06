@@ -598,10 +598,11 @@ func test_ai_casts_flatten_on_slope_building() -> void:
 	w.unit_manager.spawn_unit(SHAMAN_SCENE, 1, Vector3(40, 5, 40))
 	var hut: Building = w.building_manager.place(HUT_SCENE, w.tribes[0],
 		Vector2i(43, 38), 0, true)
-	# Terrain step right next to the hut: a flatten there breaks the foundation.
+	# Terrain step right next to the hut: a flatten there breaks the foundation
+	# (step must exceed the sturdier 2.0 m break threshold + margin).
 	for vz in range(37, 44):
 		for vx in range(48, 54):
-			w.td.set_vertex_height(vx, vz, 7.0)
+			w.td.set_vertex_height(vx, vz, 8.0)
 	check(hut.health > 0, "hut standing before the cast")
 	_arm_only(ai_tribe, &"flatten")
 	ai._cast_spells()

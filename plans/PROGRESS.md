@@ -2014,3 +2014,49 @@ Reihenfolge), KI-Heuristiken (Vulkan/Absinken/Ebene/Feuerregen via
 (siehe Plan §Manuelle Prüfung: 10 Slots + Hotkeys 1–0, Quadrat-Vorschau,
 Erdbeben-Optik, Vulkan-Berg + Lava, Feuerregen-Salve, Ebene-Klippen +
 zerplatzende Gebäude, Absinken-Flutung, KI castet die neuen Zauber).
+
+**Nachbesserung (Nutzerfeedback, erste Runde):**
+- **Tornado ist stammesblind:** Tribe-Filter in `TornadoVortex`
+  (`_wreck_buildings`/`_pick_up_units`) entfernt — auch eigene Einheiten und
+  Gebäude im Weg werden hochgewirbelt bzw. gestuft (konsistent mit der
+  Terrain-Gewalt-Doktrin).
+- **Gebäude resistenter + selbstglättendes Fundament:**
+  `FOUNDATION_BREAK_DIFF` 1,2 → **2,0 m**. Überlebt ein Gebäude eine
+  Terrainänderung mit schiefem Fundament (Spanne > 5 cm), markiert die
+  Integritätsprüfung es (`mark_foundation_disturbed`); `Building.tick`
+  planiert die Footprint-Vertices dann mit `FOUNDATION_SMOOTH_RATE`
+  (0,3 m/s) zurück auf den Mittelwert (gebatchte Nav-/Mesh-Updates wie beim
+  Bau, Gebäude setzt sich mit).
+- **Feuerregen fällt vom Himmel:** Bolts starten `SKY_HEIGHT` (14 m) über
+  ihrem eigenen Einschlagpunkt (kleiner Seitenversatz für den
+  Sturzflug-Bogen) statt bei der Schamanin; `SPREAD_RADIUS` 4 → **5,5 m**
+  (KI-Schwelle skaliert mit).
+- **Lava-Mechanik (neu, `lava_flow.gd`):** `LavaFlow`-Entität — Strom folgt
+  dem Terraingradienten bergab (auf Ebenem staut er nach ~1 m), begrenzte
+  Reichweite, hinterlässt Segmente: glühend (zündet ALLES an — Lava kennt
+  keine Freunde) → abgekühlt (schwärzt den Boden: Scorch-Decal). **Brand auf
+  Unit:** `Unit.ignite()` = einmalig `LAVA_CONTACT_DAMAGE` (30 = ½ Brave)
+  + Brand `BURN_DURATION` 4 s mit `BURN_TOTAL_DAMAGE` 120 (2× Brave) über
+  die Laufzeit; Brennende laufen in Panik umher (Panik-immune Schamanin
+  brennt ohne Panik); erneute Berührung refresht statt zu stapeln.
+- **Vulkan speit Lavaströme:** `VolcanoZone` ohne Flächen-DPS/Orange-Dome —
+  stattdessen ab 1,5 s alle 2,5 s ein `LavaFlow` aus dem Krater (Richtungen
+  deterministisch aufgefächert, fließen die Flanken hinab und schwärzen
+  sie); Placeholder-**Rauchsäule** über dem Krater; Gebäude-Stufentakt
+  (alle 4 s im 5-m-Radius) unverändert.
+- **Erdbeben = sichtbare Bruchkante statt Zufallsverwerfung:**
+  `upheaval_targets` legt eine **Verwerfungslinie** durch den Zielpunkt
+  (Ausrichtung deterministisch aus der Zielzelle): Absenkungsseite bis
+  −2,2 m direkt an der Kante (auslaufend), Gegenseite türmt sich bis
+  +0,8 m auf → benachbarte Vertices springen an der Linie um mehrere Meter
+  (der Boden "bricht"). An der frischen Kante laufen **3 kurzlebige
+  Lavaströme** die Abbruchseite hinab (Reichweite 3,5 m, 3,5 s Lebenszeit,
+  ohne Scorch — verschwinden schnell). Gebäude-/Einheiten-Effekte und
+  Wasser-Klemme unverändert.
+- Tests: **986 grün** (+27: Fundament-Settling, härtere Bruchschwelle,
+  Tornado wirbelt eigene Einheit, Feuerregen-Himmelsstart, Vulkan-Lavaströme
+  + Eruptionsende, Bruchkanten-Geometrie (Drop/Lift/Kantensprung messbar),
+  Erdbeben-Lava (3 Ströme, kein Scorch, schnell weg), Lava-Kontakt/Brand/
+  Panik/Reichweite/Abkühlung, Schamanin brennt ohne Panik).
+  Ladecheck + `--quit-after 240` fehlerfrei.
+  **Manuelle Prüfung durch Nutzer: ausstehend.**

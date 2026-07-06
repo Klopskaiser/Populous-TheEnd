@@ -1,20 +1,27 @@
 class_name EarthquakeSpell extends Spell
 
-## "Erdbeben": area terrain upheaval around the target point. Every vertex in
-## the radius shifts by a deterministic random delta (seeded from the target
-## cell, falloff to the rim), gradually over DURATION (TerrainMorph).
-## Buildings in the radius take +2 destruction stages (construction sites die
-## outright — existing fragile rule); on top of that the terrain-integrity
-## rules apply (foundation break, flooding). Enemy units take light damage
-## and a mini roll away from the epicentre. Water clamp: quake bumps never
-## push the sea floor up (no useless underwater humps); LOWERING below the
-## sea line is allowed and floods land — tactical terrain destruction.
+## "Erdbeben": the ground BREAKS along a visible fault line through the
+## target point (orientation seeded from the target cell — deterministic).
+## One side of the fault drops, the other piles up slightly, leaving a sharp
+## scarp edge; the break forms gradually over DURATION (TerrainMorph) and
+## short-lived lava runs down the fresh scarp and vanishes quickly (no
+## scorch). Buildings in the radius take +2 destruction stages (construction
+## sites die outright — existing fragile rule); on top of that the
+## terrain-integrity rules apply (foundation break, flooding). Enemy units
+## take light damage and a mini roll away from the epicentre. Water clamp:
+## the sea floor is never lifted; LOWERING below the sea line is allowed and
+## floods land — tactical terrain destruction.
 
 const RADIUS: float = 7.0
-const AMPLITUDE: float = 1.5       # max vertex shift (metres, +/-)
+const DROP: float = 2.2            # subsidence at the fault (drop side)
+const LIFT: float = 0.8            # pile-up at the fault (rise side)
 const DURATION: float = 2.0
 const STAGES: int = 2
 const UNIT_DAMAGE: int = 15        # 1/4 brave life
+## Fault lava: short streams down the scarp that disappear quickly.
+const FAULT_LAVA_RANGE: float = 3.5
+const FAULT_LAVA_LIFETIME: float = 3.5
+const FAULT_LAVA_MOLTEN: float = 3.0
 
 
 func _init() -> void:
@@ -35,18 +42,27 @@ func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:
 	var morph: TerrainMorph = TerrainMorph.new()
 	morph.setup(ctx, plan, DURATION)
 	ctx.unit_manager.register_projectile(morph)
+	_spawn_fault_lava(target, plan, ctx)
 	_hit_buildings(tribe, target, ctx)
 	_hit_units(tribe, target, ctx)
 	return true
 
 
-## Deterministic random vertex deltas (RNG seeded from the target cell, drawn
-## in scan order) with a smoothstep falloff to the rim — WITHOUT touching the
-## heightmap (the morph interpolates toward it).
+## Fault height map: vertices on the drop side sink (deepest right at the
+## fault line, easing off away from it), the rise side piles up slightly —
+## adjacent vertices across the line end up far apart: a visible scarp. The
+## whole effect fades toward the radius rim. Deterministic (fault
+## orientation seeded from the target cell); the heightmap is NOT touched
+## (the morph interpolates toward the plan). Extra keys "fault"/"normal"
+## (Vector2) describe the line for the lava spawner.
 static func upheaval_targets(td: TerrainData, center: Vector2) -> Dictionary:
 	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 	var seed_cell: Vector2i = Vector2i(int(floor(center.x)), int(floor(center.y)))
 	rng.seed = seed_cell.x * 73856093 + seed_cell.y * 19349663
+	var angle: float = rng.randf() * TAU
+	var fault: Vector2 = Vector2(cos(angle), sin(angle))
+	var normal: Vector2 = Vector2(-fault.y, fault.x)
+
 	var min_vx: int = clampi(int(floor((center.x - RADIUS) / TerrainData.CELL_SIZE)), 0, TerrainData.VERTS - 1)
 	var max_vx: int = clampi(int(ceil((center.x + RADIUS) / TerrainData.CELL_SIZE)), 0, TerrainData.VERTS - 1)
 	var min_vz: int = clampi(int(floor((center.y - RADIUS) / TerrainData.CELL_SIZE)), 0, TerrainData.VERTS - 1)
@@ -63,14 +79,19 @@ static func upheaval_targets(td: TerrainData, center: Vector2) -> Dictionary:
 			if dist > RADIUS:
 				continue
 			var t: float = clampf((RADIUS - dist) / RADIUS, 0.0, 1.0)
-			var falloff: float = t * t * (3.0 - 2.0 * t)
-			var delta: float = rng.randf_range(-AMPLITUDE, AMPLITUDE) * falloff
+			var rim: float = t * t * (3.0 - 2.0 * t)   # fade toward the rim
+			var side: float = (p - center).dot(normal)
+			var delta: float
+			if side < 0.0:
+				delta = -DROP * rim * clampf(1.0 - absf(side) / RADIUS, 0.0, 1.0)
+			else:
+				delta = LIFT * rim * clampf(1.0 - side / (RADIUS * 0.6), 0.0, 1.0)
 			var idx: int = vz * TerrainData.VERTS + vx
 			var current: float = td.heights[idx]
 			# Water clamp: never lift the sea floor (lowering stays allowed).
 			if delta > 0.0 and current <= TerrainData.SEA_LEVEL:
 				continue
-			if absf(delta) <= 0.01:
+			if absf(delta) <= 0.05:
 				continue
 			indices.append(idx)
 			targets.append(current + delta)
@@ -84,7 +105,24 @@ static func upheaval_targets(td: TerrainData, center: Vector2) -> Dictionary:
 		var cmax: Vector2i = changed_max.clamp(Vector2i.ZERO,
 			Vector2i(TerrainData.SIZE - 1, TerrainData.SIZE - 1))
 		rect = Rect2i(cmin, cmax - cmin + Vector2i.ONE)
-	return {"indices": indices, "targets": targets, "rect": rect}
+	return {"indices": indices, "targets": targets, "rect": rect,
+		"fault": fault, "normal": normal}
+
+
+## Short-lived lava spilling over the fresh scarp toward the dropped side,
+## spawned at a few points along the fault line.
+func _spawn_fault_lava(target: Vector3, plan: Dictionary, ctx: SpellContext) -> void:
+	var fault: Vector2 = plan.fault
+	var normal: Vector2 = plan.normal
+	var downhill: Vector3 = Vector3(-normal.x, 0.0, -normal.y)   # drop side
+	for offset in [-3.0, 0.0, 3.0]:
+		var at: Vector3 = Vector3(target.x + fault.x * offset, 0.0,
+			target.z + fault.y * offset)
+		at.y = ctx.terrain_data.get_height(at.x, at.z)
+		var flow: LavaFlow = LavaFlow.new()
+		flow.setup(at, downhill, ctx.unit_manager, ctx.terrain_data,
+			FAULT_LAVA_RANGE, FAULT_LAVA_LIFETIME, FAULT_LAVA_MOLTEN, false)
+		ctx.unit_manager.register_projectile(flow)
 
 
 ## Enemy buildings whose centre lies in the radius take +2 stages.

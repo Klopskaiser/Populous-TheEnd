@@ -38,6 +38,9 @@ const SINK_DURATION: float = 2.0
 const SINK_DEPTH: float = 5.0
 ## Sideways drift of a flooded wreck sliding into the water (7c integrity rule).
 const SLIDE_SPEED: float = 1.6
+## A building that survived a terrain morph levels its foundation back at
+## this rate (metres per second per vertex) — the crooked ground "settles".
+const FOUNDATION_SMOOTH_RATE: float = 0.3
 ## Placeholder damage visual: dark "broken out" chunks, 2 shown per stage.
 const MAX_DAMAGE_HOLES: int = 6
 
@@ -72,6 +75,9 @@ var _sink_time: float = 0.0
 ## instantly (debris replaces the model), flooded wrecks slide sideways.
 var _vanish_on_destroy: bool = false
 var _slide_dir: Vector3 = Vector3.ZERO
+## Set by the terrain-integrity check when the foundation got bent but held:
+## tick() then levels the footprint back until it is flat again.
+var _foundation_disturbed: bool = false
 var _damage_holes: Array[MeshInstance3D] = []
 var _visual_stage: int = -1
 ## Worker braves currently assigned to this construction site.
@@ -231,6 +237,8 @@ func tick(delta: float) -> void:
 	if under_construction:
 		_tick_construction(delta)
 	else:
+		if _foundation_disturbed and health > 0:
+			_tick_foundation_smoothing(delta)
 		if health > 0 and health < max_health:
 			_tick_repair_absorb(delta)
 		if is_usable():
@@ -335,6 +343,46 @@ func repair(amount: float) -> bool:
 ## release occupants (training buildings eject the trainee and the queue).
 func _on_disabled() -> void:
 	pass
+
+
+## Called by the terrain-integrity check (SpellContext) when a terrain morph
+## bent the foundation without breaking it — the ground settles level again.
+func mark_foundation_disturbed() -> void:
+	if under_construction or health <= 0:
+		return
+	_foundation_disturbed = true
+
+
+## Moves every footprint vertex toward the (current) mean height until the
+## foundation is flat again; terrain/nav updates are batched like during
+## construction. The building re-seats on the settling ground.
+func _tick_foundation_smoothing(delta: float) -> void:
+	if terrain_data == null:
+		_foundation_disturbed = false
+		return
+	var total: float = 0.0
+	var count: int = 0
+	for vz in range(cell.y, cell.y + footprint.y + 1):
+		for vx in range(cell.x, cell.x + footprint.x + 1):
+			total += terrain_data.vertex_height(vx, vz)
+			count += 1
+	var mean: float = total / float(count)
+	var level: bool = true
+	for vz in range(cell.y, cell.y + footprint.y + 1):
+		for vx in range(cell.x, cell.x + footprint.x + 1):
+			var h: float = terrain_data.vertex_height(vx, vz)
+			var nh: float = move_toward(h, mean, FOUNDATION_SMOOTH_RATE * delta)
+			terrain_data.set_vertex_height(vx, vz, nh)
+			if absf(nh - mean) > FLATTEN_EPS:
+				level = false
+	position.y = mean
+	_dirty = footprint_rect() if _dirty.size == Vector2i.ZERO else _dirty.merge(footprint_rect())
+	_flush_timer -= delta
+	if _flush_timer <= 0.0 or level:
+		_flush_timer = FLUSH_INTERVAL
+		_flush_deformation()
+	if level:
+		_foundation_disturbed = false
 
 
 ## While damaged: absorb wood piles near the entrance into the repair buffer

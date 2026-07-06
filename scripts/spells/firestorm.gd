@@ -1,14 +1,20 @@
 class_name FirestormSpell extends Spell
 
-## "Feuerregen": a salvo of BOLT_COUNT fireballs staggered over DURATION
-## seconds onto deterministically scattered points within SPREAD_RADIUS of
-## the target — each impact is a full, unchanged FireballBolt (same direct/
-## splash damage and throw-back, attacker = shaman). A small scheduler entity
-## on the projectile list spawns the bolts over time.
+## "Feuerregen": a salvo of BOLT_COUNT fireballs RAINING FROM THE SKY,
+## staggered over DURATION seconds onto deterministically scattered points
+## within SPREAD_RADIUS of the target — each bolt drops from high above its
+## own impact point (not from the shaman) and is a full, unchanged
+## FireballBolt (same direct/splash damage and throw-back, attacker =
+## shaman). A small scheduler entity on the projectile list spawns the bolts
+## over time.
 
 const BOLT_COUNT: int = 8
-const SPREAD_RADIUS: float = 4.0
+const SPREAD_RADIUS: float = 5.5
 const DURATION: float = 3.0
+## Bolts spawn this high above their impact point, with a small sideways
+## offset so the FireballBolt arc math yields a steep visible dive.
+const SKY_HEIGHT: float = 14.0
+const SKY_DRIFT: float = 5.0
 
 
 func _init() -> void:
@@ -23,11 +29,8 @@ func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:
 	if ctx == null or ctx.terrain_data == null or ctx.unit_manager == null:
 		return false
 	var caster: Unit = tribe.shaman if tribe != null else null
-	var from: Vector3 = target + Vector3(4.0, 6.0, 4.0)   # fallback launch point
-	if caster != null and is_instance_valid(caster):
-		from = caster.position
 	var shower: FirestormShower = FirestormShower.new()
-	shower.setup(tribe.id, from, target, caster, ctx.unit_manager, ctx.terrain_data)
+	shower.setup(tribe.id, target, caster, ctx.unit_manager, ctx.terrain_data)
 	ctx.unit_manager.register_projectile(shower)
 	return true
 
@@ -37,7 +40,6 @@ func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:
 class FirestormShower extends Node3D:
 	var done: bool = false
 	var tribe_id: int = 0
-	var from_pos: Vector3 = Vector3.ZERO
 	var target_pos: Vector3 = Vector3.ZERO
 	var shooter = null   # untyped: the shaman may die mid-salvo
 	var unit_manager: UnitManager = null
@@ -47,10 +49,9 @@ class FirestormShower extends Node3D:
 	var _timer: float = 0.0
 	var _rng: RandomNumberGenerator = RandomNumberGenerator.new()
 
-	func setup(p_tribe_id: int, from: Vector3, to: Vector3, p_shooter,
+	func setup(p_tribe_id: int, to: Vector3, p_shooter,
 			p_unit_manager: UnitManager, p_terrain_data: TerrainData) -> void:
 		tribe_id = p_tribe_id
-		from_pos = from
 		target_pos = to
 		shooter = p_shooter
 		unit_manager = p_unit_manager
@@ -78,6 +79,12 @@ class FirestormShower extends Node3D:
 		var impact: Vector3 = target_pos + Vector3(cos(angle) * dist, 0.0, sin(angle) * dist)
 		if terrain_data != null:
 			impact.y = terrain_data.get_height(impact.x, impact.z)
+		# Drop point high above the impact: the bolt dives out of the sky.
+		var drop_angle: float = _rng.randf() * TAU
+		var from: Vector3 = impact + Vector3(
+			cos(drop_angle) * FirestormSpell.SKY_DRIFT,
+			FirestormSpell.SKY_HEIGHT,
+			sin(drop_angle) * FirestormSpell.SKY_DRIFT)
 		var bolt: FireballBolt = FireballBolt.new()
-		bolt.setup(tribe_id, from_pos, impact, shooter, unit_manager, terrain_data)
+		bolt.setup(tribe_id, from, impact, shooter, unit_manager, terrain_data)
 		unit_manager.register_projectile(bolt)

@@ -8,8 +8,10 @@ class_name SpellContext extends RefCounted
 ## terrain change (all terrain-morphing spells: landbridge, earthquake,
 ## volcano, flatten, sink). Terrain violence is tribe-blind — own buildings
 ## and followers are just as much at risk (documented design).
-## Max height span under a building's foundation before it bursts apart.
-const FOUNDATION_BREAK_DIFF: float = 1.2
+## Max height span under a building's foundation before it bursts apart
+## (buildings are fairly sturdy; below this the foundation survives and
+## slowly levels itself back — Building.mark_foundation_disturbed).
+const FOUNDATION_BREAK_DIFF: float = 2.0
 ## A building slides into the water once this fraction of its footprint
 ## cells sits below the sea line.
 const FLOOD_FRACTION: float = 0.3
@@ -57,8 +59,13 @@ func check_terrain_integrity(rect: Rect2i) -> void:
 				continue
 			if _flooded_fraction(b) >= FLOOD_FRACTION:
 				b.slide_into_water(_downhill_direction(b))
-			elif _foundation_span(b) > FOUNDATION_BREAK_DIFF:
+				continue
+			var span: float = _foundation_span(b)
+			if span > FOUNDATION_BREAK_DIFF:
 				_shatter_building(b)
+			elif span > 0.05:
+				# Survived a crooked foundation: it settles level again.
+				b.mark_foundation_disturbed()
 	if unit_manager != null:
 		for u in unit_manager.units:
 			if not is_instance_valid(u) or u.state == Unit.State.DEAD \
