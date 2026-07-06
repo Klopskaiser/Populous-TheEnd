@@ -1193,3 +1193,22 @@ Steilhängen/durch Schubs/Feuerball inkl. Ketten-Umwurf in Formationen und
 Verlängerung durch Folgetreffer; Rollen ins Wasser tötet; Sterne bei viel
 Schaden; Heilung außer Kampf; Sounds je Angriffsart; Hütten-Rally auf
 Kaserne → Braves stellen sich zur Ausbildung an).
+
+**Nachbesserung (Nutzerfeedback):**
+- **Neue Sounds `throw`** (Feuerball-Abwurf, luftiger Whoosh, emittiert in
+  `Firewarrior._throw_fireball`) und **`preach`** (weicher tonaler Chant
+  175 Hz + Vibrato, alle 2 s solange der Prediger stehend channelt) — beide
+  mit **nur einer Sound-Variante**; der Feuerball-Einschlag steht ebenfalls
+  in `SINGLE_VARIANT_KINDS` (1 statt 3 Varianten). `generate_samples` um
+  beide Kinds erweitert (`_generate_chant` für den tonalen Pfad).
+- **Sterne:** verschwinden beim Tod sofort (`stars_until_ms = 0` in `_die()`
+  zusätzlich zum `has_stars`-DEAD-Guard). **Versatz behoben:** Sterne sitzen
+  jetzt entlang der **Kamera-Hochachse** über der Einheit statt Welt-Y — die
+  Einheiten-Sprites sind kamerazugewandte Billboards, deren Kopf entlang
+  Bildschirm-oben liegt; mit Welt-Y wirkten die Sterne bei geneigter Kamera
+  versetzt.
+- **Pausemenü: „Soundlautstärke"** — HSlider (0–100 %, 5er-Schritte) für den
+  Master-Bus (`Sidebar._on_volume_changed`: `linear_to_db`, 0 % = Mute);
+  sitzt zwischen „Fortsetzen" und „Beenden", sessionweit.
+- Testsuite **438 grün** (Audio-Test um throw/preach + Ein-Datei-Regel
+  erweitert).

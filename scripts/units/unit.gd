@@ -517,10 +517,11 @@ func _die() -> void:
 		if is_instance_valid(a):
 			a._on_target_died(self)
 	melee_attackers.clear()
-	# Corpse setup: no selection ring, no route, no hopping — the unit stays in
-	# the world as a lying "dead" sprite until the decay timer removes it.
+	# Corpse setup: no selection ring, no route, no hopping, no stars — the unit
+	# stays in the world as a lying "dead" sprite until the decay timer removes it.
 	selected = false
 	hop_visual = false
+	stars_until_ms = 0
 	waypoint_queue.clear()
 	_clear_path()
 	_corpse_timer = 0.0

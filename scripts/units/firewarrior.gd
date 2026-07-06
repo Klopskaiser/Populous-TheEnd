@@ -68,3 +68,4 @@ func _throw_fireball(target: Unit) -> void:
 	var ball: Fireball = Fireball.new()
 	ball.setup(self, target, position + Vector3(0.0, 1.1, 0.0))
 	path_service.register_projectile(ball)
+	_emit_combat_hit(&"throw")

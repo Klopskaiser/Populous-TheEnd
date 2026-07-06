@@ -469,11 +469,39 @@ func _build_pause_menu() -> void:
 	resume.pressed.connect(_toggle_pause)
 	vb.add_child(resume)
 
+	# Sound volume (master bus), session-scoped.
+	var volume_label: Label = Label.new()
+	volume_label.text = "Soundlautstärke"
+	volume_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	volume_label.add_theme_color_override("font_color", UiTheme.GOLD_BRIGHT)
+	vb.add_child(volume_label)
+
+	var volume: HSlider = HSlider.new()
+	volume.min_value = 0.0
+	volume.max_value = 100.0
+	volume.step = 5.0
+	volume.custom_minimum_size = Vector2(180, 20)
+	var master: int = AudioServer.get_bus_index("Master")
+	volume.value = clampf(
+		db_to_linear(AudioServer.get_bus_volume_db(master)) * 100.0, 0.0, 100.0)
+	volume.value_changed.connect(_on_volume_changed)
+	vb.add_child(volume)
+
 	var quit: Button = Button.new()
 	quit.text = "Beenden"
 	UiTheme.style_button(quit)
 	quit.pressed.connect(func() -> void: get_tree().quit())
 	vb.add_child(quit)
+
+
+## Master-bus volume from the pause-menu slider (0..100; 0 mutes).
+func _on_volume_changed(value: float) -> void:
+	var master: int = AudioServer.get_bus_index("Master")
+	if value <= 0.0:
+		AudioServer.set_bus_mute(master, true)
+		return
+	AudioServer.set_bus_mute(master, false)
+	AudioServer.set_bus_volume_db(master, linear_to_db(value / 100.0))
 
 
 # --- Tab switching ----------------------------------------------------------

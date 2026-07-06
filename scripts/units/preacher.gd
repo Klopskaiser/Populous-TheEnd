@@ -18,8 +18,12 @@ const CONVERT_TIME_MAX: float = 9.0
 ## keeps brawling instead of sitting down (retried on the next scan).
 const FIGHT_INERTIA_CHANCE: float = 0.4
 
+## Seconds between chant sounds while standing and channeling.
+const PREACH_SOUND_INTERVAL: float = 2.0
+
 ## Enemy this preacher walks toward to convert (untyped: may be freed).
 var _convert_target = null
+var _preach_sound_timer: float = 0.0
 
 
 func _init() -> void:
@@ -89,6 +93,11 @@ func _tick_convert(delta: float) -> void:
 		_clear_path()
 	if t != null and is_instance_valid(t):
 		_face_point(t.position)
+	# Soft chant while standing and channeling (single sound file, throttled).
+	_preach_sound_timer -= delta
+	if _preach_sound_timer <= 0.0:
+		_preach_sound_timer = PREACH_SOUND_INTERVAL
+		_emit_combat_hit(&"preach")
 
 
 ## Scan pass while channeling: duel-check, pacify everyone convertible in

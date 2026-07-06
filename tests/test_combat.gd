@@ -440,6 +440,9 @@ func test_combat_audio_samples() -> void:
 	check(CombatAudio.generate_samples(&"punch", 0).size()
 		< CombatAudio.generate_samples(&"fireball", 0).size(),
 		"kinds have distinct durations")
+	check(&"throw" in CombatAudio.SINGLE_VARIANT_KINDS
+		and &"preach" in CombatAudio.SINGLE_VARIANT_KINDS,
+		"throw and preach use a single sound file each")
 
 
 # --- Strike animations ---------------------------------------------------------------

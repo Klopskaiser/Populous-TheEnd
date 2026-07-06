@@ -14,7 +14,11 @@ const POOL_SIZE: int = 12
 const MIN_INTERVAL_MS: int = 45
 const MIX_RATE: int = 22050
 
-const KINDS: Array[StringName] = [&"punch", &"kick", &"shove", &"fireball"]
+## throw = fireball launch, preach = preacher channeling — one variant each is
+## plenty (user request); the melee strikes keep three.
+const KINDS: Array[StringName] = [
+	&"punch", &"kick", &"shove", &"fireball", &"throw", &"preach"]
+const SINGLE_VARIANT_KINDS: Array[StringName] = [&"fireball", &"throw", &"preach"]
 
 var _sounds: Dictionary = {}   # kind -> Array[AudioStreamWAV]
 var _pool: Array[AudioStreamPlayer3D] = []
@@ -26,8 +30,9 @@ var _rng: RandomNumberGenerator = RandomNumberGenerator.new()
 func _ready() -> void:
 	_rng.seed = 4242
 	for kind in KINDS:
+		var count: int = 1 if kind in SINGLE_VARIANT_KINDS else VARIANTS
 		var variants: Array = []
-		for v in range(VARIANTS):
+		for v in range(count):
 			variants.append(_make_stream(kind, v))
 		_sounds[kind] = variants
 	for i in range(POOL_SIZE):
@@ -59,8 +64,11 @@ func _on_combat_hit(kind: StringName, pos: Vector3) -> void:
 
 ## Sample generation is static + deterministic per (kind, variant) so headless
 ## tests can validate the data. Each kind has its own duration, smoothing
-## (crude low-pass -> timbre) and attack time.
+## (crude low-pass -> timbre) and attack time; "preach" is tonal (soft chant)
+## instead of noise-based.
 static func generate_samples(kind: StringName, variant: int) -> PackedByteArray:
+	if kind == &"preach":
+		return _generate_chant(variant)
 	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 	rng.seed = hash(kind) + variant * 7919
 	var dur: float
@@ -75,10 +83,14 @@ static func generate_samples(kind: StringName, variant: int) -> PackedByteArray:
 			dur = 0.16
 			smooth = 0.55
 			attack = 0.03
-		&"fireball":   # bright crackle
+		&"fireball":   # bright crackle (impact)
 			dur = 0.2
 			smooth = 0.25
 			attack = 0.002
+		&"throw":      # airy whoosh (fireball launch)
+			dur = 0.18
+			smooth = 0.45
+			attack = 0.05
 		_:             # punch: short mid thud
 			dur = 0.09
 			smooth = 0.68
@@ -93,6 +105,26 @@ static func generate_samples(kind: StringName, variant: int) -> PackedByteArray:
 		prev = lerpf(noise, prev, smooth)   # crude one-pole low-pass
 		var env: float = minf(t / attack, 1.0) * exp(-t * (5.0 / dur))
 		var sample: int = int(clampf(prev * env, -1.0, 1.0) * 32767.0)
+		bytes.encode_s16(i * 2, sample)
+	return bytes
+
+
+## Soft tonal chant for the channeling preacher: low sine with slow vibrato
+## and a gentle swell, ~0.6 s.
+static func _generate_chant(variant: int) -> PackedByteArray:
+	var dur: float = 0.6
+	var base_hz: float = 175.0 + float(variant) * 12.0
+	var count: int = int(dur * float(MIX_RATE))
+	var bytes: PackedByteArray = PackedByteArray()
+	bytes.resize(count * 2)
+	var phase: float = 0.0
+	for i in range(count):
+		var t: float = float(i) / float(MIX_RATE)
+		var vibrato: float = sin(t * TAU * 5.0) * 6.0
+		phase += TAU * (base_hz + vibrato) / float(MIX_RATE)
+		var tone: float = sin(phase) * 0.7 + sin(phase * 2.0) * 0.2
+		var env: float = sin(clampf(t / dur, 0.0, 1.0) * PI)   # swell in and out
+		var sample: int = int(clampf(tone * env * 0.5, -1.0, 1.0) * 32767.0)
 		bytes.encode_s16(i * 2, sample)
 	return bytes
 

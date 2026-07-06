@@ -10,8 +10,11 @@ class_name StarsRenderer extends MultiMeshInstance3D
 const MAX_STARS: int = 256
 const FRAME_COUNT: int = 4
 const FRAME_TIME: float = 0.12
-## Height above the unit's feet.
-const HEIGHT: float = 1.75
+## Height above the unit's feet, measured along the CAMERA's up axis — the
+## unit sprites are camera-facing billboards, so their heads extend along
+## screen-up, not world-up. Anchoring the stars along world-up made them
+## appear offset from the head at pitched camera angles.
+const HEIGHT: float = 1.6
 
 const C_STAR: Color = Color(1.0, 0.92, 0.3)
 
@@ -57,13 +60,18 @@ func _process(delta: float) -> void:
 		_frame_timer = 0.0
 		_frame = (_frame + 1) % FRAME_COUNT
 		_material.albedo_texture = _textures[_frame]
+	var camera: Camera3D = get_viewport().get_camera_3d()
+	# Along the camera's up axis the stars sit exactly above the billboard
+	# sprite's head at every pitch/zoom (see HEIGHT).
+	var up: Vector3 = camera.global_transform.basis.y if camera != null \
+		else Vector3.UP
 	var count: int = 0
 	for unit in _unit_manager.units:
 		if count >= MAX_STARS:
 			break
 		if unit.has_stars():
 			_multimesh.set_instance_transform(count, Transform3D(
-				Basis.IDENTITY, unit.position + Vector3(0.0, HEIGHT, 0.0)))
+				Basis.IDENTITY, unit.position + up * HEIGHT))
 			count += 1
 	_multimesh.visible_instance_count = count
 
