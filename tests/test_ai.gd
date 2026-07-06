@@ -154,6 +154,9 @@ func test_build_tick_places_and_prays() -> void:
 	for i in range(10):
 		w.unit_manager.spawn_unit(BRAVE_SCENE, 1,
 			w.nav.cell_to_world(anchor + Vector2i(6, i - 4)))
+	# Plots need wood in reach — give the base a small grove.
+	for i in range(4):
+		w.tree_manager.spawn_tree(anchor + Vector2i(10 + 3 * i, 10), TreeResource.MAX_STAGE)
 	var ai: AIController = _make_ai(w, ai_tribe, anchor)
 
 	var buildings_before: int = ai_tribe.buildings.size()
@@ -275,6 +278,110 @@ func test_wood_pile_only_near_site() -> void:
 ## Releases claims so freeing the world does not warn (tree claims etc.).
 func ai_cleanup_brave(brave: Brave) -> void:
 	brave._interrupt_tasks()
+
+
+# --- Fragile construction sites (spells wreck them outright) --------------------------
+
+func test_fragile_construction_site() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var site: Building = w.commands.place_building(tribe, HUT_SCENE, Vector2i(60, 60))
+	check(site != null and site.under_construction, "construction site placed")
+	site.apply_destruction_stages(1)
+	check(site.health == 0, "one staged spell hit levels a construction site")
+	check(not site.under_construction,
+		"the wreck is no longer under construction (workers drop it)")
+	check(not (site in tribe.buildings), "the wreck left the tribe registry")
+
+	# A finished building still takes staged damage normally.
+	var hut: Building = w.building_manager.place(HUT_SCENE, tribe, Vector2i(80, 80), 0, true)
+	hut.apply_destruction_stages(1)
+	check(hut.health > 0 and hut.destruction_stage() == 1,
+		"a finished building only drops one stage per hit")
+
+	_free_world(w)
+
+
+# --- Gradually bigger waves ------------------------------------------------------------
+
+func test_attack_wave_growth() -> void:
+	var w: Dictionary = _make_world()
+	var ai: AIController = _make_ai(w, w.tribes[1], Vector2i(64, 64))
+	check(ai.attack_wave_size == AIState.ARMY_ATTACK_SIZE,
+		"the first wave uses the base attack size")
+	ai.state = AIState.State.ATTACK
+	ai.tick_ai()   # empty tribe -> falls back, wave grows
+	check(ai.state != AIState.State.ATTACK, "empty tribe falls out of ATTACK")
+	check(ai.attack_wave_size == AIState.ARMY_ATTACK_SIZE + AIState.ATTACK_WAVE_GROWTH,
+		"the next wave target grew after the attack ended")
+
+	# The snapshot carries the dynamic target into the state machine.
+	var snap: Dictionary = AIState.make_snapshot(30, 10, AIState.ARMY_ATTACK_SIZE,
+		AIState.TARGET_HUTS, AIState.TARGET_CAMPS, true)
+	snap["army_target"] = AIState.ARMY_ATTACK_SIZE + AIState.ATTACK_WAVE_GROWTH
+	check(AIState.next_state(AIState.State.TRAIN, snap) == AIState.State.TRAIN,
+		"the old army size no longer triggers the bigger wave")
+	snap["army"] = snap["army_target"]
+	check(AIState.next_state(AIState.State.TRAIN, snap) == AIState.State.ATTACK,
+		"reaching the grown target triggers the attack")
+
+	ai.free()
+	_free_world(w)
+
+
+# --- Endless scaling & expansion --------------------------------------------------------
+
+func test_endless_building_scaling() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var ai: AIController = _make_ai(w, tribe, Vector2i(64, 64))
+	# Full base: 3 huts + one camp of each kind, all pre-built.
+	for i in range(3):
+		w.building_manager.place(HUT_SCENE, tribe, Vector2i(40 + 6 * i, 40), 0, true)
+	w.building_manager.place(WARRIOR_CAMP_SCENE, tribe, Vector2i(40, 50), 0, true)
+	w.building_manager.place(preload("res://scenes/buildings/firewarrior_camp.tscn"),
+		tribe, Vector2i(48, 50), 0, true)
+	w.building_manager.place(preload("res://scenes/buildings/temple.tscn"),
+		tribe, Vector2i(56, 50), 0, true)
+	check(ai._next_building_scene({}) == null,
+		"full base without housing pressure: nothing to build")
+
+	# Two more huts -> the camp target grows -> another camp (fewest kind).
+	w.building_manager.place(HUT_SCENE, tribe, Vector2i(40, 58), 0, true)
+	w.building_manager.place(HUT_SCENE, tribe, Vector2i(48, 58), 0, true)
+	check(ai._next_building_scene({}) == AIController.WARRIOR_CAMP_SCENE,
+		"extra huts raise the camp target (warrior camp first)")
+
+	# Housing pressure: population at 80% capacity -> a new hut, forever.
+	var braves: Array[Brave] = []
+	var need: int = int(float(tribe.housing_capacity()) * AIController.HOUSING_PRESSURE)
+	for i in range(need):
+		var brave: Brave = Brave.new()
+		braves.append(brave)
+		tribe.add_unit(brave)
+	check(ai._next_building_scene({}) == AIController.HUT_SCENE,
+		"housing pressure always asks for another hut")
+
+	for brave in braves:
+		brave.free()
+	ai.free()
+	_free_world(w)
+
+
+func test_expansion_toward_wood() -> void:
+	var w: Dictionary = _make_world()
+	var ai: AIController = _make_ai(w, w.tribes[1], Vector2i(64, 64))
+	# No trees near the base, a grove far away: the plot search expands there.
+	for i in range(4):
+		w.tree_manager.spawn_tree(Vector2i(100 + 3 * (i % 2), 100 + 3 * (i / 2)),
+			TreeResource.MAX_STAGE)
+	var cell: Vector2i = ai._find_plot(Vector2i(4, 4))
+	check(cell.x >= 0, "an expansion plot is found at the distant wood")
+	check(Vector2(cell - Vector2i(100, 100)).length() < 40.0,
+		"the plot sits near the distant grove, not near the empty base")
+
+	ai.free()
+	_free_world(w)
 
 
 # --- TRAIN tick -----------------------------------------------------------------------

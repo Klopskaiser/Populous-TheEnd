@@ -18,8 +18,13 @@ const MIN_CAMPS_FOR_TRAIN: int = 1
 const POP_FOR_TRAIN: int = 12
 
 ## TRAIN -> ATTACK at this army size (warriors + firewarriors + preachers),
-## with the shaman alive.
+## with the shaman alive. This is the FIRST wave; the controller raises its
+## per-tribe target after every attack (gradually bigger waves), passed in
+## via the snapshot key "army_target".
 const ARMY_ATTACK_SIZE: int = 8
+## Wave growth per finished attack and its cap.
+const ATTACK_WAVE_GROWTH: int = 4
+const ATTACK_WAVE_MAX: int = 40
 ## ATTACK -> fallback when the army drops below this (decimated) or the
 ## shaman dies.
 const ARMY_RETREAT_SIZE: int = 4
@@ -56,7 +61,7 @@ static func next_state(state: State, snap: Dictionary) -> State:
 			# Losing the essentials (destroyed base) sends the AI back to BUILD.
 			if huts < 1 or camps < 1:
 				return State.BUILD
-			if army >= ARMY_ATTACK_SIZE and shaman_alive:
+			if army >= int(snap.get("army_target", ARMY_ATTACK_SIZE)) and shaman_alive:
 				return State.ATTACK
 			return State.TRAIN
 		State.ATTACK:

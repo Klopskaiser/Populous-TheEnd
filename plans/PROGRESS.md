@@ -1683,3 +1683,44 @@ Endscreens (Sieg/Niederlage → „Zurück zum Menü"), 4-Spieler-Match flüssig
   Standard-Verifikationsschritt mehr** — nur noch optional bei
   KI-Umbauten. Standard bleibt die Testsuite (~10 s) + Ladecheck; das
   Match-Verhalten testet der Nutzer manuell (jetzt mit F10-Zeitraffer).
+
+**Nachbesserung 3 (Nutzerfeedback): Baustellen-Zerstörung, KI-Skalierung,
+Wellen, alle Zauber.**
+- **Baustellen sind fragil (Bugfix „unzerstörbare Fundamente"):** Ursache
+  war zweiteilig: (1) Ein Blitz machte nur Teilschaden an der Baustelle,
+  die Arbeiter bauten die beschädigte Baustelle einfach **fertig** (der
+  Baufortschritt ignoriert health); (2) die KI platzierte zerstörte
+  Baustellen im nächsten Tick am selben Plot neu → wirkte unzerstörbar.
+  Fixes: `Building.apply_destruction_stages` **zerstört Baustellen sofort**
+  (ein Stufen-Zaubertreffer = weg); `destroy()` setzt `under_construction
+  = false` (sonst hielten Arbeiter am Wrack fest — `_job_active` — und
+  `finish_construction` hätte das Wrack wiederbeleben können); die KI hat
+  einen **Wiederaufbau-Cooldown von 15 s** nach jedem Gebäudeverlust
+  (`Events.building_destroyed` → `_rebuild_ticks`, guarded für headless).
+- **Endlose KI-Skalierung:** Nach dem Grundausbau (3 Hütten + 3 Lagerarten)
+  baut die KI **für immer weiter**: neue Hütte bei **Bevölkerung ≥ 80 %
+  der Kapazität** (`HOUSING_PRESSURE`), ein **zusätzliches Lager je 2
+  weitere Hütten** (`HUTS_PER_EXTRA_CAMP`, Art mit den wenigsten
+  Gebäuden). Bei mehreren Lagern einer Art trainiert das mit der
+  **kürzesten Warteschlange** (Durchsatz für große Wellen).
+- **Holznähe + Expansion:** Plots gelten nur mit **≥ 3 Bäumen im
+  22-m-Umkreis** als versorgt (`_find_supplied_plot`, max. 40 Kandidaten);
+  gibt es um die Basis keinen versorgten Plot mehr, **expandiert** die KI
+  zum nächstgelegenen Baumbestand (`_expansion_anchor` via
+  `TreeManager.nearest_tree`) und schickt **6 Idle-Braves als Eskorte**
+  mit (der BuildingManager rekrutiert nur im ~30-m-Radius der Baustelle) —
+  relevant für größere Karten.
+- **Graduell größere Angriffe:** `attack_wave_size` startet bei 8 und
+  wächst nach **jeder beendeten Welle um +4 (Deckel 40)**; der dynamische
+  Schwellwert läuft als `army_target` im Snapshot in
+  `AIState.next_state` ein.
+- **Alle Kampfzauber in der Heuristik** (`_cast_spells`, ein Cast/Tick,
+  ohne Ladung fällt die Priorität durch): 1. Blitz auf feindliche
+  Schamanin → 2. Feindgebäude: **Tornado** (zerlegt stufenweise), Fallback
+  Blitz → 3. **Schwarm** auf Gruppen ≥ 5 Feinde (Panik) → 4. Feuerball
+  auf Cluster. Landbrücke bleibt bewusst außen vor (kein sinnvolles
+  KI-Ziel ohne Pfadanalyse).
+- Tests: **719 grün** (+15: fragile Baustelle inkl. „fertige Gebäude
+  weiter stufenweise", Wellenwachstum inkl. `army_target`-Übergänge,
+  endlose Skalierung (Camp-Ziel wächst mit Hütten, Housing-Pressure),
+  Expansion zum entfernten Wald).

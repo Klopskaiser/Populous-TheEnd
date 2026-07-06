@@ -24,10 +24,29 @@ const ATTACK_ORDER_TICKS: int = 4
 ## Parallel construction sites: one per this many braves (capped below).
 const BRAVES_PER_SITE: int = 8
 const MAX_PARALLEL_SITES: int = 3
+## Endless scaling: a new hut once the population reaches this share of the
+## housing capacity, one extra training camp per HUTS_PER_EXTRA_CAMP huts
+## beyond the base target.
+const HOUSING_PRESSURE: float = 0.8
+const HUTS_PER_EXTRA_CAMP: int = 2
+## A plot only counts as supplied with this many trees in reach; otherwise
+## the AI expands toward the nearest wood (bigger maps).
+const PLOT_TREE_RADIUS: float = 22.0
+const MIN_TREES_NEAR_PLOT: int = 3
+const MAX_PLOT_CANDIDATES: int = 40
+## Idle braves sent along to a remote expansion site (the BuildingManager
+## only recruits workers within ~30 m of a site).
+const EXPANSION_ESCORT: int = 6
+const EXPANSION_DISTANCE: float = 25.0
+## Ticks (seconds) without new construction after losing a building — the
+## player can suppress the base instead of fighting instant rebuilds.
+const REBUILD_COOLDOWN_TICKS: int = 15
 ## Spell heuristic ranges.
 const SPELL_SCAN_RADIUS: float = 12.0
 const CLUSTER_RADIUS: float = 3.0
 const CLUSTER_MIN_ENEMIES: int = 3
+## Swarm (panic) is worth it from this many enemies in scan range.
+const SWARM_MIN_ENEMIES: int = 5
 ## Enemies this close to the base anchor trigger the defence reaction.
 const DEFEND_RADIUS: float = 32.0
 ## Effective combat weight of the shaman / a militia brave in the
@@ -48,11 +67,29 @@ var nav_grid: NavGrid = null
 var base_anchor: Vector2i = Vector2i.ZERO
 
 var state: AIState.State = AIState.State.BUILD
+## Army size required for the next attack; grows after every wave
+## (gradually bigger attacks).
+var attack_wave_size: int = AIState.ARMY_ATTACK_SIZE
 ## Periodic status prints (enabled by the `ai-log` command-line user arg).
 var debug_log: bool = false
 var _accumulator: float = 0.0
 var _attack_order_countdown: int = 0
 var _tick_count: int = 0
+var _rebuild_ticks: int = 0
+
+
+func _ready() -> void:
+	# Losing a building pauses NEW construction for a while (no instant
+	# rebuild under fire). Guarded: absent in headless tests.
+	var events: Node = get_node_or_null("/root/Events")
+	if events != null:
+		events.building_destroyed.connect(_on_building_destroyed)
+
+
+func _on_building_destroyed(building) -> void:
+	if tribe != null and is_instance_valid(building) \
+			and building.tribe_id == tribe.id:
+		_rebuild_ticks = REBUILD_COOLDOWN_TICKS
 
 
 func setup(p_tribe: Tribe, p_commands: TribeCommands, p_unit_manager: UnitManager,
@@ -87,10 +124,16 @@ func tick_ai() -> void:
 			snap.get("camps", 0), _construction_site_count()])
 	var next: AIState.State = AIState.next_state(state, snap)
 	if next != state:
-		print("KI %d: %s -> %s (Pop %d, Armee %d)" % [tribe.id,
+		# Leaving ATTACK ends a wave: the next one has to be bigger.
+		if state == AIState.State.ATTACK:
+			attack_wave_size = mini(attack_wave_size + AIState.ATTACK_WAVE_GROWTH,
+				AIState.ATTACK_WAVE_MAX)
+		print("KI %d: %s -> %s (Pop %d, Armee %d, nächste Welle %d)" % [tribe.id,
 			AIState.State.keys()[state], AIState.State.keys()[next],
-			snap.get("population", 0), snap.get("army", 0)])
+			snap.get("population", 0), snap.get("army", 0), attack_wave_size])
 		state = next
+	if _rebuild_ticks > 0:
+		_rebuild_ticks -= 1
 	# Economy and magic run in EVERY state: pray, keep building toward the
 	# full base, cast spells whenever enemies are near the shaman.
 	_keep_praying()
@@ -121,17 +164,21 @@ func make_snapshot() -> Dictionary:
 				braves += 1
 			&"warrior", &"firewarrior", &"preacher":
 				army += 1
-	return AIState.make_snapshot(tribe.population(), braves, army,
+	var snap: Dictionary = AIState.make_snapshot(tribe.population(), braves, army,
 		_usable_hut_count(), _usable_camp_kind_count(), _shaman_alive())
+	snap["army_target"] = attack_wave_size
+	return snap
 
 
 # --- BUILD (runs in every state) ------------------------------------------------------
 
-## Builds toward the full base: several construction sites in parallel (one
-## per BRAVES_PER_SITE braves — the BuildingManager recruits nearby idle
-## braves as workers on its own); next missing building = huts up to target,
-## then the three training buildings. One new site per tick at most.
+## Builds toward the full base and keeps scaling forever: several sites in
+## parallel (one per BRAVES_PER_SITE braves — the BuildingManager recruits
+## nearby idle braves as workers on its own). One new site per tick at most;
+## paused for a while after losing a building (rebuild cooldown).
 func _tick_build(snap: Dictionary) -> void:
+	if _rebuild_ticks > 0:
+		return
 	var max_sites: int = clampi(snap.get("braves", 0) / BRAVES_PER_SITE,
 		1, MAX_PARALLEL_SITES)
 	if _construction_site_count() >= max_sites:
@@ -143,39 +190,68 @@ func _tick_build(snap: Dictionary) -> void:
 	var footprint: Vector2i = probe.footprint
 	probe.free()
 	var cell: Vector2i = _find_plot(footprint)
-	if cell.x >= 0:
-		commands.place_building(tribe, scene, cell)
+	if cell.x < 0:
+		return
+	if commands.place_building(tribe, scene, cell) != null:
+		_send_escort_if_remote(cell)
 
 
 ## Decides what to place next. Counts PLANNED buildings (construction sites
 ## included) — with parallel sites the usable count alone would over-build.
+## After the base essentials the AI keeps scaling forever: a new hut under
+## housing pressure, one extra camp (kind with the fewest) per
+## HUTS_PER_EXTRA_CAMP additional huts.
 func _next_building_scene(_snap: Dictionary) -> PackedScene:
 	var huts: int = 0
-	var kinds: Dictionary = {}
+	var camps: Dictionary = {&"warrior_camp": 0, &"firewarrior_camp": 0, &"temple": 0}
 	for building in tribe.buildings:
 		if not is_instance_valid(building) or building.health <= 0:
 			continue
 		if building is Hut:
 			huts += 1
 		elif building is WarriorCamp:
-			kinds[&"warrior_camp"] = true
+			camps[&"warrior_camp"] += 1
 		elif building is FirewarriorCamp:
-			kinds[&"firewarrior_camp"] = true
+			camps[&"firewarrior_camp"] += 1
 		elif building is Temple:
-			kinds[&"temple"] = true
-	# The first camp goes up right after the first hut (early training),
-	# the remaining huts and camps follow.
+			camps[&"temple"] += 1
+	# Base build-up: first camp right after the first hut (early training),
+	# the remaining huts and camp kinds follow.
 	if huts < 1:
 		return HUT_SCENE
-	if not kinds.has(&"warrior_camp"):
+	if camps[&"warrior_camp"] < 1:
 		return WARRIOR_CAMP_SCENE
 	if huts < AIState.TARGET_HUTS:
 		return HUT_SCENE
-	if not kinds.has(&"firewarrior_camp"):
+	if camps[&"firewarrior_camp"] < 1:
 		return FIREWARRIOR_CAMP_SCENE
-	if not kinds.has(&"temple"):
+	if camps[&"temple"] < 1:
 		return TEMPLE_SCENE
+	# Endless scaling: housing pressure -> hut; otherwise extra camps.
+	if tribe.population() >= int(float(tribe.housing_capacity()) * HOUSING_PRESSURE):
+		return HUT_SCENE
+	var camp_total: int = camps[&"warrior_camp"] + camps[&"firewarrior_camp"] \
+		+ camps[&"temple"]
+	var camp_target: int = AIState.TARGET_CAMPS \
+		+ maxi(0, huts - AIState.TARGET_HUTS) / HUTS_PER_EXTRA_CAMP
+	if camp_total < camp_target:
+		return _camp_scene_with_fewest(camps)
 	return null
+
+
+## Camp kind with the fewest standing/planned buildings (ties: warrior ->
+## firewarrior -> temple, mirroring the army mix priority).
+func _camp_scene_with_fewest(camps: Dictionary) -> PackedScene:
+	var best_kind: StringName = &"warrior_camp"
+	for kind in [&"firewarrior_camp", &"temple"]:
+		if camps[kind] < camps[best_kind]:
+			best_kind = kind
+	match best_kind:
+		&"firewarrior_camp":
+			return FIREWARRIOR_CAMP_SCENE
+		&"temple":
+			return TEMPLE_SCENE
+	return WARRIOR_CAMP_SCENE
 
 
 # --- TRAIN -------------------------------------------------------------------------
@@ -330,10 +406,14 @@ func _attack_target_position() -> Vector3:
 	return best
 
 
-## Simple heuristic, in priority order: lightning the enemy shaman when she
-## is near ours; lightning the nearest enemy building in scan range (units
-## cannot attack buildings — spells are the AI's siege tool); fireball the
-## densest enemy clump.
+## Heuristic, in priority order (one cast per tick; a spell without a stored
+## charge simply falls through to the next option):
+## 1. Lightning the enemy shaman near ours (kill = mana boost + disarms them).
+## 2. Enemy building in scan range: TORNADO on it (wrecks it stage by stage),
+##    lightning as the fallback — units cannot attack buildings, spells are
+##    the AI's siege tool.
+## 3. SWARM on a big enemy group (panic breaks up attacks/defence lines).
+## 4. Fireball on the densest enemy clump.
 func _cast_spells() -> void:
 	if not _shaman_alive() or unit_manager == null:
 		return
@@ -351,9 +431,18 @@ func _cast_spells() -> void:
 			break
 	var target_building: Building = _nearest_enemy_building(shaman.position,
 		SPELL_SCAN_RADIUS)
-	if target_building != null \
-			and commands.cast_spell(tribe, &"lightning", target_building.center_world()):
-		return
+	if target_building != null:
+		var center: Vector3 = target_building.center_world()
+		if commands.cast_spell(tribe, &"tornado", center):
+			return
+		if commands.cast_spell(tribe, &"lightning", center):
+			return
+	if enemies.size() >= SWARM_MIN_ENEMIES:
+		var centroid: Vector3 = Vector3.ZERO
+		for enemy in enemies:
+			centroid += enemy.position
+		if commands.cast_spell(tribe, &"swarm", centroid / float(enemies.size())):
+			return
 	var cluster: Vector3 = _densest_cluster(enemies)
 	if cluster != Vector3.INF:
 		commands.cast_spell(tribe, &"fireball", cluster)
@@ -471,19 +560,26 @@ func _usable_hut_count() -> int:
 
 
 ## Which training-building kinds are usable right now (keys: warrior_camp/
-## firewarrior_camp/temple).
+## firewarrior_camp/temple). With several camps of one kind the one with the
+## shortest queue wins (throughput for the bigger waves).
 func _usable_camp_kinds() -> Dictionary:
 	var kinds: Dictionary = {}
 	for building in tribe.buildings:
 		if not is_instance_valid(building) or not (building is TrainingBuilding) \
 				or not building.is_usable():
 			continue
+		var key: StringName
 		if building is WarriorCamp:
-			kinds[&"warrior_camp"] = building
+			key = &"warrior_camp"
 		elif building is FirewarriorCamp:
-			kinds[&"firewarrior_camp"] = building
+			key = &"firewarrior_camp"
 		elif building is Temple:
-			kinds[&"temple"] = building
+			key = &"temple"
+		else:
+			continue
+		var current = kinds.get(key)
+		if current == null or building.incoming.size() < current.incoming.size():
+			kinds[key] = building
 	return kinds
 
 
@@ -504,13 +600,72 @@ func _usable_camp_for(kind: StringName) -> TrainingBuilding:
 	return null
 
 
-## Ring search around the base anchor for the first valid plot.
+## Plot search with wood supply: first around the base anchor, and when no
+## supplied plot exists there any more, EXPAND toward the nearest wood
+## source (relevant on bigger maps — the tribe follows the trees).
 func _find_plot(footprint: Vector2i) -> Vector2i:
-	for radius in range(0, 30):
-		for cell in ring_cells(base_anchor, radius):
-			if commands.can_place_at(cell, footprint):
-				return cell
+	var cell: Vector2i = _find_supplied_plot(base_anchor, footprint)
+	if cell.x >= 0:
+		return cell
+	var expansion: Vector2i = _expansion_anchor()
+	if expansion.x >= 0:
+		return _find_supplied_plot(expansion, footprint)
 	return Vector2i(-1, -1)
+
+
+## Ring search for the first valid plot that has wood in reach. Gives up
+## after MAX_PLOT_CANDIDATES unsupplied candidates (then expansion takes over).
+func _find_supplied_plot(anchor: Vector2i, footprint: Vector2i) -> Vector2i:
+	var checked: int = 0
+	for radius in range(0, 30):
+		for cell in ring_cells(anchor, radius):
+			if not commands.can_place_at(cell, footprint):
+				continue
+			if _trees_near_cell(cell) >= MIN_TREES_NEAR_PLOT:
+				return cell
+			checked += 1
+			if checked >= MAX_PLOT_CANDIDATES:
+				return Vector2i(-1, -1)
+	return Vector2i(-1, -1)
+
+
+func _trees_near_cell(cell: Vector2i) -> int:
+	if tree_manager == null or nav_grid == null:
+		return MIN_TREES_NEAR_PLOT   # no tree data (tests): treat as supplied
+	var pos: Vector3 = nav_grid.cell_to_world(cell)
+	var count: int = 0
+	for tree in tree_manager.trees:
+		if is_instance_valid(tree) and tree.position.distance_to(pos) <= PLOT_TREE_RADIUS:
+			count += 1
+	return count
+
+
+## Cell of the nearest tree to the base — the anchor for expanding the base
+## toward fresh wood.
+func _expansion_anchor() -> Vector2i:
+	if tree_manager == null or nav_grid == null:
+		return Vector2i(-1, -1)
+	var tree = tree_manager.nearest_tree(nav_grid.cell_to_world(base_anchor))
+	if tree == null or not is_instance_valid(tree):
+		return Vector2i(-1, -1)
+	return nav_grid.world_to_cell(tree.position)
+
+
+## A site far from the base gets an escort of idle braves — the
+## BuildingManager only recruits workers within ~30 m of the site.
+func _send_escort_if_remote(cell: Vector2i) -> void:
+	if nav_grid == null:
+		return
+	if Vector2(cell - base_anchor).length() <= EXPANSION_DISTANCE:
+		return
+	var idle: Array[Unit] = _idle_braves()
+	var escort: Array[Unit] = []
+	for unit in idle:
+		if escort.size() >= EXPANSION_ESCORT:
+			break
+		escort.append(unit)
+	if not escort.is_empty():
+		commands.order_move(escort, nav_grid.cell_to_world(cell))
 
 
 static func ring_cells(center: Vector2i, radius: int) -> Array[Vector2i]:

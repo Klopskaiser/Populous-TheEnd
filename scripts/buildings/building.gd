@@ -258,8 +258,14 @@ func is_usable() -> bool:
 
 ## Damage worth `count` destruction stages (30% of max HP each) — lightning
 ## (+2) and the tornado (+1 every 2 s) deal damage in these steps.
+## Construction sites are FRAGILE: any staged spell hit levels them outright
+## (otherwise workers would finish a spell-damaged site and the building
+## seemed indestructible while under construction).
 func apply_destruction_stages(count: int) -> void:
 	if count <= 0:
+		return
+	if under_construction:
+		destroy()
 		return
 	take_damage(int(ceil(STAGE_DAMAGE * float(max_health))) * count)
 
@@ -698,6 +704,10 @@ func destroy() -> void:
 		return
 	_destroyed = true
 	health = 0
+	# A wrecked construction site must not stay "under construction": workers
+	# would keep building it (_job_active) and finish_construction could
+	# resurrect it. The guard in finish_construction relies on this too.
+	under_construction = false
 	if nav_grid != null:
 		nav_grid.fill_solid_region(footprint_rect(), false)
 	if tribe != null:
