@@ -293,12 +293,22 @@ static func _decorate_preacher(img: Image, _view: StringName, bob: int) -> void:
 	img.fill_rect(Rect2i(4, 14, 8, 10), C_GOWN)          # gown skirt over the legs
 
 
-## The shaman is unmistakably female and distinct from every other unit: a
-## long DARK mane (crown + strands past the shoulders, full mane from behind)
-## framing the face, and the game's BRIGHTEST ankle-length dress flaring out
-## from a dark belt into a wide triangle over the legs. Reads at any zoom via
-## silhouette (triangle skirt) plus the strongest dark/bright contrast.
+## The shaman is unmistakably female and distinct from every other unit: an
+## hourglass figure (the shared torso is pinched at the waist), a long DARK
+## mane (crown + strands past the shoulders, full mane from behind) framing
+## the face, and the game's BRIGHTEST ankle-length dress flaring out from a
+## dark belt into a wide triangle over the legs. Reads at any zoom via
+## silhouette plus the strongest dark/bright contrast.
 static func _decorate_shaman(img: Image, view: StringName, bob: int) -> void:
+	# Waist pinch first (transparent erase of the torso sides), hair after so
+	# the strands stay intact.
+	var clear: Color = Color(0, 0, 0, 0)
+	if view == &"right" or view == &"left":
+		img.fill_rect(Rect2i(5, 10 + bob, 1, 3), clear)
+		img.fill_rect(Rect2i(10, 10 + bob, 1, 3), clear)
+	else:
+		img.fill_rect(Rect2i(4, 10 + bob, 2, 3), clear)
+		img.fill_rect(Rect2i(10, 10 + bob, 2, 3), clear)
 	match view:
 		&"back":
 			img.fill_rect(Rect2i(4, 0 + bob, 8, 2), C_MANE)     # crown

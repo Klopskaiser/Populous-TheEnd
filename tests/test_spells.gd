@@ -348,6 +348,34 @@ func test_landbridge_builds_walkable_ramp() -> void:
 	um.free()
 
 
+func test_landbridge_grades_land_ridge_flat() -> void:
+	# Pure land cast: a steep ridge blocks the way; the corridor is graded onto
+	# the straight start->target line (bumps shaved, smooth surface).
+	var td: TerrainData = _flat_terrain()
+	for vz in range(60, 69):
+		for vx in range(61, 65):
+			td.set_vertex_height(vx, vz, 12.0)
+	var nav: NavGrid = NavGrid.new(td)
+	var tribe: Tribe = Tribe.new(0)
+	var um: UnitManager = UnitManager.new()
+	um.setup(td, nav, [tribe] as Array[Tribe])
+	um.spawn_unit(SHAMAN_SCENE, 0, Vector3(57, 0, 64))
+	var ctx: SpellContext = SpellContext.new()
+	ctx.terrain_data = td
+	ctx.nav_grid = nav
+	ctx.unit_manager = um
+	check(not nav.is_cell_walkable(Vector2i(60, 64)), "ridge flank too steep before")
+	var spell: LandbridgeSpell = LandbridgeSpell.new()
+	check(spell.execute(tribe, Vector3(68, 0, 64), ctx), "land cast succeeds")
+	for i in range(35):
+		um.tick(0.1)
+	for x in range(58, 68):
+		check(nav.is_cell_walkable(Vector2i(x, 64)),
+			"graded cell (%d, 64) is walkable" % x)
+	check(td.get_height(63.0, 64.0) < 7.0, "ridge shaved down toward the straight line")
+	um.free()
+
+
 func test_fireball_damage_and_throw() -> void:
 	var w: Dictionary = _make_world()
 	w.unit_manager.spawn_unit(SHAMAN_SCENE, 0, Vector3(30, 0, 30))

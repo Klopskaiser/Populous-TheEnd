@@ -102,9 +102,10 @@ func raise_area(center: Vector2, radius: float, amount: float) -> Rect2i:
 
 
 ## Computes the target heights of a corridor from `from` to `to` (world XZ)
-## onto a height profile interpolated between height_from and height_to — a
-## walkable ramp when the two differ. Terrain is only ever RAISED, never
-## lowered; beyond half_width the lift blends out smoothly over `edge` metres.
+## GRADED onto a straight height profile interpolated between height_from and
+## height_to: dips are raised AND bumps are shaved, producing a smooth,
+## walkable ramp/causeway (already-straight ground yields no targets at all).
+## Beyond half_width the grading blends out smoothly over `edge` metres.
 ## Returns {"indices": PackedInt32Array, "targets": PackedFloat32Array,
 ## "rect": Rect2i} WITHOUT touching the heightmap — raise_line applies it
 ## instantly, the Landbridge morph interpolates toward it over time.
@@ -141,9 +142,9 @@ func line_raise_targets(from: Vector2, to: Vector2, half_width: float,
 				blend = e * e * (3.0 - 2.0 * e)  # smoothstep to the old terrain
 			var idx: int = vz * VERTS + vx
 			var current: float = heights[idx]
-			var nh: float = maxf(current, lerpf(current, profile, blend))
-			if nh <= current + 0.0001:
-				continue
+			var nh: float = lerpf(current, profile, blend)
+			if absf(nh - current) <= 0.01:
+				continue   # already on the line: nothing to grade
 			indices.append(idx)
 			targets.append(nh)
 			changed_min_x = mini(changed_min_x, vx)

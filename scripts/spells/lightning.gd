@@ -98,16 +98,36 @@ class LightningBeam extends Node3D:
 		if lifetime <= 0.0:
 			done = true
 
+	## Jagged bolt: a polyline from high above down to the strike point with
+	## lateral jitter per joint; every segment is a thin bright cylinder.
 	func _ready() -> void:
-		var mesh: MeshInstance3D = MeshInstance3D.new()
-		var cyl: CylinderMesh = CylinderMesh.new()
-		cyl.top_radius = 0.35
-		cyl.bottom_radius = 0.12
-		cyl.height = 30.0
-		mesh.mesh = cyl
 		var mat: StandardMaterial3D = StandardMaterial3D.new()
 		mat.albedo_color = Color(1.0, 1.0, 0.9)
 		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		mesh.material_override = mat
-		mesh.position.y = 15.0
-		add_child(mesh)
+		var steps: int = 7
+		var points: Array[Vector3] = []
+		for i in range(steps + 1):
+			var t: float = float(i) / float(steps)
+			var y: float = lerpf(26.0, 0.0, t)
+			# The strike point itself stays exact; every joint above zigzags.
+			var jitter: float = 0.0 if i == steps else 1.2
+			points.append(Vector3(
+				randf_range(-jitter, jitter), y, randf_range(-jitter, jitter)))
+		for i in range(points.size() - 1):
+			_add_segment(points[i], points[i + 1], mat)
+
+	func _add_segment(a: Vector3, b: Vector3, mat: StandardMaterial3D) -> void:
+		var seg: MeshInstance3D = MeshInstance3D.new()
+		var cyl: CylinderMesh = CylinderMesh.new()
+		cyl.top_radius = 0.09
+		cyl.bottom_radius = 0.09
+		cyl.height = a.distance_to(b)
+		seg.mesh = cyl
+		seg.material_override = mat
+		add_child(seg)
+		seg.position = (a + b) * 0.5
+		# Align the cylinder's Y axis with the segment direction.
+		var dir: Vector3 = (b - a).normalized()
+		var axis: Vector3 = Vector3.UP.cross(dir)
+		if axis.length_squared() > 0.000001:
+			seg.rotate(axis.normalized(), Vector3.UP.angle_to(dir))

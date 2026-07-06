@@ -11,7 +11,12 @@ class_name TornadoVortex extends Node3D
 
 const LIFETIME: float = 8.0
 const RADIUS: float = 2.2            # pickup / building-hit radius
-const DRIFT_SPEED: float = 2.5
+## Movement profile: parks on the cast point first, then crawls off and
+## accelerates over ACCEL_TIME up to MAX_SPEED.
+const IDLE_TIME: float = 1.0
+const ACCEL_TIME: float = 4.0
+const MIN_SPEED: float = 0.4
+const MAX_SPEED: float = 2.0
 const REDIRECT_INTERVAL: float = 1.0
 const STAGE_INTERVAL: float = 2.0    # +1 destruction stage per 2 s over a building
 const TOP_HEIGHT: float = 6.0        # riders spiral up to the tip
@@ -67,13 +72,20 @@ func tick(delta: float) -> void:
 	_tick_riders(delta)
 
 
+## `_drift` is a unit DIRECTION; the actual speed ramps with age: 1 s parked
+## on the cast point, then crawling off and accelerating toward MAX_SPEED.
 func _tick_drift(delta: float) -> void:
+	var age: float = LIFETIME - _life
+	if age < IDLE_TIME:
+		return
 	_redirect -= delta
 	if _redirect <= 0.0:
 		_redirect = REDIRECT_INTERVAL + randf() * 0.6
 		var angle: float = randf() * TAU
-		_drift = Vector3(cos(angle), 0.0, sin(angle)) * DRIFT_SPEED
-	position += _drift * delta
+		_drift = Vector3(cos(angle), 0.0, sin(angle))
+	var speed: float = lerpf(MIN_SPEED, MAX_SPEED,
+		clampf((age - IDLE_TIME) / ACCEL_TIME, 0.0, 1.0))
+	position += _drift * speed * delta
 	var limit: float = float(TerrainData.SIZE) * TerrainData.CELL_SIZE - 1.0
 	position.x = clampf(position.x, 1.0, limit)
 	position.z = clampf(position.z, 1.0, limit)

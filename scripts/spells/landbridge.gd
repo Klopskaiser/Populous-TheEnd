@@ -1,11 +1,12 @@
 class_name LandbridgeSpell extends Spell
 
-## "Landbrücke": no damage, pure terrain deformation. Raises a broad corridor
-## from the shaman's position to the target point: onto coast level when the
-## target lies in water, onto the target's height on land — differing start/
-## target heights become a walkable ramp (TerrainData.line_raise_targets).
-## Terrain is only raised, never lowered, and the lift happens GRADUALLY over
-## LandbridgeMorph.DURATION (trees/piles/buildings ride along).
+## "Landbrücke": no damage, pure terrain deformation. GRADES a broad corridor
+## from the shaman's position to the target point onto a straight profile —
+## over water it rises onto coast level (bridge), on land it forms a smooth
+## straight ramp from start height to target height (dips filled, bumps
+## shaved; a stretch that is already straight changes nothing and the cast
+## fails, keeping the charge). The change happens GRADUALLY over
+## LandbridgeMorph.DURATION; units/trees/piles/buildings ride along.
 
 ## Corridor half width (broad line) and the soft blend beyond it.
 const HALF_WIDTH: float = 1.6

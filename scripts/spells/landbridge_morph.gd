@@ -54,11 +54,19 @@ func tick(delta: float) -> void:
 		done = true
 
 
-## Keeps static props on the moving ground: trees and wood piles inside the
-## rect follow the surface, buildings re-seat on their footprint centre.
+## Keeps everything on the moving ground: units (idle ones never re-snap
+## their Y on their own), trees and wood piles inside the rect follow the
+## surface, buildings re-seat on their footprint centre. Airborne (thrown)
+## units keep flying.
 func _snap_props() -> void:
 	var td: TerrainData = ctx.terrain_data
 	var grown: Rect2i = _rect.grow(1)
+	if ctx.unit_manager != null:
+		for u in ctx.unit_manager.units:
+			if not is_instance_valid(u) or u.state == Unit.State.THROWN:
+				continue
+			if grown.has_point(_world_cell(u.position)):
+				u.position.y = td.get_height(u.position.x, u.position.z)
 	if ctx.tree_manager != null:
 		for tree in ctx.tree_manager.trees:
 			if not is_instance_valid(tree):

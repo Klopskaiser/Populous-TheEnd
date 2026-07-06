@@ -1430,3 +1430,28 @@ Ladungsschub beim Gegner → Respawn-Countdown im Porträt).
   Halbzeit messbar, Holzstapel reitet mit, Cast-Reichweite aus dem Spell):
   Suite **630 grün**, Ladecheck + `--quit-after 240` fehlerfrei.
   **Manuelle Prüfung: ausstehend.**
+
+**Nachbesserung (Nutzerfeedback, zweite Runde):**
+- **Landbrücke planiert jetzt statt nur anzuheben:** Der Korridor wird auf
+  die **gerade Linie Starthöhe→Zielhöhe gestuft** — Senken werden gefüllt
+  UND Erhebungen abgetragen (`line_raise_targets` lerpt zur Profillinie
+  statt `maxf`). Damit entsteht auch auf Land eine glatte begehbare Rampe
+  (z. B. durch einen zu steilen Grat); ist die Strecke schon gerade, ändert
+  sich nichts und der Cast schlägt fehl (Ladung bleibt). Wasserenden werden
+  weiterhin auf Küstenniveau geklemmt (nie unter die Seelinie planiert).
+- **Einheiten reiten mit dem Morph:** `LandbridgeMorph._snap_props` snappt
+  jetzt auch **Einheiten** im Rechteck pro Schritt auf die neue Bodenhöhe
+  (stehende Einheiten aktualisieren ihr Y sonst nie — sie versanken im
+  wachsenden Boden, bis man sie bewegte); geworfene (THROWN) fliegen weiter.
+- **Tornado-Bewegungsprofil:** parkt **1 s** am Zielpunkt, kriecht dann los
+  (0,4 m/s) und beschleunigt über 4 s auf **max. 2,0 m/s** (vorher konstant
+  2,5); `_drift` ist jetzt eine reine Richtungs-Einheit.
+- **Blitz gezackt:** `LightningBeam` besteht aus 7 dünnen Zylinder-Segmenten
+  entlang einer gezackten Polylinie (seitlicher Jitter je Knick, Einschlag-
+  punkt exakt) statt eines geraden Strahls.
+- **Schamanin-Figur:** schmalere Taille — der gemeinsame Torso wird an den
+  Seiten transparent „abgeschnürt“ (Sanduhr-Silhouette), Haare/Gürtel/Kleid
+  darüber.
+- Neuer Test: Land-Cast planiert einen unbegehbaren Grat zur begehbaren
+  Geraden. Suite **643 grün**, `--quit-after 240` fehlerfrei.
+  **Manuelle Prüfung: ausstehend.**
