@@ -154,19 +154,20 @@ func _release_all_riders() -> void:
 
 
 func _ready() -> void:
-	# Placeholder funnel: stacked, widening grey rings.
+	# Placeholder funnel: a dense stack of widening grey rings.
 	var mat: StandardMaterial3D = StandardMaterial3D.new()
 	mat.albedo_color = Color(0.75, 0.75, 0.78, 0.8)
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	for i in range(5):
+	var count: int = 11
+	for i in range(count):
 		var ring: MeshInstance3D = MeshInstance3D.new()
 		var torus: TorusMesh = TorusMesh.new()
-		var t: float = float(i) / 4.0
-		var r: float = lerpf(0.4, 2.0, t)
-		torus.inner_radius = r - 0.25
+		var t: float = float(i) / float(count - 1)
+		var r: float = lerpf(0.35, 2.2, t)
+		torus.inner_radius = r - 0.22
 		torus.outer_radius = r
 		ring.mesh = torus
 		ring.material_override = mat
-		ring.position.y = lerpf(0.4, TOP_HEIGHT, t)
+		ring.position.y = lerpf(0.3, TOP_HEIGHT, t)
 		add_child(ring)

@@ -12,6 +12,10 @@ var display_name_de: String = "Zauber"
 ## Mana converted per stored charge (start values, balancing in phase 8).
 var charge_cost: float = 50.0
 var max_charges: int = 4
+## Range (metres) from which the shaman can release this spell at its target;
+## she walks closer first when the target lies beyond it. The targeting UI
+## shows this radius around her while the spell is armed.
+var cast_range: float = 9.0
 var charges: int = 0
 ## 0..1 partial fill of the NEXT charge (drives the sidebar pips); maintained
 ## by the tribe's charging tick for the spell currently being served.

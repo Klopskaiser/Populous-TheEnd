@@ -1399,3 +1399,34 @@ Prüfung: Zauber-Tab/Pips/Hotkeys, Landbrücke im Live-Spiel inkl. Raycast auf
 neuer Höhe, Feuerball-Bogen, Blitz auf Gebäude + Reparatur per Rechtsklick,
 Schwarm-Panik, Tornado inkl. Hochwirbeln/Versinken, Schamanin-Tod →
 Ladungsschub beim Gegner → Respawn-Countdown im Porträt).
+
+**Nachbesserung (Nutzerfeedback, erste Runde):**
+- **Landbrücke terraformt graduell:** neuer `LandbridgeMorph`
+  (`scripts/spells/landbridge_morph.gd`, läuft über die Projektil-Liste):
+  interpoliert die betroffenen Vertices über **3 s** (smoothstep, Schritte
+  alle 0,15 s — nie pro Frame) von Start- zu Zielprofil;
+  `TerrainData.line_raise_targets` (pur, ohne Schreiben) von `raise_line`
+  abgespalten. **Requisiten reiten mit:** Bäume und Holzstapel im Rechteck
+  werden je Schritt auf die neue Bodenhöhe gesnappt, Gebäude auf ihre
+  Footprint-Mitte neu gesetzt (Einheiten snappen ohnehin pro Tick);
+  `SpellContext` dafür um `tree_manager`/`wood_pile_manager` erweitert.
+- **Zauber-Reichweiten pro Zauber** (`Spell.cast_range`, Schamanin nutzt sie
+  statt der festen 9 m): Feuerball **8 m**, Blitz **10 m**, Tornado **8 m**,
+  Schwarm 8 m, Landbrücke 9 m (bleibt).
+- **Reichweiten-Ring im Zielmodus:** `SpellTargeting` zeigt beim Anwählen
+  eines Zaubers einen hellblauen Ring mit `cast_range`-Radius **um die
+  Schamanin**, folgt ihr pro Frame; Zielen außerhalb bleibt erlaubt (sie
+  läuft hin). Stirbt sie während des Zielens, bricht der Modus ab.
+- **Startszenario:** alle Zauber beginnen mit **1 Ladung** (beide Tribes,
+  KI-symmetrisch).
+- **Tornado-Optik:** Trichter jetzt aus 11 statt 5 Ringen (dichter, breiter).
+- **Schamanin-Sprite weiblich/unverwechselbar:**
+  `PlaceholderSprites._decorate_shaman` — langes **dunkles Haar** (Krone +
+  Strähnen bis zu den Schultern, volle Mähne von hinten) und das **hellste
+  Kleid im Spiel**, das ab dunklem Gürtel dreieckig bis zu den Knöcheln
+  ausschwingt (Silhouette + stärkster Hell/Dunkel-Kontrast, da der Renderer
+  mit der Stammfarbe multipliziert).
+- Tests angepasst/ergänzt (Brücke erst nach Morph begehbar, Anstieg zur
+  Halbzeit messbar, Holzstapel reitet mit, Cast-Reichweite aus dem Spell):
+  Suite **630 grün**, Ladecheck + `--quit-after 240` fehlerfrei.
+  **Manuelle Prüfung: ausstehend.**

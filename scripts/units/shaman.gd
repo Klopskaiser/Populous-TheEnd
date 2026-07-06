@@ -9,9 +9,8 @@ class_name Shaman extends Unit
 
 const HP: int = 240                        # 4x brave life (60)
 const SHAMAN_MELEE_STRENGTH: float = 2.0   # 2x brave melee damage
-## Range from which a pending spell can be released at its target.
-const CAST_RANGE: float = 9.0
-## Wind-up of the cast animation before the effect fires.
+## Wind-up of the cast animation before the effect fires. The release range
+## is per spell (Spell.cast_range).
 const CAST_TIME: float = 0.6
 ## Killing an enemy shaman grants the killer's tribe bonus mana worth this
 ## share of its total charge capacity, paid straight into spell charges.
@@ -83,14 +82,14 @@ func _tick_state(delta: float) -> void:
 	super._tick_state(delta)
 
 
-## Walks into CAST_RANGE of the target, then plays the wind-up and releases
-## the spell. The state ends in IDLE either way; a failed execute keeps the
-## charge (Spell.cast).
+## Walks into the spell's cast range of the target, then plays the wind-up
+## and releases it. The state ends in IDLE either way; a failed execute keeps
+## the charge (Spell.cast).
 func _tick_cast(delta: float) -> void:
 	if pending_spell == null:
 		_set_state(State.IDLE)
 		return
-	if _flat_dist(position, pending_target) > CAST_RANGE:
+	if _flat_dist(position, pending_target) > pending_spell.cast_range:
 		_casting = false
 		_cast_timer = CAST_TIME
 		_approach(pending_target, delta)

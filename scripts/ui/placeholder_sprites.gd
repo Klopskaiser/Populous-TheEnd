@@ -37,6 +37,9 @@ const C_HELMET: Color = Color(0.4, 0.4, 0.46)    # dark cap (firewarrior)
 const C_FIRE: Color = Color(1.0, 0.78, 0.3)      # fireball in the hand
 const C_HOOD: Color = Color(0.7, 0.7, 0.72)      # preacher hood
 const C_GOWN: Color = Color(0.86, 0.86, 0.88)    # preacher gown
+const C_DRESS: Color = Color(0.99, 0.99, 1.0)    # shaman dress (brightest)
+const C_MANE: Color = Color(0.3, 0.28, 0.33)     # shaman's long dark hair
+const C_BELT: Color = Color(0.5, 0.44, 0.55)     # shaman belt/trim
 
 ## Casters get the "cast" animation (see CLAUDE.md par. 3).
 const CASTER_KINDS: Array[StringName] = [&"shaman", &"preacher"]
@@ -232,7 +235,7 @@ static func _build_frames(kind: StringName, anim: StringName, view: StringName) 
 
 ## Draws the kind-specific silhouette accents over the shared body, in the real
 ## view (after the mirror) and shifted by the frame's upper-body bob so they
-## animate with the unit. Brave/shaman get nothing (plain silhouette).
+## animate with the unit. Only the brave stays plain.
 static func _decorate(img: Image, kind: StringName, view: StringName, bob: int) -> void:
 	match kind:
 		&"warrior":
@@ -241,6 +244,8 @@ static func _decorate(img: Image, kind: StringName, view: StringName, bob: int) 
 			_decorate_firewarrior(img, view, bob)
 		&"preacher":
 			_decorate_preacher(img, view, bob)
+		&"shaman":
+			_decorate_shaman(img, view, bob)
 		_:
 			pass
 
@@ -286,6 +291,33 @@ static func _decorate_preacher(img: Image, _view: StringName, bob: int) -> void:
 	img.fill_rect(Rect2i(4, 3 + bob, 2, 3), C_HOOD)      # hood sides (cheeks), clear of eyes
 	img.fill_rect(Rect2i(10, 3 + bob, 2, 3), C_HOOD)
 	img.fill_rect(Rect2i(4, 14, 8, 10), C_GOWN)          # gown skirt over the legs
+
+
+## The shaman is unmistakably female and distinct from every other unit: a
+## long DARK mane (crown + strands past the shoulders, full mane from behind)
+## framing the face, and the game's BRIGHTEST ankle-length dress flaring out
+## from a dark belt into a wide triangle over the legs. Reads at any zoom via
+## silhouette (triangle skirt) plus the strongest dark/bright contrast.
+static func _decorate_shaman(img: Image, view: StringName, bob: int) -> void:
+	match view:
+		&"back":
+			img.fill_rect(Rect2i(4, 0 + bob, 8, 2), C_MANE)     # crown
+			img.fill_rect(Rect2i(4, 2 + bob, 8, 10), C_MANE)    # full mane down the back
+		&"right":
+			img.fill_rect(Rect2i(4, 0 + bob, 8, 2), C_MANE)     # crown
+			img.fill_rect(Rect2i(4, 2 + bob, 2, 10), C_MANE)    # mane behind (facing right)
+		&"left":
+			img.fill_rect(Rect2i(4, 0 + bob, 8, 2), C_MANE)
+			img.fill_rect(Rect2i(10, 2 + bob, 2, 10), C_MANE)   # mane behind (facing left)
+		_:
+			img.fill_rect(Rect2i(4, 0 + bob, 8, 2), C_MANE)     # crown above the eyes
+			img.fill_rect(Rect2i(3, 2 + bob, 2, 10), C_MANE)    # strands past the cheeks
+			img.fill_rect(Rect2i(11, 2 + bob, 2, 10), C_MANE)
+	# Dress: dark belt at the waist, bright skirt widening to the ankles.
+	img.fill_rect(Rect2i(5, 13, 6, 1), C_BELT)
+	for y in range(14, 24):
+		var half: int = mini(3 + (y - 14) / 2, 7)
+		img.fill_rect(Rect2i(8 - half, y, half * 2, 1), C_DRESS)
 
 
 static func _add_animation(frames: SpriteFrames, anim: StringName,

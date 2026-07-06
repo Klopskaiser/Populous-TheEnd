@@ -191,8 +191,8 @@ func test_shaman_walks_into_range_then_casts() -> void:
 	check(shaman.state == Unit.State.CAST, "shaman enters CAST")
 	var ticks: int = _run(w, [shaman], func() -> bool: return spell.executed > 0)
 	check(ticks < MAX_TICKS, "spell released after walking into range")
-	check(shaman._flat_dist(shaman.position, target) <= Shaman.CAST_RANGE + 0.5,
-		"shaman moved into cast range first")
+	check(shaman._flat_dist(shaman.position, target) <= spell.cast_range + 0.5,
+		"shaman moved into the spell's cast range first")
 	check(spell.charges == 1, "exactly one charge consumed on release")
 	check(shaman.state == Unit.State.IDLE, "shaman idles after the cast")
 	_free_world(w)
@@ -298,7 +298,17 @@ func test_landbridge_opens_water_crossing() -> void:
 		"no path across the water before the cast")
 	var spell: LandbridgeSpell = LandbridgeSpell.new()
 	check(spell.execute(tribe, Vector3(68, 0, 64), ctx), "landbridge cast succeeds")
-	check(nav.is_cell_walkable(Vector2i(63, 64)), "bridge cell walkable after the cast")
+	# The lift is GRADUAL (morph over ~3 s): right after the cast the channel
+	# is still water; halfway through, the terrain is visibly on its way up.
+	check(not nav.is_cell_walkable(Vector2i(63, 64)),
+		"channel not instantly walkable (gradual terraforming)")
+	var start_h: float = td.get_height(63.0, 64.0)
+	for i in range(15):
+		um.tick(0.1)
+	check(td.get_height(63.0, 64.0) > start_h + 0.2, "terrain rising mid-morph")
+	for i in range(25):
+		um.tick(0.1)
+	check(nav.is_cell_walkable(Vector2i(63, 64)), "bridge cell walkable once the morph ends")
 	check(td.get_height(63.0, 64.0) > TerrainData.SEA_LEVEL,
 		"terrain raised above the water line")
 	check(not nav.find_path(Vector3(56, 0, 64), Vector3(70, 0, 64)).is_empty(),
@@ -318,8 +328,18 @@ func test_landbridge_builds_walkable_ramp() -> void:
 	ctx.terrain_data = td
 	ctx.nav_grid = nav
 	ctx.unit_manager = um
+	var wpm: WoodPileManager = WoodPileManager.new()
+	wpm.setup(td)
+	ctx.wood_pile_manager = wpm
+	wpm.deposit(Vector3(65, 0, 64), 3)   # pile inside the future corridor
+	var pile: WoodPile = wpm.piles[0]
 	var spell: LandbridgeSpell = LandbridgeSpell.new()
 	check(spell.execute(tribe, Vector3(69, 0, 64), ctx), "ramp cast succeeds")
+	for i in range(35):
+		um.tick(0.1)   # let the gradual morph finish
+	check_near(pile.position.y, td.get_height(pile.position.x, pile.position.z),
+		"wood pile rode up with the rising terrain", 0.3)
+	wpm.free()
 	for x in range(58, 69):
 		check(nav.is_cell_walkable(Vector2i(x, 64)),
 			"ramp cell (%d, 64) is walkable (slope below limit)" % x)

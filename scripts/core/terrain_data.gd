@@ -101,13 +101,15 @@ func raise_area(center: Vector2, radius: float, amount: float) -> Rect2i:
 		cell_max_x - cell_min_x + 1, cell_max_z - cell_min_z + 1)
 
 
-## Raises a corridor from `from` to `to` (world XZ) onto a height profile
-## interpolated between height_from and height_to — a walkable ramp when the
-## two differ. Terrain is only ever RAISED, never lowered; beyond half_width
-## the lift blends out smoothly over `edge` metres. Returns the affected cell
-## rect (like raise_area). Core of the Landbridge spell.
-func raise_line(from: Vector2, to: Vector2, half_width: float,
-		height_from: float, height_to: float, edge: float = 1.5) -> Rect2i:
+## Computes the target heights of a corridor from `from` to `to` (world XZ)
+## onto a height profile interpolated between height_from and height_to — a
+## walkable ramp when the two differ. Terrain is only ever RAISED, never
+## lowered; beyond half_width the lift blends out smoothly over `edge` metres.
+## Returns {"indices": PackedInt32Array, "targets": PackedFloat32Array,
+## "rect": Rect2i} WITHOUT touching the heightmap — raise_line applies it
+## instantly, the Landbridge morph interpolates toward it over time.
+func line_raise_targets(from: Vector2, to: Vector2, half_width: float,
+		height_from: float, height_to: float, edge: float = 1.5) -> Dictionary:
 	var axis: Vector2 = to - from
 	var len2: float = axis.length_squared()
 	var reach: float = half_width + edge
@@ -116,6 +118,8 @@ func raise_line(from: Vector2, to: Vector2, half_width: float,
 	var min_vz: int = clampi(int(floor((minf(from.y, to.y) - reach) / CELL_SIZE)), 0, VERTS - 1)
 	var max_vz: int = clampi(int(ceil((maxf(from.y, to.y) + reach) / CELL_SIZE)), 0, VERTS - 1)
 
+	var indices: PackedInt32Array = PackedInt32Array()
+	var targets: PackedFloat32Array = PackedFloat32Array()
 	var changed_min_x: int = VERTS
 	var changed_min_z: int = VERTS
 	var changed_max_x: int = -1
@@ -140,20 +144,35 @@ func raise_line(from: Vector2, to: Vector2, half_width: float,
 			var nh: float = maxf(current, lerpf(current, profile, blend))
 			if nh <= current + 0.0001:
 				continue
-			heights[idx] = nh
+			indices.append(idx)
+			targets.append(nh)
 			changed_min_x = mini(changed_min_x, vx)
 			changed_min_z = mini(changed_min_z, vz)
 			changed_max_x = maxi(changed_max_x, vx)
 			changed_max_z = maxi(changed_max_z, vz)
 
-	if changed_max_x < 0:
-		return Rect2i()
-	var cell_min_x: int = clampi(changed_min_x - 1, 0, SIZE - 1)
-	var cell_min_z: int = clampi(changed_min_z - 1, 0, SIZE - 1)
-	var cell_max_x: int = clampi(changed_max_x, 0, SIZE - 1)
-	var cell_max_z: int = clampi(changed_max_z, 0, SIZE - 1)
-	return Rect2i(cell_min_x, cell_min_z,
-		cell_max_x - cell_min_x + 1, cell_max_z - cell_min_z + 1)
+	var rect: Rect2i = Rect2i()
+	if changed_max_x >= 0:
+		var cell_min_x: int = clampi(changed_min_x - 1, 0, SIZE - 1)
+		var cell_min_z: int = clampi(changed_min_z - 1, 0, SIZE - 1)
+		var cell_max_x: int = clampi(changed_max_x, 0, SIZE - 1)
+		var cell_max_z: int = clampi(changed_max_z, 0, SIZE - 1)
+		rect = Rect2i(cell_min_x, cell_min_z,
+			cell_max_x - cell_min_x + 1, cell_max_z - cell_min_z + 1)
+	return {"indices": indices, "targets": targets, "rect": rect}
+
+
+## Applies a corridor raise instantly (see line_raise_targets). Returns the
+## affected cell rect (like raise_area).
+func raise_line(from: Vector2, to: Vector2, half_width: float,
+		height_from: float, height_to: float, edge: float = 1.5) -> Rect2i:
+	var plan: Dictionary = line_raise_targets(from, to, half_width,
+		height_from, height_to, edge)
+	var indices: PackedInt32Array = plan.indices
+	var targets: PackedFloat32Array = plan.targets
+	for i in range(indices.size()):
+		heights[indices[i]] = targets[i]
+	return plan.rect
 
 
 # --- Walkability -------------------------------------------------------------

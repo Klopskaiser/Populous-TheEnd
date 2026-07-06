@@ -8,6 +8,9 @@ var terrain_data: TerrainData = null
 var nav_grid: NavGrid = null
 var unit_manager: UnitManager = null
 var building_manager: BuildingManager = null
+## Optional (landbridge morph re-snaps props to the moving ground).
+var tree_manager: TreeManager = null
+var wood_pile_manager: WoodPileManager = null
 
 var _events: Node = null
 var _events_resolved: bool = false

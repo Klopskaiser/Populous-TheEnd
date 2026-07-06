@@ -9,6 +9,7 @@ func _init() -> void:
 	display_name_de = "Insektenschwarm"
 	charge_cost = 50.0
 	max_charges = 4
+	cast_range = 8.0
 
 
 func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:
