@@ -58,6 +58,9 @@ const MELEE_SHOVE: int = 3
 ## overrides _shove_chance() to shove rarely (he punches/kicks instead).
 const KICK_CHANCE: float = 0.2
 const SHOVE_CHANCE: float = 0.15
+## Fireball impact damage (slightly above a brave punch; thrown by the
+## firewarrior from medium range, see Firewarrior/Fireball).
+const FIREBALL_DAMAGE: int = 7
 
 var tribe_id: int = 0
 ## Owning tribe, injected by UnitManager.spawn_unit()/Tribe.add_unit().
@@ -125,6 +128,9 @@ var _target_search_timer: float = 0.0
 ## True on ticks where the unit is in range and striking (vs. still approaching);
 ## drives the attack-vs-walk animation in _anim_base().
 var _in_melee: bool = false
+## Animation base of the current strike (punch/kick/shove — set per rolled
+## attack kind in _do_strike; the firewarrior sets "throw" while firing).
+var attack_anim: StringName = &"punch"
 ## Cached A* goal while approaching a target (replanned when it drifts).
 var _combat_goal: Vector3 = Vector3.INF
 
@@ -400,10 +406,24 @@ func _tick_attack(delta: float) -> void:
 ## Rolls an attack kind and applies its (strength-scaled) damage to the target.
 func _do_strike(target: Unit) -> void:
 	var kind: StringName = _roll_attack_kind()
-	# Restart the attack animation on each swing for a visible hit cadence.
+	# Each kind has its own animation; restart it so the swing lands with the
+	# hit (the punch/kick/shove cycles are tuned to ATTACK_COOLDOWN).
+	attack_anim = kind_to_anim(kind)
+	anim_base_name = attack_anim
 	anim_start_ms = Time.get_ticks_msec()
 	target.take_damage(melee_damage(kind), self)
 	# Shove/roll knockback and hit sounds are wired in phases 5b(shove)/5d.
+
+
+## Animation base for an attack kind (the anim names match the kinds).
+static func kind_to_anim(kind: StringName) -> StringName:
+	match kind:
+		&"kick":
+			return &"kick"
+		&"shove":
+			return &"shove"
+		_:
+			return &"punch"
 
 
 ## Picks punch / kick / shove for this strike. Shoves are rare (rarer still for
@@ -669,8 +689,8 @@ func _anim_base() -> StringName:
 		State.MOVE, State.PANIC:
 			return &"walk"
 		State.ATTACK:
-			# Attack frames only while actually striking; walk while closing in.
-			return &"attack" if _in_melee else &"walk"
+			# The rolled strike's animation while fighting; walk while closing in.
+			return attack_anim if _in_melee else &"walk"
 		State.CAST:
 			return &"cast"
 		_:

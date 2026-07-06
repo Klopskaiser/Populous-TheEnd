@@ -51,20 +51,29 @@ const VIEWS: Array[StringName] = [&"front", &"back", &"right", &"left"]
 static var _cache: Dictionary[StringName, SpriteFrames] = {}
 
 
-## Builds the SpriteFrames (idle/walk/attack, plus cast for casters), each in
-## all four directional views. All current kinds share the same silhouette.
+## All animation bases a kind carries. "jump" is frame-driven by the hop
+## visual; punch/kick/shove are the three melee strike animations (their cycle
+## length matches Unit.ATTACK_COOLDOWN so fighting looks continuous); "throw"
+## (firewarrior only) is the ranged fireball throw.
+static func _anims_for(kind: StringName) -> Array[StringName]:
+	var anims: Array[StringName] = [
+		&"idle", &"walk", &"attack", &"jump", &"carry", &"carry_walk",
+		&"punch", &"kick", &"shove"]
+	if kind in CASTER_KINDS:
+		anims.append(&"cast")
+	if kind == &"firewarrior":
+		anims.append(&"throw")
+	return anims
+
+
+## Builds the SpriteFrames (idle/walk/attack/strikes, plus cast for casters),
+## each in all four directional views.
 static func make_frames(unit_kind: StringName) -> SpriteFrames:
 	if _cache.has(unit_kind):
 		return _cache[unit_kind]
 	var frames: SpriteFrames = SpriteFrames.new()
 	frames.remove_animation("default")
-	# "jump" is frame-driven by the hop visual (frame 0 = arms down on the
-	# ground, frame 1 = arms up in the air), not by the animation timer.
-	var anims: Array[StringName] = [
-		&"idle", &"walk", &"attack", &"jump", &"carry", &"carry_walk"]
-	if unit_kind in CASTER_KINDS:
-		anims.append(&"cast")
-	for anim in anims:
+	for anim in _anims_for(unit_kind):
 		for view in VIEWS:
 			var full_name: StringName = StringName("%s_%s" % [anim, view])
 			_add_animation(frames, full_name, _build_frames(unit_kind, anim, view), _anim_fps(anim))
@@ -84,12 +93,8 @@ static func build_atlas(kinds: Array[StringName]) -> Dictionary:
 	var images: Array[Image] = []
 	var table: Dictionary = {}
 	for kind in kinds:
-		var anims: Array[StringName] = [
-			&"idle", &"walk", &"attack", &"jump", &"carry", &"carry_walk"]
-		if kind in CASTER_KINDS:
-			anims.append(&"cast")
 		var per_base: Dictionary = {}
-		for anim in anims:
+		for anim in _anims_for(kind):
 			var per_view: Array = []
 			for view in VIEWS:
 				var frame_images: Array[Image] = _build_frames(kind, anim, view)
@@ -122,6 +127,16 @@ static func _anim_fps(anim: StringName) -> float:
 			return 8.0
 		&"attack":
 			return 6.0
+		# Strike cycles are tuned to Unit.ATTACK_COOLDOWN (0.8 s): punch has 4
+		# frames, kick/shove have 2 — all loop in exactly one cooldown, and each
+		# strike restarts the timer, so the swing lands with the hit.
+		&"punch":
+			return 5.0
+		&"kick", &"shove":
+			return 2.5
+		# Throw: 2 frames over Firewarrior.FIRE_COOLDOWN (1.5 s).
+		&"throw":
+			return 4.0 / 3.0
 		&"cast":
 			return 4.0
 		_:
@@ -161,6 +176,22 @@ static func _build_frames(kind: StringName, anim: StringName, view: StringName) 
 				_frame_carry_walk(paint_view, 1), _frame_carry(paint_view, 0),
 			]
 			bobs = [0, 0, 0, 0]
+		&"punch":
+			# Both fists strike one after the other (stand between jabs).
+			images = [
+				_frame_stand(paint_view, 0), _frame_punch(paint_view, 0),
+				_frame_stand(paint_view, 0), _frame_punch(paint_view, 1),
+			]
+			bobs = [0, 0, 0, 0]
+		&"kick":
+			images = [_frame_stand(paint_view, 0), _frame_kick(paint_view)]
+			bobs = [0, 0]
+		&"shove":
+			images = [_frame_shove(paint_view, 0), _frame_shove(paint_view, 1)]
+			bobs = [0, 0]
+		&"throw":
+			images = [_frame_throw(paint_view, 0), _frame_throw(paint_view, 1)]
+			bobs = [0, 0]
 		&"cast":
 			images = [_frame_stand(paint_view, 0), _frame_cast(paint_view)]
 			bobs = [0, 0]
@@ -391,6 +422,92 @@ static func _draw_carry_arms_and_log(img: Image, view: StringName, bob: int) -> 
 		img.fill_rect(Rect2i(3, 10 + bob, 10, 4), C_WOOD)        # log held across
 		img.fill_rect(Rect2i(3, 10 + bob, 1, 4), C_WOOD_END)
 		img.fill_rect(Rect2i(12, 10 + bob, 1, 4), C_WOOD_END)
+
+
+## One jab of the punch: phase 0 = left fist extended, phase 1 = right fist.
+## A bright 2x2 fist block at the arm's end makes the strike readable.
+static func _frame_punch(view: StringName, phase: int) -> Image:
+	var img: Image = _new_image()
+	_draw_torso(img, view, 0)
+	_draw_head(img, view, 0)
+	if view == &"right":
+		if phase == 0:
+			img.fill_rect(Rect2i(10, 8, 5, 2), C_LIMB)     # near arm jabs forward
+			img.fill_rect(Rect2i(14, 7, 2, 3), C_HEAD)     # fist
+		else:
+			img.fill_rect(Rect2i(6, 9, 3, 2), C_LIMB)      # arm chambered back
+			img.fill_rect(Rect2i(5, 8, 2, 3), C_HEAD)      # fist at the hip
+	else:
+		if phase == 0:
+			img.fill_rect(Rect2i(1, 8, 4, 2), C_LIMB)      # left arm extended
+			img.fill_rect(Rect2i(0, 7, 2, 3), C_HEAD)      # fist
+			img.fill_rect(Rect2i(12, 8, 2, 6), C_LIMB)     # right arm at the side
+		else:
+			img.fill_rect(Rect2i(2, 8, 2, 6), C_LIMB)      # left arm at the side
+			img.fill_rect(Rect2i(11, 8, 4, 2), C_LIMB)     # right arm extended
+			img.fill_rect(Rect2i(14, 7, 2, 3), C_HEAD)     # fist
+	_draw_legs_stand(img)
+	return img
+
+
+## Kick frame: one leg swings out horizontally, bright foot block at the end.
+static func _frame_kick(view: StringName) -> Image:
+	var img: Image = _new_image()
+	_draw_torso(img, view, 0)
+	_draw_head(img, view, 0)
+	_draw_arms_side(img, view, 0)
+	img.fill_rect(Rect2i(5, 16, 2, 8), C_LIMB)             # planted leg
+	if view == &"right":
+		img.fill_rect(Rect2i(9, 16, 6, 2), C_LIMB)         # kicking leg forward
+		img.fill_rect(Rect2i(14, 15, 2, 3), C_HEAD)        # foot
+	else:
+		img.fill_rect(Rect2i(9, 16, 2, 4), C_LIMB)         # thigh down
+		img.fill_rect(Rect2i(10, 18, 5, 2), C_LIMB)        # lower leg swings out
+		img.fill_rect(Rect2i(14, 17, 2, 3), C_HEAD)        # foot
+	return img
+
+
+## Shove: both palms thrust forward together; phase 1 = fully extended.
+static func _frame_shove(view: StringName, phase: int) -> Image:
+	var img: Image = _new_image()
+	_draw_torso(img, view, 0)
+	_draw_head(img, view, 0)
+	if view == &"right":
+		var reach: int = 3 + phase * 3
+		img.fill_rect(Rect2i(9, 9, reach, 2), C_LIMB)      # stacked arms forward
+		img.fill_rect(Rect2i(8 + reach, 8, 2, 4), C_HEAD)  # palms
+	else:
+		# Facing the viewer: palms as bright blocks pushing out from the chest.
+		img.fill_rect(Rect2i(2, 9, 2, 4 - phase), C_LIMB)  # arms shorten as they extend
+		img.fill_rect(Rect2i(12, 9, 2, 4 - phase), C_LIMB)
+		var size: int = 2 + phase
+		img.fill_rect(Rect2i(4 - phase, 9, size, size), C_HEAD)   # left palm
+		img.fill_rect(Rect2i(10, 9, size, size), C_HEAD)          # right palm
+	_draw_legs_stand(img)
+	return img
+
+
+## Fireball throw (firewarrior): phase 0 = wind-up (fireball raised), phase 1 =
+## release (arm thrust forward, that hand empty).
+static func _frame_throw(view: StringName, phase: int) -> Image:
+	var img: Image = _new_image()
+	_draw_torso(img, view, 0)
+	_draw_head(img, view, 0)
+	if view == &"right":
+		if phase == 0:
+			img.fill_rect(Rect2i(9, 2, 2, 6), C_LIMB)      # arm wound up high
+			img.fill_rect(Rect2i(8, 0, 3, 3), C_FIRE)      # fireball above the hand
+		else:
+			img.fill_rect(Rect2i(10, 7, 5, 2), C_LIMB)     # arm released forward
+	else:
+		img.fill_rect(Rect2i(2, 8, 2, 6), C_LIMB)          # off arm at the side
+		if phase == 0:
+			img.fill_rect(Rect2i(12, 2, 2, 7), C_LIMB)     # throwing arm up
+			img.fill_rect(Rect2i(11, 0, 3, 3), C_FIRE)     # fireball above
+		else:
+			img.fill_rect(Rect2i(12, 6, 4, 2), C_LIMB)     # arm thrust forward
+	_draw_legs_stand(img)
+	return img
 
 
 static func _frame_cast(view: StringName) -> Image:

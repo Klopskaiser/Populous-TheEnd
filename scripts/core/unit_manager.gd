@@ -38,6 +38,8 @@ var wood_pile_manager: WoodPileManager = null
 var unit_renderer: UnitRenderer = null
 
 var units: Array[Unit] = []
+## Live projectiles (Fireball), ticked here after the units.
+var projectiles: Array = []
 var _hash: Dictionary[Vector2i, Array] = {}   # hash cell -> Array of Unit
 var _path_requests: Array[Unit] = []
 var _path_head: int = 0
@@ -76,6 +78,32 @@ func tick(delta: float) -> void:
 			_move_hash_cell(unit, new_cell)
 	_drain_path_queue()
 	_apply_separation(delta)
+	_tick_projectiles(delta)
+
+
+# --- Projectiles -------------------------------------------------------------------
+
+## Registers a projectile (e.g. a Fireball); it is ticked here until `done`
+## flips, then freed. Added to the tree (visible) when the manager is in-game.
+func register_projectile(projectile: Node3D) -> void:
+	projectiles.append(projectile)
+	if is_inside_tree():
+		add_child(projectile)
+
+
+func _tick_projectiles(delta: float) -> void:
+	if projectiles.is_empty():
+		return
+	var kept: Array = []
+	for p in projectiles:
+		if not is_instance_valid(p):
+			continue
+		p.tick(delta)
+		if p.done:
+			p.queue_free()
+		else:
+			kept.append(p)
+	projectiles = kept
 
 
 # --- Path queue -------------------------------------------------------------------

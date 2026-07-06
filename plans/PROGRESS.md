@@ -885,6 +885,42 @@ Timer), Slot-System auf dem **Ziel**, freigabesichere untypisierte Referenzen.
 Reichweite, Verfolgung außer Reichweite, Krieger 3×, Slot-Cap 3 + Nachrücken,
 1v1-Verteilung, Combatant-Aggro, Brave-Vergeltung ohne Distanz-Aggro).
 `--headless --import` + `--headless --quit` + `--quit-after 240` fehlerfrei.
-**Manuelle Prüfung durch Nutzer: ausstehend** (Rechtsklick-Angriff, max. 3 auf
-einen Gegner + Warten/Nachrücken, Verteilung auf mehrere Gegner, Krieger zäher/
-härter, Braves wehren sich statt zu fliehen).
+
+**Nachbesserungen (Nutzerfeedback, erste Runde):** Kampf funktioniert
+grundsätzlich (getestet: Krieger, Feuerkrieger). Zwei Punkte behoben:
+- **Eigene Schlag-Animationen** (vorher lief im Kampf nur die Arbeits-/
+  `attack`-Animation): `PlaceholderSprites` hat drei neue Animationsbasen für
+  **alle** Kinds — `punch` (4 Frames: beide Fäuste nacheinander, helle
+  Faust-Blöcke), `kick` (Standbein + horizontal ausschwingendes Bein mit
+  Fuß-Block), `shove` (beide Handflächen stoßen nach vorn, 2 Phasen) — plus
+  `throw` **nur für den Feuerkrieger** (Ausholen mit Feuerball überm Kopf →
+  Arm nach vorn). Gemeinsame Anim-Liste jetzt in `_anims_for(kind)`
+  (make_frames **und** build_atlas). **FPS an die Cooldowns gekoppelt:**
+  Punch 5 / Kick+Schubs 2,5 (Zyklus = `ATTACK_COOLDOWN` 0,8 s), Throw 4/3
+  (Zyklus = `FIRE_COOLDOWN` 1,5 s); `_do_strike` setzt `attack_anim` =
+  Animationsname der gewürfelten Angriffsart (`Unit.kind_to_anim`, statisch)
+  und startet den Timer neu → der Schwung sitzt auf dem Treffer.
+  `_anim_base()` liefert im ATTACK-State `attack_anim` (statt `attack`).
+- **Feuerkrieger-Fernkampf vorgezogen (Kern aus 5c):** `firewarrior.gd`
+  überschreibt `_tick_attack`: **≤ MELEE_RANGE** → Prügeln (super, Slot-System,
+  Brave-Stärke, keine Feuerbälle); **≤ FIRE_RANGE (6 m)** → stehen bleiben,
+  `throw`-Animation, alle `FIRE_COOLDOWN` (1,5 s) ein Feuerball (gehaltener
+  Melee-Slot wird freigegeben; Fernkampf braucht keinen — beliebig viele
+  Schützen je Ziel); **darüber** → anlaufen. Neu `scripts/units/fireball.gd` —
+  `Fireball` (Node3D, **kein** Physik-Body): fliegt getickt mit leichtem
+  Sinus-Bogen auf Brusthöhe zum Ziel (homing solange es lebt), Treffer =
+  Distanzcheck, Schaden **genau einmal** (`Unit.FIREBALL_DAMAGE = 7`,
+  `done`-Flag), Shooter/Target untypisiert (freigabesicher); Visual (orange
+  Glow-Kugel) nur in `_ready` (headless-/testneutral). Der **UnitManager**
+  führt eine `projectiles`-Liste (`register_projectile`, in-game als Kind
+  eingehängt; `_tick_projectiles` in `tick()`, fertige werden `queue_free`t).
+  **Noch 5c:** Rückstoß-Akkumulator, Hand-Feuerball-Toggle, Konvertierungs-Reset.
+
+**Verifikation (nach Nachbesserung):** Testsuite grün (**348 Tests**, +6 neu:
+Feuerball auf Distanz = exakt 7 Schaden + Abstand gehalten + throw-Anim,
+Fireball trifft genau einmal, Nahkampf-Fallback ohne Feuerbälle/Brave-Stärke,
+Strike-Anims im Atlas (alle Kinds, throw nur Feuerkrieger, Punch 4 Frames),
+`kind_to_anim`-Mapping + Anim nach Treffer). `--headless --quit` +
+`--quit-after 240` fehlerfrei. **Manuelle Prüfung durch Nutzer: ausstehend**
+(Schlag/Tritt/Schubs-Animationen sichtbar unterschiedlich; Feuerkrieger wirft
+aus Distanz sichtbare Feuerbälle und prügelt nur im Nahkampf).

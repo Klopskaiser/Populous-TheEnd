@@ -10,6 +10,7 @@ const MAX_TICKS: int = 400
 
 const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
 const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
+const FIREWARRIOR_SCENE: PackedScene = preload("res://scenes/units/firewarrior.tscn")
 
 
 func _flat_terrain(h: float = 5.0) -> TerrainData:
@@ -189,6 +190,103 @@ func test_combatant_aggros_idle_enemy() -> void:
 	warrior.tick(TICK)  # one idle scan
 	check(warrior.state == Unit.State.ATTACK, "idle warrior aggros a nearby enemy")
 	check(warrior.attack_target == enemy, "it targets the enemy in range")
+	_free_world(w)
+
+
+# --- Firewarrior ranged (fireballs) --------------------------------------------------
+
+## At medium range the firewarrior stands and throws fireballs instead of
+## running into melee; the first impact deals exactly FIREBALL_DAMAGE.
+func test_firewarrior_throws_fireballs_at_range() -> void:
+	var w: Dictionary = _make_world()
+	var fw: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(30, 30))
+	var enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(34, 30))  # 4 m: fire range
+	enemy.max_health = 1000000
+	enemy.health = 1000000
+	fw.order_attack(enemy)
+	var hp0: int = enemy.health
+	_run(w, [fw], func() -> bool: return enemy.health < hp0)
+	check(enemy.health == hp0 - Unit.FIREBALL_DAMAGE,
+		"first fireball dealt exactly FIREBALL_DAMAGE")
+	var dist: float = Vector2(fw.position.x, fw.position.z).distance_to(
+		Vector2(enemy.position.x, enemy.position.z))
+	check(dist > Unit.MELEE_RANGE, "firewarrior kept its distance (no melee rush)")
+	check(fw.attack_anim == &"throw", "firewarrior plays the throw animation")
+	_free_world(w)
+
+
+## A fireball flies to its target and applies damage exactly once, then is done.
+func test_fireball_hits_exactly_once() -> void:
+	var w: Dictionary = _make_world()
+	var shooter: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(26, 30))
+	var enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
+	enemy.max_health = 1000
+	enemy.health = 1000
+	var ball: Fireball = Fireball.new()
+	ball.setup(shooter, enemy, shooter.position + Vector3(0.0, 1.1, 0.0))
+	var ticks: int = 0
+	while not ball.done and ticks < 200:
+		ball.tick(TICK)
+		ticks += 1
+	check(ball.done, "fireball reaches its target and finishes")
+	check(enemy.health == 1000 - Unit.FIREBALL_DAMAGE, "impact damage applied exactly once")
+	for i in range(10):
+		ball.tick(TICK)
+	check(enemy.health == 1000 - Unit.FIREBALL_DAMAGE, "no further damage after impact")
+	ball.free()
+	_free_world(w)
+
+
+## Inside melee range the firewarrior throws nothing and brawls at brave level.
+func test_firewarrior_brawls_in_melee() -> void:
+	var w: Dictionary = _make_world()
+	var fw: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(30, 30))
+	var enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30.8, 30))  # melee range
+	enemy.max_health = 1000000
+	enemy.health = 1000000
+	fw.order_attack(enemy)
+	var hp0: int = enemy.health
+	_run(w, [fw], func() -> bool: return enemy.health < hp0)
+	check(enemy.health < hp0, "melee damage applied")
+	check(w.unit_manager.projectiles.is_empty(), "no fireballs thrown in melee range")
+	check(fw.melee_strength() == 1.0, "firewarrior brawls at brave strength")
+	check(fw.attack_anim != &"throw", "melee uses a strike anim, not throw")
+	_free_world(w)
+
+
+# --- Strike animations ---------------------------------------------------------------
+
+## Every kind carries the three strike animations; throw is firewarrior-only.
+func test_strike_anims_in_atlas() -> void:
+	var atlas: Dictionary = PlaceholderSprites.build_atlas(
+		[&"brave", &"warrior", &"firewarrior"] as Array[StringName])
+	var table: Dictionary = atlas.table
+	for kind: StringName in [&"brave", &"warrior", &"firewarrior"]:
+		for anim: StringName in [&"punch", &"kick", &"shove"]:
+			check(table[kind].has(anim), "%s has a %s animation" % [kind, anim])
+	check(table[&"firewarrior"].has(&"throw"), "firewarrior has a throw animation")
+	check(not table[&"brave"].has(&"throw"), "throw is firewarrior-only")
+	var views: Array = table[&"brave"][&"punch"]
+	check(views.size() == 4, "punch exists in all four views")
+	check(int(views[0][1]) == 4, "punch alternates both fists (4 frames)")
+
+
+## A strike switches the unit's animation to the rolled kind's animation.
+func test_strike_sets_matching_anim() -> void:
+	check(Unit.kind_to_anim(&"punch") == &"punch", "punch maps to punch anim")
+	check(Unit.kind_to_anim(&"kick") == &"kick", "kick maps to kick anim")
+	check(Unit.kind_to_anim(&"shove") == &"shove", "shove maps to shove anim")
+	var w: Dictionary = _make_world()
+	var attacker: Unit = _spawn(w, WARRIOR_SCENE, 0, Vector2(30, 30))
+	var enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30.8, 30))
+	enemy.max_health = 1000000
+	enemy.health = 1000000
+	attacker.order_attack(enemy)
+	var hp0: int = enemy.health
+	_run(w, [attacker], func() -> bool: return enemy.health < hp0)
+	var strike_anims: Array[StringName] = [&"punch", &"kick", &"shove"]
+	check(attacker.anim_base_name in strike_anims,
+		"after a strike the anim base is the rolled strike animation")
 	_free_world(w)
 
 
