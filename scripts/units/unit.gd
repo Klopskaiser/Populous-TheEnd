@@ -18,6 +18,9 @@ class_name Unit extends Node3D
 enum State {IDLE, MOVE, GATHER, PRAY, BUILD, ATTACK, TRAIN, PANIC, CAST, THROWN, DEAD}
 
 signal died(unit: Unit)
+## Fired once when the corpse has finished fading; the UnitManager then removes
+## and frees the node.
+signal corpse_expired(unit: Unit)
 signal state_changed(unit: Unit, new_state: State)
 
 const TRIBE_COLORS: Array[Color] = [
@@ -61,6 +64,11 @@ const SHOVE_CHANCE: float = 0.15
 ## Fireball impact damage (slightly above a brave punch; thrown by the
 ## firewarrior from medium range, see Firewarrior/Fireball).
 const FIREBALL_DAMAGE: int = 7
+
+## A defeated unit stays lying on the ground (dead sprite, no interaction) for
+## this long, then dissolves over CORPSE_FADE_DURATION and is removed.
+const CORPSE_DURATION: float = 5.0
+const CORPSE_FADE_DURATION: float = 1.0
 
 var tribe_id: int = 0
 ## Owning tribe, injected by UnitManager.spawn_unit()/Tribe.add_unit().
@@ -133,6 +141,11 @@ var _in_melee: bool = false
 var attack_anim: StringName = &"punch"
 ## Cached A* goal while approaching a target (replanned when it drifts).
 var _combat_goal: Vector3 = Vector3.INF
+## Corpse decay: seconds since death; corpse_expired fires once at the end.
+var _corpse_timer: float = 0.0
+var _corpse_done: bool = false
+## Instance alpha last written to the renderer (corpse fade), managed there.
+var _render_alpha: float = 1.0
 
 
 ## Silhouette key for PlaceholderSprites; overridden by subclasses.
@@ -173,6 +186,8 @@ func tick(delta: float) -> void:
 			_tick_attack(delta)
 		State.IDLE:
 			_tick_idle(delta)
+		State.DEAD:
+			_tick_dead(delta)
 		_:
 			pass
 	_apply_animation(false)
@@ -352,8 +367,34 @@ func _die() -> void:
 		if is_instance_valid(a):
 			a._on_target_died(self)
 	melee_attackers.clear()
+	# Corpse setup: no selection ring, no route, no hopping — the unit stays in
+	# the world as a lying "dead" sprite until the decay timer removes it.
+	selected = false
+	hop_visual = false
+	waypoint_queue.clear()
+	_clear_path()
+	_corpse_timer = 0.0
 	_set_state(State.DEAD)
 	died.emit(self)
+
+
+## Corpse decay: lie for CORPSE_DURATION, fade over CORPSE_FADE_DURATION (the
+## renderer reads corpse_alpha()), then fire corpse_expired exactly once.
+func _tick_dead(delta: float) -> void:
+	if _corpse_done:
+		return
+	_corpse_timer += delta
+	if _corpse_timer >= CORPSE_DURATION + CORPSE_FADE_DURATION:
+		_corpse_done = true
+		corpse_expired.emit(self)
+
+
+## 1.0 while the corpse lies, then a linear fade to 0.0.
+func corpse_alpha() -> float:
+	if state != State.DEAD:
+		return 1.0
+	return clampf(
+		1.0 - (_corpse_timer - CORPSE_DURATION) / CORPSE_FADE_DURATION, 0.0, 1.0)
 
 
 ## Idle combatants scan for a nearby enemy (throttled) and engage it.
@@ -693,6 +734,8 @@ func _anim_base() -> StringName:
 			return attack_anim if _in_melee else &"walk"
 		State.CAST:
 			return &"cast"
+		State.DEAD:
+			return &"dead"
 		_:
 			return &"idle"
 

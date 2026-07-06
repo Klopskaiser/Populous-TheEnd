@@ -70,6 +70,16 @@ void fragment() {
 	if (tex.a < 0.5) {
 		discard;
 	}
+	// Corpse fade: screen-door (ordered dither) on the instance alpha keeps the
+	// opaque pipeline — real alpha blending would drag every unit sprite into
+	// the transparent pass and its sorting problems.
+	if (tint.a < 1.0) {
+		float threshold = fract(52.9829189 *
+			fract(dot(FRAGCOORD.xy, vec2(0.06711056, 0.00583715))));
+		if (tint.a < threshold) {
+			discard;
+		}
+	}
 	ALBEDO = tex.rgb * tint.rgb;
 }
 """
@@ -124,6 +134,7 @@ func register_unit(unit: Unit) -> void:
 	unit._render_kind = unit.unit_kind()
 	unit._render_pos = Vector3.INF
 	unit._render_frame = -1
+	unit._render_alpha = 1.0
 	_units.append(unit)
 	_multimesh.set_instance_color(unit._render_index,
 		Unit.TRIBE_COLORS[unit.tribe_id % Unit.TRIBE_COLORS.size()])
@@ -145,6 +156,9 @@ func unregister_unit(unit: Unit) -> void:
 		moved._render_index = index
 		moved._render_pos = Vector3.INF
 		moved._render_frame = -1
+		# Colour is rewritten at full alpha; resetting the cache makes the next
+		# frame pass re-apply a fading corpse's actual alpha.
+		moved._render_alpha = 1.0
 		_multimesh.set_instance_color(index,
 			Unit.TRIBE_COLORS[moved.tribe_id % Unit.TRIBE_COLORS.size()])
 	_multimesh.visible_instance_count = _units.size()
@@ -183,6 +197,15 @@ func _process(_delta: float) -> void:
 
 func _update_frame(unit: Unit, cam_forward: Vector3, cam_right: Vector3,
 		hop_offset: float, now_ms: int) -> void:
+	# Corpse fade: push the decaying alpha into the instance colour (before the
+	# frame-equality early-out below — the corpse frame itself never changes).
+	if unit.state == Unit.State.DEAD:
+		var alpha: float = unit.corpse_alpha()
+		if absf(alpha - unit._render_alpha) > 0.01:
+			unit._render_alpha = alpha
+			var col: Color = Unit.TRIBE_COLORS[unit.tribe_id % Unit.TRIBE_COLORS.size()]
+			col.a = alpha
+			_multimesh.set_instance_color(unit._render_index, col)
 	var view: int = Unit.view_index(unit.facing, cam_forward, cam_right)
 	var per_base: Dictionary = _table.get(unit._render_kind, _table[KINDS[0]])
 	var base: StringName = unit.anim_base_name

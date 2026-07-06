@@ -67,9 +67,40 @@ func test_damage_reduces_hp_and_kills() -> void:
 	check(enemy.state == Unit.State.DEAD, "lethal damage sets DEAD")
 	check(died_count[0] == 1, "died signal fired once")
 	check(enemy not in w.tribe1.units, "removed from its tribe")
-	check(enemy not in w.unit_manager.units, "removed from the unit registry")
+	# The corpse stays in the world (registry/hash) until its decay finishes.
+	check(enemy in w.unit_manager.units, "corpse stays registered while it lies")
+	_free_world(w)
+
+
+## A defeated unit lies as a corpse (dead sprite, fully visible) for
+## CORPSE_DURATION, then fades and is removed from the world.
+func test_corpse_lies_then_fades_and_expires() -> void:
+	var w: Dictionary = _make_world()
+	var unit: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
+	unit.take_damage(1000)
+	check(unit.state == Unit.State.DEAD, "unit is dead")
+	check(unit in w.unit_manager.units, "corpse remains in the world")
+	check(unit.anim_base_name == &"dead", "corpse uses the dead sprite")
+	check(unit.corpse_alpha() == 1.0, "corpse starts fully visible")
+
+	# 4.5 s: still lying, fully visible.
+	for i in range(45):
+		unit.tick(TICK)
+	check(unit in w.unit_manager.units, "still lying before 5 s")
+	check(unit.corpse_alpha() == 1.0, "fully visible before 5 s")
+
+	# ~5.5 s: fading (alpha strictly between 0 and 1).
+	for i in range(10):
+		unit.tick(TICK)
+	var alpha: float = unit.corpse_alpha()
+	check(alpha > 0.0 and alpha < 1.0, "corpse fades after 5 s")
+
+	# Past 6 s (5 s lying + 1 s fade): expired and removed.
+	for i in range(10):
+		unit.tick(TICK)
+	check(unit not in w.unit_manager.units, "corpse removed after the fade")
 	check(w.unit_manager.get_units_in_radius(Vector3(30, 0, 30), 5.0).is_empty(),
-		"removed from the spatial hash")
+		"corpse removed from the spatial hash")
 	_free_world(w)
 
 
@@ -266,6 +297,8 @@ func test_strike_anims_in_atlas() -> void:
 			check(table[kind].has(anim), "%s has a %s animation" % [kind, anim])
 	check(table[&"firewarrior"].has(&"throw"), "firewarrior has a throw animation")
 	check(not table[&"brave"].has(&"throw"), "throw is firewarrior-only")
+	for kind: StringName in [&"brave", &"warrior", &"firewarrior"]:
+		check(table[kind].has(&"dead"), "%s has a dead (corpse) sprite" % kind)
 	var views: Array = table[&"brave"][&"punch"]
 	check(views.size() == 4, "punch exists in all four views")
 	check(int(views[0][1]) == 4, "punch alternates both fists (4 frames)")

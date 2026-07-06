@@ -921,6 +921,42 @@ Feuerball auf Distanz = exakt 7 Schaden + Abstand gehalten + throw-Anim,
 Fireball trifft genau einmal, Nahkampf-Fallback ohne Feuerbälle/Brave-Stärke,
 Strike-Anims im Atlas (alle Kinds, throw nur Feuerkrieger, Punch 4 Frames),
 `kind_to_anim`-Mapping + Anim nach Treffer). `--headless --quit` +
-`--quit-after 240` fehlerfrei. **Manuelle Prüfung durch Nutzer: ausstehend**
-(Schlag/Tritt/Schubs-Animationen sichtbar unterschiedlich; Feuerkrieger wirft
-aus Distanz sichtbare Feuerbälle und prügelt nur im Nahkampf).
+`--quit-after 240` fehlerfrei.
+
+**Nachbesserung (Nutzerfeedback, zweite Runde): Leichname statt Sofort-Despawn.**
+Besiegte Einheiten verschwinden nicht mehr sofort: Sie liegen **5 s** als
+Leichnam am Boden (`CORPSE_DURATION`), werden dann über **1 s** transparent
+(`CORPSE_FADE_DURATION`) und erst danach entfernt.
+- **`dead`-Sprite:** neue Animationsbasis in `PlaceholderSprites._anims_for`
+  (alle Kinds, 1 Frame) — bewusst **demolierte** Liegepose statt gerader
+  Linie: Torso/Hüfte versetzt geknickt, Kopf zur Seite gekippt, ein Arm und
+  ein angewinkeltes Bein ragen hoch, ein Bein ausgestreckt; unten am Canvas
+  (Quad-Ursprung = Füße → liegt am Boden). **Keine** Ausrüstungs-Overlays
+  auf der Leiche (`_decorate` wird für `dead` übersprungen — Schild/Helm
+  säßen auf Steh-Positionen).
+- **`Unit`:** `_die()` räumt zusätzlich Selektion/Route/Hop; `State.DEAD`
+  tickt jetzt `_tick_dead` (Timer; `corpse_expired`-Signal genau einmal via
+  `_corpse_done`), `corpse_alpha()` = 1.0 bis 5 s, dann linear → 0;
+  `_anim_base()` liefert für DEAD `&"dead"`.
+- **`UnitManager`:** `_on_unit_died` entfernt **nur noch** aus dem Tribe
+  (Population) — Registry/Hash/Renderer behalten die Leiche (alle Abfragen
+  überspringen DEAD: Kampf, Selektion, Separation, Zielsuche; **keine
+  Kollision**, Einheiten liefen ohnehin ohne Physik). Tote werden in der
+  zentralen Tick-Schleife mitgetickt (Verwesung). Erst `corpse_expired` →
+  `_on_corpse_expired` → `unregister` + `queue_free`.
+- **Fade ohne Transparenz-Pass:** `UnitRenderer`-Shader macht **Screen-Door-
+  Dithering** (Interleaved-Gradient-Noise-Schwelle auf `tint.a` mit
+  `discard`) statt echtem Alpha-Blending — die Einheiten-Sprites bleiben im
+  opaken Pipeline-Pfad (kein Sortierproblem). `_update_frame` schreibt das
+  abklingende `corpse_alpha()` in die Instanzfarbe (Cache `_render_alpha`
+  auf der Unit, **vor** dem Frame-Gleichheits-Early-Out, da der Leichen-Frame
+  statisch ist); Swap-Remove im Renderer setzt den Cache des verschobenen
+  Units zurück.
+
+**Verifikation (Stand nach allen Nachbesserungen):** Testsuite grün
+(**359 Tests**, +11: Leiche bleibt registriert, `dead`-Anim aktiv, 5 s voll
+sichtbar → Fade (0<α<1) → nach 6 s aus Registry und Spatial-Hash entfernt;
+`dead`-Sprite im Atlas für alle Kinds; Todes-Test auf Leichen-Semantik
+umgestellt). `--headless --import`/`--quit`/`--quit-after 240` fehlerfrei.
+**Manuelle Prüfung durch Nutzer: ausstehend** (Strike-Anims, Feuerkrieger-
+Fernkampf, liegende/ausblendende Leichen).

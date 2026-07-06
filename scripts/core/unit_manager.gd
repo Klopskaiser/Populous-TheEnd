@@ -60,10 +60,11 @@ func setup(p_terrain_data: TerrainData, p_nav_grid: NavGrid,
 ## the Node callback overhead alone would dominate with thousands of units),
 ## then runs the manager systems. Tests call unit.tick()/tick() directly.
 func _physics_process(delta: float) -> void:
-	# Iterate a snapshot: a unit dying mid-combat deregisters itself via the
-	# died signal (erasing from `units`), which would otherwise skip elements.
+	# Iterate a snapshot: an expiring corpse deregisters itself mid-loop via the
+	# corpse_expired signal (erasing from `units`), which would otherwise skip
+	# elements. Dead units still tick — their tick runs the corpse decay.
 	for unit in units.duplicate():
-		if is_instance_valid(unit) and unit.state != Unit.State.DEAD:
+		if is_instance_valid(unit):
 			unit.tick(delta)
 	tick(delta)
 
@@ -198,6 +199,7 @@ func register(unit: Unit) -> void:
 		return
 	units.append(unit)
 	unit.died.connect(_on_unit_died)
+	unit.corpse_expired.connect(_on_corpse_expired)
 	_update_hash_cell(unit)
 	if unit_renderer != null:
 		unit_renderer.register_unit(unit)
@@ -207,6 +209,8 @@ func unregister(unit: Unit) -> void:
 	units.erase(unit)
 	if unit.died.is_connected(_on_unit_died):
 		unit.died.disconnect(_on_unit_died)
+	if unit.corpse_expired.is_connected(_on_corpse_expired):
+		unit.corpse_expired.disconnect(_on_corpse_expired)
 	if _hash.has(unit._hash_cell):
 		_hash[unit._hash_cell].erase(unit)
 	unit._hash_cell = Vector2i(2147483647, 2147483647)
@@ -223,16 +227,21 @@ func remove_from_world(unit: Unit) -> void:
 
 
 func _on_unit_died(unit: Unit) -> void:
-	unregister(unit)
+	# The unit is NOT removed here: it stays registered (and rendered) as a
+	# lying corpse — combat, selection, separation and target scans all skip
+	# DEAD units. Only the tribe loses it immediately (population drops).
 	if unit.tribe != null:
 		unit.tribe.remove_unit(unit)
 	if is_inside_tree():
 		var events: Node = get_node_or_null("/root/Events")
 		if events != null:
 			events.unit_died.emit(unit)
-	# Free the dead node (deferred): it is already out of the registry, hash,
-	# renderer, tribe and (via _die) every combat slot, so no live reference
-	# survives to the next frame.
+
+
+## Corpse finished fading: now actually remove and free the node. It is out of
+## the registry, hash, renderer, tribe and (via _die) every combat slot.
+func _on_corpse_expired(unit: Unit) -> void:
+	unregister(unit)
 	unit.queue_free()
 
 

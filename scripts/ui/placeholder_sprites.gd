@@ -58,7 +58,7 @@ static var _cache: Dictionary[StringName, SpriteFrames] = {}
 static func _anims_for(kind: StringName) -> Array[StringName]:
 	var anims: Array[StringName] = [
 		&"idle", &"walk", &"attack", &"jump", &"carry", &"carry_walk",
-		&"punch", &"kick", &"shove"]
+		&"punch", &"kick", &"shove", &"dead"]
 	if kind in CASTER_KINDS:
 		anims.append(&"cast")
 	if kind == &"firewarrior":
@@ -192,6 +192,9 @@ static func _build_frames(kind: StringName, anim: StringName, view: StringName) 
 		&"throw":
 			images = [_frame_throw(paint_view, 0), _frame_throw(paint_view, 1)]
 			bobs = [0, 0]
+		&"dead":
+			images = [_frame_dead(paint_view)]
+			bobs = [0]
 		&"cast":
 			images = [_frame_stand(paint_view, 0), _frame_cast(paint_view)]
 			bobs = [0, 0]
@@ -204,8 +207,11 @@ static func _build_frames(kind: StringName, anim: StringName, view: StringName) 
 	if view == &"left":
 		for img in images:
 			img.flip_x()
-	for i in range(images.size()):
-		_decorate(images[i], kind, view, bobs[i])
+	# No accents on the corpse: the shield/helmet/hood positions assume a
+	# standing body and would float over the crumpled figure.
+	if anim != &"dead":
+		for i in range(images.size()):
+			_decorate(images[i], kind, view, bobs[i])
 	return images
 
 
@@ -507,6 +513,22 @@ static func _frame_throw(view: StringName, phase: int) -> Image:
 		else:
 			img.fill_rect(Rect2i(12, 6, 4, 2), C_LIMB)     # arm thrust forward
 	_draw_legs_stand(img)
+	return img
+
+
+## Defeated unit lying on the ground — deliberately crumpled, not laid out
+## straight: torso and hip are offset, the head is flopped to the side, one
+## arm and one bent leg poke up, one leg is stretched out. Drawn in the bottom
+## rows (the quad's origin is at the feet, so the corpse hugs the ground).
+static func _frame_dead(_view: StringName) -> Image:
+	var img: Image = _new_image()
+	img.fill_rect(Rect2i(1, 20, 5, 3), C_BODY)       # torso
+	img.fill_rect(Rect2i(6, 21, 4, 2), C_BODY)       # hip, offset (bent body)
+	img.fill_rect(Rect2i(11, 19, 4, 4), C_HEAD)      # head flopped to the side
+	img.fill_rect(Rect2i(12, 21, 1, 1), C_EYE)       # closed eye
+	img.fill_rect(Rect2i(0, 18, 2, 3), C_LIMB)       # arm sticking out
+	img.fill_rect(Rect2i(7, 18, 2, 3), C_LIMB)       # bent leg poking up
+	img.fill_rect(Rect2i(9, 23, 5, 1), C_LIMB)       # outstretched leg
 	return img
 
 
