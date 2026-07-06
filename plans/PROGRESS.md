@@ -1660,4 +1660,26 @@ Endscreens (Sieg/Niederlage → „Zurück zum Menü"), 4-Spieler-Match flüssig
   ohne Suizid, Stapel-Radius nah/fern, `training_kind_order`).
 - Sim-Läufe: 1v1 entschieden **innerhalb 20 min Spielzeit** mit mehreren
   Angriffs-/Verteidigungszyklen (vorher: TRAIN erst nach ~10 min, Sieg nach
-  ~25+); 4-Spieler-Lauf fehlerfrei.
+  ~25+); 4-Spieler-Lauf fehlerfrei (ein Stamm eliminiert, Match lief
+  korrekt weiter).
+
+**Nachbesserung 2 (Nutzerwunsch): Zeitraffer statt langer Sim-Läufe.**
+- **Zeitraffer im Spiel (Taste F10):** zykliert **1× → 10× → 100×**
+  (`Main._cycle_time_scale`, Input-Action `time_scale_toggle`).
+  `Engine.time_scale` + angehobenes `max_physics_steps_per_frame`
+  (`clampi(faktor*4, 8, 120)`), damit die Simulation (läuft in
+  `_physics_process`-Ticks) der skalierten Uhr wirklich folgt; der Deckel
+  hält Frames kurz genug, dass F10 zum Zurückschalten bedienbar bleibt.
+  Konsole meldet den aktiven Faktor. Jedes Match startet auf 1×
+  (`Main._ready`), das Hauptmenü setzt ebenfalls zurück.
+- **Ehrliche Grenze:** Bei 100× rechnet die Engine so viele
+  Simulationsschritte pro Frame wie die CPU hergibt — real erreicht werden
+  je nach Einheitenzahl **~10–30×** (Anzeige wird ruckelig, Simulation
+  bleibt korrekt). Ein echter 100×-Durchsatz ist nicht möglich, weil jeder
+  Tick gerechnet werden muss — auch headless laufen die Sim-Läufe bereits
+  am CPU-Limit (~4–5× Echtzeit bei großen Schlachten).
+- **Konsequenz für die Verifikation:** Die langen headless
+  KI-gegen-KI-Läufe (5–6 min Wall-Time) sind **kein
+  Standard-Verifikationsschritt mehr** — nur noch optional bei
+  KI-Umbauten. Standard bleibt die Testsuite (~10 s) + Ladecheck; das
+  Match-Verhalten testet der Nutzer manuell (jetzt mit F10-Zeitraffer).

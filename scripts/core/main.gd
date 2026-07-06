@@ -46,6 +46,12 @@ const DEBUG_WARRIOR_SHARE: float = 0.7
 ## Army anchor offset from the island centre (cells, along x).
 const DEBUG_ARMY_OFFSET: int = 26
 
+## Time-lapse steps for manual testing (key F10 cycles through them). The
+## engine simulates as many physics steps per frame as the CPU allows — at
+## 100x the game time effectively runs ~10-30x (CPU-capped, display gets
+## choppy), which skips the AI build-up phase in seconds.
+const TIME_SCALE_STEPS: Array[float] = [1.0, 10.0, 100.0]
+
 ## Debug: spawn a small marker at the terrain raycast hit on left-click, to
 ## verify the HeightMapShape3D offset (marker must sit exactly under the cursor).
 @export var debug_click_marker: bool = false
@@ -69,9 +75,12 @@ const DEBUG_ARMY_OFFSET: int = 26
 var _marker: MeshInstance3D = null
 var _stress_pending: Array[int] = []   # tribe ids of queued stress spawns
 var _stress_rng: RandomNumberGenerator = RandomNumberGenerator.new()
+var _time_scale_index: int = 0
 
 
 func _ready() -> void:
+	# Every match starts in real time (the time-lapse is per-session global).
+	Engine.time_scale = 1.0
 	var td: TerrainData = TerrainData.new()
 	td.generate_island(GameState.ISLAND_SEED)
 	GameState.terrain_data = td
@@ -460,10 +469,27 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("stress_test"):
 		_queue_stress_batch()
 		return
+	if event.is_action_pressed("time_scale_toggle"):
+		_cycle_time_scale()
+		return
 	if not debug_click_marker:
 		return
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		_place_debug_marker(event.position)
+
+
+# --- Time-lapse (F10) -----------------------------------------------------------
+
+## Cycles 1x -> 10x -> 100x game speed. max_physics_steps_per_frame is raised
+## along with it so the physics (and with it the whole simulation, which runs
+## in _physics_process ticks) actually keeps up with the scaled clock; the
+## cap keeps single frames short enough that input (F10 again!) stays usable.
+func _cycle_time_scale() -> void:
+	_time_scale_index = (_time_scale_index + 1) % TIME_SCALE_STEPS.size()
+	var factor: float = TIME_SCALE_STEPS[_time_scale_index]
+	Engine.time_scale = factor
+	Engine.max_physics_steps_per_frame = clampi(int(factor) * 4, 8, 120)
+	print("Zeitraffer: %dx" % int(factor))
 
 
 # --- Stress test (F9) ----------------------------------------------------------

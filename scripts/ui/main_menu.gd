@@ -19,6 +19,8 @@ var _map_option: OptionButton = null
 
 
 func _ready() -> void:
+	# Leaving a match with an active time-lapse (F10) must not speed up the menu.
+	Engine.time_scale = 1.0
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_STOP
 
