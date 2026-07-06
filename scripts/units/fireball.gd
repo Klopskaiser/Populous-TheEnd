@@ -4,58 +4,52 @@ class_name Fireball extends Node3D
 ## accumulator and the hand-sprite toggle follow in phase 5c).
 ##
 ## No physics: flies in tick(delta) (driven by the UnitManager's projectile
-## list; tests tick it manually) toward the target with a light arc, homing on
-## the target's current position while it lives. The hit is a distance check
-## and applies damage exactly once, then `done` flips and the manager frees it.
+## list; tests tick it manually) STRAIGHT at the target, homing on its current
+## position while it lives. The hit is a distance check and applies damage
+## exactly once, then `done` flips and the manager frees it. A hard lifetime
+## cap guarantees the ball can never linger (it fizzles without damage).
 ## Shooter/target references are untyped — either may be freed mid-flight.
 
 const SPEED: float = 12.0
 const HIT_RANGE: float = 0.5
-const ARC_HEIGHT: float = 1.2
 ## Aim at chest height rather than the feet.
 const TARGET_HEIGHT: float = 0.8
+## Safety net: after this many seconds the ball fizzles no matter what.
+const MAX_LIFETIME: float = 3.0
 
 var shooter = null   # untyped: may be freed mid-flight
 var target = null    # untyped: may be freed mid-flight
 var done: bool = false
 
 var _dest: Vector3 = Vector3.ZERO
-var _start: Vector3 = Vector3.ZERO
+var _age: float = 0.0
 
 
 func setup(p_shooter, p_target, from: Vector3) -> void:
 	shooter = p_shooter
 	target = p_target
 	position = from
-	_start = from
 	_dest = p_target.position + Vector3(0.0, TARGET_HEIGHT, 0.0)
 
 
 func tick(delta: float) -> void:
 	if done:
 		return
+	_age += delta
 	if _target_alive():
 		_dest = target.position + Vector3(0.0, TARGET_HEIGHT, 0.0)
-	var flat: Vector2 = Vector2(position.x, position.z)
-	var flat_dest: Vector2 = Vector2(_dest.x, _dest.z)
-	var next: Vector2 = flat.move_toward(flat_dest, SPEED * delta)
-	position.x = next.x
-	position.z = next.y
-	# Light arc: Y interpolates start->dest with a sine bump on top.
-	var total: float = Vector2(_start.x, _start.z).distance_to(flat_dest)
-	var t: float = 1.0
-	if total > 0.001:
-		t = clampf(1.0 - next.distance_to(flat_dest) / total, 0.0, 1.0)
-	position.y = lerpf(_start.y, _dest.y, t) + sin(t * PI) * ARC_HEIGHT
-	if next.distance_to(flat_dest) <= HIT_RANGE:
+	position = position.move_toward(_dest, SPEED * delta)
+	if position.distance_to(_dest) <= HIT_RANGE or _age >= MAX_LIFETIME:
 		_impact()
 
 
-## Applies the damage exactly once (only if the target is still alive —
-## a dead/freed target just lets the ball fizzle at its last position).
+## Applies the damage exactly once — only if the target is still alive and the
+## ball actually reached it (a lifetime fizzle or a dead/freed target does no
+## damage).
 func _impact() -> void:
 	done = true
-	if _target_alive():
+	if _target_alive() and position.distance_to(
+			target.position + Vector3(0.0, TARGET_HEIGHT, 0.0)) <= HIT_RANGE * 2.0:
 		target.take_damage(Unit.FIREBALL_DAMAGE, shooter)
 
 

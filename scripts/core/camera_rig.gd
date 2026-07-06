@@ -92,6 +92,10 @@ func _handle_pan(delta: float) -> void:
 func _edge_scroll_vector() -> Vector2:
 	if not edge_scroll_enabled:
 		return Vector2.ZERO
+	# While a selection box is being dragged, the camera must hold still —
+	# panning shifts the screen-space box off the units mid-drag.
+	if SelectionManager.drag_active:
+		return Vector2.ZERO
 	# No window in headless mode -> skip.
 	if DisplayServer.get_name() == "headless":
 		return Vector2.ZERO

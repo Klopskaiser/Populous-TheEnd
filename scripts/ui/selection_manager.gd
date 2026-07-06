@@ -13,12 +13,27 @@ class_name SelectionManager extends Control
 ##   Shift+right-click appends a waypoint. Key P toggles patrol.
 ## - While the BuildMenu is in placement mode, all mouse input is ignored here.
 
-const CLICK_RADIUS_PX: float = 24.0
 const DRAG_THRESHOLD_PX: float = 6.0
 const RAY_LENGTH: float = 1000.0
 
+## Approximate world size of the unit sprites (UnitRenderer quad: 16x24 px at
+## 0.06 m/px). Picking tests the sprite's projected SCREEN RECT, so it stays
+## reliable at every zoom level (a fixed pixel radius around one anchor point
+## missed clicks on the head/feet when zoomed in).
+const SPRITE_HEIGHT_M: float = 1.44
+const SPRITE_ASPECT: float = 16.0 / 24.0
+## Extra pixels around the sprite rect that still count as a hit.
+const PICK_MARGIN_PX: float = 4.0
+## Minimum on-screen pick size (px) so tiny far-away sprites stay clickable.
+const MIN_PICK_SIZE_PX: float = 14.0
+
 const BUILDING_MASK: int = 2   # building click bodies
 const TERRAIN_MASK: int = 1
+
+## True while the user is holding a (potential) box-select drag. The CameraRig
+## suspends edge scrolling then: the camera panning mid-drag shifted the
+## screen-space box off the units and produced empty/blinking selections.
+static var drag_active: bool = false
 
 var player_tribe_id: int = 0
 var selected: Array[Unit] = []
@@ -47,9 +62,20 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE  # only draws; input via _unhandled_input
 
 
+func _process(_delta: float) -> void:
+	# Safety net: if the release event was swallowed elsewhere (e.g. dropped
+	# over the sidebar panel), end the drag as soon as the button is up so
+	# drag_active cannot stick and keep the edge scroll suspended.
+	if _dragging and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		_dragging = false
+		drag_active = false
+		queue_redraw()
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if _build_menu != null and _build_menu.is_active():
 		_dragging = false
+		drag_active = false
 		return
 	if event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event
@@ -60,10 +86,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			if mb.pressed:
 				_dragging = true
+				drag_active = true
 				_drag_start = mb.position
 				_drag_current = mb.position
 			elif _dragging:
 				_dragging = false
+				drag_active = false
 				if _drag_start.distance_to(mb.position) < DRAG_THRESHOLD_PX:
 					_click_select(mb.position)
 				else:
@@ -115,18 +143,7 @@ func _click_select(screen_pos: Vector2) -> void:
 			if b != null and b.tribe_id == player_tribe_id:
 				_select_building(b)
 				return
-	var best: Unit = null
-	var best_dist: float = CLICK_RADIUS_PX
-	for unit in _unit_manager.get_units_of_tribe(player_tribe_id):
-		if unit.state == Unit.State.DEAD:
-			continue
-		var world: Vector3 = unit.global_position + Vector3(0.0, 0.7, 0.0)
-		if camera.is_position_behind(world):
-			continue
-		var dist: float = camera.unproject_position(world).distance_to(screen_pos)
-		if dist < best_dist:
-			best_dist = dist
-			best = unit
+	var best: Unit = _pick_unit_at(screen_pos, camera, player_tribe_id)
 	if best != null:
 		_set_selection([best])
 	else:
@@ -141,12 +158,58 @@ func _box_select(rect: Rect2) -> void:
 	for unit in _unit_manager.get_units_of_tribe(player_tribe_id):
 		if unit.state == Unit.State.DEAD:
 			continue
-		var world: Vector3 = unit.global_position + Vector3(0.0, 0.7, 0.0)
-		if camera.is_position_behind(world):
-			continue
-		if rect.has_point(camera.unproject_position(world)):
+		var sprite: Rect2 = _unit_screen_rect(unit, camera)
+		if sprite.size.y > 0.0 and rect.intersects(sprite):
 			picked.append(unit)
+	# An empty box is almost always a slipped drag (or the camera moved) —
+	# keep the current selection; deselecting stays on click-on-ground.
+	if picked.is_empty():
+		return
 	_set_selection(picked)
+
+
+## Screen rect the unit's billboard sprite covers (feet->head projected,
+## sprite aspect for the width, clamped to a minimum clickable size).
+## Zero-height rect when the unit is behind the camera.
+func _unit_screen_rect(unit: Unit, camera: Camera3D) -> Rect2:
+	var feet: Vector3 = unit.global_position
+	var head: Vector3 = feet + Vector3(0.0, SPRITE_HEIGHT_M, 0.0)
+	if camera.is_position_behind(feet) or camera.is_position_behind(head):
+		return Rect2()
+	var p_feet: Vector2 = camera.unproject_position(feet)
+	var p_head: Vector2 = camera.unproject_position(head)
+	var height: float = maxf(absf(p_feet.y - p_head.y), MIN_PICK_SIZE_PX)
+	var half_w: float = maxf(height * SPRITE_ASPECT, MIN_PICK_SIZE_PX) * 0.5
+	var cx: float = (p_feet.x + p_head.x) * 0.5
+	var top: float = minf(p_feet.y, p_head.y)
+	return Rect2(cx - half_w, top, half_w * 2.0, height)
+
+
+## Nearest unit of `tribe_id` (or any ENEMY when negative) whose sprite rect
+## contains the point; ties resolved by distance to the rect centre.
+func _pick_unit_at(screen_pos: Vector2, camera: Camera3D, tribe_id: int) -> Unit:
+	if _unit_manager == null:
+		return null
+	var best: Unit = null
+	var best_dist: float = INF
+	for unit in _unit_manager.units:
+		if unit.state == Unit.State.DEAD:
+			continue
+		if tribe_id >= 0:
+			if unit.tribe_id != tribe_id:
+				continue
+		elif unit.tribe_id == player_tribe_id:
+			continue
+		var sprite: Rect2 = _unit_screen_rect(unit, camera)
+		if sprite.size.y <= 0.0:
+			continue
+		if not sprite.grow(PICK_MARGIN_PX).has_point(screen_pos):
+			continue
+		var dist: float = sprite.get_center().distance_to(screen_pos)
+		if dist < best_dist:
+			best_dist = dist
+			best = unit
+	return best
 
 
 ## Public selection setter (used by the sidebar's "select idle braves" button).
@@ -269,24 +332,10 @@ func _command_move(screen_pos: Vector2, queue_up: bool) -> void:
 		selected[i].order_move(target + TribeCommands.formation_offset(i), queue_up)
 
 
-## Nearest enemy (non-player) unit within the click radius of the cursor, or
-## null. Screen-space pick (units have no collision bodies).
+## Enemy (non-player) unit under the cursor, or null. Same sprite-rect pick as
+## the selection (units have no collision bodies).
 func _enemy_under_cursor(screen_pos: Vector2, camera: Camera3D) -> Unit:
-	if _unit_manager == null:
-		return null
-	var best: Unit = null
-	var best_dist: float = CLICK_RADIUS_PX
-	for unit in _unit_manager.units:
-		if unit.tribe_id == player_tribe_id or unit.state == Unit.State.DEAD:
-			continue
-		var world: Vector3 = unit.global_position + Vector3(0.0, 0.7, 0.0)
-		if camera.is_position_behind(world):
-			continue
-		var dist: float = camera.unproject_position(world).distance_to(screen_pos)
-		if dist < best_dist:
-			best_dist = dist
-			best = unit
-	return best
+	return _pick_unit_at(screen_pos, camera, -1)
 
 
 ## Tree -> gather, own construction site -> build, own reincarnation site ->

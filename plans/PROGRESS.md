@@ -953,10 +953,45 @@ Leichnam am Boden (`CORPSE_DURATION`), werden dann über **1 s** transparent
   statisch ist); Swap-Remove im Renderer setzt den Cache des verschobenen
   Units zurück.
 
-**Verifikation (Stand nach allen Nachbesserungen):** Testsuite grün
+**Verifikation (nach zweiter Runde):** Testsuite grün
 (**359 Tests**, +11: Leiche bleibt registriert, `dead`-Anim aktiv, 5 s voll
 sichtbar → Fade (0<α<1) → nach 6 s aus Registry und Spatial-Hash entfernt;
 `dead`-Sprite im Atlas für alle Kinds; Todes-Test auf Leichen-Semantik
 umgestellt). `--headless --import`/`--quit`/`--quit-after 240` fehlerfrei.
-**Manuelle Prüfung durch Nutzer: ausstehend** (Strike-Anims, Feuerkrieger-
-Fernkampf, liegende/ausblendende Leichen).
+
+**Nachbesserung (Nutzerfeedback, dritte Runde): Feuerball gerade + Selektionsbug.**
+- **Feuerball fliegt gerade:** Sinus-Bogen entfernt (`fireball.gd`) — direkter
+  `move_toward` auf Brusthöhe des Ziels (weiter homing). Gegen das beobachtete
+  „Hängenbleiben": harte Lebenszeit `MAX_LIFETIME = 3 s` (danach verpuffen
+  ohne Schaden); `_impact` macht Schaden nur noch, wenn der Ball das Ziel
+  wirklich erreicht hat (Distanz ≤ 2×HIT_RANGE), nicht beim Lifetime-Fizzle.
+- **Selektionsbug (Ursachenanalyse):** (a) Klick-Auswahl testete einen festen
+  **24-px-Radius** um einen Punkt auf ~0,7 m Höhe — bei nahem Zoom ist das
+  Sprite deutlich größer als 24 px → Klicks auf Kopf/Füße gingen daneben.
+  (b) **Edge-Scroll während des Box-Drags:** Der Auswahlrahmen ist Screen-
+  Space; zieht man Richtung Fensterrand (< 8 px), pannt die Kamera **während**
+  des Aufziehens, beim Loslassen liegen die Einheiten nicht mehr im Rahmen →
+  leere Auswahl, die die bestehende Selektion löschte („Ringe blitzen kurz
+  auf, dann abgewählt").
+- **Fixes (`selection_manager.gd`, `camera_rig.gd`):**
+  - Picking gegen das **projizierte Sprite-Rechteck** (`_unit_screen_rect`:
+    Füße→Kopf unprojiziert, Breite über Sprite-Seitenverhältnis 16:24,
+    Mindestgröße 14 px für ferne Winzlinge; +4 px Toleranz) — zoomunabhängig.
+    Gemeinsamer Helfer `_pick_unit_at(pos, camera, tribe_id)` (eigener Stamm
+    bzw. `-1` = Feind) für Klick-Auswahl **und** Rechtsklick-Angriffsziel;
+    Box-Select testet `rect.intersects(sprite_rect)` statt Punkt-im-Rahmen.
+  - **`SelectionManager.drag_active`** (static): solange die linke Taste für
+    einen (potenziellen) Box-Drag gehalten wird, liefert
+    `CameraRig._edge_scroll_vector()` Null — Kamera steht beim Aufziehen.
+    Sicherheitsnetz in `_process`: wird das Release woanders geschluckt
+    (Sidebar-Panel), endet der Drag, sobald die Taste oben ist.
+  - **Leere Box wählt nicht mehr ab** (fast immer ein verrutschter Drag);
+    Abwählen bleibt über Klick auf leeren Boden.
+- Klick-/Box-Verhalten ist kamera-/screen-abhängig → **nur manuell testbar**
+  (Test-Strategie Overview); Fireball-Tests decken die gerade Flugbahn ab.
+
+**Verifikation (Stand nach allen Nachbesserungen):** Testsuite grün
+(**359 Tests**), `--headless --quit` + `--quit-after 240` fehlerfrei.
+**Manuelle Prüfung durch Nutzer: ausstehend** (gerade Feuerbälle, kein
+Hängenbleiben; zuverlässige Klick-/Box-Auswahl auf allen Zoomstufen, auch
+am Bildschirmrand).
