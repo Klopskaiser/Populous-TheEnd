@@ -2816,3 +2816,37 @@ umgestellt. **1317 Tests, 0 Fehler**, `--headless --quit` und `--quit-after 400`
 Angriff auf Gebäude, Schamanin immun gegen Krieger/Feuerkrieger (nur Zauber/
 Katapult), KI ohne Zauber.
 
+**Nachbesserung 2 nach Nutzertest (2026-07-07):**
+1. **Schamanin-Schutz war falsch — zurückgebaut:** `is_targetable_by_units()` /
+   `_can_attack_protected()` komplett entfernt (Schamanin wieder durch **alle**
+   angreifbar). Stattdessen ist jetzt der **Reinkarnationsplatz**
+   (`Building.is_assailable_by_units()` Basis true, `ReincarnationSite` false)
+   gegen **Einheiten**-Angriffe geschützt: Gate in `_scan_for_enemy_building`,
+   `order_attack_building`, `Fireball._impact_building` und
+   `SelectionManager._dispatch_enemy_building` (Rechtsklick fällt auf Move →
+   Katapult beschießt ihn dann von selbst). **Zauber** (`apply_destruction_stages`)
+   und **Katapult** (`SiegeShot`) treffen ihn weiter (SiegeEngine-`order_attack_building`
+   ohne Gate).
+2. **Nahkampf-Zerstörung schwerer + Sturm-Kampfzyklus:** Demoliert wird nur bei
+   **freiem Eingang**. Neu am Gebäude: `ENTRANCE_CLEAR_RADIUS` (6 m),
+   `nearest_entrance_threat()`/`has_entrance_threat()` (lebende Besitzer-Einheit
+   ≤6 m am Eingang, `SIT`/Konversion zählt **nicht**), `has_occupants()` +
+   `begin_storm()` (wirft Insassen **vor** dem Betreten einmalig lebend aus).
+   `admit_raider` nimmt nur bei freiem Eingang + Platz auf; `_tick_raid` wirft bei
+   Bedrohung **alle Demolierer wieder raus** (`_eject_raiders_to_fight` →
+   `exit_building_as_raider(pos, self)` → Einheit nimmt das Gebäude wieder als
+   Ziel auf und kämpft). Einheit: `_storm_building` bekämpft zuerst
+   `nearest_entrance_threat` (`_engage_assault_foe`, `attack_building` bleibt →
+   nach dem Kampf setzt `_retarget_or_idle` den Sturm fort), dann `begin_storm`,
+   dann `admit_raider`. **Prediger** override `_engage_assault_foe` (konvertiert
+   Verteidiger; immune → Nahkampf) und setzt nach der Konversion den Sturm fort
+   (`_refresh_conversion` → `State.ATTACK` bei gültigem `attack_building`).
+   `has_occupants()`-Overrides in TrainingBuilding/Forester/Workshop.
+
+Tests: `test_building_assault.gd` überarbeitet (Sturm-Auswurf jetzt via
+`begin_storm()`; Schamanin-Immunitäts-Tests ersetzt durch **Schamanin wieder
+angreifbar** + **Reinkarnationsplatz** un-assailable/Fireball-no-op/per Zauber
+zerstörbar + **Eingang-räumen/Demolierer-Auswurf**-Zyklus inkl. SIT-Ausnahme).
+**1323 Tests, 0 Fehler**, `--headless --quit` und `--quit-after 400` fehlerfrei.
+**Manuelle Prüfung ausstehend.**
+

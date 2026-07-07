@@ -67,6 +67,12 @@ func has_free_slot() -> bool:
 	return is_usable() and occupants.size() < WORKER_SLOTS
 
 
+## Housed workers are storm occupants (thrown out when the storm begins).
+func has_occupants() -> bool:
+	_prune_occupants()
+	return not occupants.is_empty()
+
+
 ## Reserves a slot for a brave heading here (called from Brave.order_forester).
 func reserve_slot(brave: Brave) -> bool:
 	_prune_occupants()

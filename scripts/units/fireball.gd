@@ -92,6 +92,8 @@ func _impact_building() -> void:
 	done = true
 	if not _building_alive() or position.distance_to(_dest) > BUILDING_HIT_RANGE * 1.5:
 		return
+	if not target_building.is_assailable_by_units():
+		return   # e.g. the reincarnation site — only spells/catapults harm it
 	target_building.take_damage(Firewarrior.BUILDING_FIRE_DAMAGE, Building.DMG_RANGED)
 	if is_inside_tree():
 		var events: Node = get_node_or_null("/root/Events")

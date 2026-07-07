@@ -361,21 +361,6 @@ func is_targetable() -> bool:
 	return true
 
 
-## False for units that conventional melee/ranged attackers must ignore (the
-## shaman: she can only be harmed by SPELLS and CATAPULTS — see
-## _can_attack_protected). Distinct from is_targetable(): spells and the siege
-## engine still hit her, but warriors/firewarriors/preachers do not.
-func is_targetable_by_units() -> bool:
-	return true
-
-
-## True for attackers that may still hit an is_targetable_by_units()==false unit
-## (the siege engine — catapults can shell the shaman). Everyone else respects
-## the protection.
-func _can_attack_protected() -> bool:
-	return false
-
-
 ## Drawn via the central sprite MultiMesh (UnitRenderer). The siege engine
 ## returns false and builds its own 3D model instead.
 func renders_as_sprite() -> bool:
@@ -1438,8 +1423,6 @@ func _begin_attack(enemy: Unit) -> void:
 		return   # a sitting (pacified) unit cannot be sent into a fight
 	if enemy == null or not is_instance_valid(enemy) or enemy.state == State.DEAD:
 		return
-	if not enemy.is_targetable_by_units() and not _can_attack_protected():
-		return   # the shaman cannot be attacked in melee/ranged (only spells/catapults)
 	if attack_target == enemy:
 		if state != State.ATTACK:
 			_set_state(State.ATTACK)
@@ -1474,6 +1457,8 @@ func order_attack_building(building) -> void:
 		return
 	if building.tribe_id == tribe_id or not can_take_orders():
 		return
+	if not building.is_assailable_by_units():
+		return   # e.g. the reincarnation site — units cannot assault it
 	_on_combat_interrupt()
 	_end_attack()
 	waypoint_queue.clear()
@@ -1519,6 +1504,8 @@ func _scan_for_enemy_building(radius: float):
 	for b in building_manager.buildings:
 		if not is_instance_valid(b) or b.tribe_id == tribe_id or b.health <= 0:
 			continue
+		if not b.is_assailable_by_units():
+			continue   # e.g. the reincarnation site — only spells/catapults harm it
 		# Melee raiders skip a building with no room left (all raider slots taken)
 		# so overflow units do not keep re-targeting a full building; firewarriors
 		# bombard from range and are unaffected by the raider cap.
@@ -1560,27 +1547,44 @@ func _assault_building(delta: float) -> void:
 		_storm_building(attack_building, delta)
 
 
-## Melee raider: walk to the entrance and enter as a raider (removed from the
-## world, demolishing inside). Admission happens once the unit reaches the
-## building (entrance OR anywhere within its interact range — so a swarm does
-## not funnel through one door cell and pile up). When the building is FULL the
-## unit gives up and goes idle / resumes its attack-move (there is nothing left
-## to attack here — it must not stand around in the walk animation).
+## Melee raider. #2 (harder to raze): the entrance must be CLEAR of enemies
+## before anyone demolishes — a live defender / ejected occupant near the door
+## is fought first (preacher: converted). Only when clear does the unit enter as
+## a raider (removed from the world, demolishing inside). Admission happens once
+## the unit reaches the building (entrance OR within its interact range — so a
+## swarm does not funnel through one door cell). When the building is FULL the
+## unit gives up (idle / resume attack-move) instead of standing around.
 func _storm_building(building, delta: float) -> void:
+	var foe: Unit = building.nearest_entrance_threat()
+	if foe != null:
+		_engage_assault_foe(foe)   # clear the doorway first (keeps attack_building)
+		return
 	var entrance: Vector3 = building.entrance_world()
 	var reached: bool = _flat_dist(position, entrance) <= MELEE_RANGE \
 		or _flat_dist(position, building.center_world()) <= building.interact_range()
-	if reached:
+	if not reached:
 		_in_melee = false
-		if building.admit_raider(self):
-			return   # removed from the world; now demolishing inside
-		# Full: stop assaulting — retarget (another building / enemy) or idle.
+		_approach(entrance, delta)
+		_face_point(entrance)
+		return
+	if not building.has_raider_room():
 		_clear_building_target()
 		_retarget_or_idle()
 		return
+	building.begin_storm()   # throw occupants out (once) -> they become threats
+	foe = building.nearest_entrance_threat()
+	if foe != null:
+		_engage_assault_foe(foe)   # fight the just-ejected occupants before entering
+		return
 	_in_melee = false
-	_approach(entrance, delta)
-	_face_point(entrance)
+	building.admit_raider(self)   # entrance clear + room -> demolish inside
+
+
+## Engages a threat encountered while assaulting a building. attack_building is
+## preserved, so once the threat is cleared the assault resumes (via
+## _retarget_or_idle). The preacher overrides this to CONVERT convertible foes.
+func _engage_assault_foe(foe: Unit) -> void:
+	_begin_attack(foe)
 
 
 ## Ranged building bombardment (firewarrior override). Base units do not bombard
@@ -1600,13 +1604,20 @@ func enter_building_as_raider(building) -> void:
 	_set_state(State.RAID)
 
 
-## The building collapsed (or ejected the raiders): step back out at `pos`,
-## alive and idle (the building re-registered the unit into the world).
-func exit_building_as_raider(pos: Vector3) -> void:
+## Steps back out at `pos` (the building re-registered the unit). When a valid
+## enemy `building` is given (ejected to fight a threat), the unit RESUMES the
+## assault (fight the threat, then re-enter when clear); otherwise — the building
+## collapsed — it goes idle.
+func exit_building_as_raider(pos: Vector3, building = null) -> void:
 	raiding_building = null
 	position = pos
 	_snap_to_ground()
-	_set_state(State.IDLE)
+	if building != null and is_instance_valid(building) and building.health > 0 \
+			and building.tribe_id != tribe_id and building.is_assailable_by_units():
+		attack_building = building
+		_set_state(State.ATTACK)
+	else:
+		_set_state(State.IDLE)
 
 
 ## Clears our attack and frees the slot we held on the target.
@@ -1677,8 +1688,6 @@ func _maybe_retaliate(attacker) -> void:
 		return
 	if attacker.tribe_id == tribe_id:
 		return   # friendly fire (e.g. a rescue fireball) is not retaliated
-	if not attacker.is_targetable_by_units() and not _can_attack_protected():
-		return   # never retaliate against the shaman in melee (only spells/catapults)
 	if attack_target != null and is_instance_valid(attack_target):
 		return
 	if state == State.IDLE or state == State.CREW:
@@ -1716,8 +1725,6 @@ func _scan_for_enemy(radius: float) -> Unit:
 			continue   # sitting converts are no threat (and shall keep sitting)
 		if not u.is_targetable():
 			continue   # siege engines: attackers go for the crew instead
-		if not u.is_targetable_by_units() and not _can_attack_protected():
-			continue   # the shaman: only spells / catapults may harm her
 		var d: float = Vector2(u.position.x, u.position.z).distance_to(flat)
 		# Commitment count dominates the score so free enemies are picked first
 		# (1v1 preference), even before anyone is in striking range.

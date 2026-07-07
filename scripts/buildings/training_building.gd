@@ -42,6 +42,11 @@ func housing_capacity() -> int:
 	return 0
 
 
+## A trainee inside is a storm occupant (thrown out when the storm begins).
+func has_occupants() -> bool:
+	return is_instance_valid(trainee)
+
+
 # --- Enrolment ------------------------------------------------------------------
 
 ## Registers a brave at the back of the training queue (called by

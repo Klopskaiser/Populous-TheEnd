@@ -32,6 +32,12 @@ func display_name() -> String:
 	return "Reinkarnationsplatz"
 
 
+## The reincarnation circle cannot be attacked by ground units (melee storm /
+## firewarrior fire) — only spells and catapults can damage it.
+func is_assailable_by_units() -> bool:
+	return false
+
+
 ## Remaining respawn wait for UI countdowns; -1 while the shaman lives.
 func respawn_remaining() -> float:
 	return respawn_timer if respawn_pending else -1.0

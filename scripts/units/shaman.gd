@@ -43,13 +43,6 @@ func is_panic_immune() -> bool:
 	return true
 
 
-## The shaman cannot be attacked by conventional melee or ranged units — only
-## spells and catapults can harm her (she still takes area/spell damage and
-## dies normally to those; melee units / firewarriors simply ignore her).
-func is_targetable_by_units() -> bool:
-	return false
-
-
 # --- Casting ---------------------------------------------------------------------
 
 ## Accepts a cast order (from TribeCommands.cast_spell). Interrupts movement

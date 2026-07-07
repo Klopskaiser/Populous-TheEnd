@@ -59,6 +59,11 @@ const RAID_DPS_PER_RAIDER: float = 6.0
 ## Wobble visual while raiders demolish (± this rotation, HZ below).
 const RAID_WOBBLE_AMPLITUDE: float = 0.035   # ~2 degrees
 const RAID_WOBBLE_HZ: float = 0.8
+## A melee storm can only demolish once the entrance is clear of live enemies
+## (phase 7g nachbesserung): defenders/ejected occupants within this radius of
+## the entrance pull the demolishers back out to fight (SIT = in conversion is
+## not counted). Makes buildings meaningfully harder to raze by melee.
+const ENTRANCE_CLEAR_RADIUS: float = 6.0
 
 var tribe_id: int = 0
 var tribe: Tribe = null
@@ -105,6 +110,9 @@ var raiders: Array = []
 var _raid_damage_frac: float = 0.0
 ## Wobble animation clock while raiders are inside (in-game _process only).
 var _wobble_time: float = 0.0
+## True once the storm ejected this building's occupants (idempotent guard so
+## they are only thrown out once per storm).
+var _storm_started: bool = false
 
 ## Selection state (buildings are selectable: left-click; right-click then sets
 ## the rally point). `hovered` is set by the SelectionManager on mouse-over.
@@ -406,6 +414,14 @@ func _eject_unit(u, killed: bool) -> void:
 
 # --- Melee raiders / storm (phase 7g) --------------------------------------------
 
+## Whether ground units may assault this building (melee storm + firewarrior
+## fireballs). False for the reincarnation site: only SPELLS and CATAPULTS may
+## damage it — those go through apply_destruction_stages()/take_damage() and are
+## NOT gated by this flag.
+func is_assailable_by_units() -> bool:
+	return true
+
+
 ## Max melee raiders that may storm this building at once (watchtower: 5).
 func max_melee_raiders() -> int:
 	return MAX_MELEE_RAIDERS
@@ -418,24 +434,63 @@ func has_raider_room() -> bool:
 	return raiders.size() < max_melee_raiders()
 
 
-## Lets an attacker enter as a melee raider: it is removed from the world (like
-## a trainee) and starts demolishing from the inside. Returns false when the
-## building is already full — the caller then waits outside. The FIRST raider
-## entering begins the storm: the occupants are pushed out alive.
+## True when this building houses occupants that a storm should throw out
+## (training trainee, forester/workshop crew). Base: none.
+func has_occupants() -> bool:
+	return false
+
+
+## Begins the storm: throws the housed occupants out ALIVE (once) so the
+## attackers must fight them at the entrance before they can demolish. Called by
+## the first attacker that reaches the building; idempotent.
+func begin_storm() -> void:
+	if _storm_started:
+		return
+	_storm_started = true
+	if has_occupants():
+		eject_occupants(false)
+
+
+## Nearest LIVE enemy of the building owner (defender / ejected occupant) within
+## ENTRANCE_CLEAR_RADIUS of the entrance that is not in a conversion (SIT). Null
+## when the entrance is clear. Drives the "clear before you demolish" rule.
+func nearest_entrance_threat() -> Unit:
+	if unit_manager == null:
+		return null
+	var entrance: Vector3 = entrance_world()
+	var flat: Vector2 = Vector2(entrance.x, entrance.z)
+	var best: Unit = null
+	var best_d: float = ENTRANCE_CLEAR_RADIUS
+	for u in unit_manager.get_units_in_radius(entrance, ENTRANCE_CLEAR_RADIUS):
+		if u.tribe_id != tribe_id or u.state == Unit.State.DEAD or u.state == Unit.State.SIT:
+			continue
+		var d: float = Vector2(u.position.x, u.position.z).distance_to(flat)
+		if d < best_d:
+			best_d = d
+			best = u
+	return best
+
+
+func has_entrance_threat() -> bool:
+	return nearest_entrance_threat() != null
+
+
+## Lets an attacker enter as a melee raider: removed from the world (like a
+## trainee), demolishing from the inside. Refused when the building is full OR
+## the entrance is not clear of enemies (the storm must clear the doorway first).
 func admit_raider(unit) -> bool:
 	_prune_raiders()
 	if unit in raiders:
 		return true
 	if raiders.size() >= max_melee_raiders():
 		return false
-	var first: bool = raiders.is_empty()
+	if has_entrance_threat():
+		return false   # clear the entrance before anyone slips inside
 	raiders.append(unit)
 	if unit_manager != null:
 		unit_manager.remove_from_world(unit)
 	unit.enter_building_as_raider(self)
-	if first:
-		eject_occupants(false)   # storm begins: occupants shoved out alive
-		set_process(true)        # start the wobble (in-game only)
+	set_process(true)   # start the wobble (in-game only)
 	return true
 
 
@@ -449,18 +504,34 @@ func _prune_raiders() -> void:
 
 
 ## Raiders demolish from the inside: HP damage scales with the raider count
-## (more demolishers = faster teardown). Occupants were ejected at storm start.
+## (more demolishers = faster teardown). If a live enemy shows up at the
+## entrance (a defender, or the just-ejected occupants), the demolishers come
+## back OUT to fight it first — demolition only continues once it is clear.
 func _tick_raid(delta: float) -> void:
 	if raiders.is_empty():
 		return
 	_prune_raiders()
 	if raiders.is_empty():
 		return
+	if has_entrance_threat():
+		_eject_raiders_to_fight()
+		return
 	_raid_damage_frac += RAID_DPS_PER_RAIDER * float(raiders.size()) * delta
 	var whole: int = int(_raid_damage_frac)
 	if whole > 0:
 		_raid_damage_frac -= float(whole)
-		take_damage(whole)   # generic: occupants already out, no re-eject
+		take_damage(whole)   # generic: no re-eject (occupants already handled)
+
+
+## Sends all demolishers back out (alive) to fight an entrance threat. They keep
+## this building as their target and resume the assault once the way is clear.
+func _eject_raiders_to_fight() -> void:
+	for r in raiders:
+		if is_instance_valid(r) and r.state != Unit.State.DEAD:
+			if unit_manager != null:
+				unit_manager.register(r)
+			r.exit_building_as_raider(edge_spawn_position(), self)
+	raiders.clear()
 
 
 ## Releases the demolishers back into the world at the perimeter (alive, IDLE)

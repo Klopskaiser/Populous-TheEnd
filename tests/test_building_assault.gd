@@ -12,6 +12,7 @@ const HUT_SCENE: PackedScene = preload("res://scenes/buildings/hut.tscn")
 const WARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/warrior_camp.tscn")
 const FORESTER_SCENE: PackedScene = preload("res://scenes/buildings/forester.tscn")
 const WORKSHOP_SCENE: PackedScene = preload("res://scenes/buildings/workshop.tscn")
+const SITE_SCENE: PackedScene = preload("res://scenes/buildings/reincarnation_site.tscn")
 const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
 const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
 const FIREWARRIOR_SCENE: PackedScene = preload("res://scenes/units/firewarrior.tscn")
@@ -142,16 +143,17 @@ func test_storm_ejects_trainee_alive() -> void:
 	var camp: TrainingBuilding = _camp_with_trainee(w)
 	check(camp.trainee != null, "a brave is being trained inside the camp")
 	var trainee: Brave = camp.trainee
-	var raider: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 1, Vector3(44, 0, 44))
-	var ok: bool = camp.admit_raider(raider)
-	check(ok, "raider admitted, storm begins")
+	camp.begin_storm()   # the storm begins: occupants are thrown out first
 	check(camp.trainee == null, "bay cleared as the storm begins")
 	check(is_instance_valid(trainee) and trainee.state != Unit.State.DEAD,
 		"trainee ejected ALIVE")
 	check(trainee.state != Unit.State.TRAIN, "trainee no longer training")
 	check(trainee in w.unit_manager.units, "ejected trainee back in the world")
-	check(raider in camp.raiders and raider.state == Unit.State.RAID,
-		"raider is inside demolishing")
+	# The ejected occupant guards the doorway: no raider may slip in yet (#2).
+	check(camp.has_entrance_threat(), "ejected occupant counts as an entrance threat")
+	var raider: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 1, Vector3(44, 0, 44))
+	check(not camp.admit_raider(raider),
+		"cannot enter to demolish while the ejected occupant guards the entrance")
 	_free_world(w)
 
 
@@ -189,8 +191,7 @@ func test_ranged_after_melee_storm_no_double_eject() -> void:
 	var w: Dictionary = _make_world()
 	var camp: TrainingBuilding = _camp_with_trainee(w)
 	var trainee: Brave = camp.trainee
-	var raider: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 1, Vector3(44, 0, 44))
-	camp.admit_raider(raider)   # storm ejects the trainee alive
+	camp.begin_storm()   # storm ejects the trainee alive
 	check(camp.trainee == null and trainee.state != Unit.State.DEAD,
 		"trainee ejected alive at storm start")
 	# Ranged fire now crosses stage 1 — but the occupants are already out, so
@@ -359,36 +360,76 @@ func test_overflow_raiders_go_idle_when_full() -> void:
 	_free_world(w)
 
 
-# --- Shaman protection: only spells / catapults may harm her -------------------
+# --- Shaman is attackable by everyone again -----------------------------------
 
-func test_shaman_immune_to_melee_and_ranged_units() -> void:
+func test_shaman_attackable_by_units() -> void:
 	var w: Dictionary = _make_world()
 	var shaman: Unit = w.unit_manager.spawn_unit(SHAMAN_SCENE, 1, Vector3(21, 0, 20))
 	var warrior: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, Vector3(20, 0, 20))
-	var fire: Unit = w.unit_manager.spawn_unit(FIREWARRIOR_SCENE, 0, Vector3(19, 0, 20))
-	check(not shaman.is_targetable_by_units(), "shaman is not targetable by units")
 	warrior._engage_on_sight(0.3)
-	check(warrior.attack_target == null and warrior.state != Unit.State.ATTACK,
-		"warrior does not auto-target the enemy shaman")
-	fire._engage_on_sight(0.3)
-	check(fire.attack_target == null, "firewarrior does not auto-target the enemy shaman")
-	warrior.order_attack(shaman)
-	check(warrior.attack_target == null, "warrior cannot be ordered to melee the shaman")
-	# A brave hit by the shaman does not retaliate against her.
-	var brave: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 0, Vector3(22, 0, 20))
-	brave.take_damage(5, shaman)
-	check(brave.attack_target == null, "a struck unit does not retaliate against the shaman")
-	# Catapults DO bypass the protection.
-	check(warrior._can_attack_protected() == false, "ordinary units respect the protection")
+	check(warrior.attack_target == shaman, "warrior auto-targets the enemy shaman")
+	var fire: Unit = w.unit_manager.spawn_unit(FIREWARRIOR_SCENE, 0, Vector3(19, 0, 20))
+	fire.order_attack(shaman)
+	check(fire.attack_target == shaman, "firewarrior can be ordered onto the shaman")
 	_free_world(w)
 
 
-func test_spells_still_kill_the_shaman() -> void:
+# --- Reincarnation site: un-assailable by units (spells/catapults only) --------
+
+func test_reincarnation_site_not_assailable_by_units() -> void:
 	var w: Dictionary = _make_world()
-	var shaman: Unit = w.unit_manager.spawn_unit(SHAMAN_SCENE, 1, Vector3(21, 0, 20))
-	# Spells / catapults apply damage directly (not via the unit-targeting scan).
-	shaman.take_damage(9999)
-	check(shaman.state == Unit.State.DEAD, "direct spell/catapult damage still kills the shaman")
+	var site: Building = w.bm.place(SITE_SCENE, w.tribe1, Vector2i(40, 40), 0, true)
+	check(not site.is_assailable_by_units(), "reincarnation site is not assailable by units")
+	# Idle-scan skips it; explicit order rejects it.
+	var warrior: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, Vector3(41, 0, 44))
+	warrior._engage_on_sight(0.3)
+	check(warrior.attack_building == null, "units do not auto-target the reincarnation site")
+	warrior.order_attack_building(site)
+	check(warrior.attack_building == null, "units cannot be ordered to assault it")
+	# A firewarrior fireball does no damage to it.
+	var hp: int = site.health
+	var ball: Fireball = Fireball.new()
+	ball.setup_building(null, site, site.center_world())
+	for i in range(5):
+		ball.tick(TICK)
+		if ball.done:
+			break
+	check(site.health == hp, "firewarrior fire does not damage the reincarnation site")
+	ball.free()
+	_free_world(w)
+
+
+func test_reincarnation_site_destroyed_by_spell_or_catapult() -> void:
+	var w: Dictionary = _make_world()
+	var site: Building = w.bm.place(SITE_SCENE, w.tribe1, Vector2i(40, 40), 0, true)
+	# Spells / catapults go through apply_destruction_stages / take_damage and
+	# ARE allowed to damage the site.
+	site.apply_destruction_stages(2)   # e.g. lightning
+	check(site.destruction_stage() >= 2, "a spell damages the reincarnation site")
+	site.take_damage(site.health)      # e.g. catapult / further spell
+	check(site.health <= 0, "spells/catapults can destroy the reincarnation site")
+	_free_world(w)
+
+
+# --- Storm cycle: clear the entrance, then demolish ---------------------------
+
+func test_defender_blocks_and_ejects_demolishers() -> void:
+	var w: Dictionary = _make_world()
+	var hut: Building = w.bm.place(HUT_SCENE, w.tribe1, Vector2i(40, 40), 0, true)
+	# Two raiders demolishing inside.
+	for i in range(2):
+		hut.admit_raider(w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, Vector3(41 + i, 0, 41)))
+	check(hut.raiders.size() == 2, "two raiders inside")
+	# A defender appears at the entrance -> the demolishers are ejected to fight.
+	var defender: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 1, hut.entrance_world())
+	check(hut.has_entrance_threat(), "defender at the entrance is a threat")
+	var hp: int = hut.health
+	w.bm.tick(0.5)
+	check(hut.raiders.is_empty(), "demolishers ejected to fight the defender")
+	check(hut.health == hp, "no demolition while the entrance is contested")
+	# A defender stuck in a conversion (SIT) does NOT block demolition.
+	defender._set_state(Unit.State.SIT)
+	check(not hut.has_entrance_threat(), "a converting (SIT) defender is neutralized")
 	_free_world(w)
 
 
@@ -407,8 +448,7 @@ func test_storm_ejects_forester_workers_alive() -> void:
 	var w: Dictionary = _make_world()
 	var f: Forester = _staffed_forester(w)
 	check(f.occupants.size() == Forester.WORKER_SLOTS, "forester fully staffed")
-	var raider: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, Vector3(44, 0, 44))
-	f.admit_raider(raider)   # storm begins -> occupants ejected alive
+	f.begin_storm()   # storm begins -> occupants ejected alive
 	check(f.occupants.is_empty(), "all forester workers ejected on the storm")
 	var alive: int = 0
 	for u in w.unit_manager.units:
@@ -439,7 +479,6 @@ func test_storm_ejects_workshop_crew_alive() -> void:
 		b.order_workshop(ws)
 		ws.admit_worker(b)
 	check(ws.occupants.size() == Workshop.WORKER_SLOTS, "workshop fully staffed")
-	var raider: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, Vector3(44, 0, 44))
-	ws.admit_raider(raider)
+	ws.begin_storm()
 	check(ws.occupants.is_empty(), "workshop crew ejected on the storm")
 	_free_world(w)

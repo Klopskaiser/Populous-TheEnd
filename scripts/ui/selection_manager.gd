@@ -511,6 +511,10 @@ func _dispatch_enemy_building(hit: Dictionary) -> bool:
 	var building: Building = node.get_meta("building") as Building
 	if building == null or building.tribe_id == player_tribe_id or building.health <= 0:
 		return false
+	if not building.is_assailable_by_units():
+		# e.g. reincarnation site: units cannot storm it. Fall through to a plain
+		# move order (a selected catapult auto-bombards it once in range).
+		return false
 	_tribe_commands.order_attack_building(selected, building)
 	return true
 

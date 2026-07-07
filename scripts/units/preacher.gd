@@ -78,6 +78,17 @@ func order_attack(enemy: Unit) -> void:
 	super.order_attack(enemy)
 
 
+## While assaulting a building, clear the entrance by CONVERTING convertible
+## defenders (enemy priests / shamans are fought in melee instead). The building
+## stays the target, so the assault resumes once the doorway is clear.
+func _engage_assault_foe(foe: Unit) -> void:
+	if foe != null and is_instance_valid(foe) and not foe.is_conversion_immune():
+		_convert_target = foe
+		_set_state(State.CAST)
+	else:
+		_begin_attack(foe)
+
+
 ## CAST: channel on everything convertible in range; walk toward the focus
 ## target while nobody is in range; duel enemy preachers that come close.
 func _tick_convert(delta: float) -> void:
@@ -142,7 +153,12 @@ func _refresh_conversion() -> void:
 		_convert_target = nearest
 		return
 	_convert_target = null
-	_set_state(State.IDLE)
+	# Nothing left to convert: resume a building assault if one is pending
+	# (cleared the entrance defenders), otherwise go idle.
+	if _building_target_valid():
+		_set_state(State.ATTACK)
+	else:
+		_set_state(State.IDLE)
 
 
 ## Cast frames only while standing and channeling; walk while approaching.
