@@ -78,6 +78,8 @@ var _crew_prune_timer: float = 0.0
 var _vehicle_burn: float = 0.0
 ## The destroyed wreck sinks into the ground (burn/water death).
 var _sinking: bool = false
+## Height the tornado currently lifts the whole vehicle by (0 = grounded).
+var _tornado_lift: float = 0.0
 ## Own 3D model parts (in-game only, built in _ready).
 var _model: Node3D = null
 var _arm: Node3D = null
@@ -168,6 +170,32 @@ func ignite(_source_pos: Vector3) -> void:
 
 func is_burning() -> bool:
 	return _vehicle_burn > 0.0
+
+
+## Tornado proximity: the vortex lifts the whole vehicle off the ground (the
+## crew is sucked up separately as normal units). Set each tornado tick.
+func set_tornado_lift(h: float) -> void:
+	_tornado_lift = maxf(h, 0.0)
+
+
+## The tornado tore the catapult apart (phase 7f, user request): it releases
+## its crew and is destroyed leaving NOTHING itself — the vortex spawns the
+## two wood chunks that scatter like any whirled-up wood.
+func burst_into_wood() -> void:
+	if state == State.DEAD:
+		return
+	_tornado_lift = 0.0
+	for m in crew.duplicate():
+		if is_instance_valid(m):
+			m.leave_crew()
+	crew.clear()
+	attack_building = null
+	_vehicle_burn = 0.0
+	_show_flame(false)
+	if _model != null:
+		_model.visible = false
+	health = 0
+	_die()
 
 
 ## Flooded ground (terrain spells): the wreck goes under — crew released.
@@ -752,6 +780,9 @@ func _tick_visual(delta: float) -> void:
 		return
 	if _sinking and state == State.DEAD:
 		position.y -= SINK_SPEED * delta
+	elif _tornado_lift > 0.0 and terrain_data != null:
+		# Whirled up by the tornado: hover above the ground until it bursts.
+		position.y = terrain_data.get_height(position.x, position.z) + _tornado_lift
 	if facing.length_squared() > 0.000001:
 		rotation.y = atan2(facing.x, facing.z)
 	if _flame != null and _flame.visible:

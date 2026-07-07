@@ -28,6 +28,17 @@ const FLING_SPEED: float = 12.0      # horizontal release speed
 const FLING_UP: float = 3.5
 const FALL_DAMAGE: int = 30          # 1/2 brave life, applied on landing
 
+# --- Siege engines (phase 7f) ------------------------------------------------------
+## A catapult too heavy to whirl up like a unit is instead LIFTED in place
+## while the vortex lingers within SIEGE_NEAR_RADIUS; after SIEGE_BURST_TIME
+## continuous seconds it bursts into SIEGE_WOOD_CHUNKS wood chunks (1 wood
+## each) that then scatter like any whirled-up wood. Its crew is sucked up
+## separately as normal units. Leaving the radius resets the timer.
+const SIEGE_NEAR_RADIUS: float = 2.0
+const SIEGE_BURST_TIME: float = 2.0
+const SIEGE_LIFT_HEIGHT: float = 4.0
+const SIEGE_WOOD_CHUNKS: int = 2
+
 var done: bool = false
 var tribe_id: int = 0
 var unit_manager: UnitManager = null
@@ -42,6 +53,8 @@ var _stage_timer: float = 0.0
 var _pickup_timer: float = 0.0
 ## Rider entries: {unit, time: float, angle: float}.
 var _riders: Array = []
+## Per siege engine: seconds it has been continuously within SIEGE_NEAR_RADIUS.
+var _siege_timers: Dictionary = {}
 
 
 func setup(p_tribe_id: int, at: Vector3, p_unit_manager: UnitManager,
@@ -72,6 +85,7 @@ func tick(delta: float) -> void:
 		_pick_up_units()
 		_shred_trees_and_scatter_piles()
 	_tick_riders(delta)
+	_affect_siege_engines(delta)
 
 
 ## `_drift` is a unit DIRECTION; the actual speed ramps with age: 1 s parked
@@ -180,6 +194,45 @@ func _tick_riders(delta: float) -> void:
 		else:
 			kept.append(r)
 	_riders = kept
+
+
+## Lifts catapults lingering in the near radius and, after SIEGE_BURST_TIME,
+## bursts them into wood chunks. Engines that drift out settle back down and
+## lose their timer (the 2 s must be continuous). Runs every tick with the
+## real delta so the timing is exact.
+func _affect_siege_engines(delta: float) -> void:
+	if unit_manager == null:
+		return
+	var near_now: Dictionary = {}
+	for u in unit_manager.get_units_in_radius(position, SIEGE_NEAR_RADIUS):
+		if not (u is SiegeEngine) or u.state == Unit.State.DEAD:
+			continue
+		near_now[u] = true
+		var t: float = float(_siege_timers.get(u, 0.0)) + delta
+		_siege_timers[u] = t
+		var lift: float = clampf(t / SIEGE_BURST_TIME, 0.0, 1.0) * SIEGE_LIFT_HEIGHT
+		(u as SiegeEngine).set_tornado_lift(lift)
+		if t >= SIEGE_BURST_TIME:
+			_burst_siege(u as SiegeEngine)
+			_siege_timers.erase(u)
+	# Engines that left the radius drop back down and reset their timer.
+	for engine in _siege_timers.keys():
+		if not near_now.has(engine):
+			if is_instance_valid(engine):
+				(engine as SiegeEngine).set_tornado_lift(0.0)
+			_siege_timers.erase(engine)
+
+
+## Bursts a lifted catapult: it releases its crew and is destroyed, and two
+## 1-wood chunks are whirled up from its spot (they fling/settle like any
+## tornado wood debris).
+func _burst_siege(engine: SiegeEngine) -> void:
+	if not is_instance_valid(engine):
+		return
+	var at: Vector3 = engine.position
+	engine.burst_into_wood()
+	for i in range(SIEGE_WOOD_CHUNKS):
+		_spawn_debris(at, 1)
 
 
 func _fling(u: Unit, angle: float) -> void:

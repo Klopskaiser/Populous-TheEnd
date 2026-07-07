@@ -2643,3 +2643,21 @@ Schrittweite ≈ Katapult-Tempo, Formation gehalten),
 Bemannung). **1227 Tests, 0 Fehler**, Ladecheck fehlerfrei. Manuelle Prüfung
 erneut ausstehend.
 
+**Erweiterung 4 nach Nutzerwunsch (2026-07-07) — Tornado wirkt aufs Katapult:**
+Bisher saugte der Tornado nur die **Crew** ein (normale Einheiten); das
+Katapult selbst war wurf-immun. Neu (`tornado_vortex.gd` +
+`siege_engine.gd`): Ist der Tornado ≥ **2 s durchgehend** innerhalb
+`SIEGE_NEAR_RADIUS` (**2 m**) eines Katapults, wird das Gerät währenddessen
+sichtbar **angehoben** (`SiegeEngine.set_tornado_lift`, hover bis 4 m) und
+**zerplatzt** dann: `SiegeEngine.burst_into_wood()` gibt die Crew frei und
+zerstört das Gerät (ohne eigenes Trümmer-Mesh), der Vortex spawnt **zwei
+1-Holz-Trümmer** (`TornadoDebris`), die wie jedes hochgewirbelte Holz
+weggeschleudert werden und als 1-Holz-Stapel liegen bleiben. Verlässt der
+Tornado den 2-m-Radius vor Ablauf, wird der Timer zurückgesetzt und das
+Katapult sinkt wieder ab (die 2 s müssen durchgehend sein). Umgesetzt in
+`TornadoVortex._affect_siege_engines`/`_burst_siege` (pro Tick mit echtem
+delta). Tests: `test_tornado_lifts_and_bursts_catapult` (Lift < 2 s, Burst ≥ 2 s,
+zwei 1-Holz-Chunks → 2 Holz am Boden), `test_tornado_near_reset_spares_catapult`
+(unterbrochene Nähe akkumuliert nicht). **1235 Tests, 0 Fehler**, Ladecheck
+fehlerfrei. Manuelle Prüfung ausstehend.
+

@@ -790,6 +790,59 @@ func test_engine_bursts_on_terrain_rip() -> void:
 	_free_world(w)
 
 
+func test_tornado_lifts_and_bursts_catapult() -> void:
+	var w: Dictionary = _make_world()
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(60, 60))) as SiegeEngine
+	_board_crew(w, engine)
+	var vortex: TornadoVortex = TornadoVortex.new()
+	vortex.setup(0, engine.position, w.unit_manager, w.td, w.building_manager)
+	# Under 2 s near: lifted but intact.
+	vortex._affect_siege_engines(1.0)
+	check(engine.state != Unit.State.DEAD, "under 2 s the catapult is only lifted")
+	check(engine._tornado_lift > 0.0, "the tornado lifts the catapult while near")
+	# Cross the 2 s threshold: it bursts into two 1-wood chunks.
+	vortex._affect_siege_engines(1.5)
+	check(engine.state == Unit.State.DEAD, "after 2 s near the catapult bursts")
+	var chunks: int = 0
+	for p in w.unit_manager.projectiles:
+		if p is TornadoDebris and p.wood == 1:
+			chunks += 1
+	check(chunks == 2, "the burst leaves two 1-wood chunks flying")
+	# They fling and settle into 2 wood total.
+	var t: int = 0
+	while not w.unit_manager.projectiles.is_empty() and t < 400:
+		w.unit_manager.tick(0.1)
+		t += 1
+	check(w.wood_pile_manager.total_wood() == 2,
+		"the two chunks settle into 2 wood on the ground")
+	vortex.free()
+	_free_world(w)
+
+
+## Drifting out of the near radius before 2 s resets the timer (the vehicle
+## settles back down, no burst).
+func test_tornado_near_reset_spares_catapult() -> void:
+	var w: Dictionary = _make_world()
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(60, 60))) as SiegeEngine
+	_board_crew(w, engine)
+	var vortex: TornadoVortex = TornadoVortex.new()
+	vortex.setup(0, engine.position, w.unit_manager, w.td, w.building_manager)
+	vortex._affect_siege_engines(1.5)   # 1.5 s near
+	check(engine.state != Unit.State.DEAD, "not yet burst")
+	# Tornado drifts away, then comes back briefly — the timer restarts.
+	vortex.position += Vector3(20.0, 0.0, 0.0)
+	vortex._affect_siege_engines(0.2)
+	check(engine._tornado_lift == 0.0, "out of range: the catapult settles back down")
+	vortex.position = engine.position
+	vortex._affect_siege_engines(1.5)   # only 1.5 s again -> still alive
+	check(engine.state != Unit.State.DEAD,
+		"a broken-off approach does not accumulate — no burst under 2 s continuous")
+	vortex.free()
+	_free_world(w)
+
+
 # --- Selection rules (crew selects the catapult) ------------------------------------
 
 func test_crew_selection_maps_to_engine() -> void:
