@@ -229,19 +229,37 @@ func production_progress() -> float:
 	return clampf(1.0 - _train_timer / training_time, 0.0, 1.0)
 
 
-## Damaged into stage >= 1: training stops — the trainee steps back out into
-## the world (alive, back in the registry) and the queued braves are released.
-func _on_disabled() -> void:
+## Damaged into stage >= 1 (or stormed): training stops. The trainee is ejected
+## — pushed out alive for spells / the melee storm (`killed` = false), or flung
+## out and killed at the door when RANGED fire alone reached stage 1
+## (`killed` = true). The queued braves are always released.
+func eject_occupants(killed: bool) -> void:
 	if is_instance_valid(trainee):
-		trainee.position = edge_spawn_position()
+		var t: Brave = trainee
+		trainee = null
+		t.position = edge_spawn_position()
 		if unit_manager != null:
-			unit_manager.register(trainee)
-		trainee.cancel_training()
+			unit_manager.register(t)
+		t.cancel_training()
+		if killed:
+			t.take_damage(t.health + 1000)   # flung out and dies at the door
+		else:
+			_shove_out(t)   # pushed out alive with a mini tumble
 	trainee = null
 	for brave in incoming:
 		if is_instance_valid(brave):
 			brave.cancel_training()
 	incoming.clear()
+
+
+## Shoves an ejected trainee away from the building into a short tumble.
+func _shove_out(t: Brave) -> void:
+	var dir: Vector3 = t.position - center_world()
+	dir.y = 0.0
+	if dir.length_squared() < 0.000001:
+		dir = Vector3(1.0, 0.0, 0.0)
+	t.displace(dir, Unit.SHOVE_DISPLACE)
+	t.start_roll(dir, Unit.MINI_ROLL_DURATION)
 
 
 ## Frees the trainee and releases the queued braves when destroyed.

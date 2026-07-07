@@ -2676,3 +2676,113 @@ MOVE-Zustand und lösen `_interrupt_tasks` beim Retaliieren nicht aus). Test
 `test_worker_order_clears_stale_move_waypoint`. **1238 Tests, 0 Fehler**,
 Ladecheck fehlerfrei.
 
+---
+
+## Phase 7g — Gebäudezerstörung durch Einheiten (Sturmangriff) (umgesetzt)
+
+Einheiten können gegnerische Gebäude ohne Zauber schleifen: **Nahkampfsturm**
+(durch den Eingang eindringen, Insassen auswerfen, von innen demolieren) und
+**Feuerkrieger-Fernbeschuss** (halb so effektiv). Gebäude sind **immer die
+niedrigste Zielpriorität** (erst Feindeinheiten, dann Gebäude).
+
+**Gebaut:**
+- `scripts/buildings/building.gd` — **Raider-Registry** (`raiders: Array`,
+  untypisiert wie Trainee/Crew): `max_melee_raiders()` (Basis
+  `MAX_MELEE_RAIDERS = 15`, Turm überschreibt in 7h), `admit_raider(unit)`
+  (voll → false; nimmt bis Limit, `remove_from_world` + `enter_building_as_raider`;
+  **erster Raider** startet den Sturm → `eject_occupants(false)` + Wackel-Visual),
+  `_prune_raiders`, `_tick_raid(delta)` (`RAID_DPS_PER_RAIDER = 6` HP/s ×
+  Raiderzahl, in `tick()` außerhalb des `is_usable`-Gates), `_release_raiders`
+  (bei `destroy()` treten alle Demolierer **lebend/IDLE** am Rand aus, nach
+  Footprint-Freigabe). **Auswurf-Hooks:** `eject_occupants(killed)` (Basis leer),
+  `_on_disabled()` → `eject_occupants(false)` (lebender Auswurf für Zauber).
+  **Schadensquelle:** `take_damage(amount, source = DMG_GENERIC/DMG_RANGED)` —
+  überschreitet **Fernkampf** allein Stufe 1 (`raiders.is_empty()`), sterben die
+  Insassen (`eject_occupants(true)`); Zauber/Nahkampf werfen lebend aus. Produktion
+  pausiert, solange Raider drin sind (`_tick_active`-Gate um `raiders.is_empty()`).
+  **Wackel-Visual:** `_process` schwingt `_mesh_root` (Rotation z/x, Sinus ~0,8 Hz,
+  ±2°) solange Raider drin sind (nur in-game); `_process` unterscheidet jetzt
+  Sink-Phase (`_destroyed`) vs. Wackeln.
+- `scripts/buildings/training_building.gd` — `_on_disabled`-Override durch
+  `eject_occupants(killed)` ersetzt: `killed = true` → Trainee wird am Auswurfpunkt
+  registriert und **getötet** (`take_damage(health+1000)` → Leiche, Pop −1);
+  `killed = false` → registriert, `cancel_training`, **rausgeschubst + Mini-Roll**
+  (`_shove_out`). Warteschlange wird immer freigegeben. `destroy()` (Trainee-Kill
+  bei Kollaps) unverändert.
+- `scripts/units/unit.gd` — neuer **`State.RAID`** (angehängt; Demolierer sind aus
+  der Welt, nicht angreifbar/selektierbar) + Felder `attack_building`,
+  `building_manager` (beide **jetzt in der Basis**, von SiegeEngine geerbt),
+  `raiding_building`. Neu: `order_attack_building(b)` (expliziter Befehl, alle
+  Typen, räumt Route), `_begin_attack_building(b)` (Auto-Scan, behält Route),
+  `_building_target_valid`, `_clear_building_target` (in `order_move`/`_die`/
+  `convert_to_tribe`), `_try_engage_building`, `_scan_for_enemy_building`
+  (Feindgebäude im Aggro-Radius, Kandidaten-Cap), `_tick_no_unit_target`
+  (kein Einheitenziel → Gebäude-Assault, Einheiten bleiben Vorrang),
+  `_assault_building` (ranged → `_bombard_building`, sonst `_storm_building`),
+  `_storm_building` (zum Eingang laufen → `admit_raider`, voll → `_wait_near_point`),
+  `_bombard_building` (Basis no-op), `_wait_near_point`, `enter/exit_building_as_raider`.
+  `_engage_on_sight`/`_retarget_or_idle` bekommen den Gebäude-Fallback (niedrigste
+  Priorität); `_tick_attack` routet fehlendes Einheitenziel über
+  `_tick_no_unit_target`.
+- `scripts/units/firewarrior.gd` — `_tick_attack` fällt bei fehlendem
+  Einheitenziel auf `_tick_no_unit_target` (Gebäude-Assault); `_bombard_building`
+  (in `FIRE_RANGE` stehen, `throw`-Anim, alle `FIRE_COOLDOWN` ein Feuerball aufs
+  Gebäude) + `_throw_fireball_at_building`. `BUILDING_FIRE_DAMAGE = 5` (≈ halber
+  Nahkampf-DPS: 5/1,5 s ≈ 3,3 vs. 6 HP/s).
+- `scripts/units/preacher.gd` — `_engage_on_sight`-Fallback `_try_engage_building`
+  (Prediger stürmt als Nahkämpfer, wenn nichts zu bekehren/duelieren ist).
+- `scripts/units/fireball.gd` — `target_building` + `setup_building` + `_tick_building`
+  + `_impact_building` (`building.take_damage(BUILDING_FIRE_DAMAGE, DMG_RANGED)`,
+  `BUILDING_HIT_RANGE = 1,6`).
+- `scripts/units/siege_engine.gd` — doppelte `attack_building`/`building_manager`
+  entfernt (jetzt geerbt); Siege-Logik unverändert (eigenes `_tick_attack`/
+  `order_attack_building`/`_retarget_or_idle`).
+- `scripts/core/tribe_commands.gd` — `order_attack_building(units, building)`
+  wirkt jetzt auf **alle** Einheitentypen (nicht mehr nur SiegeEngine); eigenes
+  Gebäude/eigener Stamm wird übersprungen.
+- `scripts/ui/selection_manager.gd` — Rechtsklick auf Feindgebäude schickt die
+  **ganze** Selektion in `order_attack_building` (kein Siege/Escort-Split mehr).
+- `scripts/core/building_manager.gd` — `tick` iteriert `buildings.duplicate()`
+  (ein per Raid mitten im Tick zerstörtes Gebäude meldet sich sonst mitten in
+  der Iteration ab).
+
+**KI:** keine Heuristik-Änderung nötig — die KI greift bereits per **Attack-Move**
+(`order_move(..., aggressive = true)`, `ai_controller.gd:348/397`) an; der neue
+Gebäude-Scan-Fallback in `_engage_on_sight` lässt die Wellen erst Verteidiger,
+dann die Basis schleifen (400-Frame-Headless-Lauf fehlerfrei).
+
+**Dokumentierte Auslegungen:** Demolierer im Gebäude sind aus der Welt (nicht
+angreifbar/selektierbar, kein Gegensturm in V1). Braves stürmen nur auf expliziten
+Befehl (nicht combatant → kein Auto-Scan). Idle-Combatants (Krieger/Feuerkrieger/
+Prediger) und Attack-Move zählen Feindgebäude im Aggro-Radius als niedrigste
+Priorität.
+
+**Tests:** `tests/test_building_assault.gd` (neu, 60 Checks): Raider-Cap (20 →
+15 drin/5 warten), DPS-Skalierung (2× Raider = 2× Schaden), Demolierung bis
+Kollaps + lebender Raider-Austritt + Footprint frei, Sturm wirft Trainee lebend
+aus, Fernkampf-Stufe-1 tötet Insassen / Zauber-Stufe-1 wirft lebend aus / kein
+Doppel-Auswurf nach Nahkampfsturm, Feuerball-Gebäudeschaden = halber DPS,
+Prioritäts-Tests (Einheit vor Gebäude, einzelnes Gebäude wird angegriffen, Brave
+ignoriert Gebäude), Order-Routing (alle Typen, eigenes Gebäude abgelehnt),
+Move-Order bricht Assault ab, Voll-Pipeline (befohlene Krieger stürmen und
+schleifen). `test_siege.gd`-Fall „order_attack_building" auf das neue
+Alle-Typen-Verhalten umgestellt.
+
+**Erkenntnisse/Stolpersteine:**
+- `attack_building`/`building_manager` mussten von SiegeEngine in die Basis
+  wandern (Doppel-Deklaration wäre ein Parse-Fehler); Siege-Overrides bleiben
+  unberührt, da sie `_tick_attack`/`order_attack_building` komplett ersetzen.
+- Raider werden im **UnitManager-Unit-Loop** (der `units.duplicate()` iteriert)
+  über `remove_from_world` aus der Welt genommen — mitten im Tick sicher.
+- `BuildingManager.tick` musste auf `buildings.duplicate()` umgestellt werden, weil
+  Raid-Schaden ein Gebäude in seinem eigenen Tick zerstören kann.
+
+**Verifikation:** Testsuite grün (**1298 Tests, 0 Fehler**), `--headless --import`,
+`--headless --quit` und `--headless --quit-after 400` fehlerfrei.
+**Manuelle Prüfung ausstehend** (durch Nutzer, siehe Plan 7g §Manuelle Prüfung):
+Trupp per Rechtsklick auf Feindhütte → Nahkämpfer verschwinden im Eingang,
+Gebäude wackelt/nimmt Stufen, Trainees purzeln raus und werden verprügelt, bei
+Zerstörung kommen die eigenen Leute raus; Feuerkrieger allein → Stufe 1 → Insassen
+fliegen tot heraus; Attack-Move durch eine Basis (erst Verteidiger, dann Gebäude);
+KI schleift die Spielerbasis auch ohne Zauber.
+

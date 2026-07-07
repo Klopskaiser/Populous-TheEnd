@@ -16,6 +16,10 @@ const FIRE_COOLDOWN: float = 1.5
 ## fire on threats out to here — including an enemy shooting a neighbour — and
 ## then closes to fire range, instead of only reacting to enemies right on top.
 const RANGED_AGGRO: float = 13.0
+## Building damage per fireball hit (phase 7g). Roughly HALF the melee raid
+## DPS-equivalent: 5 HP / FIRE_COOLDOWN (1.5 s) ≈ 3.3 HP/s vs. a raider's
+## 6 HP/s (Building.RAID_DPS_PER_RAIDER). Balance in phase 8.
+const BUILDING_FIRE_DAMAGE: int = 5
 
 
 func _init() -> void:
@@ -45,7 +49,7 @@ func aggro_radius() -> float:
 ## medium range, close in beyond FIRE_RANGE.
 func _tick_attack(delta: float) -> void:
 	if not _target_valid(attack_target) or attack_target.tribe_id == tribe_id:
-		_retarget_or_idle()
+		_tick_no_unit_target(delta)   # falls back to a building assault (7g)
 		return
 	if _breaks_off_vs_sitting(attack_target):
 		return
@@ -142,5 +146,35 @@ func _throw_fireball(target: Unit) -> void:
 		return
 	var ball: Fireball = Fireball.new()
 	ball.setup(self, target, position + Vector3(0.0, 1.1, 0.0))
+	path_service.register_projectile(ball)
+	_emit_combat_hit(&"throw")
+
+
+## Building bombardment (phase 7g): stand in FIRE_RANGE and lob fireballs at the
+## building (half the melee raid DPS-equivalent); close in when out of range.
+func _bombard_building(building, delta: float) -> void:
+	var center: Vector3 = building.center_world()
+	if _flat_dist(position, center) > FIRE_RANGE:
+		_in_melee = false
+		_approach(center, delta)
+		_face_point(center)
+		return
+	if _has_path():
+		_clear_path()
+	_in_melee = true
+	attack_anim = &"throw"
+	_face_point(center)
+	_attack_cooldown -= delta
+	if _attack_cooldown <= 0.0:
+		_attack_cooldown = FIRE_COOLDOWN
+		anim_start_ms = Time.get_ticks_msec()
+		_throw_fireball_at_building(building)
+
+
+func _throw_fireball_at_building(building) -> void:
+	if path_service == null:
+		return
+	var ball: Fireball = Fireball.new()
+	ball.setup_building(self, building, position + Vector3(0.0, 1.1, 0.0))
 	path_service.register_projectile(ball)
 	_emit_combat_hit(&"throw")

@@ -44,6 +44,22 @@ const FOUNDATION_SMOOTH_RATE: float = 0.3
 ## Placeholder damage visual: dark "broken out" chunks, 2 shown per stage.
 const MAX_DAMAGE_HOLES: int = 6
 
+# --- Building assault (phase 7g) ----------------------------------------------
+## Damage source tags for take_damage: ranged fire (firewarrior) that reaches
+## stage 1 on its own KILLS the trapped occupants, everything else (spells,
+## melee demolition) ejects them alive.
+const DMG_GENERIC: int = 0
+const DMG_RANGED: int = 1
+## Max melee raiders that can storm this building at once (the watchtower in
+## phase 7h overrides this with 5). Extras wait outside like a full melee ring.
+const MAX_MELEE_RAIDERS: int = 15
+## Demolition damage per raider per second (Startwert, balance in phase 8):
+## more raiders inside = faster teardown.
+const RAID_DPS_PER_RAIDER: float = 6.0
+## Wobble visual while raiders demolish (± this rotation, HZ below).
+const RAID_WOBBLE_AMPLITUDE: float = 0.035   # ~2 degrees
+const RAID_WOBBLE_HZ: float = 0.8
+
 var tribe_id: int = 0
 var tribe: Tribe = null
 var max_health: int = 300
@@ -82,6 +98,13 @@ var _damage_holes: Array[MeshInstance3D] = []
 var _visual_stage: int = -1
 ## Worker braves currently assigned to this construction site.
 var workers: Array[Brave] = []
+
+## Melee raiders currently INSIDE demolishing (phase 7g). Untyped like the
+## trainee/crew registries: entries are removed from the world and may be freed.
+var raiders: Array = []
+var _raid_damage_frac: float = 0.0
+## Wobble animation clock while raiders are inside (in-game _process only).
+var _wobble_time: float = 0.0
 
 ## Selection state (buildings are selectable: left-click; right-click then sets
 ## the rally point). `hovered` is set by the SelectionManager on mouse-over.
@@ -248,9 +271,12 @@ func tick(delta: float) -> void:
 	else:
 		if _foundation_disturbed and health > 0:
 			_tick_foundation_smoothing(delta)
+		_tick_raid(delta)
 		if health > 0 and health < max_health:
 			_tick_repair_absorb(delta)
-		if is_usable():
+		# A building being stormed from the inside stops producing (the stage
+		# gate also disables it once the demolition passes 30 %).
+		if is_usable() and raiders.is_empty():
 			_tick_active(delta)
 	_update_overlay()
 	_update_rally_marker()
@@ -348,10 +374,81 @@ func repair(amount: float) -> bool:
 	return true
 
 
-## Hook: the building just crossed into stage >= 1 (unusable). Subclasses
-## release occupants (training buildings eject the trainee and the queue).
+## The building just crossed into stage >= 1 (unusable): eject occupants alive
+## (spells keep the original living eject; the melee storm ejected them earlier).
 func _on_disabled() -> void:
+	eject_occupants(false)
+
+
+## Ejects any units housed inside (training trainee; tower crew in 7h). Base
+## buildings have none. `killed` = ejected units die at the door (ranged fire
+## reached stage 1); otherwise they are pushed out alive (melee storm start).
+func eject_occupants(_killed: bool) -> void:
 	pass
+
+
+# --- Melee raiders / storm (phase 7g) --------------------------------------------
+
+## Max melee raiders that may storm this building at once (watchtower: 5).
+func max_melee_raiders() -> int:
+	return MAX_MELEE_RAIDERS
+
+
+## Lets an attacker enter as a melee raider: it is removed from the world (like
+## a trainee) and starts demolishing from the inside. Returns false when the
+## building is already full — the caller then waits outside. The FIRST raider
+## entering begins the storm: the occupants are pushed out alive.
+func admit_raider(unit) -> bool:
+	_prune_raiders()
+	if unit in raiders:
+		return true
+	if raiders.size() >= max_melee_raiders():
+		return false
+	var first: bool = raiders.is_empty()
+	raiders.append(unit)
+	if unit_manager != null:
+		unit_manager.remove_from_world(unit)
+	unit.enter_building_as_raider(self)
+	if first:
+		eject_occupants(false)   # storm begins: occupants shoved out alive
+		set_process(true)        # start the wobble (in-game only)
+	return true
+
+
+## Drops freed/dead raiders and ones that are no longer inside this building.
+func _prune_raiders() -> void:
+	var kept: Array = []
+	for r in raiders:
+		if is_instance_valid(r) and r.state != Unit.State.DEAD and r.raiding_building == self:
+			kept.append(r)
+	raiders = kept
+
+
+## Raiders demolish from the inside: HP damage scales with the raider count
+## (more demolishers = faster teardown). Occupants were ejected at storm start.
+func _tick_raid(delta: float) -> void:
+	if raiders.is_empty():
+		return
+	_prune_raiders()
+	if raiders.is_empty():
+		return
+	_raid_damage_frac += RAID_DPS_PER_RAIDER * float(raiders.size()) * delta
+	var whole: int = int(_raid_damage_frac)
+	if whole > 0:
+		_raid_damage_frac -= float(whole)
+		take_damage(whole)   # generic: occupants already out, no re-eject
+
+
+## Releases the demolishers back into the world at the perimeter (alive, IDLE)
+## when the building collapses — they tear it down and step out.
+func _release_raiders() -> void:
+	for r in raiders:
+		if is_instance_valid(r) and r.state != Unit.State.DEAD:
+			var pos: Vector3 = edge_spawn_position()
+			if unit_manager != null:
+				unit_manager.register(r)
+			r.exit_building_as_raider(pos)
+	raiders.clear()
 
 
 ## Called by the terrain-integrity check (SpellContext) when a terrain morph
@@ -744,7 +841,7 @@ func finish_construction() -> void:
 
 # --- Damage / destruction ------------------------------------------------------------
 
-func take_damage(amount: int) -> void:
+func take_damage(amount: int, source: int = DMG_GENERIC) -> void:
 	if health <= 0:
 		return
 	var was_usable: bool = is_usable()
@@ -754,7 +851,13 @@ func take_damage(amount: int) -> void:
 		destroy()
 		return
 	if was_usable and not is_usable():
-		_on_disabled()
+		# Just crossed into stage >= 1 (unusable). Ranged fire that reaches this
+		# on its own kills the trapped occupants; spells / melee demolition eject
+		# them alive (melee already ejected them at the storm start -> no-op).
+		if source == DMG_RANGED and raiders.is_empty():
+			eject_occupants(true)
+		else:
+			_on_disabled()
 	_update_damage_visual()
 
 
@@ -773,6 +876,8 @@ func destroy() -> void:
 	under_construction = false
 	if nav_grid != null:
 		nav_grid.fill_solid_region(footprint_rect(), false)
+	# The footprint is walkable again: the demolishers step out alive (IDLE).
+	_release_raiders()
 	if tribe != null:
 		tribe.remove_building(self)
 	set_selected(false)
@@ -821,11 +926,30 @@ func _begin_sinking() -> void:
 
 
 func _process(delta: float) -> void:
-	_sink_time += delta
-	position.y -= SINK_DEPTH / SINK_DURATION * delta
-	position += _slide_dir * SLIDE_SPEED * delta
-	if _sink_time >= SINK_DURATION:
-		queue_free()
+	if _destroyed:
+		_sink_time += delta
+		position.y -= SINK_DEPTH / SINK_DURATION * delta
+		position += _slide_dir * SLIDE_SPEED * delta
+		if _sink_time >= SINK_DURATION:
+			queue_free()
+		return
+	_tick_wobble(delta)
+
+
+## Rocks the model back and forth in slow swings while raiders demolish it;
+## settles upright and stops processing once the storm ends (in-game only).
+func _tick_wobble(delta: float) -> void:
+	if _mesh_root == null:
+		return
+	if raiders.is_empty():
+		_wobble_time = 0.0
+		_mesh_root.rotation.x = 0.0
+		_mesh_root.rotation.z = 0.0
+		set_process(false)
+		return
+	_wobble_time += delta
+	_mesh_root.rotation.z = RAID_WOBBLE_AMPLITUDE * sin(_wobble_time * TAU * RAID_WOBBLE_HZ)
+	_mesh_root.rotation.x = RAID_WOBBLE_AMPLITUDE * 0.6 * sin(_wobble_time * TAU * RAID_WOBBLE_HZ * 1.3)
 
 
 # --- Visuals (placeholder meshes, created in _ready only) ----------------------------

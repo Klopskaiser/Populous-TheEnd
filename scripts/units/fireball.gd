@@ -30,7 +30,14 @@ const NEIGHBOR_ROLL_CHANCE: float = 0.5
 
 var shooter = null   # untyped: may be freed mid-flight
 var target = null    # untyped: may be freed mid-flight
+## Enemy building target (phase 7g, firewarrior siege); mutually exclusive with
+## `target`. Untyped: may be freed when the building collapses.
+var target_building = null
 var done: bool = false
+
+## Building hits count as reaching the target within this range (buildings are
+## large; the shot aims at the footprint centre at chest height).
+const BUILDING_HIT_RANGE: float = 1.6
 
 var _dest: Vector3 = Vector3.ZERO
 var _age: float = 0.0
@@ -47,15 +54,54 @@ func setup(p_shooter, p_target, from: Vector3) -> void:
 	_dest = p_target.position + Vector3(0.0, TARGET_HEIGHT, 0.0)
 
 
+## Building bombardment variant (phase 7g): flies at the footprint centre and
+## deals half-melee HP damage on impact (Firewarrior.BUILDING_FIRE_DAMAGE).
+func setup_building(p_shooter, p_building, from: Vector3) -> void:
+	shooter = p_shooter
+	target_building = p_building
+	position = from
+	_launch_from = from
+	_dest = p_building.center_world() + Vector3(0.0, TARGET_HEIGHT, 0.0)
+
+
 func tick(delta: float) -> void:
 	if done:
 		return
 	_age += delta
+	if target_building != null:
+		_tick_building(delta)
+		return
 	if _target_alive():
 		_dest = target.position + Vector3(0.0, TARGET_HEIGHT, 0.0)
 	position = position.move_toward(_dest, SPEED * delta)
 	if position.distance_to(_dest) <= HIT_RANGE or _age >= MAX_LIFETIME:
 		_impact()
+
+
+func _tick_building(delta: float) -> void:
+	if not _building_alive():
+		done = true
+		return
+	_dest = target_building.center_world() + Vector3(0.0, TARGET_HEIGHT, 0.0)
+	position = position.move_toward(_dest, SPEED * delta)
+	if position.distance_to(_dest) <= BUILDING_HIT_RANGE or _age >= MAX_LIFETIME:
+		_impact_building()
+
+
+func _impact_building() -> void:
+	done = true
+	if not _building_alive() or position.distance_to(_dest) > BUILDING_HIT_RANGE * 1.5:
+		return
+	target_building.take_damage(Firewarrior.BUILDING_FIRE_DAMAGE, Building.DMG_RANGED)
+	if is_inside_tree():
+		var events: Node = get_node_or_null("/root/Events")
+		if events != null:
+			events.combat_hit.emit(&"fireball", position)
+
+
+func _building_alive() -> bool:
+	return target_building != null and is_instance_valid(target_building) \
+		and target_building.health > 0
 
 
 ## Applies the damage exactly once — only if the target is still alive and the

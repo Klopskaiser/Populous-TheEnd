@@ -31,8 +31,12 @@ func _physics_process(delta: float) -> void:
 
 
 func tick(delta: float) -> void:
-	for building in buildings:
-		building.tick(delta)
+	# Iterate a snapshot: a building demolished by raiders (phase 7g) destroys
+	# itself mid-tick and erases from `buildings`, which would otherwise skip an
+	# element.
+	for building in buildings.duplicate():
+		if is_instance_valid(building):
+			building.tick(delta)
 	_recruit_timer -= delta
 	if _recruit_timer <= 0.0:
 		_recruit_timer += RECRUIT_INTERVAL

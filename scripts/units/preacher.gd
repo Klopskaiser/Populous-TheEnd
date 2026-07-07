@@ -55,7 +55,7 @@ func _engage_on_sight(delta: float) -> bool:
 		return false
 	var enemy: Unit = _scan_for_enemy(AGGRO_RADIUS)
 	if enemy == null:
-		return false
+		return _try_engage_building()   # lowest-priority fallback (phase 7g)
 	if enemy.is_conversion_immune():
 		_begin_attack(enemy)   # priest duel (or shaman) -> melee
 	else:

@@ -500,9 +500,10 @@ func _try_crew_assignment(screen_pos: Vector2, camera: Camera3D) -> bool:
 	return true
 
 
-## Enemy building under the cursor + siege engines in the selection: siege
-## bombards, the rest escorts (attack-move onto the plot). Returns false when
-## the selection has no siege engine — the click stays a plain move/attack-move.
+## Enemy building under the cursor: the whole selection assaults it (phase 7g)
+## — melee units storm the entrance, firewarriors bombard, siege engines lob
+## shots, braves storm on this explicit order. Returns false when it is not an
+## enemy building (the click stays a plain move / attack-move).
 func _dispatch_enemy_building(hit: Dictionary) -> bool:
 	var node: Node = hit.get("collider") as Node
 	if node == null or not node.has_meta("building"):
@@ -510,18 +511,7 @@ func _dispatch_enemy_building(hit: Dictionary) -> bool:
 	var building: Building = node.get_meta("building") as Building
 	if building == null or building.tribe_id == player_tribe_id or building.health <= 0:
 		return false
-	var siege: Array[Unit] = []
-	var escort: Array[Unit] = []
-	for u in selected:
-		if u is SiegeEngine:
-			siege.append(u)
-		else:
-			escort.append(u)
-	if siege.is_empty():
-		return false
-	_tribe_commands.order_attack_building(siege, building)
-	if not escort.is_empty():
-		_tribe_commands.order_move(escort, building.center_world(), false, true)
+	_tribe_commands.order_attack_building(selected, building)
 	return true
 
 

@@ -60,17 +60,14 @@ const C_METAL: Color = Color(0.45, 0.45, 0.48)
 ## Crew members (untyped entries: may be freed). Includes recruits still
 ## walking over (not yet boarded).
 var crew: Array = []
-## Enemy building this engine bombards (the fallback when no unit is in the
-## fire band). Untyped: may be freed when it collapses.
-var attack_building = null
+## `attack_building` (the bombardment target) and `building_manager` (the
+## building scan) are inherited from Unit (shared with the phase-7g assault).
 ## True while the CURRENT target came from an explicit player/AI order — only
 ## then may the slow catapult APPROACH a unit that is out of the fire band.
 ## Auto-acquired unit targets are never chased (it is the slowest unit on the
 ## field — trundling after a fleeing brave was the "drives in, never shoots"
 ## bug). Cleared on every _end_attack.
 var _target_ordered: bool = false
-## Injected by UnitManager.spawn_unit (set()); needed for the building scan.
-var building_manager: BuildingManager = null
 
 var _fire_cooldown: float = 0.0
 var _crew_prune_timer: float = 0.0

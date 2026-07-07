@@ -20,7 +20,10 @@ class_name Unit extends Node3D
 ## sapling, phase 7d).
 ## CREW = manning a siege engine (phase 7f): the unit walks with the engine on
 ## its side slot; it defends itself when attacked and returns afterwards.
-enum State {IDLE, MOVE, GATHER, PRAY, BUILD, ATTACK, TRAIN, PANIC, CAST, THROWN, DEAD, SIT, ROLL, FORESTER, CREW}
+## RAID = a melee raider INSIDE an enemy building demolishing it (phase 7g):
+## removed from the world like a trainee; it steps back out alive when the
+## building collapses.
+enum State {IDLE, MOVE, GATHER, PRAY, BUILD, ATTACK, TRAIN, PANIC, CAST, THROWN, DEAD, SIT, ROLL, FORESTER, CREW, RAID}
 
 signal died(unit: Unit)
 ## Fired after this unit switched tribes (preacher conversion) — the
@@ -229,6 +232,16 @@ var _path_queued: bool = false
 ## Enemy this unit is meleeing (null = none). Typed, but every read is guarded
 ## with is_instance_valid — the target may be freed by another attacker.
 var attack_target: Unit = null
+## Enemy BUILDING this unit assaults (phase 7g; untyped: may be freed when it
+## collapses). Lowest-priority target: only pursued when no enemy unit is near.
+## The siege engine (7f) reuses this field with its own bombardment logic.
+var attack_building = null
+## While set (untyped: may be freed), this unit is a melee raider INSIDE this
+## building demolishing it (State.RAID, removed from the world like a trainee).
+var raiding_building = null
+## Enemy-building scan support (phase 7g); injected by UnitManager.spawn_unit()
+## via set() for every unit (the siege engine used it first, 7f).
+var building_manager: BuildingManager = null
 ## Units currently meleeing THIS unit (max MAX_MELEE_ATTACKERS get a slot).
 ## Untyped on purpose: entries may be freed, and binding a freed instance to a
 ## typed parameter raises a script error (see Brave._tree_valid rationale).
@@ -519,7 +532,7 @@ func _on_path_finished() -> void:
 ## airborne (thrown) and panicking units are equally beyond control.
 func can_take_orders() -> bool:
 	return state != State.SIT and state != State.DEAD and state != State.ROLL \
-		and state != State.THROWN and state != State.PANIC
+		and state != State.THROWN and state != State.PANIC and state != State.RAID
 
 
 ## Move order. queue_up appends the target as an additional waypoint
@@ -531,6 +544,7 @@ func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = fals
 		return
 	leave_crew()   # an explicit move order pulls the unit off its siege engine
 	_end_attack()
+	_clear_building_target()   # a move order also breaks off a building assault
 	move_aggressive = aggressive
 	_flee_hits = 0
 	if not queue_up:
@@ -646,6 +660,7 @@ func _die() -> void:
 	# waiting attackers can back-fill onto a fresh target.
 	leave_crew()
 	_end_attack()
+	_clear_building_target()
 	for a in melee_attackers.duplicate():
 		if is_instance_valid(a):
 			a._on_target_died(self)
@@ -1159,6 +1174,7 @@ func convert_to_tribe(new_tribe: Tribe) -> void:
 	conversion_progress = 0.0
 	last_attacker = null
 	_end_attack()
+	_clear_building_target()
 	for a in melee_attackers.duplicate():
 		if is_instance_valid(a):
 			a._on_target_died(self)   # drops the target and retargets
@@ -1266,17 +1282,20 @@ func _engage_on_sight(delta: float) -> bool:
 	if not _due_to_scan(delta):
 		return false
 	var enemy: Unit = _scan_for_enemy(aggro_radius())
-	if enemy == null:
-		return false
-	_begin_attack(enemy)
-	return true
+	if enemy != null:
+		_begin_attack(enemy)
+		return true
+	# Buildings are the LOWEST-priority target: only when no enemy unit is near
+	# (phase 7g — attack-move / idle scan sieges an enemy building it can reach).
+	return _try_engage_building()
 
 
 ## Pursues the current target and strikes it when in range and holding a slot.
 func _tick_attack(delta: float) -> void:
-	# A converted target became friendly mid-fight -> drop it.
+	# A converted target became friendly mid-fight -> drop it (or fall back to a
+	# building assault, phase 7g).
 	if not _target_valid(attack_target) or attack_target.tribe_id == tribe_id:
-		_retarget_or_idle()
+		_tick_no_unit_target(delta)
 		return
 	if _breaks_off_vs_sitting(attack_target):
 		return
@@ -1417,6 +1436,153 @@ func order_attack(enemy: Unit) -> void:
 	_begin_attack(enemy)
 
 
+# --- Building assault (phase 7g) ----------------------------------------------
+
+## Untyped (freed-safe): true while our building target is a live enemy building.
+func _building_target_valid() -> bool:
+	return attack_building != null and is_instance_valid(attack_building) \
+		and attack_building.health > 0 and attack_building.tribe_id != tribe_id
+
+
+## Explicit order (right-click, AI, TribeCommands) to assault an enemy building.
+## Every unit type accepts it (braves storm only on this explicit order); the
+## route is cleared. Firewarriors bombard, everyone else storms the entrance.
+func order_attack_building(building) -> void:
+	if building == null or not is_instance_valid(building) or building.health <= 0:
+		return
+	if building.tribe_id == tribe_id or not can_take_orders():
+		return
+	_on_combat_interrupt()
+	_end_attack()
+	waypoint_queue.clear()
+	attack_building = building
+	_set_state(State.ATTACK)
+
+
+## Auto-engage a building found by the idle / attack-move scan: keeps the
+## pending route (attack-move resumes after the building falls).
+func _begin_attack_building(building) -> void:
+	if not can_take_orders():
+		return
+	_on_combat_interrupt()
+	_end_attack()
+	attack_building = building
+	_set_state(State.ATTACK)
+
+
+func _clear_building_target() -> void:
+	attack_building = null
+
+
+## Throttled lowest-priority scan: engage the nearest enemy building in aggro.
+func _try_engage_building() -> bool:
+	var b = _scan_for_enemy_building(aggro_radius())
+	if b == null:
+		return false
+	_begin_attack_building(b)
+	return true
+
+
+## Nearest living enemy building within `radius` (null without a manager /
+## in bare tests). Iteration is capped like the unit scan (hot-path rule).
+func _scan_for_enemy_building(radius: float):
+	if building_manager == null:
+		return null
+	var best = null
+	var best_d: float = radius
+	var checked: int = 0
+	for b in building_manager.buildings:
+		if not is_instance_valid(b) or b.tribe_id == tribe_id or b.health <= 0:
+			continue
+		checked += 1
+		if checked > SCAN_MAX_CANDIDATES:
+			break
+		var d: float = _flat_dist(b.center_world(), position)
+		if d <= best_d:
+			best_d = d
+			best = b
+	return best
+
+
+## No live unit target in ATTACK: fall back to the (lowest-priority) building
+## assault, else re-target / idle. While sieging, an enemy unit that comes into
+## aggro still takes precedence (buildings are always last).
+func _tick_no_unit_target(delta: float) -> void:
+	if attack_target != null:
+		_end_attack()   # clear a stale/dead unit target and its slot
+	if _building_target_valid():
+		if _is_combatant() and _due_to_scan(delta):
+			var enemy: Unit = _scan_for_enemy(aggro_radius())
+			if enemy != null:
+				_begin_attack(enemy)
+				return
+		_assault_building(delta)
+		return
+	_clear_building_target()
+	_retarget_or_idle()
+
+
+## Assault dispatch: firewarriors bombard from range, everyone else storms in.
+func _assault_building(delta: float) -> void:
+	if _is_ranged():
+		_bombard_building(attack_building, delta)
+	else:
+		_storm_building(attack_building, delta)
+
+
+## Melee raider: walk to the entrance, then enter as a raider (removed from the
+## world, demolishing inside). When the building is full, wait outside like an
+## overflow melee attacker until a slot frees.
+func _storm_building(building, delta: float) -> void:
+	var entrance: Vector3 = building.entrance_world()
+	if _flat_dist(position, entrance) > MELEE_RANGE:
+		_in_melee = false
+		_approach(entrance, delta)
+		_face_point(entrance)
+		return
+	_in_melee = false
+	if building.admit_raider(self):
+		return   # removed from the world; now demolishing inside
+	_wait_near_point(entrance, delta)   # full: wait for a slot
+
+
+## Ranged building bombardment (firewarrior override). Base units do not bombard
+## buildings.
+func _bombard_building(_building, _delta: float) -> void:
+	pass
+
+
+## Waits near a fixed point (building entrance) until a raider slot frees —
+## the point-based twin of _wait_near.
+func _wait_near_point(point: Vector3, delta: float) -> void:
+	if _flat_dist(position, point) > MELEE_WAIT_RADIUS + 0.6:
+		var angle: float = float(get_instance_id() % 628) * 0.01
+		var dest: Vector3 = point + Vector3(
+			cos(angle) * MELEE_WAIT_RADIUS, 0.0, sin(angle) * MELEE_WAIT_RADIUS)
+		_step_toward(dest, delta)
+	_face_point(point)
+
+
+## Enters `building` as a melee raider: already removed from the world by the
+## building, so just settle the state (stops ticking until ejected/collapse).
+func enter_building_as_raider(building) -> void:
+	raiding_building = building
+	attack_building = null
+	waypoint_queue.clear()
+	_clear_path()
+	selected = false
+	_set_state(State.RAID)
+
+
+## The building collapsed (or ejected the raiders): step back out at `pos`,
+## alive and idle (the building re-registered the unit into the world).
+func exit_building_as_raider(pos: Vector3) -> void:
+	raiding_building = null
+	position = pos
+	_snap_to_ground()
+	_set_state(State.IDLE)
+
+
 ## Clears our attack and frees the slot we held on the target.
 func _end_attack() -> void:
 	if attack_target != null and is_instance_valid(attack_target):
@@ -1444,6 +1610,11 @@ func _retarget_or_idle() -> void:
 		if enemy != null:
 			_begin_attack(enemy)
 			return
+	# No enemy unit left: keep sieging a targeted building (phase 7g) before
+	# giving up. Buildings are always the lowest-priority target.
+	if _building_target_valid():
+		_set_state(State.ATTACK)
+		return
 	# Combat over: resume a pending (attack-)move to its destination instead of
 	# stopping where the fight ended — an attack-move must carry on to its
 	# target point once the area is clear (applies to every unit).

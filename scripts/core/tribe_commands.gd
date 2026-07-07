@@ -248,16 +248,19 @@ func order_crew(units: Array[Unit], engine: Unit) -> void:
 		unit.order_crew(engine)
 
 
-## Bombard order on an enemy building (7f): only siege engines act on it —
-## ordinary units reject the order (the UI sends them an attack-move instead).
+## Assault order on an enemy building (7f siege bombardment + 7g melee storm /
+## fireball siege): every unit type acts on it — melee units storm the entrance,
+## firewarriors bombard, siege engines lob shots, braves storm on this explicit
+## order. Own units and own-tribe targets are skipped.
 func order_attack_building(units: Array[Unit], building: Building) -> void:
 	if building == null or not is_instance_valid(building) or building.health <= 0:
 		return
 	for unit in units:
 		if unit == null or not is_instance_valid(unit) or unit.state == Unit.State.DEAD:
 			continue
-		if unit is SiegeEngine and unit.tribe_id != building.tribe_id:
-			(unit as SiegeEngine).order_attack_building(building)
+		if unit.tribe_id == building.tribe_id:
+			continue
+		unit.order_attack_building(building)
 
 
 ## Assigns braves to a workshop's standing worker crew (max 3); non-braves

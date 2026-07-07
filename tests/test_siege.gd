@@ -562,11 +562,13 @@ func test_engine_range_band_and_priorities() -> void:
 	check(engine.attack_building == camp,
 		"without units in range the building is engaged as fallback")
 
-	# order_attack_building on ordinary units is rejected.
+	# order_attack_building now also storms ordinary units into the building
+	# (phase 7g melee assault — braves storm on this explicit order).
 	var brave: Brave = w.unit_manager.spawn_unit(
 		BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(52, 60))) as Brave
 	w.commands.order_attack_building([brave] as Array[Unit], camp)
-	check(brave.state == Unit.State.IDLE, "order_attack_building ignores non-siege units")
+	check(brave.state == Unit.State.ATTACK and brave.attack_building == camp,
+		"order_attack_building sends ordinary units to storm the building (7g)")
 	_free_world(w)
 
 
