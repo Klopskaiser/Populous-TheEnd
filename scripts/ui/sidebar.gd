@@ -71,12 +71,19 @@ var _pause_menu: Control = null
 ## clicking an occupied slot sends that worker back out.
 var _forester_panel: PanelContainer = null
 var _forester_slot_buttons: Array[Button] = []
-## Workshop panel (shown while a workshop is selected, 7f): worker/stock
-## readout, pause toggle and the max-catapult stepper.
+## Workshop panel (shown while a workshop is selected, 7f): worker slot
+## buttons (eject, forester-style), stock readout, pause toggle and the
+## max-catapult stepper.
 var _workshop_panel: PanelContainer = null
 var _workshop_info: Label = null
 var _workshop_pause: Button = null
 var _workshop_max_label: Label = null
+var _workshop_slot_buttons: Array[Button] = []
+## Siege-crew panel (shown while exactly one catapult is selected, 7f):
+## one button per crew member to send it off the vehicle.
+var _siege_panel: PanelContainer = null
+var _siege_info: Label = null
+var _siege_slot_buttons: Array[Button] = []
 ## Shaman portrait (below the minimap, Populous style): full live-animated
 ## figure + health bar; click centres the camera on her and selects ONLY her.
 var _portrait_sprite: AnimatedSprite2D = null
@@ -235,6 +242,7 @@ func setup(p_tribes: Array[Tribe], p_player_id: int, p_unit_manager: UnitManager
 func _process(delta: float) -> void:
 	_refresh_forester_panel()   # responsive to selection changes (cheap: 4 buttons)
 	_refresh_workshop_panel()
+	_refresh_siege_panel()
 	_follower_timer -= delta
 	if _follower_timer <= 0.0:
 		_follower_timer = FOLLOWER_INTERVAL
@@ -269,6 +277,7 @@ func _build_ui() -> void:
 	_build_tab_content(root)
 	_build_forester_panel(root)
 	_build_workshop_panel(root)
+	_build_siege_panel(root)
 
 	var spacer: Control = Control.new()
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -599,9 +608,20 @@ func _build_workshop_panel(root: Control) -> void:
 	_workshop_panel.add_child(vb)
 
 	var title: Label = Label.new()
-	title.text = "Werkstatt"
+	title.text = "Werkstatt — Arbeiter"
 	title.add_theme_color_override("font_color", UiTheme.GOLD_BRIGHT)
 	vb.add_child(title)
+
+	# Worker slots (forester pattern): click an occupied slot to eject.
+	for i in range(Workshop.WORKER_SLOTS):
+		var slot: Button = Button.new()
+		slot.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		slot.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		UiTheme.style_button(slot)
+		var idx: int = i
+		slot.pressed.connect(func() -> void: _on_workshop_eject(idx))
+		vb.add_child(slot)
+		_workshop_slot_buttons.append(slot)
 
 	_workshop_info = Label.new()
 	_workshop_info.add_theme_color_override("font_color", UiTheme.TEXT)
@@ -652,11 +672,106 @@ func _refresh_workshop_panel() -> void:
 			_workshop_panel.visible = false
 		return
 	_workshop_panel.visible = true
-	_workshop_info.text = "Arbeiter: %d/%d   Vorrat: %d/%d\nBemannte Katapulte: %d" % [
-		ws.workers.size(), Workshop.WORKER_SLOTS,
+	for i in range(_workshop_slot_buttons.size()):
+		var btn: Button = _workshop_slot_buttons[i]
+		var occupied: bool = i < ws.occupants.size() \
+			and is_instance_valid(ws.occupants[i])
+		if occupied:
+			btn.text = "Platz %d: Arbeiter  (rausschicken)" % (i + 1)
+			btn.disabled = false
+		else:
+			btn.text = "Platz %d: frei" % (i + 1)
+			btn.disabled = true
+	_workshop_info.text = "Vorrat: %d/%d   Bemannte Katapulte: %d" % [
 		ws.stock_wood(), Workshop.STOCK_TARGET, ws.manned_catapult_count()]
 	_workshop_pause.text = "Produktion fortsetzen" if ws.paused else "Produktion pausieren"
 	_workshop_max_label.text = "Max. Katapulte: %d" % ws.max_catapults
+
+
+func _on_workshop_eject(index: int) -> void:
+	var ws: Workshop = _selected_workshop()
+	if ws != null:
+		ws.eject_worker(index)
+		_refresh_workshop_panel()
+
+
+## Crew panel for a selected catapult (7f): the crew is not individually
+## selectable — this is the worker-style interface (like the forester) to
+## send members off the vehicle. Shown while exactly one siege engine is
+## selected.
+func _build_siege_panel(root: Control) -> void:
+	_siege_panel = PanelContainer.new()
+	_siege_panel.name = "SiegePanel"
+	_siege_panel.add_theme_stylebox_override("panel", UiTheme.inset_style())
+	_siege_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	_siege_panel.visible = false
+	root.add_child(_siege_panel)
+
+	var vb: VBoxContainer = VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 3)
+	_siege_panel.add_child(vb)
+
+	var title: Label = Label.new()
+	title.text = "Belagerungswaffe — Besatzung"
+	title.add_theme_color_override("font_color", UiTheme.GOLD_BRIGHT)
+	vb.add_child(title)
+
+	_siege_info = Label.new()
+	_siege_info.add_theme_color_override("font_color", UiTheme.TEXT)
+	vb.add_child(_siege_info)
+
+	for i in range(SiegeEngine.MAX_CREW):
+		var b: Button = Button.new()
+		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		UiTheme.style_button(b)
+		var idx: int = i
+		b.pressed.connect(func() -> void: _on_siege_eject(idx))
+		vb.add_child(b)
+		_siege_slot_buttons.append(b)
+
+
+## The siege engine currently selected (exactly one selected unit), or null.
+func _selected_siege() -> SiegeEngine:
+	if _selection == null or _selection.selected.size() != 1:
+		return null
+	var u: Unit = _selection.selected[0]
+	if u is SiegeEngine and is_instance_valid(u) and u.state != Unit.State.DEAD:
+		return u as SiegeEngine
+	return null
+
+
+func _refresh_siege_panel() -> void:
+	if _siege_panel == null:
+		return
+	var engine: SiegeEngine = _selected_siege()
+	if engine == null:
+		if _siege_panel.visible:
+			_siege_panel.visible = false
+		return
+	_siege_panel.visible = true
+	_siege_info.text = "Besatzung: %d/%d  (min. 1 fahren, 2 feuern)" % [
+		engine.boarded_count(), SiegeEngine.MAX_CREW]
+	for i in range(_siege_slot_buttons.size()):
+		var btn: Button = _siege_slot_buttons[i]
+		var member = engine.crew[i] if i < engine.crew.size() else null
+		if member != null and is_instance_valid(member):
+			var status: String = "an Bord" if member.siege_boarded else "unterwegs"
+			btn.text = "Platz %d: %s  (aussteigen)" % [i + 1, status]
+			btn.disabled = false
+		else:
+			btn.text = "Platz %d: frei" % (i + 1)
+			btn.disabled = true
+
+
+func _on_siege_eject(index: int) -> void:
+	var engine: SiegeEngine = _selected_siege()
+	if engine == null or index < 0 or index >= engine.crew.size():
+		return
+	var member = engine.crew[index]
+	if member != null and is_instance_valid(member):
+		member.leave_crew()
+	_refresh_siege_panel()
 
 
 func _on_workshop_pause() -> void:

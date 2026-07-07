@@ -2,22 +2,27 @@ class_name Workshop extends Building
 
 ## Werkstatt (phase 7f): continuously manufactures siege engines (catapults).
 ##
-## Unlike the training buildings its workers are NOT consumed — up to
-## WORKER_SLOTS braves join the finished workshop as a standing crew (the
-## construction-job system, Brave.order_workshop -> State.BUILD with
-## Task.PRODUCE). They behave like construction workers:
-## - While the wood stock in piles at the entrance is below STOCK_TARGET and
-##   they are not mid-production, they fetch wood (CHOP/PICKUP/DELIVER).
-## - Otherwise they hammer at the building; each worker contributes
-##   worker-seconds (add_production_work). One catapult takes
-##   WORK_PER_CATAPULT worker-seconds: 3 workers ~30 s, 1 worker ~90 s.
+## Worker model = the FORESTER's (user feedback), without mana upkeep: up to
+## WORKER_SLOTS braves hold a slot (Brave.order_workshop -> reserve_slot),
+## walk in and are HOUSED inside (removed from the world, still population).
+## They work INSIDE the building; they only step out to fetch stock wood
+## (dispatched via the construction-wood pipeline: chop/pickup/deliver to the
+## entrance) and walk back in. The sidebar panel ejects them per slot —
+## nobody joins without an explicit order (construction workers are released
+## when the building finishes; they never become production workers).
 ##
-## Production of ONE catapult: starting consumes CATAPULT_WOOD from the piles
-## at the entrance (the wood visibly vanishes — no refund, ever). Production
+## Production of ONE catapult: needs >= 1 housed worker; every housed worker
+## contributes worker-seconds (WORK_PER_CATAPULT per catapult: 3 workers
+## ~30 s, 1 worker ~90 s). Starting consumes CATAPULT_WOOD from the piles at
+## the entrance (the wood visibly vanishes — no refund, ever). Production
 ## only starts while: not paused, the exit is clear (no finished catapult
 ## waiting at the entrance) and the tribe owns fewer than `max_catapults`
-## MANNED engines. Aborts (building disabled/destroyed, all workers gone)
+## MANNED engines. Aborts (building disabled/destroyed, all slots emptied)
 ## lose the progress AND the consumed wood.
+##
+## While NOT producing, the workers keep the entrance stock topped up to
+## STOCK_TARGET; with no reachable wood the fetch stalls for
+## WOOD_RECHECK_INTERVAL (base Building wood_stalled mechanism).
 ##
 ## The finished catapult appears at the entrance; up to AUTO_CREW braves
 ## idling nearby board it automatically (one shot — nobody near means it
@@ -28,7 +33,7 @@ const WOOD_COST: int = 15
 ## BuildingManager swaps the footprint for east/west orientations.
 const FOOTPRINT: Vector2i = Vector2i(8, 4)
 const MAX_HEALTH: int = 350
-## Standing worker crew (max 3; production needs >= 1).
+## Worker slots (housed inside; production needs >= 1).
 const WORKER_SLOTS: int = 3
 ## Worker-seconds per catapult: 3 workers -> 30 s build time.
 const WORK_PER_CATAPULT: float = 90.0
@@ -51,11 +56,14 @@ const SIEGE_SCENE: PackedScene = preload("res://scenes/units/siege_engine.tscn")
 const C_WALL: Color = Color(0.45, 0.33, 0.2)
 const C_ROOF: Color = Color(0.32, 0.22, 0.12)
 const C_METAL: Color = Color(0.5, 0.5, 0.53)
+const C_WOOD_ARM: Color = Color(0.5, 0.36, 0.2)
 
 ## Player-facing controls (sidebar panel).
 var paused: bool = false
 var max_catapults: int = DEFAULT_MAX_CATAPULTS
 
+## Braves holding a worker slot (housed inside, walking in/out or fetching).
+var occupants: Array[Brave] = []
 ## True while a catapult is being built (its 5 wood are already consumed).
 var production_active: bool = false
 ## Worker-seconds contributed to the current catapult.
@@ -79,18 +87,89 @@ func housing_capacity() -> int:
 	return 0
 
 
-## Standing crew is capped at WORKER_SLOTS (construction of the workshop
-## itself still uses the base MAX_WORKERS cap — this only gates the finished
-## building's production crew).
-func join(worker: Brave) -> bool:
-	if under_construction:
-		return super.join(worker)
-	if worker in workers:
-		return true
-	if workers.size() >= WORKER_SLOTS:
+# --- Worker slots (forester pattern, no mana upkeep) --------------------------------
+
+func has_free_slot() -> bool:
+	_prune_occupants()
+	return is_usable() and occupants.size() < WORKER_SLOTS
+
+
+## Reserves a slot for a brave heading here (called from Brave.order_workshop).
+func reserve_slot(brave: Brave) -> bool:
+	_prune_occupants()
+	if not is_usable() or occupants.size() >= WORKER_SLOTS:
 		return false
-	workers.append(worker)
+	if not (brave in occupants):
+		occupants.append(brave)
 	return true
+
+
+## The brave reached the entrance: house it (removed from the world, still
+## population). If the workshop turned unusable meanwhile, release the slot.
+func admit_worker(brave: Brave) -> void:
+	if not (brave in occupants):
+		return
+	if not is_usable():
+		occupants.erase(brave)
+		brave.leave_workshop()
+		return
+	if unit_manager != null:
+		unit_manager.remove_from_world(brave)
+	brave.workshop_inside = true
+	brave.enter_workshop()
+
+
+## Frees a slot when the brave leaves on its own (new order / death). Called
+## from Brave._interrupt_tasks while its job still points here.
+func release_worker(brave: Brave) -> void:
+	occupants.erase(brave)
+
+
+## UI eject: sends the slot-`index` worker back into the world and frees it.
+func eject_worker(index: int) -> void:
+	_prune_occupants()
+	if index < 0 or index >= occupants.size():
+		return
+	var brave: Brave = occupants[index]
+	occupants.remove_at(index)
+	if brave.workshop_inside:
+		_return_to_world(brave)
+	if is_instance_valid(brave):
+		brave.leave_workshop()
+
+
+func _prune_occupants() -> void:
+	var kept: Array[Brave] = []
+	for b in occupants:
+		if is_instance_valid(b) and b.state != Unit.State.DEAD and b.job == self:
+			kept.append(b)
+	occupants = kept
+
+
+## Housed workers currently inside (the ones contributing worker-seconds).
+func inside_count() -> int:
+	var count: int = 0
+	for b in occupants:
+		if is_instance_valid(b) and b.workshop_inside:
+			count += 1
+	return count
+
+
+## Re-registers a housed brave at a walkable edge cell (dispatch / eject /
+## destruction).
+func _return_to_world(brave: Brave) -> void:
+	if unit_manager == null:
+		return
+	unit_manager.register(brave)
+	brave.position = edge_spawn_position()
+	brave.workshop_inside = false
+
+
+## Sends a housed worker out to fetch stock wood (it re-enters on its own
+## once the stock is full or nothing is reachable).
+func _dispatch_fetch(brave: Brave) -> void:
+	_return_to_world(brave)
+	brave.begin_workshop_fetch()
 
 
 # --- Stock (piles at the entrance) --------------------------------------------------
@@ -110,47 +189,61 @@ func wants_more_stock_wood() -> bool:
 	if not is_usable():
 		return false
 	var incoming: int = 0
-	for worker in workers:
-		if is_instance_valid(worker):
-			incoming += worker.carried_wood + worker.claimed_tree_yield()
+	for b in occupants:
+		if is_instance_valid(b):
+			incoming += b.carried_wood + b.claimed_tree_yield()
 	return stock_wood() + incoming < STOCK_TARGET
 
 
 # --- Production ----------------------------------------------------------------------
 
-## Whether a new catapult could START right now (gates the workers' PRODUCE
-## task and the actual start below).
+## Whether a new catapult could START right now (housed workers are checked
+## separately in the tick).
 func can_start_production() -> bool:
 	return is_usable() and not paused and not exit_blocked() \
 		and manned_catapult_count() < max_catapults \
 		and stock_wood() >= CATAPULT_WOOD
 
 
-## One worker's production contribution (worker-seconds). Returns false when
-## no work can be done right now — the worker then re-chooses (fetch stock
-## wood or wait). Starting a catapult consumes its wood from the entrance
-## piles on the spot (visibly — and never refunded).
-func add_production_work(delta: float) -> bool:
-	if not is_usable() or paused:
-		return false
-	if not production_active:
-		if not can_start_production():
-			return false
+func _tick_active(delta: float) -> void:
+	_prune_occupants()
+	# Wood-stall re-check (mirrors the construction sites).
+	if wood_stalled:
+		_wood_recheck_timer -= delta
+		if _wood_recheck_timer <= 0.0:
+			wood_stalled = false
+	# Abort rule: a running production with EVERY slot emptied loses the
+	# progress and the already-consumed wood (spec: no refunds on aborts).
+	if production_active and occupants.is_empty():
+		production_active = false
+		work_done = 0.0
+	var inside: int = inside_count()
+	if production_active:
+		# Housed workers hammer worker-seconds into the current catapult.
+		if inside > 0:
+			work_done += float(inside) * delta
+			if work_done >= WORK_PER_CATAPULT:
+				_finish_catapult()
+		return
+	# Not producing: top the entrance stock up first (spec: fetch all the
+	# wood BEFORE starting to work), then start the next catapult.
+	if wants_more_stock_wood() and not wood_stalled:
+		for b in occupants:
+			if is_instance_valid(b) and b.workshop_inside:
+				_dispatch_fetch(b)
+		return
+	if inside >= 1 and can_start_production():
 		if wood_pile_manager == null:
-			return false
+			return
 		var taken: int = wood_pile_manager.take_from_radius(
 			delivery_point(), ABSORB_RADIUS, CATAPULT_WOOD)
 		if taken < CATAPULT_WOOD:
 			# Race lost (someone absorbed the piles): put the rest back.
 			if taken > 0:
 				wood_pile_manager.deposit(delivery_point(), taken)
-			return false
+			return
 		production_active = true
 		work_done = 0.0
-	work_done += delta
-	if work_done >= WORK_PER_CATAPULT:
-		_finish_catapult()
-	return true
 
 
 ## Rolls the finished catapult out of the entrance and auto-mans it with up
@@ -205,42 +298,37 @@ func manned_catapult_count() -> int:
 	return count
 
 
-func _tick_active(_delta: float) -> void:
-	_prune_workers()
-	# Abort rule: production with NOBODY left on the job loses the progress
-	# and the already-consumed wood (spec: no refunds on aborts).
-	if production_active and workers.is_empty():
-		production_active = false
-		work_done = 0.0
-
-
-## Drops workers that died or were ordered elsewhere (their job link is gone).
-func _prune_workers() -> void:
-	var kept: Array[Brave] = []
-	for w in workers:
-		if is_instance_valid(w) and w.state != Unit.State.DEAD and w.job == self:
-			kept.append(w)
-	workers = kept
-
-
 func production_progress() -> float:
 	if not is_usable() or not production_active:
 		return -1.0
 	return clampf(work_done / WORK_PER_CATAPULT, 0.0, 1.0)
 
 
-## Damaged into stage >= 1: the running production is lost (no refund); the
-## workers switch to repair duty on their own (the job system keeps them
-## bound while the building is damaged).
+# --- Disable / destruction -----------------------------------------------------------
+
+## Damaged into stage >= 1: the running production is lost (no refund) and
+## the workers are released (like the forester); re-staffing is manual.
 func _on_disabled() -> void:
 	production_active = false
 	work_done = 0.0
+	_release_all_occupants()
 
 
 func destroy() -> void:
 	production_active = false
 	work_done = 0.0
+	_release_all_occupants()
 	super.destroy()
+
+
+func _release_all_occupants() -> void:
+	for b in occupants.duplicate():
+		if not is_instance_valid(b):
+			continue
+		if b.workshop_inside:
+			_return_to_world(b)
+		b.leave_workshop()
+	occupants.clear()
 
 
 # --- Visuals (placeholder) -----------------------------------------------------------
@@ -300,6 +388,3 @@ func _create_visuals() -> void:
 	_mesh_root.add_child(wheel)
 
 	_add_flag()
-
-
-const C_WOOD_ARM: Color = Color(0.5, 0.36, 0.2)

@@ -63,6 +63,11 @@ func _explode() -> void:
 	for u in unit_manager.get_units_in_radius(target_pos, SPLASH_RADIUS):
 		if u.state == Unit.State.DEAD or u.tribe_id == tribe_id:
 			continue
+		if u is SiegeEngine:
+			# Fire spells set the wooden vehicle alight (7f): it burns and
+			# then sinks; the crew takes the splash on its own.
+			u.ignite(target_pos)
+			continue
 		var flat_d: float = Vector2(u.position.x - target_pos.x,
 			u.position.z - target_pos.z).length()
 		var dmg: int = DIRECT_DAMAGE if flat_d <= DIRECT_RADIUS else SPLASH_DAMAGE

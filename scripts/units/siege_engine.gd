@@ -30,13 +30,28 @@ const MIN_RANGE: float = 3.0
 ## Shot cooldown by boarded crew: 2 -> slowest, 6 (full) -> fastest.
 const COOLDOWN_MIN_CREW: float = 6.0
 const COOLDOWN_FULL_CREW: float = 3.0
-## Brave speed 4.0 * 0.75 (slowest unit in the game).
-const SIEGE_SPEED: float = 3.0
+## Brave speed 4.0 * 0.5 (slowest unit in the game; user-tuned from 0.75).
+const SIEGE_SPEED: float = 2.0
 ## Crew slot layout: 3 per long side, this far out/apart.
 const CREW_SIDE_OFFSET: float = 0.95
 const CREW_RANK_SPACING: float = 0.85
-## Auto-aggro scan radius (buildings first, then units).
-const SIEGE_AGGRO: float = 16.0
+## Auto-aggro scan radius (UNITS first, then buildings — user feedback);
+## comfortably above the fire range so approaching enemies are engaged early.
+const SIEGE_AGGRO: float = 20.0
+
+## How the device can be destroyed (user feedback): fire SPELLS or lava set
+## it alight — it burns this long, then sinks into the ground; terrain
+## morphing that leaves this height span under the chassis bursts it apart.
+## The crew survives both, is released and controllable again.
+const VEHICLE_BURN_TIME: float = 3.0
+const SINK_SPEED: float = 0.8   # m/s downward while the wreck sinks
+## Height span under the chassis that bursts it. Deliberately ABOVE what
+## drivable terrain can present (walkable cells allow 1.5 m/cell → ~3 m over
+## the vehicle) — only real terrain rips (quake/flatten/sink cliffs) trigger.
+const BREAK_HEIGHT_SPAN: float = 3.5
+## Chassis sample half-extents (along facing x sideways).
+const CHASSIS_HALF_LENGTH: float = 1.1
+const CHASSIS_HALF_WIDTH: float = 0.7
 
 const C_WOOD: Color = Color(0.42, 0.29, 0.15)
 const C_WOOD_DARK: Color = Color(0.3, 0.2, 0.1)
@@ -53,9 +68,15 @@ var building_manager: BuildingManager = null
 
 var _fire_cooldown: float = 0.0
 var _crew_prune_timer: float = 0.0
+## Seconds of burn left after a fire-spell/lava hit (0 = not burning).
+var _vehicle_burn: float = 0.0
+## The destroyed wreck sinks into the ground (burn/water death).
+var _sinking: bool = false
 ## Own 3D model parts (in-game only, built in _ready).
+var _model: Node3D = null
 var _arm: Node3D = null
 var _flag_mesh: MeshInstance3D = null
+var _flame: MeshInstance3D = null
 var _arm_anim: float = 1.0
 
 
@@ -103,6 +124,12 @@ func can_crew_siege() -> bool:
 	return false
 
 
+## Big ring enclosing the vehicle and its side crew (selecting a crew member
+## selects the whole catapult — the ring mirrors that).
+func selection_ring_scale() -> float:
+	return 4.5
+
+
 ## The device takes no damage — attacks hit the crew (spec: catapults cannot
 ## be attacked directly). Only water destroys it (drown bypasses this).
 func take_damage(_amount: int, _attacker = null) -> void:
@@ -123,8 +150,75 @@ func displace(_dir: Vector3, _dist: float) -> void:
 	pass
 
 
+## Fire spells and lava DO destroy the device (user feedback): it catches
+## fire, burns for a moment and then sinks into the ground. The crew is
+## released alive at the wreck (it takes the area damage on its own).
 func ignite(_source_pos: Vector3) -> void:
-	pass
+	if state == State.DEAD or _vehicle_burn > 0.0:
+		return
+	_vehicle_burn = VEHICLE_BURN_TIME
+	_show_flame(true)
+
+
+func is_burning() -> bool:
+	return _vehicle_burn > 0.0
+
+
+## Flooded ground (terrain spells): the wreck goes under — crew released.
+func drown() -> void:
+	if state == State.DEAD:
+		return
+	for m in crew.duplicate():
+		if is_instance_valid(m):
+			m.leave_crew()
+	crew.clear()
+	_sinking = true
+	super.drown()
+
+
+# --- Vehicle destruction (phase 7f, user feedback) -----------------------------------
+
+## Burn-out and water: the wreck sinks. Terrain rip: it bursts apart
+## (debris). Either way the crew survives, is released and controllable.
+func _destroy_vehicle(burst: bool) -> void:
+	if state == State.DEAD:
+		return
+	for m in crew.duplicate():
+		if is_instance_valid(m):
+			m.leave_crew()
+	crew.clear()
+	attack_building = null
+	_vehicle_burn = 0.0
+	if burst:
+		_show_flame(false)
+		if _model != null:
+			_model.visible = false
+		if path_service != null:
+			var debris: BuildingDebris = BuildingDebris.new()
+			debris.setup(position, 1.5, terrain_data)
+			path_service.register_projectile(debris)
+	else:
+		_sinking = true
+	health = 0
+	_die()
+
+
+## Height span under the chassis (4 corner samples along the facing).
+func _chassis_height_span() -> float:
+	if terrain_data == null:
+		return 0.0
+	var forward: Vector3 = facing.normalized() if facing.length_squared() > 0.0 \
+		else Vector3(0, 0, 1)
+	var right: Vector3 = Vector3(-forward.z, 0.0, forward.x)
+	var lo: float = INF
+	var hi: float = -INF
+	for sf in [-CHASSIS_HALF_LENGTH, CHASSIS_HALF_LENGTH]:
+		for sr in [-CHASSIS_HALF_WIDTH, CHASSIS_HALF_WIDTH]:
+			var p: Vector3 = position + forward * sf + right * sr
+			var h: float = terrain_data.get_height(p.x, p.z)
+			lo = minf(lo, h)
+			hi = maxf(hi, h)
+	return hi - lo
 
 
 # --- Crew management --------------------------------------------------------------
@@ -249,6 +343,14 @@ func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = fals
 	super.order_move(target, queue_up, aggressive)
 
 
+## Explicit attack order on a unit (right-click, AI): clears a building
+## focus — the ordered target must win, the old building priority silently
+## overrode unit orders (user feedback: "unreliable attack commands").
+func order_attack(enemy: Unit) -> void:
+	attack_building = null
+	super.order_attack(enemy)
+
+
 ## Explicit bombard order on an enemy building (right-click, AI).
 func order_attack_building(building) -> void:
 	if building == null or not is_instance_valid(building) or building.health <= 0:
@@ -275,11 +377,20 @@ func _plan_path_to(target: Vector3) -> bool:
 
 
 func tick(delta: float) -> void:
+	# Burning wreck-to-be: count the fire down, then sink.
+	if _vehicle_burn > 0.0 and state != State.DEAD:
+		_vehicle_burn -= delta
+		if _vehicle_burn <= 0.0:
+			_destroy_vehicle(false)
 	_crew_prune_timer -= delta
 	if _crew_prune_timer <= 0.0:
 		_crew_prune_timer = 0.5
 		_prune_crew()
 		_resummon_crew()
+		# Terrain integrity: a spell ripped the ground under the chassis
+		# apart (cliff beyond anything drivable) -> the vehicle bursts.
+		if state != State.DEAD and _chassis_height_span() > BREAK_HEIGHT_SPAN:
+			_destroy_vehicle(true)
 	# An unmanned (or under-crewed) vehicle rolls to a stop mid-route.
 	if state == State.MOVE and boarded_count() < MIN_MOVE_CREW:
 		waypoint_queue.clear()
@@ -289,20 +400,20 @@ func tick(delta: float) -> void:
 	_tick_visual(delta)
 
 
-## Auto-aggro, buildings FIRST (inverse of every other unit): the siege
-## specialist tears down the base while the escort handles the defenders.
+## Auto-aggro, UNITS first (user feedback), buildings as the fallback siege
+## work. The unit scan skips enemies inside the minimum range (unhittable).
 func _engage_on_sight(delta: float) -> bool:
 	if boarded_count() < MIN_FIRE_CREW:
 		return false
 	if not _due_to_scan(delta):
 		return false
+	var enemy: Unit = _scan_enemy_unit()
+	if enemy != null:
+		_begin_attack(enemy)
+		return true
 	var b = _scan_enemy_building(FIRE_RANGE + 2.0)
 	if b != null:
 		order_attack_building(b)
-		return true
-	var enemy: Unit = _scan_for_enemy(aggro_radius())
-	if enemy != null:
-		_begin_attack(enemy)
 		return true
 	return false
 
@@ -311,24 +422,41 @@ func _tick_idle(delta: float) -> void:
 	_engage_on_sight(delta)
 
 
-## Bombardment: building target first, unit target second. Holds position in
-## the [MIN_RANGE, FIRE_RANGE] band, advances beyond it, never melees.
+## Bombardment: an ordered/aggroed UNIT target takes precedence; the building
+## focus is the fallback. Holds position in the [MIN_RANGE, FIRE_RANGE] band,
+## advances beyond it, never melees.
 func _tick_attack(delta: float) -> void:
 	if boarded_count() < MIN_MOVE_CREW:
 		attack_building = null
 		_retarget_or_idle()
 		return
+	if _target_valid(attack_target) and attack_target.tribe_id != tribe_id:
+		# A unit target that crawled inside the minimum range cannot be hit:
+		# swap to another enemy in the band (throttled) instead of idling.
+		if _flat_dist(position, attack_target.position) < MIN_RANGE \
+				and _due_to_scan(delta):
+			var alt: Unit = _scan_enemy_unit()
+			if alt != null and alt != attack_target:
+				_begin_attack(alt)
+		_bombard(attack_target.position, delta)
+		return
+	if attack_target != null:
+		_end_attack()   # dead/converted unit target: drop it cleanly
 	if attack_building != null:
 		if not is_instance_valid(attack_building) or attack_building.health <= 0:
 			attack_building = null
 			_retarget_or_idle()
 			return
+		# Units first, even mid-siege: enemies walking up interrupt the
+		# building bombardment (the building focus stays as the fallback).
+		if _due_to_scan(delta):
+			var enemy: Unit = _scan_enemy_unit()
+			if enemy != null:
+				_begin_attack(enemy)
+				return
 		_bombard(attack_building.center_world(), delta)
 		return
-	if not _target_valid(attack_target) or attack_target.tribe_id == tribe_id:
-		_retarget_or_idle()
-		return
-	_bombard(attack_target.position, delta)
+	_retarget_or_idle()
 
 
 func _bombard(target_pos: Vector3, delta: float) -> void:
@@ -377,6 +505,27 @@ func _launch_shot(target_pos: Vector3) -> void:
 	_emit_combat_hit(&"throw")
 
 
+## Nearest attackable enemy UNIT in the aggro radius that is not inside the
+## minimum range (those cannot be hit by the arcing shot).
+func _scan_enemy_unit() -> Unit:
+	if path_service == null:
+		return null
+	var best: Unit = null
+	var best_d: float = INF
+	for u in path_service.get_units_in_radius(position, aggro_radius(), SCAN_MAX_CANDIDATES):
+		if u == self or u.state == State.DEAD or u.tribe_id == tribe_id:
+			continue
+		if u.state == State.SIT or not u.is_targetable():
+			continue
+		var d: float = _flat_dist(position, u.position)
+		if d < MIN_RANGE:
+			continue
+		if d < best_d:
+			best_d = d
+			best = u
+	return best
+
+
 ## Nearest living enemy building within `radius`; null without a manager
 ## (bare tests) or when none is in range.
 func _scan_enemy_building(radius: float):
@@ -405,6 +554,7 @@ func _create_model() -> void:
 	var root: Node3D = Node3D.new()
 	root.name = "Model"
 	add_child(root)
+	_model = root
 
 	# Base frame (the 1x2 m body).
 	var frame: MeshInstance3D = MeshInstance3D.new()
@@ -490,12 +640,42 @@ func _mat(color: Color) -> StandardMaterial3D:
 	return mat
 
 
-## Rotates the model with the facing and plays the throwing-arm snap.
+## Lazily built flame overlay while the vehicle burns (in-game only).
+func _show_flame(show: bool) -> void:
+	if not is_inside_tree():
+		return
+	if _flame == null:
+		if not show:
+			return
+		_flame = MeshInstance3D.new()
+		var s: SphereMesh = SphereMesh.new()
+		s.radius = 0.6
+		s.height = 1.2
+		_flame.mesh = s
+		var mat: StandardMaterial3D = StandardMaterial3D.new()
+		mat.albedo_color = Color(1.0, 0.5, 0.1, 0.85)
+		mat.emission_enabled = true
+		mat.emission = Color(1.0, 0.4, 0.05)
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		_flame.material_override = mat
+		_flame.position.y = 1.2
+		add_child(_flame)
+	_flame.visible = show
+
+
+## Rotates the model with the facing, plays the throwing-arm snap, flickers
+## the burn flame and sinks the destroyed wreck into the ground.
 func _tick_visual(delta: float) -> void:
 	if not is_inside_tree():
 		return
+	if _sinking and state == State.DEAD:
+		position.y -= SINK_SPEED * delta
 	if facing.length_squared() > 0.000001:
 		rotation.y = atan2(facing.x, facing.z)
+	if _flame != null and _flame.visible:
+		_flame.scale = Vector3.ONE * (0.85 + 0.3 * absf(sin(
+			float(Time.get_ticks_msec()) * 0.02)))
 	if _arm == null:
 		return
 	if _arm_anim < 1.0:

@@ -352,6 +352,12 @@ func can_crew_siege() -> bool:
 	return unit_kind() != &"shaman" and unit_kind() != &"siege"
 
 
+## Scale of the selection ring (SelectionRingRenderer). The siege engine uses
+## a big ring that visually encloses the vehicle AND its crew.
+func selection_ring_scale() -> float:
+	return 1.0
+
+
 ## Radius at which an idle/marching combatant engages enemies on its own (and
 ## re-targets). Melee units use AGGRO_RADIUS; ranged units (firewarrior) see
 ## farther so they react to threats near their fire range — including an enemy

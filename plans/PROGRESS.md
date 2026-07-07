@@ -2526,3 +2526,49 @@ Vorrat/Produktion/Pause/Max-Grenze im Panel, Auto-Bemannung, Crew-Verhalten
 (Verteidigung + Rückkehr, Übernahme), Beschuss-Optik (Bogen + Schweif, Lava,
 Umwerfen), KI-Match mit Katapulten.
 
+**Überarbeitung nach Nutzertest (2026-07-07):**
+1. **Werkstatt auf das Förster-Arbeitersystem umgestellt** (ohne Mana-Upkeep):
+   `occupants`-Slots (3) mit `reserve_slot`/`admit_worker`/`eject_worker` —
+   Arbeiter werden per Befehl zugewiesen, im Gebäude **gehaust** (aus der Welt
+   genommen; die Werkstatt trägt ihre Arbeiter-Sekunden selbst bei) und kommen
+   nur zum Holzholen heraus (`_dispatch_fetch` → vorhandene
+   CHOP/PICKUP/DELIVER-Pipeline → `admit_worker` beim Rückweg). Sidebar-Panel
+   mit 3 Slot-Buttons (rausschicken) wie beim Förster. **Bugfix:** Die
+   BAU-Arbeiter der Werkstatt übernahmen nach Fertigstellung nahtlos die
+   Produktion (bis zu 8 ohne Befehl) — `_job_active` bindet Werkstatt-Arbeiter
+   jetzt nur noch über einen gehaltenen Slot; Bauarbeiter werden bei
+   Fertigstellung freigegeben (Test `test_construction_workers_are_not_auto_hired`).
+   Kein reachbares Holz → `mark_wood_stalled` (30-s-Recheck) statt
+   Rein/Raus-Pingpong. `add_production_work` entfällt (Tick-getrieben).
+2. **Zielpriorität umgedreht: EINHEITEN vor Gebäuden** (auch mitten im
+   Gebäudebeschuss wird auf ankommende Einheiten gewechselt; Gebäudefokus
+   bleibt als Fallback). Aggroradius 16 → **20 m**. **Befehls-Fix:**
+   `order_attack` räumt den Gebäudefokus (vorher übersteuerte die alte
+   Gebäude-Priorität stillschweigend explizite Einheiten-Befehle —
+   die gemeldete Unzuverlässigkeit); Einheiten-Scans überspringen Ziele
+   innerhalb der 3-m-Mindestreichweite, ein Ziel das hineinkriecht wird
+   (throttled) gegen ein triffbares getauscht.
+3. **Speed 3.0 → 2.0** (0,5 × Brave).
+4. **Crew nicht mehr einzeln selektierbar:** Klick/Box auf ein Crew-Mitglied
+   selektiert das KATAPULT (`_crew_to_engine`-Mapping in Pick/Box;
+   Doppelklick-Typselektion überspringt Crew). Katapult zeigt einen
+   **großen Auswahlring** (`selection_ring_scale` 4,5×, Ring-Renderer
+   skaliert per Instanz-Transform). Crew-Verwaltung über das neue
+   **Besatzungs-Panel** im Sidebar (6 Slots, „aussteigen" je Mitglied),
+   sichtbar wenn genau ein Katapult selektiert ist.
+5. **Zerstörungswege des Katapults:** (a) **Feuerzauber** (FireballBolt →
+   auch Feuerregen) und **Lava** (`ignite`) setzen es in Brand
+   (Flammen-Overlay, 3 s) → es versinkt im Boden (`_sinking` im DEAD-Visual);
+   (b) **Terrainriss**: Höhenspanne unter dem Chassis > 3,5 m (bewusst über
+   dem fahrbaren Maximum — begehbare Zellen erlauben 1,5 m/Zelle) → es
+   **zerplatzt** (BuildingDebris-Burst, Modell verschwindet); (c) Wasser
+   (`drown`) versinkt wie gehabt. In allen Fällen überlebt die **Crew**, wird
+   freigegeben und ist wieder einzeln steuerbar (sie nimmt Flächenschaden
+   weiterhin normal, da sie als normale Einheiten neben dem Gerät stehen).
+
+Tests: Werkstatt-Sektion auf das Slot-System umgeschrieben (+ Dispatch-Test,
+Bauarbeiter-Bugtest), Prioritätstest umgedreht (+ Befehls-Override-,
+Fallback-Test), neue Tests für Brand (Feuerball + Lava), Terrainriss-Burst,
+Crew-Überleben und das Selektions-Mapping. **1199 Tests, 0 Fehler**,
+Ladecheck fehlerfrei. Manuelle Prüfung erneut ausstehend.
+

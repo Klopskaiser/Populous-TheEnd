@@ -90,6 +90,19 @@ func _board_crew(w: Dictionary, engine: SiegeEngine, tribe_id: int = 0) -> Brave
 
 # --- Workshop: production ---------------------------------------------------------
 
+## Houses a worker in the workshop: order the slot, then tick until it walked
+## in (forester pattern).
+func _house_worker(w: Dictionary, ws: Workshop) -> Brave:
+	var brave: Brave = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 0, ws.entrance_world() + Vector3(1.0, 0.0, 1.0)) as Brave
+	brave.order_workshop(ws)
+	var ticks: int = 0
+	while not brave.workshop_inside and ticks < MAX_TICKS:
+		_tick_world(w)
+		ticks += 1
+	return brave
+
+
 func test_workshop_produces_catapult() -> void:
 	var w: Dictionary = _make_world()
 	var ws: Workshop = _place_workshop(w)
@@ -98,62 +111,79 @@ func test_workshop_produces_catapult() -> void:
 	check(ws.wood_cost == 15, "workshop costs 15 wood")
 	w.wood_pile_manager.deposit(ws.delivery_point(), 20)
 
-	# Fake one standing worker so the abort rule does not clear the run.
-	var brave: Brave = w.unit_manager.spawn_unit(
-		BRAVE_SCENE, 0, ws.delivery_point()) as Brave
-	brave.order_workshop(ws)
-	check(brave.job == ws and brave.state == Unit.State.BUILD,
-		"the brave joined the workshop crew")
+	var brave: Brave = _house_worker(w, ws)
+	check(ws.occupants.size() == 1, "the brave holds a worker slot")
+	check(brave.workshop_inside, "the worker is housed INSIDE the workshop")
+	check(not (brave in w.unit_manager.units),
+		"a housed worker is out of the live world (forester pattern)")
 
 	var stock_before: int = ws.stock_wood()
-	check(ws.add_production_work(1.0), "production starts with wood in stock")
-	check(ws.production_active, "a catapult is in the works")
+	ws._tick_active(1.0)   # start tick: consumes the wood
+	check(ws.production_active, "production starts with a housed worker and wood")
 	check(stock_before - ws.stock_wood() == Workshop.CATAPULT_WOOD,
 		"starting consumed exactly %d wood from the piles" % Workshop.CATAPULT_WOOD)
-	# 90 worker-seconds total (1 already contributed above).
-	for i in range(89):
-		ws.add_production_work(1.0)
+	# 90 worker-seconds with 1 housed worker.
+	for i in range(90):
+		ws._tick_active(1.0)
 	check(not ws.production_active, "the catapult is finished after 90 worker-seconds")
 	check(_siege_units(w).size() == 1, "one siege engine rolled out")
-	check(is_instance_valid(brave) and brave.state != Unit.State.DEAD,
+	check(is_instance_valid(brave) and ws.occupants.size() == 1,
 		"the worker was NOT consumed (unlike training)")
 	_free_world(w)
 
 
 func test_workshop_worker_pipeline_builds_catapult() -> void:
-	# Integration: real braves fetch nothing (stock pre-piled) and hammer the
-	# 90 worker-seconds in; 3 workers -> ~30 s.
+	# Integration: real braves walk in (stock pre-piled, nothing to fetch) and
+	# the housed trio contributes 90 worker-seconds -> ~30 s.
 	var w: Dictionary = _make_world()
 	var ws: Workshop = _place_workshop(w)
 	w.wood_pile_manager.deposit(ws.delivery_point(), 20)
 	for i in range(3):
 		var b: Brave = w.unit_manager.spawn_unit(BRAVE_SCENE, 0,
-			ws.delivery_point() + Vector3(float(i), 0.0, 1.0)) as Brave
+			ws.entrance_world() + Vector3(float(i), 0.0, 1.0)) as Brave
 		b.order_workshop(ws)
-	check(ws.workers.size() == 3, "three braves man the workshop (cap)")
+	check(ws.occupants.size() == 3, "three braves hold the worker slots")
 	var extra: Brave = w.unit_manager.spawn_unit(BRAVE_SCENE, 0,
-		ws.delivery_point() + Vector3(3.0, 0.0, 1.0)) as Brave
+		ws.entrance_world() + Vector3(3.0, 0.0, 1.0)) as Brave
 	extra.order_workshop(ws)
-	check(ws.workers.size() == 3, "a fourth worker is rejected (max 3 slots)")
+	check(ws.occupants.size() == 3, "a fourth worker is rejected (max 3 slots)")
+	check(extra.state == Unit.State.IDLE, "the rejected brave stays idle")
 
 	var ticks: int = 0
 	while _siege_units(w).is_empty() and ticks < MAX_TICKS:
 		_tick_world(w)
 		ticks += 1
 	check(not _siege_units(w).is_empty(),
-		"the worker crew built a catapult (took %d ticks)" % ticks)
+		"the housed workers built a catapult (took %d ticks)" % ticks)
 	check(float(ticks) * TICK < 60.0,
 		"3 workers finish in well under 60 s (~30 s expected, took %.1f s)" % (float(ticks) * TICK))
+	_free_world(w)
+
+
+func test_construction_workers_are_not_auto_hired() -> void:
+	# The bug from the user report: braves that BUILT the workshop must not
+	# slide into production duty — slots are taken by explicit order only.
+	var w: Dictionary = _make_world()
+	var ws: Workshop = _place_workshop(w)
+	var brave: Brave = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 0, ws.entrance_world()) as Brave
+	# Simulate the post-construction state: job still points at the (now
+	# finished) workshop, but no slot was ever reserved.
+	brave.job = ws
+	brave._set_state(Unit.State.BUILD)
+	brave.tick(TICK)
+	check(brave.state == Unit.State.IDLE and brave.job == null,
+		"a construction worker is released, not hired into the workshop")
+	check(ws.occupants.is_empty(), "no slot was taken without an order")
 	_free_world(w)
 
 
 func test_workshop_stalls_without_wood_and_resumes() -> void:
 	var w: Dictionary = _make_world()
 	var ws: Workshop = _place_workshop(w)
-	check(not ws.add_production_work(1.0), "no wood -> production cannot start")
-	check(not ws.production_active, "nothing is in the works without wood")
+	check(not ws.can_start_production(), "no wood -> production cannot start")
 	w.wood_pile_manager.deposit(ws.delivery_point(), Workshop.CATAPULT_WOOD)
-	check(ws.add_production_work(1.0), "production starts once wood arrived")
+	check(ws.can_start_production(), "production can start once wood arrived")
 	_free_world(w)
 
 
@@ -163,7 +193,6 @@ func test_workshop_pause_and_max_cap() -> void:
 	w.wood_pile_manager.deposit(ws.delivery_point(), 20)
 	ws.paused = true
 	check(not ws.can_start_production(), "paused workshop starts nothing")
-	check(not ws.add_production_work(1.0), "paused workshop refuses work")
 	ws.paused = false
 
 	# Cap: one MANNED catapult of the tribe + max 1 -> auto-stop.
@@ -181,13 +210,11 @@ func test_workshop_pause_and_max_cap() -> void:
 func test_workshop_exit_blockade_and_abort() -> void:
 	var w: Dictionary = _make_world()
 	var ws: Workshop = _place_workshop(w)
-	w.wood_pile_manager.deposit(ws.delivery_point(), 20)
-	var brave: Brave = w.unit_manager.spawn_unit(
-		BRAVE_SCENE, 0, ws.delivery_point()) as Brave
-	brave.order_workshop(ws)
-	ws.add_production_work(1.0)
-	for i in range(89):
-		ws.add_production_work(1.0)
+	w.wood_pile_manager.deposit(ws.delivery_point(), 25)
+	var brave: Brave = _house_worker(w, ws)
+	check(brave.workshop_inside, "worker housed")
+	for i in range(91):
+		ws._tick_active(1.0)
 	var engines: Array = _siege_units(w)
 	check(engines.size() == 1, "catapult finished")
 	check(ws.exit_blocked(), "the fresh catapult blocks the entrance")
@@ -196,27 +223,54 @@ func test_workshop_exit_blockade_and_abort() -> void:
 	check(not ws.exit_blocked(), "moving the catapult off clears the exit")
 	check(ws.can_start_production(), "production may start again")
 
-	# Abort: production running, all workers leave -> progress AND wood lost.
-	var stock_before: int = ws.stock_wood()
-	ws.add_production_work(1.0)
+	# Abort: production running, the last slot is emptied -> progress AND
+	# wood lost.
+	ws._tick_active(1.0)
 	check(ws.production_active, "second catapult started")
-	brave.order_move(Vector3(10, 5, 10))   # pulls the worker off the job
+	var stock_after_start: int = ws.stock_wood()
+	ws.eject_worker(0)
+	check(ws.occupants.is_empty(), "the worker was ejected")
+	check(is_instance_valid(brave) and brave.state == Unit.State.IDLE,
+		"the ejected worker is back in the world and idle")
 	ws._tick_active(TICK)
-	check(not ws.production_active, "all workers gone -> production aborted")
-	check(ws.stock_wood() == stock_before - Workshop.CATAPULT_WOOD,
+	check(not ws.production_active, "all slots empty -> production aborted")
+	check(ws.stock_wood() == stock_after_start,
 		"the consumed wood is NOT refunded on abort")
 	_free_world(w)
 
 
-func test_workshop_disabled_aborts_production() -> void:
+func test_workshop_disabled_aborts_and_releases() -> void:
 	var w: Dictionary = _make_world()
 	var ws: Workshop = _place_workshop(w)
 	w.wood_pile_manager.deposit(ws.delivery_point(), 20)
-	ws.add_production_work(1.0)
+	var brave: Brave = _house_worker(w, ws)
+	ws._tick_active(1.0)
 	check(ws.production_active, "production running")
 	ws.take_damage(int(float(ws.max_health) * 0.4))   # stage >= 1: unusable
 	check(not ws.is_usable(), "damaged workshop is unusable")
 	check(not ws.production_active, "damage aborted the production (no refund)")
+	check(ws.occupants.is_empty(), "the workers were released (forester rule)")
+	check(is_instance_valid(brave) and brave in w.unit_manager.units,
+		"the housed worker stepped back into the world")
+	_free_world(w)
+
+
+func test_workshop_dispatches_fetchers_for_stock() -> void:
+	# Low stock + reachable trees: the housed worker steps OUT, fetches wood
+	# to the entrance and is housed again once the stock target is reached.
+	var w: Dictionary = _make_world()
+	var ws: Workshop = _place_workshop(w)
+	for i in range(8):
+		w.tree_manager.spawn_tree(Vector2i(55 + (i % 4), 68 + (i / 4) * 2),
+			TreeResource.MAX_STAGE)
+	var brave: Brave = _house_worker(w, ws)
+	check(brave.workshop_inside, "worker housed before the stock check")
+	var ticks: int = 0
+	while ws.stock_wood() < Workshop.CATAPULT_WOOD and ticks < MAX_TICKS:
+		_tick_world(w)
+		ticks += 1
+	check(ws.stock_wood() >= Workshop.CATAPULT_WOOD,
+		"the dispatched worker piled wood at the entrance (took %d ticks)" % ticks)
 	_free_world(w)
 
 
@@ -224,12 +278,15 @@ func test_workshop_auto_mans_fresh_catapult() -> void:
 	var w: Dictionary = _make_world()
 	var ws: Workshop = _place_workshop(w)
 	w.wood_pile_manager.deposit(ws.delivery_point(), 20)
+	var worker: Brave = _house_worker(w, ws)
+	check(worker.workshop_inside, "producer housed")
 	# Two IDLE braves near the entrance (auto-crew candidates).
 	var idle1: Brave = w.unit_manager.spawn_unit(BRAVE_SCENE, 0,
 		ws.entrance_world() + Vector3(2.0, 0.0, 2.0)) as Brave
 	var idle2: Brave = w.unit_manager.spawn_unit(BRAVE_SCENE, 0,
 		ws.entrance_world() + Vector3(-2.0, 0.0, 2.0)) as Brave
-	ws.add_production_work(90.0)
+	for i in range(91):
+		ws._tick_active(1.0)
 	var engines: Array = _siege_units(w)
 	check(engines.size() == 1, "catapult finished")
 	if engines.size() == 1:
@@ -258,7 +315,7 @@ func test_crew_movement_and_fire_gates() -> void:
 	check(engine.boarded_count() == 1, "one crew member serves")
 	engine.order_move(w.nav.cell_to_world(Vector2i(70, 60)))
 	check(engine.state == Unit.State.MOVE, "1 crew is enough to move")
-	check(engine.speed < 4.0, "the catapult is slower than a brave (0.75x)")
+	check_near(engine.speed, 2.0, "the catapult moves at half brave speed (0.5x)")
 	check(is_inf(SiegeEngine.fire_cooldown_for_crew(1)), "1 crew cannot fire")
 	check_near(SiegeEngine.fire_cooldown_for_crew(2), 6.0, "2 crew fire slowly")
 	check_near(SiegeEngine.fire_cooldown_for_crew(6), 3.0, "full crew fires fastest")
@@ -450,25 +507,128 @@ func test_engine_range_band_and_priorities() -> void:
 	check(w.unit_manager.projectiles.filter(func(p): return p is SiegeShot).is_empty(),
 		"below the 3-m minimum range the engine holds fire")
 
-	# Auto-priority: building BEFORE unit.
+	# Auto-priority: UNITS before buildings (user feedback) — with the camp
+	# AND an enemy brave in range, the brave is engaged first.
 	engine.attack_building = null
 	engine._end_attack()
 	engine._set_state(Unit.State.IDLE)
 	_teleport_engine(engine, w.nav.cell_to_world(Vector2i(64, 60)))
-	w.unit_manager.spawn_unit(BRAVE_SCENE, 1, engine.position + Vector3(3.0, 0.0, 0.0))
+	var foe: Brave = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, engine.position + Vector3(5.0, 0.0, 0.0)) as Brave
 	engine._target_search_timer = 0.0
 	var scan_ticks: int = 0
 	while engine.state != Unit.State.ATTACK and scan_ticks < 50:
 		_tick_world(w)
 		scan_ticks += 1
+	check(engine.attack_target == foe,
+		"auto-aggro picks the enemy UNIT before the building in range")
+	check(engine.attack_building == null, "no building focus while units are around")
+
+	# Explicit unit order clears a building focus (order reliability fix).
+	engine.attack_building = camp
+	engine.order_attack(foe)
+	check(engine.attack_target == foe and engine.attack_building == null,
+		"an attack order on a unit overrides the building focus")
+
+	# Sieging resumes on buildings once no unit is in range.
+	foe.take_damage(9999)
+	engine._end_attack()
+	engine._set_state(Unit.State.IDLE)
+	engine._target_search_timer = 0.0
+	scan_ticks = 0
+	while engine.attack_building == null and scan_ticks < 50:
+		_tick_world(w)
+		scan_ticks += 1
 	check(engine.attack_building == camp,
-		"auto-aggro picks the enemy BUILDING before the nearby unit")
+		"without units in range the building is engaged as fallback")
 
 	# order_attack_building on ordinary units is rejected.
 	var brave: Brave = w.unit_manager.spawn_unit(
 		BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(52, 60))) as Brave
 	w.commands.order_attack_building([brave] as Array[Unit], camp)
 	check(brave.state == Unit.State.IDLE, "order_attack_building ignores non-siege units")
+	_free_world(w)
+
+
+# --- Vehicle destruction (fire/lava burn, terrain rip) -----------------------------
+
+func test_engine_burns_from_fire_spell_and_sinks() -> void:
+	var w: Dictionary = _make_world()
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(60, 60))) as SiegeEngine
+	var crew: Brave = _board_crew(w, engine)
+	# Enemy shaman fireball hits the vehicle: it catches fire...
+	var bolt: FireballBolt = FireballBolt.new()
+	bolt.setup(1, engine.position + Vector3(-8.0, 0.0, 0.0), engine.position,
+		null, w.unit_manager, w.td)
+	while not bolt.done:
+		bolt.tick(TICK)
+	bolt.free()
+	check(engine.is_burning(), "a fire-spell hit sets the catapult alight")
+	# ...burns out and is destroyed; the crew survives and is released.
+	var t: float = 0.0
+	while engine.state != Unit.State.DEAD and t < 10.0:
+		_tick_world(w)
+		t += TICK
+	check(engine.state == Unit.State.DEAD, "the burning catapult is destroyed")
+	check(is_instance_valid(crew) and crew.state != Unit.State.DEAD,
+		"the crew survives the loss of the vehicle")
+	check(crew.siege_engine == null and crew.state == Unit.State.IDLE,
+		"the crew is released and individually controllable again")
+	_free_world(w)
+
+
+func test_engine_burns_from_lava() -> void:
+	var w: Dictionary = _make_world()
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(60, 60))) as SiegeEngine
+	var surge: LavaSurge = LavaSurge.new()
+	surge.setup(engine.position, w.unit_manager, w.td, 3.0)
+	for i in range(10):
+		surge.tick(TICK)
+	check(engine.is_burning(), "lava sets the catapult alight")
+	surge.free()
+	_free_world(w)
+
+
+func test_engine_bursts_on_terrain_rip() -> void:
+	var w: Dictionary = _make_world()
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(60, 60))) as SiegeEngine
+	var crew: Brave = _board_crew(w, engine)
+	check(engine.state != Unit.State.DEAD, "intact on level ground")
+	# A spell rips a cliff under the chassis (way beyond drivable slopes):
+	# the whole +x side of the vehicle is heaved several metres up.
+	var c: Vector2i = w.nav.world_to_cell(engine.position)
+	for vz in range(c.y - 2, c.y + 4):
+		for vx in range(c.x + 1, c.x + 4):
+			w.td.set_vertex_height(vx, vz, w.td.vertex_height(vx, vz) + 6.0)
+	var t: float = 0.0
+	while engine.state != Unit.State.DEAD and t < 3.0:
+		_tick_world(w)
+		t += TICK
+	check(engine.state == Unit.State.DEAD, "the torn ground bursts the catapult")
+	check(is_instance_valid(crew) and crew.state != Unit.State.DEAD
+		and crew.siege_engine == null,
+		"the crew survives the burst and is released")
+	_free_world(w)
+
+
+# --- Selection rules (crew selects the catapult) ------------------------------------
+
+func test_crew_selection_maps_to_engine() -> void:
+	var w: Dictionary = _make_world()
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(60, 60))) as SiegeEngine
+	var crew: Brave = _board_crew(w, engine)
+	var loose: Brave = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(70, 70))) as Brave
+	check(SelectionManager._crew_to_engine(crew) == engine,
+		"picking a crew member yields its catapult")
+	check(SelectionManager._crew_to_engine(loose) == loose,
+		"ordinary units pass through the crew mapping")
+	check(engine.selection_ring_scale() > loose.selection_ring_scale(),
+		"the catapult shows a bigger selection ring than a unit")
 	_free_world(w)
 
 
@@ -589,6 +749,6 @@ func test_ai_builds_workshop_after_temple() -> void:
 		w.unit_manager.spawn_unit(BRAVE_SCENE, 0,
 			w.nav.cell_to_world(Vector2i(62, 48 + i)))
 	ai._staff_workshops()
-	check(ws.workers.size() == 3, "the AI staffs the workshop with 3 braves")
+	check(ws.occupants.size() == 3, "the AI staffs the workshop with 3 braves")
 	ai.free()
 	_free_world(w)

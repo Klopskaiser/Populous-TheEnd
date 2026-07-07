@@ -225,7 +225,10 @@ func _box_select(rect: Rect2) -> void:
 			continue
 		var sprite: Rect2 = _unit_screen_rect(unit, camera)
 		if sprite.size.y > 0.0 and rect.intersects(sprite):
-			picked.append(unit)
+			# Crew in the box selects its catapult (deduplicated below).
+			var target: Unit = _crew_to_engine(unit)
+			if not (target in picked):
+				picked.append(target)
 	# An empty box is almost always a slipped drag (or the camera moved) —
 	# keep the current selection; deselecting stays on click-on-ground.
 	if picked.is_empty():
@@ -253,6 +256,9 @@ func _unit_screen_rect(unit: Unit, camera: Camera3D) -> Rect2:
 
 ## Nearest unit of `tribe_id` (or any ENEMY when negative) whose sprite rect
 ## contains the point; ties resolved by distance to the rect centre.
+## Siege crew is not individually selectable (7f): picking an OWN crew member
+## yields its CATAPULT instead (enemy picks keep the crew — attacking it is
+## the only way to fight the vehicle).
 func _pick_unit_at(screen_pos: Vector2, camera: Camera3D, tribe_id: int) -> Unit:
 	if _unit_manager == null:
 		return null
@@ -275,7 +281,18 @@ func _pick_unit_at(screen_pos: Vector2, camera: Camera3D, tribe_id: int) -> Unit
 		if dist < best_dist:
 			best_dist = dist
 			best = unit
+	if best != null and tribe_id >= 0:
+		best = _crew_to_engine(best)
 	return best
+
+
+## Own crew members map to their catapult (selection-wise the crew IS the
+## vehicle); everything else passes through.
+static func _crew_to_engine(unit: Unit) -> Unit:
+	if unit.siege_engine != null and is_instance_valid(unit.siege_engine) \
+			and unit.siege_engine.state != Unit.State.DEAD:
+		return unit.siege_engine
+	return unit
 
 
 ## Double click on an own unit: select all own units of the same kind whose
@@ -292,6 +309,8 @@ func _double_click_select(screen_pos: Vector2) -> void:
 	var viewport_rect: Rect2 = Rect2(Vector2.ZERO, get_viewport().get_visible_rect().size)
 	var picked: Array[Unit] = []
 	for unit in candidates:
+		if unit.siege_engine != null:
+			continue   # crew belongs to its catapult, not to the kind selection
 		var sprite: Rect2 = _unit_screen_rect(unit, camera)
 		if sprite.size.y > 0.0 and viewport_rect.intersects(sprite):
 			picked.append(unit)

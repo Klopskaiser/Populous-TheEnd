@@ -789,7 +789,8 @@ func _staff_workshops() -> void:
 	var idle: Array[Unit] = _idle_braves()
 	var i: int = 0
 	for ws in workshops:
-		while i < idle.size() and ws.workers.size() < WORKSHOP_WORKERS:
+		while i < idle.size() and ws.occupants.size() < WORKSHOP_WORKERS \
+				and ws.has_free_slot():
 			commands.order_workshop([idle[i]] as Array[Unit], ws)
 			i += 1
 

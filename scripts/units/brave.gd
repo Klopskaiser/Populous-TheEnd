@@ -73,6 +73,9 @@ var train_reached_slot: bool = false
 ## it is housed (removed from the world); otherwise it is walking in/out.
 var forester_home: Forester = null
 var forester_inside: bool = false
+## Workshop slot (phase 7f, forester-style): true while housed inside the
+## workshop (removed from the world; `job` holds the workshop itself).
+var workshop_inside: bool = false
 var _forester_phase: ForesterPhase = ForesterPhase.JOIN
 var _plant_target: Vector3 = Vector3.INF
 var _kneel_timer: float = 0.0
@@ -183,21 +186,50 @@ func order_repair(building: Building) -> void:
 	_set_state(State.BUILD)
 
 
-## Join a finished workshop as a standing production worker (max
-## Workshop.WORKER_SLOTS; fails silently when the crew is full). Runs on the
-## construction-job system: the brave fetches stock wood and contributes
-## worker-seconds (Task.PRODUCE) until ordered away.
+## Take a worker slot in a finished workshop (forester pattern, max
+## Workshop.WORKER_SLOTS — ignored when no slot is free, no queue). The brave
+## walks in and is housed inside; it only steps out to fetch stock wood
+## (dispatched by the workshop) and to deliver it at the entrance.
 func order_workshop(workshop: Workshop) -> void:
 	if not can_take_orders():
 		return
 	if workshop == null or not is_instance_valid(workshop) or not workshop.is_usable():
 		return
+	if not workshop.has_free_slot():
+		return
 	_interrupt_tasks()
-	if not workshop.join(self):
+	if not workshop.reserve_slot(self):
 		return
 	job = workshop
+	workshop_inside = false
+	task = Task.PRODUCE   # PRODUCE = walk to the entrance and be housed
 	_retry_timer = 0.0
+	_reset_seek()
 	_set_state(State.BUILD)
+
+
+## Housed inside the workshop: already removed from the world, just settle
+## (it stops ticking; the WORKSHOP contributes its worker-seconds).
+func enter_workshop() -> void:
+	_clear_path()
+	task = Task.PRODUCE
+	_set_working(false)
+	set_selected(false)
+
+
+## Dispatched by the workshop to fetch stock wood: back in the world (the
+## workshop re-registered it), re-choose a task (the fetch pipeline).
+func begin_workshop_fetch() -> void:
+	task = Task.NONE
+	_retry_timer = 0.0
+	_reset_seek()
+
+
+## Released from the workshop (ejected, building lost, or a new order).
+## _interrupt_tasks releases the slot (release_worker is idempotent).
+func leave_workshop() -> void:
+	workshop_inside = false
+	_stop_all()
 
 
 func order_pray(site: Building) -> void:
@@ -344,11 +376,13 @@ func _tick_job(delta: float) -> void:
 
 ## A job binds its workers while the building is under construction or (for
 ## repair jobs) damaged; a finished/fully repaired building releases them.
-## Workshop crews (7f) stay bound as long as the workshop is usable.
+## Workshop workers (7f) stay bound only while they HOLD one of the three
+## slots — construction workers are released when the workshop finishes and
+## never slide into production duty without an explicit order.
 func _job_active() -> bool:
 	return job.under_construction \
 		or (job.health > 0 and job.health < job.max_health) \
-		or (job is Workshop and job.is_usable())
+		or (job is Workshop and job.is_usable() and self in (job as Workshop).occupants)
 
 
 ## Workers pick their own sensible sub-task: deliver carried wood first; then
@@ -391,38 +425,29 @@ func _choose_job_task() -> void:
 	# Nothing to do right now: wait and re-check via the retry timer.
 
 
-## Workshop crew duty (7f), in priority order: keep working on a RUNNING
-## production (its wood is already spent); top the entrance stock up to
-## STOCK_TARGET while idle; start the next catapult when everything is ready.
-## Nothing to do (stock full, production blocked) -> wait via the retry timer.
+## Workshop duty OUTSIDE the building (7f; housed workers do not tick — the
+## workshop contributes their worker-seconds itself): fetch stock wood while
+## the entrance piles are short and production is idle, otherwise walk back
+## in. Finding no reachable wood stalls the workshop's fetching for a while.
 func _choose_workshop_task() -> void:
 	var ws: Workshop = job as Workshop
-	if ws.production_active:
-		task = Task.PRODUCE
-		_reset_seek()
-		return
-	if ws.wants_more_stock_wood() and _try_fetch_wood():
-		return
-	if ws.can_start_production():
-		task = Task.PRODUCE
-		_reset_seek()
-		return
-	# Stock is full (or nothing can run): stand by and re-check.
+	if not ws.production_active and ws.wants_more_stock_wood():
+		if _try_fetch_wood():
+			return
+		ws.mark_wood_stalled()   # nothing reachable: re-checked on an interval
+	task = Task.PRODUCE   # walk to the entrance and be housed again
+	_reset_seek()
 
 
-## Hammers worker-seconds into the workshop's current catapult. The workshop
-## refuses work while paused/blocked/out of wood — then re-choose.
+## Walks to the workshop entrance and is housed inside (the forester's JOIN
+## walk, on the job system).
 func _tick_produce(delta: float) -> void:
 	if not (job is Workshop):
 		_end_subtask()
 		return
 	var ws: Workshop = job as Workshop
-	if not _seek(ws.center_world(), ws.interact_range(), delta):
-		return
-	_set_working(true)
-	_face_toward(ws.center_world())
-	if not ws.add_production_work(delta):
-		_end_subtask()
+	if _seek(ws.entrance_world(), FORESTER_RANGE, delta, true):
+		ws.admit_worker(self)
 
 
 ## Repair job: fetch wood while the damage still owes some (delivered piles are
@@ -859,6 +884,9 @@ func _interrupt_tasks() -> void:
 		train_target.remove_trainee(self)
 	if forester_home != null and is_instance_valid(forester_home):
 		forester_home.release_worker(self)
+	if job != null and is_instance_valid(job) and job is Workshop:
+		(job as Workshop).release_worker(self)
+	workshop_inside = false
 	job = null
 	task = Task.NONE
 	task_cell = Vector2i(-1, -1)
