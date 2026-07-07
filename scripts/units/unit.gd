@@ -1078,18 +1078,36 @@ func _pick_panic_target() -> void:
 		base_angle = randf() * TAU
 	var angle: float = base_angle + randf_range(-1.2, 1.2)
 	var dist: float = randf_range(2.0, 4.0)
-	var target: Vector3 = position + Vector3(cos(angle) * dist, 0.0, sin(angle) * dist)
+	var target: Vector3
 	if nav_grid != null:
-		var cell: Vector2i = nav_grid.world_to_cell(target)
-		if not nav_grid.is_cell_walkable(cell):
-			var near: Vector2i = nav_grid.nearest_walkable_cell(cell)
-			if near.x < 0:
-				return
-			target = nav_grid.cell_to_world(near)
-	elif terrain_data != null:
-		target.y = terrain_data.get_height(target.x, target.z)
+		# March along the flee direction and stop before the first unwalkable
+		# cell, so the straight (A*-less) panic hop never crosses a cliff/water
+		# edge — panicking units used to clip up hard cliffs (phase 7i fix).
+		target = _walkable_reach(Vector2(cos(angle), sin(angle)), dist)
+	else:
+		target = position + Vector3(cos(angle) * dist, 0.0, sin(angle) * dist)
+		if terrain_data != null:
+			target.y = terrain_data.get_height(target.x, target.z)
 	_path = PackedVector3Array([target])
 	_path_index = 0
+
+
+## Furthest point up to `max_dist` along `dir` (XZ unit vector) whose whole
+## straight segment stays on walkable ground; falls back to the current
+## position when even the first step is blocked. Y snapped to the terrain.
+func _walkable_reach(dir: Vector2, max_dist: float) -> Vector3:
+	var flat: Vector2 = Vector2(position.x, position.z)
+	var reached: Vector2 = flat
+	var step: float = 0.5
+	var d: float = step
+	while d <= max_dist:
+		var p: Vector2 = flat + dir * d
+		if not nav_grid.is_cell_walkable(nav_grid.world_to_cell(Vector3(p.x, 0.0, p.y))):
+			break
+		reached = p
+		d += step
+	var y: float = terrain_data.get_height(reached.x, reached.y) if terrain_data != null else 0.0
+	return Vector3(reached.x, y, reached.y)
 
 
 ## Downhill direction at the current position; the vector length is the slope

@@ -59,12 +59,12 @@ func _create_visuals() -> void:
 	skirt.position.y = 0.6
 	_mesh_root.add_child(skirt)
 
-	# Wide octagonal (polygonal) reed roof.
+	# Octagonal (polygonal) reed roof — overlaps the keep but with a modest eave.
 	var roof: MeshInstance3D = MeshInstance3D.new()
 	var cone: CylinderMesh = CylinderMesh.new()
 	cone.radial_segments = SIDES
 	cone.top_radius = 0.0
-	cone.bottom_radius = span * 0.55
+	cone.bottom_radius = span * 0.46
 	cone.height = 2.6
 	roof.mesh = cone
 	roof.material_override = _make_material(C_ROOF)

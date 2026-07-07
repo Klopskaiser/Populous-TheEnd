@@ -3152,3 +3152,22 @@ Manuelle Prüfung ausstehend.
   unpassierbaren Flanken (nur die 3 Pässe verbinden die Hälften).
 - Bekannter, vorbestehender Flaky-Test `test_spells: orders work again after the
   panic` (randf-Panikdauer) — unabhängig von 7i.
+
+**Nachbesserungen 7i (Nutzerfeedback).**
+- **Vulkan repariert:** `volcano.gd::cone_targets` nutzte noch `TerrainData.VERTS/SIZE`
+  (Klassen-Const) statt `td.verts/td.size` → auf 256er-Karten falscher Heightmap-Stride,
+  daher kein Berg (nur Lava) und am Reichweitenrand scheiterte `execute` (leere Indizes).
+  Jetzt instanzbasiert. (Der übersehene Rest des Schritt-0-Sweeps.)
+- **Cast-in-Reichweite-laufen:** war bereits korrekt implementiert/getestet
+  (`Shaman._tick_cast` läuft hin, castet, Move-Order bricht ab —
+  `test_shaman_walks_into_range_then_casts`); der Eindruck „castet nicht" kam vom
+  Vulkan-Bug. Keine Änderung nötig.
+- **Panik durch Klippen:** Panik-Flucht nutzt einen Direkt-Wegpunkt (kein A*); die
+  Gerade zum begehbaren Zielfeld konnte Klippenzellen kreuzen → Einheiten klippten
+  hoch. Neu `Unit._walkable_reach(dir, max_dist)`: `_pick_panic_target` beschneidet
+  die Flucht auf das durchgehend begehbare Segment (Stopp vor der ersten
+  unbegehbaren Zelle).
+- **Dächer** von Tempel (Kegel-Radius span·0,5 → 0,42) und Feuertempel (0,55 → 0,46)
+  verkleinert — überlappen noch, aber ohne extremen Überhang.
+- **Tests:** 1487 grün; neu `test_volcano_cone_on_large_map` (Index-Stride auf 256)
+  und `test_panic_hop_stops_before_cliff`.

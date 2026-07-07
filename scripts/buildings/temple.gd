@@ -43,11 +43,11 @@ func _create_visuals() -> void:
 	dome.position.y = 0.9
 	_mesh_root.add_child(dome)
 
-	# Wide round reed roof over the dome.
+	# Round reed roof over the dome — overlaps the dome but no longer far past it.
 	var roof: MeshInstance3D = MeshInstance3D.new()
 	var cone: CylinderMesh = CylinderMesh.new()
-	cone.top_radius = span * 0.12
-	cone.bottom_radius = span * 0.5
+	cone.top_radius = span * 0.1
+	cone.bottom_radius = span * 0.42
 	cone.height = 1.1
 	roof.mesh = cone
 	roof.material_override = _make_material(C_ROOF)
