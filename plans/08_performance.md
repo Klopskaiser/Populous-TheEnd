@@ -99,10 +99,12 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
 
 ## Definition of Done
 
-- [ ] Gesamte Testsuite grün, `--headless --quit` fehlerfrei
-- [ ] FPS-Anzeige vorhanden + über Optionen schaltbar
-- [ ] Lag-Szenario (Bergpass, 3 KIs + Spieler, Früh-Aufbau) flüssig
-- [ ] Bewegung/Kampf bei 2000 flüssig (Ziel 6000 dokumentiert)
-- [ ] Perf-Regressionstests in der Suite
-- [ ] PROGRESS.md ergänzt, Checkbox Phase 8 in [00_overview.md](00_overview.md) abgehakt
-- [ ] `git add -A && git commit -m "Phase 8: Performance" && git push`
+- [x] Gesamte Testsuite grün, `--headless --quit` fehlerfrei *(1499 Tests)*
+- [x] FPS-Anzeige vorhanden + über Optionen schaltbar
+- [x] Lag-Szenario (Bergpass, 3 KIs + Spieler, Früh-Aufbau) flüssig *(headless
+  gemessen: Ø-Unit-Kosten 99 → 1,8 ms/Frame; In-Game-Prüfung durch Nutzer ausstehend)*
+- [x] Bewegung/Kampf bei 2000 flüssig (Ziel 6000 dokumentiert) *(headless 2000:
+  ~28-30 ms/Tick unter 33-ms-Budget; 6000: 46/76 ms als Kennzahl)*
+- [x] Perf-Regressionstests in der Suite *(tests/test_perf.gd)*
+- [x] PROGRESS.md ergänzt, Checkbox Phase 8 in [00_overview.md](00_overview.md) abgehakt
+- [x] `git add -A && git commit -m "Phase 8: Performance" && git push`

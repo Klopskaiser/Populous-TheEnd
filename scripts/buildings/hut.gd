@@ -21,6 +21,9 @@ const FULL_CREW_BONUS: float = 1.1
 const MAN_RADIUS: float = 16.0
 ## Growth maintenance throttle.
 const GROWTH_INTERVAL: float = 1.0
+## Crew admission + population-cap re-check throttle (phase 8): the entrance
+## radius query and the tribe-wide cap check used to run EVERY frame per hut.
+const MAINTAIN_INTERVAL: float = 0.25
 
 const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
 
@@ -30,6 +33,10 @@ var _spawn_counter: int = 0
 ## registries (entries may be freed).
 var crew: Array = []
 var _growth_timer: float = 0.0
+var _maintain_timer: float = 0.0
+## Cached "population/unit cap reached" verdict (refreshed on the maintain
+## interval — a per-frame tribe-wide capacity sum per hut adds up).
+var _cap_blocked: bool = false
 
 
 func _init() -> void:
@@ -168,6 +175,8 @@ func _crew_target() -> int:
 ## Keeps the crew at the target: ejects excess (mode lowered / NONE) or pulls
 ## nearby idle braves in (up to the deficit). Braves are only pulled when they
 ## are close — huts far from any idle brave can stay empty even at MAXIMUM.
+## ONE radius query per run covers both the incoming count and the idle-brave
+## candidates (phase 8 — this used to be up to 6 queries per hut per second).
 func _tick_growth() -> void:
 	if tribe == null or unit_manager == null or not is_usable():
 		return
@@ -177,42 +186,38 @@ func _tick_growth() -> void:
 		while crew.size() > target:
 			eject_crew(crew.size() - 1)
 		return
-	var deficit: int = target - crew.size() - _incoming_crew_count()
-	while deficit > 0:
-		var brave: Unit = _find_idle_brave_near()
-		if brave == null:
-			return
-		brave.order_man_hut(self)
-		deficit -= 1
-
-
-## Braves currently walking toward THIS hut to be admitted (not yet housed).
-func _incoming_crew_count() -> int:
-	var n: int = 0
-	for u in unit_manager.get_units_in_radius(center_world(), MAN_RADIUS + 4.0):
+	var deficit: int = target - crew.size()
+	if deficit <= 0:
+		return
+	var here: Vector3 = center_world()
+	var candidates: Array[Unit] = []
+	for u in unit_manager.get_units_in_radius(here, MAN_RADIUS + 4.0):
 		if u.state == Unit.State.GARRISON and u.garrison_target == self \
 				and not u.garrison_housed:
-			n += 1
-	return n
-
-
-## Nearest own idle brave within MAN_RADIUS that has no other task/destination.
-func _find_idle_brave_near() -> Unit:
-	var best: Unit = null
-	var best_d: float = INF
-	var here: Vector3 = center_world()
-	for u in unit_manager.get_units_in_radius(here, MAN_RADIUS):
+			deficit -= 1   # already walking toward this hut
+			continue
 		if u.tribe_id != tribe_id or u.unit_kind() != &"brave":
 			continue
 		if u.state != Unit.State.IDLE or not u.can_take_orders():
 			continue
 		if u.garrison_target != null:
 			continue
-		var d: float = Vector2(u.position.x - here.x, u.position.z - here.z).length_squared()
-		if d < best_d:
-			best_d = d
-			best = u
-	return best
+		if Vector2(u.position.x - here.x, u.position.z - here.z).length_squared() \
+				> MAN_RADIUS * MAN_RADIUS:
+			continue   # pull radius is smaller than the incoming-count radius
+		candidates.append(u)
+	while deficit > 0 and not candidates.is_empty():
+		var best_i: int = 0
+		var best_d: float = INF
+		for i in range(candidates.size()):
+			var d: float = Vector2(candidates[i].position.x - here.x,
+				candidates[i].position.z - here.z).length_squared()
+			if d < best_d:
+				best_d = d
+				best_i = i
+		candidates[best_i].order_man_hut(self)
+		candidates.remove_at(best_i)
+		deficit -= 1
 
 
 # --- Production ----------------------------------------------------------------
@@ -243,11 +248,18 @@ func growth_per_minute() -> float:
 
 ## Spawns braves while manned and below the housing / hard cap. The timer only
 ## advances with crew (scaled by crew count), so an empty hut never produces.
+## Crew pruning/admission and the cap check are throttled (MAINTAIN_INTERVAL,
+## staggered per hut) — they cost a radius query / a tribe-wide sum per run.
 func _tick_active(delta: float) -> void:
 	if tribe == null or unit_manager == null:
 		return
-	_prune_crew()
-	_admit_arrived_crew()
+	_maintain_timer -= delta
+	if _maintain_timer <= 0.0:
+		_maintain_timer = MAINTAIN_INTERVAL + float(get_instance_id() % 8) * 0.01
+		_prune_crew()
+		_admit_arrived_crew()
+		_cap_blocked = tribe.population() >= tribe.housing_capacity() \
+			or tribe.at_unit_cap()
 	_growth_timer -= delta
 	if _growth_timer <= 0.0:
 		_growth_timer = GROWTH_INTERVAL
@@ -255,7 +267,7 @@ func _tick_active(delta: float) -> void:
 	if crew.is_empty():
 		spawn_timer = SPAWN_INTERVAL
 		return
-	if tribe.population() >= tribe.housing_capacity() or tribe.at_unit_cap():
+	if _cap_blocked:
 		spawn_timer = SPAWN_INTERVAL
 		return
 	spawn_timer -= delta * _spawn_rate_factor()

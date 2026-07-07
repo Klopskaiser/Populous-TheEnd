@@ -10,7 +10,9 @@ class_name UnitRenderer extends MultiMeshInstance3D
 ## VISUAL_SLICES staggered slices; transforms are only rewritten for units
 ## whose position actually changed (standing units cost one comparison).
 
-const MAX_UNITS: int = 4096
+## Sized for the phase-8 target: 4 tribes x 1500 hard cap, plus corpses that
+## linger a few seconds before expiring.
+const MAX_UNITS: int = 8192
 const VISUAL_SLICES: int = 3
 const PIXEL_SIZE: float = 0.06
 ## Kinds baked into the atlas.

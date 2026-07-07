@@ -33,13 +33,12 @@ const SKIRMISH_BASE_RADIUS: float = 26.0
 const SKIRMISH_BASE_TREES: int = 12
 const SKIRMISH_TREE_RADIUS: float = 20.0
 
-## Stress test (key F9): spawns this many braves per tribe per press,
-## staggered over frames so the spawn itself does not hitch.
-const STRESS_BATCH_PER_TRIBE: int = 250
+## Stress test (key F9): spawns this many braves TOTAL per press (split over
+## the tribes), staggered over frames so the spawn itself does not hitch.
+## Phase-8 targets: one press = 2000 units, three presses = 6000 (needs a
+## 4-player skirmish — the 1500-per-tribe hard cap still applies).
+const STRESS_BATCH_TOTAL: int = 2000
 const STRESS_SPAWNS_PER_FRAME: int = 40
-## Spawn areas per tribe (island quadrants).
-const STRESS_ANCHORS: Array[Vector2i] = [
-	Vector2i(44, 44), Vector2i(84, 44), Vector2i(44, 84), Vector2i(84, 84)]
 
 ## Debug battle (pause-menu "Debugschlacht"): two armies of this size meet in
 ## the middle of the island. Blue (tribe 0) stays player-controllable.
@@ -161,6 +160,10 @@ func _ready() -> void:
 	var combat_audio: CombatAudio = CombatAudio.new()
 	combat_audio.name = "CombatAudio"
 	add_child(combat_audio)
+	# FPS counter (phase 8), toggled via the main-menu options (persisted).
+	var fps_overlay: FpsOverlay = FpsOverlay.new()
+	fps_overlay.name = "FpsOverlay"
+	$UI.add_child(fps_overlay)
 
 	# Terrain deformations (foundation flattening, later Landbridge) rebuild
 	# the affected mesh chunks + collision here.
@@ -576,11 +579,14 @@ func _cycle_time_scale() -> void:
 
 # --- Stress test (F9) ----------------------------------------------------------
 
-## Queues STRESS_BATCH_PER_TRIBE braves for every tribe; _physics_process
-## spawns them staggered over frames.
+## Queues STRESS_BATCH_TOTAL braves split over the tribes; _physics_process
+## spawns them staggered over frames (tribes at their 1500 hard cap simply
+## stop accepting spawns).
 func _queue_stress_batch() -> void:
-	for tribe_id in range(GameState.tribes.size()):
-		for i in range(STRESS_BATCH_PER_TRIBE):
+	var tribe_count: int = maxi(1, GameState.tribes.size())
+	var per_tribe: int = int(ceil(float(STRESS_BATCH_TOTAL) / float(tribe_count)))
+	for tribe_id in range(tribe_count):
+		for i in range(per_tribe):
 			_stress_pending.append(tribe_id)
 	print("Stresstest: %d Einheiten in Warteschlange (gesamt danach: %d)" % [
 		_stress_pending.size(), _unit_manager.units.size() + _stress_pending.size()])
@@ -599,13 +605,26 @@ func _physics_process(_delta: float) -> void:
 
 func _spawn_stress_brave(tribe_id: int) -> void:
 	var nav: NavGrid = GameState.nav_grid
-	var anchor: Vector2i = STRESS_ANCHORS[tribe_id % STRESS_ANCHORS.size()]
+	var anchor: Vector2i = _stress_anchor(tribe_id)
 	for attempt in range(24):
 		var cell: Vector2i = anchor + Vector2i(
 			_stress_rng.randi_range(-18, 18), _stress_rng.randi_range(-18, 18))
 		if nav.is_cell_walkable(cell):
 			_unit_manager.spawn_unit(BRAVE_SCENE, tribe_id, nav.cell_to_world(cell))
 			return
+
+
+## Stress-spawn quadrant anchor per tribe, scaled to the map size (the old
+## fixed island coordinates missed the 256 maps).
+func _stress_anchor(tribe_id: int) -> Vector2i:
+	var s: int = GameState.terrain_data.size
+	var lo: int = int(float(s) * 0.34)
+	var hi: int = int(float(s) * 0.66)
+	match tribe_id % 4:
+		0: return Vector2i(lo, lo)
+		1: return Vector2i(hi, lo)
+		2: return Vector2i(lo, hi)
+		_: return Vector2i(hi, hi)
 
 
 func _place_debug_marker(screen_pos: Vector2) -> void:

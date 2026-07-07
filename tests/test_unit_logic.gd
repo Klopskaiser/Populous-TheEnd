@@ -362,20 +362,25 @@ func test_path_queue_spreads_path_requests() -> void:
 			pending += 1
 	check(pending == count, "all move orders wait for the path queue first")
 
+	# One tick resolves a bounded batch: capped by PATHS_PER_TICK AND the
+	# PATH_BUDGET_USEC time budget (phase 8) — never everything at once.
 	manager.tick(TICK)
 	var resolved: int = 0
 	for unit in units:
 		if not unit.get_remaining_path().is_empty():
 			resolved += 1
-	check(resolved == UnitManager.PATHS_PER_TICK,
-		"one tick resolves at most PATHS_PER_TICK paths (got %d)" % resolved)
+	check(resolved > 0 and resolved <= UnitManager.PATHS_PER_TICK,
+		"one tick resolves a bounded batch (got %d of %d)" % [resolved, count])
+	check(resolved < count, "the first tick never resolves everything")
 
-	manager.tick(TICK)
+	# A few more ticks drain the whole queue.
+	for i in range(16):
+		manager.tick(TICK)
 	resolved = 0
 	for unit in units:
 		if not unit.get_remaining_path().is_empty():
 			resolved += 1
-	check(resolved == count, "the second tick resolves the rest")
+	check(resolved == count, "later ticks resolve the rest")
 
 	var before: Vector3 = units[0].position
 	units[0].tick(TICK)

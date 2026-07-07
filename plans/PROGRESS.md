@@ -3187,3 +3187,139 @@ Manuelle Prüfung ausstehend.
   Neu-Picken nur noch über den Redirect-Timer (~0,8 s), nicht mehr bei leerem Pfad.
   Perf-Sanity: 200 Panik-Einheiten an einer Klippe ≈ 2,5 ms/Frame (headless, nur
   Logik).
+
+---
+
+## Phase 8 — Performance (umgesetzt; manuelle Prüfung ausstehend)
+
+Plan: [08_performance.md](08_performance.md). Reine Performance-Phase,
+messgestützt (headless-Benchmarks + Pfad-Telemetrie); Balance/Komfort bewusst
+in Phase 9.
+
+**Messwerkzeuge (neu):**
+- `scripts/core/game_settings.gd` — `GameSettings` (statisch): persistente
+  Nutzereinstellungen via ConfigFile (`user://settings.cfg`); aktuell
+  `show_fps` (Default aus).
+- `scripts/ui/fps_overlay.gd` — `FpsOverlay` (Label, oben rechts): FPS +
+  Frame-Zeit in ms, 4x/s aktualisiert; folgt `GameSettings.show_fps()` live.
+  In `main.gd` in den UI-Layer gehängt; Optionen-Seite im Hauptmenü hat den
+  CheckButton „FPS-Anzeige" (persistiert).
+- **Lag-Szenario per Flag:** `godot --path . -- lagtest` startet direkt
+  Skirmish Bergpass mit 3 KIs (main_menu.gd; F10-Zeitraffer rafft den Aufbau).
+- `tests/benchmark_earlygame.gd` — Headless-Nachbau des Lag-Szenarios
+  (Bergpass, 4 KI-Stämme, 150 s Sim): Kosten pro Subsystem in 30-s-Fenstern,
+  Top-Kostenstellen pro Einheiten-State, Pfad-Telemetrie.
+- `tests/benchmark_mass.gd` — Bewegung + Kampf bei 2000/6000 Einheiten mit
+  Phasen-Split (units/hash/paths/sep/regroup).
+- `Unit.dbg_plan_calls/-fails/-us` (statisch) — Pfadplanungs-Telemetrie, von
+  Benchmarks und `test_perf.gd` gelesen.
+
+**Früh-Lag: Befund (gemessen) und Fix.** Das Benchmark reproduzierte den Lag
+exakt: Ø-Frame-Kosten der Unit-Ticks stiegen bei nur ~220 Einheiten auf
+**~100 ms/Frame** (Budget 33 ms), Treiber war `brave/BUILD/CHOP`. Ursache:
+**fehlschlagende A*-Läufe** — auf Bergpass stehen Bäume auf begehbaren, aber
+**isolierten** Bergkuppen; Bauarbeiter wählten so einen Baum, der Pfad schlug
+fehl (Voll-Exploration der halben 256er-Karte, ~6,5 ms je Fehlschlag),
+`_end_subtask` setzte den Retry-Timer auf 0 → derselbe Baum wurde **alle 2
+Frames** neu gewählt. Gemessen: 8327 Pfad-Fehlschläge in 30 s (54 s
+CPU-Zeit im Fenster). Fixes:
+- `Building.mark_wood_unreachable()`/`is_wood_unreachable()` — Baustelle merkt
+  sich unerreichbare Bäume/Stapel (TTL 30 s, geteilt von allen Arbeitern der
+  Baustelle; nach Ablauf Re-Check, falls z. B. eine Landbrücke den Weg öffnet).
+  `Brave._on_seek_failed` markiert; `_nearest_claimable_tree`/
+  `_nearest_eligible_pile` filtern.
+- Retry-Backoff: `TASK_RETRY_IDLE` (1,5 s + Jitter) wenn die Task-Wahl leer
+  ausgeht oder ein Seek scheitert (vorher 0,6 s bzw. sofort).
+- Pfad-Queue zusätzlich **zeitbudgetiert** (`PATH_BUDGET_USEC` 4 ms neben dem
+  48er-Cap) — teure/fehlschlagende Pfade auf großen Karten können den Tick
+  nicht mehr sprengen (test_unit_logic-Queue-Test auf „höchstens N pro Tick,
+  Rest später" angepasst).
+- Fetch-Sicherheitsscan entschärft: Gegner-Check nur noch für den **besten**
+  Kandidaten statt pro Stapel/Baum (`_best_safe_pile`/`_claim_safe_tree`
+  zweiphasig); `UnitManager.has_enemy_in_radius()` als allokationsfreier
+  Existenz-Check.
+
+**Ergebnis Früh-Lag (Benchmark vorher → nachher):** Ø-Unit-Tick-Kosten
+t=90s: 22→0,9 ms; t=120s: 49→1,2 ms; t=150s: 99→**1,8 ms**; schlimmster
+Frame 583→55 ms; Pfad-Fehlschläge 8327→185 pro 30-s-Fenster.
+
+**Wirtschaft/Gebäude-Ticks entlastet (Per-Frame-Kosten weg):**
+- `Hut`: Aufnahme-Radius-Query + Bevölkerungs-/Cap-Check nur noch alle 0,25 s
+  (gestaffelt, `MAINTAIN_INTERVAL`, Cache `_cap_blocked`); `_tick_growth`
+  bündelt Incoming-Zählung + Idle-Brave-Suche in **eine** Radius-Query
+  (vorher bis zu 6 Queries/s je Hütte).
+- `Watchtower`: Prune/Aufnahme alle 0,25 s; Besatzungs-Scans (Feuer/
+  Konvertierung) über 0,15-s-Akkumulator statt pro Frame (Cooldowns laufen
+  über das akkumulierte Delta → gleiche Kadenz).
+- `TrainingBuilding`: `_prune_queue` ohne Allokation im Normalfall;
+  `_assign_slots` (Perimeter-Geometrie + Nav-Snap je Brave) nur alle 0,25 s
+  bzw. sofort bei Queue-Längen-Änderung.
+- `Workshop`: Vorrats-/Start-Checks (Stapelsummen, Katapult-Zählung) alle
+  0,3 s statt pro Frame.
+- `Forester`: 2-s-Backoff nach fehlgeschlagenem Pflanz-Dispatch (volle
+  Fläche/keine freie Zelle wurde vorher pro Frame neu gescannt).
+- `BuildingManager._recruit_workers`: iteriert die Einheiten des BESITZER-
+  Stamms mit Distanzcheck statt einer ungecappten 30-m-Radius-Query je
+  Baustelle.
+- `AIController`: Plot-Ringsuche hart gedeckelt (`MAX_PLOT_CELLS` 1200) +
+  5-Ticks-Cooldown nach erfolgloser Suche (vorher bis ~3700 `can_place_at`
+  pro KI-Tick).
+- `GameState`: Tribe-Ticks (Mana; `praying_braves()` läuft über alle
+  Einheiten) auf 10 Hz statt pro Render-Frame (Einkommen identisch:
+  Rate × Delta).
+
+**Bewegung & Kampf skaliert:**
+- Bewegungs-Hotpath: Steigung aus dem letzten Schritt (`_ground_slope`, 1 Tick
+  Verzögerung) statt 2 zusätzlicher Terrain-Samples pro Tick — Laufen braucht
+  nur noch das eine `get_height` des Y-Snaps (auch in `_step_toward`);
+  `_slope_ahead` entfernt.
+- `UnitManager.nearest_enemy()` — allokationsfreier Gegner-Scan (ersetzt
+  `get_units_in_radius`-Arrays in `Unit._scan_for_enemy`); Kandidaten-Cap
+  zählt wie vorher JEDE Einheit im Radius (sonst degeneriert der Scan in
+  Freundes-Massen zum Voll-Bucket-Lauf — gemessen: Regroup-Pass 34→1 ms bei
+  6000).
+- `_prune_melee_attackers` alloziert nur noch bei tatsächlich ungültigen
+  Einträgen (lief pro Angreifer pro Tick).
+- Separation-Budget 600→450 Einheiten/Tick (Slices skalieren den Push wie
+  gehabt).
+- `UnitRenderer.MAX_UNITS` 4096→**8192** (4×1500-Hardcap + Leichen).
+- **F9-Stresstest:** 2000 Einheiten pro Druck (auf die vorhandenen Stämme
+  verteilt), Spawn-Anker skalieren mit der Kartengröße; 6000 erreichbar im
+  4-Spieler-Skirmish (3× F9; Hardcap 1500/Stamm bleibt).
+
+**Messwerte Masse (headless, Ø/Tick, Budget ~33 ms):** Bewegung 2000:
+38→**29,5 ms**; Kampf 2000 (alle kämpfen): 50→**28 ms** → Mindestziel 2000
+erreicht. Richtung 6000 (Kennzahl, kein hartes Ziel): Bewegung 6000
+~46 ms, Kampf ~4700 ~76 ms — Sim läuft dann unter 30 Hz (Zeitlupe), bleibt
+aber bedienbar. Headless misst nur die Logik; maßgeblich im Spiel ist die
+neue FPS-Anzeige.
+
+**Rendering:** bewusst NICHT angefasst (Plan: „nur bei Bedarf, wenn GPU
+limitiert" — headless nicht messbar). Falls die FPS-Anzeige im Spiel GPU-
+Limits zeigt, sind MultiMesh-Bäume (statt ~2-4 MeshInstance3D je Baum) und
+Culling der Overlays die nächsten Hebel.
+
+**Tests:** `tests/test_perf.gd` (neu, 4 Wächter): Massen-Bewegung 2000 und
+Massen-Kampf 2000 unter großzügigem O(n²)-Budget, Unreachable-Holz-Regression
+(deterministische Insel: begrenzte Pfad-Fehlschläge, Baustelle stallt,
+Arbeiter idlet), Früh-Wirtschafts-Budget (Bergpass, 4 KI-Stämme, 30 s Sim,
+Ø-Frame-Budget). **1499 Tests grün, 0 Fehler**; `--headless --quit` und
+`--headless --quit-after 600 -- lagtest` fehlerfrei.
+
+**Erkenntnisse/Stolpersteine:**
+- Ein fehlschlagender A* auf einer 256er-Karte exploriert die GANZE
+  erreichbare Komponente (~6,5 ms) — fehlgeschlagene Ziele dürfen nie im
+  Frame-Takt neu versucht werden. Konnektivitäts-Labels (O(1)-Fail) wurden
+  erwogen und verworfen: Rebuild nach jeder Terrain-Verformung (Planier-Flush
+  alle 0,25 s je Baustelle) wäre teurer als die Krankheit.
+- Kandidaten-Caps müssen ALLE untersuchten Einheiten zählen, nicht nur
+  Treffer — sonst degeneriert der Scan in dichten Freundes-Massen.
+- Headless-Zeitmessungen auf dieser Maschine streuen stark (±30 %, einzelne
+  Ausreißer-Frames durch OS-Jitter); Suite-Budgets deshalb als Größenordnungs-
+  Wächter (3-4× Messwert) ausgelegt.
+
+**Manuelle Prüfung ausstehend (durch Nutzer):** FPS-Anzeige über Optionen
+ein-/ausschalten; Lag-Szenario (`-- lagtest` oder Skirmish Bergpass + 3 KIs)
+im Spiel flüssig; F9-Stresstest 2000/4000/6000 im 4-Spieler-Skirmish (FPS
+beobachten — falls GPU limitiert: Rendering-Hebel oben); Wachturm-Beschuss,
+Hütten-Bemannung und Trainings-Queues verhalten sich unverändert.

@@ -33,6 +33,12 @@ const PLAYER_TRIBE: int = 0
 ## tornado disabling the last hut without destroying it).
 const DEFEAT_CHECK_INTERVAL: float = 1.0
 
+## Tribe ticks (mana economy) run at this interval instead of per render frame
+## (phase 8): praying_braves() walks every unit of the tribe per tick — at
+## 60+ fps with 4 tribes x hundreds of units that was pure waste. The mana
+## income is rate x delta, so a coarser tick yields the identical amount.
+const TRIBE_TICK_INTERVAL: float = 0.1
+
 ## Configuration of the next/current match, set by the main menu and consumed
 ## by Main._ready(). null = direct scene start (Main falls back to the
 ## start mission).
@@ -44,11 +50,15 @@ var match_over: bool = false
 var _win_tracking: bool = false
 var _defeated: Dictionary[int, bool] = {}
 var _defeat_timer: float = 0.0
+var _tribe_tick_accum: float = 0.0
 
 
 func _process(delta: float) -> void:
-	for tribe in tribes:
-		tribe.tick(delta)
+	_tribe_tick_accum += delta
+	if _tribe_tick_accum >= TRIBE_TICK_INTERVAL:
+		for tribe in tribes:
+			tribe.tick(_tribe_tick_accum)
+		_tribe_tick_accum = 0.0
 	if _win_tracking and not match_over:
 		_defeat_timer -= delta
 		if _defeat_timer <= 0.0:

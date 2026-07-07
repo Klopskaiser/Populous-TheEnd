@@ -51,6 +51,13 @@ func _ready() -> void:
 	# Headless verification hook: `godot ... -- skirmish=N [map=<id>]` skips the
 	# menu and starts a skirmish with N AIs right away (the menu needs mouse input).
 	var args: PackedStringArray = OS.get_cmdline_user_args()
+	# Profiling shortcut (phase 8): `godot ... -- lagtest` starts the
+	# reproducible early-lag scenario (bergpass, 3 AIs + player) directly —
+	# quick re-entry for editor-profiler runs (F10 time-lapse speeds up the
+	# build-up phase in-game).
+	if args.has("lagtest"):
+		_launch.call_deferred(MatchConfig.skirmish(3, "bergpass"))
+		return
 	var map_arg: String = MapGenerator.DEFAULT_MAP
 	for arg in args:
 		if arg.begins_with("map="):
@@ -173,6 +180,14 @@ func _build_options_page() -> Control:
 	volume.value = AudioSettings.master_volume_percent()
 	volume.value_changed.connect(AudioSettings.set_master_volume_percent)
 	vb.add_child(volume)
+
+	# FPS overlay toggle (phase 8), persisted via GameSettings.
+	var fps_check: CheckButton = CheckButton.new()
+	fps_check.text = "FPS-Anzeige"
+	UiTheme.style_button(fps_check)
+	fps_check.button_pressed = GameSettings.show_fps()
+	fps_check.toggled.connect(GameSettings.set_show_fps)
+	vb.add_child(fps_check)
 
 	vb.add_child(HSeparator.new())
 	_add_button(vb, "Zurück", func() -> void: _show_page(0))

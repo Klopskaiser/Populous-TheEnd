@@ -50,6 +50,9 @@ const AUTO_CREW_RADIUS: float = 12.0
 ## Default cap of MANNED catapults before production auto-stops (UI-adjustable).
 const DEFAULT_MAX_CATAPULTS: int = 3
 const MAX_CATAPULTS_LIMIT: int = 20
+## Idle-branch throttle (phase 8): the stock/start checks sum entrance piles
+## and count the tribe's manned catapults — too expensive per frame.
+const STOCK_CHECK_INTERVAL: float = 0.3
 
 const SIEGE_SCENE: PackedScene = preload("res://scenes/units/siege_engine.tscn")
 
@@ -73,6 +76,7 @@ var pending_engine = null
 ## True once the fresh engine was ordered off the entrance pad (so it is not
 ## re-ordered every tick).
 var _engine_dispatched: bool = false
+var _stock_timer: float = 0.0
 
 
 func _init() -> void:
@@ -236,7 +240,12 @@ func _tick_active(delta: float) -> void:
 				_finish_catapult()
 		return
 	# Not producing: top the entrance stock up first (spec: fetch all the
-	# wood BEFORE starting to work), then start the next catapult.
+	# wood BEFORE starting to work), then start the next catapult. Throttled —
+	# the stock check sums the entrance piles per call (phase 8).
+	_stock_timer -= delta
+	if _stock_timer > 0.0:
+		return
+	_stock_timer = STOCK_CHECK_INTERVAL
 	if wants_more_stock_wood() and not wood_stalled:
 		for b in occupants:
 			if is_instance_valid(b) and b.workshop_inside:

@@ -26,6 +26,11 @@ const QUEUE_START_OFFSET: float = 0.9
 const QUEUE_WINDING_SPACING: float = 1.0
 const QUEUE_MAX_WINDINGS: int = 3
 
+## Queue-slot reassignment throttle (phase 8): queue_slot_world does perimeter
+## geometry plus a nav snap per queued brave — per FRAME per building that
+## added up. Slots also refresh immediately whenever the queue length changes.
+const SLOT_ASSIGN_INTERVAL: float = 0.25
+
 ## Combat unit spawned when a brave finishes training.
 var produces: PackedScene = null
 var training_time: float = 3.0
@@ -35,6 +40,8 @@ var incoming: Array[Brave] = []
 var trainee: Brave = null
 var _train_timer: float = 0.0
 var _spawn_counter: int = 0
+var _slot_timer: float = 0.0
+var _slot_count: int = -1
 
 
 ## Training buildings do not house population.
@@ -69,7 +76,11 @@ func remove_trainee(brave) -> void:
 
 func _tick_active(delta: float) -> void:
 	_prune_queue()
-	_assign_slots()
+	_slot_timer -= delta
+	if _slot_timer <= 0.0 or incoming.size() != _slot_count:
+		_slot_timer = SLOT_ASSIGN_INTERVAL
+		_slot_count = incoming.size()
+		_assign_slots()
 	_admit_front()
 	if trainee != null:
 		_train_timer -= delta
@@ -77,14 +88,22 @@ func _tick_active(delta: float) -> void:
 			_finish_one()
 
 
-## Drops braves that are gone or no longer heading here.
+## Drops braves that are gone or no longer heading here. The rebuild only
+## happens when an invalid entry was actually found (no allocation per frame).
 func _prune_queue() -> void:
-	var still: Array[Brave] = []
+	var dirty: bool = false
 	for brave in incoming:
-		if is_instance_valid(brave) and brave.state == Unit.State.TRAIN \
-				and brave.train_target == self:
-			still.append(brave)
-	incoming = still
+		if not (is_instance_valid(brave) and brave.state == Unit.State.TRAIN \
+				and brave.train_target == self):
+			dirty = true
+			break
+	if dirty:
+		var still: Array[Brave] = []
+		for brave in incoming:
+			if is_instance_valid(brave) and brave.state == Unit.State.TRAIN \
+					and brave.train_target == self:
+				still.append(brave)
+		incoming = still
 	if trainee != null and not is_instance_valid(trainee):
 		trainee = null
 
