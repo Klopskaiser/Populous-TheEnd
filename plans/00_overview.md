@@ -21,7 +21,7 @@ Nach Abschluss einer Phase: Checkbox abhaken, committen, pushen.
 - [x] **Phase 7e** — [07e_sprite_directions.md](07e_sprite_directions.md): 8 Sprite-Blickrichtungen (Diagonalen) *(abgeschlossen 2026-07-07; manuelle Optik-Prüfung bestanden, inkl. Diagonal-Deko Krieger/Feuerkrieger/Prediger)*
 - [ ] **Phase 7g** — [07g_building_assault.md](07g_building_assault.md): Gebäudezerstörung durch Einheiten (Sturmangriff durch den Eingang, Insassen-Auswurf, Feuerkrieger-Fernbeschuss, 15/5-Nahkampf-Limits, Gebäude = niedrigste Scan-Priorität)
 - [ ] **Phase 7h** — [07h_watchtower.md](07h_watchtower.md): Wachturm (4 Holz, 2 Besatzungsplätze für Kampfeinheiten/Schamanin; +3 m Reichweite für Fernkampf/Bekehrung/Zauber — Krieger ohne Bonus, nur geschützte Reserve)
-- [ ] **Phase 7f** — [07f_siege_workshop.md](07f_siege_workshop.md): Belagerungswaffe + Werkstatt (Belagerungs-Spezialist auf Basis des 7g-Targetings) — *bewusst nach 7g/7h*
+- [x] **Phase 7f** — [07f_siege_workshop.md](07f_siege_workshop.md): Belagerungswaffe + Werkstatt (Crew-System, Fahrzeug-Navigation, Werkstatt-Produktion) *(abgeschlossen 2026-07-07 — auf Nutzerentscheidung VOR 7g eigenständig umgesetzt: eigenes Siege-Gebäude-Targeting statt 7g-Basis; manuelle Prüfung ausstehend)*
 - [ ] **Phase 8** — [08_performance_polish.md](08_performance_polish.md): Performance, Balance, Feinschliff *(bewusst NACH den Feature-Phasen 7c–7f: Optimierung/Balance gegen den fertigen Feature-Stand — inkl. Balance der neuen Zauber, des Baumertrags/`SKIRMISH_BASE_TREES` und der Belagerungswaffe; bekannte Perf-Kandidaten siehe PROGRESS: Melee-Slot-Kontention, GPU-Rendering, Exit-Leaks)*
 
 Die Phasen sind **strikt sequenziell** — jede baut auf den Artefakten der vorherigen auf.

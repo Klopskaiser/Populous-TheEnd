@@ -15,7 +15,7 @@ class_name Brave extends Unit
 ## All logic runs in tick(delta) and works without the scene tree. References
 ## to trees/piles are kept untyped because they may be freed by other workers.
 
-enum Task {NONE, FLATTEN, CHOP, PICKUP, DELIVER, CONSTRUCT, REPAIR}
+enum Task {NONE, FLATTEN, CHOP, PICKUP, DELIVER, CONSTRUCT, REPAIR, PRODUCE}
 ## Sub-phase of the forester job (State.FORESTER, phase 7d): walking in to be
 ## housed, walking out to a plant spot, kneeling to plant, walking back in.
 enum ForesterPhase {JOIN, PLANT_GO, KNEEL, RETURN}
@@ -183,6 +183,23 @@ func order_repair(building: Building) -> void:
 	_set_state(State.BUILD)
 
 
+## Join a finished workshop as a standing production worker (max
+## Workshop.WORKER_SLOTS; fails silently when the crew is full). Runs on the
+## construction-job system: the brave fetches stock wood and contributes
+## worker-seconds (Task.PRODUCE) until ordered away.
+func order_workshop(workshop: Workshop) -> void:
+	if not can_take_orders():
+		return
+	if workshop == null or not is_instance_valid(workshop) or not workshop.is_usable():
+		return
+	_interrupt_tasks()
+	if not workshop.join(self):
+		return
+	job = workshop
+	_retry_timer = 0.0
+	_set_state(State.BUILD)
+
+
 func order_pray(site: Building) -> void:
 	if not can_take_orders():
 		return
@@ -321,13 +338,17 @@ func _tick_job(delta: float) -> void:
 			_tick_construct(delta)
 		Task.REPAIR:
 			_tick_repair(delta)
+		Task.PRODUCE:
+			_tick_produce(delta)
 
 
 ## A job binds its workers while the building is under construction or (for
 ## repair jobs) damaged; a finished/fully repaired building releases them.
+## Workshop crews (7f) stay bound as long as the workshop is usable.
 func _job_active() -> bool:
 	return job.under_construction \
-		or (job.health > 0 and job.health < job.max_health)
+		or (job.health > 0 and job.health < job.max_health) \
+		or (job is Workshop and job.is_usable())
 
 
 ## Workers pick their own sensible sub-task: deliver carried wood first; then
@@ -340,6 +361,11 @@ func _choose_job_task() -> void:
 		_reset_seek()
 		return
 	if not job.under_construction:
+		# A healthy workshop is production duty; a damaged one falls through
+		# to the repair pipeline (and back once fixed).
+		if job is Workshop and job.health >= job.max_health:
+			_choose_workshop_task()
+			return
 		_choose_repair_task()
 		return
 	if job.needs_flatten() and job.has_unclaimed_flatten_cell():
@@ -363,6 +389,40 @@ func _choose_job_task() -> void:
 		_reset_seek()
 		return
 	# Nothing to do right now: wait and re-check via the retry timer.
+
+
+## Workshop crew duty (7f), in priority order: keep working on a RUNNING
+## production (its wood is already spent); top the entrance stock up to
+## STOCK_TARGET while idle; start the next catapult when everything is ready.
+## Nothing to do (stock full, production blocked) -> wait via the retry timer.
+func _choose_workshop_task() -> void:
+	var ws: Workshop = job as Workshop
+	if ws.production_active:
+		task = Task.PRODUCE
+		_reset_seek()
+		return
+	if ws.wants_more_stock_wood() and _try_fetch_wood():
+		return
+	if ws.can_start_production():
+		task = Task.PRODUCE
+		_reset_seek()
+		return
+	# Stock is full (or nothing can run): stand by and re-check.
+
+
+## Hammers worker-seconds into the workshop's current catapult. The workshop
+## refuses work while paused/blocked/out of wood — then re-choose.
+func _tick_produce(delta: float) -> void:
+	if not (job is Workshop):
+		_end_subtask()
+		return
+	var ws: Workshop = job as Workshop
+	if not _seek(ws.center_world(), ws.interact_range(), delta):
+		return
+	_set_working(true)
+	_face_toward(ws.center_world())
+	if not ws.add_production_work(delta):
+		_end_subtask()
 
 
 ## Repair job: fetch wood while the damage still owes some (delivered piles are
@@ -584,11 +644,15 @@ func _tick_repair(delta: float) -> void:
 		_end_subtask()
 
 
-## Wood demand of the current job (construction vs. repair).
+## Wood demand of the current job (construction vs. repair vs. workshop stock).
 func _job_wants_wood() -> bool:
 	if job == null or not is_instance_valid(job):
 		return false
-	return job.wants_more_wood() if job.under_construction else job.wants_more_repair_wood()
+	if job.under_construction:
+		return job.wants_more_wood()
+	if job is Workshop and job.health >= job.max_health:
+		return (job as Workshop).wants_more_stock_wood()
+	return job.wants_more_repair_wood()
 
 
 func _end_subtask() -> void:

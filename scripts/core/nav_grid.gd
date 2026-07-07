@@ -15,6 +15,11 @@ var terrain: TerrainData = null
 
 var _astar: AStarGrid2D = AStarGrid2D.new()
 var _building_cells: Dictionary[Vector2i, bool] = {}  # cells blocked by buildings
+## Second grid for wide vehicles (siege engine, phase 7f): a cell is passable
+## only when at least one fully walkable 2x2 block contains it — 1-cell gaps
+## and narrow ledges stay closed to vehicles. Derived from the unit grid on
+## every update.
+var _vehicle_astar: AStarGrid2D = AStarGrid2D.new()
 
 
 func _init(p_terrain: TerrainData) -> void:
@@ -23,6 +28,10 @@ func _init(p_terrain: TerrainData) -> void:
 	_astar.cell_size = Vector2(TerrainData.CELL_SIZE, TerrainData.CELL_SIZE)
 	_astar.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES
 	_astar.update()
+	_vehicle_astar.region = _astar.region
+	_vehicle_astar.cell_size = _astar.cell_size
+	_vehicle_astar.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES
+	_vehicle_astar.update()
 	update_region(Rect2i(0, 0, TerrainData.SIZE, TerrainData.SIZE))
 
 
@@ -121,6 +130,90 @@ func update_region(rect: Rect2i) -> void:
 			var cell: Vector2i = Vector2i(x, z)
 			var solid: bool = _building_cells.has(cell) or not terrain.is_walkable(cell)
 			_astar.set_point_solid(cell, solid)
+	_refresh_vehicle_region(r)
+
+
+# --- Vehicle navigation (siege engine, phase 7f) ----------------------------------
+
+## A vehicle-sized unit (~1x2 m, rotating) fits on a cell when at least one
+## 2x2 block of walkable cells contains it.
+func is_cell_vehicle_walkable(cell: Vector2i) -> bool:
+	return terrain.in_bounds(cell) and not _vehicle_astar.is_point_solid(cell)
+
+
+## Recomputes vehicle passability from the unit grid. Grown by 1 because a
+## cell's vehicle flag depends on its neighbours.
+func _refresh_vehicle_region(rect: Rect2i) -> void:
+	var r: Rect2i = rect.grow(1).intersection(Rect2i(0, 0, TerrainData.SIZE, TerrainData.SIZE))
+	for z in range(r.position.y, r.position.y + r.size.y):
+		for x in range(r.position.x, r.position.x + r.size.x):
+			var cell: Vector2i = Vector2i(x, z)
+			_vehicle_astar.set_point_solid(cell, not _vehicle_passable(cell))
+
+
+func _vehicle_passable(cell: Vector2i) -> bool:
+	if not terrain.in_bounds(cell) or _astar.is_point_solid(cell):
+		return false
+	# Any of the four 2x2 blocks containing the cell fully walkable?
+	for oz in range(-1, 1):
+		for ox in range(-1, 1):
+			if _block_walkable(cell + Vector2i(ox, oz)):
+				return true
+	return false
+
+
+## Whether the 2x2 block with top-left `origin` is fully walkable.
+func _block_walkable(origin: Vector2i) -> bool:
+	for dz in range(2):
+		for dx in range(2):
+			var c: Vector2i = origin + Vector2i(dx, dz)
+			if not terrain.in_bounds(c) or _astar.is_point_solid(c):
+				return false
+	return true
+
+
+## find_path for vehicles: same contract, on the eroded vehicle grid. Start/
+## target snap to the nearest VEHICLE-passable cell; empty when no wide-enough
+## route exists (the engine then stays put).
+func find_vehicle_path(from: Vector3, to: Vector3) -> PackedVector3Array:
+	var result: PackedVector3Array = PackedVector3Array()
+	var from_cell: Vector2i = _nearest_vehicle_cell(world_to_cell(from))
+	var target_cell: Vector2i = world_to_cell(to)
+	var to_cell: Vector2i = _nearest_vehicle_cell(target_cell)
+	if from_cell.x < 0 or to_cell.x < 0:
+		return result
+	var id_path: Array[Vector2i] = _vehicle_astar.get_id_path(from_cell, to_cell)
+	if id_path.is_empty():
+		return result
+	for cell in id_path:
+		result.append(cell_to_world(cell))
+	if to_cell == target_cell:
+		result[result.size() - 1] = Vector3(to.x, terrain.get_height(to.x, to.z), to.z)
+	return result
+
+
+## Nearest vehicle-passable cell via outward ring search; (-1, -1) if none.
+func _nearest_vehicle_cell(cell: Vector2i) -> Vector2i:
+	cell = Vector2i(
+		clampi(cell.x, 0, TerrainData.SIZE - 1),
+		clampi(cell.y, 0, TerrainData.SIZE - 1))
+	if not _vehicle_astar.is_point_solid(cell):
+		return cell
+	for radius in range(1, MAX_SNAP_RADIUS + 1):
+		var best: Vector2i = Vector2i(-1, -1)
+		var best_dist: float = INF
+		for candidate in _ring_cells(cell, radius):
+			if not terrain.in_bounds(candidate):
+				continue
+			if _vehicle_astar.is_point_solid(candidate):
+				continue
+			var d: float = Vector2(candidate - cell).length_squared()
+			if d < best_dist:
+				best_dist = d
+				best = candidate
+		if best.x >= 0:
+			return best
+	return Vector2i(-1, -1)
 
 
 ## Blocks/unblocks cells for a building footprint (persists across

@@ -108,6 +108,7 @@ func _ready() -> void:
 
 	_unit_manager.setup(td, nav, tribes, _tree_manager, _wood_pile_manager)
 	_unit_manager.unit_renderer = _unit_renderer
+	_unit_manager.building_manager = _building_manager   # siege building scan (7f)
 	_building_manager.setup(td, nav, _unit_manager, _wood_pile_manager)
 	_tree_manager.setup(td, nav)
 	_wood_pile_manager.setup(td)

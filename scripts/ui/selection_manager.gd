@@ -264,8 +264,8 @@ func _pick_unit_at(screen_pos: Vector2, camera: Camera3D, tribe_id: int) -> Unit
 		if tribe_id >= 0:
 			if unit.tribe_id != tribe_id:
 				continue
-		elif unit.tribe_id == player_tribe_id:
-			continue
+		elif unit.tribe_id == player_tribe_id or not unit.is_targetable():
+			continue   # enemy pick: siege engines cannot be attacked directly
 		var sprite: Rect2 = _unit_screen_rect(unit, camera)
 		if sprite.size.y <= 0.0:
 			continue
@@ -407,6 +407,10 @@ func _command_move(screen_pos: Vector2, queue_up: bool, aggressive: bool = false
 	var camera: Camera3D = get_viewport().get_camera_3d()
 	if camera == null:
 		return
+	# Right-click on a crewable siege engine (own, or unmanned of any tribe):
+	# assign the selected units as its crew (7f).
+	if _tribe_commands != null and _try_crew_assignment(screen_pos, camera):
+		return
 	# Right-click on an enemy unit = attack order (units have no physics body, so
 	# this is a screen-space pick like _click_select, not a raycast).
 	var enemy: Unit = _enemy_under_cursor(screen_pos, camera)
@@ -420,6 +424,11 @@ func _command_move(screen_pos: Vector2, queue_up: bool, aggressive: bool = false
 		from, from + dir * RAY_LENGTH)
 	var hit: Dictionary = space.intersect_ray(query)
 	if hit.is_empty():
+		return
+
+	# Right-click on an ENEMY building with siege engines selected: bombard it
+	# (7f); everyone else escorts with an attack-move onto the plot.
+	if _tribe_commands != null and _dispatch_enemy_building(hit):
 		return
 
 	# An armed attack-move is always a march order — context commands
@@ -439,6 +448,62 @@ func _command_move(screen_pos: Vector2, queue_up: bool, aggressive: bool = false
 ## the selection (units have no collision bodies).
 func _enemy_under_cursor(screen_pos: Vector2, camera: Camera3D) -> Unit:
 	return _pick_unit_at(screen_pos, camera, -1)
+
+
+## Crew assignment (7f): a siege engine under the cursor that the player may
+## man — his own, or an UNMANNED one of any tribe (battlefield takeover).
+## Returns true when the order was issued (only crew-capable units join).
+func _try_crew_assignment(screen_pos: Vector2, camera: Camera3D) -> bool:
+	var crewable: Array[Unit] = []
+	for u in selected:
+		if u.can_crew_siege():
+			crewable.append(u)
+	if crewable.is_empty():
+		return false
+	var engine: Unit = null
+	var best_dist: float = INF
+	for unit in _unit_manager.units:
+		if unit.state == Unit.State.DEAD or not (unit is SiegeEngine):
+			continue
+		if unit.tribe_id != player_tribe_id \
+				and (unit as SiegeEngine).boarded_count() > 0:
+			continue   # a manned enemy engine cannot be taken
+		var sprite: Rect2 = _unit_screen_rect(unit, camera)
+		if sprite.size.y <= 0.0 or not sprite.grow(PICK_MARGIN_PX).has_point(screen_pos):
+			continue
+		var dist: float = sprite.get_center().distance_to(screen_pos)
+		if dist < best_dist:
+			best_dist = dist
+			engine = unit
+	if engine == null:
+		return false
+	_tribe_commands.order_crew(crewable, engine)
+	return true
+
+
+## Enemy building under the cursor + siege engines in the selection: siege
+## bombards, the rest escorts (attack-move onto the plot). Returns false when
+## the selection has no siege engine — the click stays a plain move/attack-move.
+func _dispatch_enemy_building(hit: Dictionary) -> bool:
+	var node: Node = hit.get("collider") as Node
+	if node == null or not node.has_meta("building"):
+		return false
+	var building: Building = node.get_meta("building") as Building
+	if building == null or building.tribe_id == player_tribe_id or building.health <= 0:
+		return false
+	var siege: Array[Unit] = []
+	var escort: Array[Unit] = []
+	for u in selected:
+		if u is SiegeEngine:
+			siege.append(u)
+		else:
+			escort.append(u)
+	if siege.is_empty():
+		return false
+	_tribe_commands.order_attack_building(siege, building)
+	if not escort.is_empty():
+		_tribe_commands.order_move(escort, building.center_world(), false, true)
+	return true
 
 
 ## Tree -> gather, own construction site -> build, own reincarnation site ->
@@ -467,6 +532,9 @@ func _dispatch_context_command(hit: Dictionary) -> bool:
 				return true
 			if building is Forester:
 				_tribe_commands.order_forester(selected, building)
+				return true
+			if building is Workshop:
+				_tribe_commands.order_workshop(selected, building)
 				return true
 			if building is TrainingBuilding:
 				_tribe_commands.order_train(building, selected)

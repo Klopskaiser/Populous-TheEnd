@@ -54,6 +54,11 @@ func place(scene: PackedScene, tribe: Tribe, cell: Vector2i,
 	building.wood_pile_manager = wood_pile_manager
 	building.cell = cell
 	building.orientation = orientation
+	# Non-square footprints (workshop 8x4) turn with the entrance side: the
+	# mesh root is rotated by the orientation, so the blocked cells must
+	# follow. A no-op for the square buildings.
+	if orientation % 2 == 1:
+		building.footprint = Vector2i(building.footprint.y, building.footprint.x)
 	building.position = _placement_position(building)
 	add_child(building)
 	register(building, tribe)

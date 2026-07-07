@@ -98,6 +98,8 @@ static func icon(key: StringName) -> ImageTexture:
 			_draw_temple(img)
 		&"forester":
 			_draw_seedling(img)
+		&"workshop":
+			_draw_catapult(img)
 		&"lightning":
 			_draw_lightning(img)
 		&"swarm":
@@ -217,6 +219,19 @@ static func _draw_seedling(img: Image) -> void:
 	_disc(img, 8, 10, 3, C_LEAF)              # left leaf
 	_disc(img, 16, 9, 3, C_LEAF)              # right leaf
 	_disc(img, 12, 6, 2, C_LEAF)              # tip
+
+
+static func _draw_catapult(img: Image) -> void:
+	# Siege workshop: a little catapult — base, two wheels, slanted throwing
+	# arm with a basket and a stone leaving it.
+	_rect(img, 5, 15, 14, 3, I_DARK)          # base frame
+	_disc(img, 7, 19, 2, I_GOLD)              # wheels
+	_disc(img, 17, 19, 2, I_GOLD)
+	for i in range(9):                        # slanted arm
+		img.set_pixel(8 + i, 14 - i, I_LIGHT)
+		img.set_pixel(9 + i, 14 - i, I_LIGHT)
+	_disc(img, 17, 5, 2, I_GOLD)              # basket
+	_disc(img, 20, 3, 1, Color(0.9, 0.35, 0.1))   # stone flying off
 
 
 static func _draw_lightning(img: Image) -> void:

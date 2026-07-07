@@ -56,6 +56,8 @@ func place_building(tribe: Tribe, building_scene: PackedScene, cell: Vector2i,
 		return null
 	var fp: Vector2i = probe.footprint
 	probe.free()
+	if orientation % 2 == 1:
+		fp = Vector2i(fp.y, fp.x)   # non-square footprints turn with the entrance
 	if not can_place_at(cell, fp):
 		return null
 	return building_manager.place(building_scene, tribe, cell, orientation)
@@ -233,12 +235,56 @@ func cast_spell(tribe: Tribe, spell_id: StringName, target: Vector3) -> bool:
 	return (shaman as Shaman).order_cast(spell, target, spell_context)
 
 
+## Assigns units to a siege engine's crew (right-click on the engine, 7f).
+## Everyone except the shaman may man it; the engine validates tribe/capacity
+## (unmanned engines accept any tribe — takeover on boarding).
+func order_crew(units: Array[Unit], engine: Unit) -> void:
+	if engine == null or not is_instance_valid(engine) \
+			or engine.state == Unit.State.DEAD or not (engine is SiegeEngine):
+		return
+	for unit in units:
+		if unit == null or not is_instance_valid(unit) or unit.state == Unit.State.DEAD:
+			continue
+		unit.order_crew(engine)
+
+
+## Bombard order on an enemy building (7f): only siege engines act on it —
+## ordinary units reject the order (the UI sends them an attack-move instead).
+func order_attack_building(units: Array[Unit], building: Building) -> void:
+	if building == null or not is_instance_valid(building) or building.health <= 0:
+		return
+	for unit in units:
+		if unit == null or not is_instance_valid(unit) or unit.state == Unit.State.DEAD:
+			continue
+		if unit is SiegeEngine and unit.tribe_id != building.tribe_id:
+			(unit as SiegeEngine).order_attack_building(building)
+
+
+## Assigns braves to a workshop's standing worker crew (max 3); non-braves
+## just walk there. The workshop ignores braves once its crew is full.
+func order_workshop(units: Array[Unit], workshop: Workshop) -> void:
+	if workshop == null or not is_instance_valid(workshop) or not workshop.is_usable():
+		return
+	var movers: Array[Unit] = []
+	for unit in units:
+		if unit.state == Unit.State.DEAD:
+			continue
+		if unit is Brave and unit.tribe_id == workshop.tribe_id:
+			(unit as Brave).order_workshop(workshop)
+		else:
+			movers.append(unit)
+	if not movers.is_empty():
+		order_move(movers, workshop.center_world())
+
+
 ## Right-click attack: selected units melee the clicked enemy. Units distribute
 ## intelligently — if the ordered target is already at its 3-attacker limit, a
 ## unit picks another free enemy near it instead of piling on a fourth.
 func order_attack(units: Array[Unit], enemy: Unit) -> void:
 	if enemy == null or not is_instance_valid(enemy) or enemy.state == Unit.State.DEAD:
 		return
+	if not enemy.is_targetable():
+		return   # siege engines cannot be attacked directly — only their crew
 	for unit in units:
 		if unit == null or not is_instance_valid(unit) or unit.state == Unit.State.DEAD:
 			continue

@@ -2388,3 +2388,141 @@ analog von x10 → x9. Tests **1079 grün**, Ladecheck fehlerfrei.
 unterscheidbar, Diagonal-Accessoires (Krieger Schwert/Schild, Feuerkrieger zwei
 Feuerbälle) und Prediger-Augen sitzen korrekt. Phase 7e abgeschlossen.
 
+---
+
+## Phase 7f — Belagerungswaffe (Katapult) & Werkstatt
+
+**Vorbemerkung (bewusste Abweichung von der Phasenreihenfolge):** Laut Overview
+war 7f NACH 7g/7h geplant (generisches Gebäude-Targeting aus 7g als Basis). Auf
+Nutzerentscheidung wurde 7f **eigenständig** umgesetzt: Das Katapult bringt sein
+EIGENES Gebäude-Targeting mit (`order_attack_building` + Auto-Scan nur auf der
+`SiegeEngine`); 7g liefert später das generische Targeting für alle Einheiten
+und kann die Siege-Pfade darauf umziehen.
+
+**Gebaut:**
+- `scripts/buildings/workshop.gd` + `scenes/buildings/workshop.tscn` —
+  **Werkstatt**: 15 Holz, Footprint **8×4** (doppelte Hüttenfläche), HP 350.
+  KEINE `TrainingBuilding`-Subklasse (bewusste Abweichung vom alten Planstand):
+  Arbeiter werden nicht verbraucht, sondern sind eine **stehende Crew (max 3)**
+  auf dem Bau-Job-System (`Building.workers`, `join()`-Override mit 3er-Cap).
+  Kern-APIs: `stock_wood()` (Holzvorrat = Stapel am Eingang, Ziel 15;
+  `wants_more_stock_wood()` zählt getragenes/reserviertes Holz mit),
+  `can_start_production()` (usable + nicht pausiert + Ausgang frei + Kap nicht
+  erreicht + ≥5 Holz), `add_production_work(delta)` (Arbeiter-Sekunden;
+  **90 je Katapult** → 3 Arbeiter ≈ 30 s; Start verbraucht 5 Holz sichtbar aus
+  den Stapeln, **keine Erstattung**), `exit_blocked()` (fertiges Katapult ≤3 m
+  vor dem Eingang blockiert die nächste Fertigung), `manned_catapult_count()`,
+  `paused` (Toggle) und `max_catapults` (Default 3, 0–20). Abbruchregeln:
+  Beschädigung (Stufe ≥1) oder „alle Arbeiter weg" → Produktion + Holz verloren;
+  beschädigte Werkstatt wird von der Crew über die Repair-Pipeline repariert
+  und danach weiterbetrieben. Auto-Bemannung: nach Fertigstellung entern bis zu
+  **2 idle Braves** (≤12 m, one-shot) das neue Katapult.
+- `scripts/units/siege_engine.gd` + `scenes/units/siege_engine.tscn` —
+  **SiegeEngine** (`unit_kind &"siege"`): **Fahrzeug**, kein Gläubiger.
+  **Nicht direkt angreifbar** (`is_targetable() false`, `take_damage` no-op,
+  wurf-/roll-/panik-/bekehrungs-/feuerimmun; nur Wasser zerstört es via
+  `drown`). Zählt nicht als Bevölkerung (`counts_population false` →
+  `Tribe.population()` filtert), erzeugt kein Mana. Speed **3.0** (0,75×Brave),
+  `push_immune` (Separation schiebt es nicht). **Crew-System**: `add_crew`/
+  `on_crew_boarded`/`boarded_count` (dient ab Board + ≤8 m Leash),
+  min 1 Crew für Bewegung, min 2 zum Feuern; Feuerrate
+  `fire_cooldown_for_crew`: 2→6 s … 6→3 s linear; max 6 (3 je Längsseite,
+  `crew_slot_position` wandert mit `facing` mit). **Besitz folgt der Crew**:
+  Entern eines unbemannten Katapults beliebiger Herkunft übernimmt es
+  (`_switch_owner` via `convert_to_tribe`); bemannte fremde Geräte sind nicht
+  kapierbar. Angriff: Band **3–15 m** (darunter Feuerpause, darüber
+  Nachrücken), `order_attack_building` + **Auto-Aggro Gebäude VOR Einheiten**
+  (invers zur Normalregel; `building_manager` wird per `unit.set()` injiziert).
+  Rendering: **eigenes 3D-Modell** (Rahmen, 4 Räder, Wurfarm mit
+  Abschuss-Animation, Besitzerfahne) statt Sprite-MultiMesh
+  (`renders_as_sprite() false`).
+- `scripts/units/siege_shot.gd` — **SiegeShot**: großer Feuerball in hoher
+  Parabel (ARC 6 m) mit Glut-Schweif. Einschlag: feindliches Gebäude im
+  (+1 gewachsenen) Footprint → `apply_destruction_stages(1)` (Baustelle
+  zerschellt, Fragil-Regel) **und stationierte Insassen sterben**
+  (`TrainingBuilding.trainee`, gehauste `Forester`-Arbeiter); **eigene Gebäude
+  nie beschädigt**. Ohne Gebäudetreffer: kleine, schnell verschwindende **Lava**
+  (`LavaSurge` mit Radius 0,8). Immer: **Schockwelle 2 m** — 15 Schaden
+  (¼ Brave-Leben) auf ALLE Einheiten (Friendly Fire), Gegner mit
+  Slope-abhängiger Roll-Chance (`roll_chance_for_slope`: flach 40 % / ab 0,2
+  Steigung 80 % / ab 0,6 100 %), Rolldauer min. **1 s**.
+- `scripts/units/unit.gd` — neuer **State `CREW`** (angehängt) + Crew-Felder
+  (`siege_engine`, `siege_boarded`, `push_immune`, `counts_population`):
+  `order_crew` (alle außer Schamanin, `can_crew_siege()`), `leave_crew`
+  (Move-Order, Konversion und Tod verlassen die Crew), `_tick_crew` (läuft zum
+  Seiten-Slot, Boarding bei ≤2,5 m). `_maybe_retaliate` feuert jetzt auch aus
+  CREW (Crew verteidigt sich, bleibt per Leash Crew und kehrt zurück —
+  `_resummon_crew` holt IDLE-Mitglieder an die Slots). `_scan_for_enemy`
+  filtert `is_targetable()`. **Roll-Härtung (§9):** `begin_conversion` lehnt
+  ROLL/THROWN/PANIC ab (Prediger kann rollende/fliegende Einheiten nicht mehr
+  in SIT reißen).
+- `scripts/units/shaman.gd` — `_on_combat_interrupt` → `_cancel_cast()`:
+  Roll/Wurf/Kampf brechen einen laufenden Cast sauber ab (vorher blieb
+  `pending_spell` als Leiche stehen; Ladung bleibt erhalten).
+- `scripts/units/brave.gd` — `order_workshop` + **`Task.PRODUCE`**
+  (`_tick_produce` hämmert `add_production_work`), `_choose_workshop_task`
+  (Priorität: laufende Produktion > Vorrat auffüllen > Produktion starten),
+  `_job_active`/`_job_wants_wood` um Werkstatt erweitert; Holz-Beschaffung
+  läuft über die vorhandene CHOP/PICKUP/DELIVER-Pipeline an den
+  `delivery_point`.
+- `scripts/core/nav_grid.gd` — **Fahrzeug-Navigation**: zweites `AStarGrid2D`,
+  Zelle fahrzeug-passierbar, wenn ein voll begehbarer **2×2-Block** sie enthält
+  (1-Zellen-Lücken bleiben zu); `find_vehicle_path`,
+  `is_cell_vehicle_walkable`, Sync über `update_region`/`fill_solid_region`
+  (`_refresh_vehicle_region` mit grow(1)). `SiegeEngine._plan_path_to` nutzt
+  den Fahrzeug-Pfad.
+- `scripts/core/unit_manager.gd` — Renderer-Registrierung nur für
+  `renders_as_sprite()`, Separation überspringt `push_immune`, neues Feld
+  `building_manager` (Main verdrahtet es; `spawn_unit` injiziert per `set()`).
+- `scripts/core/tribe_commands.gd` — `order_crew`, `order_attack_building`
+  (wirkt NUR auf SiegeEngines — Braves/Krieger ignorieren den Befehl),
+  `order_workshop`; `order_attack` lehnt untargetable Ziele ab.
+  `place_building` dreht nicht-quadratische Footprints bei Ost/West-Eingang
+  (Swap x/y), ebenso `BuildingManager.place` und der `BuildMenu`-Ghost
+  (`_effective_footprint`, Box-Resize bei R-Rotation).
+- `scripts/ui/selection_manager.gd` — Rechtsklick-Routing: (1) Katapult unter
+  dem Cursor (eigen ODER unbemannt) + crewfähige Selektion → `order_crew`;
+  (2) Feindgebäude + SiegeEngines in der Selektion → `order_attack_building`,
+  Rest eskortiert per Attack-Move; (3) eigene nutzbare Werkstatt →
+  `order_workshop`. Feind-Pick überspringt untargetable Katapulte.
+- `scripts/ui/sidebar.gd` — Baumenü „Werkstatt (15 Holz)", Follower-Zeile
+  „Belagerungswaffe" (`&"siege"`), **Werkstatt-Panel** (Arbeiter x/3, Vorrat
+  x/15, bemannte Katapulte, Pause-Toggle, Max-Katapulte −/+);
+  `scripts/ui/ui_theme.gd` — `workshop`-Icon (Katapult-Piktogramm).
+- `scripts/ai/ai_controller.gd` — Werkstatt im Grundausbau **nach dem Tempel**
+  (1×), `_staff_workshops` (bis 3 idle Braves, Wirtschafts-Minimum beachtet),
+  `_army_units` nimmt **bemannte** Katapulte in Angriffs-/Verteidigungswellen
+  auf (Auto-Bemannung der Werkstatt gilt symmetrisch für die KI).
+
+**Tests:** `tests/test_siege.gd` (neu, 96 Checks): Fertigung (Arbeiter-Sekunden,
+5-Holz-Verbrauch, Arbeiter bleiben erhalten, 3er-Cap, Integration mit echten
+Braves < 60 s), Stall ohne Holz + Wiederanlauf, Pause, Max-Kap (bemannt
+gezählt), Eingang-Blockade, Abbruch ohne Rückerstattung (Arbeiterabzug +
+Beschädigung), Auto-Bemannung, Crew-Gates (1/2/6), Übernahme unbemannter /
+Schutz bemannter Katapulte, Nicht-Angreifbarkeit (Scan + order_attack +
+take_damage), Schamanin-Verbot, Beschuss (+1 Stufe, Insassen-Kill, eigenes
+Gebäude heil, Baustelle zerschellt), Schockwelle (Friendly Fire, Radius),
+Roll-Chance-Bänder, Reichweiten-Band + Auto-Gebäude-Priorität +
+`order_attack_building`-Ablehnung für Nicht-Siege, Fahrzeug-Korridore
+(1 Zelle zu / 2 Zellen offen), Roll-Härtung (Angreifer/Prediger/SIT-Opfer/
+Schamanin). `test_ai.gd`-Vollausbau um die Werkstatt ergänzt.
+
+**Erkenntnisse/Stolpersteine:**
+- `_prune_crew` darf fremde, noch NICHT geboardete Rekruten nicht rauswerfen —
+  sonst bricht die Übernahme unbemannter Katapulte (Leash gilt nur für
+  geboardete Mitglieder); außerdem `leave_crew` nie mid-iteration über `crew`
+  aufrufen (`remove_crew` mutiert die Liste).
+- `queue_free()` außerhalb des Szenenbaums wird in Headless-Tests nicht
+  geflusht → Insassen-Kill nutzt `is_inside_tree() ? queue_free : free`.
+- Teleport-Tests müssen die Crew MIT versetzen, sonst leasht sie aus und das
+  Katapult ist bewegungsunfähig.
+- Nicht-quadratische Footprints brauchten den Orientierungs-Swap an DREI
+  Stellen (Validierung, Platzierung, Ghost) — für quadratische Gebäude no-op.
+
+**Verifikation:** Testsuite grün (**1175 Tests, 0 Fehler**),
+`--headless --import` und `--headless --quit` fehlerfrei.
+**Manuelle Prüfung ausstehend** (durch Nutzer, siehe Plan 7f): Werkstatt bauen,
+Vorrat/Produktion/Pause/Max-Grenze im Panel, Auto-Bemannung, Crew-Verhalten
+(Verteidigung + Rückkehr, Übernahme), Beschuss-Optik (Bogen + Schweif, Lava,
+Umwerfen), KI-Match mit Katapulten.
+

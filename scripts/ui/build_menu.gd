@@ -79,13 +79,22 @@ func _toggle_hut() -> void:
 		start_placement(HUT_SCENE)
 
 
+## Footprint as placed with the current orientation: non-square footprints
+## (workshop 8x4) turn with the entrance side (mirrors BuildingManager.place).
+func _effective_footprint() -> Vector2i:
+	if _orientation % 2 == 1:
+		return Vector2i(_build_footprint.y, _build_footprint.x)
+	return _build_footprint
+
+
 func _create_ghost() -> void:
 	if _world_root == null:
 		return
 	_ghost = MeshInstance3D.new()
 	_ghost.name = "BuildGhost"
+	var fp: Vector2i = _effective_footprint()
 	var box: BoxMesh = BoxMesh.new()
-	box.size = Vector3(float(_build_footprint.x), 1.6, float(_build_footprint.y))
+	box.size = Vector3(float(fp.x), 1.6, float(fp.y))
 	_ghost.mesh = box
 	_ghost_material = StandardMaterial3D.new()
 	_ghost_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -112,9 +121,14 @@ func _create_ghost() -> void:
 func _update_entrance_marker() -> void:
 	if _entrance_marker == null:
 		return
+	var fp: Vector2i = _effective_footprint()
+	# Rotating may swap the footprint: keep the ghost box in sync.
+	if _ghost != null and _ghost.mesh is BoxMesh:
+		(_ghost.mesh as BoxMesh).size = Vector3(float(fp.x), 1.6, float(fp.y))
 	var dirs: Array[Vector3] = [
 		Vector3(0, 0, 1), Vector3(1, 0, 0), Vector3(0, 0, -1), Vector3(-1, 0, 0)]
-	var dist: float = float(maxi(_build_footprint.x, _build_footprint.y)) * 0.5 + 0.5
+	# Distance to the entrance edge along the entrance axis (z for S/N, x for E/W).
+	var dist: float = (float(fp.y) if _orientation % 2 == 0 else float(fp.x)) * 0.5 + 0.5
 	_entrance_marker.position = dirs[_orientation] * dist + Vector3(0.0, -0.55, 0.0)
 
 
@@ -140,13 +154,14 @@ func _process(_delta: float) -> void:
 		_ghost.visible = false
 		_ghost_valid = false
 		return
-	# Centre the footprint on the cursor cell.
+	# Centre the footprint (as oriented) on the cursor cell.
+	var fp: Vector2i = _effective_footprint()
 	var hit_cell: Vector2i = _nav_grid.world_to_cell(hit.position)
-	_ghost_cell = hit_cell - _build_footprint / 2
-	_ghost_valid = _tribe_commands.can_place_at(_ghost_cell, _build_footprint)
+	_ghost_cell = hit_cell - fp / 2
+	_ghost_valid = _tribe_commands.can_place_at(_ghost_cell, fp)
 	_ghost_material.albedo_color = COLOR_VALID if _ghost_valid else COLOR_INVALID
-	var wx: float = (float(_ghost_cell.x) + float(_build_footprint.x) * 0.5) * TerrainData.CELL_SIZE
-	var wz: float = (float(_ghost_cell.y) + float(_build_footprint.y) * 0.5) * TerrainData.CELL_SIZE
+	var wx: float = (float(_ghost_cell.x) + float(fp.x) * 0.5) * TerrainData.CELL_SIZE
+	var wz: float = (float(_ghost_cell.y) + float(fp.y) * 0.5) * TerrainData.CELL_SIZE
 	var wy: float = GameState.terrain_data.get_height(wx, wz) if GameState.terrain_data != null else hit.position.y
 	_ghost.position = Vector3(wx, wy + 0.8, wz)
 	_ghost.visible = true

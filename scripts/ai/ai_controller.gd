@@ -13,6 +13,7 @@ const WARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/warrior_
 const FIREWARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/firewarrior_camp.tscn")
 const TEMPLE_SCENE: PackedScene = preload("res://scenes/buildings/temple.tscn")
 const FORESTER_SCENE: PackedScene = preload("res://scenes/buildings/forester.tscn")
+const WORKSHOP_SCENE: PackedScene = preload("res://scenes/buildings/workshop.tscn")
 
 const TICK_INTERVAL: float = 1.0
 ## Braves kept praying at the reincarnation site (mana income).
@@ -39,6 +40,8 @@ const MIN_TREES_NEAR_PLOT: int = 3
 const FORESTER_MIN_TREES: int = 6
 ## Braves the AI keeps working in each of its foresters.
 const FORESTER_WORKERS: int = 2
+## Braves the AI keeps working in its workshop (7f; full crew = 30-s catapults).
+const WORKSHOP_WORKERS: int = 3
 const MAX_PLOT_CANDIDATES: int = 40
 ## Idle braves sent along to a remote expansion site (the BuildingManager
 ## only recruits workers within ~30 m of a site).
@@ -157,6 +160,7 @@ func tick_ai() -> void:
 	_keep_praying()
 	_tick_build(snap)
 	_staff_foresters()
+	_staff_workshops()
 	_cast_spells()
 	# An attack on the own village takes priority over everything else.
 	var threat: Dictionary = _detect_threat()
@@ -223,12 +227,15 @@ func _tick_build(snap: Dictionary) -> void:
 func _next_building_scene(_snap: Dictionary) -> PackedScene:
 	var huts: int = 0
 	var foresters: int = 0
+	var workshops: int = 0
 	var camps: Dictionary = {&"warrior_camp": 0, &"firewarrior_camp": 0, &"temple": 0}
 	for building in tribe.buildings:
 		if not is_instance_valid(building) or building.health <= 0:
 			continue
 		if building is Forester:
 			foresters += 1
+		elif building is Workshop:
+			workshops += 1
 		elif building is Hut:
 			huts += 1
 		elif building is WarriorCamp:
@@ -253,6 +260,10 @@ func _next_building_scene(_snap: Dictionary) -> PackedScene:
 		return FIREWARRIOR_CAMP_SCENE
 	if camps[&"temple"] < 1:
 		return TEMPLE_SCENE
+	# One workshop right after the temple (7f): catapults are the AI's siege
+	# arm alongside the spells.
+	if workshops < 1:
+		return WORKSHOP_SCENE
 	# Endless scaling: housing pressure -> hut; otherwise extra camps.
 	if tribe.population() >= int(float(tribe.housing_capacity()) * HOUSING_PRESSURE):
 		return HUT_SCENE
@@ -614,6 +625,11 @@ func _army_units() -> Array[Unit]:
 		match unit.unit_kind():
 			&"warrior", &"firewarrior", &"preacher":
 				army.append(unit)
+			&"siege":
+				# Manned catapults march with the wave (7f); their building-
+				# first auto-priority does the sieging on arrival.
+				if (unit as SiegeEngine).boarded_count() >= SiegeEngine.MIN_MOVE_CREW:
+					army.append(unit)
 	return army
 
 
@@ -751,6 +767,30 @@ func _staff_foresters() -> void:
 	for f in foresters:
 		while i < idle.size() and f.occupants.size() < FORESTER_WORKERS and f.has_free_slot():
 			commands.order_forester([idle[i]] as Array[Unit], f)
+			i += 1
+
+
+## Keeps up to WORKSHOP_WORKERS idle braves working in each usable workshop
+## (7f; never below the minimum economy crew). The workshop refuses braves
+## once its crew is full. Fresh catapults are auto-manned by the workshop.
+func _staff_workshops() -> void:
+	var workshops: Array[Workshop] = []
+	for building in tribe.buildings:
+		if building is Workshop and is_instance_valid(building) and building.is_usable():
+			workshops.append(building)
+	if workshops.is_empty():
+		return
+	var brave_count: int = 0
+	for unit in tribe.units:
+		if is_instance_valid(unit) and unit is Brave and unit.state != Unit.State.DEAD:
+			brave_count += 1
+	if brave_count <= AIState.MIN_ECONOMY_BRAVES:
+		return
+	var idle: Array[Unit] = _idle_braves()
+	var i: int = 0
+	for ws in workshops:
+		while i < idle.size() and ws.workers.size() < WORKSHOP_WORKERS:
+			commands.order_workshop([idle[i]] as Array[Unit], ws)
 			i += 1
 
 

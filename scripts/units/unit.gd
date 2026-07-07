@@ -18,7 +18,9 @@ class_name Unit extends Node3D
 ## downhill / knocked over (5d).
 ## FORESTER = assigned to a forester (housed inside, or briefly out planting a
 ## sapling, phase 7d).
-enum State {IDLE, MOVE, GATHER, PRAY, BUILD, ATTACK, TRAIN, PANIC, CAST, THROWN, DEAD, SIT, ROLL, FORESTER}
+## CREW = manning a siege engine (phase 7f): the unit walks with the engine on
+## its side slot; it defends itself when attacked and returns afterwards.
+enum State {IDLE, MOVE, GATHER, PRAY, BUILD, ATTACK, TRAIN, PANIC, CAST, THROWN, DEAD, SIT, ROLL, FORESTER, CREW}
 
 signal died(unit: Unit)
 ## Fired after this unit switched tribes (preacher conversion) — the
@@ -268,6 +270,20 @@ var converting_preacher = null
 var conversion_progress: float = 0.0
 var conversion_time: float = 0.0
 
+# --- Siege crew state (phase 7f) ---------------------------------------------------
+## The siege engine this unit is manning (untyped: may be freed). Membership
+## survives self-defence fights (the engine's leash rule drops runaways);
+## explicit move orders and conversions leave the crew.
+var siege_engine = null
+## True once this crew member reached its engine at least once. Fresh recruits
+## walking over from afar are never leash-pruned; boarded members are.
+var siege_boarded: bool = false
+## Excluded from the soft-separation push (siege engines: a vehicle is not
+## shoved aside by pedestrians). A FIELD like idle_aggro — hot path.
+var push_immune: bool = false
+## Counted in Tribe.population() (false for devices like the siege engine).
+var counts_population: bool = true
+
 # --- Roll state (phase 5d) ---------------------------------------------------------
 var roll_dir: Vector3 = Vector3.ZERO
 var _roll_time: float = 0.0
@@ -316,6 +332,24 @@ func _is_combatant() -> bool:
 ## the 3-attacker melee cap and its target redistribution do not apply to them.
 func _is_ranged() -> bool:
 	return false
+
+
+## False for units that can never be attacked directly (the siege engine:
+## attackers hit its crew instead). Filtered in every enemy scan/order.
+func is_targetable() -> bool:
+	return true
+
+
+## Drawn via the central sprite MultiMesh (UnitRenderer). The siege engine
+## returns false and builds its own 3D model instead.
+func renders_as_sprite() -> bool:
+	return true
+
+
+## Whether this unit may man a siege engine (everyone except the shaman and
+## the engines themselves, phase 7f).
+func can_crew_siege() -> bool:
+	return unit_kind() != &"shaman" and unit_kind() != &"siege"
 
 
 ## Radius at which an idle/marching combatant engages enemies on its own (and
@@ -373,6 +407,8 @@ func _tick_state(delta: float) -> void:
 			_tick_panic(delta)
 		State.DEAD:
 			_tick_dead(delta)
+		State.CREW:
+			_tick_crew(delta)
 		_:
 			pass
 
@@ -484,6 +520,7 @@ func can_take_orders() -> bool:
 func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = false) -> void:
 	if not can_take_orders():
 		return
+	leave_crew()   # an explicit move order pulls the unit off its siege engine
 	_end_attack()
 	move_aggressive = aggressive
 	_flee_hits = 0
@@ -598,6 +635,7 @@ func take_damage(amount: int, attacker = null) -> void:
 func _die() -> void:
 	# Release our own slot, then tell everyone attacking us to look elsewhere so
 	# waiting attackers can back-fill onto a fresh target.
+	leave_crew()
 	_end_attack()
 	for a in melee_attackers.duplicate():
 		if is_instance_valid(a):
@@ -1041,9 +1079,13 @@ func is_panic_immune() -> bool:
 
 ## Pacified by an enemy preacher: stop everything and sit down. The conversion
 ## completes after `duration` seconds of uninterrupted channeling (_tick_sit).
-## Returns false when this unit cannot be converted.
+## Returns false when this unit cannot be converted. Rolling, airborne and
+## panicking units finish their tumble first (phase 7f roll hardening —
+## a preacher must not yank a rolling unit into SIT mid-air).
 func begin_conversion(preacher: Unit, duration: float) -> bool:
 	if state == State.DEAD or state == State.SIT or is_conversion_immune():
+		return false
+	if state == State.ROLL or state == State.THROWN or state == State.PANIC:
 		return false
 	_on_combat_interrupt()
 	_end_attack()
@@ -1099,6 +1141,7 @@ func _stand_up(fight_preacher: bool) -> void:
 ## running orders are gone and everyone attacking it drops the (now friendly)
 ## target.
 func convert_to_tribe(new_tribe: Tribe) -> void:
+	leave_crew()   # a converted crew member no longer serves the old engine
 	if tribe != null:
 		tribe.remove_unit(self)
 	tribe_id = new_tribe.id
@@ -1115,6 +1158,65 @@ func convert_to_tribe(new_tribe: Tribe) -> void:
 	selected = false
 	_set_state(State.IDLE)
 	converted.emit(self)
+
+
+# --- Siege crew (phase 7f) ---------------------------------------------------------
+
+## Assigns this unit to a siege engine's crew (right-click on the engine, the
+## workshop's auto-manning or the AI). The engine validates tribe/capacity;
+## refused assignments are silently ignored. Shamans never crew.
+func order_crew(engine) -> void:
+	if not can_take_orders() or not can_crew_siege():
+		return
+	if engine == null or not is_instance_valid(engine) or engine.state == State.DEAD:
+		return
+	if siege_engine == engine and state == State.CREW:
+		return
+	_on_combat_interrupt()
+	_end_attack()
+	if not engine.add_crew(self):
+		return
+	leave_crew(engine)   # drop a previous engine's slot (keep the new one)
+	siege_engine = engine
+	siege_boarded = false
+	waypoint_queue.clear()
+	_clear_path()
+	_set_state(State.CREW)
+
+
+## Drops the crew membership (new order, conversion, death). `except` keeps
+## a just-joined engine untouched when switching engines.
+func leave_crew(except = null) -> void:
+	var engine = siege_engine
+	siege_engine = null
+	siege_boarded = false
+	if engine != null and engine != except and is_instance_valid(engine):
+		engine.remove_crew(self)
+	if state == State.CREW:
+		_clear_path()
+		_set_state(State.IDLE)
+
+
+## Walks to (and holds) the side slot the engine assigned. Boarding is flagged
+## on first contact; the engine's tick handles ownership, leash and re-summons
+## after self-defence fights.
+func _tick_crew(delta: float) -> void:
+	var engine = siege_engine
+	if engine == null or not is_instance_valid(engine) or engine.state == State.DEAD:
+		leave_crew()
+		return
+	var slot: Vector3 = engine.crew_slot_position(self)
+	var dist: float = _flat_dist(position, slot)
+	if not siege_boarded and _flat_dist(position, engine.position) <= engine.BOARD_RANGE:
+		engine.on_crew_boarded(self)
+		if siege_engine != engine:
+			return   # boarding was refused (enemy took it meanwhile)
+	if dist > 0.4:
+		_approach(slot, delta)
+		return
+	if _has_path():
+		_clear_path()
+	facing = engine.facing   # stand aligned with the vehicle
 
 
 ## Idle combatants scan for a nearby enemy (throttled) and engage it.
@@ -1343,7 +1445,9 @@ func _maybe_retaliate(attacker) -> void:
 		return   # friendly fire (e.g. a rescue fireball) is not retaliated
 	if attack_target != null and is_instance_valid(attack_target):
 		return
-	if state == State.IDLE:
+	if state == State.IDLE or state == State.CREW:
+		# Siege crew defends itself, leaving its post if necessary — it stays
+		# crew (leash rule) and returns to the engine after the fight.
 		_begin_attack(attacker)
 		return
 	if state != State.MOVE:
@@ -1374,6 +1478,8 @@ func _scan_for_enemy(radius: float) -> Unit:
 			continue
 		if u.state == State.SIT:
 			continue   # sitting converts are no threat (and shall keep sitting)
+		if not u.is_targetable():
+			continue   # siege engines: attackers go for the crew instead
 		var d: float = Vector2(u.position.x, u.position.z).distance_to(flat)
 		# Commitment count dominates the score so free enemies are picked first
 		# (1v1 preference), even before anyone is in striking range.
@@ -1562,6 +1668,8 @@ func _anim_base() -> StringName:
 			return &"roll"
 		State.DEAD:
 			return &"dead"
+		State.CREW:
+			return &"walk" if _has_path() else &"idle"
 		_:
 			return &"idle"
 

@@ -348,6 +348,9 @@ func test_endless_building_scaling() -> void:
 	# before expanding, so the "full base" must include it for this check.
 	w.building_manager.place(preload("res://scenes/buildings/forester.tscn"),
 		tribe, Vector2i(56, 58), 0, true)
+	# And the workshop (phase 7f): it follows right after the temple.
+	w.building_manager.place(preload("res://scenes/buildings/workshop.tscn"),
+		tribe, Vector2i(64, 50), 0, true)
 	check(ai._next_building_scene({}) == null,
 		"full base without housing pressure: nothing to build")
 

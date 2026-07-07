@@ -30,6 +30,7 @@ const FOLLOWER_ROWS: Array[Dictionary] = [
 	{"kind": &"warrior", "name": "Krieger", "active": true},
 	{"kind": &"firewarrior", "name": "Feuerkrieger", "active": true},
 	{"kind": &"preacher", "name": "Prediger", "active": true},
+	{"kind": &"siege", "name": "Belagerungswaffe", "active": true},
 	{"kind": &"shaman", "name": "Schamanin", "active": true},
 ]
 
@@ -38,6 +39,7 @@ const WARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/warrior_
 const FIREWARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/firewarrior_camp.tscn")
 const TEMPLE_SCENE: PackedScene = preload("res://scenes/buildings/temple.tscn")
 const FORESTER_SCENE: PackedScene = preload("res://scenes/buildings/forester.tscn")
+const WORKSHOP_SCENE: PackedScene = preload("res://scenes/buildings/workshop.tscn")
 
 # --- Injected references (setup) --------------------------------------------
 var _tribes: Array[Tribe] = []
@@ -69,6 +71,12 @@ var _pause_menu: Control = null
 ## clicking an occupied slot sends that worker back out.
 var _forester_panel: PanelContainer = null
 var _forester_slot_buttons: Array[Button] = []
+## Workshop panel (shown while a workshop is selected, 7f): worker/stock
+## readout, pause toggle and the max-catapult stepper.
+var _workshop_panel: PanelContainer = null
+var _workshop_info: Label = null
+var _workshop_pause: Button = null
+var _workshop_max_label: Label = null
 ## Shaman portrait (below the minimap, Populous style): full live-animated
 ## figure + health bar; click centres the camera on her and selects ONLY her.
 var _portrait_sprite: AnimatedSprite2D = null
@@ -138,6 +146,8 @@ static func default_build_entries() -> Array[Dictionary]:
 			"icon": &"temple", "wood_cost": Temple.WOOD_COST, "enabled": true},
 		{"id": &"forester", "name": "Försterei", "scene": FORESTER_SCENE,
 			"icon": &"forester", "wood_cost": Forester.WOOD_COST, "enabled": true},
+		{"id": &"workshop", "name": "Werkstatt", "scene": WORKSHOP_SCENE,
+			"icon": &"workshop", "wood_cost": Workshop.WOOD_COST, "enabled": true},
 	]
 
 
@@ -224,6 +234,7 @@ func setup(p_tribes: Array[Tribe], p_player_id: int, p_unit_manager: UnitManager
 
 func _process(delta: float) -> void:
 	_refresh_forester_panel()   # responsive to selection changes (cheap: 4 buttons)
+	_refresh_workshop_panel()
 	_follower_timer -= delta
 	if _follower_timer <= 0.0:
 		_follower_timer = FOLLOWER_INTERVAL
@@ -257,6 +268,7 @@ func _build_ui() -> void:
 	_build_header(root)
 	_build_tab_content(root)
 	_build_forester_panel(root)
+	_build_workshop_panel(root)
 
 	var spacer: Control = Control.new()
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -569,6 +581,96 @@ func _on_forester_eject(index: int) -> void:
 	if b is Forester and is_instance_valid(b):
 		(b as Forester).eject_worker(index)
 		_refresh_forester_panel()
+
+
+## Control panel for a selected workshop (7f): worker/stock/catapult readout,
+## a pause toggle and the max-catapult stepper. Hidden until a workshop is
+## the selected building (polled in _process — cheap, a handful of widgets).
+func _build_workshop_panel(root: Control) -> void:
+	_workshop_panel = PanelContainer.new()
+	_workshop_panel.name = "WorkshopPanel"
+	_workshop_panel.add_theme_stylebox_override("panel", UiTheme.inset_style())
+	_workshop_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	_workshop_panel.visible = false
+	root.add_child(_workshop_panel)
+
+	var vb: VBoxContainer = VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 3)
+	_workshop_panel.add_child(vb)
+
+	var title: Label = Label.new()
+	title.text = "Werkstatt"
+	title.add_theme_color_override("font_color", UiTheme.GOLD_BRIGHT)
+	vb.add_child(title)
+
+	_workshop_info = Label.new()
+	_workshop_info.add_theme_color_override("font_color", UiTheme.TEXT)
+	vb.add_child(_workshop_info)
+
+	_workshop_pause = Button.new()
+	_workshop_pause.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	UiTheme.style_button(_workshop_pause)
+	_workshop_pause.pressed.connect(_on_workshop_pause)
+	vb.add_child(_workshop_pause)
+
+	var row: HBoxContainer = HBoxContainer.new()
+	row.add_theme_constant_override("separation", 4)
+	vb.add_child(row)
+	var minus: Button = Button.new()
+	minus.text = "−"
+	UiTheme.style_button(minus)
+	minus.pressed.connect(func() -> void: _on_workshop_max_delta(-1))
+	row.add_child(minus)
+	_workshop_max_label = Label.new()
+	_workshop_max_label.add_theme_color_override("font_color", UiTheme.TEXT)
+	_workshop_max_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_workshop_max_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	row.add_child(_workshop_max_label)
+	var plus: Button = Button.new()
+	plus.text = "+"
+	UiTheme.style_button(plus)
+	plus.pressed.connect(func() -> void: _on_workshop_max_delta(1))
+	row.add_child(plus)
+
+
+## The workshop currently selected by the player, or null.
+func _selected_workshop() -> Workshop:
+	if _selection == null:
+		return null
+	var b: Building = _selection.selected_building
+	if b is Workshop and is_instance_valid(b) and not b.under_construction:
+		return b as Workshop
+	return null
+
+
+func _refresh_workshop_panel() -> void:
+	if _workshop_panel == null:
+		return
+	var ws: Workshop = _selected_workshop()
+	if ws == null:
+		if _workshop_panel.visible:
+			_workshop_panel.visible = false
+		return
+	_workshop_panel.visible = true
+	_workshop_info.text = "Arbeiter: %d/%d   Vorrat: %d/%d\nBemannte Katapulte: %d" % [
+		ws.workers.size(), Workshop.WORKER_SLOTS,
+		ws.stock_wood(), Workshop.STOCK_TARGET, ws.manned_catapult_count()]
+	_workshop_pause.text = "Produktion fortsetzen" if ws.paused else "Produktion pausieren"
+	_workshop_max_label.text = "Max. Katapulte: %d" % ws.max_catapults
+
+
+func _on_workshop_pause() -> void:
+	var ws: Workshop = _selected_workshop()
+	if ws != null:
+		ws.paused = not ws.paused
+		_refresh_workshop_panel()
+
+
+func _on_workshop_max_delta(delta: int) -> void:
+	var ws: Workshop = _selected_workshop()
+	if ws != null:
+		ws.max_catapults = clampi(ws.max_catapults + delta, 0, Workshop.MAX_CATAPULTS_LIMIT)
+		_refresh_workshop_panel()
 
 
 func _build_menu_panel(root: Control) -> void:

@@ -75,6 +75,14 @@ func _cancel_cast() -> void:
 	_casting = false
 
 
+## Rolls, throws and fights interrupt a pending cast for good (the charge is
+## kept). Without this the stale pending_spell survived the tumble (phase 7f
+## roll hardening).
+func _on_combat_interrupt() -> void:
+	if pending_spell != null:
+		_cancel_cast()
+
+
 func _tick_state(delta: float) -> void:
 	if state == State.CAST:
 		_tick_cast(delta)

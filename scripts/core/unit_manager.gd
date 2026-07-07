@@ -74,6 +74,8 @@ var tree_manager: TreeManager = null
 var wood_pile_manager: WoodPileManager = null
 ## Central MultiMesh renderer (set by Main; null in headless tests).
 var unit_renderer: UnitRenderer = null
+## Injected by Main/tests; the siege engine (7f) scans enemy buildings with it.
+var building_manager: BuildingManager = null
 
 var units: Array[Unit] = []
 ## Live projectiles (Fireball), ticked here after the units.
@@ -191,7 +193,7 @@ func _apply_separation(delta: float) -> void:
 	for index in range(_separation_phase, units.size(), slices):
 		var unit: Unit = units[index]
 		if unit.state == Unit.State.DEAD or unit.state == Unit.State.THROWN \
-				or unit.state == Unit.State.ROLL:
+				or unit.state == Unit.State.ROLL or unit.push_immune:
 			continue
 		var push: Vector2 = Vector2.ZERO
 		var pos: Vector3 = unit.position
@@ -430,8 +432,8 @@ func register(unit: Unit) -> void:
 	unit.corpse_expired.connect(_on_corpse_expired)
 	unit.converted.connect(_on_unit_converted)
 	_update_hash_cell(unit)
-	if unit_renderer != null:
-		unit_renderer.register_unit(unit)
+	if unit_renderer != null and unit.renders_as_sprite():
+		unit_renderer.register_unit(unit)   # siege engines draw their own model
 
 
 func unregister(unit: Unit) -> void:
@@ -493,6 +495,8 @@ func spawn_unit(scene: PackedScene, tribe_id: int, pos: Vector3) -> Unit:
 	# Worker references — only Braves have these properties.
 	unit.set("tree_manager", tree_manager)
 	unit.set("wood_pile_manager", wood_pile_manager)
+	# Building scan — only the SiegeEngine has this property (7f).
+	unit.set("building_manager", building_manager)
 	unit.position = pos
 	if terrain_data != null:
 		unit.position.y = terrain_data.get_height(pos.x, pos.z)
