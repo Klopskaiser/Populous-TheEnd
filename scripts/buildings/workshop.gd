@@ -357,6 +357,22 @@ func _on_disabled() -> void:
 	_release_all_occupants()
 
 
+## Building assault (phase 7g): running production is lost and all housed crew
+## is ejected. `killed` (ranged stage-1 fire) kills them at the door; the melee
+## storm pushes them out alive.
+func eject_occupants(killed: bool) -> void:
+	production_active = false
+	work_done = 0.0
+	for b in occupants.duplicate():
+		if not is_instance_valid(b):
+			continue
+		if b.workshop_inside:
+			_return_to_world(b)
+		b.leave_workshop()
+		_eject_unit(b, killed)
+	occupants.clear()
+
+
 func destroy() -> void:
 	production_active = false
 	work_done = 0.0

@@ -387,11 +387,35 @@ func eject_occupants(_killed: bool) -> void:
 	pass
 
 
+## Ejects one occupant that has just been put back into the world: `killed`
+## flings it out and kills it at the door (ranged stage-1 fire), otherwise it is
+## shoved away from the building into a short tumble. Untyped param (freed-safe).
+func _eject_unit(u, killed: bool) -> void:
+	if not is_instance_valid(u) or u.state == Unit.State.DEAD:
+		return
+	if killed:
+		u.take_damage(u.health + 1000)
+		return
+	var dir: Vector3 = u.position - center_world()
+	dir.y = 0.0
+	if dir.length_squared() < 0.000001:
+		dir = Vector3(1.0, 0.0, 0.0)
+	u.displace(dir, Unit.SHOVE_DISPLACE)
+	u.start_roll(dir, Unit.MINI_ROLL_DURATION)
+
+
 # --- Melee raiders / storm (phase 7g) --------------------------------------------
 
 ## Max melee raiders that may storm this building at once (watchtower: 5).
 func max_melee_raiders() -> int:
 	return MAX_MELEE_RAIDERS
+
+
+## True while another melee raider still fits (used by the unit building scan so
+## overflow raiders do not keep re-targeting a full building).
+func has_raider_room() -> bool:
+	_prune_raiders()
+	return raiders.size() < max_melee_raiders()
 
 
 ## Lets an attacker enter as a melee raider: it is removed from the world (like

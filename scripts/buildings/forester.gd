@@ -271,6 +271,22 @@ func _on_disabled() -> void:
 	_release_all_occupants()
 
 
+## Building assault (phase 7g): eject all housed workers. `killed` (ranged
+## stage-1 fire) kills them at the door; the melee storm pushes them out alive.
+func eject_occupants(killed: bool) -> void:
+	for b in occupants.duplicate():
+		if not is_instance_valid(b):
+			continue
+		if b.forester_inside and b != _planting_worker:
+			_return_to_world(b)
+		b.leave_forester()
+		_eject_unit(b, killed)
+	occupants.clear()
+	_planting_worker = null
+	_plant_progress = 0.0
+	_active_workers = 0
+
+
 func destroy() -> void:
 	_release_all_occupants()
 	super.destroy()

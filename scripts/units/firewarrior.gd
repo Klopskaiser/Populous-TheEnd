@@ -132,6 +132,8 @@ func _melee_threat() -> Unit:
 	for u in path_service.get_units_in_radius(position, MELEE_RANGE):
 		if u.tribe_id == tribe_id or u.state == Unit.State.DEAD or u.state == Unit.State.SIT:
 			continue
+		if not u.is_targetable_by_units():
+			continue   # the shaman cannot be attacked by the firewarrior
 		var d: float = _flat_dist(position, u.position)
 		if d < best_d:
 			best_d = d

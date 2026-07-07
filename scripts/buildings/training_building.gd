@@ -241,25 +241,12 @@ func eject_occupants(killed: bool) -> void:
 		if unit_manager != null:
 			unit_manager.register(t)
 		t.cancel_training()
-		if killed:
-			t.take_damage(t.health + 1000)   # flung out and dies at the door
-		else:
-			_shove_out(t)   # pushed out alive with a mini tumble
+		_eject_unit(t, killed)   # killed → dies at the door, else shoved out alive
 	trainee = null
 	for brave in incoming:
 		if is_instance_valid(brave):
 			brave.cancel_training()
 	incoming.clear()
-
-
-## Shoves an ejected trainee away from the building into a short tumble.
-func _shove_out(t: Brave) -> void:
-	var dir: Vector3 = t.position - center_world()
-	dir.y = 0.0
-	if dir.length_squared() < 0.000001:
-		dir = Vector3(1.0, 0.0, 0.0)
-	t.displace(dir, Unit.SHOVE_DISPLACE)
-	t.start_roll(dir, Unit.MINI_ROLL_DURATION)
 
 
 ## Frees the trainee and releases the queued braves when destroyed.

@@ -11,6 +11,8 @@ const HUT_SCENE: PackedScene = preload("res://scenes/buildings/hut.tscn")
 const WARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/warrior_camp.tscn")
 const FIREWARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/firewarrior_camp.tscn")
 const TEMPLE_SCENE: PackedScene = preload("res://scenes/buildings/temple.tscn")
+const FORESTER_SCENE: PackedScene = preload("res://scenes/buildings/forester.tscn")
+const WORKSHOP_SCENE: PackedScene = preload("res://scenes/buildings/workshop.tscn")
 const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
 const FIREWARRIOR_SCENE: PackedScene = preload("res://scenes/units/firewarrior.tscn")
 const PREACHER_SCENE: PackedScene = preload("res://scenes/units/preacher.tscn")
@@ -362,6 +364,45 @@ func _setup_sparring(tribes: Array[Tribe], nav: NavGrid) -> void:
 	_spawn_shaman_near(red, red_site, anchor + Vector2i(8, 8), nav)
 	# A small starting force spread around the anchor.
 	_spawn_sparring_units(red, anchor, nav)
+	# Fully-staffed industry buildings so the phase-7g occupant eject can be
+	# tried in-game: two manned foresters and one manned (idle) workshop.
+	_setup_sparring_industry(red, anchor, nav)
+
+
+## Two fully-staffed foresters and one staffed but idle (paused) workshop for
+## the sparring enemy — targets to test the building-assault occupant eject.
+func _setup_sparring_industry(red: Tribe, anchor: Vector2i, nav: NavGrid) -> void:
+	for off in [Vector2i(-7, -6), Vector2i(7, -6)]:
+		var fcell: Vector2i = _find_plot(anchor + off, Forester.FOOTPRINT, nav)
+		if fcell.x >= 0:
+			var f: Forester = _building_manager.place(
+				FORESTER_SCENE, red, fcell, 0, true) as Forester
+			_staff_building(f, Forester.WORKER_SLOTS, red.id, true)
+	var wcell: Vector2i = _find_plot(anchor + Vector2i(0, 11), Workshop.FOOTPRINT, nav)
+	if wcell.x >= 0:
+		var ws: Workshop = _building_manager.place(
+			WORKSHOP_SCENE, red, wcell, 0, true) as Workshop
+		if ws != null:
+			ws.paused = true   # manned, but produces nothing
+			_staff_building(ws, Workshop.WORKER_SLOTS, red.id, false)
+
+
+## Spawns `slots` braves and houses them inside a forester/workshop right away
+## (skips the walk-in), so the building starts fully staffed.
+func _staff_building(building: Building, slots: int, tribe_id: int, is_forester: bool) -> void:
+	if building == null:
+		return
+	for i in range(slots):
+		var b: Brave = _unit_manager.spawn_unit(
+			BRAVE_SCENE, tribe_id, building.edge_spawn_position()) as Brave
+		if b == null:
+			return
+		if is_forester:
+			b.order_forester(building as Forester)
+			(building as Forester).admit_worker(b)
+		else:
+			b.order_workshop(building as Workshop)
+			(building as Workshop).admit_worker(b)
 
 
 func _spawn_sparring_units(red: Tribe, anchor: Vector2i, nav: NavGrid) -> void:

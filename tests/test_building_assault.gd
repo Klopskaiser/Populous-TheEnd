@@ -10,9 +10,12 @@ const MAX_TICKS: int = 1500
 
 const HUT_SCENE: PackedScene = preload("res://scenes/buildings/hut.tscn")
 const WARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/warrior_camp.tscn")
+const FORESTER_SCENE: PackedScene = preload("res://scenes/buildings/forester.tscn")
+const WORKSHOP_SCENE: PackedScene = preload("res://scenes/buildings/workshop.tscn")
 const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
 const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
 const FIREWARRIOR_SCENE: PackedScene = preload("res://scenes/units/firewarrior.tscn")
+const SHAMAN_SCENE: PackedScene = preload("res://scenes/units/shaman.tscn")
 
 
 func _flat_terrain(h: float = 5.0) -> TerrainData:
@@ -300,4 +303,143 @@ func test_ordered_warriors_storm_and_level_building() -> void:
 	var razed: int = _run(w, squad, func() -> bool: return hut.health <= 0)
 	check(razed < MAX_TICKS, "the storming warriors level the building")
 	check(hut not in w.bm.buildings, "razed building deregistered")
+	_free_world(w)
+
+
+func test_idle_combatants_auto_raze_building() -> void:
+	var w: Dictionary = _make_world()
+	var hut: Building = w.bm.place(HUT_SCENE, w.tribe1, Vector2i(40, 40), 0, true)
+	# Idle warriors a few metres from the enemy hut — no explicit order.
+	var squad: Array[Unit] = []
+	for i in range(5):
+		squad.append(w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, Vector3(37 + i, 0, 38)))
+	var razed: int = _run(w, squad, func() -> bool: return hut.health <= 0)
+	check(razed < MAX_TICKS, "idle combatants auto-engage and raze the enemy building")
+	_free_world(w)
+
+
+func test_attack_move_engages_building_lowest_priority() -> void:
+	var w: Dictionary = _make_world()
+	var hut: Building = w.bm.place(HUT_SCENE, w.tribe1, Vector2i(40, 40), 0, true)
+	var warrior: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, Vector3(30, 0, 40))
+	# Attack-move to a point past the hut: it engages the building it passes.
+	warrior.order_move(Vector3(52, 0, 42), false, true)
+	var engaged: int = _run(w, [warrior],
+		func() -> bool: return warrior.attack_building == hut or not hut.raiders.is_empty())
+	check(engaged < MAX_TICKS, "attack-move engages the enemy building on the way")
+	_free_world(w)
+
+
+func test_overflow_raiders_go_idle_when_full() -> void:
+	var w: Dictionary = _make_world()
+	var hut: Building = w.bm.place(HUT_SCENE, w.tribe1, Vector2i(40, 40), 0, true)
+	# The hut cannot be razed while we watch: keep it topped up so it stays full.
+	var squad: Array[Unit] = []
+	for i in range(20):
+		var wr: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 0,
+			Vector3(34 + (i % 10), 0, 34 + (i / 10) * 2))
+		wr.order_attack_building(hut)
+		squad.append(wr)
+	# Tick units + hash only (no BuildingManager tick => no demolition), so the
+	# hut stays full and the overflow's final state is observable.
+	for t in range(800):
+		for u in squad:
+			if is_instance_valid(u) and u.state != Unit.State.DEAD:
+				u.tick(TICK)
+		w.unit_manager.tick(TICK)
+	check(hut.raiders.size() == Building.MAX_MELEE_RAIDERS, "15 raiders fill the building")
+	var stuck: int = 0
+	for u in squad:
+		if u.state == Unit.State.RAID:
+			continue
+		# Overflow units must NOT stand around assaulting a full building.
+		if u.state == Unit.State.ATTACK and u.attack_building != null:
+			stuck += 1
+	check(stuck == 0, "overflow raiders give up on the full building (no stuck attackers)")
+	_free_world(w)
+
+
+# --- Shaman protection: only spells / catapults may harm her -------------------
+
+func test_shaman_immune_to_melee_and_ranged_units() -> void:
+	var w: Dictionary = _make_world()
+	var shaman: Unit = w.unit_manager.spawn_unit(SHAMAN_SCENE, 1, Vector3(21, 0, 20))
+	var warrior: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, Vector3(20, 0, 20))
+	var fire: Unit = w.unit_manager.spawn_unit(FIREWARRIOR_SCENE, 0, Vector3(19, 0, 20))
+	check(not shaman.is_targetable_by_units(), "shaman is not targetable by units")
+	warrior._engage_on_sight(0.3)
+	check(warrior.attack_target == null and warrior.state != Unit.State.ATTACK,
+		"warrior does not auto-target the enemy shaman")
+	fire._engage_on_sight(0.3)
+	check(fire.attack_target == null, "firewarrior does not auto-target the enemy shaman")
+	warrior.order_attack(shaman)
+	check(warrior.attack_target == null, "warrior cannot be ordered to melee the shaman")
+	# A brave hit by the shaman does not retaliate against her.
+	var brave: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 0, Vector3(22, 0, 20))
+	brave.take_damage(5, shaman)
+	check(brave.attack_target == null, "a struck unit does not retaliate against the shaman")
+	# Catapults DO bypass the protection.
+	check(warrior._can_attack_protected() == false, "ordinary units respect the protection")
+	_free_world(w)
+
+
+func test_spells_still_kill_the_shaman() -> void:
+	var w: Dictionary = _make_world()
+	var shaman: Unit = w.unit_manager.spawn_unit(SHAMAN_SCENE, 1, Vector3(21, 0, 20))
+	# Spells / catapults apply damage directly (not via the unit-targeting scan).
+	shaman.take_damage(9999)
+	check(shaman.state == Unit.State.DEAD, "direct spell/catapult damage still kills the shaman")
+	_free_world(w)
+
+
+# --- Occupant eject from foresters & workshops (phase 7g) ----------------------
+
+func _staffed_forester(w: Dictionary) -> Forester:
+	var f: Forester = w.bm.place(FORESTER_SCENE, w.tribe1, Vector2i(40, 40), 0, true) as Forester
+	for i in range(Forester.WORKER_SLOTS):
+		var b: Brave = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, Vector3(44 + i, 0, 44)) as Brave
+		b.order_forester(f)
+		f.admit_worker(b)
+	return f
+
+
+func test_storm_ejects_forester_workers_alive() -> void:
+	var w: Dictionary = _make_world()
+	var f: Forester = _staffed_forester(w)
+	check(f.occupants.size() == Forester.WORKER_SLOTS, "forester fully staffed")
+	var raider: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, Vector3(44, 0, 44))
+	f.admit_raider(raider)   # storm begins -> occupants ejected alive
+	check(f.occupants.is_empty(), "all forester workers ejected on the storm")
+	var alive: int = 0
+	for u in w.unit_manager.units:
+		if u.tribe_id == 1 and u.unit_kind() == &"brave" and u.state != Unit.State.DEAD:
+			alive += 1
+	check(alive == Forester.WORKER_SLOTS, "ejected forester workers are alive in the world")
+	_free_world(w)
+
+
+func test_ranged_stage1_kills_forester_workers() -> void:
+	var w: Dictionary = _make_world()
+	var f: Forester = _staffed_forester(w)
+	var pop_before: int = w.tribe1.population()
+	# 30% of the forester HP via ranged fire crosses stage 1.
+	f.take_damage(int(ceil(0.3 * float(f.max_health))), Building.DMG_RANGED)
+	check(f.destruction_stage() >= 1, "forester at stage >= 1")
+	check(f.occupants.is_empty(), "workers ejected")
+	check(w.tribe1.population() == pop_before - Forester.WORKER_SLOTS,
+		"ranged stage-1 fire kills the housed forester workers")
+	_free_world(w)
+
+
+func test_storm_ejects_workshop_crew_alive() -> void:
+	var w: Dictionary = _make_world()
+	var ws: Workshop = w.bm.place(WORKSHOP_SCENE, w.tribe1, Vector2i(40, 40), 0, true) as Workshop
+	for i in range(Workshop.WORKER_SLOTS):
+		var b: Brave = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, Vector3(44 + i, 0, 46)) as Brave
+		b.order_workshop(ws)
+		ws.admit_worker(b)
+	check(ws.occupants.size() == Workshop.WORKER_SLOTS, "workshop fully staffed")
+	var raider: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, Vector3(44, 0, 44))
+	ws.admit_raider(raider)
+	check(ws.occupants.is_empty(), "workshop crew ejected on the storm")
 	_free_world(w)

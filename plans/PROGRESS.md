@@ -2779,10 +2779,40 @@ Alle-Typen-Verhalten umgestellt.
 
 **Verifikation:** Testsuite grün (**1298 Tests, 0 Fehler**), `--headless --import`,
 `--headless --quit` und `--headless --quit-after 400` fehlerfrei.
-**Manuelle Prüfung ausstehend** (durch Nutzer, siehe Plan 7g §Manuelle Prüfung):
-Trupp per Rechtsklick auf Feindhütte → Nahkämpfer verschwinden im Eingang,
-Gebäude wackelt/nimmt Stufen, Trainees purzeln raus und werden verprügelt, bei
-Zerstörung kommen die eigenen Leute raus; Feuerkrieger allein → Stufe 1 → Insassen
-fliegen tot heraus; Attack-Move durch eine Basis (erst Verteidiger, dann Gebäude);
-KI schleift die Spielerbasis auch ohne Zauber.
+
+**Nachbesserung 1 nach Nutzertest (2026-07-07):**
+1. **Schamanin unangreifbar für Nah-/Fernkampf** (nur Zauber + Katapulte): neue
+   `Unit.is_targetable_by_units()` (Basis true, `Shaman` false) + `_can_attack_protected()`
+   (Basis false, `SiegeEngine` true). Geprüft in `_scan_for_enemy`, `_begin_attack`,
+   `_maybe_retaliate` (auch Brave-Wache) und `Firewarrior._melee_threat`; Zauber
+   (direkter `take_damage`) und Katapult-Beschuss/-Schockwelle treffen sie weiter.
+2. **Überzählige Stürmer stehen nicht mehr rum:** `_storm_building` nimmt jetzt im
+   **`interact_range`** des Gebäudes auf (nicht nur am exakten Eingang → kein
+   Stau an einer Türzelle, ~15 kommen zügig rein). Ist das Gebäude **voll**, gibt
+   die Einheit auf (`_clear_building_target` + `_retarget_or_idle` → IDLE bzw.
+   Attack-Move fortsetzen) statt mit Lauf-Animation zu warten;
+   `_scan_for_enemy_building` überspringt für Nahkämpfer volle Gebäude
+   (`Building.has_raider_room()`), Feuerkrieger bombardieren weiter.
+3. **Gebäude-Auto-Angriff zuverlässiger:** eigener, etwas größerer Erkennungsradius
+   `BUILDING_ENGAGE_RADIUS = 12 m` (statt nur Melee-Aggro 8 m) im Idle-/Attack-Move-
+   Scan — weiterhin **niedrigste Priorität** (Einheiten im normalen Aggro-Radius
+   zuerst). Headless verifiziert: idle Combatants und Attack-Move schleifen ein
+   Feindgebäude ohne Extra-Befehl.
+4. **Auswurf testbar im Spiel:** `Forester`/`Workshop` überschreiben jetzt
+   `eject_occupants(killed)` (gehauste Arbeiter fliegen raus — lebend beim Sturm,
+   tot bei Fernkampf-Stufe-1), gemeinsamer Helfer `Building._eject_unit`. Das
+   START_MISSION-Gegnerlager (`main.gd:_setup_sparring_industry`) bekommt **2 voll
+   besetzte Förstereien + 1 besetzte, pausierte Werkstatt** (`_staff_building`).
+
+Tests: +19 in `test_building_assault.gd` (Auto-Raze idle/Attack-Move, Overflow→IDLE
+bei vollem Gebäude, Schamanin-Immunität gegen Nah-/Fernkampf + Zauber-Tod, Förster-/
+Werkstatt-Auswurf lebend/tot). `test_siege.gd`-Fall auf Alle-Typen-Routing
+umgestellt. **1317 Tests, 0 Fehler**, `--headless --quit` und `--quit-after 400`
+(Startszenario mit besetzten Gebäuden) fehlerfrei.
+
+**Manuelle Prüfung ausstehend** (durch Nutzer): Rechtsklick auf Feindhütte
+(≤15 rein, Rest IDLE), Wackeln/Stufen, Trainee-/Förster-/Werkstatt-Auswurf
+(START_MISSION-Gegnerlager), Feuerkrieger-Stufe-1-Kill, Attack-Move/Idle-Auto-
+Angriff auf Gebäude, Schamanin immun gegen Krieger/Feuerkrieger (nur Zauber/
+Katapult), KI ohne Zauber.
 

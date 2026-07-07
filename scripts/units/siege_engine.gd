@@ -129,6 +129,12 @@ func can_crew_siege() -> bool:
 	return false
 
 
+## Catapults MAY shell the shaman (she is protected only from conventional
+## melee/ranged units).
+func _can_attack_protected() -> bool:
+	return true
+
+
 ## Big ring enclosing the vehicle and its side crew (selecting a crew member
 ## selects the whole catapult — the ring mirrors that).
 func selection_ring_scale() -> float:
