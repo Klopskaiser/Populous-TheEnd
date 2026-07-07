@@ -2858,3 +2858,9 @@ jeder Seite/„von hinten", ohne den Eingang zu erreichen). Fix
 Tür. Kein Stau, da aufgenommene Raider sofort aus der Welt verschwinden. **1323
 Tests, 0 Fehler**, Ladecheck + `--quit-after 400` fehlerfrei.
 
+**Manuelle Prüfung durch Nutzer bestanden (2026-07-07): Phase 7g abgeschlossen.**
+Bestätigt: Sturmangriff durch den Eingang, Insassen-Auswurf + Kampf + Wieder-
+Eintritt, Demolierer verlassen das Haus bei Bedrohung am Eingang, Reinkarnations-
+platz durch Truppen unzerstörbar (nur Zauber/Katapult), Schamanin wieder normal
+angreifbar.
+
