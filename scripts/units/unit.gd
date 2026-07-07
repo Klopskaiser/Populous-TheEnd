@@ -1059,11 +1059,17 @@ func _tick_panic(delta: float) -> void:
 		_clear_path()
 		_set_state(State.IDLE)
 		return
+	# Only re-pick on the redirect timer — NOT when the path is empty. A flee
+	# hop clamped short by a cliff (or blocked entirely) exhausts its path in a
+	# frame; re-picking on `not _has_path()` then ran _pick_panic_target (with a
+	# fresh PackedVector3Array) EVERY frame for every cliff-blocked panicker —
+	# an allocation storm that lagged swarm casts near cliffs (phase 7i fix).
 	_panic_redirect -= delta
-	if _panic_redirect <= 0.0 or not _has_path():
+	if _panic_redirect <= 0.0:
 		_panic_redirect = PANIC_REDIRECT_INTERVAL + randf() * 0.3
 		_pick_panic_target()
-	_advance_path(delta)
+	if _has_path():
+		_advance_path(delta)
 
 
 ## Short random flight hop, biased away from the panic source; clamped onto a

@@ -3171,3 +3171,19 @@ Manuelle Prüfung ausstehend.
   verkleinert — überlappen noch, aber ohne extremen Überhang.
 - **Tests:** 1487 grün; neu `test_volcano_cone_on_large_map` (Index-Stride auf 256)
   und `test_panic_hop_stops_before_cliff`.
+
+**Nachbesserungen 7i (2. Runde, Nutzerfeedback).**
+- **Crash behoben:** `Sidebar._selected_siege` (und die anderen Auswahl-Helfer)
+  prüften `x is Type` VOR `is_instance_valid(x)` — bei einer inzwischen
+  freigegebenen Selektion (Einheit/Gebäude zerstört) wirft der `is`-Operator
+  „Left operand of 'is' is a previously freed instance". Reihenfolge überall auf
+  **`is_instance_valid(x) and x is Type`** gedreht (sidebar.gd, building.gd,
+  ai_controller.gd).
+- **Lag bei Insektenzauber an Klippen behoben:** Der 7i-Panik-Fix beschnitt das
+  Fluchtziel auf begehbares Terrain; an einer Klippe blockierte Einheiten bekamen
+  dadurch einen Pfad, der im selben Frame „ankam" → `not _has_path()` triggerte in
+  `_tick_panic` **jeden Frame** ein neues `_pick_panic_target` inkl. frischer
+  `PackedVector3Array` — bei vielen Panik-Einheiten eine Allokations-Lawine. Fix:
+  Neu-Picken nur noch über den Redirect-Timer (~0,8 s), nicht mehr bei leerem Pfad.
+  Perf-Sanity: 200 Panik-Einheiten an einer Klippe ≈ 2,5 ms/Frame (headless, nur
+  Logik).

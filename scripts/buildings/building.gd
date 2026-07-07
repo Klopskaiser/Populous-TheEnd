@@ -206,7 +206,7 @@ func rally_training_building() -> TrainingBuilding:
 		int(floor(rally_point.x / TerrainData.CELL_SIZE)),
 		int(floor(rally_point.z / TerrainData.CELL_SIZE)))
 	for b in tribe.buildings:
-		if b is TrainingBuilding and is_instance_valid(b) and b.is_usable():
+		if is_instance_valid(b) and b is TrainingBuilding and b.is_usable():
 			if Rect2i(b.cell, b.footprint).has_point(rc):
 				return b as TrainingBuilding
 	return null

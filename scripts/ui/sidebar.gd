@@ -615,7 +615,7 @@ func _refresh_forester_panel() -> void:
 	var forester: Forester = null
 	if _selection != null:
 		var b: Building = _selection.selected_building
-		if b is Forester and is_instance_valid(b):
+		if is_instance_valid(b) and b is Forester:
 			forester = b as Forester
 	if forester == null:
 		if _forester_panel.visible:
@@ -638,7 +638,7 @@ func _on_forester_eject(index: int) -> void:
 	if _selection == null:
 		return
 	var b: Building = _selection.selected_building
-	if b is Forester and is_instance_valid(b):
+	if is_instance_valid(b) and b is Forester:
 		(b as Forester).eject_worker(index)
 		_refresh_forester_panel()
 
@@ -694,7 +694,7 @@ func _refresh_watchtower_panel() -> void:
 	var tower: Watchtower = null
 	if _selection != null:
 		var b: Building = _selection.selected_building
-		if b is Watchtower and is_instance_valid(b):
+		if is_instance_valid(b) and b is Watchtower:
 			tower = b as Watchtower
 	if tower == null:
 		if _watchtower_panel.visible:
@@ -717,7 +717,7 @@ func _on_watchtower_eject(index: int) -> void:
 	if _selection == null:
 		return
 	var b: Building = _selection.selected_building
-	if b is Watchtower and is_instance_valid(b):
+	if is_instance_valid(b) and b is Watchtower:
 		(b as Watchtower).eject_crew(index)
 		_refresh_watchtower_panel()
 
@@ -788,7 +788,7 @@ func _selected_workshop() -> Workshop:
 	if _selection == null:
 		return null
 	var b: Building = _selection.selected_building
-	if b is Workshop and is_instance_valid(b) and not b.under_construction:
+	if is_instance_valid(b) and b is Workshop and not b.under_construction:
 		return b as Workshop
 	return null
 
@@ -866,7 +866,7 @@ func _selected_siege() -> SiegeEngine:
 	if _selection == null or _selection.selected.size() != 1:
 		return null
 	var u: Unit = _selection.selected[0]
-	if u is SiegeEngine and is_instance_valid(u) and u.state != Unit.State.DEAD:
+	if is_instance_valid(u) and u is SiegeEngine and u.state != Unit.State.DEAD:
 		return u as SiegeEngine
 	return null
 
@@ -1085,7 +1085,7 @@ func _player_growth_per_min() -> float:
 		return 0.0
 	var total: float = 0.0
 	for b: Building in _building_manager.get_buildings_of_tribe(_player_id):
-		if b is Hut:
+		if is_instance_valid(b) and b is Hut:
 			total += (b as Hut).growth_per_minute()
 	return total
 
@@ -1213,7 +1213,7 @@ func _refresh_portrait() -> void:
 	var remaining: float = -1.0
 	if player != null:
 		for b in player.buildings:
-			if b is ReincarnationSite and is_instance_valid(b):
+			if is_instance_valid(b) and b is ReincarnationSite:
 				remaining = (b as ReincarnationSite).respawn_remaining()
 				break
 	if remaining >= 0.0:
@@ -1268,7 +1268,7 @@ func _on_select_idle() -> void:
 		return
 	var idle: Array[Unit] = []
 	for u: Unit in _unit_manager.get_units_of_tribe(_player_id):
-		if u is Brave and u.state == Unit.State.IDLE:
+		if is_instance_valid(u) and u is Brave and u.state == Unit.State.IDLE:
 			idle.append(u)
 	_selection.select_units(idle)
 

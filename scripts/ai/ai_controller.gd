@@ -764,7 +764,7 @@ func _wood_thin_near_base() -> bool:
 func _staff_foresters() -> void:
 	var foresters: Array[Forester] = []
 	for building in tribe.buildings:
-		if building is Forester and is_instance_valid(building) and building.is_usable():
+		if is_instance_valid(building) and building is Forester and building.is_usable():
 			foresters.append(building)
 	if foresters.is_empty():
 		return
@@ -788,7 +788,7 @@ func _staff_foresters() -> void:
 func _staff_workshops() -> void:
 	var workshops: Array[Workshop] = []
 	for building in tribe.buildings:
-		if building is Workshop and is_instance_valid(building) and building.is_usable():
+		if is_instance_valid(building) and building is Workshop and building.is_usable():
 			workshops.append(building)
 	if workshops.is_empty():
 		return
@@ -814,7 +814,7 @@ func _staff_workshops() -> void:
 func _man_watchtowers() -> void:
 	var towers: Array = []
 	for building in tribe.buildings:
-		if building is Watchtower and is_instance_valid(building) \
+		if is_instance_valid(building) and building is Watchtower \
 				and building.is_usable() and building.has_crew_room():
 			towers.append(building)
 	if towers.is_empty():
