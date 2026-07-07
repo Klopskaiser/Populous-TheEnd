@@ -69,6 +69,11 @@ const SCAN_MAX_CANDIDATES: int = 24
 ## targets) are reliably picked up — but still LOWEST priority: an enemy unit in
 ## the normal aggro radius is always engaged first.
 const BUILDING_ENGAGE_RADIUS: float = 12.0
+## A melee raider enters only through the ENTRANCE: it must be within this
+## distance of the entrance point to slip in (they path around the footprint to
+## the door instead of clipping in through the nearest wall). Admitted raiders
+## leave the world immediately, so the doorway drains without a real bottleneck.
+const RAID_ENTER_RANGE: float = 2.0
 ## Max simultaneous melee attackers on one target; extras wait and back-fill.
 const MAX_MELEE_ATTACKERS: int = 3
 ## Radius of the ring the (up to 3) attackers stand on around their target.
@@ -1550,19 +1555,17 @@ func _assault_building(delta: float) -> void:
 ## Melee raider. #2 (harder to raze): the entrance must be CLEAR of enemies
 ## before anyone demolishes — a live defender / ejected occupant near the door
 ## is fought first (preacher: converted). Only when clear does the unit enter as
-## a raider (removed from the world, demolishing inside). Admission happens once
-## the unit reaches the building (entrance OR within its interact range — so a
-## swarm does not funnel through one door cell). When the building is FULL the
-## unit gives up (idle / resume attack-move) instead of standing around.
+## a raider (removed from the world, demolishing inside). Entry is ONLY through
+## the entrance (RAID_ENTER_RANGE) — units path around the footprint to the door
+## rather than clipping in through the nearest wall. When the building is FULL
+## the unit gives up (idle / resume attack-move) instead of standing around.
 func _storm_building(building, delta: float) -> void:
 	var foe: Unit = building.nearest_entrance_threat()
 	if foe != null:
 		_engage_assault_foe(foe)   # clear the doorway first (keeps attack_building)
 		return
 	var entrance: Vector3 = building.entrance_world()
-	var reached: bool = _flat_dist(position, entrance) <= MELEE_RANGE \
-		or _flat_dist(position, building.center_world()) <= building.interact_range()
-	if not reached:
+	if _flat_dist(position, entrance) > RAID_ENTER_RANGE:
 		_in_melee = false
 		_approach(entrance, delta)
 		_face_point(entrance)

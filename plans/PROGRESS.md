@@ -2850,3 +2850,11 @@ zerstörbar + **Eingang-räumen/Demolierer-Auswurf**-Zyklus inkl. SIT-Ausnahme).
 **1323 Tests, 0 Fehler**, `--headless --quit` und `--quit-after 400` fehlerfrei.
 **Manuelle Prüfung ausstehend.**
 
+**Bugfix (Nutzertest 2026-07-07) — Eintritt „von hinten":** Raider wurden
+aufgenommen, sobald sie im `interact_range` der Gebäude**mitte** waren (also von
+jeder Seite/„von hinten", ohne den Eingang zu erreichen). Fix
+(`Unit._storm_building`): Eintritt nur noch **am Eingang** (`RAID_ENTER_RANGE`
+2 m um `entrance_world()`); Einheiten laufen um den nav-soliden Footprint zur
+Tür. Kein Stau, da aufgenommene Raider sofort aus der Welt verschwinden. **1323
+Tests, 0 Fehler**, Ladecheck + `--quit-after 400` fehlerfrei.
+
