@@ -82,8 +82,10 @@ var _time_scale_index: int = 0
 
 
 func _ready() -> void:
-	# Every match starts in real time (the time-lapse is per-session global).
+	# Every match starts in real time (the time-lapse is per-session global);
+	# the catch-up cap returns to the project default (see _cycle_time_scale).
 	Engine.time_scale = 1.0
+	Engine.max_physics_steps_per_frame = 2
 
 	# Match configuration (set by the main menu); direct scene starts (tests,
 	# headless checks) fall back to the start mission — today's behaviour.
@@ -569,11 +571,14 @@ func _unhandled_input(event: InputEvent) -> void:
 ## along with it so the physics (and with it the whole simulation, which runs
 ## in _physics_process ticks) actually keeps up with the scaled clock; the
 ## cap keeps single frames short enough that input (F10 again!) stays usable.
+## At 1x the cap returns to the project default of 2 (phase 8: no catch-up
+## death spiral in mass battles — overload degrades into slight slow motion).
 func _cycle_time_scale() -> void:
 	_time_scale_index = (_time_scale_index + 1) % TIME_SCALE_STEPS.size()
 	var factor: float = TIME_SCALE_STEPS[_time_scale_index]
 	Engine.time_scale = factor
-	Engine.max_physics_steps_per_frame = clampi(int(factor) * 4, 8, 120)
+	Engine.max_physics_steps_per_frame = 2 if factor <= 1.0 \
+		else clampi(int(factor) * 4, 8, 120)
 	print("Zeitraffer: %dx" % int(factor))
 
 

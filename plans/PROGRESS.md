@@ -3374,3 +3374,53 @@ GPU-seitig nichts messbar.
 Warnungen — `shadow_opacity` existiert in 4.7). **Manuelle Prüfung durch
 Nutzer ausstehend:** F9-Test mit FPS-/Draw-Call-Anzeige, Blob-Optik,
 Helligkeit (Ambient/Opacity nach Geschmack nachjustieren).
+
+### Nachbesserung Phase 8 — Kampf-Einbruch auf 2-3 FPS (Nutzerfeedback, 2026-07-07)
+
+**Anlass:** Nach dem Schatten-Umbau besser, aber sobald echter Kampf + Bewegung
+lief (Debugschlacht, ~2200 Einheiten), brach die FPS von ~30 auf 2-3 ein —
+bei nur 600 Draw-Calls/210 Objekten, also klar CPU-seitig.
+
+**Diagnose (gemessen):**
+- **Physik-Aufholspirale** als Haupttäter des Klippeneffekts: Der Kampf-Tick
+  lag bei Vollkampf am/über dem 33-ms-Budget (30 Hz). Godots Default
+  `max_physics_steps_per_frame = 8` stapelt dann bis zu 8 Sim-Schritte pro
+  Render-Frame → ~280-ms-Frames → 2-3 FPS, dauerhaft (die Sim kommt nie
+  wieder vor die Uhr). Erklärt exakt „erste 5 s gut, dann Absturz".
+- Sektions-Split des Attack-Ticks (temporäre Instrumentierung, 2000 Krieger,
+  1859 im ATTACK-State): Verfolgung/`_approach` 13,1 ms, Kopf (Zielvalidierung
+  + `request_melee_slot` pro Tick) 6,5 ms, Warten 0,7, Zuschlagen 0,8; dazu
+  Basis-Tick-Overhead (Knockback/Regen/Brennen/Anim-Calls pro Einheit).
+- **Sounds geprüft (Nutzerfrage): unkritisch.** `combat_audio.gd` ist gepoolt
+  (12 Player) + global gedrosselt (min. 45 ms Abstand ≈ max. 22 Sounds/s);
+  pro Treffer läuft nur ein µs-Handler. Bei ~1250 Treffern/s ≈ 1-2 ms/s.
+
+**Fixes:**
+- `project.godot`: **`max_physics_steps_per_frame = 2`** (statt 8) — Überlast
+  wird zu leichter Zeitlupe bei spielbarer FPS statt zur 2-FPS-Spirale.
+  `main.gd` setzt beim Matchstart auf 2 zurück; F10-Zeitraffer hebt weiter an
+  (10x/100x brauchen viele Schritte/Frame), 1x geht zurück auf 2.
+- Kampf-Hotpath (`unit.gd`):
+  - `request_melee_slot`: Fast path zuerst (Slot-Halter überspringen den
+    Prune-Scan; Prune nur noch bei Neuzugang).
+  - `_approach`: quadrierte Distanzen statt `_flat_dist`-Aufrufe, Replan-
+    Schwelle 1,0 → 1,5 m (Brawl-Ziele zittern durch Schubser/Separation —
+    weniger A*-Läufe: 29,5k → 24,5k pro 300 Ticks).
+  - Verfolger-Branch: redundantes `_face_point` entfernt (Facing kommt aus der
+    Bewegung selbst).
+  - `tick()`: Knockback-/Brennen-Aufrufe nur noch bei aktivem Effekt (2
+    gesparte Calls pro Einheit pro Tick).
+  - `_advance_path`/`_step_toward`: Steigungs-Speed + Boden-Snap inline (je
+    ein Call pro bewegter Einheit pro Tick gespart).
+- `stars_renderer.gd`: eine Uhr-Ablesung pro Frame statt pro Einheit
+  (`has_stars()` inline).
+
+**Messwerte (headless, Ø/Tick):** Bewegung 2000: 29,5 → **17,9 ms**; Kampf
+2000: 28 → **22,7 ms** (Luft unterm 33-ms-Budget); Kampf ~4700: 76 → 52 ms;
+Bewegung 6000: ~47 ms. Im Spiel fängt zusätzlich der 2er-Step-Cap jede
+Restüberlast ab.
+
+**Verifikation:** Suite grün, Ladecheck fehlerfrei (Stand nach Lauf s. u.).
+**Manuelle Prüfung ausstehend:** Debugschlacht + Skirmish-F9 — FPS sollte im
+Vollkampf nicht mehr unter ~15-20 fallen; bei Überlast läuft das Spiel
+minimal langsamer statt einzufrieren.

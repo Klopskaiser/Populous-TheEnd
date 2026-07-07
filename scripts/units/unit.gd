@@ -443,9 +443,13 @@ func tick(delta: float) -> void:
 	# facing, animation, fire/convert): they have no world tick of their own.
 	if garrison_housed:
 		return
-	_tick_knockback(delta)
+	# Guarded calls (phase 8): knockback/burning are idle for almost every unit
+	# almost always — two skipped function calls per unit per tick add up.
+	if knockback_accum > 0.0 or _knockback_remaining != Vector3.ZERO:
+		_tick_knockback(delta)
 	_tick_regen(delta)
-	_tick_burning(delta)
+	if _burn_time > 0.0:
+		_tick_burning(delta)
 	_tick_state(delta)
 	_apply_animation(false)
 
@@ -512,14 +516,20 @@ func _advance_path(delta: float) -> bool:
 	if slope < -STEEP_ROLL_SLOPE and randf() < STEEP_ROLL_CHANCE_PER_SEC * delta:
 		start_roll(Vector3(to_target.x, 0.0, to_target.y), MINI_ROLL_DURATION)
 		return false
-	var next: Vector2 = flat_pos.move_toward(flat_target, _slope_speed(slope) * delta)
+	# Inlined slope speed + ground snap (hot path — a function call per moving
+	# unit per tick is measurable at thousands of units).
+	var spd: float = speed
+	if slope > 0.0:
+		spd = speed * clampf(1.0 - slope * UPHILL_SLOWDOWN, MIN_SPEED_FACTOR, 1.0)
+	var next: Vector2 = flat_pos.move_toward(flat_target, spd * delta)
 	var step_len: float = flat_pos.distance_to(next)
 	position.x = next.x
 	position.z = next.y
-	var prev_y: float = position.y
-	_snap_to_ground()
-	if step_len > 0.001:
-		_ground_slope = (position.y - prev_y) / step_len
+	if terrain_data != null:
+		var prev_y: float = position.y
+		position.y = terrain_data.get_height(next.x, next.y)
+		if step_len > 0.001:
+			_ground_slope = (position.y - prev_y) / step_len
 	if next.distance_to(flat_target) <= ARRIVE_EPS:
 		_path_index += 1
 	return _path_index >= _path.size()
@@ -1406,12 +1416,12 @@ func _tick_attack(delta: float) -> void:
 				return
 		_wait_near(target, delta)
 		return
-	var slot_pos: Vector3 = target.melee_slot_position(slot)
 	var dist: float = _flat_dist(position, target.position)
 	if dist > MELEE_RANGE:
 		_in_melee = false
-		_approach(slot_pos, delta)
-		_face_point(target.position)
+		# Facing comes from the movement itself (chase direction ~= target
+		# direction); the extra normalize per pursuer per tick added up.
+		_approach(target.melee_slot_position(slot), delta)
 		return
 	# In range: stand still, face the target and strike on cooldown.
 	_in_melee = true
@@ -1954,11 +1964,14 @@ func _scan_for_enemy(radius: float) -> Unit:
 
 ## Registers `attacker` on this unit's melee ring. Returns its slot index
 ## (0..MAX-1) or -1 when the ring is full. Untyped param (freed-safe).
+## Fast path first (phase 8): an attacker that already holds a slot skips the
+## prune scan — this runs per attacker per tick in mass battles. The prune
+## only runs when someone NEW tries to join (that is when stale slots matter).
 func request_melee_slot(attacker) -> int:
-	_prune_melee_attackers()
 	var idx: int = melee_attackers.find(attacker)
 	if idx >= 0:
 		return idx
+	_prune_melee_attackers()
 	if melee_attackers.size() < MAX_MELEE_ATTACKERS:
 		melee_attackers.append(attacker)
 		return melee_attackers.size() - 1
@@ -2002,13 +2015,26 @@ func melee_slot_position(slot: int) -> Vector3:
 
 ## Approaches `dest`: A* while far (avoids water/obstacles), direct step when
 ## close (combat is chaotic and short-range — no need to re-path every metre).
+## Hot path (phase 8): squared-distance comparisons (no sqrt/Vector2 helper)
+## and a wider replan threshold — brawl targets jitter from shoves/separation,
+## so re-pathing on every metre of drift burned A* runs.
 func _approach(dest: Vector3, delta: float) -> void:
-	if _flat_dist(position, dest) > COMBAT_DIRECT_RANGE and nav_grid != null:
-		if not _has_path() or _flat_dist(_combat_goal, dest) > 1.0:
+	var dx: float = dest.x - position.x
+	var dz: float = dest.z - position.z
+	if dx * dx + dz * dz > COMBAT_DIRECT_RANGE * COMBAT_DIRECT_RANGE and nav_grid != null:
+		if not _has_path():
 			_combat_goal = dest
 			if not _plan_path_to(dest):
 				_step_toward(dest, delta)
 				return
+		else:
+			var gx: float = _combat_goal.x - dest.x
+			var gz: float = _combat_goal.z - dest.z
+			if gx * gx + gz * gz > 2.25:   # goal drifted > 1.5 m
+				_combat_goal = dest
+				if not _plan_path_to(dest):
+					_step_toward(dest, delta)
+					return
 		if _advance_path(delta):
 			_clear_path()
 		return
@@ -2041,17 +2067,21 @@ func _step_toward(point: Vector3, delta: float) -> void:
 	var to_target: Vector2 = flat_target - flat
 	if to_target.length_squared() > 0.000001:
 		facing = Vector3(to_target.x, 0.0, to_target.y).normalized()
-	var next: Vector2 = flat.move_toward(flat_target, _slope_speed(_ground_slope) * delta)
+	var spd: float = speed
+	if _ground_slope > 0.0:
+		spd = speed * clampf(1.0 - _ground_slope * UPHILL_SLOWDOWN, MIN_SPEED_FACTOR, 1.0)
+	var next: Vector2 = flat.move_toward(flat_target, spd * delta)
 	if nav_grid != null and not nav_grid.is_cell_walkable(
 			nav_grid.world_to_cell(Vector3(next.x, 0.0, next.y))):
 		return
 	var step_len: float = flat.distance_to(next)
 	position.x = next.x
 	position.z = next.y
-	var prev_y: float = position.y
-	_snap_to_ground()
-	if step_len > 0.001:
-		_ground_slope = (position.y - prev_y) / step_len
+	if terrain_data != null:
+		var prev_y: float = position.y
+		position.y = terrain_data.get_height(next.x, next.y)
+		if step_len > 0.001:
+			_ground_slope = (position.y - prev_y) / step_len
 
 
 func _face_point(point: Vector3) -> void:

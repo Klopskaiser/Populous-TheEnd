@@ -66,10 +66,13 @@ func _process(delta: float) -> void:
 	var up: Vector3 = camera.global_transform.basis.y if camera != null \
 		else Vector3.UP
 	var count: int = 0
+	# Inline has_stars() with ONE clock read: the per-unit Time call added up
+	# with thousands of units per rendered frame (phase 8).
+	var now_ms: int = Time.get_ticks_msec()
 	for unit in _unit_manager.units:
 		if count >= MAX_STARS:
 			break
-		if unit.has_stars():
+		if now_ms < unit.stars_until_ms and unit.state != Unit.State.DEAD:
 			_multimesh.set_instance_transform(count, Transform3D(
 				Basis.IDENTITY, unit.position + up * HEIGHT))
 			count += 1

@@ -168,6 +168,11 @@ cast_spell_10={
 ; 30 Hz gameplay ticks are plenty for an RTS and halve the per-second cost
 ; of unit movement/separation/hash updates (target: 4000 units).
 common/physics_ticks_per_second=30
+; Phase 8: at most 2 catch-up physics steps per rendered frame. The default 8
+; is a death spiral in mass battles: once one sim tick exceeds its 33 ms
+; budget, the engine stacks up to 8 ticks per frame (~280 ms frames = 2-3
+; FPS). Capped at 2, overload degrades into mild slow motion at playable FPS.
+common/max_physics_steps_per_frame=2
 
 [rendering]
 
