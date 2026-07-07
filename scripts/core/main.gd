@@ -144,6 +144,11 @@ func _ready() -> void:
 	stars.name = "StarsRenderer"
 	add_child(stars)
 	stars.setup(_unit_manager)
+	# Range rings for ranged units, toggled with G (phase 7f).
+	var ranges: RangeRenderer = RangeRenderer.new()
+	ranges.name = "RangeRenderer"
+	add_child(ranges)
+	ranges.setup(_unit_manager, GameState.PLAYER_TRIBE)
 	var combat_audio: CombatAudio = CombatAudio.new()
 	combat_audio.name = "CombatAudio"
 	add_child(combat_audio)

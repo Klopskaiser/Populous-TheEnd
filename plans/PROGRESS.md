@@ -2572,3 +2572,36 @@ Fallback-Test), neue Tests für Brand (Feuerball + Lava), Terrainriss-Burst,
 Crew-Überleben und das Selektions-Mapping. **1199 Tests, 0 Fehler**,
 Ladecheck fehlerfrei. Manuelle Prüfung erneut ausstehend.
 
+**Überarbeitung 2 nach Nutzertest (2026-07-07):**
+1. **Katapult-Targeting robust „feuern statt jagen"** (`siege_engine.gd`): Der
+   gemeldete Bug „fährt rein und schießt nicht" kam vom **Auto-Verfolgen von
+   Einheiten** — als langsamste Einheit trottete das Katapult ewig hinter
+   fliehenden Zielen her, ohne je in Reichweite zu feuern. Neu: `_auto_acquire`
+   (idle **und** Angriffsbewegung teilen dieselbe Akquise) feuert nur, was
+   **bereits im Feuerband** (`_nearest_enemy_unit(FIRE_RANGE)`) steht
+   (Einheiten bevorzugt), und nähert sich sonst dem nächsten **Gebäude** in
+   Aggro (stationär → erreichbar). Einheiten werden NIE automatisch verfolgt.
+   Neues Flag `_target_ordered` (gesetzt nur in `order_attack`, gelöscht in
+   jedem `_end_attack`): **nur explizit befohlene** Einheitenziele werden aus
+   dem Band heraus verfolgt (`_bombard_unit`), Auto-Ziele fallen zurück.
+   `_retarget_or_idle` überschrieben (sonst hätte die geerbte Version wieder
+   die nächste Einheit auf jede Distanz gepackt). `_bombard` in
+   `_bombard_unit`/`_bombard_point` aufgeteilt. So stoppt ein hineingeschicktes
+   Katapult zuverlässig und beschießt Gebäude/Einheiten in Reichweite.
+2. **Reichweitenanzeige, Taste G** (`scripts/ui/range_renderer.gd`, neu): Ein
+   MultiMesh aus flachen Ringen (per-Instanz-Farbe) zeigt auf Knopfdruck die
+   Reichweiten der **eigenen** Feuerkrieger (7 m), Prediger (5 m) und Katapulte
+   (15 m + dünner innerer 3-m-Mindestreichweiten-Ring). Toggle über neue
+   Input-Action `toggle_ranges` (G); in Main verdrahtet
+   (`ranges.setup(unit_manager, player)`). **Besatzungen werden übersprungen**
+   (`unit.siege_engine != null`), sie haben keine eigene Reichweite. Statischer
+   Helfer `range_for_kind(kind)` (headless-testbar).
+
+Tests: neue Fälle `test_engine_does_not_auto_chase_units` (Out-of-Band-Einheit
+wird ignoriert, Gebäude in Aggro stattdessen angefahren),
+`test_engine_chases_ordered_unit` (explizit befohlene Einheit wird verfolgt +
+beschossen), `test_range_renderer_ranges` (Reichweiten je Kind, Crew/Nahkämpfer
+= 0). **1211 Tests, 0 Fehler**, Ladecheck fehlerfrei. Manuelle Prüfung erneut
+ausstehend (v. a.: Katapult per Angriffsbewegung in die Basis → stoppt und
+feuert; G blendet Reichweitenringe ein/aus).
+

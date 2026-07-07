@@ -60,9 +60,15 @@ const C_METAL: Color = Color(0.45, 0.45, 0.48)
 ## Crew members (untyped entries: may be freed). Includes recruits still
 ## walking over (not yet boarded).
 var crew: Array = []
-## Enemy building this engine bombards (takes priority over unit targets).
-## Untyped: may be freed when it collapses.
+## Enemy building this engine bombards (the fallback when no unit is in the
+## fire band). Untyped: may be freed when it collapses.
 var attack_building = null
+## True while the CURRENT target came from an explicit player/AI order — only
+## then may the slow catapult APPROACH a unit that is out of the fire band.
+## Auto-acquired unit targets are never chased (it is the slowest unit on the
+## field — trundling after a fleeing brave was the "drives in, never shoots"
+## bug). Cleared on every _end_attack.
+var _target_ordered: bool = false
 ## Injected by UnitManager.spawn_unit (set()); needed for the building scan.
 var building_manager: BuildingManager = null
 
@@ -343,12 +349,20 @@ func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = fals
 	super.order_move(target, queue_up, aggressive)
 
 
-## Explicit attack order on a unit (right-click, AI): clears a building
-## focus — the ordered target must win, the old building priority silently
-## overrode unit orders (user feedback: "unreliable attack commands").
+## Explicit attack order on a unit (right-click, AI): clears a building focus
+## and marks the target as ORDERED, so the catapult will close in on it even
+## out of the fire band (the only case a unit is chased).
 func order_attack(enemy: Unit) -> void:
 	attack_building = null
 	super.order_attack(enemy)
+	_target_ordered = true
+
+
+## Clearing the attack always drops the "ordered" flag (auto re-targets are
+## never treated as ordered chases).
+func _end_attack() -> void:
+	_target_ordered = false
+	super._end_attack()
 
 
 ## Explicit bombard order on an enemy building (right-click, AI).
@@ -400,68 +414,120 @@ func tick(delta: float) -> void:
 	_tick_visual(delta)
 
 
-## Auto-aggro, UNITS first (user feedback), buildings as the fallback siege
-## work. The unit scan skips enemies inside the minimum range (unhittable).
-func _engage_on_sight(delta: float) -> bool:
+## Auto target acquisition (idle + aggressive move — NO explicit order). The
+## siege weapon FIRES at whatever is already in the fire band (units first,
+## then buildings) and, finding nothing to shoot, creeps toward the nearest
+## enemy BUILDING within aggro (stationary → catchable). It never auto-chases
+## a unit: as the slowest thing on the field it would just trundle after a
+## fleeing target forever without ever firing. Returns true when it engaged.
+func _auto_acquire(delta: float) -> bool:
 	if boarded_count() < MIN_FIRE_CREW:
 		return false
 	if not _due_to_scan(delta):
 		return false
-	var enemy: Unit = _scan_enemy_unit()
-	if enemy != null:
-		_begin_attack(enemy)
+	var u: Unit = _nearest_enemy_unit(FIRE_RANGE)
+	if u != null:
+		_begin_attack(u)   # auto: _target_ordered stays false (no chase)
 		return true
-	var b = _scan_enemy_building(FIRE_RANGE + 2.0)
+	var b = _scan_enemy_building(SIEGE_AGGRO)
 	if b != null:
 		order_attack_building(b)
 		return true
 	return false
 
 
+## Aggressive-move auto-engage (Unit._tick_move) and idle both use the same
+## acquisition, so a catapult sent into a base stops and bombards reliably.
+func _engage_on_sight(delta: float) -> bool:
+	return _auto_acquire(delta)
+
+
 func _tick_idle(delta: float) -> void:
-	_engage_on_sight(delta)
+	_auto_acquire(delta)
 
 
-## Bombardment: an ordered/aggroed UNIT target takes precedence; the building
-## focus is the fallback. Holds position in the [MIN_RANGE, FIRE_RANGE] band,
-## advances beyond it, never melees.
+## Bombardment. A live unit target takes precedence over the building focus;
+## a dead/gone target falls back to the building, then to re-acquisition.
 func _tick_attack(delta: float) -> void:
 	if boarded_count() < MIN_MOVE_CREW:
 		attack_building = null
-		_retarget_or_idle()
+		_end_attack()
+		_set_state(State.IDLE)
 		return
 	if _target_valid(attack_target) and attack_target.tribe_id != tribe_id:
-		# A unit target that crawled inside the minimum range cannot be hit:
-		# swap to another enemy in the band (throttled) instead of idling.
-		if _flat_dist(position, attack_target.position) < MIN_RANGE \
-				and _due_to_scan(delta):
-			var alt: Unit = _scan_enemy_unit()
-			if alt != null and alt != attack_target:
-				_begin_attack(alt)
-		_bombard(attack_target.position, delta)
+		_bombard_unit(attack_target, delta)
 		return
 	if attack_target != null:
 		_end_attack()   # dead/converted unit target: drop it cleanly
-	if attack_building != null:
-		if not is_instance_valid(attack_building) or attack_building.health <= 0:
-			attack_building = null
-			_retarget_or_idle()
-			return
-		# Units first, even mid-siege: enemies walking up interrupt the
-		# building bombardment (the building focus stays as the fallback).
+	if attack_building != null and is_instance_valid(attack_building) \
+			and attack_building.health > 0 and attack_building.tribe_id != tribe_id:
+		# A unit stepping into the fire band interrupts the siege (throttled);
+		# the building focus stays as the fallback afterwards.
 		if _due_to_scan(delta):
-			var enemy: Unit = _scan_enemy_unit()
-			if enemy != null:
-				_begin_attack(enemy)
+			var u: Unit = _nearest_enemy_unit(FIRE_RANGE)
+			if u != null:
+				_begin_attack(u)
 				return
-		_bombard(attack_building.center_world(), delta)
+		_bombard_point(attack_building.center_world(), delta, true)
 		return
+	attack_building = null
 	_retarget_or_idle()
 
 
-func _bombard(target_pos: Vector3, delta: float) -> void:
+## Re-acquisition after a target is lost — same "fire, don't chase" rule as
+## _auto_acquire (the inherited version would lock the nearest enemy UNIT at
+## any range and the catapult would trundle after it instead of sieging).
+func _retarget_or_idle() -> void:
+	_end_attack()
+	if boarded_count() >= MIN_FIRE_CREW:
+		var u: Unit = _nearest_enemy_unit(FIRE_RANGE)
+		if u != null:
+			_begin_attack(u)
+			return
+		var b = _scan_enemy_building(SIEGE_AGGRO)
+		if b != null:
+			order_attack_building(b)
+			return
+	attack_building = null
+	_set_state(State.IDLE)
+
+
+## Unit target: fire while it is in the band. Only an ORDERED target is chased
+## when it drifts out of the band; an auto target is dropped instead. A target
+## that crept inside the minimum range is swapped for another in-band enemy.
+func _bombard_unit(target: Unit, delta: float) -> void:
+	var dist: float = _flat_dist(position, target.position)
+	if dist > FIRE_RANGE:
+		if not _target_ordered:
+			_end_attack()
+			_retarget_or_idle()
+			return
+		_in_melee = false
+		_approach(target.position, delta)
+		_face_point(target.position)
+		return
+	if dist < MIN_RANGE:
+		if _due_to_scan(delta):
+			var alt: Unit = _nearest_enemy_unit(FIRE_RANGE)
+			if alt != null and alt != target:
+				_begin_attack(alt)
+				return
+		if _has_path():
+			_clear_path()
+		_in_melee = true
+		_face_point(target.position)
+		return   # too close — hold fire until it clears the minimum
+	_bombard_point(target.position, delta, false)
+
+
+## Stands in the [MIN_RANGE, FIRE_RANGE] band and fires at a fixed point.
+## `approach` closes the gap when the point is beyond the fire range (used for
+## buildings — stationary and catchable). Never melees.
+func _bombard_point(target_pos: Vector3, delta: float, approach: bool) -> void:
 	var dist: float = _flat_dist(position, target_pos)
 	if dist > FIRE_RANGE:
+		if not approach:
+			return
 		_in_melee = false
 		_approach(target_pos, delta)
 		_face_point(target_pos)
@@ -505,20 +571,21 @@ func _launch_shot(target_pos: Vector3) -> void:
 	_emit_combat_hit(&"throw")
 
 
-## Nearest attackable enemy UNIT in the aggro radius that is not inside the
-## minimum range (those cannot be hit by the arcing shot).
-func _scan_enemy_unit() -> Unit:
+## Nearest attackable enemy UNIT within `max_range` that is not inside the
+## minimum range (those cannot be hit by the arcing shot). Used with
+## FIRE_RANGE so auto-fire only ever locks a target it can hit right away.
+func _nearest_enemy_unit(max_range: float) -> Unit:
 	if path_service == null:
 		return null
 	var best: Unit = null
-	var best_d: float = INF
-	for u in path_service.get_units_in_radius(position, aggro_radius(), SCAN_MAX_CANDIDATES):
+	var best_d: float = max_range
+	for u in path_service.get_units_in_radius(position, max_range, SCAN_MAX_CANDIDATES):
 		if u == self or u.state == State.DEAD or u.tribe_id == tribe_id:
 			continue
 		if u.state == State.SIT or not u.is_targetable():
 			continue
 		var d: float = _flat_dist(position, u.position)
-		if d < MIN_RANGE:
+		if d < MIN_RANGE or d > max_range:
 			continue
 		if d < best_d:
 			best_d = d

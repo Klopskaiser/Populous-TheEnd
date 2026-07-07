@@ -550,6 +550,77 @@ func test_engine_range_band_and_priorities() -> void:
 	_free_world(w)
 
 
+## The catapult must never AUTO-chase a unit (it is the slowest unit — it
+## would trundle after a fleeing target forever without firing, the reported
+## "drives in but never shoots" bug). Out-of-band units are ignored; a
+## building within aggro is approached instead.
+func test_engine_does_not_auto_chase_units() -> void:
+	var w: Dictionary = _make_world()
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(50, 60))) as SiegeEngine
+	_board_crew(w, engine)
+	_board_crew(w, engine)
+	# Enemy unit 18 m away — beyond the 15 m fire range, no building around.
+	var foe: Brave = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, w.nav.cell_to_world(Vector2i(68, 60))) as Brave
+	engine._target_search_timer = 0.0
+	for i in range(20):
+		_tick_world(w)
+	check(engine.state == Unit.State.IDLE,
+		"an out-of-band enemy unit is NOT auto-chased")
+	check(engine.attack_target == null, "no unit target was locked")
+	check(is_instance_valid(foe), "the far unit is left alone")
+
+	# A building within aggro IS approached (stationary → catchable).
+	var camp: WarriorCamp = w.building_manager.place(
+		WARRIOR_CAMP_SCENE, w.tribe1, Vector2i(62, 58), 0, true) as WarriorCamp
+	engine._target_search_timer = 0.0
+	var t: int = 0
+	while engine.attack_building == null and t < 50:
+		_tick_world(w)
+		t += 1
+	check(engine.attack_building == camp,
+		"a building within aggro is approached instead of the far unit")
+	_free_world(w)
+
+
+## An EXPLICIT attack order on a unit is honoured even out of the band: the
+## catapult closes in and fires (the only case it chases a unit).
+func test_engine_chases_ordered_unit() -> void:
+	var w: Dictionary = _make_world()
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(50, 60))) as SiegeEngine
+	_board_crew(w, engine)
+	_board_crew(w, engine)
+	var foe: Brave = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, w.nav.cell_to_world(Vector2i(68, 60))) as Brave
+	engine.order_attack(foe)
+	check(engine.attack_target == foe and engine._target_ordered,
+		"the ordered unit target is marked for chasing")
+	var t: int = 0
+	while w.unit_manager.projectiles.filter(func(p): return p is SiegeShot).is_empty() \
+			and t < 300:
+		_tick_world(w)
+		t += 1
+	check(not w.unit_manager.projectiles.filter(func(p): return p is SiegeShot).is_empty(),
+		"the ordered unit is chased into range and fired on (took %d ticks)" % t)
+	_free_world(w)
+
+
+# --- Range display (G toggle) ------------------------------------------------------
+
+func test_range_renderer_ranges() -> void:
+	check_near(RangeRenderer.range_for_kind(&"firewarrior"), Firewarrior.FIRE_RANGE,
+		"firewarrior ring = its fire range")
+	check_near(RangeRenderer.range_for_kind(&"preacher"), Preacher.CONVERT_RANGE,
+		"preacher ring = its convert range")
+	check_near(RangeRenderer.range_for_kind(&"siege"), SiegeEngine.FIRE_RANGE,
+		"catapult ring = its fire range")
+	check(RangeRenderer.range_for_kind(&"brave") == 0.0, "braves have no range ring")
+	check(RangeRenderer.range_for_kind(&"warrior") == 0.0, "warriors have no range ring")
+	check(RangeRenderer.range_for_kind(&"shaman") == 0.0, "the shaman has no range ring")
+
+
 # --- Vehicle destruction (fire/lava burn, terrain rip) -----------------------------
 
 func test_engine_burns_from_fire_spell_and_sinks() -> void:
