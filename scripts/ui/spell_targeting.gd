@@ -28,9 +28,18 @@ var _cursor: Node3D = null
 ## its effect area is a hard-edged square).
 var _cursor_ring: Node3D = null
 var _cursor_square: Node3D = null
-## Ring around the shaman showing the armed spell's cast range; follows her
-## every frame (targets beyond it are allowed — she walks closer first).
-var _range_ring: MeshInstance3D = null
+## Terrain-conforming ring around the shaman showing the armed spell's cast
+## range, rebuilt every frame at her (moving) position — it hugs slopes
+## instead of a flat disc sinking into hills (targets beyond it are allowed:
+## she walks closer first). World-origin ImmediateMesh.
+var _range_mesh: MeshInstance3D = null
+var _range_radius: float = 0.0
+## Terrain-conforming aim-cursor ring, rebuilt at the mouse hit point each
+## frame. The tip sphere / flatten square still ride the moving _cursor node.
+var _cursor_ring_mesh: MeshInstance3D = null
+const CURSOR_RING_RADIUS: float = 1.2
+const C_RANGE_RING: Color = Color(0.55, 0.8, 1.0, 0.8)
+const C_CURSOR_RING: Color = Color(0.98, 0.85, 0.45, 0.9)
 
 
 func setup(p_tribe_commands: TribeCommands, p_tribe: Tribe,
@@ -72,6 +81,8 @@ func start_targeting(spell_id: StringName) -> void:
 	_ensure_cursor()
 	if _cursor_ring != null:
 		_cursor_ring.visible = spell_id != &"flatten"
+	if _cursor_ring_mesh != null:
+		_cursor_ring_mesh.visible = spell_id != &"flatten"
 	if _cursor_square != null:
 		_cursor_square.visible = spell_id == &"flatten"
 	_show_range_ring(spell.cast_range)
@@ -89,8 +100,12 @@ func cancel() -> void:
 	_armed_spell = &""
 	if _cursor != null:
 		_cursor.visible = false
-	if _range_ring != null:
-		_range_ring.visible = false
+	if _cursor_ring_mesh != null:
+		_cursor_ring_mesh.visible = false
+		(_cursor_ring_mesh.mesh as ImmediateMesh).clear_surfaces()
+	if _range_mesh != null:
+		_range_mesh.visible = false
+		(_range_mesh.mesh as ImmediateMesh).clear_surfaces()
 
 
 func _ensure_cursor() -> void:
@@ -104,14 +119,6 @@ func _ensure_cursor() -> void:
 	_cursor_ring = Node3D.new()
 	_cursor_ring.name = "RingCursor"
 	_cursor.add_child(_cursor_ring)
-	var ring: MeshInstance3D = MeshInstance3D.new()
-	var torus: TorusMesh = TorusMesh.new()
-	torus.inner_radius = 1.0
-	torus.outer_radius = 1.25
-	ring.mesh = torus
-	ring.material_override = mat
-	ring.position.y = 0.15
-	_cursor_ring.add_child(ring)
 	var tip: MeshInstance3D = MeshInstance3D.new()
 	var sphere: SphereMesh = SphereMesh.new()
 	sphere.radius = 0.2
@@ -124,6 +131,13 @@ func _ensure_cursor() -> void:
 	_cursor.add_child(_cursor_square)
 	_cursor.visible = false
 	_world_root.add_child(_cursor)
+	# Terrain-conforming aim ring (world-origin, rebuilt each frame in _process).
+	_cursor_ring_mesh = MeshInstance3D.new()
+	_cursor_ring_mesh.name = "CursorRingMesh"
+	_cursor_ring_mesh.mesh = ImmediateMesh.new()
+	_cursor_ring_mesh.material_override = TerrainRing.make_material()
+	_cursor_ring_mesh.visible = false
+	_world_root.add_child(_cursor_ring_mesh)
 
 
 ## Square outline (four thin bars) matching the flatten spell's area.
@@ -148,23 +162,19 @@ func _make_square_cursor(mat: StandardMaterial3D) -> Node3D:
 	return square
 
 
-## Builds (once) and sizes the range ring for the armed spell.
+## Ensures the (world-origin) range-ring mesh exists and stores the radius;
+## the ring itself is rebuilt terrain-conforming each frame in _process.
 func _show_range_ring(radius: float) -> void:
 	if _world_root == null:
 		return
-	if _range_ring == null:
-		_range_ring = MeshInstance3D.new()
-		_range_ring.name = "SpellRangeRing"
-		var mat: StandardMaterial3D = StandardMaterial3D.new()
-		mat.albedo_color = Color(0.55, 0.8, 1.0)
-		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		_range_ring.material_override = mat
-		_world_root.add_child(_range_ring)
-	var torus: TorusMesh = TorusMesh.new()
-	torus.inner_radius = radius - 0.12
-	torus.outer_radius = radius
-	_range_ring.mesh = torus
-	_range_ring.visible = true
+	if _range_mesh == null:
+		_range_mesh = MeshInstance3D.new()
+		_range_mesh.name = "SpellRangeMesh"
+		_range_mesh.mesh = ImmediateMesh.new()
+		_range_mesh.material_override = TerrainRing.make_material()
+		_world_root.add_child(_range_mesh)
+	_range_radius = radius
+	_range_mesh.visible = true
 
 
 func _process(_delta: float) -> void:
@@ -176,20 +186,28 @@ func _process(_delta: float) -> void:
 			or shaman.state == Unit.State.DEAD:
 		cancel()
 		return
-	# Range ring follows the (possibly moving) shaman.
-	if _range_ring != null:
-		_range_ring.position = shaman.position + Vector3(0.0, 0.15, 0.0)
+	var td: TerrainData = GameState.terrain_data
+	# Range ring: rebuilt terrain-conforming at the (moving) shaman each frame.
+	if _range_mesh != null and _range_mesh.visible:
+		var rim: ImmediateMesh = _range_mesh.mesh as ImmediateMesh
+		rim.clear_surfaces()
+		TerrainRing.add_band(rim, shaman.position, _range_radius, td, C_RANGE_RING)
 	if _cursor == null:
 		return
-	if Sidebar.is_mouse_over_ui():
-		_cursor.visible = false
-		return
-	var hit: Dictionary = _terrain_hit(get_viewport().get_mouse_position())
+	var hit: Dictionary = {} if Sidebar.is_mouse_over_ui() \
+		else _terrain_hit(get_viewport().get_mouse_position())
 	if hit.is_empty():
 		_cursor.visible = false
+		if _cursor_ring_mesh != null:
+			(_cursor_ring_mesh.mesh as ImmediateMesh).clear_surfaces()
 		return
 	_cursor.position = hit.position
 	_cursor.visible = true
+	# Aim ring: rebuilt terrain-conforming at the cursor point.
+	if _cursor_ring_mesh != null and _cursor_ring_mesh.visible:
+		var cim: ImmediateMesh = _cursor_ring_mesh.mesh as ImmediateMesh
+		cim.clear_surfaces()
+		TerrainRing.add_band(cim, hit.position, CURSOR_RING_RADIUS, td, C_CURSOR_RING)
 
 
 func _terrain_hit(screen_pos: Vector2) -> Dictionary:

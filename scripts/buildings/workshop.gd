@@ -70,6 +70,9 @@ var production_active: bool = false
 var work_done: float = 0.0
 ## The finished engine still standing at the entrance (untyped: may be freed).
 var pending_engine = null
+## True once the fresh engine was ordered off the entrance pad (so it is not
+## re-ordered every tick).
+var _engine_dispatched: bool = false
 
 
 func _init() -> void:
@@ -207,6 +210,7 @@ func can_start_production() -> bool:
 
 func _tick_active(delta: float) -> void:
 	_prune_occupants()
+	_maybe_dispatch_engine()
 	# Wood-stall re-check (mirrors the construction sites).
 	if wood_stalled:
 		_wood_recheck_timer -= delta
@@ -258,6 +262,7 @@ func _finish_catapult() -> void:
 	if engine == null:
 		return
 	pending_engine = engine
+	_engine_dispatched = false
 	var crewed: int = 0
 	for u in unit_manager.get_units_in_radius(entrance_world(), AUTO_CREW_RADIUS):
 		if crewed >= AUTO_CREW:
@@ -269,6 +274,44 @@ func _finish_catapult() -> void:
 		u.order_crew(engine)
 		if u.siege_engine == engine:
 			crewed += 1
+
+
+## Once a crew has boarded the fresh catapult, drive it off the entrance pad
+## to the delivery/rally point (user request) so the next one can be built.
+## Nobody aboard yet → it stays put (and keeps blocking).
+func _maybe_dispatch_engine() -> void:
+	var e = pending_engine
+	if e == null or not is_instance_valid(e) or e.state == Unit.State.DEAD:
+		pending_engine = null
+		_engine_dispatched = false
+		return
+	if _engine_dispatched:
+		return
+	if e.boarded_count() >= SiegeEngine.MIN_MOVE_CREW:
+		e.order_move(_dispatch_point())
+		_engine_dispatched = true
+
+
+## Where a freshly crewed catapult is sent: the rally point when the player set
+## one clear of the entrance, otherwise a few metres out along the entrance
+## normal (off the build pad).
+func _dispatch_point() -> Vector3:
+	var ent: Vector3 = entrance_world()
+	if rally_point != Vector3.ZERO \
+			and Vector2(rally_point.x - ent.x, rally_point.z - ent.z).length() \
+				> EXIT_CLEAR_RADIUS + 0.5:
+		return rally_point
+	var c: Vector3 = center_world()
+	var out: Vector3 = Vector3(ent.x - c.x, 0.0, ent.z - c.z)
+	if out.length_squared() < 0.001:
+		out = Vector3(0.0, 0.0, 1.0)
+	out = out.normalized()
+	var p: Vector3 = ent + out * (EXIT_CLEAR_RADIUS + 2.0)
+	if nav_grid != null:
+		var cell: Vector2i = nav_grid.nearest_walkable_cell(nav_grid.world_to_cell(p))
+		if cell.x >= 0:
+			return nav_grid.cell_to_world(cell)
+	return p
 
 
 ## True while a finished catapult still stands at the entrance — no further

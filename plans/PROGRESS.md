@@ -2605,3 +2605,41 @@ beschossen), `test_range_renderer_ranges` (Reichweiten je Kind, Crew/Nahkämpfer
 ausstehend (v. a.: Katapult per Angriffsbewegung in die Basis → stoppt und
 feuert; G blendet Reichweitenringe ein/aus).
 
+**Überarbeitung 3 nach Nutzertest (2026-07-07):**
+1. **Reichweitenringe folgen dem Gelände** (`scripts/ui/terrain_ring.gd`, neu):
+   Wiederverwendbarer `TerrainRing.add_band(im, center, radius, td, color)` —
+   eine dünne Ring-Bahn als Triangle-Strip, deren Stützpunkte pro Winkel auf
+   die Terrainhöhe gehoben werden (kein flacher Disc, der in Hügeln versinkt).
+   `RangeRenderer` von MultiMesh auf ein pro Frame neu gebautes ImmediateMesh
+   umgestellt; `SpellTargeting` zeichnet Cast-Range-Ring (um die Schamanin)
+   und Cursor-Ring jetzt ebenfalls terrain-folgend (world-origin
+   ImmediateMesh, pro Frame neu). Flatten-Quadrat unverändert (Sonderfall).
+2. **Katapult wird nach Bemannung vom Eingang weggefahren**
+   (`workshop.gd`): `_maybe_dispatch_engine` schickt das frische Katapult,
+   sobald ≥1 Crew an Bord ist, per `order_move` zum Auslieferungspunkt
+   (`_dispatch_point`: gesetzter Rally-Point, sonst ein paar Meter entlang der
+   Eingangs-Normalen) — der Bauplatz wird frei, das nächste Katapult kann
+   gebaut werden. Ohne Crew in der Nähe bleibt es stehen (unverändert).
+3. **Crew läuft mit dem Katapult statt zu teleportieren** (`unit.gd`
+   `_tick_crew`): Beim Anmarsch zum Boarding eigenes Tempo; **an Bord** folgt
+   die Crew ihrem Seiten-Slot **im Katapult-Tempo** (mit kleinem
+   Aufhol-Boost nach Drehungen/Boarding) statt in schnellen Sprüngen (die
+   schnellere Crew „dash-and-wait" wirkte wie Teleportieren). Neues Flag
+   `_crew_walking` treibt die Lauf-Animation im CREW-Zustand (unabhängig von
+   einem A*-Pfad).
+4. **Angriffsbewegung läuft nach dem Kampf weiter** (`unit.gd`
+   `_retarget_or_idle` — gilt für ALLE Einheiten): Ist der Kampf vorbei und
+   kein Gegner mehr da, wird ein noch anstehender Wegpunkt (das
+   Attack-Move-Ziel) wieder aufgenommen (`_start_path_to`) statt am Ort zu
+   verharren. Für das Katapult zusätzlich: Auto-Beschuss von Gebäuden behält
+   die Route (`_set_building_target(..., keep_route=true)`), explizite Befehle
+   ersetzen sie; das Katapult-`_retarget_or_idle` nimmt die Route ebenfalls
+   wieder auf.
+
+Tests: `test_terrain_ring_builds_surface`, `test_attack_move_resumes_after_combat`
+(deterministisch, ohne Kampf-RNG), `test_crew_walks_with_engine` (gebundene
+Schrittweite ≈ Katapult-Tempo, Formation gehalten),
+`test_workshop_dispatches_crewed_catapult` (Katapult verlässt den Bauplatz nach
+Bemannung). **1227 Tests, 0 Fehler**, Ladecheck fehlerfrei. Manuelle Prüfung
+erneut ausstehend.
+

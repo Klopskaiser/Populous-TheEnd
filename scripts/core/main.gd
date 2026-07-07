@@ -148,7 +148,7 @@ func _ready() -> void:
 	var ranges: RangeRenderer = RangeRenderer.new()
 	ranges.name = "RangeRenderer"
 	add_child(ranges)
-	ranges.setup(_unit_manager, GameState.PLAYER_TRIBE)
+	ranges.setup(_unit_manager, GameState.PLAYER_TRIBE, td)
 	var combat_audio: CombatAudio = CombatAudio.new()
 	combat_audio.name = "CombatAudio"
 	add_child(combat_audio)

@@ -365,14 +365,23 @@ func _end_attack() -> void:
 	super._end_attack()
 
 
-## Explicit bombard order on an enemy building (right-click, AI).
+## Explicit bombard order on an enemy building (right-click, AI): replaces any
+## pending route.
 func order_attack_building(building) -> void:
 	if building == null or not is_instance_valid(building) or building.health <= 0:
 		return
 	if building.tribe_id == tribe_id:
 		return
+	_set_building_target(building, false)
+
+
+## Focuses a building for bombardment. `keep_route` preserves the pending
+## (attack-)move waypoint so the catapult carries on to its destination after
+## the building falls; explicit orders clear it.
+func _set_building_target(building, keep_route: bool) -> void:
 	_end_attack()
-	waypoint_queue.clear()
+	if not keep_route:
+		waypoint_queue.clear()
 	_clear_path()
 	attack_building = building
 	_set_state(State.ATTACK)
@@ -431,7 +440,7 @@ func _auto_acquire(delta: float) -> bool:
 		return true
 	var b = _scan_enemy_building(SIEGE_AGGRO)
 	if b != null:
-		order_attack_building(b)
+		_set_building_target(b, true)   # keep the move route (resume after)
 		return true
 	return false
 
@@ -486,8 +495,13 @@ func _retarget_or_idle() -> void:
 			return
 		var b = _scan_enemy_building(SIEGE_AGGRO)
 		if b != null:
-			order_attack_building(b)
+			_set_building_target(b, true)   # keep the move route
 			return
+	# Nothing left to shoot: carry on to the pending (attack-)move destination.
+	if not waypoint_queue.is_empty():
+		attack_building = null
+		_start_path_to(waypoint_queue[0])
+		return
 	attack_building = null
 	_set_state(State.IDLE)
 

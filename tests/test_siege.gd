@@ -621,6 +621,111 @@ func test_range_renderer_ranges() -> void:
 	check(RangeRenderer.range_for_kind(&"shaman") == 0.0, "the shaman has no range ring")
 
 
+## The range rings hug the terrain (one band surface per ring); a zero radius
+## draws nothing.
+func test_terrain_ring_builds_surface() -> void:
+	var td: TerrainData = _flat_terrain()
+	var im: ImmediateMesh = ImmediateMesh.new()
+	TerrainRing.add_band(im, Vector3(60.0, 5.0, 60.0), 8.0, td, Color(1, 0, 0, 1))
+	check(im.get_surface_count() == 1, "a ring band adds one terrain-conforming surface")
+	im.clear_surfaces()
+	TerrainRing.add_band(im, Vector3(60.0, 5.0, 60.0), 0.0, td, Color(1, 0, 0, 1))
+	check(im.get_surface_count() == 0, "a zero-radius ring draws nothing")
+
+
+# --- Attack-move resumes after combat (all units) ----------------------------------
+
+## Deterministic (no combat RNG): attack-move, engage a target, the target
+## dies → the unit must resume the march to its destination, not idle at the
+## corpse. This is a general Unit behaviour (all units), verified via the
+## warrior; combat outcome itself is left out to keep the test stable.
+func test_attack_move_resumes_after_combat() -> void:
+	var w: Dictionary = _make_world()
+	var warrior: Warrior = w.unit_manager.spawn_unit(
+		WARRIOR_SCENE, 0, w.nav.cell_to_world(Vector2i(50, 60))) as Warrior
+	var foe: Brave = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, w.nav.cell_to_world(Vector2i(56, 60))) as Brave
+	var dest: Vector3 = w.nav.cell_to_world(Vector2i(80, 60))
+	warrior.order_move(dest, false, true)   # attack-move
+	check(warrior.waypoint_queue.size() == 1, "the destination is queued")
+	warrior._begin_attack(foe)              # engage an enemy on the way
+	check(warrior.state == Unit.State.ATTACK, "the unit stops to fight")
+	check(warrior.waypoint_queue.size() == 1, "the move destination is kept during combat")
+	# The target dies; simulate the death notification the killer receives.
+	foe.take_damage(9999)
+	warrior._on_target_died(foe)
+	check(warrior.state == Unit.State.MOVE,
+		"the unit resumes marching once the fight is over")
+	var d0: float = Vector2(warrior.position.x - dest.x, warrior.position.z - dest.z).length()
+	for i in range(40):
+		_tick_world(w)
+	var d1: float = Vector2(warrior.position.x - dest.x, warrior.position.z - dest.z).length()
+	check(d1 < d0 - 1.0,
+		"it carries on toward the attack-move destination after combat")
+	_free_world(w)
+
+
+# --- Crew walks with the vehicle (no teleport) --------------------------------------
+
+func test_crew_walks_with_engine() -> void:
+	var w: Dictionary = _make_world()
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(60, 60))) as SiegeEngine
+	var crew: Brave = _board_crew(w, engine)
+	# Settle at the slot: standing, not walking.
+	for i in range(40):
+		_tick_world(w)
+	check(not crew._crew_walking, "a settled crew member stands (idle), not walking")
+
+	# The engine moves: the crew follows on foot in bounded steps (no teleport).
+	engine.order_move(w.nav.cell_to_world(Vector2i(72, 60)))
+	for i in range(3):
+		_tick_world(w)   # let the queued path resolve and the motion start
+	var prev: Vector3 = crew.position
+	_tick_world(w)
+	var step: float = Vector2(crew.position.x - prev.x, crew.position.z - prev.z).length()
+	check(crew._crew_walking, "the crew walks while the engine moves")
+	check(step <= engine.speed * 2.0 * TICK + 0.06,
+		"the crew steps at (about) the engine's speed — it does not teleport")
+	# It keeps formation near its slot.
+	var slot: Vector3 = engine.crew_slot_position(crew)
+	check(Vector2(crew.position.x - slot.x, crew.position.z - slot.z).length() < 2.0,
+		"the crew holds its side slot in lockstep")
+	_free_world(w)
+
+
+# --- Workshop dispatches the crewed catapult off the entrance -----------------------
+
+func test_workshop_dispatches_crewed_catapult() -> void:
+	var w: Dictionary = _make_world()
+	var ws: Workshop = _place_workshop(w)
+	w.wood_pile_manager.deposit(ws.delivery_point(), 20)
+	var worker: Brave = _house_worker(w, ws)
+	check(worker.workshop_inside, "producer housed")
+	# Idle braves near the entrance auto-man the fresh catapult.
+	w.unit_manager.spawn_unit(BRAVE_SCENE, 0, ws.entrance_world() + Vector3(2.0, 0.0, 2.0))
+	w.unit_manager.spawn_unit(BRAVE_SCENE, 0, ws.entrance_world() + Vector3(-2.0, 0.0, 2.0))
+	for i in range(91):
+		ws._tick_active(1.0)
+	var engines: Array = _siege_units(w)
+	check(engines.size() == 1, "catapult finished")
+	if engines.size() == 1:
+		var engine: SiegeEngine = engines[0]
+		# Once a crew has boarded, the catapult drives off the entrance pad.
+		var t: int = 0
+		while ws.exit_blocked() and t < MAX_TICKS:
+			_tick_world(w)
+			t += 1
+		check(not ws.exit_blocked(),
+			"the crewed catapult drives off the entrance pad (took %d ticks)" % t)
+		check(engine.boarded_count() >= 1, "it moved under its own crew")
+		var d: float = Vector2(engine.position.x - ws.entrance_world().x,
+			engine.position.z - ws.entrance_world().z).length()
+		check(d > Workshop.EXIT_CLEAR_RADIUS,
+			"the catapult left the entrance area so the next one can be built")
+	_free_world(w)
+
+
 # --- Vehicle destruction (fire/lava burn, terrain rip) -----------------------------
 
 func test_engine_burns_from_fire_spell_and_sinks() -> void:

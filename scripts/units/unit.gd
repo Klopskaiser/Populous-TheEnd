@@ -278,6 +278,9 @@ var siege_engine = null
 ## True once this crew member reached its engine at least once. Fresh recruits
 ## walking over from afar are never leash-pruned; boarded members are.
 var siege_boarded: bool = false
+## True while a crew member is walking (to board or to keep its slot) — drives
+## the walk animation without needing an A* path (crew glide in lockstep).
+var _crew_walking: bool = false
 ## Excluded from the soft-separation push (siege engines: a vehicle is not
 ## shoved aside by pedestrians). A FIELD like idle_aggro — hot path.
 var push_immune: bool = false
@@ -1205,24 +1208,46 @@ func leave_crew(except = null) -> void:
 
 ## Walks to (and holds) the side slot the engine assigned. Boarding is flagged
 ## on first contact; the engine's tick handles ownership, leash and re-summons
-## after self-defence fights.
+## after self-defence fights. While following, the crew moves at the ENGINE's
+## speed (with a small lag boost) so it glides in lockstep and shows the walk
+## animation — a faster crew used to dash-and-wait, which looked like the
+## crew teleporting alongside (user feedback).
 func _tick_crew(delta: float) -> void:
 	var engine = siege_engine
 	if engine == null or not is_instance_valid(engine) or engine.state == State.DEAD:
 		leave_crew()
 		return
+	# Not yet aboard: walk over to board — at the crew member's own speed.
+	if not siege_boarded:
+		if _flat_dist(position, engine.position) <= engine.BOARD_RANGE:
+			engine.on_crew_boarded(self)
+			if siege_engine != engine:
+				return   # boarding was refused (enemy took it meanwhile)
+		else:
+			_crew_walking = true
+			_approach(engine.position, delta)
+			return
+	# Boarded: keep the side slot, gliding at the engine's speed.
 	var slot: Vector3 = engine.crew_slot_position(self)
-	var dist: float = _flat_dist(position, slot)
-	if not siege_boarded and _flat_dist(position, engine.position) <= engine.BOARD_RANGE:
-		engine.on_crew_boarded(self)
-		if siege_engine != engine:
-			return   # boarding was refused (enemy took it meanwhile)
-	if dist > 0.4:
-		_approach(slot, delta)
+	var flat: Vector2 = Vector2(position.x, position.z)
+	var flat_slot: Vector2 = Vector2(slot.x, slot.z)
+	var to: Vector2 = flat_slot - flat
+	var d: float = to.length()
+	if d <= 0.08:
+		_crew_walking = false
+		if engine.facing.length_squared() > 0.000001:
+			facing = engine.facing   # stand aligned with the vehicle
+		_snap_to_ground()
 		return
-	if _has_path():
-		_clear_path()
-	facing = engine.facing   # stand aligned with the vehicle
+	_crew_walking = true
+	facing = Vector3(to.x, 0.0, to.y).normalized()
+	# Engine speed keeps formation smooth; a boost recovers from turns/boarding.
+	var spd: float = engine.speed if d < 1.2 else engine.speed * 2.0
+	var step: float = minf(spd * delta, d)
+	var nxt: Vector2 = flat + to.normalized() * step
+	position.x = nxt.x
+	position.z = nxt.y
+	_snap_to_ground()
 
 
 ## Idle combatants scan for a nearby enemy (throttled) and engage it.
@@ -1419,6 +1444,12 @@ func _retarget_or_idle() -> void:
 		if enemy != null:
 			_begin_attack(enemy)
 			return
+	# Combat over: resume a pending (attack-)move to its destination instead of
+	# stopping where the fight ended — an attack-move must carry on to its
+	# target point once the area is clear (applies to every unit).
+	if not waypoint_queue.is_empty():
+		_start_path_to(waypoint_queue[0])
+		return
 	_set_state(State.IDLE)
 
 
@@ -1675,7 +1706,7 @@ func _anim_base() -> StringName:
 		State.DEAD:
 			return &"dead"
 		State.CREW:
-			return &"walk" if _has_path() else &"idle"
+			return &"walk" if _crew_walking else &"idle"
 		_:
 			return &"idle"
 
