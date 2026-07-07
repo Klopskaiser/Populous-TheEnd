@@ -109,6 +109,13 @@ func is_targetable() -> bool:
 	return false  # attackers go for the crew
 
 
+## Catapult-vs-catapult (ranged): a catapult MAY aim at another catapult — its
+## shot's splash then hits the enemy crew. Every other unit still targets the
+## crew, never the vehicle.
+func _may_target_vehicle(enemy: Unit) -> bool:
+	return enemy is SiegeEngine
+
+
 func renders_as_sprite() -> bool:
 	return false  # own 3D model instead of the sprite MultiMesh
 
@@ -621,7 +628,11 @@ func _nearest_enemy_unit(max_range: float) -> Unit:
 	for u in path_service.get_units_in_radius(position, max_range, SCAN_MAX_CANDIDATES):
 		if u == self or u.state == State.DEAD or u.tribe_id == tribe_id:
 			continue
-		if u.state == State.SIT or not u.is_targetable():
+		if u.state == State.SIT:
+			continue
+		# Skip other non-targetable units, but an enemy CATAPULT is fair game
+		# (its crew takes the shot's splash) — catapult-vs-catapult.
+		if not u.is_targetable() and not (u is SiegeEngine):
 			continue
 		var d: float = _flat_dist(position, u.position)
 		if d < MIN_RANGE or d > max_range:

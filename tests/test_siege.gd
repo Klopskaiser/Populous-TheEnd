@@ -103,6 +103,36 @@ func _house_worker(w: Dictionary, ws: Workshop) -> Brave:
 	return brave
 
 
+## A non-siege enemy can never lock onto the vehicle itself — attacks go for the
+## crew (spec: catapults are not directly attackable in melee/ranged).
+func test_units_never_target_the_vehicle() -> void:
+	var w: Dictionary = _make_world()
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, Vector3(40, 0, 40)) as SiegeEngine
+	_board_crew(w, engine, 0)
+	var enemy: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 1, Vector3(41, 0, 40))
+	# Direct order and auto-scan must both refuse the vehicle.
+	enemy.order_attack(engine)
+	check(enemy.attack_target != engine, "an enemy warrior cannot target the vehicle")
+	enemy._begin_attack(engine)
+	check(enemy.attack_target != engine, "_begin_attack rejects the non-targetable vehicle")
+	_free_world(w)
+
+
+## Catapult-vs-catapult (ranged) IS allowed: a catapult may aim at an enemy
+## catapult (its shot's splash then hits the crew).
+func test_catapult_may_target_enemy_catapult() -> void:
+	var w: Dictionary = _make_world()
+	var mine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, Vector3(40, 0, 40)) as SiegeEngine
+	var foe: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 1, Vector3(48, 0, 40)) as SiegeEngine
+	check(mine._may_target_vehicle(foe), "a catapult may target another catapult")
+	mine.order_attack(foe)
+	check(mine.attack_target == foe, "catapult locks onto the enemy catapult")
+	_free_world(w)
+
+
 func test_workshop_produces_catapult() -> void:
 	var w: Dictionary = _make_world()
 	var ws: Workshop = _place_workshop(w)

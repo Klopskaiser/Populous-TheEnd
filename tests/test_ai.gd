@@ -351,6 +351,13 @@ func test_endless_building_scaling() -> void:
 	# And the workshop (phase 7f): it follows right after the temple.
 	w.building_manager.place(preload("res://scenes/buildings/workshop.tscn"),
 		tribe, Vector2i(64, 50), 0, true)
+	# The workshop is followed by the two defensive watchtowers (phase 7h) —
+	# the full base includes them before the endless scaling kicks in.
+	check(ai._next_building_scene({}) == AIController.WATCHTOWER_SCENE,
+		"after the workshop the AI builds a watchtower")
+	for i in range(AIController.TARGET_WATCHTOWERS):
+		w.building_manager.place(preload("res://scenes/buildings/watchtower.tscn"),
+			tribe, Vector2i(40 + 4 * i, 64), 0, true)
 	check(ai._next_building_scene({}) == null,
 		"full base without housing pressure: nothing to build")
 

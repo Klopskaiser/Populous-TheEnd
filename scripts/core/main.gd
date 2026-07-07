@@ -13,10 +13,12 @@ const FIREWARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/fire
 const TEMPLE_SCENE: PackedScene = preload("res://scenes/buildings/temple.tscn")
 const FORESTER_SCENE: PackedScene = preload("res://scenes/buildings/forester.tscn")
 const WORKSHOP_SCENE: PackedScene = preload("res://scenes/buildings/workshop.tscn")
+const WATCHTOWER_SCENE: PackedScene = preload("res://scenes/buildings/watchtower.tscn")
 const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
 const FIREWARRIOR_SCENE: PackedScene = preload("res://scenes/units/firewarrior.tscn")
 const PREACHER_SCENE: PackedScene = preload("res://scenes/units/preacher.tscn")
 const SHAMAN_SCENE: PackedScene = preload("res://scenes/units/shaman.tscn")
+const SIEGE_SCENE: PackedScene = preload("res://scenes/units/siege_engine.tscn")
 const START_BRAVES: int = 20
 const TREE_COUNT: int = 60
 
@@ -341,6 +343,11 @@ func _setup_player_base(tribe: Tribe, nav: NavGrid) -> void:
 		var c: Vector2i = _find_plot(anchor, fp, nav)
 		if c.x >= 0:
 			_building_manager.place(scene, tribe, c, 0, true)
+	# A starting catapult for the player, UNMANNED (crew it via right-click,
+	# optionally after a waypoint route) — test scenario.
+	var siege_cell: Vector2i = _find_walkable_near(center + Vector2i(4, -4), nav, 0)
+	if siege_cell.x >= 0:
+		_unit_manager.spawn_unit(SIEGE_SCENE, tribe.id, nav.cell_to_world(siege_cell))
 
 
 ## Statically pre-places a red sparring tribe (id 1) on the far side of the
@@ -367,6 +374,33 @@ func _setup_sparring(tribes: Array[Tribe], nav: NavGrid) -> void:
 	# Fully-staffed industry buildings so the phase-7g occupant eject can be
 	# tried in-game: two manned foresters and one manned (idle) workshop.
 	_setup_sparring_industry(red, anchor, nav)
+	# Three manned watchtowers (phase 7h test scenario): fire posts to storm /
+	# convert / bombard against.
+	_setup_sparring_towers(red, anchor, nav)
+
+
+## Three enemy watchtowers, each with a full 2-unit crew (phase 7h test setup):
+## tower 1 = two preachers, tower 2 = two firewarriors, tower 3 = one
+## firewarrior + one warrior.
+func _setup_sparring_towers(red: Tribe, anchor: Vector2i, nav: NavGrid) -> void:
+	var plan: Array = [
+		[Vector2i(-4, 14), [PREACHER_SCENE, PREACHER_SCENE]],
+		[Vector2i(4, 14), [FIREWARRIOR_SCENE, FIREWARRIOR_SCENE]],
+		[Vector2i(12, 12), [FIREWARRIOR_SCENE, WARRIOR_SCENE]],
+	]
+	for entry in plan:
+		var cell: Vector2i = _find_plot(anchor + entry[0], Watchtower.FOOTPRINT, nav)
+		if cell.x < 0:
+			continue
+		var tower: Watchtower = _building_manager.place(
+			WATCHTOWER_SCENE, red, cell, 0, true) as Watchtower
+		if tower == null:
+			continue
+		for crew_scene in entry[1]:
+			var u: Unit = _unit_manager.spawn_unit(
+				crew_scene, red.id, tower.edge_spawn_position())
+			if u != null:
+				tower.admit_crew(u)
 
 
 ## Two fully-staffed foresters and one staffed but idle (paused) workshop for

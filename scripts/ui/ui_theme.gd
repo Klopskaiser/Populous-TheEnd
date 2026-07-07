@@ -100,6 +100,8 @@ static func icon(key: StringName) -> ImageTexture:
 			_draw_seedling(img)
 		&"workshop":
 			_draw_catapult(img)
+		&"watchtower":
+			_draw_watchtower(img)
 		&"lightning":
 			_draw_lightning(img)
 		&"swarm":
@@ -208,6 +210,16 @@ static func _draw_temple(img: Image) -> void:
 	_rect(img, 11, 11, 2, 8, I_LIGHT)
 	_rect(img, 16, 11, 2, 8, I_LIGHT)
 	_rect(img, 4, 19, 16, 2, I_GOLD)
+
+
+static func _draw_watchtower(img: Image) -> void:
+	# Tall slim shaft, a wider crenellated top and a dark doorway at the base.
+	_rect(img, 9, 6, 6, 14, I_LIGHT)      # shaft
+	_rect(img, 7, 4, 10, 3, I_GOLD)       # platform
+	_rect(img, 7, 3, 2, 2, I_GOLD)        # merlons
+	_rect(img, 11, 3, 2, 2, I_GOLD)
+	_rect(img, 15, 3, 2, 2, I_GOLD)
+	_rect(img, 10, 14, 4, 6, I_DARK)      # doorway
 
 
 static func _draw_seedling(img: Image) -> void:

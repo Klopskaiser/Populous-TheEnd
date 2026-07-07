@@ -75,6 +75,11 @@ func _ignite_covered_units() -> void:
 		if u.state == Unit.State.DEAD or u.state == Unit.State.THROWN:
 			continue   # airborne units pass over the lava
 		u.ignite(position)
+	# Lava also sets trees and wood piles alight (phase 7d) — like the lava flow.
+	if unit_manager.tree_manager != null:
+		unit_manager.tree_manager.ignite_in_radius(position, _radius)
+	if unit_manager.wood_pile_manager != null:
+		unit_manager.wood_pile_manager.ignite_in_radius(position, _radius)
 
 
 # --- Radial sheet visual (in-game only) -----------------------------------------------

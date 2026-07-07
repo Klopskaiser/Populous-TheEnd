@@ -9,6 +9,51 @@ Verifikationsstand. Auch bei nachträglichen Erweiterungen außerhalb einer Phas
 
 ---
 
+## Bugfixes nach 7h (Nutzerfeedback, 2026-07-07)
+
+- **Katapult-Zielregel:** Einheiten konnten über Umwege (Angriffs-Umverteilung
+  `TribeCommands._nearest_free_enemy_near`, Feuerkrieger-`_melee_threat`) das
+  **Fahrzeug selbst** als Ziel bekommen → Gegner schlug aufs Katapult ein
+  (`take_damage` = No-op), die Crew wurde nie angegriffen und wehrte sich nicht.
+  Fix: `Unit._begin_attack` weist **nicht-zielbare** Ziele grundsätzlich ab
+  (`not is_targetable() and not _may_target_vehicle()`), plus `is_targetable()`-
+  Filter in den beiden lecken Scans. **Ausnahme Katapult-gegen-Katapult
+  (Fernkampf):** `SiegeEngine._may_target_vehicle(enemy) = enemy is SiegeEngine`
+  und `_nearest_enemy_unit` lässt gegnerische Katapulte zu (der Schuss trifft per
+  Splash die Crew). Regel: Katapulte sind nah/fern nicht direkt angreifbar, nur
+  ihre Crews — außer Katapult vs. Katapult im Fernkampf.
+- **Lava verbrennt Bäume:** `LavaSurge._ignite_covered_units` entzündete nur
+  Einheiten. Jetzt auch Bäume + Holzstapel im Radius
+  (`tree_manager.ignite_in_radius` / `wood_pile_manager.ignite_in_radius`, wie
+  beim `LavaFlow`) — Vulkan-Lava und die Katapult-Lavapfütze setzen Bäume in Brand.
+- **Verifikation:** **1389 Tests grün** (neu: `test_units_never_target_the_vehicle`,
+  `test_catapult_may_target_enemy_catapult` in `test_siege.gd`;
+  `test_lava_surge_ignites_trees` in `test_spells.gd`), `--headless --quit` fehlerfrei.
+
+### Wegpunkt-Folgebefehle + Turm-Anmarsch + Start-Katapult (2026-07-07)
+
+- **Wegpunkte + Gebäudebefehl am Ende:** Shift+Rechtsklick auf ein Gebäude/einen
+  Baum/ein Katapult **nach** einer Wegpunktroute führte den Befehl sofort aus
+  (Route ignoriert). Neu: `Unit.route_end_action: Callable` — ein per
+  Shift+Rechtsklick gesetzter Folgebefehl, der **erst nach Abschluss der Route**
+  feuert (`_finish_route`). Der `SelectionManager` hängt bei Shift den
+  Anlaufpunkt als letzten Wegpunkt an (`_queue_route_action`) und bewaffnet je
+  Einheit `route_end_action` (Bau/Reparatur/Beten/Förster/Werkstatt/Garnison/
+  Training via `_apply_building_command`, Baum via `order_chop`, Katapult-Crew
+  via `order_crew`). Jeder frische, nicht-gequeuete Befehl löscht die pending
+  Action (`order_move`, `_begin_attack`, `order_garrison`, `order_crew`,
+  `Brave._interrupt_tasks`). **Gilt auch für Katapulte** (Crew mit Wegpunkten).
+- **Turm-Anmarsch robuster:** Der strikte Eingang-Radius (2 m) ließ Einheiten am
+  Footprint-Eck hängen (Direktschritt blockiert). `_tick_garrison` zählt jetzt
+  „angekommen", sobald die Einheit im `interact_range` der Turmmitte ist; der
+  Turm nimmt im selben Radius auf.
+- **Start-Katapult (Spieler):** `_setup_player_base` spawnt ein **unbemanntes**
+  Katapult neben der Spielerbasis (Test der Crew-Zuweisung, auch mit Wegpunkten).
+- **Verifikation:** **1397 Tests grün** (neu: `test_queued_garrison_runs_after_route`
+  in `test_watchtower.gd`), `--headless --quit` fehlerfrei.
+
+---
+
 ## Phase 1 — Projektgerüst, Terrain, Kamera (abgeschlossen, Commit `71e0073`)
 
 **Gebaut:**
@@ -2863,4 +2908,143 @@ Bestätigt: Sturmangriff durch den Eingang, Insassen-Auswurf + Kampf + Wieder-
 Eintritt, Demolierer verlassen das Haus bei Bedrohung am Eingang, Reinkarnations-
 platz durch Truppen unzerstörbar (nur Zauber/Katapult), Schamanin wieder normal
 angreifbar.
+
+---
+
+## Phase 7h — Wachturm (abgeschlossen; manuelle Prüfung ausstehend)
+
+**Gebaut:**
+- `scripts/buildings/watchtower.gd` + `scenes/buildings/watchtower.tscn` —
+  `Watchtower` (extends Building): „Wachturm", **4 Holz**, Footprint **2×2**,
+  HP 200, `housing_capacity() = 0`, `max_melee_raiders() = 5` (zäher zu stürmen
+  als eine Hütte mit 15). Konstanten `CREW_CAPACITY = 2`,
+  `TOWER_RANGE_BONUS = 3.0`, `PLATFORM_Y = 4.0`. Hohes schlankes Placeholder-
+  Mesh (Steinschaft + breite Plattform mit 4 Zinnen + Tür Süd + Fahne).
+  - **Besatzung** `crew: Array` (max. 2): `admit_crew(unit)` (nur eigene
+    Kampfeinheiten/Schamanin via `Unit.can_garrison()`; `remove_from_world`,
+    Population bleibt gezählt), `has_crew_room()`, `crew_count()`, `_prune_crew()`,
+    `eject_occupants(killed)` / `eject_crew_to(dest)` / `_eject_all()`,
+    `destroy()`-Override (wirft Besatzung lebend raus). `has_occupants()` → Sturm
+    (7g `begin_storm`) wirft die Besatzung lebend aus. Base `_on_disabled`
+    (Stufe ≥ 1 durch Zauber/Nahkampf) wirft lebend aus; `take_damage(.., DMG_RANGED)`
+    bei leeren Raidern tötet die Besatzung an der Tür (7g-Regel).
+  - **Aufnahme kollisionssicher:** Anmarsch-Einheiten stehen am Eingang und
+    setzen `garrison_reached`; der **Turm** nimmt sie in `_tick_active` →
+    `_admit_arrived_crew()` auf (Gebäude-Tick, nicht Unit-Loop → keine Mutation
+    der `units`-Liste mid-iteration; gleiche Logik wie die Trainings-Queue).
+  - **Reichweitenbonus (nur Fernwirker)** in `_tick_active`: je Besatzung ein
+    Scan von der Turmposition mit Basisreichweite + 3 —
+    Feuerkrieger: Feuerball ab Plattformhöhe (`Firewarrior.fire_from(origin,
+    target)`, `FIRE_RANGE + 3`, eigene `_fire_cd`-Map); Prediger: turmgetriebener
+    Konvertierungs-Channel (`CONVERT_RANGE + 3`, `_convert_state`-Map, konvertiert
+    nach Ablauf direkt via `convert_to_tribe`); **Krieger: keine Aktion**
+    (geschützte Reserve); Schamanin: siehe unten.
+  - **Belegungsanzeige:** `production_progress()` liefert `crew/CREW_CAPACITY`
+    (Balken-Overlay = Belegung, versteckt wenn leer).
+- `scripts/units/unit.gd` — neuer `State.GARRISON`; Felder `garrison_target`,
+  `garrison_housed`, `garrison_reached`. `can_garrison()`
+  (`_is_combatant() or shaman` — keine Braves/Siege), `order_garrison(tower)`,
+  `_tick_garrison(delta)` (läuft zum Eingang, wartet auf Aufnahme),
+  `enter_garrison(tower)` (housed), `leave_garrison()`. `can_take_orders()` ist
+  false solange `garrison_housed` (Besatzung nimmt keine Befehle an; Move/Cast
+  außerhalb Reichweite lässt sie NICHT aussteigen). `order_move`/`_begin_attack`
+  brechen einen laufenden Anmarsch ab. `_anim_base`: GARRISON → walk.
+- `scripts/units/shaman.gd` — `order_cast` castet bei `garrison_housed` **sofort
+  vom Turm** (Ursprung = Turmmitte, `cast_range + TOWER_RANGE_BONUS`); außer
+  Reichweite scheitert der Cast lautlos (Ladung bleibt), sie steigt nie aus.
+- `scripts/units/firewarrior.gd` — `fire_from(origin, target)` (Feuerball von
+  fester Position, für den Turmbeschuss).
+- `scripts/core/tribe_commands.gd` — `order_garrison(units, tower)` (nur eigene
+  garrison-fähige Einheiten; UI + KI).
+- `scripts/ui/selection_manager.gd` — Rechtsklick mit garrison-fähiger Selektion
+  auf eigenen Wachturm → `order_garrison`; Turm selektiert + Rechtsklick auf
+  Boden → `eject_crew_to(punkt)` (Besatzung steigt aus und läuft dorthin) +
+  Rally gesetzt. Helfer `_selection_has_garrison_capable()`, `_eject_tower_crew()`.
+- `scripts/ui/sidebar.gd` — Baumenü-Eintrag „Wachturm (4 Holz)" (`WATCHTOWER_SCENE`).
+- `scripts/ui/ui_theme.gd` — Icon `watchtower` (`_draw_watchtower`).
+- `scripts/ai/ai_controller.gd` — `_next_building_scene` baut nach der Werkstatt
+  **2 Wachtürme** (`TARGET_WATCHTOWERS`), `_man_watchtowers()` bemannt leere,
+  nutzbare Türme mit **untätigen Feuerkriegern** (hält `WATCHTOWER_MIN_MOBILE_FW`
+  = 2 mobil, damit die Armee nicht ausblutet); jede Sekunde getickt.
+
+**Erkenntnisse/Stolpersteine:**
+- **Mid-Iteration-Falle:** Die Aufnahme der Besatzung darf NICHT im Unit-Tick
+  `remove_from_world` aufrufen (mutiert die `units`-Liste, über die der
+  UnitManager gerade iteriert). Lösung wie die Trainings-Queue: Einheit wartet
+  am Eingang (`garrison_reached`), der Turm nimmt im **Gebäude-Tick** auf.
+- **Schutz gratis:** Housed = aus der Welt abgemeldet → Fernkampf-/Prediger-
+  Scans (über den Spatial-Hash) finden die Besatzung nicht; nach Auswurf sofort
+  wieder registriert/angreifbar. Kein Sondercode nötig, aber getestet.
+- `range` ist eine GDScript-Builtin — lokale Variablen heißen `reach`.
+- `_next_building_scene` verschob die KI-Baureihenfolge → `test_ai.gd`
+  („endless scaling") um die 2 Wachtürme ergänzt.
+
+**Bewusste Abweichung:** Die 2 KI-Wachtürme werden über den normalen
+Plot-Finder um den Base-Anchor platziert (nicht gezielt „Richtung Feindseite" —
+der Plot-Finder hat keine Richtungs-Bias; funktional ausreichend).
+
+**Verifikation:** Testsuite grün (**1376 Tests**, davon 52 neu in
+`test_watchtower.gd`: Besatzung/Kapazität/Eignung, kompletter order_garrison-
+Flow, Feuerkrieger-Reichweite +3 (trifft/trifft nicht), Krieger greift nie an,
+Prediger-Konvertierung +3, Schamanin-Cast +3 ohne Auszug, Besatzungsschutz,
+7g-5er-Cap/Sturm-Auswurf/Fernkampf-Tod/Zauber-Auswurf, Kosten/Footprint),
+`--headless --import` + `--headless --quit` fehlerfrei. **Manuelle Prüfung durch
+Nutzer ausstehend** (Turm bauen + bemannen, Reichweite spürbar, Schamanin-Ring
++3, Krieger tut nichts, Sturm-Auswurf, Aussteigen per Rechtsklick, KI baut/bemannt).
+
+### Nachbesserung (Nutzerfeedback, 2026-07-07)
+
+**Besatzung sichtbar + Turm als Koordinator (Redesign):** Statt aus der Welt
+abgemeldet zu werden, **bleibt die Besatzung registriert und sichtbar** oben auf
+der Plattform (`crew_slot_position(i)`, `PLATFORM_STAND_Y = 4.75`, zwei Slots
+±0,45 m). `Unit.tick()` bricht bei `garrison_housed` sofort ab — der **Turm**
+treibt Position, `facing`, Animation und Beschuss (`_tick_active`). Vorteile: die
+zentrale Sprite-Rendering-/Animationsmaschinerie greift automatisch, man sieht,
+wer im Turm steht, und die Kampfanimation passt.
+- **Schutz** jetzt über `Unit.is_targetable() = not garrison_housed` (Fern-/
+  Nahkampf-Scans überspringen sie) + `begin_conversion` lehnt housed ab + der
+  Turm-Prediger-Scan filtert `not is_targetable()`. `push_immune` hält sie im
+  Separations-Pass fest. Nach Auswurf sofort wieder angreifbar.
+- **Verhalten** (Nutzer-Festlegung): Stationierte greifen **alles in
+  Fernreichweite** an (Feuerkrieger → Feuerball ab Plattformslot, Prediger →
+  Konvertierung), **bewegen sich nicht** (nur `facing` dreht), **initiieren
+  keinen Nahkampf**. Feuerbälle gehen daher auch auf Feinde direkt am Turmfuß.
+  Krieger/Schamanin stehen nur (Krieger = geschützte Reserve, greift nie an).
+  Ziehen aus dem Turm → normale Regeln.
+- **Reichweitenanzeige stimmt (real):** `range_renderer.gd` (Taste G) und
+  `spell_targeting.gd` (Zauber-Zielring) zeichnen für stationierte Einheiten den
+  Ring **um die Turmmitte mit Basisreichweite + 3** (Feuerkrieger/Prediger bzw.
+  Schamanin-`cast_range + 3`).
+- **Auswahl:** garrisonierte Crew ist nicht mehr einzeln box-/klick-/
+  doppelklick-selektierbar (gehört dem Turm).
+- **Manuelles Testszenario** (`main.gd` `_setup_sparring_towers`, START_MISSION):
+  der rote Gegner hat **3 bemannte Wachtürme** — Turm 1: 2 Prediger, Turm 2:
+  2 Feuerkrieger, Turm 3: 1 Feuerkrieger + 1 Krieger.
+
+**Besatzung über das Sidemenü (Nutzerfeedback):** Der Wachturm nutzt jetzt
+dasselbe Bedienmuster wie Förster/Werkstatt — ein **Wachturm-Besatzungspanel**
+in der Sidebar (`sidebar.gd` `_build/_refresh_watchtower_panel`, sichtbar solange
+ein Wachturm selektiert ist) mit einem Knopf je Platz (zeigt die Einheitenart,
+Klick = rauswerfen → `Watchtower.eject_crew(index)`, lebend an den Rand, läuft
+zum Rally-Punkt falls gesetzt). Der **In-World-Füllstandsbalken** über dem Turm
+ist entfernt (`production_progress`-Override raus → Basis liefert -1).
+**Rechtsklick auf den Boden setzt nur den Auslieferungs-/Rally-Punkt** (wie bei
+allen Gebäuden) und wirft die Besatzung NICHT mehr automatisch raus (der frühere
+`eject_crew_to`/`_eject_tower_crew`-Pfad ist entfernt).
+
+**Bugfixes (Nutzerfeedback):**
+- **Baumenü-Eintrag unklickbar:** Mit 7 Einträgen lief die Bauliste aus dem
+  festen Tab-Bereich (200 px) heraus, der Wachturm-Button war nicht erreichbar.
+  Fix: `content`-Höhe auf 300 und Bau-Tab in einen `ScrollContainer`
+  (`sidebar.gd`) — die komplette Liste bleibt immer erreichbar.
+- **Turm im 3D nicht anklickbar:** Der Klick-/Auswahlkörper der `Building`-Basis
+  war fix 2,5 m hoch → Klicks auf den hohen Turmschaft/Plattform trafen nichts.
+  Neu: Hook `Building._click_body_height()` (Standard 2,5), `Watchtower`
+  überschreibt auf 5,5 m.
+
+**Verifikation nach Nachbesserung:** **1383 Tests grün** (59 in
+`test_watchtower.gd`; neu: sichtbar auf der Plattform, Beschuss am Turmfuß ohne
+Bewegung, Nicht-Konvertierbarkeit, Schutz via `is_targetable`),
+`--headless --import`/`--quit` fehlerfrei (Ladecheck baut in START_MISSION die
+Sidebar + das 3-Turm-Testszenario). Manuelle Prüfung weiter ausstehend.
 

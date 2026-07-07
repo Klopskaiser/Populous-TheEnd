@@ -1096,11 +1096,18 @@ func _create_click_body() -> void:
 	body.set_meta("building", self)
 	var shape: CollisionShape3D = CollisionShape3D.new()
 	var box: BoxShape3D = BoxShape3D.new()
-	box.size = Vector3(float(footprint.x), 2.5, float(footprint.y))
+	var h: float = _click_body_height()
+	box.size = Vector3(float(footprint.x), h, float(footprint.y))
 	shape.shape = box
-	shape.position.y = 1.25
+	shape.position.y = h * 0.5
 	body.add_child(shape)
 	add_child(body)
+
+
+## Height (metres) of the click/selection collision box. Tall buildings (the
+## watchtower) override this so clicks on the upper structure still register.
+func _click_body_height() -> float:
+	return 2.5
 
 
 ## The building "grows out of the ground" with the build progress

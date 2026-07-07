@@ -893,6 +893,7 @@ func _interrupt_tasks() -> void:
 	task_tree = null
 	task_pile = null
 	target_building = null
+	route_end_action = Callable()   # a fresh task cancels a queued follow-up order
 	train_target = null
 	train_slot_pos = Vector3.INF
 	train_reached_slot = false

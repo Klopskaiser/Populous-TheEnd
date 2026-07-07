@@ -70,6 +70,29 @@ func _run(w: Dictionary, units: Array, done: Callable) -> int:
 	return MAX_TICKS
 
 
+# --- Lava burns trees ----------------------------------------------------------
+
+## The volcano's lava surge sets trees alight (was only igniting units before).
+func test_lava_surge_ignites_trees() -> void:
+	var td: TerrainData = _flat_terrain()
+	var nav: NavGrid = NavGrid.new(td)
+	var tribe0: Tribe = Tribe.new(0)
+	var tm: TreeManager = TreeManager.new()
+	tm.setup(td, nav)
+	var um: UnitManager = UnitManager.new()
+	um.setup(td, nav, [tribe0] as Array[Tribe], tm)
+	var tree: TreeResource = tm.spawn_tree(Vector2i(64, 64), TreeResource.MAX_STAGE)
+	check(tree != null and not tree.is_burning(), "tree starts unburnt")
+	var surge: LavaSurge = LavaSurge.new()
+	surge.setup(tree.position, um, td, 5.0)
+	for i in range(10):
+		surge.tick(0.1)
+	check(tree.is_burning(), "the volcano lava surge sets nearby trees alight")
+	surge.free()
+	tm.free()
+	um.free()
+
+
 # --- Charge system -------------------------------------------------------------
 
 func test_no_charge_without_enough_mana() -> void:

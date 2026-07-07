@@ -101,7 +101,7 @@ Nahkampf-Angreifer statt 15).
 
 ## Definition of Done
 
-- [ ] Testsuite grün, `--headless --quit` fehlerfrei
-- [ ] Manuelle Prüfung bestanden
-- [ ] PROGRESS.md ergänzt, Checkbox 7h in [00_overview.md](00_overview.md) abgehakt
-- [ ] `git add -A && git commit -m "Phase 7h: Wachturm" && git push`
+- [x] Testsuite grün (1397 Tests), `--headless --quit` fehlerfrei
+- [x] Manuelle Prüfung bestanden (2026-07-07)
+- [x] PROGRESS.md ergänzt, Checkbox 7h in [00_overview.md](00_overview.md) abgehakt
+- [x] `git add -A && git commit -m "Phase 7h: Wachturm" && git push`

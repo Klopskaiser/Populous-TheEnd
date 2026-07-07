@@ -72,7 +72,14 @@ func _process(_delta: float) -> void:
 		var r: float = range_for_kind(unit.unit_kind())
 		if r <= 0.0:
 			continue
-		TerrainRing.add_band(_im, unit.position, r, _terrain_data,
+		# Garrisoned tower crew (7h): the real reach is +3 m, centred on the
+		# tower, not the crew's platform position.
+		var origin: Vector3 = unit.position
+		if unit.garrison_housed and unit.garrison_target != null \
+				and is_instance_valid(unit.garrison_target):
+			origin = unit.garrison_target.center_world()
+			r += Watchtower.TOWER_RANGE_BONUS
+		TerrainRing.add_band(_im, origin, r, _terrain_data,
 			_color_for(unit.unit_kind()))
 		# Catapults also show a dim inner minimum-range ring.
 		if unit is SiegeEngine:

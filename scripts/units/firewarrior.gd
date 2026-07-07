@@ -132,6 +132,8 @@ func _melee_threat() -> Unit:
 	for u in path_service.get_units_in_radius(position, MELEE_RANGE):
 		if u.tribe_id == tribe_id or u.state == Unit.State.DEAD or u.state == Unit.State.SIT:
 			continue
+		if not u.is_targetable():
+			continue   # a catapult / garrisoned crew is not a melee threat
 		var d: float = _flat_dist(position, u.position)
 		if d < best_d:
 			best_d = d
@@ -169,6 +171,18 @@ func _bombard_building(building, delta: float) -> void:
 		_attack_cooldown = FIRE_COOLDOWN
 		anim_start_ms = Time.get_ticks_msec()
 		_throw_fireball_at_building(building)
+
+
+## Fires a fireball from a fixed origin at `target` (phase 7h: while stationed in
+## a watchtower the shot leaves the platform, not the firewarrior's own — stale —
+## position). Reuses the normal projectile.
+func fire_from(origin: Vector3, target: Unit) -> void:
+	if path_service == null or target == null or not is_instance_valid(target):
+		return
+	var ball: Fireball = Fireball.new()
+	ball.setup(self, target, origin)
+	path_service.register_projectile(ball)
+	_emit_combat_hit(&"throw")
 
 
 func _throw_fireball_at_building(building) -> void:

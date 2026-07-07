@@ -187,11 +187,18 @@ func _process(_delta: float) -> void:
 		cancel()
 		return
 	var td: TerrainData = GameState.terrain_data
-	# Range ring: rebuilt terrain-conforming at the (moving) shaman each frame.
+	# Range ring: rebuilt terrain-conforming each frame. A garrisoned shaman
+	# (7h) casts from the tower with +3 m reach — show the real ring there.
 	if _range_mesh != null and _range_mesh.visible:
+		var origin: Vector3 = shaman.position
+		var radius: float = _range_radius
+		if shaman.garrison_housed and shaman.garrison_target != null \
+				and is_instance_valid(shaman.garrison_target):
+			origin = shaman.garrison_target.center_world()
+			radius += Watchtower.TOWER_RANGE_BONUS
 		var rim: ImmediateMesh = _range_mesh.mesh as ImmediateMesh
 		rim.clear_surfaces()
-		TerrainRing.add_band(rim, shaman.position, _range_radius, td, C_RANGE_RING)
+		TerrainRing.add_band(rim, origin, radius, td, C_RANGE_RING)
 	if _cursor == null:
 		return
 	var hit: Dictionary = {} if Sidebar.is_mouse_over_ui() \

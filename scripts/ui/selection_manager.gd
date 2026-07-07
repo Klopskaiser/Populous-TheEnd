@@ -135,6 +135,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			queue_redraw()
 		elif mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
 			if selected_building != null and is_instance_valid(selected_building):
+				# Right-click sets the rally/delivery point for ALL buildings
+				# (incl. the watchtower) — it never ejects the crew; that is done
+				# per slot in the sidebar panel.
 				_set_rally(mb.position)
 			else:
 				var aggressive: bool = attack_arm_active
@@ -221,8 +224,8 @@ func _box_select(rect: Rect2) -> void:
 		return
 	var picked: Array[Unit] = []
 	for unit in _unit_manager.get_units_of_tribe(player_tribe_id):
-		if unit.state == Unit.State.DEAD:
-			continue
+		if unit.state == Unit.State.DEAD or unit.garrison_housed:
+			continue   # tower crew belong to the tower, not the box-select
 		var sprite: Rect2 = _unit_screen_rect(unit, camera)
 		if sprite.size.y > 0.0 and rect.intersects(sprite):
 			# Crew in the box selects its catapult (deduplicated below).
@@ -265,8 +268,8 @@ func _pick_unit_at(screen_pos: Vector2, camera: Camera3D, tribe_id: int) -> Unit
 	var best: Unit = null
 	var best_dist: float = INF
 	for unit in _unit_manager.units:
-		if unit.state == Unit.State.DEAD:
-			continue
+		if unit.state == Unit.State.DEAD or unit.garrison_housed:
+			continue   # garrisoned tower crew are not individually pickable
 		if tribe_id >= 0:
 			if unit.tribe_id != tribe_id:
 				continue
@@ -309,8 +312,8 @@ func _double_click_select(screen_pos: Vector2) -> void:
 	var viewport_rect: Rect2 = Rect2(Vector2.ZERO, get_viewport().get_visible_rect().size)
 	var picked: Array[Unit] = []
 	for unit in candidates:
-		if unit.siege_engine != null:
-			continue   # crew belongs to its catapult, not to the kind selection
+		if unit.siege_engine != null or unit.garrison_housed:
+			continue   # crew belongs to its catapult / tower, not the kind selection
 		var sprite: Rect2 = _unit_screen_rect(unit, camera)
 		if sprite.size.y > 0.0 and viewport_rect.intersects(sprite):
 			picked.append(unit)
@@ -372,6 +375,14 @@ func _set_rally(screen_pos: Vector2) -> void:
 	selected_building.rally_point = hit.position
 
 
+## True while at least one selected unit can man a watchtower (combat / shaman).
+func _selection_has_garrison_capable() -> bool:
+	for u in selected:
+		if is_instance_valid(u) and u.state != Unit.State.DEAD and u.can_garrison():
+			return true
+	return false
+
+
 ## Tracks the building under the cursor so it can show its production bar on
 ## hover (in addition to when selected).
 func _update_hover(screen_pos: Vector2) -> void:
@@ -427,8 +438,8 @@ func _command_move(screen_pos: Vector2, queue_up: bool, aggressive: bool = false
 	if camera == null:
 		return
 	# Right-click on a crewable siege engine (own, or unmanned of any tribe):
-	# assign the selected units as its crew (7f).
-	if _tribe_commands != null and _try_crew_assignment(screen_pos, camera):
+	# assign the selected units as its crew (7f). Shift queues it after the route.
+	if _tribe_commands != null and _try_crew_assignment(screen_pos, camera, queue_up):
 		return
 	# Right-click on an enemy unit = attack order (units have no physics body, so
 	# this is a screen-space pick like _click_select, not a raycast).
@@ -452,7 +463,8 @@ func _command_move(screen_pos: Vector2, queue_up: bool, aggressive: bool = false
 
 	# An armed attack-move is always a march order — context commands
 	# (chop/build/pray/train) would be surprising with the attack cursor up.
-	if not aggressive and _tribe_commands != null and _dispatch_context_command(hit):
+	# Shift+right-click QUEUES the context command after the waypoint route.
+	if not aggressive and _tribe_commands != null and _dispatch_context_command(hit, queue_up):
 		return
 
 	var target: Vector3 = hit.position
@@ -472,7 +484,7 @@ func _enemy_under_cursor(screen_pos: Vector2, camera: Camera3D) -> Unit:
 ## Crew assignment (7f): a siege engine under the cursor that the player may
 ## man — his own, or an UNMANNED one of any tribe (battlefield takeover).
 ## Returns true when the order was issued (only crew-capable units join).
-func _try_crew_assignment(screen_pos: Vector2, camera: Camera3D) -> bool:
+func _try_crew_assignment(screen_pos: Vector2, camera: Camera3D, queue_up: bool = false) -> bool:
 	var crewable: Array[Unit] = []
 	for u in selected:
 		if u.can_crew_siege():
@@ -496,7 +508,15 @@ func _try_crew_assignment(screen_pos: Vector2, camera: Camera3D) -> bool:
 			engine = unit
 	if engine == null:
 		return false
-	_tribe_commands.order_crew(crewable, engine)
+	if queue_up:
+		# Walk the waypoint route first, then board (Shift+right-click).
+		_tribe_commands.order_move(crewable, engine.position, true)
+		var eng: Unit = engine
+		for u in crewable:
+			var unit: Unit = u
+			unit.route_end_action = (func(target: Unit) -> void: target.order_crew(eng)).bind(unit)
+	else:
+		_tribe_commands.order_crew(crewable, engine)
 	return true
 
 
@@ -520,41 +540,84 @@ func _dispatch_enemy_building(hit: Dictionary) -> bool:
 
 
 ## Tree -> gather, own construction site -> build, own reincarnation site ->
-## pray. Returns false when the click should be a plain move order.
-func _dispatch_context_command(hit: Dictionary) -> bool:
+## pray, forester/workshop/watchtower -> staff/garrison. `queue_up` (Shift)
+## QUEUES the command after the current waypoint route instead of running it now
+## (the unit walks its waypoints, then enters). Returns false when the click
+## should be a plain move order.
+func _dispatch_context_command(hit: Dictionary, queue_up: bool = false) -> bool:
 	var collider: Object = hit.get("collider")
 	var node: Node = collider as Node
 	if node == null:
 		return false
 	if node.has_meta("tree_resource"):
 		var tree: TreeResource = node.get_meta("tree_resource") as TreeResource
-		if tree != null and not tree.felled_flag:
+		if tree == null or tree.felled_flag:
+			return false
+		if queue_up:
+			_queue_route_action(tree.position,
+				func(u: Unit) -> void: _tribe_commands.order_chop([u] as Array[Unit], tree))
+		else:
 			_tribe_commands.order_chop(selected, tree)
-			return true
-		return false
+		return true
 	if node.has_meta("building"):
 		var building: Building = node.get_meta("building") as Building
 		if building == null or building.tribe_id != player_tribe_id:
 			return false
-		if building.under_construction:
-			_tribe_commands.order_build(selected, building)
-			return true
-		if building.is_usable():
-			if building is ReincarnationSite:
-				_tribe_commands.order_pray(selected, building)
-				return true
-			if building is Forester:
-				_tribe_commands.order_forester(selected, building)
-				return true
-			if building is Workshop:
-				_tribe_commands.order_workshop(selected, building)
-				return true
-			if building is TrainingBuilding:
-				_tribe_commands.order_train(building, selected)
-				return true
-		if building.health < building.max_health and building.health > 0:
-			# Damaged building (huts at any damage, others once unusable):
-			# workers repair it.
-			_tribe_commands.order_repair(selected, building)
-			return true
+		# A watchtower with no crew-capable unit selected falls through to a plain
+		# move onto the plot (an all-brave selection cannot garrison).
+		if building is Watchtower and building.is_usable() and not building.under_construction \
+				and not _selection_has_garrison_capable():
+			return false
+		if not _building_is_actionable(building):
+			return false
+		if queue_up:
+			_queue_route_action(building.center_world(),
+				func(u: Unit) -> void: _apply_building_command([u] as Array[Unit], building))
+		else:
+			_apply_building_command(selected, building)
+		return true
 	return false
+
+
+## Whether _apply_building_command would issue an order for this own building.
+func _building_is_actionable(building: Building) -> bool:
+	if building.under_construction:
+		return true
+	if building.is_usable():
+		return building is ReincarnationSite or building is Forester \
+			or building is Workshop or building is Watchtower \
+			or building is TrainingBuilding
+	return building.health < building.max_health and building.health > 0
+
+
+## Issues the context command for `units` on an own building (construction site
+## -> build, reincarnation site -> pray, forester/workshop -> staff, watchtower
+## -> garrison, training building -> train, otherwise damaged -> repair).
+func _apply_building_command(units: Array[Unit], building: Building) -> void:
+	if building.under_construction:
+		_tribe_commands.order_build(units, building)
+		return
+	if building.is_usable():
+		if building is ReincarnationSite:
+			_tribe_commands.order_pray(units, building)
+		elif building is Forester:
+			_tribe_commands.order_forester(units, building)
+		elif building is Workshop:
+			_tribe_commands.order_workshop(units, building)
+		elif building is Watchtower:
+			_tribe_commands.order_garrison(units, building as Watchtower)
+		elif building is TrainingBuilding:
+			_tribe_commands.order_train(building, units)
+		return
+	if building.health < building.max_health and building.health > 0:
+		_tribe_commands.order_repair(units, building)
+
+
+## Appends `approach` as a final waypoint for the whole selection, then arms
+## each unit's route-end follow-up (Shift+right-click on a building/tree): the
+## unit walks its waypoints and only then runs `per_unit` for itself.
+func _queue_route_action(approach: Vector3, per_unit: Callable) -> void:
+	_tribe_commands.order_move(selected, approach, true)
+	for u in selected.duplicate():
+		var unit: Unit = u
+		unit.route_end_action = per_unit.bind(unit)

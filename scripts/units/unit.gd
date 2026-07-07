@@ -23,7 +23,10 @@ class_name Unit extends Node3D
 ## RAID = a melee raider INSIDE an enemy building demolishing it (phase 7g):
 ## removed from the world like a trainee; it steps back out alive when the
 ## building collapses.
-enum State {IDLE, MOVE, GATHER, PRAY, BUILD, ATTACK, TRAIN, PANIC, CAST, THROWN, DEAD, SIT, ROLL, FORESTER, CREW, RAID}
+## GARRISON = walking to / stationed inside an own watchtower (phase 7h):
+## while approaching the unit is a normal walker; once admitted it is removed
+## from the world (protected reserve), driven by the tower.
+enum State {IDLE, MOVE, GATHER, PRAY, BUILD, ATTACK, TRAIN, PANIC, CAST, THROWN, DEAD, SIT, ROLL, FORESTER, CREW, RAID, GARRISON}
 
 signal died(unit: Unit)
 ## Fired after this unit switched tribes (preacher conversion) — the
@@ -177,6 +180,11 @@ var health: int = 100
 var speed: float = 4.0
 var state: State = State.IDLE
 var waypoint_queue: Array[Vector3] = []
+## A queued follow-up order (Shift+right-click on a building / catapult after a
+## waypoint route): fired ONCE when the route completes, so the unit walks its
+## waypoints first and only THEN enters the building / boards the engine. Cleared
+## by any fresh (non-queued) order.
+var route_end_action: Callable = Callable()
 var patrol: bool = false
 ## Move mode of the current route: aggressive (attack-move — combatants engage
 ## enemies they pass) or passive (plain move/flee: march through, only the
@@ -249,6 +257,17 @@ var attack_building = null
 ## While set (untyped: may be freed), this unit is a melee raider INSIDE this
 ## building demolishing it (State.RAID, removed from the world like a trainee).
 var raiding_building = null
+## Watchtower this unit is walking to (approach) or stationed inside (phase 7h;
+## untyped: may be freed). While housed (garrison_housed) the unit is removed
+## from the world and driven by the tower.
+var garrison_target = null
+## True once this unit is HOUSED inside the tower (removed from the world). It
+## then accepts no orders — the only way out is ejection (eject / storm / damage).
+var garrison_housed: bool = false
+## True while this unit stands at the tower entrance waiting to be admitted. The
+## tower admits it on ITS tick (not here) so the units list is not mutated
+## mid-iteration (same rationale as the training queue).
+var garrison_reached: bool = false
 ## Enemy-building scan support (phase 7g); injected by UnitManager.spawn_unit()
 ## via set() for every unit (the siege engine used it first, 7f).
 var building_manager: BuildingManager = null
@@ -361,9 +380,11 @@ func _is_ranged() -> bool:
 
 
 ## False for units that can never be attacked directly (the siege engine:
-## attackers hit its crew instead). Filtered in every enemy scan/order.
+## attackers hit its crew instead) or that are currently a protected reserve
+## (tower crew, phase 7h — safe from fireballs/melee/conversion until ejected).
+## Filtered in every enemy scan/order.
 func is_targetable() -> bool:
-	return true
+	return not garrison_housed
 
 
 ## Drawn via the central sprite MultiMesh (UnitRenderer). The siege engine
@@ -412,6 +433,10 @@ func _on_combat_interrupt() -> void:
 # --- Core logic (testable without scene tree) ---------------------------------
 
 func tick(delta: float) -> void:
+	# Stationed tower crew (phase 7h) are fully driven by the tower (position,
+	# facing, animation, fire/convert): they have no world tick of their own.
+	if garrison_housed:
+		return
 	_tick_knockback(delta)
 	_tick_regen(delta)
 	_tick_burning(delta)
@@ -441,6 +466,8 @@ func _tick_state(delta: float) -> void:
 			_tick_dead(delta)
 		State.CREW:
 			_tick_crew(delta)
+		State.GARRISON:
+			_tick_garrison(delta)
 		_:
 			pass
 
@@ -520,7 +547,7 @@ func _snap_to_ground() -> void:
 
 func _on_path_finished() -> void:
 	if waypoint_queue.is_empty():
-		_set_state(State.IDLE)
+		_finish_route()
 		return
 	if patrol:
 		# Rotate the queue: the reached waypoint goes to the back.
@@ -529,9 +556,21 @@ func _on_path_finished() -> void:
 	else:
 		waypoint_queue.pop_front()
 		if waypoint_queue.is_empty():
-			_set_state(State.IDLE)
+			_finish_route()
 		else:
 			_start_path_to(waypoint_queue[0])
+
+
+## The waypoint route is exhausted: fire the queued follow-up order (Shift+
+## right-click on a building/catapult after waypoints — enter/board only AFTER
+## walking the route), otherwise just go idle.
+func _finish_route() -> void:
+	if route_end_action.is_valid():
+		var act: Callable = route_end_action
+		route_end_action = Callable()
+		act.call()
+		return
+	_set_state(State.IDLE)
 
 
 # --- Orders --------------------------------------------------------------------
@@ -542,7 +581,8 @@ func _on_path_finished() -> void:
 ## airborne (thrown) and panicking units are equally beyond control.
 func can_take_orders() -> bool:
 	return state != State.SIT and state != State.DEAD and state != State.ROLL \
-		and state != State.THROWN and state != State.PANIC and state != State.RAID
+		and state != State.THROWN and state != State.PANIC and state != State.RAID \
+		and not garrison_housed
 
 
 ## Move order. queue_up appends the target as an additional waypoint
@@ -553,11 +593,13 @@ func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = fals
 	if not can_take_orders():
 		return
 	leave_crew()   # an explicit move order pulls the unit off its siege engine
+	garrison_target = null   # a move order abandons a pending garrison approach
 	_end_attack()
 	_clear_building_target()   # a move order also breaks off a building assault
 	move_aggressive = aggressive
 	_flee_hits = 0
 	if not queue_up:
+		route_end_action = Callable()   # a fresh route cancels a queued follow-up
 		waypoint_queue.clear()
 		waypoint_queue.append(target)
 		_start_path_to(target)
@@ -1119,6 +1161,8 @@ func is_panic_immune() -> bool:
 func begin_conversion(preacher: Unit, duration: float) -> bool:
 	if state == State.DEAD or state == State.SIT or is_conversion_immune():
 		return false
+	if garrison_housed:
+		return false   # tower crew are a protected reserve (phase 7h)
 	if state == State.ROLL or state == State.THROWN or state == State.PANIC:
 		return false
 	_on_combat_interrupt()
@@ -1207,6 +1251,7 @@ func order_crew(engine) -> void:
 		return
 	if siege_engine == engine and state == State.CREW:
 		return
+	route_end_action = Callable()
 	_on_combat_interrupt()
 	_end_attack()
 	if not engine.add_crew(self):
@@ -1428,10 +1473,18 @@ func _begin_attack(enemy: Unit) -> void:
 		return   # a sitting (pacified) unit cannot be sent into a fight
 	if enemy == null or not is_instance_valid(enemy) or enemy.state == State.DEAD:
 		return
+	# Never lock onto a non-targetable unit (a siege engine / a garrisoned tower
+	# crew): attackers go for the crew instead, so a stray scan must not leave
+	# them swinging at the vehicle for no damage. The only exception is a
+	# catapult bombarding another catapult (_may_target_vehicle).
+	if not enemy.is_targetable() and not _may_target_vehicle(enemy):
+		return
 	if attack_target == enemy:
 		if state != State.ATTACK:
 			_set_state(State.ATTACK)
 		return
+	garrison_target = null   # a fresh fight abandons a pending garrison approach
+	route_end_action = Callable()
 	_on_combat_interrupt()
 	_end_attack()
 	attack_target = enemy
@@ -1444,6 +1497,14 @@ func _begin_attack(enemy: Unit) -> void:
 ## Public order entry used by TribeCommands.order_attack (UI + AI).
 func order_attack(enemy: Unit) -> void:
 	_begin_attack(enemy)
+
+
+## Whether this unit may attack a non-targetable vehicle directly. Only a
+## catapult may bombard another catapult (its shot's splash hits the crew);
+## every other unit targets the crew, never the vehicle. The siege engine
+## overrides this.
+func _may_target_vehicle(_enemy: Unit) -> bool:
+	return false
 
 
 # --- Building assault (phase 7g) ----------------------------------------------
@@ -1620,6 +1681,100 @@ func exit_building_as_raider(pos: Vector3, building = null) -> void:
 		attack_building = building
 		_set_state(State.ATTACK)
 	else:
+		_set_state(State.IDLE)
+
+
+# --- Watchtower garrison (phase 7h) -------------------------------------------
+
+## True for units that may man a watchtower: combat units and the shaman, never
+## braves or siege engines.
+func can_garrison() -> bool:
+	return _is_combatant() or unit_kind() == &"shaman"
+
+
+## Orders the unit to garrison an own watchtower: it walks to the entrance and
+## is admitted (up to the tower's crew capacity). Rejected for braves/siege, a
+## foreign or unusable/full tower, or while the unit is beyond control.
+func order_garrison(tower) -> void:
+	if not can_take_orders() or not can_garrison():
+		return
+	if tower == null or not is_instance_valid(tower) or tower.health <= 0:
+		return
+	if tower.tribe_id != tribe_id or not tower.is_usable() or not tower.has_crew_room():
+		return
+	route_end_action = Callable()
+	_on_combat_interrupt()
+	_end_attack()
+	_clear_building_target()
+	waypoint_queue.clear()
+	_clear_path()
+	garrison_target = tower
+	garrison_reached = false
+	_set_state(State.GARRISON)
+
+
+## Walks to the tower entrance and waits there to be admitted. The tower does
+## the actual admission on ITS tick (see Watchtower._admit_arrived_crew), so the
+## live units list is never mutated from inside the unit loop. Gives up (idle)
+## when the tower is gone / unusable / full.
+func _tick_garrison(delta: float) -> void:
+	var t = garrison_target
+	if t == null or not is_instance_valid(t) or t.health <= 0 \
+			or not t.is_usable() or t.tribe_id != tribe_id:
+		garrison_target = null
+		garrison_reached = false
+		_set_state(State.IDLE)
+		return
+	# Head for the door but count as "arrived" once anywhere at the building
+	# (within interact_range of the centre): the direct-step approach can be
+	# blocked by the footprint corner right at the entrance, which used to leave
+	# the unit oscillating just outside the strict entrance range forever.
+	if _flat_dist(position, t.center_world()) > t.interact_range():
+		garrison_reached = false
+		_in_melee = false
+		_approach(t.entrance_world(), delta)
+		_face_point(t.center_world())
+		return
+	if not t.has_crew_room():
+		garrison_target = null
+		garrison_reached = false
+		_set_state(State.IDLE)
+		return
+	if _has_path():
+		_clear_path()
+	_face_point(t.center_world())
+	garrison_reached = true   # wait here; the tower admits us on its tick
+
+
+## Called by the tower when admitted: the unit STAYS in the world (visible on
+## the platform, rendered/animated by the renderer) but stops its own tick — the
+## tower drives its position, facing, animation and ranged fire. It becomes a
+## protected reserve (non-targetable, immune to the separation push, no orders).
+func enter_garrison(tower, slot_pos: Vector3) -> void:
+	garrison_target = tower
+	garrison_housed = true
+	garrison_reached = false
+	push_immune = true
+	waypoint_queue.clear()
+	_clear_path()
+	_end_attack()
+	_clear_building_target()
+	selected = false
+	position = slot_pos
+	anim_base_name = &"idle"
+	anim_start_ms = Time.get_ticks_msec()
+	_set_state(State.GARRISON)
+
+
+## Released from the tower (ejection / storm / damage / destruction): back to a
+## normal world unit, go idle. The tower repositions it on the ground first.
+func leave_garrison() -> void:
+	garrison_target = null
+	garrison_housed = false
+	garrison_reached = false
+	push_immune = false
+	if state == State.GARRISON:
+		_clear_path()
 		_set_state(State.IDLE)
 
 
@@ -1918,6 +2073,8 @@ func _anim_base() -> StringName:
 			return &"dead"
 		State.CREW:
 			return &"walk" if _crew_walking else &"idle"
+		State.GARRISON:
+			return &"walk"   # walking to the tower (housed units are not rendered)
 		_:
 			return &"idle"
 

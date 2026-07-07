@@ -14,8 +14,13 @@ const FIREWARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/fire
 const TEMPLE_SCENE: PackedScene = preload("res://scenes/buildings/temple.tscn")
 const FORESTER_SCENE: PackedScene = preload("res://scenes/buildings/forester.tscn")
 const WORKSHOP_SCENE: PackedScene = preload("res://scenes/buildings/workshop.tscn")
+const WATCHTOWER_SCENE: PackedScene = preload("res://scenes/buildings/watchtower.tscn")
 
 const TICK_INTERVAL: float = 1.0
+## Watchtowers the AI builds after the base essentials (defensive fire posts).
+const TARGET_WATCHTOWERS: int = 2
+## Idle firewarriors kept mobile before any get garrisoned into a tower.
+const WATCHTOWER_MIN_MOBILE_FW: int = 2
 ## Braves kept praying at the reincarnation site (mana income).
 const PRAY_BRAVES: int = 4
 ## Braves sent into training per tick (at most), spread over the camps by
@@ -161,6 +166,7 @@ func tick_ai() -> void:
 	_tick_build(snap)
 	_staff_foresters()
 	_staff_workshops()
+	_man_watchtowers()
 	_cast_spells()
 	# An attack on the own village takes priority over everything else.
 	var threat: Dictionary = _detect_threat()
@@ -228,6 +234,7 @@ func _next_building_scene(_snap: Dictionary) -> PackedScene:
 	var huts: int = 0
 	var foresters: int = 0
 	var workshops: int = 0
+	var towers: int = 0
 	var camps: Dictionary = {&"warrior_camp": 0, &"firewarrior_camp": 0, &"temple": 0}
 	for building in tribe.buildings:
 		if not is_instance_valid(building) or building.health <= 0:
@@ -236,6 +243,8 @@ func _next_building_scene(_snap: Dictionary) -> PackedScene:
 			foresters += 1
 		elif building is Workshop:
 			workshops += 1
+		elif building is Watchtower:
+			towers += 1
 		elif building is Hut:
 			huts += 1
 		elif building is WarriorCamp:
@@ -264,6 +273,9 @@ func _next_building_scene(_snap: Dictionary) -> PackedScene:
 	# arm alongside the spells.
 	if workshops < 1:
 		return WORKSHOP_SCENE
+	# Defensive fire posts after the base is complete (7h).
+	if towers < TARGET_WATCHTOWERS:
+		return WATCHTOWER_SCENE
 	# Endless scaling: housing pressure -> hut; otherwise extra camps.
 	if tribe.population() >= int(float(tribe.housing_capacity()) * HOUSING_PRESSURE):
 		return HUT_SCENE
@@ -792,6 +804,32 @@ func _staff_workshops() -> void:
 		while i < idle.size() and ws.occupants.size() < WORKSHOP_WORKERS \
 				and ws.has_free_slot():
 			commands.order_workshop([idle[i]] as Array[Unit], ws)
+			i += 1
+
+
+## Mans usable watchtowers that still have room with idle firewarriors, keeping
+## at least WATCHTOWER_MIN_MOBILE_FW firewarriors mobile so the attack force is
+## not starved (7h). Warriors/preachers stay in the field; the AI garrisons the
+## ranged fire posts.
+func _man_watchtowers() -> void:
+	var towers: Array = []
+	for building in tribe.buildings:
+		if building is Watchtower and is_instance_valid(building) \
+				and building.is_usable() and building.has_crew_room():
+			towers.append(building)
+	if towers.is_empty():
+		return
+	var idle_fw: Array[Unit] = []
+	for unit in tribe.units:
+		if is_instance_valid(unit) and unit.unit_kind() == &"firewarrior" \
+				and unit.state == Unit.State.IDLE:
+			idle_fw.append(unit)
+	var i: int = 0
+	for tower in towers:
+		while i < idle_fw.size() and tower.has_crew_room():
+			if idle_fw.size() - i <= WATCHTOWER_MIN_MOBILE_FW:
+				return   # keep a mobile firewarrior reserve
+			commands.order_garrison([idle_fw[i]] as Array[Unit], tower)
 			i += 1
 
 

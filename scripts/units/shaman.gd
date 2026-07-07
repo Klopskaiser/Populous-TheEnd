@@ -48,7 +48,17 @@ func is_panic_immune() -> bool:
 ## Accepts a cast order (from TribeCommands.cast_spell). Interrupts movement
 ## and combat; returns false while the shaman is beyond control (rolling etc.).
 func order_cast(spell: Spell, target: Vector3, ctx: SpellContext) -> bool:
-	if not can_take_orders() or spell == null:
+	if spell == null:
+		return false
+	# Stationed in a watchtower (phase 7h): cast straight from the tower with
+	# +3 m range instead of walking there — she never leaves the tower. Out of
+	# range = the cast fails silently (charge kept), she stays put.
+	if garrison_housed and garrison_target != null and is_instance_valid(garrison_target):
+		var origin: Vector3 = garrison_target.center_world()
+		if _flat_dist(origin, target) > spell.cast_range + Watchtower.TOWER_RANGE_BONUS:
+			return false
+		return spell.cast(tribe, target, ctx)
+	if not can_take_orders():
 		return false
 	_end_attack()
 	waypoint_queue.clear()

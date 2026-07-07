@@ -40,6 +40,7 @@ const FIREWARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/fire
 const TEMPLE_SCENE: PackedScene = preload("res://scenes/buildings/temple.tscn")
 const FORESTER_SCENE: PackedScene = preload("res://scenes/buildings/forester.tscn")
 const WORKSHOP_SCENE: PackedScene = preload("res://scenes/buildings/workshop.tscn")
+const WATCHTOWER_SCENE: PackedScene = preload("res://scenes/buildings/watchtower.tscn")
 
 # --- Injected references (setup) --------------------------------------------
 var _tribes: Array[Tribe] = []
@@ -84,6 +85,10 @@ var _workshop_slot_buttons: Array[Button] = []
 var _siege_panel: PanelContainer = null
 var _siege_info: Label = null
 var _siege_slot_buttons: Array[Button] = []
+## Watchtower crew panel (shown while a watchtower is selected, 7h): one button
+## per crew slot to eject that occupant (forester-style).
+var _watchtower_panel: PanelContainer = null
+var _watchtower_slot_buttons: Array[Button] = []
 ## Shaman portrait (below the minimap, Populous style): full live-animated
 ## figure + health bar; click centres the camera on her and selects ONLY her.
 var _portrait_sprite: AnimatedSprite2D = null
@@ -155,6 +160,8 @@ static func default_build_entries() -> Array[Dictionary]:
 			"icon": &"forester", "wood_cost": Forester.WOOD_COST, "enabled": true},
 		{"id": &"workshop", "name": "Werkstatt", "scene": WORKSHOP_SCENE,
 			"icon": &"workshop", "wood_cost": Workshop.WOOD_COST, "enabled": true},
+		{"id": &"watchtower", "name": "Wachturm", "scene": WATCHTOWER_SCENE,
+			"icon": &"watchtower", "wood_cost": Watchtower.WOOD_COST, "enabled": true},
 	]
 
 
@@ -243,6 +250,7 @@ func _process(delta: float) -> void:
 	_refresh_forester_panel()   # responsive to selection changes (cheap: 4 buttons)
 	_refresh_workshop_panel()
 	_refresh_siege_panel()
+	_refresh_watchtower_panel()
 	_follower_timer -= delta
 	if _follower_timer <= 0.0:
 		_follower_timer = FOLLOWER_INTERVAL
@@ -278,6 +286,7 @@ func _build_ui() -> void:
 	_build_forester_panel(root)
 	_build_workshop_panel(root)
 	_build_siege_panel(root)
+	_build_watchtower_panel(root)
 
 	var spacer: Control = Control.new()
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -428,7 +437,9 @@ func _make_tribe_bar(color: Color) -> ProgressBar:
 
 func _build_tab_content(root: Control) -> void:
 	var content: Control = Control.new()
-	content.custom_minimum_size = Vector2(0, 200)
+	# Tall enough for the building tab's full list (7 entries incl. the
+	# watchtower); the tab itself also scrolls as a safety net (short windows).
+	content.custom_minimum_size = Vector2(0, 300)
 	content.size_flags_vertical = Control.SIZE_FILL
 	root.add_child(content)
 	_tab_panels.append(_build_building_tab())
@@ -440,7 +451,12 @@ func _build_tab_content(root: Control) -> void:
 
 
 func _build_building_tab() -> Control:
+	# A scroll container so the full build list stays reachable even if the tab
+	# area is short (more entries than fit — the watchtower was falling off).
+	var scroll: ScrollContainer = ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	var grid: VBoxContainer = VBoxContainer.new()
+	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	grid.add_theme_constant_override("separation", 4)
 	for entry in default_build_entries():
 		var b: Button = Button.new()
@@ -461,7 +477,8 @@ func _build_building_tab() -> Control:
 			var scene: PackedScene = entry["scene"]
 			b.pressed.connect(func() -> void: _on_build_pressed(scene))
 		grid.add_child(b)
-	return grid
+	scroll.add_child(grid)
+	return scroll
 
 
 func _build_spell_tab() -> Control:
@@ -590,6 +607,85 @@ func _on_forester_eject(index: int) -> void:
 	if b is Forester and is_instance_valid(b):
 		(b as Forester).eject_worker(index)
 		_refresh_forester_panel()
+
+
+## Watchtower crew panel (7h): one button per crew slot; clicking an occupied
+## slot ejects that unit (same pattern as the forester/workshop). Kind is shown
+## so you can tell who is manning the tower.
+func _build_watchtower_panel(root: Control) -> void:
+	_watchtower_panel = PanelContainer.new()
+	_watchtower_panel.name = "WatchtowerPanel"
+	_watchtower_panel.add_theme_stylebox_override("panel", UiTheme.inset_style())
+	_watchtower_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	_watchtower_panel.visible = false
+	root.add_child(_watchtower_panel)
+
+	var vb: VBoxContainer = VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 3)
+	_watchtower_panel.add_child(vb)
+
+	var title: Label = Label.new()
+	title.text = "Wachturm — Besatzung"
+	title.add_theme_color_override("font_color", UiTheme.GOLD_BRIGHT)
+	vb.add_child(title)
+
+	for i in range(Watchtower.CREW_CAPACITY):
+		var b: Button = Button.new()
+		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		UiTheme.style_button(b)
+		var idx: int = i
+		b.pressed.connect(func() -> void: _on_watchtower_eject(idx))
+		vb.add_child(b)
+		_watchtower_slot_buttons.append(b)
+
+
+## German label for a crew unit kind (shown in the slot buttons).
+static func _crew_kind_label(kind: StringName) -> String:
+	match kind:
+		&"warrior":
+			return "Krieger"
+		&"firewarrior":
+			return "Feuerkrieger"
+		&"preacher":
+			return "Prediger"
+		&"shaman":
+			return "Schamanin"
+	return "Einheit"
+
+
+func _refresh_watchtower_panel() -> void:
+	if _watchtower_panel == null:
+		return
+	var tower: Watchtower = null
+	if _selection != null:
+		var b: Building = _selection.selected_building
+		if b is Watchtower and is_instance_valid(b):
+			tower = b as Watchtower
+	if tower == null:
+		if _watchtower_panel.visible:
+			_watchtower_panel.visible = false
+		return
+	_watchtower_panel.visible = true
+	for i in range(_watchtower_slot_buttons.size()):
+		var btn: Button = _watchtower_slot_buttons[i]
+		var occupied: bool = i < tower.crew.size() and is_instance_valid(tower.crew[i])
+		if occupied:
+			btn.text = "Platz %d: %s  (rauswerfen)" % [
+				i + 1, _crew_kind_label(tower.crew[i].unit_kind())]
+			btn.disabled = false
+		else:
+			btn.text = "Platz %d: frei" % (i + 1)
+			btn.disabled = true
+
+
+func _on_watchtower_eject(index: int) -> void:
+	if _selection == null:
+		return
+	var b: Building = _selection.selected_building
+	if b is Watchtower and is_instance_valid(b):
+		(b as Watchtower).eject_crew(index)
+		_refresh_watchtower_panel()
 
 
 ## Control panel for a selected workshop (7f): worker/stock/catapult readout,

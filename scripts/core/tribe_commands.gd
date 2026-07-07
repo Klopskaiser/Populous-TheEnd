@@ -280,6 +280,20 @@ func order_workshop(units: Array[Unit], workshop: Workshop) -> void:
 		order_move(movers, workshop.center_world())
 
 
+## Garrisons an own watchtower with the selected combat units / shaman (phase
+## 7h): each walks to the entrance and enters up to the 2 crew slots; braves and
+## overflow units are ignored. The tower validates tribe/capacity/usability.
+func order_garrison(units: Array[Unit], tower: Watchtower) -> void:
+	if tower == null or not is_instance_valid(tower) or not tower.is_usable():
+		return
+	for unit in units:
+		if unit == null or not is_instance_valid(unit) or unit.state == Unit.State.DEAD:
+			continue
+		if unit.tribe_id != tower.tribe_id or not unit.can_garrison():
+			continue
+		unit.order_garrison(tower)
+
+
 ## Right-click attack: selected units melee the clicked enemy. Units distribute
 ## intelligently — if the ordered target is already at its 3-attacker limit, a
 ## unit picks another free enemy near it instead of piling on a fourth.
@@ -315,8 +329,8 @@ func _nearest_free_enemy_near(avoid: Unit, unit: Unit) -> Unit:
 	for u in unit_manager.get_units_in_radius(avoid.position, Unit.AGGRO_RADIUS):
 		if u == avoid or u == unit or u.state == Unit.State.DEAD:
 			continue
-		if u.tribe_id == unit.tribe_id:
-			continue
+		if u.tribe_id == unit.tribe_id or not u.is_targetable():
+			continue   # never redistribute onto a vehicle/garrisoned crew
 		if u.active_melee_attacker_count() >= Unit.MAX_MELEE_ATTACKERS:
 			continue
 		var d: float = Vector2(u.position.x, u.position.z).distance_to(flat)
