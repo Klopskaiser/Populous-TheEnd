@@ -160,6 +160,26 @@ func test_workshop_worker_pipeline_builds_catapult() -> void:
 	_free_world(w)
 
 
+## A brave recruited into a job mid-walk must drop its pending move waypoint,
+## so a finished/idle worker shows no phantom route marker (user bug report).
+func test_worker_order_clears_stale_move_waypoint() -> void:
+	var w: Dictionary = _make_world()
+	var ws: Workshop = _place_workshop(w)
+	var brave: Brave = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 0, ws.entrance_world() + Vector3(2.0, 0.0, 2.0)) as Brave
+	brave.order_move(w.nav.cell_to_world(Vector2i(90, 90)))
+	check(not brave.waypoint_queue.is_empty(), "the move order queued a destination")
+	# Being put to work cancels the pending move (no lingering route marker).
+	brave.order_workshop(ws)
+	check(brave.waypoint_queue.is_empty(),
+		"starting work clears the stale move waypoint")
+	# Ejecting it back out leaves it idle WITHOUT a phantom destination.
+	ws.eject_worker(0)
+	check(brave.state == Unit.State.IDLE and brave.waypoint_queue.is_empty(),
+		"a released worker is idle with no stale waypoint")
+	_free_world(w)
+
+
 func test_construction_workers_are_not_auto_hired() -> void:
 	# The bug from the user report: braves that BUILT the workshop must not
 	# slide into production duty — slots are taken by explicit order only.

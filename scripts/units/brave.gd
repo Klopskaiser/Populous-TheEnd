@@ -905,6 +905,11 @@ func _interrupt_tasks() -> void:
 	if carried_wood > 0 and wood_pile_manager != null:
 		wood_pile_manager.deposit(position, carried_wood)
 		carried_wood = 0
+	# Starting a worker task cancels any pending MOVE intent: a brave recruited
+	# mid-walk (or one that just finished a job and drops to IDLE through here)
+	# must not keep a stale destination — it left a phantom route marker on the
+	# finished worker even though nobody walks there (bug, purely visual).
+	waypoint_queue.clear()
 	_reset_seek()
 
 

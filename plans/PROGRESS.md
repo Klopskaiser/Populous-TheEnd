@@ -2661,3 +2661,18 @@ zwei 1-Holz-Chunks → 2 Holz am Boden), `test_tornado_near_reset_spares_catapul
 (unterbrochene Nähe akkumuliert nicht). **1235 Tests, 0 Fehler**, Ladecheck
 fehlerfrei. Manuelle Prüfung ausstehend.
 
+**Bugfix (Nutzertest 2026-07-07) — Phantom-Routenmarker an fertigen Arbeitern:**
+Wählte man Arbeiter nach getaner Arbeit aus, zeigten sich manchmal
+Ziel-/Routenmarker (z. B. an einer alten Baumstelle), obwohl niemand dorthin
+läuft. Ursache: `Brave._interrupt_tasks` räumte Aufgaben/Claims und `_path`
+(`_reset_seek`) ab, **nicht aber `waypoint_queue`**. Wird ein Brave mitten in
+einer Bewegung zu einem Job rekrutiert (order_build/chop/pray/train/forester/
+workshop) — oder fällt er nach dem Job über `_interrupt_tasks` → IDLE —, blieb
+die alte Bewegungsabsicht als Wegpunkt hängen; der `RouteVisualizer` zeichnete
+dafür einen Marker. Fix: `_interrupt_tasks` leert jetzt zusätzlich
+`waypoint_queue` (Beginn eines Arbeitsauftrags verwirft die Laufabsicht). Der
+Attack-Move-Resume bleibt unberührt (fliehende/laufende Braves sind im
+MOVE-Zustand und lösen `_interrupt_tasks` beim Retaliieren nicht aus). Test
+`test_worker_order_clears_stale_move_waypoint`. **1238 Tests, 0 Fehler**,
+Ladecheck fehlerfrei.
+
