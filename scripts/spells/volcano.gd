@@ -14,7 +14,7 @@ const DURATION: float = 3.0
 func _init() -> void:
 	id = &"volcano"
 	display_name_de = "Vulkan"
-	charge_cost = 120.0
+	charge_cost = 180.0
 	max_charges = 1
 	cast_range = 12.0
 

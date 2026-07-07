@@ -62,6 +62,9 @@ var _pop_label: Label = null
 var _wood_label: Label = null
 var _tribe_bars: Array[ProgressBar] = []
 var _mana_segments: Array[ColorRect] = []
+var _mana_label: Label = null   # numeric mana + income per second (phase 7i)
+var _growth_slider: HSlider = null   # hut growth control (phase 7i)
+var _growth_label: Label = null
 var _tab_buttons: Array[Button] = []
 var _tab_panels: Array[Control] = []
 var _spell_ui: Dictionary = {}       # id -> {"button": Button, "pips": Array[ColorRect]}
@@ -235,12 +238,15 @@ func setup(p_tribes: Array[Tribe], p_player_id: int, p_unit_manager: UnitManager
 	_camera_rig = p_camera_rig
 
 	_minimap.setup(p_terrain_data, p_unit_manager, p_building_manager,
-		p_tree_manager, p_camera_rig)
+		p_tree_manager, p_camera_rig, MapGenerator.round_mask(GameState.map_id))
 	_refresh_tribe_bars()
 	var player: Tribe = _tribes[_player_id] if _player_id < _tribes.size() else null
 	if player != null:
 		_set_population(player.population(), player.housing_capacity())
 		_set_mana(player.mana)
+		if _growth_slider != null:
+			_growth_slider.set_value_no_signal(float(int(player.growth_mode)))
+	_update_growth_label()
 	_refresh_wood_near_base()
 	_refresh_spells()
 	_refresh_portrait()
@@ -258,6 +264,7 @@ func _process(delta: float) -> void:
 		_refresh_wood_near_base()
 		_refresh_spells()
 		_refresh_portrait()
+		_update_growth_label()
 
 
 # --- UI construction --------------------------------------------------------
@@ -419,6 +426,33 @@ func _build_header(root: Control) -> void:
 		seg.color = _mana_empty_color()
 		mana_row.add_child(seg)
 		_mana_segments.append(seg)
+
+	# Numeric mana readout + income per second (phase 7i).
+	_mana_label = Label.new()
+	_mana_label.add_theme_color_override("font_color", UiTheme.TEXT)
+	_mana_label.text = "Mana: 0  (+0.0/s)"
+	vb.add_child(_mana_label)
+
+	# Growth control (phase 7i): 0 = Kein, 1 = Minimal, 2 = Maximum hut manning.
+	var growth_row: HBoxContainer = HBoxContainer.new()
+	growth_row.add_theme_constant_override("separation", 6)
+	vb.add_child(growth_row)
+	var gl: Label = Label.new()
+	gl.text = "Wachstum"
+	gl.add_theme_color_override("font_color", UiTheme.TEXT)
+	growth_row.add_child(gl)
+	_growth_slider = HSlider.new()
+	_growth_slider.min_value = 0.0
+	_growth_slider.max_value = 2.0
+	_growth_slider.step = 1.0
+	_growth_slider.custom_minimum_size = Vector2(90, 16)
+	_growth_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_growth_slider.value_changed.connect(_on_growth_changed)
+	growth_row.add_child(_growth_slider)
+	_growth_label = Label.new()
+	_growth_label.add_theme_color_override("font_color", UiTheme.GOLD)
+	_growth_label.text = "Maximum  (+0/min)"
+	vb.add_child(_growth_label)
 
 
 func _make_tribe_bar(color: Color) -> ProgressBar:
@@ -1028,6 +1062,34 @@ func _set_population(population: int, capacity: int) -> void:
 		_pop_label.text = "Bevölkerung: %d/%d" % [population, capacity]
 
 
+## Growth slider moved: apply the mode to the player's tribe and refresh the label.
+func _on_growth_changed(value: float) -> void:
+	if _player_id < _tribes.size():
+		_tribes[_player_id].growth_mode = int(value) as Tribe.GrowthMode
+	_update_growth_label()
+
+
+func _update_growth_label() -> void:
+	if _growth_label == null:
+		return
+	var names: Array[String] = ["Kein", "Minimal", "Maximum"]
+	var mode: int = 0
+	if _player_id < _tribes.size():
+		mode = int(_tribes[_player_id].growth_mode)
+	_growth_label.text = "%s  (+%.0f/min)" % [names[clampi(mode, 0, 2)], _player_growth_per_min()]
+
+
+## Total brave growth per minute across the player's manned huts (readout).
+func _player_growth_per_min() -> float:
+	if _building_manager == null:
+		return 0.0
+	var total: float = 0.0
+	for b: Building in _building_manager.get_buildings_of_tribe(_player_id):
+		if b is Hut:
+			total += (b as Hut).growth_per_minute()
+	return total
+
+
 func _set_wood(amount: int) -> void:
 	if _wood_label != null:
 		_wood_label.text = "Holz: %d" % amount
@@ -1037,6 +1099,9 @@ func _set_mana(amount: float) -> void:
 	var filled: int = mana_segments(amount, MANA_DISPLAY_CAP, MANA_SEGMENTS)
 	for i in range(_mana_segments.size()):
 		_mana_segments[i].color = _mana_fill_color() if i < filled else _mana_empty_color()
+	if _mana_label != null:
+		var rate: float = _tribes[_player_id].mana_rate() if _player_id < _tribes.size() else 0.0
+		_mana_label.text = "Mana: %d  (+%.1f/s)" % [int(amount), rate]
 
 
 func _refresh_tribe_bars() -> void:

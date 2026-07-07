@@ -23,6 +23,10 @@ const ABSORB_RADIUS: float = 5.0
 const ABSORB_INTERVAL: float = 0.5
 ## Terrain/nav updates are batched and flushed at this interval.
 const FLUSH_INTERVAL: float = 0.25
+## Once construction really starts (>=1 wood built in), units standing on the
+## footprint are pushed off at this interval so the rising building never buries
+## them (phase 7i bugfix).
+const CLEAR_INTERVAL: float = 0.5
 const FLATTEN_EPS: float = 0.02
 ## When no wood source is reachable the site stalls; after this interval it
 ## becomes available for workers again (they re-check for new wood/trees).
@@ -138,6 +142,7 @@ var _flatten_claims: Dictionary[Vector2i, int] = {}
 var _dirty: Rect2i = Rect2i()
 var _flush_timer: float = FLUSH_INTERVAL
 var _absorb_timer: float = ABSORB_INTERVAL
+var _clear_timer: float = 0.0   # footprint-clear throttle (phase 7i)
 var _wood_recheck_timer: float = 0.0
 
 
@@ -740,6 +745,32 @@ func _tick_construction(delta: float) -> void:
 		_wood_recheck_timer -= delta
 		if _wood_recheck_timer <= 0.0:
 			wood_stalled = false  # workers may try again (30-s re-check)
+	# From the first delivered wood on, keep the footprint clear of units so the
+	# rising building does not bury (and hide) anyone standing on the plot.
+	if wood_delivered >= 1:
+		_clear_timer -= delta
+		if _clear_timer <= 0.0:
+			_clear_timer = CLEAR_INTERVAL
+			_clear_footprint()
+
+
+## Pushes any unit standing on the footprint to the nearest walkable cell
+## outside it. Delivering workers wait at the entrance (outside), so they are
+## unaffected; units that cannot take orders (dead/thrown/sitting/crew) are left.
+func _clear_footprint() -> void:
+	if unit_manager == null or nav_grid == null:
+		return
+	var rect: Rect2i = footprint_rect()
+	var reach: float = float(maxi(footprint.x, footprint.y)) * 0.5 * TerrainData.CELL_SIZE + 1.0
+	for u in unit_manager.get_units_in_radius(center_world(), reach):
+		if not is_instance_valid(u) or not u.can_take_orders():
+			continue
+		var cell: Vector2i = nav_grid.world_to_cell(u.position)
+		if not rect.has_point(cell):
+			continue
+		var out: Vector2i = nav_grid.nearest_walkable_cell(cell)
+		if out.x >= 0 and not rect.has_point(out):
+			u.order_move(nav_grid.cell_to_world(out))
 
 
 ## Subclass logic while the building is operational.

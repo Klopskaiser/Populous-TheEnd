@@ -74,8 +74,8 @@ func spawn_trees(count: int, p_seed: int) -> void:
 	while placed < count and attempts < count * 60:
 		attempts += 1
 		var c: Vector2i = Vector2i(
-			_rng.randi_range(0, TerrainData.SIZE - 1),
-			_rng.randi_range(0, TerrainData.SIZE - 1))
+			_rng.randi_range(0, terrain_data.size - 1),
+			_rng.randi_range(0, terrain_data.size - 1))
 		if not nav_grid.is_cell_walkable(c):
 			continue
 		if _too_close(c):

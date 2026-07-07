@@ -25,6 +25,10 @@ const COLOR_ROCK: Color = Color(0.45, 0.44, 0.42)
 const COLOR_WATER: Color = Color(0.12, 0.24, 0.42)
 const COLOR_WATER_DEEP: Color = Color(0.07, 0.15, 0.30)
 
+## Round island mask (default). Square maps (phase 7i) set this false so the
+## corners — where players can start — are not clipped away.
+var round_mask: bool = true
+
 var _terrain_data: TerrainData = null
 var _unit_manager: UnitManager = null
 var _building_manager: BuildingManager = null
@@ -39,8 +43,9 @@ var _dragging: bool = false
 
 func setup(p_terrain_data: TerrainData, p_unit_manager: UnitManager,
 		p_building_manager: BuildingManager, p_tree_manager: TreeManager,
-		p_camera_rig: Node3D) -> void:
+		p_camera_rig: Node3D, p_round_mask: bool = true) -> void:
 	_terrain_data = p_terrain_data
+	round_mask = p_round_mask
 	_unit_manager = p_unit_manager
 	_building_manager = p_building_manager
 	_tree_manager = p_tree_manager
@@ -102,7 +107,7 @@ static func height_to_color(h: float) -> Color:
 func _build_terrain_image() -> void:
 	if _terrain_data == null:
 		return
-	var n: int = TerrainData.SIZE
+	var n: int = _terrain_data.size
 	_image = Image.create_empty(n, n, false, Image.FORMAT_RGBA8)
 	for z in range(n):
 		for x in range(n):
@@ -112,22 +117,23 @@ func _build_terrain_image() -> void:
 
 ## Colour for a cell, transparent outside the inscribed circle (round mask).
 func _cell_color(x: int, z: int) -> Color:
-	var n: float = float(TerrainData.SIZE)
-	var half: float = n * 0.5
-	var dx: float = float(x) + 0.5 - half
-	var dz: float = float(z) + 0.5 - half
-	if dx * dx + dz * dz > half * half:
-		return Color(0, 0, 0, 0)
+	if round_mask:
+		var n: float = float(_terrain_data.size)
+		var half: float = n * 0.5
+		var dx: float = float(x) + 0.5 - half
+		var dz: float = float(z) + 0.5 - half
+		if dx * dx + dz * dz > half * half:
+			return Color(0, 0, 0, 0)
 	return height_to_color(_terrain_data.cell_height(Vector2i(x, z)))
 
 
 func _on_terrain_deformed(rect: Rect2i) -> void:
 	if _image == null or _terrain_data == null:
 		return
-	var x0: int = clampi(rect.position.x, 0, TerrainData.SIZE - 1)
-	var z0: int = clampi(rect.position.y, 0, TerrainData.SIZE - 1)
-	var x1: int = clampi(rect.position.x + rect.size.x, 0, TerrainData.SIZE)
-	var z1: int = clampi(rect.position.y + rect.size.y, 0, TerrainData.SIZE)
+	var x0: int = clampi(rect.position.x, 0, _terrain_data.size - 1)
+	var z0: int = clampi(rect.position.y, 0, _terrain_data.size - 1)
+	var x1: int = clampi(rect.position.x + rect.size.x, 0, _terrain_data.size)
+	var z1: int = clampi(rect.position.y + rect.size.y, 0, _terrain_data.size)
 	for z in range(z0, z1):
 		for x in range(x0, x1):
 			_image.set_pixel(x, z, _cell_color(x, z))
@@ -141,10 +147,13 @@ func _draw() -> void:
 	var s: float = minf(size.x, size.y)
 	if _texture != null:
 		draw_texture_rect(_texture, Rect2(Vector2.ZERO, Vector2(s, s)), false)
-	# Gold rim around the circle.
-	draw_arc(Vector2(s * 0.5, s * 0.5), s * 0.5 - 1.0, 0.0, TAU, 48,
-		UiTheme.GOLD, 2.0, true)
-	var world: float = float(TerrainData.SIZE)
+	# Gold rim — circle for round maps, square frame for the square maps.
+	if round_mask:
+		draw_arc(Vector2(s * 0.5, s * 0.5), s * 0.5 - 1.0, 0.0, TAU, 48,
+			UiTheme.GOLD, 2.0, true)
+	else:
+		draw_rect(Rect2(Vector2.ONE, Vector2(s - 2.0, s - 2.0)), UiTheme.GOLD, false, 2.0)
+	var world: float = float(_terrain_data.size)
 	var center: Vector2 = Vector2(s * 0.5, s * 0.5)
 	var radius: float = s * 0.5
 
@@ -176,6 +185,8 @@ func _to_map(world_pos: Vector3, s: float, world: float) -> Vector2:
 
 
 func _inside(p: Vector2, center: Vector2, radius: float) -> bool:
+	if not round_mask:
+		return true   # square map: the whole s×s frame is valid
 	return p.distance_to(center) <= radius
 
 
@@ -217,7 +228,7 @@ func _move_camera_to(local_pos: Vector2) -> void:
 	if _camera_rig == null:
 		return
 	var s: float = minf(size.x, size.y)
-	var world: Vector2 = map_to_world(local_pos, s, float(TerrainData.SIZE))
+	var world: Vector2 = map_to_world(local_pos, s, float(_terrain_data.size))
 	_camera_rig.global_position.x = world.x
 	_camera_rig.global_position.z = world.y
 	queue_redraw()

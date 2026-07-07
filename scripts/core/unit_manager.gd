@@ -487,6 +487,10 @@ func _on_unit_converted(unit: Unit) -> void:
 # --- Spawning -------------------------------------------------------------------
 
 func spawn_unit(scene: PackedScene, tribe_id: int, pos: Vector3) -> Unit:
+	# Hard unit cap per tribe (phase 7i): refuse to spawn beyond it. Callers
+	# (hut spawn, training completion) must handle the null return.
+	if tribe_id >= 0 and tribe_id < tribes.size() and tribes[tribe_id].at_unit_cap():
+		return null
 	var unit: Unit = scene.instantiate() as Unit
 	unit.tribe_id = tribe_id
 	unit.terrain_data = terrain_data

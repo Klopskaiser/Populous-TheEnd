@@ -93,18 +93,22 @@ func test_apply_destruction_stages_deals_stage_damage() -> void:
 
 func test_damaged_hut_stops_production_and_capacity() -> void:
 	var w: Dictionary = _make_world()
-	var hut: Building = w.bm.place(HUT_SCENE, w.tribe0, Vector2i(30, 30), 0, true)
-	check(hut.housing_capacity() == 100, "intact hut houses 100")
-	# Production runs while intact (population 0 < capacity).
+	var hut: Hut = w.bm.place(HUT_SCENE, w.tribe0, Vector2i(30, 30), 0, true) as Hut
+	check(hut.housing_capacity() == Hut.CAPACITY, "intact hut houses Hut.CAPACITY")
+	# A manned hut works toward a spawn (phase 7i: unmanned huts do nothing).
+	for i in range(Hut.CREW_CAPACITY):
+		var b: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, w.tribe0.id, hut.center_world())
+		hut.admit_crew(b)
 	w.bm.tick(3.0)
-	check(hut.spawn_timer < Hut.SPAWN_INTERVAL, "intact hut works toward a spawn")
-	hut.take_damage(90)   # stage 1
+	check(hut.spawn_timer < Hut.SPAWN_INTERVAL, "intact manned hut works toward a spawn")
+	hut.take_damage(90)   # stage 1 -> unusable, crew ejected
 	check(hut.housing_capacity() == 0, "damaged hut houses nobody")
 	check_near(hut.production_progress(), -1.0, "no production bar while damaged")
 	var frozen: float = hut.spawn_timer
+	var pop_after_damage: int = w.tribe0.population()
 	w.bm.tick(5.0)
 	check_near(hut.spawn_timer, frozen, "spawn timer frozen while damaged")
-	check(w.unit_manager.units.is_empty(), "no braves spawned from a damaged hut")
+	check(w.tribe0.population() == pop_after_damage, "no new braves from a damaged hut")
 	_free_world(w)
 
 
@@ -140,8 +144,8 @@ func test_repair_stalls_without_wood() -> void:
 	var w: Dictionary = _make_world()
 	var hut: Building = w.bm.place(HUT_SCENE, w.tribe0, Vector2i(30, 30), 0, true)
 	hut.take_damage(270)   # 90% damage, health 30
-	check(hut.repair_wood_missing() == 13,
-		"90% damage on a 15-wood hut owes floor(13.5) = 13 wood")
+	check(hut.repair_wood_missing() == 10,
+		"90% damage on a 12-wood hut owes floor(10.8) = 10 wood")
 	var brave: Brave = w.unit_manager.spawn_unit(BRAVE_SCENE, 0, Vector3(28, 0, 28))
 	brave.order_repair(hut)
 	_run(w, [brave], func() -> bool: return brave.state == Unit.State.IDLE)
@@ -154,13 +158,12 @@ func test_repair_stalls_without_wood() -> void:
 func test_repair_consumes_floored_wood_and_restores_usability() -> void:
 	var w: Dictionary = _make_world()
 	var hut: Building = w.bm.place(HUT_SCENE, w.tribe0, Vector2i(30, 30), 0, true)
-	hut.take_damage(270)   # 90% damage -> owes 13 wood
-	# Deliver exactly 13 wood as piles inside the absorb radius of the entrance.
+	hut.take_damage(270)   # 90% damage -> owes 10 wood
+	# Deliver exactly 10 wood as piles inside the absorb radius of the entrance.
 	var entrance: Vector3 = hut.entrance_world()
 	w.wpm.deposit(entrance, 5)
 	w.wpm.deposit(entrance + Vector3(2.8, 0, 0), 5)
-	w.wpm.deposit(entrance + Vector3(-2.8, 0, 0), 3)
-	var absorb_ticks: int = _run(w, [], func() -> bool: return hut.repair_wood >= 13)
+	var absorb_ticks: int = _run(w, [], func() -> bool: return hut.repair_wood >= 10)
 	check(absorb_ticks < MAX_TICKS, "delivered piles absorbed into the repair buffer")
 	check(hut.repair_wood_missing() == 0, "all owed wood delivered")
 	var brave: Brave = w.unit_manager.spawn_unit(BRAVE_SCENE, 0, Vector3(28, 0, 28))
@@ -170,7 +173,7 @@ func test_repair_consumes_floored_wood_and_restores_usability() -> void:
 	check(hut.health == hut.max_health, "fully repaired")
 	check(hut.repair_wood == 0, "exactly the floored wood amount consumed")
 	check(hut.destruction_stage() == 0 and hut.is_usable(), "usable again after repair")
-	check(hut.housing_capacity() == 100, "capacity restored")
+	check(hut.housing_capacity() == Hut.CAPACITY, "capacity restored")
 	_run(w, [brave], func() -> bool: return brave.state == Unit.State.IDLE)
 	check(brave.state == Unit.State.IDLE, "worker released after full repair")
 	_free_world(w)

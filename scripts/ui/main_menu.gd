@@ -7,15 +7,23 @@ class_name MainMenu extends Control
 
 const GAME_SCENE_PATH: String = "res://scenes/main.tscn"
 
-## Selectable maps (only the fixed skirmish island exists so far).
-const MAPS: Array[Dictionary] = [
-	{"id": "island", "name": "Insel"},
-]
-
 var _pages: Array[Control] = []
 var _center: CenterContainer = null
 var _ai_count_option: OptionButton = null
 var _map_option: OptionButton = null
+var _map_desc: Label = null
+## Selectable map ids, index-aligned with the OptionButton items.
+var _map_ids: PackedStringArray = MapGenerator.map_ids()
+
+
+## Short German blurb per map, shown under the selector.
+static func _map_description(map_id: String) -> String:
+	match map_id:
+		"island": return "Runde Insel, Wasser ringsum. Standardgröße."
+		"seenland": return "Doppelt groß. See in der Mitte, Start in den Ecken, angehobene Ecken."
+		"bergpass": return "Doppelt groß. Gebirge mit 3 engen Pässen teilt die Karte in zwei Hälften."
+		"plateau": return "Standardgröße. Start auf erhöhtem Plateau mit harten Kanten und einer Rampe."
+	return ""
 
 
 func _ready() -> void:
@@ -40,11 +48,16 @@ func _ready() -> void:
 	_pages.append(_build_options_page())
 	_show_page(0)
 
-	# Headless verification hook: `godot ... -- skirmish=N` skips the menu and
-	# starts a skirmish with N AIs right away (the menu needs mouse input).
-	for arg in OS.get_cmdline_user_args():
+	# Headless verification hook: `godot ... -- skirmish=N [map=<id>]` skips the
+	# menu and starts a skirmish with N AIs right away (the menu needs mouse input).
+	var args: PackedStringArray = OS.get_cmdline_user_args()
+	var map_arg: String = MapGenerator.DEFAULT_MAP
+	for arg in args:
+		if arg.begins_with("map="):
+			map_arg = arg.get_slice("=", 1)
+	for arg in args:
 		if arg.begins_with("skirmish="):
-			_launch.call_deferred(MatchConfig.skirmish(int(arg.get_slice("=", 1))))
+			_launch.call_deferred(MatchConfig.skirmish(int(arg.get_slice("=", 1)), map_arg))
 			return
 
 
@@ -125,10 +138,18 @@ func _build_skirmish_page() -> Control:
 	vb.add_child(map_label)
 	_map_option = OptionButton.new()
 	UiTheme.style_button(_map_option)
-	for map_entry in MAPS:
-		_map_option.add_item(map_entry["name"])
+	for map_id in _map_ids:
+		_map_option.add_item(MapGenerator.display_name(map_id))
 	_map_option.select(0)
+	_map_option.item_selected.connect(_on_map_selected)
 	vb.add_child(_map_option)
+
+	_map_desc = Label.new()
+	_map_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_map_desc.custom_minimum_size = Vector2(300, 0)
+	_map_desc.add_theme_color_override("font_color", UiTheme.GOLD)
+	vb.add_child(_map_desc)
+	_on_map_selected(0)
 
 	vb.add_child(HSeparator.new())
 	_add_button(vb, "Starten", _start_skirmish)
@@ -160,9 +181,14 @@ func _build_options_page() -> Control:
 
 # --- Match start -----------------------------------------------------------------
 
+func _on_map_selected(index: int) -> void:
+	if _map_desc != null and index >= 0 and index < _map_ids.size():
+		_map_desc.text = _map_description(_map_ids[index])
+
+
 func _start_skirmish() -> void:
 	var ai_count: int = _ai_count_option.get_selected_id()
-	var map_id: String = MAPS[_map_option.selected]["id"]
+	var map_id: String = _map_ids[_map_option.selected]
 	_launch(MatchConfig.skirmish(ai_count, map_id))
 
 

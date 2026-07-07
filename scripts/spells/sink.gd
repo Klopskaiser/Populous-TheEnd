@@ -40,14 +40,14 @@ func execute(_tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:
 ## Lowering height map: full DEPTH at the centre, smoothstep falloff to zero
 ## at the rim, clamped so nothing dips below the sea floor.
 static func sink_targets(td: TerrainData, center: Vector2) -> Dictionary:
-	var min_vx: int = clampi(int(floor((center.x - RADIUS) / TerrainData.CELL_SIZE)), 0, TerrainData.VERTS - 1)
-	var max_vx: int = clampi(int(ceil((center.x + RADIUS) / TerrainData.CELL_SIZE)), 0, TerrainData.VERTS - 1)
-	var min_vz: int = clampi(int(floor((center.y - RADIUS) / TerrainData.CELL_SIZE)), 0, TerrainData.VERTS - 1)
-	var max_vz: int = clampi(int(ceil((center.y + RADIUS) / TerrainData.CELL_SIZE)), 0, TerrainData.VERTS - 1)
+	var min_vx: int = clampi(int(floor((center.x - RADIUS) / TerrainData.CELL_SIZE)), 0, td.verts - 1)
+	var max_vx: int = clampi(int(ceil((center.x + RADIUS) / TerrainData.CELL_SIZE)), 0, td.verts - 1)
+	var min_vz: int = clampi(int(floor((center.y - RADIUS) / TerrainData.CELL_SIZE)), 0, td.verts - 1)
+	var max_vz: int = clampi(int(ceil((center.y + RADIUS) / TerrainData.CELL_SIZE)), 0, td.verts - 1)
 
 	var indices: PackedInt32Array = PackedInt32Array()
 	var targets: PackedFloat32Array = PackedFloat32Array()
-	var changed_min: Vector2i = Vector2i(TerrainData.VERTS, TerrainData.VERTS)
+	var changed_min: Vector2i = Vector2i(td.verts, td.verts)
 	var changed_max: Vector2i = Vector2i(-1, -1)
 	for vz in range(min_vz, max_vz + 1):
 		for vx in range(min_vx, max_vx + 1):
@@ -57,7 +57,7 @@ static func sink_targets(td: TerrainData, center: Vector2) -> Dictionary:
 				continue
 			var t: float = clampf((RADIUS - dist) / RADIUS, 0.0, 1.0)
 			var falloff: float = t * t * (3.0 - 2.0 * t)
-			var idx: int = vz * TerrainData.VERTS + vx
+			var idx: int = vz * td.verts + vx
 			var current: float = td.heights[idx]
 			var nh: float = maxf(current - DEPTH * falloff, FLOOR_LEVEL)
 			if current - nh <= 0.01:
@@ -70,8 +70,8 @@ static func sink_targets(td: TerrainData, center: Vector2) -> Dictionary:
 	var rect: Rect2i = Rect2i()
 	if changed_max.x >= 0:
 		var cmin: Vector2i = (changed_min - Vector2i.ONE).clamp(Vector2i.ZERO,
-			Vector2i(TerrainData.SIZE - 1, TerrainData.SIZE - 1))
+			Vector2i(td.size - 1, td.size - 1))
 		var cmax: Vector2i = changed_max.clamp(Vector2i.ZERO,
-			Vector2i(TerrainData.SIZE - 1, TerrainData.SIZE - 1))
+			Vector2i(td.size - 1, td.size - 1))
 		rect = Rect2i(cmin, cmax - cmin + Vector2i.ONE)
 	return {"indices": indices, "targets": targets, "rect": rect}

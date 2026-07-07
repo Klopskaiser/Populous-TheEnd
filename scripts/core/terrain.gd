@@ -33,6 +33,7 @@ var _chunk_count: int = TerrainData.SIZE / CHUNK  # chunks per side
 ## Builds the whole terrain from the given data. Call once at startup.
 func build(p_data: TerrainData) -> void:
 	data = p_data
+	_chunk_count = data.size / CHUNK   # map-driven (128 -> 8, 256 -> 16)
 	_ensure_nodes()
 	_build_all_chunks()
 	update_collision()
@@ -52,14 +53,14 @@ func _ensure_nodes() -> void:
 	if _static_body == null:
 		_static_body = StaticBody3D.new()
 		_static_body.name = "TerrainBody"
-		# HeightMapShape3D is origin-centred -> shift to cover world [0..SIZE].
-		_static_body.position = Vector3(TerrainData.SIZE * 0.5, 0.0, TerrainData.SIZE * 0.5)
+		# HeightMapShape3D is origin-centred -> shift to cover world [0..size].
+		_static_body.position = Vector3(data.size * 0.5, 0.0, data.size * 0.5)
 		add_child(_static_body)
 		_collision_shape = CollisionShape3D.new()
 		_static_body.add_child(_collision_shape)
 		_height_shape = HeightMapShape3D.new()
-		_height_shape.map_width = TerrainData.VERTS
-		_height_shape.map_depth = TerrainData.VERTS
+		_height_shape.map_width = data.verts
+		_height_shape.map_depth = data.verts
 		_collision_shape.shape = _height_shape
 
 	_ensure_water()
@@ -71,9 +72,9 @@ func _ensure_water() -> void:
 	var water: MeshInstance3D = MeshInstance3D.new()
 	water.name = "Water"
 	var plane: PlaneMesh = PlaneMesh.new()
-	plane.size = Vector2(TerrainData.SIZE, TerrainData.SIZE)
+	plane.size = Vector2(data.size, data.size)
 	water.mesh = plane
-	water.position = Vector3(TerrainData.SIZE * 0.5, TerrainData.SEA_LEVEL, TerrainData.SIZE * 0.5)
+	water.position = Vector3(data.size * 0.5, TerrainData.SEA_LEVEL, data.size * 0.5)
 	var wmat: StandardMaterial3D = StandardMaterial3D.new()
 	wmat.albedo_color = Color(0.15, 0.35, 0.6, 0.55)
 	wmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -121,8 +122,8 @@ func _normal_at(x: int, z: int) -> Vector3:
 func _build_chunk_mesh(cx: int, cz: int, mi: MeshInstance3D) -> void:
 	var x0: int = cx * CHUNK
 	var z0: int = cz * CHUNK
-	var x1: int = mini(x0 + CHUNK, TerrainData.SIZE)  # inclusive vertex range end
-	var z1: int = mini(z0 + CHUNK, TerrainData.SIZE)
+	var x1: int = mini(x0 + CHUNK, data.size)  # inclusive vertex range end
+	var z1: int = mini(z0 + CHUNK, data.size)
 	var w: int = x1 - x0 + 1  # vertices along x
 	var d: int = z1 - z0 + 1  # vertices along z
 

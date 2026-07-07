@@ -84,9 +84,11 @@ func _handle_pan(delta: float) -> void:
 	right = right.normalized()
 	var motion: Vector3 = (right * input.x + forward * input.y) * pan_speed * delta
 	global_position += motion
-	# Keep the rig within the terrain bounds.
-	global_position.x = clampf(global_position.x, 0.0, float(TerrainData.SIZE))
-	global_position.z = clampf(global_position.z, 0.0, float(TerrainData.SIZE))
+	# Keep the rig within the terrain bounds (map-driven; falls back to default).
+	var td: TerrainData = GameState.terrain_data
+	var bound: float = float(td.size) if td != null else float(TerrainData.SIZE)
+	global_position.x = clampf(global_position.x, 0.0, bound)
+	global_position.z = clampf(global_position.z, 0.0, bound)
 
 
 func _edge_scroll_vector() -> Vector2:

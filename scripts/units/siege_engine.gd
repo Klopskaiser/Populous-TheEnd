@@ -628,8 +628,9 @@ func _nearest_enemy_unit(max_range: float) -> Unit:
 	for u in path_service.get_units_in_radius(position, max_range, SCAN_MAX_CANDIDATES):
 		if u == self or u.state == State.DEAD or u.tribe_id == tribe_id:
 			continue
-		if u.state == State.SIT:
-			continue
+		# NOTE (phase 7i): unlike foot units, the catapult MAY bombard units that
+		# are being converted (State.SIT) — its splash does not care about the
+		# trance. So no SIT skip here.
 		# Skip other non-targetable units, but an enemy CATAPULT is fair game
 		# (its crew takes the shot's splash) — catapult-vs-catapult.
 		if not u.is_targetable() and not (u is SiegeEngine):

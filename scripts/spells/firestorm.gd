@@ -20,7 +20,7 @@ const SKY_DRIFT: float = 5.0
 func _init() -> void:
 	id = &"firestorm"
 	display_name_de = "Feuerregen"
-	charge_cost = 70.0
+	charge_cost = 100.0
 	max_charges = 2
 	cast_range = 10.0
 

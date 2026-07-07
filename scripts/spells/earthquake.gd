@@ -27,7 +27,7 @@ const FAULT_LAVA_MOLTEN: float = 3.0
 func _init() -> void:
 	id = &"earthquake"
 	display_name_de = "Erdbeben"
-	charge_cost = 80.0
+	charge_cost = 110.0
 	max_charges = 2
 	cast_range = 10.0
 
@@ -63,14 +63,14 @@ static func upheaval_targets(td: TerrainData, center: Vector2) -> Dictionary:
 	var fault: Vector2 = Vector2(cos(angle), sin(angle))
 	var normal: Vector2 = Vector2(-fault.y, fault.x)
 
-	var min_vx: int = clampi(int(floor((center.x - RADIUS) / TerrainData.CELL_SIZE)), 0, TerrainData.VERTS - 1)
-	var max_vx: int = clampi(int(ceil((center.x + RADIUS) / TerrainData.CELL_SIZE)), 0, TerrainData.VERTS - 1)
-	var min_vz: int = clampi(int(floor((center.y - RADIUS) / TerrainData.CELL_SIZE)), 0, TerrainData.VERTS - 1)
-	var max_vz: int = clampi(int(ceil((center.y + RADIUS) / TerrainData.CELL_SIZE)), 0, TerrainData.VERTS - 1)
+	var min_vx: int = clampi(int(floor((center.x - RADIUS) / TerrainData.CELL_SIZE)), 0, td.verts - 1)
+	var max_vx: int = clampi(int(ceil((center.x + RADIUS) / TerrainData.CELL_SIZE)), 0, td.verts - 1)
+	var min_vz: int = clampi(int(floor((center.y - RADIUS) / TerrainData.CELL_SIZE)), 0, td.verts - 1)
+	var max_vz: int = clampi(int(ceil((center.y + RADIUS) / TerrainData.CELL_SIZE)), 0, td.verts - 1)
 
 	var indices: PackedInt32Array = PackedInt32Array()
 	var targets: PackedFloat32Array = PackedFloat32Array()
-	var changed_min: Vector2i = Vector2i(TerrainData.VERTS, TerrainData.VERTS)
+	var changed_min: Vector2i = Vector2i(td.verts, td.verts)
 	var changed_max: Vector2i = Vector2i(-1, -1)
 	for vz in range(min_vz, max_vz + 1):
 		for vx in range(min_vx, max_vx + 1):
@@ -86,7 +86,7 @@ static func upheaval_targets(td: TerrainData, center: Vector2) -> Dictionary:
 				delta = -DROP * rim * clampf(1.0 - absf(side) / RADIUS, 0.0, 1.0)
 			else:
 				delta = LIFT * rim * clampf(1.0 - side / (RADIUS * 0.6), 0.0, 1.0)
-			var idx: int = vz * TerrainData.VERTS + vx
+			var idx: int = vz * td.verts + vx
 			var current: float = td.heights[idx]
 			# Water clamp: never lift the sea floor (lowering stays allowed).
 			if delta > 0.0 and current <= TerrainData.SEA_LEVEL:
@@ -101,9 +101,9 @@ static func upheaval_targets(td: TerrainData, center: Vector2) -> Dictionary:
 	var rect: Rect2i = Rect2i()
 	if changed_max.x >= 0:
 		var cmin: Vector2i = (changed_min - Vector2i.ONE).clamp(Vector2i.ZERO,
-			Vector2i(TerrainData.SIZE - 1, TerrainData.SIZE - 1))
+			Vector2i(td.size - 1, td.size - 1))
 		var cmax: Vector2i = changed_max.clamp(Vector2i.ZERO,
-			Vector2i(TerrainData.SIZE - 1, TerrainData.SIZE - 1))
+			Vector2i(td.size - 1, td.size - 1))
 		rect = Rect2i(cmin, cmax - cmin + Vector2i.ONE)
 	return {"indices": indices, "targets": targets, "rect": rect,
 		"fault": fault, "normal": normal}

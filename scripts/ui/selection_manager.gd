@@ -383,6 +383,13 @@ func _selection_has_garrison_capable() -> bool:
 	return false
 
 
+func _selection_has_brave() -> bool:
+	for u in selected:
+		if is_instance_valid(u) and u.state != Unit.State.DEAD and u is Brave:
+			return true
+	return false
+
+
 ## Tracks the building under the cursor so it can show its production bar on
 ## hover (in addition to when selected).
 func _update_hover(screen_pos: Vector2) -> void:
@@ -568,6 +575,11 @@ func _dispatch_context_command(hit: Dictionary, queue_up: bool = false) -> bool:
 		if building is Watchtower and building.is_usable() and not building.under_construction \
 				and not _selection_has_garrison_capable():
 			return false
+		# A usable hut with no brave selected falls through to a plain move
+		# (only braves can man it).
+		if building is Hut and building.is_usable() and not building.under_construction \
+				and not _selection_has_brave():
+			return false
 		if not _building_is_actionable(building):
 			return false
 		if queue_up:
@@ -586,7 +598,7 @@ func _building_is_actionable(building: Building) -> bool:
 	if building.is_usable():
 		return building is ReincarnationSite or building is Forester \
 			or building is Workshop or building is Watchtower \
-			or building is TrainingBuilding
+			or building is TrainingBuilding or building is Hut
 	return building.health < building.max_health and building.health > 0
 
 
@@ -606,6 +618,8 @@ func _apply_building_command(units: Array[Unit], building: Building) -> void:
 			_tribe_commands.order_workshop(units, building)
 		elif building is Watchtower:
 			_tribe_commands.order_garrison(units, building as Watchtower)
+		elif building is Hut:
+			_tribe_commands.order_man_hut(units, building as Hut)
 		elif building is TrainingBuilding:
 			_tribe_commands.order_train(building, units)
 		return

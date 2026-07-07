@@ -24,7 +24,7 @@ var _vehicle_astar: AStarGrid2D = AStarGrid2D.new()
 
 func _init(p_terrain: TerrainData) -> void:
 	terrain = p_terrain
-	_astar.region = Rect2i(0, 0, TerrainData.SIZE, TerrainData.SIZE)
+	_astar.region = Rect2i(0, 0, terrain.size, terrain.size)
 	_astar.cell_size = Vector2(TerrainData.CELL_SIZE, TerrainData.CELL_SIZE)
 	_astar.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES
 	_astar.update()
@@ -32,15 +32,15 @@ func _init(p_terrain: TerrainData) -> void:
 	_vehicle_astar.cell_size = _astar.cell_size
 	_vehicle_astar.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES
 	_vehicle_astar.update()
-	update_region(Rect2i(0, 0, TerrainData.SIZE, TerrainData.SIZE))
+	update_region(Rect2i(0, 0, terrain.size, terrain.size))
 
 
 # --- Cell <-> world conversion ------------------------------------------------
 
 func world_to_cell(pos: Vector3) -> Vector2i:
 	return Vector2i(
-		clampi(int(floor(pos.x / TerrainData.CELL_SIZE)), 0, TerrainData.SIZE - 1),
-		clampi(int(floor(pos.z / TerrainData.CELL_SIZE)), 0, TerrainData.SIZE - 1))
+		clampi(int(floor(pos.x / TerrainData.CELL_SIZE)), 0, terrain.size - 1),
+		clampi(int(floor(pos.z / TerrainData.CELL_SIZE)), 0, terrain.size - 1))
 
 
 ## World position of a cell centre, with Y from the terrain heightmap.
@@ -87,8 +87,8 @@ func is_cell_blocked_by_building(cell: Vector2i) -> bool:
 ## Nearest walkable cell via outward ring search; (-1, -1) if none in range.
 func nearest_walkable_cell(cell: Vector2i) -> Vector2i:
 	cell = Vector2i(
-		clampi(cell.x, 0, TerrainData.SIZE - 1),
-		clampi(cell.y, 0, TerrainData.SIZE - 1))
+		clampi(cell.x, 0, terrain.size - 1),
+		clampi(cell.y, 0, terrain.size - 1))
 	if not _astar.is_point_solid(cell):
 		return cell
 	for radius in range(1, MAX_SNAP_RADIUS + 1):
@@ -124,7 +124,7 @@ func _ring_cells(center: Vector2i, radius: int) -> Array[Vector2i]:
 ## Re-reads walkability of all cells in the rect from TerrainData (call with the
 ## Rect2i returned by TerrainData.raise_area after a deformation).
 func update_region(rect: Rect2i) -> void:
-	var r: Rect2i = rect.intersection(Rect2i(0, 0, TerrainData.SIZE, TerrainData.SIZE))
+	var r: Rect2i = rect.intersection(Rect2i(0, 0, terrain.size, terrain.size))
 	for z in range(r.position.y, r.position.y + r.size.y):
 		for x in range(r.position.x, r.position.x + r.size.x):
 			var cell: Vector2i = Vector2i(x, z)
@@ -144,7 +144,7 @@ func is_cell_vehicle_walkable(cell: Vector2i) -> bool:
 ## Recomputes vehicle passability from the unit grid. Grown by 1 because a
 ## cell's vehicle flag depends on its neighbours.
 func _refresh_vehicle_region(rect: Rect2i) -> void:
-	var r: Rect2i = rect.grow(1).intersection(Rect2i(0, 0, TerrainData.SIZE, TerrainData.SIZE))
+	var r: Rect2i = rect.grow(1).intersection(Rect2i(0, 0, terrain.size, terrain.size))
 	for z in range(r.position.y, r.position.y + r.size.y):
 		for x in range(r.position.x, r.position.x + r.size.x):
 			var cell: Vector2i = Vector2i(x, z)
@@ -195,8 +195,8 @@ func find_vehicle_path(from: Vector3, to: Vector3) -> PackedVector3Array:
 ## Nearest vehicle-passable cell via outward ring search; (-1, -1) if none.
 func _nearest_vehicle_cell(cell: Vector2i) -> Vector2i:
 	cell = Vector2i(
-		clampi(cell.x, 0, TerrainData.SIZE - 1),
-		clampi(cell.y, 0, TerrainData.SIZE - 1))
+		clampi(cell.x, 0, terrain.size - 1),
+		clampi(cell.y, 0, terrain.size - 1))
 	if not _vehicle_astar.is_point_solid(cell):
 		return cell
 	for radius in range(1, MAX_SNAP_RADIUS + 1):
@@ -219,7 +219,7 @@ func _nearest_vehicle_cell(cell: Vector2i) -> Vector2i:
 ## Blocks/unblocks cells for a building footprint (persists across
 ## terrain-driven update_region calls).
 func fill_solid_region(rect: Rect2i, solid: bool) -> void:
-	var r: Rect2i = rect.intersection(Rect2i(0, 0, TerrainData.SIZE, TerrainData.SIZE))
+	var r: Rect2i = rect.intersection(Rect2i(0, 0, terrain.size, terrain.size))
 	for z in range(r.position.y, r.position.y + r.size.y):
 		for x in range(r.position.x, r.position.x + r.size.x):
 			var cell: Vector2i = Vector2i(x, z)

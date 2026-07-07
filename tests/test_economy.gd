@@ -51,6 +51,17 @@ func _free_world(w: Dictionary) -> void:
 	w.unit_manager.free()        # frees spawned units (children)
 
 
+## Mans a hut with `n` fresh braves (phase 7i crew; each counts toward
+## population). Returns the crew braves.
+func _man_hut(w: Dictionary, hut: Hut, n: int) -> Array[Unit]:
+	var crew: Array[Unit] = []
+	for i in range(n):
+		var b: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, hut.tribe_id, hut.center_world())
+		if b != null and hut.admit_crew(b):
+			crew.append(b)
+	return crew
+
+
 # --- Mana formula -----------------------------------------------------------------
 
 func test_mana_formula() -> void:
@@ -499,11 +510,23 @@ func test_hut_spawns_braves_until_capacity() -> void:
 	check(hut != null, "hut placed")
 	check(tribe.housing_capacity() == Hut.CAPACITY, "capacity of one hut is %d" % Hut.CAPACITY)
 
+	# An unmanned hut produces nothing (phase 7i). NONE prevents auto-manning.
+	tribe.growth_mode = Tribe.GrowthMode.NONE
+	for i in range(int(Hut.SPAWN_INTERVAL / TICK) + 5):
+		hut.tick(TICK)
+	check(tribe.population() == 0, "an unmanned hut produces no braves")
+
+	# Man it fully -> it produces again. Crew counts toward population.
+	tribe.growth_mode = Tribe.GrowthMode.MAXIMUM
+	_man_hut(w, hut, Hut.CREW_CAPACITY)
+	var base: int = tribe.population()
+	check(base == Hut.CREW_CAPACITY, "crew counts toward population")
+
 	var t: float = 0.0
-	while t < Hut.SPAWN_INTERVAL + 0.5 and tribe.population() == 0:
+	while t < Hut.SPAWN_INTERVAL + 1.0 and tribe.population() == base:
 		hut.tick(TICK)
 		t += TICK
-	check(tribe.population() == 1, "one brave after one spawn interval")
+	check(tribe.population() == base + 1, "a manned hut spawns a brave")
 
 	var dummies: Array[Unit] = []
 	while tribe.population() < Hut.CAPACITY:
@@ -625,6 +648,7 @@ func test_hut_production_progress() -> void:
 	var w: Dictionary = _make_world()
 	var hut: Hut = w.building_manager.place(
 		HUT_SCENE, w.tribe, Vector2i(60, 60), 0, true) as Hut   # prebuilt, producing
+	_man_hut(w, hut, Hut.CREW_CAPACITY)   # a hut only shows a bar while manned (phase 7i)
 	hut.spawn_timer = Hut.SPAWN_INTERVAL
 	check_near(hut.production_progress(), 0.0, "fresh spawn timer -> 0 progress")
 	hut.spawn_timer = Hut.SPAWN_INTERVAL * 0.5
@@ -635,6 +659,39 @@ func test_hut_production_progress() -> void:
 	var site: Hut = w.building_manager.place(
 		HUT_SCENE, w.tribe, Vector2i(70, 70), 0, false) as Hut   # under construction
 	check(site.production_progress() < 0.0, "under-construction hut has no production bar")
+	_free_world(w)
+
+
+## Phase 7i bugfix: once construction really starts (>=1 wood built in), units
+## standing on the footprint are pushed off so the rising building never buries
+## them.
+func test_construction_clears_footprint() -> void:
+	var w: Dictionary = _make_world()
+	var site: Hut = w.building_manager.place(
+		HUT_SCENE, w.tribe, Vector2i(60, 60), 0, false) as Hut   # under construction
+	var rect: Rect2i = site.footprint_rect()
+	# A brave standing right on the footprint.
+	var mid: Vector2i = site.cell + site.footprint / 2
+	var brave: Unit = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 0, w.nav.cell_to_world(mid))
+	check(rect.has_point(w.nav.world_to_cell(brave.position)),
+		"brave starts on the footprint")
+	# Before any wood: no clearing (still flattening/placing).
+	site.tick(1.0)
+	brave.tick(0.1)
+	w.unit_manager.tick(0.1)
+	check(brave.state != Unit.State.MOVE, "no eviction before the first wood")
+	# First wood delivered -> the site clears its footprint.
+	site.wood_delivered = 1
+	var cleared: bool = false
+	for i in range(int(10.0 / 0.1)):
+		site.tick(0.1)
+		brave.tick(0.1)
+		w.unit_manager.tick(0.1)
+		if not rect.has_point(w.nav.world_to_cell(brave.position)):
+			cleared = true
+			break
+	check(cleared, "the brave is pushed off the footprint once building starts")
 	_free_world(w)
 
 

@@ -202,15 +202,20 @@ func test_hut_rally_on_camp_trains_brave() -> void:
 	check(hut.rally_training_building() == camp,
 		"the rally point resolves to the warrior camp")
 
-	# Tick the hut until it spawns its first brave.
-	for i in range(int(Hut.SPAWN_INTERVAL / TICK) + 5):
+	# A hut only produces while manned (phase 7i); the crew counts as population.
+	for i in range(Hut.CREW_CAPACITY):
+		hut.admit_crew(_spawn_brave(w, Vector2i(28, 28)))
+	var base: int = w.tribe.population()
+
+	# Tick the hut until it spawns a fresh (non-crew) brave.
+	for i in range(int(Hut.SPAWN_INTERVAL / TICK) * 2 + 5):
 		hut.tick(TICK)
-		if w.tribe.population() > 0:
+		if w.tribe.population() > base:
 			break
-	check(w.tribe.population() == 1, "the hut spawned a brave")
+	check(w.tribe.population() == base + 1, "the manned hut spawned a brave")
 	var brave: Brave = null
 	for u: Unit in w.tribe.units:
-		if u is Brave:
+		if u is Brave and u.state != Unit.State.GARRISON:   # skip hidden crew
 			brave = u as Brave
 	check(brave != null and brave.state == Unit.State.TRAIN,
 		"the new brave heads for training instead of the rally spot")

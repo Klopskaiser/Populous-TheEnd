@@ -49,7 +49,9 @@ func _tick_state(delta: float) -> void:
 
 ## Prefer converting over brawling — normal enemies pull the preacher into
 ## CAST (approach + channel); preachers/shamans are attacked in melee. Runs
-## from IDLE and while marching (attack-move, Unit._tick_move).
+## from IDLE and while marching (attack-move, Unit._tick_move). Multiple
+## preachers spread out: the approach focus prefers a target no other own
+## preacher is already handling (phase 7i).
 func _engage_on_sight(delta: float) -> bool:
 	if not _due_to_scan(delta):
 		return false
@@ -58,10 +60,52 @@ func _engage_on_sight(delta: float) -> bool:
 		return _try_engage_building()   # lowest-priority fallback (phase 7g)
 	if enemy.is_conversion_immune():
 		_begin_attack(enemy)   # priest duel (or shaman) -> melee
-	else:
-		_convert_target = enemy
-		_set_state(State.CAST)
+		return true
+	# Convertible: prefer an unclaimed target so preachers fan out instead of
+	# piling onto the same crowd (falls back to the nearest if all are claimed).
+	var focus: Unit = _pick_convert_focus()
+	_convert_target = focus if focus != null else enemy
+	_set_state(State.CAST)
 	return true
+
+
+## True when another OWN preacher is already converting `u` (it sits under him)
+## or walking toward it as its focus. Cheap: only a handful of preachers exist.
+func _claimed_by_peer(u: Unit) -> bool:
+	if tribe == null or u == null:
+		return false
+	for p in tribe.units:
+		if p == self or p.state == State.DEAD or not (p is Preacher):
+			continue
+		if u.state == State.SIT and u.converting_preacher == p:
+			return true
+		if (p as Preacher)._convert_target == u:
+			return true
+	return false
+
+
+## Nearest convertible enemy in range, preferring one no peer preacher has
+## claimed; returns null when nobody convertible is in range.
+func _pick_convert_focus() -> Unit:
+	if path_service == null:
+		return null
+	var nearest_free: Unit = null
+	var d_free: float = INF
+	var nearest_any: Unit = null
+	var d_any: float = INF
+	for u in path_service.get_units_in_radius(position, AGGRO_RADIUS, SCAN_MAX_CANDIDATES):
+		if u == self or u.state == State.DEAD or u.tribe_id == tribe_id:
+			continue
+		if u.state == State.SIT or u.is_conversion_immune() or not u.is_targetable():
+			continue
+		var d: float = _flat_dist(position, u.position)
+		if d < d_any:
+			d_any = d
+			nearest_any = u
+		if not _claimed_by_peer(u) and d < d_free:
+			d_free = d
+			nearest_free = u
+	return nearest_free if nearest_free != null else nearest_any
 
 
 ## Explicit attack order: convertible enemies are converted (walk into range,
@@ -120,8 +164,12 @@ func _refresh_conversion() -> void:
 		_set_state(State.IDLE)
 		return
 	var any_in_range: bool = false
-	var nearest: Unit = null
-	var nearest_d: float = INF
+	# Approach focus for when nobody is in range: prefer a target no peer
+	# preacher has claimed (spread out), else the nearest one (phase 7i).
+	var nearest_free: Unit = null
+	var d_free: float = INF
+	var nearest_any: Unit = null
+	var d_any: float = INF
 	for u in path_service.get_units_in_radius(position, AGGRO_RADIUS):
 		if u == self or u.state == State.DEAD or u.tribe_id == tribe_id:
 			continue
@@ -143,12 +191,17 @@ func _refresh_conversion() -> void:
 					continue
 				u.begin_conversion(self,
 					randf_range(CONVERT_TIME_MIN, CONVERT_TIME_MAX))
-		elif u.state != State.SIT and d < nearest_d:
-			nearest_d = d
-			nearest = u
+		elif u.state != State.SIT:
+			if d < d_any:
+				d_any = d
+				nearest_any = u
+			if not _claimed_by_peer(u) and d < d_free:
+				d_free = d
+				nearest_free = u
 	if any_in_range:
 		_convert_target = null   # stand and channel
 		return
+	var nearest: Unit = nearest_free if nearest_free != null else nearest_any
 	if nearest != null:
 		_convert_target = nearest
 		return

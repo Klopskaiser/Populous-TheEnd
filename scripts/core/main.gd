@@ -85,15 +85,6 @@ var _time_scale_index: int = 0
 func _ready() -> void:
 	# Every match starts in real time (the time-lapse is per-session global).
 	Engine.time_scale = 1.0
-	var td: TerrainData = TerrainData.new()
-	td.generate_island(GameState.ISLAND_SEED)
-	GameState.terrain_data = td
-	GameState.terrain = _terrain
-
-	_terrain.build(td)
-
-	var nav: NavGrid = NavGrid.new(td)
-	GameState.nav_grid = nav
 
 	# Match configuration (set by the main menu); direct scene starts (tests,
 	# headless checks) fall back to the start mission — today's behaviour.
@@ -102,6 +93,20 @@ func _ready() -> void:
 		config = MatchConfig.start_mission()
 		GameState.match_config = config
 	GameState.stop_win_tracking()
+
+	# Map (phase 7i): skirmish uses the chosen map; other modes use the default
+	# island. The map decides the grid size (128 or 256) and its heightmap.
+	var map_id: String = config.map_id if config.mode == MatchConfig.Mode.SKIRMISH \
+		else MapGenerator.DEFAULT_MAP
+	GameState.map_id = map_id
+	var td: TerrainData = MapGenerator.create_terrain(map_id, GameState.ISLAND_SEED)
+	GameState.terrain_data = td
+	GameState.terrain = _terrain
+
+	_terrain.build(td)
+
+	var nav: NavGrid = NavGrid.new(td)
+	GameState.nav_grid = nav
 
 	# Tribes: 0 = player (blue), rest = AI — identical instances.
 	var tribes: Array[Tribe] = []
@@ -168,9 +173,11 @@ func _ready() -> void:
 	GameState.match_ended.connect(func(id: int) -> void:
 		print("Match beendet — Sieger: Stamm %d" % id))
 
-	var center_cell: Vector2i = Vector2i(TerrainData.SIZE / 2, TerrainData.SIZE / 2)
+	var center_cell: Vector2i = Vector2i(td.size / 2, td.size / 2)
 	var camera_anchor: Vector2i = center_cell
-	_tree_manager.spawn_trees(TREE_COUNT, GameState.ISLAND_SEED)
+	# Scale the wild-tree count with the map area (128 -> TREE_COUNT, 256 -> 4x).
+	var tree_count: int = TREE_COUNT * (td.size * td.size) / (TerrainData.SIZE * TerrainData.SIZE)
+	_tree_manager.spawn_trees(tree_count, GameState.ISLAND_SEED)
 	match config.mode:
 		MatchConfig.Mode.DEBUG_BATTLE:
 			# Sandbox: two armies clashing, no bases and no win tracking.
@@ -200,7 +207,7 @@ func _place_start_site(tribe: Tribe, nav: NavGrid) -> void:
 ## First valid footprint near `anchor` gets the tribe's reincarnation site.
 func _place_site_near(tribe: Tribe, anchor: Vector2i) -> Building:
 	var fp: Vector2i = ReincarnationSite.FOOTPRINT
-	for radius in range(0, TerrainData.SIZE / 2):
+	for radius in range(0, GameState.terrain_data.size / 2):
 		for cell in _ring_cells(anchor, radius):
 			if _tribe_commands.can_place_at(cell, fp):
 				return _building_manager.place(SITE_SCENE, tribe, cell, 0, true)
@@ -227,7 +234,7 @@ func _spawn_shaman_near(tribe: Tribe, site: Building, anchor: Vector2i, nav: Nav
 ## spread out via a spiral ring search.
 func _spawn_braves_near(tribe_id: int, center: Vector2i, count: int, nav: NavGrid) -> void:
 	var spawned: int = 0
-	for radius in range(0, TerrainData.SIZE / 2):
+	for radius in range(0, GameState.terrain_data.size / 2):
 		for cell in _ring_cells(center, radius):
 			if spawned >= count:
 				return
@@ -252,8 +259,10 @@ func _setup_skirmish(tribes: Array[Tribe], nav: NavGrid) -> Vector2i:
 	# Headless sim hook: `-- ai-player` lets an AI drive the player tribe too
 	# (full AI-vs-AI integration run, see the phase 7 plan).
 	var ai_player: bool = OS.get_cmdline_user_args().has("ai-player")
+	var anchors: Array[Vector2i] = MapGenerator.spawn_anchors(
+		GameState.terrain_data, GameState.map_id, tribes.size())
 	for tribe in tribes:
-		var anchor: Vector2i = _skirmish_anchor(tribe.id, tribes.size())
+		var anchor: Vector2i = anchors[tribe.id]
 		_setup_skirmish_base(tribe, anchor, nav)
 		if tribe.id != GameState.PLAYER_TRIBE or ai_player:
 			var ai: AIController = AIController.new()
@@ -262,17 +271,7 @@ func _setup_skirmish(tribes: Array[Tribe], nav: NavGrid) -> Vector2i:
 			add_child(ai)
 			ai.setup(tribe, _tribe_commands, _unit_manager, _building_manager,
 				_tree_manager, nav, anchor)
-	return _skirmish_anchor(GameState.PLAYER_TRIBE, tribes.size())
-
-
-## Base anchor of the index-th tribe: evenly spaced on the circle, the player
-## starting in the south.
-func _skirmish_anchor(index: int, count: int) -> Vector2i:
-	var center: float = float(TerrainData.SIZE) * 0.5
-	var angle: float = TAU * float(index) / float(maxi(count, 1)) + PI * 0.5
-	return Vector2i(
-		int(round(center + cos(angle) * SKIRMISH_BASE_RADIUS)),
-		int(round(center + sin(angle) * SKIRMISH_BASE_RADIUS)))
+	return anchors[GameState.PLAYER_TRIBE]
 
 
 ## One symmetric starter kit — the SAME for player and AI (no cheats).
@@ -511,7 +510,7 @@ func _spawn_debug_army(tribe_id: int, anchor: Vector2i, nav: NavGrid) -> void:
 
 ## Ring-searches outward from `center` for the first buildable footprint.
 func _find_plot(center: Vector2i, footprint: Vector2i, _nav: NavGrid) -> Vector2i:
-	for radius in range(0, TerrainData.SIZE / 2):
+	for radius in range(0, GameState.terrain_data.size / 2):
 		for cell in _ring_cells(center, radius):
 			if _tribe_commands.can_place_at(cell, footprint):
 				return cell

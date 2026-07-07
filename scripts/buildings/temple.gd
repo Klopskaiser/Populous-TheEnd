@@ -1,12 +1,12 @@
 class_name Temple extends TrainingBuilding
 
-## Temple (Tempel): trains braves into preachers (5 wood, 5 s — longest).
-## Placeholder mesh evokes the reference image: a domed clay hut with a wide
-## round reed roof, a blue-gold conical finial on top, and a small arched porch.
-## Holy/peaceful theme.
+## Temple (Tempel): trains braves into preachers (15 wood, 5 s — longest).
+## Phase 7i: twice the footprint (6x6). Placeholder mesh evokes the reference
+## image: a domed clay hut with a wide round reed roof, a blue-gold conical
+## finial on top, and a small arched porch. Holy/peaceful theme.
 
-const WOOD_COST: int = 5
-const FOOTPRINT: Vector2i = Vector2i(4, 4)
+const WOOD_COST: int = 15
+const FOOTPRINT: Vector2i = Vector2i(6, 6)
 const TRAINING_TIME: float = 5.0
 const PREACHER_SCENE: PackedScene = preload("res://scenes/units/preacher.tscn")
 
@@ -19,8 +19,8 @@ const C_BLUE: Color = Color(0.35, 0.4, 0.85)
 func _init() -> void:
 	wood_cost = WOOD_COST
 	footprint = FOOTPRINT
-	max_health = 320
-	health = 320
+	max_health = 440
+	health = 440
 	produces = PREACHER_SCENE
 	training_time = TRAINING_TIME
 

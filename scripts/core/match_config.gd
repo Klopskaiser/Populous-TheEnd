@@ -12,15 +12,15 @@ const MAX_AI: int = 3
 var mode: Mode = Mode.SKIRMISH
 ## Number of AI opponents (SKIRMISH only; clamped to MIN_AI..MAX_AI).
 var ai_count: int = 1
-## Map selection — currently only the fixed skirmish island exists.
-var map_id: String = "island"
+## Map selection (phase 7i: island / seenland / bergpass / plateau).
+var map_id: String = MapGenerator.DEFAULT_MAP
 
 
-static func skirmish(p_ai_count: int, p_map_id: String = "island") -> MatchConfig:
+static func skirmish(p_ai_count: int, p_map_id: String = MapGenerator.DEFAULT_MAP) -> MatchConfig:
 	var config: MatchConfig = MatchConfig.new()
 	config.mode = Mode.SKIRMISH
 	config.ai_count = clampi(p_ai_count, MIN_AI, MAX_AI)
-	config.map_id = p_map_id
+	config.map_id = p_map_id if p_map_id in MapGenerator.map_ids() else MapGenerator.DEFAULT_MAP
 	return config
 
 

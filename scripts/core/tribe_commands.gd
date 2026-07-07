@@ -294,6 +294,22 @@ func order_garrison(units: Array[Unit], tower: Watchtower) -> void:
 		unit.order_garrison(tower)
 
 
+## Braves man a hut as production crew (phase 7i); non-braves just move there.
+func order_man_hut(units: Array[Unit], hut: Hut) -> void:
+	if hut == null or not is_instance_valid(hut) or not hut.is_usable():
+		return
+	var movers: Array[Unit] = []
+	for unit in units:
+		if unit == null or not is_instance_valid(unit) or unit.state == Unit.State.DEAD:
+			continue
+		if unit is Brave and unit.tribe_id == hut.tribe_id:
+			(unit as Brave).order_man_hut(hut)
+		else:
+			movers.append(unit)
+	if not movers.is_empty():
+		order_move(movers, hut.center_world())
+
+
 ## Right-click attack: selected units melee the clicked enemy. Units distribute
 ## intelligently — if the ordered target is already at its 3-attacker limit, a
 ## unit picks another free enemy near it instead of piling on a fourth.

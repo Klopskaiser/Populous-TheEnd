@@ -1778,6 +1778,43 @@ func leave_garrison() -> void:
 		_set_state(State.IDLE)
 
 
+## Orders a BRAVE to man an own hut as production crew (phase 7i): it walks to
+## the entrance (reusing the garrison approach) and the hut admits it. Rejected
+## for non-braves, a foreign/unusable/full hut, or while beyond control.
+func order_man_hut(hut) -> void:
+	if unit_kind() != &"brave" or not can_take_orders():
+		return
+	if hut == null or not is_instance_valid(hut) or hut.health <= 0:
+		return
+	if hut.tribe_id != tribe_id or not hut.is_usable() or not hut.has_crew_room():
+		return
+	route_end_action = Callable()
+	_on_combat_interrupt()
+	_end_attack()
+	_clear_building_target()
+	waypoint_queue.clear()
+	_clear_path()
+	garrison_target = hut
+	garrison_reached = false
+	_set_state(State.GARRISON)
+
+
+## Called by a hut when admitted as crew: like a garrison, but the hut also
+## removes the brave from the world (hidden reserve). It keeps counting toward
+## population; reuses the garrison_housed machinery (leave_garrison releases it).
+func enter_hut(hut) -> void:
+	garrison_target = hut
+	garrison_housed = true
+	garrison_reached = false
+	push_immune = true
+	waypoint_queue.clear()
+	_clear_path()
+	_end_attack()
+	_clear_building_target()
+	selected = false
+	_set_state(State.GARRISON)
+
+
 ## Clears our attack and frees the slot we held on the target.
 func _end_attack() -> void:
 	if attack_target != null and is_instance_valid(attack_target):

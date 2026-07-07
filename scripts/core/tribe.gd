@@ -14,6 +14,19 @@ const MANA_BASE_RATE: float = 0.1
 ## Extra mana per second per praying brave.
 const MANA_PRAY_BONUS: float = 0.5
 
+## Hard unit cap per tribe (phase 7i): no hut spawn / training beyond this, on
+## top of the housing capacity — whichever limits first.
+const MAX_UNITS: int = 1500
+
+## Population-growth control (phase 7i): governs how huts are auto-manned by
+## nearby idle braves. NONE empties all huts (no growth); MINIMAL keeps one crew
+## per hut; MAXIMUM fills huts to capacity. Manual manning works in every mode.
+enum GrowthMode { NONE, MINIMAL, MAXIMUM }
+
+## Per-tribe growth setting (player drives it via the sidebar; AI keeps the
+## default). MAXIMUM = grow like before (huts fill up from nearby idle braves).
+var growth_mode: GrowthMode = GrowthMode.MAXIMUM
+
 var id: int = 0
 var color: Color = Color.WHITE
 var mana: float = 0.0
@@ -43,6 +56,11 @@ func population() -> int:
 	return units.size()
 
 
+## At or above the hard unit cap (phase 7i).
+func at_unit_cap() -> bool:
+	return units.size() >= MAX_UNITS
+
+
 ## Sum of the housing capacity of all (finished) buildings.
 func housing_capacity() -> int:
 	var total: int = 0
@@ -57,6 +75,13 @@ func praying_braves() -> int:
 		if unit.is_praying():
 			count += 1
 	return count
+
+
+## Current mana income per second (phase 7i display): the same term the tick
+## adds, i.e. population base rate + praying-brave bonus. Forester upkeep drains
+## the pool separately (consume_mana) and is not netted here.
+func mana_rate() -> float:
+	return float(population()) * MANA_BASE_RATE + float(praying_braves()) * MANA_PRAY_BONUS
 
 
 # --- Tick (mana economy) ------------------------------------------------------

@@ -70,7 +70,11 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
 | **Brave (Gefolgsmann)** | Basis-Einheit. Sammelt **passiv Holz**, baut Gebäude aus, generiert durch **Beten Mana**. Wird von Hütten gespawnt. |
 | **Krieger** | Nahkampf-Einheit. Ausbildung in der **Kaserne** (Krieger-Trainingslager). |
 | **Feuerkrieger** | Fernkampf-Einheit (Feuerbälle). Ausbildung im **Feuertempel** (Feuerkrieger-Trainingslager). |
-| **Prediger** | **Konvertiert** feindliche Einheiten zum eigenen Stamm. Ausbildung im **Tempel**. |
+| **Prediger** | **Konvertiert** feindliche Einheiten zum eigenen Stamm. Ausbildung im **Tempel**. Mehrere Prediger verteilen sich auf verschiedene Ziele; **Einheiten in Bekehrung sind kein gültiges Ziel** für Nah-/Fernkampf (Katapult ausgenommen). |
+| **Belagerungswaffe (Katapult)** | Fernkampf-Fahrzeug mit Crew, gebaut in der **Werkstatt** (Phase 7f). |
+
+> **Einheiten-Hardcap:** max. **1500 Einheiten pro Stamm** (zusätzlich zum
+> Bevölkerungslimit der Hütten).
 
 **Steuerung:**
 - **Rechtsklick** bewegt selektierte Einheiten (Standard-RTS-Selektion: Klick + Box-Select).
@@ -84,14 +88,22 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
 
 - **Holz** ist die **einzige physische Ressource**. Braves sammeln es von **wilden Bäumen**;
   es wird für Bau und Ausbau von Gebäuden benötigt.
-- **Hütten (Huts):**
-  - **Bewusste Abweichung vom Original:** Eine Hütte bietet Platz für **100 maximale
-    Bevölkerung** (nicht wenige wie im Original).
-  - Hütten **spawnen über Zeit neue Braves**, solange das Bevölkerungslimit (Summe der
-    Hütten-Kapazitäten) nicht erreicht ist.
+- **Hütten (Huts):** **12 Holz**, Platz für **40** Bevölkerung (bewusste Abweichung vom
+  Original — dort wenige).
+  - **Bemannung (Phase 7i):** Eine Hütte produziert nur **mit Besatzung** (bis zu **4**
+    Braves, im Gebäude versteckt, zählen weiter zur Bevölkerung, **kein Mana**). Leere
+    Hütte = keine Produktion; die Rate skaliert mit der Besatzung (volle Hütte ~10 %
+    schneller als die alte Rate). Bemannung manuell (Braves + Rechtsklick auf die Hütte)
+    oder automatisch per **Wachstumsregler** (pro Stamm, UI bei Bevölkerung/Mana):
+    **Kein** (leert alle Hütten), **Minimal** (1 Besatzung je Hütte), **Maximum**
+    (füllt Hütten auf 4). Automatisch werden nur **nahe idle** Braves eingezogen.
 - **Trainingsgebäude:** **Kaserne** (Krieger, 5 Holz/3 s), **Feuertempel** (Feuerkrieger,
-  10 Holz/4 s), **Tempel** (Prediger, 5 Holz/5 s). Ablauf: Brave betritt das Gebäude → kommt
-  nach Ausbildungszeit als entsprechende Kampfeinheit heraus → läuft zum Rally Point.
+  **20 Holz**/4 s, großer vieleckiger Bau, 8×8), **Tempel** (Prediger, **15 Holz**/5 s,
+  doppelt so groß, 6×6). Ablauf: Brave betritt das Gebäude → kommt nach Ausbildungszeit als
+  entsprechende Kampfeinheit heraus → läuft zum Rally Point.
+- **Weitere Gebäude:** **Förster** (Setzlinge/Holzwirtschaft, Phase 7d), **Werkstatt**
+  (baut Belagerungswaffen, Phase 7f), **Wachturm** (4 Holz, 2 Besatzungsplätze mit
+  Reichweitenbonus, Phase 7h).
 - **Reinkarnationsplatz:** Respawn-Ort der Schamanin (siehe §4).
 - **Gebäudezerstörung (4 Zerstörungsstufen):** Stufe 0 = intakt. Stufen 1–3 (ab 30 % /
   60 % / 90 % Schaden): Gebäude **nicht nutzbar (keinerlei Produktion)**, per Rechtsklick
@@ -109,7 +121,10 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
 - **Ladungssystem (wie im Original):** Mana wird automatisch in **Zauber-Ladungen**
   umgewandelt (je Zauber `charge_cost` und `max_charges`); Casts verbrauchen gespeicherte
   Ladungen, es gibt keinen separaten Cooldown. Anzeige als Ladungs-Pips in der Zauberleiste.
-- **Zaubersprüche** (bewusst reduziertes Set):
+- **Zaubersprüche:** Grundset (1–5) aus Phase 6, erweitertes Set (6–10) aus Phase 7c.
+  „Ladungen" = `max_charges`; der **Mana-Bedarf pro Ladung** (`charge_cost`) steigt mit
+  der Mächtigkeit — die **hohen Zauber** (Erdbeben/Vulkan/Feuerregen, auch Tornado/Ebene)
+  haben in Phase 7i **erhöhte Manabedarfe**.
 
 | # | Zauber | Ladungen | Effekt |
 |---|---|---|---|
@@ -118,9 +133,20 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
 | 3 | **Swarm (Insektenschwarm)** | 4 | Spawnt einen **zufällig wandernden Schwarm (10 s)**; Gegner in der Nähe geraten in **Panik (6 s)** und erleiden leichten Schaden. Schamanin ist gegen den Panikeffekt immun. |
 | 4 | **Landbridge (Landbrücke)** | 4 | Kein Schaden. Hebt Terrain in **breiter Linie** an: über Wasser auf Küstenniveau, sonst auf das Niveau des Zielpunkts; bei Höhendifferenz entsteht eine **begehbare Schräge** (→ Laufzeit-Terrainverformung, §3). |
 | 5 | **Tornado** | 3 | Windhose (8 s), wandert zufällig; über Gebäuden **+1 Zerstörungsstufe alle 2 s**. Einheiten im Weg werden zur Spitze **hochgewirbelt**, kurz mitgetragen und mit hoher Geschwindigkeit **weggeschleudert** (Sturzschaden ½ Brave-Leben + Rollschaden; ins Wasser = Sofort-Tod). |
+| 6 | **Erdbeben** | 2 | Hebt/senkt das Terrain entlang einer zufälligen Verwerfung (Laufzeit-Verformung), beschädigt Gebäude. |
+| 7 | **Vulkan** | 1 | Hebt einen Vulkankegel, Lava; teuerster Zauber. |
+| 8 | **Feuerregen** | 2 | Feuerbälle regnen über dem Zielgebiet nieder. |
+| 9 | **Ebene** | 3 | Ebnet das Zielquadrat exakt ein (harte Kanten). |
+| 10 | **Absinken** | 3 | Senkt das Zielgebiet ab (nie unter den Meeresboden). |
 
 **Neue Mechaniken durch die Zauber:** Panik, Umherschleudern von Einheiten
-(Wurf-Parabel → Rollen bis zum Ausrollen), Gebäudezerstörung in Stufen (§5).
+(Wurf-Parabel → Rollen bis zum Ausrollen), Gebäudezerstörung in Stufen (§5),
+Laufzeit-Terrainverformung (Erdbeben/Vulkan/Ebene/Absinken).
+
+**Skirmish-Karten (Phase 7i):** Auswahl im Skirmish-Setup — **Insel** (Standard,
+128), **Seenland** (256, See mittig, Start in den Ecken), **Bergpass** (256, Gebirge
+mit 3 Pässen), **Plateau** (128, erhöhte Start-Plateaus mit Rampe). Terrain-Kantenlänge
+ist pro Karte variabel.
 
 ## 7. Skirmish-KI
 

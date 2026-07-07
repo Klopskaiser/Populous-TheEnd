@@ -17,6 +17,9 @@ var terrain_data: TerrainData = null
 var terrain: Node3D = null   # the Terrain node (set by Main on startup)
 var nav_grid: NavGrid = null
 
+## Id of the active map (phase 7i); drives minimap mask/label. Set by Main.
+var map_id: String = MapGenerator.DEFAULT_MAP
+
 ## Player (index 0, blue) and AIs — identical Tribe instances.
 var tribes: Array[Tribe] = []
 

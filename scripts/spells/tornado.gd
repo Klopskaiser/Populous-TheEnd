@@ -7,7 +7,7 @@ class_name TornadoSpell extends Spell
 func _init() -> void:
 	id = &"tornado"
 	display_name_de = "Tornado"
-	charge_cost = 90.0
+	charge_cost = 110.0
 	max_charges = 3
 	cast_range = 8.0
 

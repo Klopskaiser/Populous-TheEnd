@@ -144,7 +144,7 @@ func _in_water(pos: Vector3) -> bool:
 
 
 func _clamp_to_map() -> void:
-	var limit: float = float(TerrainData.SIZE) * TerrainData.CELL_SIZE - 1.0
+	var limit: float = float(terrain_data.size if terrain_data != null else TerrainData.SIZE) * TerrainData.CELL_SIZE - 1.0
 	position.x = clampf(position.x, 1.0, limit)
 	position.z = clampf(position.z, 1.0, limit)
 

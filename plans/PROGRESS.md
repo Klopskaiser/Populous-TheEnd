@@ -3048,3 +3048,107 @@ Bewegung, Nicht-Konvertierbarkeit, Schutz via `is_targetable`),
 `--headless --import`/`--quit` fehlerfrei (Ladecheck baut in START_MISSION die
 Sidebar + das 3-Turm-Testszenario). Manuelle Prüfung weiter ausstehend.
 
+
+## Phase 7i — Balancing, Karten & Wirtschaft (Zwischenphase, umgesetzt)
+
+Plan: [07i_balancing_maps_economy.md](07i_balancing_maps_economy.md). Bündel aus
+Balancing- und zwei Feature-Blöcken (Kartenauswahl, bemannbare Hütten).
+
+**Variable Terraingröße (Refactor).** `TerrainData.SIZE/VERTS` sind weiterhin
+Consts (Default 128/129), aber die tatsächliche Größe liegt jetzt pro Instanz in
+`size`/`verts` (`_init(p_size := SIZE)`). Alle internen Methoden nutzen die
+Instanzfelder; externe Aufrufer lesen die Instanz statt der Const:
+`nav_grid` (`terrain.size`), `terrain.gd` (`data.size/verts`, `_chunk_count` in
+`build()`), `camera_rig` (Pan-Clamp aus `GameState.terrain_data.size`),
+`minimap` (`_terrain_data.size` + neues `round_mask`), `tree_manager`,
+`main.gd` (Zentrum/Ring-Suchen), Zauber `earthquake/flatten/sink` (statische
+`*_targets(td,…)` → `td.verts/td.size`), `swarm_cloud/tornado_debris`
+(`terrain_data.size`). Standardkarte bleibt 128; die großen Karten sind 256.
+
+**Kartensystem + 3 neue Karten.** Neu `scripts/core/map_generator.gd`
+(`MapGenerator`): Registry (`map_ids`, `display_name`, `map_size`, `round_mask`,
+`max_players`), `create_terrain(map_id, seed)` und `spawn_anchors(td, map_id, n)`.
+Karten teilen Anker- und Generierungszellen (Ecken/Hälften):
+- **island** (128, rund): unverändert, Anker auf Kreis.
+- **seenland** (256, eckig): überwiegend Land, mittiger See (unter Meeresspiegel),
+  angehobene Ecken, 4 Startecken (diagonal für 2 Spieler).
+- **bergpass** (256, eckig): flach, kein Wasser, mittiger Gebirgsriegel (Höhe
+  +26) mit **3 Pässen** (x=¼,½,¾) und steilen Flanken (Klippen), 2 Spieler je
+  Hälfte, Basen relativ nah.
+- **plateau** (128, eckig): flache Ebene, je Spieler ein stark angehobenes
+  Plateau (+12) mit harten Kanten und **einer begehbaren Rampe** Richtung
+  Kartenmitte (`raise_line`).
+Integration: `main.gd::_ready` baut das Terrain über `MapGenerator` (Skirmish =
+gewählte Karte, sonst Insel), setzt `GameState.map_id`, skaliert die Baumzahl mit
+der Fläche und nutzt `spawn_anchors` statt des alten Kreis-Ankers
+(`_skirmish_anchor` entfernt). `MatchConfig.map_id` wird gegen die Registry
+validiert. `main_menu.gd`: Kartenauswahl aus `MapGenerator.map_ids()` +
+Beschreibungslabel; Headless-Hook `-- skirmish=N [map=<id>]`. Minimap wird für
+eckige Karten quadratisch (Maske/Umrandung, kein Beschnitt der Eck-Basen) via
+`Sidebar.setup → Minimap.setup(..., round_mask)`.
+
+**Prediger-Verteilung + Bekehrte als Nicht-Ziel.** `preacher.gd`: `_engage_on_sight`
+und `_refresh_conversion` bevorzugen bei der Fokuswahl ein Ziel, das **kein anderer
+eigener Prediger** bereits bearbeitet (`_claimed_by_peer` prüft `converting_preacher`
+bzw. fremdes `_convert_target`; `_pick_convert_focus` liefert nächstes unbelegtes,
+sonst nächstes Ziel) → mehrere Prediger fächern auf, auch bei Attack-Move.
+Sitzende (SIT) werden vom Nah-/Fernkampf ohnehin übersprungen (bestehend). **Katapult-
+Ausnahme:** der Siege-Scan (`siege_engine.gd::_nearest_enemy_unit`) überspringt SIT
+nicht mehr → Katapult beschießt Konvertierende weiter.
+
+**Balancing-Werte.** Hardcap **1500 Einheiten/Stamm** (`Tribe.MAX_UNITS`,
+`Tribe.at_unit_cap()`; `UnitManager.spawn_unit` gibt am Cap `null` zurück —
+Training entfernt den Trainee vor dem Spawn, daher kein Verlust). Hütte **12 Holz /
+40 Platz** (vorher 15/100). Feuertempel **20 Holz, 8×8**, neues **vieleckiges
+(oktagonales)** Placeholder-Modell, HP 600. Tempel **15 Holz, 6×6**, HP 440.
+Zauberkosten der hohen Zauber erhöht: Erdbeben 80→110, Vulkan 120→180,
+Feuerregen 70→100, Tornado 90→110, Ebene 70→90. Mana-Zuwachs als Zahl:
+`Tribe.mana_rate()` + Sidebar-Label „Mana: N (+X.X/s)".
+
+**Bemannbare Hütten + Wachstumsregler.** `hut.gd`: `crew: Array` (max 4,
+`CREW_CAPACITY`), `admit_crew`/`eject_crew`/`eject_occupants`, `has_crew_room`,
+`crew_count`. Crew = Braves, per `Unit.enter_hut` versteckt (über
+`UnitManager.remove_from_world`, Population bleibt gezählt, kein Mana) — reutzt die
+Garrison-Maschinerie (`Unit.order_man_hut` mirror von `order_garrison`, aber
+Brave-only; `leave_garrison` beim Auswurf). **Leere Hütte produziert nichts**;
+Produktionsrate skaliert mit Crew (`_spawn_rate_factor` 0..`FULL_CREW_BONUS 1.1`;
+volle Hütte ≈ 9,1 s statt 10 s). Wachstumsregler pro Stamm
+(`Tribe.GrowthMode {NONE,MINIMAL,MAXIMUM}`, Default MAXIMUM): `hut._tick_growth`
+(alle `GROWTH_INTERVAL`=1 s) hält die Crew auf `_crew_target()` (0/1/4) — wirft
+Überzählige aus (NONE leert alle Hütten) bzw. zieht **nahe idle Braves**
+(`MAN_RADIUS`=16, `_find_idle_brave_near`, nur IDLE ohne andere Aufgabe) über
+`order_man_hut` herein; nur nahe Braves → Hütten können auch bei MAXIMUM leer
+bleiben. Auto-Bemannung gilt symmetrisch für die KI (kein KI-Sondercode).
+Manuell: Braves selektiert + Rechtsklick auf eigene Hütte →
+`TribeCommands.order_man_hut` (Nicht-Braves laufen nur hin);
+`selection_manager` (`_building_is_actionable`/`_apply_building_command` +
+`_selection_has_brave`-Guard). Sidebar: Wachstums-Regler (`HSlider` 0/1/2) +
+Label „<Modus> (+N/min)" (`Hut.growth_per_minute`, Summe über eigene Hütten).
+
+**Bugfix — Bauplatz freiräumen.** `Building._clear_footprint` (in
+`_tick_construction`, ab `wood_delivered >= 1`, gedrosselt `CLEAR_INTERVAL`=0,5 s):
+Einheiten mit Position im Footprint (die Order annehmen können — DEAD/THROWN/ROLL/
+SIT/Crew ausgenommen) bekommen `order_move` auf die nächste begehbare Zelle
+außerhalb → keiner steckt mehr unsichtbar im aufsteigenden Gebäude.
+
+**Tests/Verifikation.** **1481 Tests grün**, `--headless --quit` fehlerfrei,
+Skirmish-Läufe auf island/seenland/bergpass/plateau headless fehlerfrei
+(inkl. 2500-Frame-KI-Läufe island + bergpass 256). Neu:
+`tests/test_maps.gd` (variable Größe, Anker begehbar+erreichbar, See/Pässe/
+Plateau-Features), `tests/test_hut_crew.gd` (Crew-Limit/Eignung, leere Hütte
+ohne Produktion, Ratenskalierung, Auswurf, Wachstumsmodi NONE/MAXIMUM,
+Nähe-Regel, Hardcap), `tests/test_conversion_targeting.gd` (Fußtruppe ignoriert
+SIT, Katapult zielt auf SIT, Prediger-Verteilung). Bestehende Hütten-/Produktions-
+Tests auf Crew umgestellt (test_economy/test_training/test_building_destruction).
+Manuelle Prüfung ausstehend.
+
+**Erkenntnisse/Stolpersteine.**
+- `UnitManager.tick()` bewegt Einheiten NICHT — Bewegung liegt in `unit.tick()`
+  (im Spiel über `_physics_process`). Ein Sim-Schritt in Tests = jede Unit ticken
+  **und** `um.tick()` (Hash-Refresh, damit `get_units_in_radius`/Crew-Admit die
+  neuen Positionen sehen) **und** das Gebäude.
+- Der Gebirgsriegel (bergpass) ist oben flach (begehbares, aber isoliertes
+  Plateau) — nur die Flanken sind Klippen; die Blockade wirkt über die
+  unpassierbaren Flanken (nur die 3 Pässe verbinden die Hälften).
+- Bekannter, vorbestehender Flaky-Test `test_spells: orders work again after the
+  panic` (randf-Panikdauer) — unabhängig von 7i.

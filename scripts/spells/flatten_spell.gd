@@ -21,7 +21,7 @@ const DROP_OUT: float = 2.0
 func _init() -> void:
 	id = &"flatten"
 	display_name_de = "Ebene"
-	charge_cost = 70.0
+	charge_cost = 90.0
 	max_charges = 3
 	cast_range = 10.0
 
@@ -44,16 +44,16 @@ func execute(_tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:
 ## Square height map: every vertex inside the square goes EXACTLY to `level`
 ## (hard edge — vertices outside stay untouched, forming cliffs at the rim).
 static func flatten_targets(td: TerrainData, center: Vector2, level: float) -> Dictionary:
-	var min_vx: int = clampi(int(ceil((center.x - HALF_EXTENT) / TerrainData.CELL_SIZE)), 0, TerrainData.VERTS - 1)
-	var max_vx: int = clampi(int(floor((center.x + HALF_EXTENT) / TerrainData.CELL_SIZE)), 0, TerrainData.VERTS - 1)
-	var min_vz: int = clampi(int(ceil((center.y - HALF_EXTENT) / TerrainData.CELL_SIZE)), 0, TerrainData.VERTS - 1)
-	var max_vz: int = clampi(int(floor((center.y + HALF_EXTENT) / TerrainData.CELL_SIZE)), 0, TerrainData.VERTS - 1)
+	var min_vx: int = clampi(int(ceil((center.x - HALF_EXTENT) / TerrainData.CELL_SIZE)), 0, td.verts - 1)
+	var max_vx: int = clampi(int(floor((center.x + HALF_EXTENT) / TerrainData.CELL_SIZE)), 0, td.verts - 1)
+	var min_vz: int = clampi(int(ceil((center.y - HALF_EXTENT) / TerrainData.CELL_SIZE)), 0, td.verts - 1)
+	var max_vz: int = clampi(int(floor((center.y + HALF_EXTENT) / TerrainData.CELL_SIZE)), 0, td.verts - 1)
 
 	var indices: PackedInt32Array = PackedInt32Array()
 	var targets: PackedFloat32Array = PackedFloat32Array()
 	for vz in range(min_vz, max_vz + 1):
 		for vx in range(min_vx, max_vx + 1):
-			var idx: int = vz * TerrainData.VERTS + vx
+			var idx: int = vz * td.verts + vx
 			if absf(td.heights[idx] - level) <= 0.01:
 				continue
 			indices.append(idx)
@@ -61,10 +61,10 @@ static func flatten_targets(td: TerrainData, center: Vector2, level: float) -> D
 
 	var rect: Rect2i = Rect2i()
 	if not indices.is_empty():
-		var cmin: Vector2i = Vector2i(clampi(min_vx - 1, 0, TerrainData.SIZE - 1),
-			clampi(min_vz - 1, 0, TerrainData.SIZE - 1))
-		var cmax: Vector2i = Vector2i(clampi(max_vx, 0, TerrainData.SIZE - 1),
-			clampi(max_vz, 0, TerrainData.SIZE - 1))
+		var cmin: Vector2i = Vector2i(clampi(min_vx - 1, 0, td.size - 1),
+			clampi(min_vz - 1, 0, td.size - 1))
+		var cmax: Vector2i = Vector2i(clampi(max_vx, 0, td.size - 1),
+			clampi(max_vz, 0, td.size - 1))
 		rect = Rect2i(cmin, cmax - cmin + Vector2i.ONE)
 	return {"indices": indices, "targets": targets, "rect": rect}
 
