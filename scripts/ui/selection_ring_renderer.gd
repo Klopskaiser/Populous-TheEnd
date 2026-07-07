@@ -33,6 +33,8 @@ func _ready() -> void:
 	_multimesh.instance_count = MAX_RINGS
 	_multimesh.visible_instance_count = 0
 	multimesh = _multimesh
+	# UI geometry never enters the shadow pass (phase 8 shadow rework).
+	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 
 func _process(_delta: float) -> void:

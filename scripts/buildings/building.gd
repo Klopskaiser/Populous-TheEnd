@@ -643,6 +643,7 @@ func set_hovered(p_hovered: bool) -> void:
 func _create_selection_ring() -> void:
 	_selection_ring = MeshInstance3D.new()
 	_selection_ring.name = "SelectionRing"
+	_selection_ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var torus: TorusMesh = TorusMesh.new()
 	var r: float = float(maxi(footprint.x, footprint.y)) * 0.5 + 0.4
 	torus.inner_radius = r - 0.18
@@ -669,6 +670,7 @@ func _create_rally_marker() -> void:
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 
 	var ring: MeshInstance3D = MeshInstance3D.new()
+	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var torus: TorusMesh = TorusMesh.new()
 	torus.inner_radius = 0.45
 	torus.outer_radius = 0.6
@@ -678,6 +680,7 @@ func _create_rally_marker() -> void:
 	_rally_marker.add_child(ring)
 
 	var pole: MeshInstance3D = MeshInstance3D.new()
+	pole.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var cyl: CylinderMesh = CylinderMesh.new()
 	cyl.top_radius = 0.05
 	cyl.bottom_radius = 0.05
@@ -1122,6 +1125,7 @@ func _add_flag() -> void:
 	if _mesh_root == null:
 		return
 	var pole: MeshInstance3D = MeshInstance3D.new()
+	pole.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var pole_mesh: CylinderMesh = CylinderMesh.new()
 	pole_mesh.top_radius = 0.05
 	pole_mesh.bottom_radius = 0.05
@@ -1130,6 +1134,7 @@ func _add_flag() -> void:
 	pole.position = Vector3(float(footprint.x) * 0.5 - 0.2, 1.2, float(footprint.y) * 0.5 - 0.2)
 	_mesh_root.add_child(pole)
 	var flag: MeshInstance3D = MeshInstance3D.new()
+	flag.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var flag_mesh: BoxMesh = BoxMesh.new()
 	flag_mesh.size = Vector3(0.7, 0.4, 0.05)
 	flag.mesh = flag_mesh
@@ -1203,6 +1208,7 @@ func _create_damage_holes() -> void:
 	var d: float = float(footprint.y)
 	for i in range(MAX_DAMAGE_HOLES):
 		var hole: MeshInstance3D = MeshInstance3D.new()
+		hole.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var box: BoxMesh = BoxMesh.new()
 		var s: float = 0.5 + 0.18 * float(i % 3)
 		box.size = Vector3(s, s, s)

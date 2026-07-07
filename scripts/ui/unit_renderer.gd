@@ -15,6 +15,13 @@ class_name UnitRenderer extends MultiMeshInstance3D
 const MAX_UNITS: int = 8192
 const VISUAL_SLICES: int = 3
 const PIXEL_SIZE: float = 0.06
+## Diameter of the hardcoded circular blob shadow under every unit and its
+## lift above the ground (z-fighting guard). Real shadow casting is OFF for
+## units (phase 8 shadow rework): thousands of billboarded alpha-discard quads
+## went through all shadow cascades before.
+const BLOB_SIZE: float = 0.7
+const BLOB_Y: float = 0.04
+const BLOB_COLOR: Color = Color(0.0, 0.0, 0.0, 0.4)
 ## Kinds baked into the atlas.
 const KINDS: Array[StringName] = [&"brave", &"warrior", &"firewarrior", &"preacher", &"shaman"]
 ## Sprite Y offset while airborne selects the arms-up jump frame.
@@ -91,6 +98,40 @@ var _multimesh: MultiMesh = null
 var _uvs: PackedVector2Array = PackedVector2Array()
 var _table: Dictionary = {}
 var _visual_phase: int = 0
+## Blob-shadow MultiMesh, slot-synchronous with _multimesh (same indices).
+var _blob_multimesh: MultiMesh = null
+
+## Shared radial blob texture (also used by the siege engine's blob quad).
+static var _blob_texture: ImageTexture = null
+
+
+## White circle with a soft radial alpha falloff; tinted via albedo_color.
+static func blob_texture() -> ImageTexture:
+	if _blob_texture == null:
+		var s: int = 32
+		var img: Image = Image.create_empty(s, s, false, Image.FORMAT_RGBA8)
+		var half: float = float(s) * 0.5
+		for y in range(s):
+			for x in range(s):
+				var d: float = Vector2(float(x) + 0.5 - half, float(y) + 0.5 - half).length() / half
+				var a: float = clampf(1.0 - smoothstep(0.55, 1.0, d), 0.0, 1.0)
+				img.set_pixel(x, y, Color(1.0, 1.0, 1.0, a))
+		_blob_texture = ImageTexture.create_from_image(img)
+	return _blob_texture
+
+
+## Flat ground quad with the blob texture (unshaded, alpha, casts nothing).
+static func make_blob_mesh(size: Vector2, color: Color = BLOB_COLOR) -> PlaneMesh:
+	var plane: PlaneMesh = PlaneMesh.new()
+	plane.size = size
+	var mat: StandardMaterial3D = StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_texture = blob_texture()
+	mat.albedo_color = color
+	mat.disable_receive_shadows = true
+	plane.material = mat
+	return plane
 
 
 func _ready() -> void:
@@ -122,6 +163,23 @@ func _ready() -> void:
 	_multimesh.instance_count = MAX_UNITS
 	_multimesh.visible_instance_count = 0
 	multimesh = _multimesh
+	# Units never enter the shadow pass (phase 8): the shader's shadows_disabled
+	# only stops RECEIVING — casting is this node flag, and thousands of
+	# billboarded discard quads across all cascades were pure waste.
+	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+
+	# Hardcoded circular blob shadows instead, one flat quad per unit through a
+	# second MultiMesh with the SAME slot indices.
+	_blob_multimesh = MultiMesh.new()
+	_blob_multimesh.transform_format = MultiMesh.TRANSFORM_3D
+	_blob_multimesh.mesh = make_blob_mesh(Vector2(BLOB_SIZE, BLOB_SIZE))
+	_blob_multimesh.instance_count = MAX_UNITS
+	_blob_multimesh.visible_instance_count = 0
+	var blobs: MultiMeshInstance3D = MultiMeshInstance3D.new()
+	blobs.name = "BlobShadows"
+	blobs.multimesh = _blob_multimesh
+	blobs.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(blobs)
 
 
 # --- Registration ------------------------------------------------------------------
@@ -137,10 +195,12 @@ func register_unit(unit: Unit) -> void:
 	unit._render_pos = Vector3.INF
 	unit._render_frame = -1
 	unit._render_alpha = 1.0
+	unit._blob_hidden = false
 	_units.append(unit)
 	_multimesh.set_instance_color(unit._render_index,
 		Unit.TRIBE_COLORS[unit.tribe_id % Unit.TRIBE_COLORS.size()])
 	_multimesh.visible_instance_count = _units.size()
+	_blob_multimesh.visible_instance_count = _units.size()
 
 
 ## Swap-remove: the last slot's unit moves into the freed slot; its data is
@@ -161,9 +221,11 @@ func unregister_unit(unit: Unit) -> void:
 		# Colour is rewritten at full alpha; resetting the cache makes the next
 		# frame pass re-apply a fading corpse's actual alpha.
 		moved._render_alpha = 1.0
+		moved._blob_hidden = false   # re-hidden by the frame pass if DEAD
 		_multimesh.set_instance_color(index,
 			Unit.TRIBE_COLORS[moved.tribe_id % Unit.TRIBE_COLORS.size()])
 	_multimesh.visible_instance_count = _units.size()
+	_blob_multimesh.visible_instance_count = _units.size()
 
 
 ## Re-applies the tribe colour of a unit's instance (after a preacher
@@ -195,7 +257,9 @@ func _process(_delta: float) -> void:
 		_update_frame(_units[i], cam_forward, cam_right, hop_offset, now_ms)
 	_visual_phase = (_visual_phase + 1) % VISUAL_SLICES
 
-	# Transforms every frame, but only for units that actually moved.
+	# Transforms every frame, but only for units that actually moved. The blob
+	# shadow follows on the ground point (no hop offset); corpses hide theirs
+	# in the frame pass.
 	for i in range(_units.size()):
 		var unit: Unit = _units[i]
 		var pos: Vector3 = unit.position
@@ -205,6 +269,10 @@ func _process(_delta: float) -> void:
 			unit._render_pos = pos
 			_multimesh.set_instance_transform(unit._render_index,
 				Transform3D(Basis.IDENTITY, pos))
+			if unit.state != Unit.State.DEAD:
+				_blob_multimesh.set_instance_transform(unit._render_index,
+					Transform3D(Basis.IDENTITY, Vector3(
+						unit.position.x, unit.position.y + BLOB_Y, unit.position.z)))
 
 
 func _update_frame(unit: Unit, cam_forward: Vector3, cam_right: Vector3,
@@ -212,6 +280,10 @@ func _update_frame(unit: Unit, cam_forward: Vector3, cam_right: Vector3,
 	# Corpse fade: push the decaying alpha into the instance colour (before the
 	# frame-equality early-out below — the corpse frame itself never changes).
 	if unit.state == Unit.State.DEAD:
+		if not unit._blob_hidden:
+			unit._blob_hidden = true   # a lying corpse casts no blob
+			_blob_multimesh.set_instance_transform(unit._render_index,
+				Transform3D(Basis.IDENTITY.scaled(Vector3.ZERO), Vector3.ZERO))
 		var alpha: float = unit.corpse_alpha()
 		if absf(alpha - unit._render_alpha) > 0.01:
 			unit._render_alpha = alpha

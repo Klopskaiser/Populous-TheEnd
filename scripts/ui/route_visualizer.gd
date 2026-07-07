@@ -37,6 +37,7 @@ func _ready() -> void:
 	_line_mesh = ImmediateMesh.new()
 	var lines: MeshInstance3D = MeshInstance3D.new()
 	lines.name = "RouteLines"
+	lines.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	lines.mesh = _line_mesh
 	var line_mat: StandardMaterial3D = StandardMaterial3D.new()
 	line_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -63,6 +64,7 @@ func _ready() -> void:
 	_multimesh.visible_instance_count = 0
 	var markers: MultiMeshInstance3D = MultiMeshInstance3D.new()
 	markers.name = "RouteMarkers"
+	markers.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	markers.multimesh = _multimesh
 	add_child(markers)
 

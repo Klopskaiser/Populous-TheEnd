@@ -92,6 +92,7 @@ func _create_ghost() -> void:
 		return
 	_ghost = MeshInstance3D.new()
 	_ghost.name = "BuildGhost"
+	_ghost.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var fp: Vector2i = _effective_footprint()
 	var box: BoxMesh = BoxMesh.new()
 	box.size = Vector3(float(fp.x), 1.6, float(fp.y))
@@ -106,6 +107,7 @@ func _create_ghost() -> void:
 
 	# Entrance marker: a small block on the entrance side of the footprint.
 	_entrance_marker = MeshInstance3D.new()
+	_entrance_marker.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var marker_box: BoxMesh = BoxMesh.new()
 	marker_box.size = Vector3(0.8, 0.5, 0.8)
 	_entrance_marker.mesh = marker_box

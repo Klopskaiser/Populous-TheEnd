@@ -243,6 +243,8 @@ var _render_index: int = -1
 var _render_kind: StringName = &"unit"
 var _render_pos: Vector3 = Vector3.INF
 var _render_frame: int = -1
+## True once the renderer collapsed this unit's blob shadow (corpses).
+var _blob_hidden: bool = false
 
 var _path: PackedVector3Array = PackedVector3Array()
 var _path_index: int = 0

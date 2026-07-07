@@ -46,6 +46,7 @@ func _ready() -> void:
 	_im = ImmediateMesh.new()
 	mesh = _im
 	material_override = TerrainRing.make_material()
+	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 
 func toggle() -> void:

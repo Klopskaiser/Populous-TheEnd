@@ -71,6 +71,8 @@ func _ensure_water() -> void:
 		return
 	var water: MeshInstance3D = MeshInstance3D.new()
 	water.name = "Water"
+	# The translucent sea plane must not shadow the sea floor (phase 8).
+	water.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var plane: PlaneMesh = PlaneMesh.new()
 	plane.size = Vector2(data.size, data.size)
 	water.mesh = plane

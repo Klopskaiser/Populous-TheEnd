@@ -3323,3 +3323,54 @@ ein-/ausschalten; Lag-Szenario (`-- lagtest` oder Skirmish Bergpass + 3 KIs)
 im Spiel flüssig; F9-Stresstest 2000/4000/6000 im 4-Spieler-Skirmish (FPS
 beobachten — falls GPU limitiert: Rendering-Hebel oben); Wachturm-Beschuss,
 Hütten-Bemannung und Trainings-Queues verhalten sich unverändert.
+
+### Nachbesserung Phase 8 — Schatten-Umbau + Aufhellung (Nutzerfeedback, 2026-07-07)
+
+**Anlass:** F9 (2000 Einheiten) im Skirmish drückte die FPS auf ~10, ohne
+Bewegung — Simulation headless bei ~1-2 ms, also render-seitig. Analyse: Der
+Unit-Shader hat zwar `shadows_disabled`, das deaktiviert aber nur das
+**Empfangen** — `cast_shadow` des MultiMeshInstance3D stand auf Default ON,
+d. h. bis zu 8192 zur Schattenkamera gebillboardete Alpha-discard-Quads
+liefen durch **alle 4 Schatten-Kaskaden** (Default-Setup: 4 Splits, 4096er
+Map, 100 m Distanz — nirgends konfiguriert).
+
+**Umgesetzt („nur grobe Formen werfen Schatten"):**
+- `unit_renderer.gd`: `cast_shadow = OFF` für das Einheiten-MultiMesh;
+  stattdessen **hartkodierte Kreis-Blob-Schatten** über ein zweites,
+  slot-synchrones MultiMesh (flacher PlaneMesh-Quad 0,7 m, prozedurale
+  radiale Alpha-Textur, unshaded/alpha, +0,04 m über Boden; Transforms
+  laufen im vorhandenen Positions-Cache-Loop mit, Leichen blenden ihren
+  Blob per Null-Skalierung aus — Flag `Unit._blob_hidden`). Statische Helfer
+  `UnitRenderer.blob_texture()`/`make_blob_mesh(size)`.
+- `siege_engine.gd`: alle Modell-Meshes `cast_shadow = OFF` + eigener
+  Blob-Quad (1,6×2,4 m) unterm Chassis; Flammen-Overlay ebenfalls OFF.
+- `cast_shadow = OFF` für sämtliche Hilfs-/UI-Geometrie: Selection-Ring-
+  MultiMesh (bis 1024 Tori!), Gebäude-Auswahlring/Rally-Marker/Flaggen/
+  Damage-Holes, Wasser-Plane, Routen-Linien+Marker, Reichweiten-Ringe,
+  Zauber-Cursor/-Ringe, Bau-Ghost. **Schatten behalten:** Terrain-Chunks,
+  Bäume, Gebäudekörper (die groben Formen).
+- Schattenqualität vergröbert: Sun auf **2 PSSM-Splits** (statt 4),
+  `directional_shadow_max_distance = 70`, project.godot:
+  `directional_shadow/size = 2048` (statt 4096), Soft-Filter „low",
+  Positional-Atlas 512 (keine Punktlichter vorhanden).
+- **Aufgehellt:** `ambient_light_energy` 0,5 → 0,75 und `Sun.shadow_opacity
+  = 0.8` (Schatten durchscheinend statt schwarz) — Startwerte zum
+  Nachjustieren.
+- **FPS-Overlay erweitert:** zweite Zeile mit Draw-Calls + Objekten pro Frame
+  (`RenderingServer.get_rendering_info`) — damit ist der Vorher/Nachher-
+  Effekt und ein etwaiges verbleibendes GPU-Limit direkt ablesbar.
+
+**Erwartete Ersparnis (GPU/Renderthread):** Schattenpass verliert die
+Einheiten-Quads (skalierte exakt mit F9), ~1000+ potenzielle Ring-Instanzen
+und den Kleinkram; halbe Kaskadenzahl × halbe Map-Auflösung × kürzere
+Distanz. Beleg läuft über die Draw-Call-Anzeige im Nutzertest — headless ist
+GPU-seitig nichts messbar.
+
+**Nächster Hebel, falls weiter GPU-limitiert:** MultiMesh für Bäume
+(2 MeshInstances je Baum, 120-480 Stück) und Gebäude-Mesh-Bündelung.
+
+**Verifikation:** Testsuite grün (1499), `--headless --quit` und
+`--headless --quit-after 600 -- lagtest` fehlerfrei (keine Property-
+Warnungen — `shadow_opacity` existiert in 4.7). **Manuelle Prüfung durch
+Nutzer ausstehend:** F9-Test mit FPS-/Draw-Call-Anzeige, Blob-Optik,
+Helligkeit (Ambient/Opacity nach Geschmack nachjustieren).

@@ -120,6 +120,7 @@ func _ensure_cursor() -> void:
 	_cursor_ring.name = "RingCursor"
 	_cursor.add_child(_cursor_ring)
 	var tip: MeshInstance3D = MeshInstance3D.new()
+	tip.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var sphere: SphereMesh = SphereMesh.new()
 	sphere.radius = 0.2
 	sphere.height = 0.4
@@ -134,6 +135,7 @@ func _ensure_cursor() -> void:
 	# Terrain-conforming aim ring (world-origin, rebuilt each frame in _process).
 	_cursor_ring_mesh = MeshInstance3D.new()
 	_cursor_ring_mesh.name = "CursorRingMesh"
+	_cursor_ring_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_cursor_ring_mesh.mesh = ImmediateMesh.new()
 	_cursor_ring_mesh.material_override = TerrainRing.make_material()
 	_cursor_ring_mesh.visible = false
@@ -152,6 +154,7 @@ func _make_square_cursor(mat: StandardMaterial3D) -> Node3D:
 		Vector3(FlattenSpell.HALF_EXTENT, 0.15, 0.0)]
 	for i in range(4):
 		var bar: MeshInstance3D = MeshInstance3D.new()
+		bar.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var box: BoxMesh = BoxMesh.new()
 		box.size = Vector3(side, 0.12, 0.18) if i < 2 else Vector3(0.18, 0.12, side)
 		bar.mesh = box
@@ -170,6 +173,7 @@ func _show_range_ring(radius: float) -> void:
 	if _range_mesh == null:
 		_range_mesh = MeshInstance3D.new()
 		_range_mesh.name = "SpellRangeMesh"
+		_range_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		_range_mesh.mesh = ImmediateMesh.new()
 		_range_mesh.material_override = TerrainRing.make_material()
 		_world_root.add_child(_range_mesh)

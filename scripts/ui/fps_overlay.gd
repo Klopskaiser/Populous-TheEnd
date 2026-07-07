@@ -1,8 +1,10 @@
 class_name FpsOverlay extends Label
 
 ## In-game FPS counter (phase 8): frames per second plus the frame time in
-## milliseconds, top-right corner. Visibility follows GameSettings.show_fps()
-## live, so the options toggle applies without restarting the match.
+## milliseconds and the renderer's draw calls / objects per frame (GPU-side
+## diagnosis, e.g. before/after the shadow rework), top-right corner.
+## Visibility follows GameSettings.show_fps() live, so the options toggle
+## applies without restarting the match.
 
 const UPDATE_INTERVAL: float = 0.25
 
@@ -11,7 +13,7 @@ var _timer: float = 0.0
 
 func _ready() -> void:
 	set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	offset_left = -170.0
+	offset_left = -230.0
 	offset_top = 8.0
 	offset_right = -10.0
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -33,4 +35,9 @@ func _process(delta: float) -> void:
 		return
 	_timer = UPDATE_INTERVAL
 	var fps: float = Engine.get_frames_per_second()
-	text = "FPS: %d (%.1f ms)" % [int(fps), 1000.0 / maxf(fps, 1.0)]
+	var draw_calls: int = RenderingServer.get_rendering_info(
+		RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME)
+	var objects: int = RenderingServer.get_rendering_info(
+		RenderingServer.RENDERING_INFO_TOTAL_OBJECTS_IN_FRAME)
+	text = "FPS: %d (%.1f ms)\nDraw-Calls: %d | Objekte: %d" % [
+		int(fps), 1000.0 / maxf(fps, 1.0), draw_calls, objects]

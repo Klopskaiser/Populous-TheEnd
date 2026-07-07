@@ -744,6 +744,17 @@ func _create_model() -> void:
 	_flag_mesh.position = Vector3(0.2, 1.5, 0.85)
 	root.add_child(_flag_mesh)
 
+	# Phase 8 shadow rework: units cast no real shadows — the model gets a
+	# hardcoded blob quad instead (like the sprite units' blob MultiMesh).
+	for m in root.find_children("*", "MeshInstance3D", true, false):
+		(m as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var blob: MeshInstance3D = MeshInstance3D.new()
+	blob.name = "BlobShadow"
+	blob.mesh = UnitRenderer.make_blob_mesh(Vector2(1.6, 2.4))
+	blob.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	blob.position.y = 0.04
+	root.add_child(blob)
+
 
 func _refresh_flag_color() -> void:
 	if _flag_mesh == null:
@@ -766,6 +777,7 @@ func _show_flame(show: bool) -> void:
 		if not show:
 			return
 		_flame = MeshInstance3D.new()
+		_flame.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var s: SphereMesh = SphereMesh.new()
 		s.radius = 0.6
 		s.height = 1.2
