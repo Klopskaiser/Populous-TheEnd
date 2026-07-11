@@ -48,13 +48,6 @@ const FORESTER_WORKERS: int = 2
 ## Braves the AI keeps working in its workshop (7f; full crew = 30-s catapults).
 const WORKSHOP_WORKERS: int = 3
 const MAX_PLOT_CANDIDATES: int = 40
-## Hard cap on ring cells EXAMINED per plot search (phase 8): the full ring
-## sweep ran can_place_at on up to ~3700 cells per AI per second once the
-## base area filled up.
-const MAX_PLOT_CELLS: int = 1200
-## Ticks (seconds) the AI skips plot searching after one came up empty —
-## hammering a full base area every tick was a recurring per-second spike.
-const PLOT_RETRY_TICKS: int = 5
 ## Idle braves sent along to a remote expansion site (the BuildingManager
 ## only recruits workers within ~30 m of a site).
 const EXPANSION_ESCORT: int = 6
@@ -109,8 +102,6 @@ var _accumulator: float = 0.0
 var _attack_order_countdown: int = 0
 var _tick_count: int = 0
 var _rebuild_ticks: int = 0
-## Cooldown ticks after a failed plot search (see PLOT_RETRY_TICKS).
-var _plot_retry_ticks: int = 0
 
 
 func _ready() -> void:
@@ -217,9 +208,6 @@ func make_snapshot() -> Dictionary:
 func _tick_build(snap: Dictionary) -> void:
 	if _rebuild_ticks > 0:
 		return
-	if _plot_retry_ticks > 0:
-		_plot_retry_ticks -= 1
-		return
 	var max_sites: int = clampi(snap.get("braves", 0) / BRAVES_PER_SITE,
 		1, MAX_PARALLEL_SITES)
 	if _construction_site_count() >= max_sites:
@@ -232,7 +220,6 @@ func _tick_build(snap: Dictionary) -> void:
 	probe.free()
 	var cell: Vector2i = _find_plot(footprint)
 	if cell.x < 0:
-		_plot_retry_ticks = PLOT_RETRY_TICKS
 		return
 	if commands.place_building(tribe, scene, cell) != null:
 		_send_escort_if_remote(cell)
@@ -743,17 +730,11 @@ func _find_plot(footprint: Vector2i) -> Vector2i:
 
 
 ## Ring search for the first valid plot that has wood in reach. Gives up
-## after MAX_PLOT_CANDIDATES unsupplied candidates (then expansion takes over)
-## or after MAX_PLOT_CELLS examined ring cells (can_place_at per cell is the
-## cost driver — phase 8).
+## after MAX_PLOT_CANDIDATES unsupplied candidates (then expansion takes over).
 func _find_supplied_plot(anchor: Vector2i, footprint: Vector2i) -> Vector2i:
 	var checked: int = 0
-	var cells_seen: int = 0
 	for radius in range(0, 30):
 		for cell in ring_cells(anchor, radius):
-			cells_seen += 1
-			if cells_seen > MAX_PLOT_CELLS:
-				return Vector2i(-1, -1)
 			if not commands.can_place_at(cell, footprint):
 				continue
 			if _trees_near_cell(cell) >= MIN_TREES_NEAR_PLOT:

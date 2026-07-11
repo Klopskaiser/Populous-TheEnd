@@ -3424,3 +3424,61 @@ Restüberlast ab.
 **Manuelle Prüfung ausstehend:** Debugschlacht + Skirmish-F9 — FPS sollte im
 Vollkampf nicht mehr unter ~15-20 fallen; bei Überlast läuft das Spiel
 minimal langsamer statt einzufrieren.
+
+### Rückabwicklung Phase 8 — Wegfindungs-Regression (Nutzerentscheid, 2026-07-12)
+
+**Symptome (Langzeittest durch Nutzer):** Nach einer Weile Spielzeit ignorieren
+Einheiten Befehle — Zielmarker werden angezeigt, Einheiten bewegen sich nicht
+(beobachtet nahe Erdbeben-verformtem Terrain); KI-Einheiten verlassen die Basis
+nicht mehr, zeigen aber **Laufanimation**.
+
+**Täter-Hypothese (Startpunkt für den Neuanlauf in Phase 8.1):**
+„Laufanimation ohne Bewegung" ist exakt der Zustand MOVE-State-wartet-auf-
+Pfad-Queue (`_pending_target` gesetzt, `_tick_move` returned, `_anim_base()` =
+walk). Das Phase-8-**Zeitbudget der Pfad-Queue** (`PATH_BUDGET_USEC = 4000`)
+drückt den Queue-Durchsatz auf großen Karten mit teuren/fehlschlagenden
+A*-Läufen (z. B. nach Erdbeben-Verformung) auf wenige Pfade pro Tick; die
+GLOBALE Queue (alle Stämme teilen sie) staut sich dann unbegrenzt auf — alle
+neuen Bewegungsbefehle warten Minuten. Passt auf beide Symptome (KI-Basen ohne
+Terrain-Verformung sind über die geteilte Queue mitbetroffen). Zweiter
+Kandidat: der Unreachable-Holz-Cache (30-s-Bann nach EINEM Pfad-Fehlschlag —
+auch transiente Blockaden, z. B. Baustellen-Footprints, lösten ihn aus).
+
+**Zurückgerollt auf den Stand vor Phase 8 (`16bc4be`):** alle Sim-/Wegfindungs-/
+KI-Verhaltensänderungen aus `302ebad` („Phase 8: Performance") und `98de11f`
+(Kampf-Hotpath): Pfad-Queue-Zeitbudget, Unreachable-Holz-Cache + Filter,
+Worker-Retry-Backoffs, zweiphasige Safety-Scans, Hütten-/Wachturm-/Trainings-/
+Werkstatt-/Förster-Drosselungen, Recruit-über-Stammesliste, KI-Plot-Cooldown/
+Zell-Cap, 10-Hz-Tribe-Tick, `_ground_slope`-Bewegung (zurück zu `_slope_ahead`),
+`_approach`-/`_tick_attack`-Umbauten, Melee-Slot-Fastpath, Tick-Guards,
+allokationsfreie Scans (`nearest_enemy`/`has_enemy_in_radius`).
+Komplett zurückgesetzte Dateien: brave.gd, hut.gd, watchtower.gd,
+training_building.gd, workshop.gd, forester.gd, building_manager.gd,
+ai_controller.gd, game_state.gd, unit_manager.gd; unit.gd zurückgesetzt und
+building.gd bereinigt.
+
+**Bewusst behalten:**
+- Schatten-Umbau komplett (`7d7f6af`): Blob-Schatten, cast_shadow-OFF-Liste,
+  2 PSSM-Splits/2048er-Map/70 m, Ambient 0,75 + shadow_opacity 0,8.
+- Messwerkzeuge: FPS-/Draw-Call-Anzeige (GameSettings/FpsOverlay), lagtest-Flag,
+  F9-Ausbau (2000/Druck, kartengrößen-Anker), Benchmarks
+  (benchmark_earlygame/-mass/-units), Pfad-Telemetrie `Unit.dbg_plan_*`
+  (in unit.gd re-eingepatcht), `_blob_hidden`-Feld (vom Blob-Renderer genutzt),
+  StarsRenderer-Uhr-Optimierung, Renderer-Kapazität 8192.
+- **Aufholspiralen-Cap `max_physics_steps_per_frame = 2`** (project.godot +
+  main.gd) — verhindert weiterhin das 2-3-FPS-Standbild; Überlast wird Zeitlupe.
+
+**Bekannte Kehrseite:** Früh-Lag (Bergpass) und Kampf-Tick-Kosten von vor
+Phase 8 sind zurück (headless nach Rollback gemessen: Bewegung 2000 ≈ 31,5 ms,
+Kampf 2000 ≈ 45,9 ms/Tick; Bewegung 6000 ≈ 79 ms, Kampf ~4700 ≈ 108 ms).
+
+**Tests:** `test_perf.gd` um `test_unreachable_wood_is_cached` und
+`test_early_economy_budget` gekürzt (wachten über zurückgerollte Fixes); die
+zwei Massen-Budget-Wächter (move/combat 2000, Budgets 100/120 ms) bleiben.
+Pfad-Queue-Test in test_unit_logic bleibt (kompatible „höchstens N pro
+Tick"-Assertion).
+
+**Nutzer-Vorgabe für alle künftigen Performance-Arbeiten:** KEINE Reduktion
+der Simulationsfrequenz / keine Genauigkeits-Tricks („akkurate Berechnung") —
+der 20-Hz-Plan (08a) ist verworfen. Performance-Neuanlauf (Phase 8.1 im
+Overview): Optimierungen einzeln, mit Langzeit-Verifikation, wieder einführen.

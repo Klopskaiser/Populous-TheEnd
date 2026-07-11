@@ -27,10 +27,6 @@ const AREA_TREE_CAP: int = 30
 const MANA_PER_WORKER: float = 2.0
 ## Worker-seconds of work per sapling: 4 active workers -> one per 15 s.
 const PLANT_WORK_PER_TREE: float = 60.0
-## Retry interval after a FAILED plant dispatch (area full / no free cell):
-## the dispatch scan (tree count + ring search + pile checks) is too expensive
-## to re-run every frame while the progress sits at its cap (phase 8).
-const PLANT_RETRY_INTERVAL: float = 2.0
 
 const C_WALL: Color = Color(0.42, 0.3, 0.16)
 const C_ROOF: Color = Color(0.2, 0.45, 0.2)
@@ -45,8 +41,6 @@ var _plant_cell: Vector2i = Vector2i(-1, -1)
 var _plant_progress: float = 0.0
 ## Active worker count from the last tick (mana-limited); drives the bar.
 var _active_workers: int = 0
-## Backoff after a failed dispatch (see PLANT_RETRY_INTERVAL).
-var _plant_retry: float = 0.0
 
 
 func _init() -> void:
@@ -195,12 +189,8 @@ func _tick_active(delta: float) -> void:
 	# a worker is out (the next plant fires as soon as it returns).
 	_plant_progress = minf(_plant_progress + float(active) * delta, PLANT_WORK_PER_TREE)
 	if _plant_progress >= PLANT_WORK_PER_TREE and _planting_worker == null:
-		_plant_retry -= delta
-		if _plant_retry <= 0.0:
-			if _dispatch_plant():
-				_plant_progress = 0.0
-			else:
-				_plant_retry = PLANT_RETRY_INTERVAL
+		if _dispatch_plant():
+			_plant_progress = 0.0
 
 
 ## Sends one housed worker out to plant on a free cell in the area. Returns false

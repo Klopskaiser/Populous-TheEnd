@@ -214,10 +214,6 @@ var hop_visual: bool = false
 ## choice of the four sprite views. Default: facing the camera side (south).
 var facing: Vector3 = Vector3(0, 0, 1)
 
-## Ground slope (rise per metre) measured from the LAST movement step —
-## replaces two per-tick terrain samples on the walk hot path (phase 8).
-var _ground_slope: float = 0.0
-
 ## Injected by UnitManager.spawn_unit() (or directly by tests).
 var terrain_data: TerrainData = null
 var nav_grid: NavGrid = null
@@ -443,13 +439,9 @@ func tick(delta: float) -> void:
 	# facing, animation, fire/convert): they have no world tick of their own.
 	if garrison_housed:
 		return
-	# Guarded calls (phase 8): knockback/burning are idle for almost every unit
-	# almost always — two skipped function calls per unit per tick add up.
-	if knockback_accum > 0.0 or _knockback_remaining != Vector3.ZERO:
-		_tick_knockback(delta)
+	_tick_knockback(delta)
 	_tick_regen(delta)
-	if _burn_time > 0.0:
-		_tick_burning(delta)
+	_tick_burning(delta)
 	_tick_state(delta)
 	_apply_animation(false)
 
@@ -498,11 +490,6 @@ func _tick_move(delta: float) -> void:
 ## are not State.MOVE). Returns true when the path is exhausted. Uphill slopes
 ## slow the step down; very steep DOWNHILL stretches can knock the unit into a
 ## roll (phase 5d).
-##
-## Hot path (phase 8): the slope comes from the PREVIOUS step's height change
-## (_ground_slope) instead of two extra terrain samples per tick — walking
-## needs only the one get_height of the Y snap. The slope lags one tick, which
-## is invisible at 30 Hz step sizes.
 func _advance_path(delta: float) -> bool:
 	if _path_index >= _path.size():
 		return true
@@ -512,27 +499,30 @@ func _advance_path(delta: float) -> bool:
 	var to_target: Vector2 = flat_target - flat_pos
 	if to_target.length_squared() > 0.000001:
 		facing = Vector3(to_target.x, 0.0, to_target.y).normalized()
-	var slope: float = _ground_slope
+	var slope: float = _slope_ahead(to_target)
 	if slope < -STEEP_ROLL_SLOPE and randf() < STEEP_ROLL_CHANCE_PER_SEC * delta:
 		start_roll(Vector3(to_target.x, 0.0, to_target.y), MINI_ROLL_DURATION)
 		return false
-	# Inlined slope speed + ground snap (hot path — a function call per moving
-	# unit per tick is measurable at thousands of units).
-	var spd: float = speed
-	if slope > 0.0:
-		spd = speed * clampf(1.0 - slope * UPHILL_SLOWDOWN, MIN_SPEED_FACTOR, 1.0)
-	var next: Vector2 = flat_pos.move_toward(flat_target, spd * delta)
-	var step_len: float = flat_pos.distance_to(next)
+	var next: Vector2 = flat_pos.move_toward(flat_target, _slope_speed(slope) * delta)
 	position.x = next.x
 	position.z = next.y
-	if terrain_data != null:
-		var prev_y: float = position.y
-		position.y = terrain_data.get_height(next.x, next.y)
-		if step_len > 0.001:
-			_ground_slope = (position.y - prev_y) / step_len
+	_snap_to_ground()
 	if next.distance_to(flat_target) <= ARRIVE_EPS:
 		_path_index += 1
 	return _path_index >= _path.size()
+
+
+## Terrain slope (rise per metre) a short step ahead along move_dir; negative
+## = downhill. 0 without terrain (tests) or when standing still.
+func _slope_ahead(move_dir: Vector2) -> float:
+	if terrain_data == null or move_dir.length_squared() < 0.000001:
+		return 0.0
+	var d: Vector2 = move_dir.normalized()
+	var ahead: float = 0.6
+	var h0: float = terrain_data.get_height(position.x, position.z)
+	var h1: float = terrain_data.get_height(
+		position.x + d.x * ahead, position.z + d.y * ahead)
+	return (h1 - h0) / ahead
 
 
 ## Effective speed for a given slope: full speed on flat/downhill, slowed
@@ -655,9 +645,9 @@ func _resolve_pending_path() -> void:
 		_set_state(State.IDLE)
 
 
-## Path-planning telemetry (phase 8), read/reset by the perf benchmarks —
-## failing A* runs explore their whole walkable component and were the
-## measured early-game lag driver, so the benchmarks watch these counters.
+## Path-planning telemetry (phase 8 tooling), read/reset by the perf
+## benchmarks — failing A* runs explore their whole walkable component, so
+## the benchmarks watch these counters. Pure counters, no behaviour.
 static var dbg_plan_calls: int = 0
 static var dbg_plan_fails: int = 0
 static var dbg_plan_us: int = 0
@@ -1416,12 +1406,12 @@ func _tick_attack(delta: float) -> void:
 				return
 		_wait_near(target, delta)
 		return
+	var slot_pos: Vector3 = target.melee_slot_position(slot)
 	var dist: float = _flat_dist(position, target.position)
 	if dist > MELEE_RANGE:
 		_in_melee = false
-		# Facing comes from the movement itself (chase direction ~= target
-		# direction); the extra normalize per pursuer per tick added up.
-		_approach(target.melee_slot_position(slot), delta)
+		_approach(slot_pos, delta)
+		_face_point(target.position)
 		return
 	# In range: stand still, face the target and strike on cooldown.
 	_in_melee = true
@@ -1953,25 +1943,38 @@ func _maybe_retaliate(attacker) -> void:
 
 
 ## Nearest enemy in radius, preferring targets with fewer attackers (1v1 bias).
-## The candidate cap and the allocation-free bucket walk live in
-## UnitManager.nearest_enemy (phase 8) — this is the hottest combat scan.
+## The candidate query is capped: in a mega-crowd an uncapped scan per unit
+## per 0.25 s dominated the tick (measured 60 ms with 4000 stacked units).
 func _scan_for_enemy(radius: float) -> Unit:
 	if path_service == null:
 		return null
-	return path_service.nearest_enemy(position, radius, tribe_id,
-		SCAN_MAX_CANDIDATES, self)
+	var flat: Vector2 = Vector2(position.x, position.z)
+	var best: Unit = null
+	var best_score: float = INF
+	for u in path_service.get_units_in_radius(position, radius, SCAN_MAX_CANDIDATES):
+		if u == self or u.state == State.DEAD or u.tribe_id == tribe_id:
+			continue
+		if u.state == State.SIT:
+			continue   # sitting converts are no threat (and shall keep sitting)
+		if not u.is_targetable():
+			continue   # siege engines: attackers go for the crew instead
+		var d: float = Vector2(u.position.x, u.position.z).distance_to(flat)
+		# Commitment count dominates the score so free enemies are picked first
+		# (1v1 preference), even before anyone is in striking range.
+		var score: float = float(u.incoming_attackers) * 1000.0 + d
+		if score < best_score:
+			best_score = score
+			best = u
+	return best
 
 
 ## Registers `attacker` on this unit's melee ring. Returns its slot index
 ## (0..MAX-1) or -1 when the ring is full. Untyped param (freed-safe).
-## Fast path first (phase 8): an attacker that already holds a slot skips the
-## prune scan — this runs per attacker per tick in mass battles. The prune
-## only runs when someone NEW tries to join (that is when stale slots matter).
 func request_melee_slot(attacker) -> int:
+	_prune_melee_attackers()
 	var idx: int = melee_attackers.find(attacker)
 	if idx >= 0:
 		return idx
-	_prune_melee_attackers()
 	if melee_attackers.size() < MAX_MELEE_ATTACKERS:
 		melee_attackers.append(attacker)
 		return melee_attackers.size() - 1
@@ -1988,16 +1991,7 @@ func active_melee_attacker_count() -> int:
 
 
 ## Drops freed/dead attackers and any that have since retargeted, freeing slots.
-## Rebuilds only when an invalid entry was found — this runs per attacker per
-## tick via request_melee_slot, so a per-call allocation added up (phase 8).
 func _prune_melee_attackers() -> void:
-	var dirty: bool = false
-	for a in melee_attackers:
-		if not (is_instance_valid(a) and a.state != State.DEAD and a.attack_target == self):
-			dirty = true
-			break
-	if not dirty:
-		return
 	var kept: Array = []
 	for a in melee_attackers:
 		if is_instance_valid(a) and a.state != State.DEAD and a.attack_target == self:
@@ -2015,26 +2009,13 @@ func melee_slot_position(slot: int) -> Vector3:
 
 ## Approaches `dest`: A* while far (avoids water/obstacles), direct step when
 ## close (combat is chaotic and short-range — no need to re-path every metre).
-## Hot path (phase 8): squared-distance comparisons (no sqrt/Vector2 helper)
-## and a wider replan threshold — brawl targets jitter from shoves/separation,
-## so re-pathing on every metre of drift burned A* runs.
 func _approach(dest: Vector3, delta: float) -> void:
-	var dx: float = dest.x - position.x
-	var dz: float = dest.z - position.z
-	if dx * dx + dz * dz > COMBAT_DIRECT_RANGE * COMBAT_DIRECT_RANGE and nav_grid != null:
-		if not _has_path():
+	if _flat_dist(position, dest) > COMBAT_DIRECT_RANGE and nav_grid != null:
+		if not _has_path() or _flat_dist(_combat_goal, dest) > 1.0:
 			_combat_goal = dest
 			if not _plan_path_to(dest):
 				_step_toward(dest, delta)
 				return
-		else:
-			var gx: float = _combat_goal.x - dest.x
-			var gz: float = _combat_goal.z - dest.z
-			if gx * gx + gz * gz > 2.25:   # goal drifted > 1.5 m
-				_combat_goal = dest
-				if not _plan_path_to(dest):
-					_step_toward(dest, delta)
-					return
 		if _advance_path(delta):
 			_clear_path()
 		return
@@ -2067,21 +2048,13 @@ func _step_toward(point: Vector3, delta: float) -> void:
 	var to_target: Vector2 = flat_target - flat
 	if to_target.length_squared() > 0.000001:
 		facing = Vector3(to_target.x, 0.0, to_target.y).normalized()
-	var spd: float = speed
-	if _ground_slope > 0.0:
-		spd = speed * clampf(1.0 - _ground_slope * UPHILL_SLOWDOWN, MIN_SPEED_FACTOR, 1.0)
-	var next: Vector2 = flat.move_toward(flat_target, spd * delta)
+	var next: Vector2 = flat.move_toward(flat_target, _slope_speed(_slope_ahead(to_target)) * delta)
 	if nav_grid != null and not nav_grid.is_cell_walkable(
 			nav_grid.world_to_cell(Vector3(next.x, 0.0, next.y))):
 		return
-	var step_len: float = flat.distance_to(next)
 	position.x = next.x
 	position.z = next.y
-	if terrain_data != null:
-		var prev_y: float = position.y
-		position.y = terrain_data.get_height(next.x, next.y)
-		if step_len > 0.001:
-			_ground_slope = (position.y - prev_y) / step_len
+	_snap_to_ground()
 
 
 func _face_point(point: Vector3) -> void:

@@ -20,7 +20,7 @@ const SEPARATION_SPEED: float = 1.6
 ## Separation processes at most this many units per tick (round-robin over
 ## slices; the push delta is scaled by the slice count) — a full pass every
 ## frame would dominate the frame time with thousands of units.
-const SEPARATION_UNITS_PER_TICK: int = 450
+const SEPARATION_UNITS_PER_TICK: int = 600
 ## Max neighbour candidates examined per separated unit. Bounds the cost when
 ## thousands of units share one crowded hash bucket (the benchmark showed
 ## ~190 ms/tick without this cap when 4000 units converge on one point).
@@ -28,11 +28,6 @@ const SEPARATION_MAX_CHECKS: int = 20
 ## Max A* path computations per tick (mass move orders are spread over
 ## frames via the path queue instead of stalling one frame).
 const PATHS_PER_TICK: int = 48
-## Additional TIME budget for the path queue (phase 8): one failing A* on a
-## 256 map explores its whole walkable component (~6 ms) — 48 of those in one
-## tick would stall a frame. Whatever binds first (count or time) ends the
-## drain; at least one request is always resolved per tick.
-const PATH_BUDGET_USEC: int = 4000
 
 ## Idle 6-packs (phase 7b, reworked on user feedback): EXPLICIT groups with
 ## sticky membership — the earlier centroid drift made units hop between
@@ -168,7 +163,6 @@ func request_path(unit: Unit) -> void:
 
 func _drain_path_queue() -> void:
 	var budget: int = PATHS_PER_TICK
-	var deadline: int = Time.get_ticks_usec() + PATH_BUDGET_USEC
 	while budget > 0 and _path_head < _path_requests.size():
 		var unit: Unit = _path_requests[_path_head]
 		_path_head += 1
@@ -176,8 +170,6 @@ func _drain_path_queue() -> void:
 			continue
 		unit._resolve_pending_path()
 		budget -= 1
-		if Time.get_ticks_usec() >= deadline:
-			break   # heavy paths (big map / failing A*): rest next tick
 	if _path_head >= _path_requests.size():
 		_path_requests.clear()
 		_path_head = 0
@@ -560,64 +552,6 @@ func get_units_in_radius(pos: Vector3, radius: float, max_count: int = 0) -> Arr
 					if max_count > 0 and result.size() >= max_count:
 						return result
 	return result
-
-
-## Nearest attackable enemy of tribe `p_tribe_id` within `radius` of `pos`,
-## preferring targets with fewer committed attackers (1v1 bias — the score
-## mirrors Unit._scan_for_enemy). Allocation-free walk over the hash buckets
-## (phase 8): the old per-scan get_units_in_radius array was built every
-## 0.25 s per fighting unit. `max_checks` caps the examined in-radius
-## candidates like before; `exclude` skips the scanning unit itself.
-func nearest_enemy(pos: Vector3, radius: float, p_tribe_id: int,
-		max_checks: int, exclude: Unit = null) -> Unit:
-	var min_key: Vector2i = hash_key(pos - Vector3(radius, 0.0, radius))
-	var max_key: Vector2i = hash_key(pos + Vector3(radius, 0.0, radius))
-	var flat_pos: Vector2 = Vector2(pos.x, pos.z)
-	var best: Unit = null
-	var best_score: float = INF
-	var checks: int = max_checks
-	for kz in range(min_key.y, max_key.y + 1):
-		for kx in range(min_key.x, max_key.x + 1):
-			var bucket: Array = _hash.get(Vector2i(kx, kz), [])
-			for unit: Unit in bucket:
-				if unit == exclude:
-					continue
-				var d: float = Vector2(unit.position.x, unit.position.z).distance_to(flat_pos)
-				if d > radius:
-					continue
-				# The cap counts EVERY in-radius unit (friend or foe), exactly
-				# like the old get_units_in_radius(max_count) query — otherwise
-				# a scan inside a friendly mega-crowd walks the whole bucket.
-				checks -= 1
-				if unit.tribe_id != p_tribe_id and unit.state != Unit.State.DEAD \
-						and unit.state != Unit.State.SIT and unit.is_targetable():
-					var score: float = float(unit.incoming_attackers) * 1000.0 + d
-					if score < best_score:
-						best_score = score
-						best = unit
-				if checks <= 0:
-					return best
-	return best
-
-
-## True when a living enemy of tribe `p_tribe_id` stands within `radius` of
-## `pos` (XZ). Allocation-free existence check for hot safety scans (worker
-## wood-fetch, phase 8) — get_units_in_radius builds a result array per call,
-## which dominated the early-game tick when dozens of workers scanned dozens
-## of piles/trees every retry.
-func has_enemy_in_radius(pos: Vector3, radius: float, p_tribe_id: int) -> bool:
-	var min_key: Vector2i = hash_key(pos - Vector3(radius, 0.0, radius))
-	var max_key: Vector2i = hash_key(pos + Vector3(radius, 0.0, radius))
-	var flat_pos: Vector2 = Vector2(pos.x, pos.z)
-	for kz in range(min_key.y, max_key.y + 1):
-		for kx in range(min_key.x, max_key.x + 1):
-			var bucket: Array = _hash.get(Vector2i(kx, kz), [])
-			for unit: Unit in bucket:
-				if unit.tribe_id == p_tribe_id or unit.state == Unit.State.DEAD:
-					continue
-				if Vector2(unit.position.x, unit.position.z).distance_to(flat_pos) <= radius:
-					return true
-	return false
 
 
 func get_units_of_tribe(tribe_id: int) -> Array[Unit]:

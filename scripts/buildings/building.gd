@@ -108,15 +108,6 @@ var _visual_stage: int = -1
 ## Worker braves currently assigned to this construction site.
 var workers: Array[Brave] = []
 
-## Wood sources (trees/piles) workers could not path to, shared by ALL workers
-## of this site (phase 8): without this, every worker re-picked the same
-## unreachable tree (e.g. on an isolated bergpass plateau) every retry and
-## paid a FAILING full-map A* each time — the measured early-game lag driver.
-## instance_id -> expiry (Time.get_ticks_msec()); re-checked after the TTL in
-## case a landbridge/terrain morph opened a route.
-var _unreachable_wood: Dictionary = {}
-const WOOD_UNREACHABLE_TTL_MS: int = 30000
-
 ## Melee raiders currently INSIDE demolishing (phase 7g). Untyped like the
 ## trainee/crew registries: entries are removed from the world and may be freed.
 var raiders: Array = []
@@ -924,26 +915,6 @@ func progress_cap() -> float:
 	if wood_cost <= 0:
 		return 1.0
 	return float(wood_delivered) / float(wood_cost)
-
-
-## Remembers a wood source (tree/pile) as unreachable for this site's workers.
-func mark_wood_unreachable(obj) -> void:
-	if obj != null and is_instance_valid(obj):
-		_unreachable_wood[obj.get_instance_id()] = Time.get_ticks_msec() \
-			+ WOOD_UNREACHABLE_TTL_MS
-
-
-## True while `obj` was recently marked unreachable (TTL not yet expired).
-func is_wood_unreachable(obj) -> bool:
-	if obj == null or not is_instance_valid(obj):
-		return false
-	var expiry: int = int(_unreachable_wood.get(obj.get_instance_id(), 0))
-	if expiry == 0:
-		return false
-	if Time.get_ticks_msec() > expiry:
-		_unreachable_wood.erase(obj.get_instance_id())
-		return false
-	return true
 
 
 ## Called by workers when no wood source is reachable anywhere: the site

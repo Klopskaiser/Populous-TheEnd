@@ -43,10 +43,6 @@ const REPAIR_RATE: float = 10.0     # building HP repaired per second per worker
 const JOB_TREE_RADIUS: float = 40.0 # tree search radius around the site
 const CHOP_CHAIN_RADIUS: float = 8.0
 const TASK_RETRY: float = 0.6
-## Backoff when task selection came up EMPTY (no wood source, all flatten cells
-## claimed): the full fetch scan (piles + trees) is too expensive to hammer
-## every 0.6 s per waiting worker (phase 8 — the measured early-game lag).
-const TASK_RETRY_IDLE: float = 1.5
 ## A wood pile is only preferred over chopping when it lies within this radius
 ## of the construction site (otherwise fetching it is not worth it) AND no enemy
 ## is within WOOD_ENEMY_RADIUS of it — a pile guarded by enemies is skipped in
@@ -362,11 +358,6 @@ func _tick_job(delta: float) -> void:
 			if _retry_timer <= 0.0:
 				_retry_timer = TASK_RETRY
 				_choose_job_task()
-				if task == Task.NONE:
-					# Nothing found: back off (staggered per unit so waiting
-					# crews do not re-scan in the same frame).
-					_retry_timer = TASK_RETRY_IDLE \
-						+ float(get_instance_id() % 16) * 0.03
 		Task.FLATTEN:
 			_tick_flatten(delta)
 		Task.CHOP:
@@ -500,20 +491,9 @@ func _try_fetch_wood() -> bool:
 ## Nearest wood pile (to the worker) that is close to the site, not already in
 ## the site's absorb radius (those get swallowed anyway) and has no enemy within
 ## WOOD_ENEMY_RADIUS. Null when no such safe, close pile exists.
-## Hot path (phase 8): the enemy check runs ONCE for the best candidate — only
-## when that one is contested does the full per-pile safety scan run.
 func _best_safe_pile() -> WoodPile:
 	if wood_pile_manager == null or job == null or not is_instance_valid(job):
 		return null
-	var pile: WoodPile = _nearest_eligible_pile(false)
-	if pile == null:
-		return null
-	if not _enemies_near(pile.position, WOOD_ENEMY_RADIUS):
-		return pile
-	return _nearest_eligible_pile(true)
-
-
-func _nearest_eligible_pile(require_safe: bool) -> WoodPile:
 	var site: Vector2 = Vector2(job.center_world().x, job.center_world().z)
 	var entrance: Vector2 = Vector2(job.entrance_world().x, job.entrance_world().z)
 	var worker: Vector2 = Vector2(position.x, position.z)
@@ -527,9 +507,7 @@ func _nearest_eligible_pile(require_safe: bool) -> WoodPile:
 			continue   # the site absorbs these on its own
 		if pf.distance_to(site) > PILE_PREFER_RADIUS:
 			continue   # too far to be worth fetching over chopping
-		if job.is_wood_unreachable(pile):
-			continue   # no path last time (checked again after the TTL)
-		if require_safe and _enemies_near(pile.position, WOOD_ENEMY_RADIUS):
+		if _enemies_near(pile.position, WOOD_ENEMY_RADIUS):
 			continue   # guarded by enemies -> chop a tree instead
 		var d: float = pf.distance_squared_to(worker)
 		if d < best_d:
@@ -541,17 +519,12 @@ func _nearest_eligible_pile(require_safe: bool) -> WoodPile:
 ## Claims the nearest chopable tree near the site, preferring one with no enemy
 ## within WOOD_ENEMY_RADIUS; if every reachable tree is contested, falls back to
 ## the nearest one anyway (better than stalling). Null when none is chopable.
-## Hot path (phase 8): like _best_safe_pile, the safety scan per tree only runs
-## when the nearest tree turns out to be contested.
 func _claim_safe_tree() -> TreeResource:
-	var tree: TreeResource = _nearest_claimable_tree(false)
+	var tree: TreeResource = _nearest_claimable_tree(true)
 	if tree == null:
-		return null
-	if _enemies_near(tree.position, WOOD_ENEMY_RADIUS):
-		var safe: TreeResource = _nearest_claimable_tree(true)
-		if safe != null:
-			tree = safe
-	tree.add_claimer(self)
+		tree = _nearest_claimable_tree(false)
+	if tree != null:
+		tree.add_claimer(self)
 	return tree
 
 
@@ -567,8 +540,6 @@ func _nearest_claimable_tree(require_safe: bool) -> TreeResource:
 		var d: float = Vector2(tree.position.x, tree.position.z).distance_squared_to(origin)
 		if d > best_d:
 			continue
-		if job.is_wood_unreachable(tree):
-			continue   # no path last time (checked again after the TTL)
 		if require_safe and _enemies_near(tree.position, WOOD_ENEMY_RADIUS):
 			continue
 		best_d = d
@@ -580,7 +551,10 @@ func _nearest_claimable_tree(require_safe: bool) -> TreeResource:
 func _enemies_near(pos: Vector3, radius: float) -> bool:
 	if path_service == null:
 		return false
-	return path_service.has_enemy_in_radius(pos, radius, tribe_id)
+	for u in path_service.get_units_in_radius(pos, radius):
+		if u.tribe_id != tribe_id and u.state != Unit.State.DEAD:
+			return true
+	return false
 
 
 func _claim_flatten() -> bool:
@@ -1002,16 +976,9 @@ func _seek(target_pos: Vector3, arrive_range: float, delta: float,
 
 
 ## Unreachable goal: give up the current sub-task (job workers pick a new
-## task, everything else stops). Unreachable wood sources are remembered at
-## the SITE (shared by its workers) so nobody re-picks them, and the retry
-## backs off — the old immediate retry re-ran a failing full-map A* every
-## other frame per worker (phase 8, the measured early-game lag).
+## task, everything else stops).
 func _on_seek_failed() -> void:
 	if state == State.BUILD and job != null and is_instance_valid(job):
-		if task == Task.CHOP and _tree_valid(task_tree):
-			job.mark_wood_unreachable(task_tree)
-		elif task == Task.PICKUP and task_pile != null and is_instance_valid(task_pile):
-			job.mark_wood_unreachable(task_pile)
 		if task_cell.x >= 0:
 			job.release_flatten_cell(task_cell)
 		if tree_manager != null and _tree_valid(task_tree):
@@ -1019,7 +986,6 @@ func _on_seek_failed() -> void:
 		task_tree = null
 		task_pile = null
 		_end_subtask()
-		_retry_timer = TASK_RETRY_IDLE + float(get_instance_id() % 16) * 0.03
 	else:
 		_stop_all()
 

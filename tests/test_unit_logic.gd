@@ -362,8 +362,8 @@ func test_path_queue_spreads_path_requests() -> void:
 			pending += 1
 	check(pending == count, "all move orders wait for the path queue first")
 
-	# One tick resolves a bounded batch: capped by PATHS_PER_TICK AND the
-	# PATH_BUDGET_USEC time budget (phase 8) — never everything at once.
+	# One tick resolves a bounded batch (at most PATHS_PER_TICK) — never
+	# everything at once.
 	manager.tick(TICK)
 	var resolved: int = 0
 	for unit in units:

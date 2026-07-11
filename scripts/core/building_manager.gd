@@ -97,9 +97,6 @@ func _on_building_destroyed(building: Building) -> void:
 
 
 ## Sends idle braves of the owning tribe to under-construction sites nearby.
-## Iterates the OWNING tribe's units instead of a 30-m radius query (phase 8):
-## the uncapped query walked ~225 hash buckets and built an array of every
-## unit near the base per site per second.
 func _recruit_workers() -> void:
 	if unit_manager == null:
 		return
@@ -110,18 +107,11 @@ func _recruit_workers() -> void:
 			continue  # waiting for new wood (re-checked on an interval)
 		if building.workers.size() >= Building.MAX_WORKERS:
 			continue
-		if building.tribe == null:
-			continue
-		var center: Vector3 = building.center_world()
-		var flat: Vector2 = Vector2(center.x, center.z)
-		for unit in building.tribe.units:
+		for unit in unit_manager.get_units_in_radius(building.center_world(), RECRUIT_RADIUS):
 			if building.workers.size() >= Building.MAX_WORKERS:
 				break
-			if not is_instance_valid(unit) or not (unit is Brave) \
-					or unit.state != Unit.State.IDLE:
-				continue
-			if Vector2(unit.position.x, unit.position.z).distance_to(flat) \
-					<= RECRUIT_RADIUS:
+			if unit is Brave and unit.tribe_id == building.tribe_id \
+					and unit.state == Unit.State.IDLE:
 				(unit as Brave).order_build(building)
 
 

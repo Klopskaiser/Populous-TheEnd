@@ -1,4 +1,11 @@
-# Phase 8.1 — Massenschlacht-FPS: 20-Hz-Sim + Render-Interpolation + Hotpath Runde 2
+# [VERWORFEN] Phase 8.1 — Massenschlacht-FPS: 20-Hz-Sim + Render-Interpolation + Hotpath Runde 2
+
+> ⛔ **VERWORFEN (Nutzerentscheid 2026-07-12):** Keine Reduktion der
+> Simulationsfrequenz — die Berechnung soll akkurat bei 30 Hz bleiben.
+> Zudem wurden die Phase-8-Verhaltensänderungen wegen einer Wegfindungs-
+> Regression zurückgerollt (siehe PROGRESS.md „Rückabwicklung"). Dieser Plan
+> bleibt nur als Referenz für die Design-Review-Erkenntnisse erhalten
+> (physics_interpolation-Fallstricke, prev/curr-Interpolationsmuster).
 
 > Architektur-Entscheidungen und Verifikations-Befehle: siehe [00_overview.md](00_overview.md).
 > Fortsetzung der Performance-Arbeit aus Phase 8 ([08_performance.md](08_performance.md))

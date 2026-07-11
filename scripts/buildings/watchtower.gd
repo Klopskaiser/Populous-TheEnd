@@ -38,14 +38,6 @@ const C_SHAFT: Color = Color(0.5, 0.48, 0.44)
 const C_PLATFORM: Color = Color(0.42, 0.3, 0.16)
 const C_DOOR: Color = Color(0.16, 0.11, 0.06)
 
-## Crew admission/prune throttle (phase 8): the entrance radius query used to
-## run every frame per tower.
-const MAINTAIN_INTERVAL: float = 0.25
-## Crew actions (target scans, fire/convert) run on this accumulator instead of
-## per frame — the per-crew enemy scan was a per-frame radius query. Cooldowns
-## and channels advance by the accumulated delta, so the cadence is unchanged.
-const CREW_ACTION_INTERVAL: float = 0.15
-
 ## Stationed units (combat / shaman), removed from the world. Untyped like the
 ## other occupant registries (entries may be freed).
 var crew: Array = []
@@ -53,8 +45,6 @@ var crew: Array = []
 var _fire_cd: Dictionary = {}
 ## Per-preacher conversion channel: preacher -> {"target": Unit, "left": float}.
 var _convert_state: Dictionary = {}
-var _maintain_timer: float = 0.0
-var _crew_accum: float = 0.0
 
 
 func _init() -> void:
@@ -221,30 +211,18 @@ func destroy() -> void:
 ## warrior never attacks — it is a protected reserve). Only runs while the tower
 ## is usable and not being demolished (base tick() gate).
 func _tick_active(delta: float) -> void:
-	_maintain_timer -= delta
-	if _maintain_timer <= 0.0:
-		_maintain_timer = MAINTAIN_INTERVAL + float(get_instance_id() % 8) * 0.01
-		_prune_crew()
-		_admit_arrived_crew()   # admitted here (building tick), not in the unit loop
+	_prune_crew()
+	_admit_arrived_crew()   # admitted here (building tick), not in the unit loop
 	if crew.is_empty() or unit_manager == null:
 		return
-	# Crew actions on the accumulator (throttled scans); the accumulated delta
-	# drives cooldowns/channels so fire/convert cadence stays the same.
-	_crew_accum += delta
-	if _crew_accum < CREW_ACTION_INTERVAL:
-		return
-	var step: float = _crew_accum
-	_crew_accum = 0.0
 	for i in range(crew.size()):
 		var u = crew[i]
-		if not is_instance_valid(u):
-			continue   # pruned on the maintain interval
 		u.position = crew_slot_position(i)   # pin visibly to the platform slot
 		match u.unit_kind():
 			&"firewarrior":
-				_tick_crew_firewarrior(u, step)
+				_tick_crew_firewarrior(u, delta)
 			&"preacher":
-				_tick_crew_preacher(u, step)
+				_tick_crew_preacher(u, delta)
 			_:
 				_set_crew_anim(u, &"idle")   # warrior / shaman: stand, no auto action
 
