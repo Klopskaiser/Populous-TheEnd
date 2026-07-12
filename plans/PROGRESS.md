@@ -3586,3 +3586,52 @@ gelassen, nicht in derselben Sitzung angehängt. Nächster isolierter Schritt.
 **Verifikationsstand:** Headless vollständig grün + lagtest-Smoke sauber.
 Manuelle In-Game-Prüfung (langes Bergpass-Skirmish, Massenbefehl-Spikes,
 F10-Zeitraffer, Speichern/Beenden) durch den Nutzer noch ausstehend.
+
+### Stufe B — Separation-Fan-out: gemessen und VERWORFEN (No-Go, 2026-07-12)
+
+**Umsetzung (funktionsfähig, konserviert in der Git-History):** Commit
+`305f73a` enthält die komplette zweiphasige Parallel-Separation
+(POD-Snapshot + CSR-Bucket-Grid per Counting-Sort, `WorkerThreadPool.
+add_group_task` in 256er-Chunks, serielles Anwenden mit unveränderten
+Walkability-/Y-Snap-/Escape-Regeln, Flag `separation_parallel` + Main-Konstante
+`USE_PARALLEL_SEPARATION`, 13 Funktionstests). Revert in `c24c775`.
+
+**Messung (benchmark_mass, Ø sep-Phase pro Tick, sync → parallel):**
+
+| Szenario | sync | parallel | Gewinn |
+|---|---|---|---|
+| move 2000 | 9,09 ms | 5,89 ms | 3,2 ms |
+| move 6000 | 12,83 ms | 12,24 ms | **0,6 ms** |
+| combat 2000 | 9,29 ms | 5,90 ms | 3,4 ms |
+| combat 4740 | 12,11 ms | 8,97 ms | 3,1 ms |
+
+**No-Go-Begründung (Plan-Kriterium: > ~4 ms/Tick bei 2000+):** Überall
+verfehlt; bei 6000 praktisch kein Gewinn. Ursache: Der **O(n)-Snapshot**
+(Positionen/Flags/Bucket-CSR über ALLE Einheiten, pro Tick, in GDScript
+~0,9 µs je Array-Schreibzugriff) kostet bei 6000 Einheiten ~11 ms und frisst
+den Parallelgewinn der eigentlichen Push-Berechnung (parallel nur ~1 ms) fast
+vollständig auf — die Skalierung, für die Stufe B gedacht war, findet nicht
+statt. Dazu kamen zwei nötige Verhaltens-Workarounds, die die Semantik vom
+seriellen Pfad wegbewegen (Regressionsrisiko der Phase-8-Klasse):
+
+1. **Push-Lockstep:** Aus EINEM Snapshot berechnete Pushes sind für gestapelte
+   Einheiten identisch, wenn beide unter dem 20er-Checks-Cap dieselbe
+   Nachbar-Teilmenge sehen (CSR-Reihenfolge) — Distanz bleibt exakt 0, für
+   immer. Die serielle Variante entgeht dem nur durch ihre SOFORTIGEN
+   Positions-Writes. Workarounds: paar-antisymmetrische
+   Voll-Überlapp-Richtung + pro Einheit rotierter Bucket-Scan-Start.
+2. **Escape-Churn:** `overlap_ticks` akkumulieren auch während überlapptem
+   Marschieren; snapshot-basiert eskapieren gestapelte Einheiten von derselben
+   Position zur SELBEN freien Zelle, kommen gestapelt an und eskapieren sofort
+   wieder — Endlosschleife. Workaround: Tight-Buchführung nur im IDLE.
+
+**Lehren für einen späteren Neuanlauf (Stufe C):** Der Snapshot ist das
+strukturelle Limit jeder „Spiegeln-dann-parallel"-Stufe in GDScript. Erst wenn
+Positionen/Kernzustände OHNEHIN in Packed-Arrays leben (data-oriented
+Unit-Loop, Stufe C), entfällt das Spiegeln — dann ist der Fan-out
+(inkl. der beiden dokumentierten Workarounds) direkt wiederverwendbar:
+`git show 305f73a`.
+
+**Damit Definition of Done Phase 8.1 erfüllt:** Stufe A umgesetzt und grün,
+Stufe B „gemessen und dokumentiert verworfen" (Plan-Option 2). Suite nach
+Revert erneut 1509 grün.
