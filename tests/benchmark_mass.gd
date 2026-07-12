@@ -11,9 +11,13 @@ extends SceneTree
 const TICK: float = 1.0 / 30.0
 const MOVE_TICKS: int = 300     # 10 simulated seconds
 const COMBAT_TICKS: int = 300
+## Battle scenarios run longer: the armies need ~2 s to close in, then the
+## brunt of the fighting happens (reported separately as the combat window).
+const BATTLE_TICKS: int = 450
 
 const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
 const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
+const FIREWARRIOR_SCENE: PackedScene = preload("res://scenes/units/firewarrior.tscn")
 
 
 func _initialize() -> void:
@@ -26,6 +30,14 @@ func _initialize() -> void:
 		_run_move(count, true)
 	for count in [2000, 6000]:
 		_run_combat(count)
+	# Phase 8.2 battle scenarios (user request): two armies marching at each
+	# other like the debug battle, one unit kind per run — pure melee
+	# (warriors: groups/slots/strikes) and pure ranged (firewarriors:
+	# fire-range targeting + projectile load, which the grid scenario and the
+	# warrior battle never exercise).
+	print("== Schlacht-Szenarien (2 Armeen, Attack-Move) ==")
+	_run_battle(1000, WARRIOR_SCENE, "schlacht krieger 2x1000     ")
+	_run_battle(1000, FIREWARRIOR_SCENE, "schlacht feuerkrieger 2x1000")
 	quit(0)
 
 
@@ -80,12 +92,48 @@ func _run_combat(count: int) -> void:
 	_teardown(w)
 
 
-func _simulate(label: String, um: UnitManager, ticks: int) -> void:
+## Debug-battle shape: two armies (one tribe each) ring-packed around anchors
+## left/right of the island centre, attack-moving at each other's anchor. The
+## aggro/pairing systems take over on contact.
+func _run_battle(per_side: int, scene: PackedScene, label: String) -> void:
+	var w: Dictionary = _make_world()
+	var um: UnitManager = w.um
+	var nav: NavGrid = w.nav
+	var commands: TribeCommands = TribeCommands.new()
+	commands.setup(nav, null, um)
+	var center: Vector2i = Vector2i(64, 64)
+	for side in range(2):
+		var dir: int = -1 if side == 0 else 1
+		var anchor: Vector2i = center + Vector2i(dir * 20, 0)
+		var spawned: int = 0
+		for radius in range(0, 40):
+			if spawned >= per_side:
+				break
+			for cell in AIController.ring_cells(anchor, radius):
+				if spawned >= per_side:
+					break
+				if not nav.is_cell_walkable(cell):
+					continue
+				if um.spawn_unit(scene, side, nav.cell_to_world(cell)) == null:
+					spawned = per_side   # 1500-per-tribe hard cap
+					break
+				spawned += 1
+		commands.order_move(um.get_units_of_tribe(side),
+			nav.cell_to_world(center + Vector2i(-dir * 20, 0)), false, true)
+	_simulate(label, um, BATTLE_TICKS, BATTLE_TICKS / 3)
+	commands.free()
+	_teardown(w)
+
+
+## `window_from` > 0 additionally reports the average over the ticks FROM that
+## index (battle scenarios: the fighting window, skipping the approach march).
+func _simulate(label: String, um: UnitManager, ticks: int, window_from: int = 0) -> void:
 	Unit.dbg_plan_calls = 0
 	Unit.dbg_plan_fails = 0
 	Unit.dbg_plan_us = 0
 	var total_us: int = 0
 	var worst_us: int = 0
+	var window_us: int = 0
 	var units_us: int = 0
 	var hash_us: int = 0
 	var path_us: int = 0
@@ -116,9 +164,15 @@ func _simulate(label: String, um: UnitManager, ticks: int) -> void:
 		var took: int = t5 - t0
 		total_us += took
 		worst_us = maxi(worst_us, took)
+		if window_from > 0 and t >= window_from:
+			window_us += took
 	var n: float = float(ticks)
-	print("%s: Ø %.2f ms | schlimmster Tick %.2f ms | Pfade %d (%d Fehlschläge, %.1f ms) | Budget ~33 ms" % [
-		label, float(total_us) / n / 1000.0, float(worst_us) / 1000.0,
+	var window_txt: String = ""
+	if window_from > 0:
+		window_txt = " | Ø Kampf-Fenster %.2f ms" % (
+			float(window_us) / float(ticks - window_from) / 1000.0)
+	print("%s: Ø %.2f ms%s | schlimmster Tick %.2f ms | Pfade %d (%d Fehlschläge, %.1f ms) | Budget ~33 ms" % [
+		label, float(total_us) / n / 1000.0, window_txt, float(worst_us) / 1000.0,
 		Unit.dbg_plan_calls, Unit.dbg_plan_fails, float(Unit.dbg_plan_us) / 1000.0])
 	print("  Ø Phasen: units %.2f | hash %.2f | paths %.2f | sep %.2f | regroup+proj %.2f ms" % [
 		float(units_us) / n / 1000.0, float(hash_us) / n / 1000.0,

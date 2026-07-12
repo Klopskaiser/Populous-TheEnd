@@ -35,6 +35,10 @@ var buildings: Array[Building] = []
 ## The tribe's single spell caster; kept in sync by add_unit/remove_unit
 ## (null while she is dead — the reincarnation site respawns her).
 var shaman: Unit = null
+## The tribe's preachers, kept in sync by add_unit/remove_unit (phase 8.2):
+## the firewarrior's priest-priority scan iterates THESE few units instead of
+## an uncapped radius query over the whole battle (measured hotspot).
+var preachers: Array[Unit] = []
 ## Spell set (charge system), installed via set_spells (cost-sorted).
 var spells: Array[Spell] = []
 ## Round-robin pointer into `spells`: the pointed spell is the next to
@@ -189,6 +193,8 @@ func add_unit(unit: Unit) -> void:
 	unit.tribe = self
 	if unit.unit_kind() == &"shaman":
 		shaman = unit
+	elif unit.unit_kind() == &"preacher" and unit not in preachers:
+		preachers.append(unit)
 	_emit_population()
 
 
@@ -196,6 +202,8 @@ func remove_unit(unit: Unit) -> void:
 	units.erase(unit)
 	if shaman == unit:
 		shaman = null
+	if not preachers.is_empty():
+		preachers.erase(unit)
 	_emit_population()
 
 

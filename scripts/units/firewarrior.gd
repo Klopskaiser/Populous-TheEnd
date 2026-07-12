@@ -53,19 +53,22 @@ func _tick_attack(delta: float) -> void:
 		return
 	if _breaks_off_vs_sitting(attack_target):
 		return
-	# Self-defence FIRST: an enemy on top of us takes priority. If the current
-	# target is out of melee range but something is meleeing us, turn to fight it.
-	if _flat_dist(position, attack_target.position) > MELEE_RANGE:
+	# Threat + priest retarget, throttled to the scan cadence (phase 8.2): the
+	# old PER-TICK threat query plus the uncapped priest sweep were the
+	# dominant cost of the pure-firewarrior battle benchmark (~250 ms/tick at
+	# 2x1000); a 0.25-s reaction window matches every other scan.
+	if _due_to_scan(delta) \
+			and _flat_dist(position, attack_target.position) > MELEE_RANGE:
+		# Self-defence FIRST: an enemy on top of us takes priority.
 		var threat: Unit = _melee_threat()
 		if threat != null:
 			_begin_attack(threat)
-	# Priest priority (throttled): while not brawling, switch to an enemy
-	# preacher in range — killing it stops mass conversions.
-	if _due_to_scan(delta) and attack_target.unit_kind() != &"preacher" \
-			and _flat_dist(position, attack_target.position) > MELEE_RANGE:
-		var priest: Unit = _nearest_enemy_priest(aggro_radius())
-		if priest != null and priest != attack_target:
-			_begin_attack(priest)
+		elif attack_target.unit_kind() != &"preacher":
+			# Priest priority: while not brawling, switch to an enemy preacher
+			# in range — killing it stops mass conversions.
+			var priest: Unit = _nearest_enemy_priest(aggro_radius())
+			if priest != null and priest != attack_target:
+				_begin_attack(priest)
 	var target: Unit = attack_target
 	var dist: float = _flat_dist(position, target.position)
 	if dist <= MELEE_RANGE:
@@ -78,7 +81,12 @@ func _tick_attack(delta: float) -> void:
 		target.release_melee_slot(self)   # ranged stance: not holding a slot
 		if dist > FIRE_RANGE:
 			_in_melee = false
-			_approach(target.position, delta)
+			if not _approach(target.position, delta):
+				# Unreachable (e.g. up on a cliff): disengage like the melee
+				# path instead of standing frozen against the wall.
+				_mark_target_unreachable(target)
+				_retarget_or_idle()
+				return
 			_face_point(target.position)
 			return
 	# Fire (stand): medium range, or reserve row inside melee range.
@@ -105,35 +113,40 @@ func _scan_for_enemy(radius: float, max_examined: int = 0) -> Unit:
 
 
 ## Nearest living enemy preacher within `radius`; null when none is in range.
+## Iterates the enemy tribes' preacher LISTS (a handful of units, phase 8.2)
+## instead of an uncapped radius query over the whole battle — with 2x1000
+## firewarriors that query alone cost a three-digit ms share per tick.
 func _nearest_enemy_priest(radius: float) -> Unit:
 	if path_service == null:
 		return null
 	var best: Unit = null
-	var best_d: float = INF
-	for u in path_service.get_units_in_radius(position, radius):
-		if u.tribe_id == tribe_id or u.state == Unit.State.DEAD:
+	var best_d: float = radius
+	for t in path_service.tribes:
+		if t == null or t.id == tribe_id:
 			continue
-		if u.unit_kind() != &"preacher":
-			continue
-		var d: float = _flat_dist(position, u.position)
-		if d < best_d:
-			best_d = d
-			best = u
+		for u in t.preachers:
+			if u == null or not is_instance_valid(u) or u.state == Unit.State.DEAD:
+				continue
+			if not u.is_targetable():
+				continue
+			var d: float = _flat_dist(position, u.position)
+			if d <= best_d:
+				best_d = d
+				best = u
 	return best
 
 
 ## Nearest living enemy within melee range (the immediate threat to defend
-## against); null when nothing is in our face.
+## against); null when nothing is in our face. Capped enemies-only candidate
+## query (phase 8.2) — the tiny radius needs no deep sweep.
 func _melee_threat() -> Unit:
 	if path_service == null:
 		return null
 	var best: Unit = null
 	var best_d: float = INF
-	for u in path_service.get_units_in_radius(position, MELEE_RANGE):
-		if u.tribe_id == tribe_id or u.state == Unit.State.DEAD or u.state == Unit.State.SIT:
-			continue
-		if not u.is_targetable():
-			continue   # a catapult / garrisoned crew is not a melee threat
+	for u in path_service.get_enemy_candidates(position, MELEE_RANGE, tribe_id, 6, 48):
+		if u.state == Unit.State.SIT:
+			continue   # sitting converts are no threat
 		var d: float = _flat_dist(position, u.position)
 		if d < best_d:
 			best_d = d

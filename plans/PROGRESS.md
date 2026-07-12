@@ -3807,3 +3807,79 @@ langes Bergpass-Skirmish (keine Sockel-Trauben, KI baut kontinuierlich).
 - `_unreachable_plots` wird bei Terraforming (Landbrücke!) nicht
   invalidiert (Plan: kleiner Session-Cache). Falls die KI später
   Landbrücken zur Expansion nutzt: Cache bei Terrain-Änderung leeren.
+
+### Nutzertest + Nacharbeit (2026-07-12, zweite Runde)
+
+**Nutzertest-Ergebnis:** Kampfablauf deutlich besser, Einheiten greifen
+richtig an, **Nord-Bug bestätigt weg**. Zwei Punkte: (1) In-Game-Performance
+„etwas schlechter" (trotz besserer Headless-Werte — Hauptverdächtiger unten
+gefunden und behoben; erneuter FPS-Test durch Nutzer ausstehend);
+(2) **Einheiten stacken stark** → offener Punkt, Kandidaten: Melee-Ring
+(0,9 m) / Warte-Ring-Winkelverteilung / Separation im Kampf / Leichen unter
+laufenden Kämpfen. Nicht in dieser Runde angefasst.
+
+**Neue Schlacht-Benchmarks (Nutzerwunsch):** `benchmark_mass` hat zwei
+zusätzliche Szenarien im Debugschlacht-Zuschnitt (zwei Armeen ±20 Zellen um
+die Inselmitte, Attack-Move aufeinander, 450 Ticks, Ausgabe zusätzlich als
+„Ø Kampf-Fenster" ab Tick 150): **schlacht krieger 2x1000** (reiner
+Nahkampf: Gruppen/Slots/Schläge) und **schlacht feuerkrieger 2x1000**
+(reiner Fernkampf: Zielsuche + Projektillast — von keinem bisherigen
+Szenario abgedeckt).
+
+**Fund durch das neue Szenario — Feuerkrieger-Hotspot:** Die reine
+fw-Schlacht lief anfangs mit **Ø 264 ms/Tick (units-Phase 254 ms!)**.
+Ursachen: `_melee_threat()` lief pro fw PRO TICK als ungecappte
+`get_units_in_radius`-Query, und die Prediger-Priorität
+(`_nearest_enemy_priest`, 13-m-Radius) sweepte ungecappt über das ganze
+Schlachtfeld. Fixes (einzeln, konservativ):
+- `Tribe.preachers` (neue Liste, gepflegt in add_unit/remove_unit —
+  Konversionen laufen über dieselben Hooks): der Priest-Scan iteriert die
+  wenigen Prediger der Gegnerstämme statt Tausender Umgebungseinheiten.
+- `_melee_threat()` auf gecappte `get_enemy_candidates` (Radius 1,2 m,
+  max 6 Kandidaten / 48 examined) umgestellt.
+- Threat- UND Priest-Check hinter die vorhandene Scan-Drossel
+  (`_due_to_scan`, 0,25 s) gelegt — gleiche Reaktions-Kadenz wie alle
+  anderen Scans (vorher: Threat-Check pro Tick).
+- Nebenbei: fw disengagiert jetzt wie der Nahkampf bei unerreichbarem Ziel
+  (`_approach` false → `_mark_target_unreachable` + Retarget) statt
+  eingefroren an der Wand zu stehen.
+
+**Messwerte (headless, dieser Rechner):**
+
+| Szenario | vor Fix | nach Fix |
+|---|---|---|
+| schlacht feuerkrieger 2x1000 | Ø 264,0 ms (units 254,4) | **Ø 28,2 ms** (units 20,9) |
+| schlacht krieger 2x1000 | Ø 28,5 ms | Ø 21,5 ms |
+| combat 2000 (Grid) | — | Ø 13,3 ms |
+| combat 4740 (Grid) | — | Ø 31,8 ms |
+
+Die Debugschlacht hat 30 % Feuerkrieger — der fw-Hotspot ist der
+plausibelste Täter für das „etwas schlechter" des Nutzertests (die alten
+Benchmarks enthielten schlicht keine Fernkämpfer). Verbleibende fw-Kosten:
+~65k Chase-Replans/450 Ticks (~2,3 ms/Tick A*) — unter Budget belassen.
+
+**Parallelisierungs-Einschätzung Kampflogik (Nutzerfrage „wie bei der
+Bewegung"):** Vorerst NICHT umsetzen, Begründung:
+- Der Pfad-Worker parallelisiert eine **reine Funktion** (Grid-Klon, POD
+  rein/raus, keine Rückwirkung). Der Kampf-Tick ist das Gegenteil: fast
+  jede Operation **mutiert geteilten Zustand** (take_damage auf beliebige
+  Ziele, Gruppen-Membership/Flip/Pull, Retarget-Kaskaden bei Toden,
+  Spatial-Hash) — in GDScript ohne thread-sichere Objekte nur über
+  „Snapshot → parallel rechnen → seriell anwenden" machbar.
+- Genau diese Snapshot-Architektur ist in **Stufe B gemessen gescheitert**
+  (O(n)-Spiegeln in GDScript ≈ 11 ms bei 6000 — frisst den Gewinn); ein
+  Kampf-Snapshot wäre GRÖSSER (HP, Ziele, Gruppen, Cooldowns) und das
+  serielle Zurückschreiben (Schäden, Zustandswechsel) breiter.
+- Der parallelisierbare (read-only) Anteil — Gegner-Scans/Zielsuche — ist
+  nach 8.2 gerade KLEIN geworden: gebundene Kämpfer scannen nicht mehr;
+  der Kampf-Tick besteht jetzt aus Verfolgen/Zuschlagen/Basisarbeit.
+  Erwartbarer Gewinn liegt unter der 4-ms-Go-Schwelle aus 08b → gleiches
+  No-Go-Verdikt wie Stufe B.
+- **Voraussetzung für echten Kampf-Fan-out bleibt Stufe C**
+  (data-oriented: Positionen/HP/Ziele in Packed-Arrays — dann entfällt das
+  Spiegeln, und Separation + Scans sind natürliche Parallel-Kandidaten;
+  Wiedereinstieg: `git show 305f73a` + PROGRESS „Stufe B").
+
+**Verifikation:** Suite 1591 grün, Ladecheck sauber, lagtest-Smoke
+(600 Frames) fehlerfrei. **Nutzer ausstehend:** FPS-Nachtest Debugschlacht
+(fw-Fix!), Stacking-Beurteilung nach dem nächsten Balancing-Pass.
