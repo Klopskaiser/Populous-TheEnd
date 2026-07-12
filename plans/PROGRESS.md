@@ -3883,3 +3883,44 @@ Bewegung"):** Vorerst NICHT umsetzen, Begründung:
 **Verifikation:** Suite 1591 grün, Ladecheck sauber, lagtest-Smoke
 (600 Frames) fehlerfrei. **Nutzer ausstehend:** FPS-Nachtest Debugschlacht
 (fw-Fix!), Stacking-Beurteilung nach dem nächsten Balancing-Pass.
+
+### Stresstest-Modus im Hauptmenü (Nutzerwunsch, 2026-07-13)
+
+**Nutzertest fw-Fix bestätigt:** „keine großen Frameeinbrüche bei
+Debugschlacht mehr."
+
+**Neuer Sandbox-Modus `Stresstest`** (Hauptmenü-Button unter Debugschlacht;
+headless/CLI: `godot … -- stresstest`), Spezifikation vom Nutzer:
+- **4 Armeen** (Stamm 0 = Spieler, spielbar; Stämme 1–3 skriptgesteuert,
+  KEIN AIController) auf den Kompasspunkten ±30 Zellen um die Inselmitte,
+  je **1000 Fußeinheiten** (60 % Krieger vorn, 30 % Feuerkrieger, 10 %
+  Prediger hinten) + **6 bemannte Katapulte** (je 3 Brave-Crew, spawnen
+  direkt am Gerät und boarden sofort) + Schamanin im Rücken mit vollen
+  Ladungen → **4100 Einheiten gesamt**.
+- Nach **5 s Idle** ein einmaliger **Angriffsbefehl** (Attack-Move) aller
+  vier Armeen auf die Inselmitte (Crew-Braves ausgenommen — ein Move-Befehl
+  würde sie vom Katapult ziehen); ab Kontakt übernimmt das Kampfsystem.
+- **Zauber-Dauerfeuer:** alle 5 s ein Cast pro Stamm, rotierend durch
+  **Tornado / Erdbeben / Insektenschwarm / Feuerregen**; Ziel = nächster
+  Gegner um die Schamanin (30 m, `get_enemy_candidates`), vor Kontakt die
+  Inselmitte. Die Ladung wird vor jedem Cast aufgefüllt (Sandbox — Dauerlast
+  ist der Zweck). Kein Win-Tracking, keine Basen (wie Debugschlacht).
+
+**Umsetzung:** `MatchConfig.Mode.STRESS_TEST` + `stress_test()`
+(`tribe_count()` = 4), Menü-Button + `stresstest`-CLI-Flag (main_menu.gd),
+`main.gd`: `STRESS_MATCH_*`-Konstanten, `_setup_stress_match` /
+`_spawn_stress_match_army` / `_spawn_stress_match_sieges` (nutzt
+`_spawn_debug_shaman` wieder), Treiber `_tick_stress_match` in
+`_physics_process`.
+
+**Test-Härtung nebenbei:** Der Symmetrie-Drift-Wächter bekam `seed(1337)`
++ Toleranz 4,5 m (Random-Walk der Schubser/Rollen erreichte auf grünem Code
+~3,7 m; der systematische Bias lag bei 5+ m klein / −35 m groß). Der
+dadurch semi-deterministisch gewordene `test_attack_move_engages_enemies`
+flatterte danach (Prüfung eines MOMENT-Zustands: Schubser-Mini-Roll genau
+im Prüf-Tick) → auf Poll „engagiert innerhalb 4 s" umgestellt.
+
+**Verifikation:** Ladecheck sauber; headless-Smoke `--quit-after 1200 --
+stresstest`: 4100 Einheiten, Abmarsch feuert, keine Fehler; Suite **1591
+grün, 6× wiederholt**. **Nutzer ausstehend:** manueller Stresstest-Lauf
+(Optik/FPS der Zauber-Dauerlast).

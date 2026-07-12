@@ -4,7 +4,7 @@ class_name MatchConfig extends RefCounted
 ## Main._ready(). Held in GameState.match_config; when absent (direct scene
 ## start, e.g. headless checks) Main falls back to the start mission.
 
-enum Mode { SKIRMISH, START_MISSION, DEBUG_BATTLE }
+enum Mode { SKIRMISH, START_MISSION, DEBUG_BATTLE, STRESS_TEST }
 
 const MIN_AI: int = 1
 const MAX_AI: int = 3
@@ -36,9 +36,20 @@ static func debug_battle() -> MatchConfig:
 	return config
 
 
+## Stress-test sandbox (phase 8.2 follow-up): four full armies (units +
+## catapults + spell-slinging shamans) clash in the island centre.
+static func stress_test() -> MatchConfig:
+	var config: MatchConfig = MatchConfig.new()
+	config.mode = Mode.STRESS_TEST
+	return config
+
+
 ## Number of tribes the match needs (player + AIs). START_MISSION and
-## DEBUG_BATTLE always run with two tribes (blue vs. red), like before.
+## DEBUG_BATTLE always run with two tribes (blue vs. red), like before;
+## the stress test always fields four armies.
 func tribe_count() -> int:
 	if mode == Mode.SKIRMISH:
 		return 1 + clampi(ai_count, MIN_AI, MAX_AI)
+	if mode == Mode.STRESS_TEST:
+		return 4
 	return 2

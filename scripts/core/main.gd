@@ -54,6 +54,26 @@ const DEBUG_WARRIOR_SHARE: float = 0.7
 ## Army anchor offset from the island centre (cells, along x).
 const DEBUG_ARMY_OFFSET: int = 26
 
+## Stress-test match (main-menu "Stresstest", phase 8.2 follow-up): four full
+## armies (tribe 0 stays player-controllable, the other three are scripted —
+## no AIController) idle briefly, then all attack-move at the island centre
+## while their shamans keep casting. A sandbox like the debug battle: no
+## bases, no win tracking.
+const STRESS_MATCH_ARMY: int = 1000
+const STRESS_MATCH_WARRIOR_SHARE: float = 0.6
+const STRESS_MATCH_FW_SHARE: float = 0.3     # the rest are preachers
+const STRESS_MATCH_SIEGE: int = 6            # crewed catapults per army
+const STRESS_MATCH_SIEGE_CREW: int = 3
+## Army anchor offset from the island centre (cells).
+const STRESS_MATCH_OFFSET: int = 30
+## Idle time before the armies march.
+const STRESS_MATCH_IDLE_DELAY: float = 5.0
+## One cast per tribe every this many seconds, cycling through the list; the
+## charge is refilled before each cast — sustained spell load is the point.
+const STRESS_MATCH_CAST_INTERVAL: float = 5.0
+const STRESS_MATCH_SPELLS: Array[StringName] = [
+	&"tornado", &"earthquake", &"swarm", &"firestorm"]
+
 ## Time-lapse steps for manual testing (key F10 cycles through them). The
 ## engine simulates as many physics steps per frame as the CPU allows — at
 ## 100x the game time effectively runs ~10-30x (CPU-capped, display gets
@@ -84,6 +104,12 @@ var _marker: MeshInstance3D = null
 var _stress_pending: Array[int] = []   # tribe ids of queued stress spawns
 var _stress_rng: RandomNumberGenerator = RandomNumberGenerator.new()
 var _time_scale_index: int = 0
+# Stress-test match driver state (see STRESS_MATCH_* constants).
+var _stress_match: bool = false
+var _stress_match_marched: bool = false
+var _stress_match_timer: float = 0.0
+var _stress_cast_timer: float = 0.0
+var _stress_spell_index: int = 0
 
 
 func _ready() -> void:
@@ -204,6 +230,9 @@ func _ready() -> void:
 		MatchConfig.Mode.DEBUG_BATTLE:
 			# Sandbox: two armies clashing, no bases and no win tracking.
 			_setup_debug_battle(nav)
+		MatchConfig.Mode.STRESS_TEST:
+			# Sandbox: four full armies + catapults + spell barrage.
+			camera_anchor = _setup_stress_match(nav)
 		MatchConfig.Mode.START_MISSION:
 			_place_start_site(tribes[GameState.PLAYER_TRIBE], nav)
 			_setup_player_base(tribes[GameState.PLAYER_TRIBE], nav)
@@ -530,6 +559,145 @@ func _spawn_debug_army(tribe_id: int, anchor: Vector2i, nav: NavGrid) -> void:
 			% [spawned, DEBUG_ARMY_SIZE, tribe_id])
 
 
+# --- Stress-test match (main menu, phase 8.2 follow-up) ---------------------------
+
+## Four armies on the compass points around the island centre: 1000 foot units
+## each (warriors/firewarriors/preachers), six crewed catapults behind the
+## lines and a shaman with FULL spell charges. Tribe 0 (south, camera start)
+## stays player-controllable; the march + spell barrage is driven by
+## _tick_stress_match. Returns the player anchor.
+func _setup_stress_match(nav: NavGrid) -> Vector2i:
+	var td: TerrainData = GameState.terrain_data
+	var center: Vector2i = Vector2i(td.size / 2, td.size / 2)
+	var offsets: Array[Vector2i] = [
+		Vector2i(0, STRESS_MATCH_OFFSET), Vector2i(0, -STRESS_MATCH_OFFSET),
+		Vector2i(-STRESS_MATCH_OFFSET, 0), Vector2i(STRESS_MATCH_OFFSET, 0)]
+	for i in range(mini(offsets.size(), GameState.tribes.size())):
+		var anchor: Vector2i = center + offsets[i]
+		var back: Vector2i = Vector2i(signi(offsets[i].x), signi(offsets[i].y))
+		_spawn_stress_match_army(i, anchor, nav)
+		_spawn_stress_match_sieges(i, anchor, back, nav)
+		_spawn_debug_shaman(i, anchor + back * 8, nav)   # rear, full charges
+	_stress_match = true
+	_stress_match_timer = STRESS_MATCH_IDLE_DELAY
+	_stress_cast_timer = STRESS_MATCH_IDLE_DELAY
+	print("Stresstest: %d Einheiten gesamt — Abmarsch in %.0f s" % [
+		_unit_manager.units.size(), STRESS_MATCH_IDLE_DELAY])
+	return center + offsets[0]
+
+
+## Ring-fills one army around its anchor: warriors first (front rings), then
+## firewarriors, preachers last (rear rings).
+func _spawn_stress_match_army(tribe_id: int, anchor: Vector2i, nav: NavGrid) -> void:
+	var warriors: int = int(float(STRESS_MATCH_ARMY) * STRESS_MATCH_WARRIOR_SHARE)
+	var firewarriors: int = int(float(STRESS_MATCH_ARMY) * STRESS_MATCH_FW_SHARE)
+	var spawned: int = 0
+	for radius in range(0, 40):
+		for cell in _ring_cells(anchor, radius):
+			if spawned >= STRESS_MATCH_ARMY:
+				return
+			if not nav.is_cell_walkable(cell):
+				continue
+			var scene: PackedScene = WARRIOR_SCENE
+			if spawned >= warriors + firewarriors:
+				scene = PREACHER_SCENE
+			elif spawned >= warriors:
+				scene = FIREWARRIOR_SCENE
+			if _unit_manager.spawn_unit(scene, tribe_id, nav.cell_to_world(cell)) == null:
+				return   # 1500-per-tribe hard cap
+			spawned += 1
+	if spawned < STRESS_MATCH_ARMY:
+		push_warning("Stresstest: nur %d von %d Einheiten für Stamm %d gespawnt"
+			% [spawned, STRESS_MATCH_ARMY, tribe_id])
+
+
+## Six catapults per army in a line behind the anchor (outward side), each
+## crewed by three braves spawned right next to it (they board immediately).
+func _spawn_stress_match_sieges(tribe_id: int, anchor: Vector2i, back: Vector2i,
+		nav: NavGrid) -> void:
+	var side: Vector2i = Vector2i(-back.y, back.x)
+	for k in range(STRESS_MATCH_SIEGE):
+		@warning_ignore("integer_division")
+		var wish: Vector2i = anchor + back * 12 + side * ((k - STRESS_MATCH_SIEGE / 2) * 4)
+		var cell: Vector2i = _find_walkable_near(wish, nav, 0)
+		if cell.x < 0:
+			continue
+		var engine: Unit = _unit_manager.spawn_unit(
+			SIEGE_SCENE, tribe_id, nav.cell_to_world(cell))
+		if engine == null:
+			return
+		for c in range(STRESS_MATCH_SIEGE_CREW):
+			var crew_cell: Vector2i = _find_walkable_near(cell, nav, c + 1)
+			if crew_cell.x < 0:
+				continue
+			var brave: Unit = _unit_manager.spawn_unit(
+				BRAVE_SCENE, tribe_id, nav.cell_to_world(crew_cell))
+			if brave != null:
+				brave.order_crew(engine)
+
+
+## Stress-match driver (called from _physics_process): after the idle delay
+## every army attack-moves at the island centre ONCE (combat takes over on
+## contact), then the shamans cast on a rolling timer — one spell per tribe
+## per interval, cycling STRESS_MATCH_SPELLS, charges refilled (sandbox).
+func _tick_stress_match(delta: float) -> void:
+	var nav: NavGrid = GameState.nav_grid
+	var td: TerrainData = GameState.terrain_data
+	if nav == null or td == null:
+		return
+	var center: Vector3 = nav.cell_to_world(Vector2i(td.size / 2, td.size / 2))
+	if not _stress_match_marched:
+		_stress_match_timer -= delta
+		if _stress_match_timer > 0.0:
+			return
+		_stress_match_marched = true
+		for tribe in GameState.tribes:
+			var squad: Array[Unit] = []
+			for u in tribe.units:
+				if not is_instance_valid(u) or u.state == Unit.State.DEAD:
+					continue
+				if u.unit_kind() == &"brave":
+					continue   # the catapult crews stay on their engines
+				squad.append(u)
+			if not squad.is_empty():
+				_tribe_commands.order_move(squad, center, false, true)   # attack-move
+		print("Stresstest: Angriffsbefehl — alle Armeen marschieren zur Mitte")
+		return
+	_stress_cast_timer -= delta
+	if _stress_cast_timer > 0.0:
+		return
+	_stress_cast_timer = STRESS_MATCH_CAST_INTERVAL
+	for tribe in GameState.tribes:
+		var shaman: Unit = tribe.shaman
+		if shaman == null or not is_instance_valid(shaman) \
+				or shaman.state == Unit.State.DEAD or shaman.state == Unit.State.CAST:
+			continue
+		var spell_id: StringName = STRESS_MATCH_SPELLS[
+			_stress_spell_index % STRESS_MATCH_SPELLS.size()]
+		_stress_spell_index += 1
+		var spell: Spell = tribe.get_spell(spell_id)
+		if spell == null:
+			continue
+		spell.charges = maxi(spell.charges, 1)   # sandbox: the barrage never dries up
+		_tribe_commands.cast_spell(tribe, spell_id,
+			_stress_spell_target(tribe, shaman, center))
+
+
+## Cast point: the nearest enemy around the shaman (the barrage lands where
+## the fighting is); before contact the island centre is the fallback.
+func _stress_spell_target(tribe: Tribe, shaman: Unit, fallback: Vector3) -> Vector3:
+	var best: Unit = null
+	var best_d: float = INF
+	for u in _unit_manager.get_enemy_candidates(shaman.position, 30.0, tribe.id, 8):
+		var d: float = shaman.position.distance_squared_to(u.position)
+		if d < best_d:
+			best_d = d
+			best = u
+	if best != null:
+		return best.position
+	return fallback
+
+
 ## Ring-searches outward from `center` for the first buildable footprint.
 func _find_plot(center: Vector2i, footprint: Vector2i, _nav: NavGrid) -> Vector2i:
 	for radius in range(0, GameState.terrain_data.size / 2):
@@ -614,7 +782,9 @@ func _queue_stress_batch() -> void:
 		_stress_pending.size(), _unit_manager.units.size() + _stress_pending.size()])
 
 
-func _physics_process(_delta: float) -> void:
+func _physics_process(delta: float) -> void:
+	if _stress_match:
+		_tick_stress_match(delta)
 	if _stress_pending.is_empty():
 		return
 	var spawned: int = 0

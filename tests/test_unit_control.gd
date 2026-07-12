@@ -77,9 +77,16 @@ func test_attack_move_engages_enemies() -> void:
 		w.nav.cell_to_world(Vector2i(60, 60)))
 	w.unit_manager.spawn_unit(BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(64, 60)))
 	mover.order_move(w.nav.cell_to_world(Vector2i(80, 60)), false, true)
-	_run_ticks(w, w.unit_manager.units, 1.2)
-	check(mover.state == Unit.State.ATTACK,
-		"an attack-move engages enemies on the way")
+	# Poll for the engagement instead of asserting a single instant: once the
+	# brawl starts, a shove can knock the mover into a transient mini-ROLL
+	# right at a fixed check time (flaky) — engaging at all is the contract.
+	var engaged: bool = false
+	for i in range(40):
+		_run_ticks(w, w.unit_manager.units, 0.1)
+		if mover.state == Unit.State.ATTACK:
+			engaged = true
+			break
+	check(engaged, "an attack-move engages enemies on the way")
 	_free_world(w)
 
 
