@@ -108,6 +108,15 @@ func _on_combat_interrupt() -> void:
 		_interrupt_tasks()
 
 
+## Harmless downhill stumble (phase 8.2): the carrier drops its wood on the
+## spot but KEEPS its task — resuming the fetch, the normal task selection
+## finds the dropped pile right at its feet and picks it back up.
+func _on_stumble() -> void:
+	if carried_wood > 0 and wood_pile_manager != null:
+		wood_pile_manager.deposit(position, carried_wood)
+		carried_wood = 0
+
+
 func is_praying() -> bool:
 	return state == State.PRAY and _working
 

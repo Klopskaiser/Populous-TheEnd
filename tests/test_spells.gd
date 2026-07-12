@@ -487,8 +487,11 @@ func test_swarm_panics_enemies_not_shaman() -> void:
 		func() -> bool: return enemy_shaman.health < enemy_shaman.max_health)
 	check(enemy_shaman.health < enemy_shaman.max_health, "swarm stings nearby enemies")
 	# The cloud expires after its lifetime, the panic after its own duration.
+	# Wait until the brave is ORDERABLE again — a downhill stumble mid-panic
+	# briefly rolls it (state != PANIC, but orders are still refused; the
+	# stumble no longer cancels the panic since phase 8.2).
 	ticks = _run(w, [brave, enemy_shaman, own], func() -> bool:
-		return cloud.done and brave.state != Unit.State.PANIC)
+		return cloud.done and brave.can_take_orders())
 	check(ticks < MAX_TICKS, "cloud despawns and the panic wears off")
 	check(brave.state != Unit.State.PANIC, "brave controllable again")
 	brave.order_move(Vector3(60, 0, 60))

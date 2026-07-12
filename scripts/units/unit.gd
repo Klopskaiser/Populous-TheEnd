@@ -137,6 +137,17 @@ const ROLL_DPS: float = 5.0
 ## The roll keeps following the fall line while the downhill slope exceeds
 ## this; on flatter ground it ends once the (mini) duration ran out.
 const ROLL_END_SLOPE: float = 0.5
+## Trapped-roll safety nets (phase 8.2): a roll in an earthquake bowl can
+## follow the fall line forever (the walls stay steeper than ROLL_END_SLOPE)
+## — with the deferred-death rule that made units IMMORTAL. A roll that
+## makes no net progress ends early (stand up / finish dying), and no roll
+## survives the hard time cap.
+const ROLL_MAX_DURATION: float = 30.0
+const ROLL_PROBE_INTERVAL: float = 2.0
+const ROLL_PROBE_MIN_DIST: float = 1.0
+## Same hard cap for scripted throws (e.g. a tornado carry that never lands):
+## past this the unit dies and drops out of the sky as a corpse.
+const THROWN_MAX_DURATION: float = 30.0
 ## Walking DOWN a slope steeper than this may trigger a roll on its own...
 const STEEP_ROLL_SLOPE: float = 1.0
 ## ...with this chance per second.
@@ -351,6 +362,10 @@ var _crew_walking: bool = false
 ## Excluded from the soft-separation push (siege engines: a vehicle is not
 ## shoved aside by pedestrians). A FIELD like idle_aggro — hot path.
 var push_immune: bool = false
+## > 0 for VEHICLES (siege engine): the separation keeps this distance to
+## OTHER vehicles — sized so two devices incl. their side/rank crew slots
+## never overlap (phase 8.2). Pedestrians keep the normal tiny radius.
+var vehicle_separation: float = 0.0
 ## Counted in Tribe.population() (false for devices like the siege engine).
 var counts_population: bool = true
 
@@ -361,10 +376,20 @@ var _roll_min_time: float = 0.0
 var _roll_damage_frac: float = 0.0
 ## Momentum of a throw-landing roll (0 = plain constant-speed roll).
 var _roll_init_speed: float = 0.0
+## State to resume when a harmless downhill STUMBLE ends (-1 = combat roll:
+## orders were cleared, the unit gets up idle). Workers continue their task,
+## movers continue their route (phase 8.2 — stumbling used to wipe orders).
+var _stumble_resume: int = -1
+## Trapped-roll progress probe (see ROLL_PROBE_* constants).
+var _roll_probe_pos: Vector3 = Vector3.ZERO
+var _roll_probe_timer: float = 0.0
 
 # --- Throw / panic state (phase 6) ----------------------------------------------------
 var _throw_velocity: Vector3 = Vector3.ZERO
 var _throw_fall_damage: int = 0
+## Continuous airborne time; past THROWN_MAX_DURATION the unit dies and
+## drops out of the sky as a corpse (phase 8.2 safety net).
+var _throw_time: float = 0.0
 ## While set (untyped: may be freed), an external carrier (the tornado)
 ## controls this thrown unit's position; _tick_thrown idles until the carrier
 ## releases it via fling_from_carry.
@@ -524,7 +549,8 @@ func _advance_path(delta: float) -> bool:
 		facing = Vector3(to_target.x, 0.0, to_target.y).normalized()
 	var slope: float = _slope_ahead(to_target)
 	if slope < -STEEP_ROLL_SLOPE and randf() < STEEP_ROLL_CHANCE_PER_SEC * delta:
-		start_roll(Vector3(to_target.x, 0.0, to_target.y), MINI_ROLL_DURATION)
+		# Harmless downhill stumble: orders survive (resumed after the tumble).
+		start_roll(Vector3(to_target.x, 0.0, to_target.y), MINI_ROLL_DURATION, 0.0, true)
 		return false
 	var next: Vector2 = flat_pos.move_toward(flat_target, _slope_speed(slope) * delta)
 	position.x = next.x
@@ -888,8 +914,11 @@ func _tick_knockback(delta: float) -> void:
 ## landings) that bleeds off via ROLL_FRICTION — the unit tumbles on and only
 ## stands up once slow. Rolling suspends all orders and separation; rolling
 ## into water kills instantly; roll damage kills only at the roll's end.
+## `stumble` marks a harmless downhill trip (steep-walk trigger, NO combat
+## cause): orders and task fields survive, and the unit resumes them when it
+## gets back up (phase 8.2 — see _resume_after_stumble).
 func start_roll(dir: Vector3, duration: float = MINI_ROLL_DURATION,
-		initial_speed: float = 0.0) -> void:
+		initial_speed: float = 0.0, stumble: bool = false) -> void:
 	if state == State.DEAD:
 		return
 	var flat: Vector3 = Vector3(dir.x, 0.0, dir.z)
@@ -902,19 +931,40 @@ func start_roll(dir: Vector3, duration: float = MINI_ROLL_DURATION,
 		# Another hit while tumbling (e.g. a follow-up fireball): extend.
 		_roll_min_time = maxf(_roll_min_time, _roll_time + duration)
 		_roll_init_speed = maxf(_roll_init_speed, initial_speed)
+		if not stumble and _stumble_resume >= 0:
+			# A combat/spell hit extends a harmless stumble: from here on it
+			# is a real combat roll — the saved orders are cleared like on a
+			# fresh combat roll.
+			_stumble_resume = -1
+			_on_combat_interrupt()
+			_end_attack()
+			waypoint_queue.clear()
 		return
-	_on_combat_interrupt()
-	_end_attack()
-	converting_preacher = null
-	conversion_progress = 0.0
-	waypoint_queue.clear()
+	if stumble:
+		_stumble_resume = state
+		_on_stumble()
+	else:
+		_stumble_resume = -1
+		_on_combat_interrupt()
+		_end_attack()
+		converting_preacher = null
+		conversion_progress = 0.0
+		waypoint_queue.clear()
 	_clear_path()
 	hop_visual = false
 	_roll_time = 0.0
 	_roll_min_time = duration
 	_roll_damage_frac = 0.0
 	_roll_init_speed = initial_speed
+	_roll_probe_pos = position
+	_roll_probe_timer = 0.0
 	_set_state(State.ROLL)
+
+
+## Hook for a harmless downhill stumble (start_roll with `stumble`); the
+## Brave drops its carried wood here (and picks it back up on resume).
+func _on_stumble() -> void:
+	pass
 
 
 func _tick_roll(delta: float) -> void:
@@ -925,6 +975,27 @@ func _tick_roll(delta: float) -> void:
 		health = 0
 		_die()
 		return
+	# Trapped-roll safety nets (phase 8.2, earthquake bowls — the fall line
+	# there never flattens below ROLL_END_SLOPE, so the roll never ended and
+	# the deferred-death rule made the unit IMMORTAL):
+	# 1. Lethal damage is deferred only for the minimum tumble, not forever.
+	if health <= 0 and _roll_time >= _roll_min_time:
+		_end_roll()
+		return
+	# 2. No roll survives the hard time cap (dies as a corpse on the spot).
+	if _roll_time >= ROLL_MAX_DURATION:
+		health = 0
+		_end_roll()
+		return
+	# 3. A roll that makes no net progress (bouncing between the bowl walls)
+	# ends early — the unit stands back up instead of tumbling in place.
+	_roll_probe_timer += delta
+	if _roll_probe_timer >= ROLL_PROBE_INTERVAL:
+		if _flat_dist(position, _roll_probe_pos) < ROLL_PROBE_MIN_DIST:
+			_end_roll()
+			return
+		_roll_probe_timer = 0.0
+		_roll_probe_pos = position
 	# Follow the fall line while the ground is steep.
 	var down: Vector3 = _downhill_vector()
 	var slope: float = down.length()
@@ -975,7 +1046,37 @@ func _end_roll() -> void:
 		health = 0
 		_die()
 		return
+	if _stumble_resume >= 0:
+		var resume: int = _stumble_resume
+		_stumble_resume = -1
+		_resume_after_stumble(resume)
+		return
 	_set_state(State.IDLE)
+
+
+## Back on its feet after a harmless downhill stumble: continue what we were
+## doing — the route to the next waypoint (fresh path from the landing spot),
+## the running fight, or the worker task whose fields survived the tumble
+## (the Brave picks its dropped wood back up via its normal task selection).
+func _resume_after_stumble(prev: int) -> void:
+	match prev:
+		State.MOVE:
+			if not waypoint_queue.is_empty():
+				_start_path_to(waypoint_queue[0])
+			else:
+				_set_state(State.IDLE)
+		State.ATTACK:
+			if (_target_valid(attack_target) and attack_target.tribe_id != tribe_id) \
+					or _building_target_valid():
+				_set_state(State.ATTACK)
+			else:
+				_retarget_or_idle()
+		State.IDLE, State.DEAD, State.ROLL, State.THROWN, State.SIT:
+			_set_state(State.IDLE)
+		_:
+			# Worker/pray/train/crew/garrison/panic sub-states: their fields
+			# were preserved, the state tick carries on where it left off.
+			_set_state(prev as State)
 
 
 # --- Throw (phase 6) --------------------------------------------------------------------
@@ -1000,12 +1101,23 @@ func throw_airborne(velocity: Vector3, fall_damage: int = 0) -> void:
 	_clear_path()
 	hop_visual = false
 	_no_combat_timer = 0.0
+	_stumble_resume = -1   # a throw is combat: any saved stumble order is void
 	_throw_velocity = velocity
 	_throw_fall_damage = fall_damage
+	_throw_time = 0.0
 	_set_state(State.THROWN)
 
 
 func _tick_thrown(delta: float) -> void:
+	_throw_time += delta
+	if _throw_time >= THROWN_MAX_DURATION:
+		# Safety net: a throw/carry that never lands (e.g. trapped over a
+		# deformation pit) ends here — the unit dies and falls as a corpse.
+		throw_carrier = null
+		_snap_to_ground()
+		health = 0
+		_die()
+		return
 	if throw_carrier != null:
 		if is_instance_valid(throw_carrier):
 			return   # the carrier moves us

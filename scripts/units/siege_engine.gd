@@ -90,6 +90,10 @@ func _init() -> void:
 	health = 1
 	speed = SIEGE_SPEED
 	push_immune = true       # pedestrians do not shove the vehicle around
+	# Vehicle-vs-vehicle spacing (phase 8.2): body ~1x2 m plus the crew slots
+	# (side offset 0.95, rank spacing 0.85) — engines parked/marching together
+	# used to overlap visually and their crews clipped into each other.
+	vehicle_separation = 3.2
 	counts_population = false  # a device, not a believer (no mana, no housing)
 
 
@@ -154,7 +158,7 @@ func throw_airborne(_velocity: Vector3, _fall_damage: int = 0) -> void:
 
 
 func start_roll(_dir: Vector3, _duration: float = MINI_ROLL_DURATION,
-		_initial_speed: float = 0.0) -> void:
+		_initial_speed: float = 0.0, _stumble: bool = false) -> void:
 	pass
 
 

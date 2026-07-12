@@ -1033,3 +1033,32 @@ func test_ai_builds_workshop_after_temple() -> void:
 	check(ws.occupants.size() == 3, "the AI staffs the workshop with 3 braves")
 	ai.free()
 	_free_world(w)
+
+
+## Phase 8.2: two siege engines keep the vehicle separation distance (crews
+## included, they glide on their side slots) — engines parked on top of each
+## other used to overlap visually and their crews clipped into each other.
+## Pedestrians still cannot shove a vehicle around (push_immune).
+func test_vehicle_separation_spreads_engines() -> void:
+	var w: Dictionary = _make_world()
+	var e1: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(60, 60))) as SiegeEngine
+	var e2: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, Vector3(61.0, 0.0, 60.5)) as SiegeEngine
+	check(e1.vehicle_separation > 2.0, "engines carry a big separation radius")
+	for i in range(300):
+		_tick_world(w)
+	var d: float = Vector2(e1.position.x - e2.position.x,
+		e1.position.z - e2.position.z).length()
+	check(d >= e1.vehicle_separation - 0.4,
+		"the engines spread apart (%.2f m)" % d)
+
+	# A pedestrian right at an engine does not shove the vehicle around.
+	var before: Vector3 = e1.position
+	w.unit_manager.spawn_unit(BRAVE_SCENE, 0,
+		e1.position + Vector3(0.2, 0.0, 0.0))
+	for i in range(100):
+		_tick_world(w)
+	check(Vector2(e1.position.x - before.x, e1.position.z - before.z).length() < 0.5,
+		"a pedestrian cannot push the vehicle away")
+	_free_world(w)

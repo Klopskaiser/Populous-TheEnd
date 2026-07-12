@@ -3924,3 +3924,59 @@ im Prüf-Tick) → auf Poll „engagiert innerhalb 4 s" umgestellt.
 stresstest`: 4100 Einheiten, Abmarsch feuert, keine Fehler; Suite **1591
 grün, 6× wiederholt**. **Nutzer ausstehend:** manueller Stresstest-Lauf
 (Optik/FPS der Zauber-Dauerlast).
+
+### Bugfix-Runde nach Stresstest (Nutzerreport, 2026-07-13)
+
+Nutzerfeedback: Stresstest läuft (langsam, „erstmal ok"). Drei gemeldete
+Bugs, alle behoben:
+
+**1. Stolpern vergisst den Auftrag.** Die Steilhang-Stolperrolle
+(`_advance_path` → `start_roll`) räumte wie jede Kampfrolle ALLE Befehle ab
+(`_on_combat_interrupt` + Waypoints). Fix: `start_roll(…, stumble)` — der
+Stolper-Aufruf markiert die Rolle als harmlos; Befehle/Task-Felder bleiben
+erhalten (`_stumble_resume` = vorheriger State) und `_end_roll` setzt über
+`_resume_after_stumble` fort: MOVE plant frisch zum nächsten Wegpunkt,
+ATTACK kämpft weiter (Gruppenbindung überlebt die Rolle ohnehin),
+Arbeiter-/Gebets-/Trainings-/Crew-Sub-States laufen mit intakten Feldern
+weiter. **Brave:** neuer Hook `_on_stumble` — lässt getragenes Holz als
+Haufen fallen, behält aber Task/Claim; beim Fortsetzen findet die normale
+Task-Wahl den Haufen vor den Füßen und hebt ihn wieder auf. Trifft eine
+Kampf-/Zauberrolle die stolpernde Einheit mid-Roll, wird daraus eine echte
+Kampfrolle (Befehle weg, Originalregeln). Panik wird durch Stolpern nicht
+mehr abgebrochen, sondern pausiert (Test in test_spells angepasst: auf
+`can_take_orders` warten statt `!= PANIC`).
+
+**2. Unsterbliche Dauerrolle in der Erdbebensenke (Priester-Report).**
+Root cause gefunden: `take_damage` schiebt den Tod im ROLL-Zustand auf
+(`_end_roll` holt ihn nach) — aber in einer steilen Senke bleibt die
+Fall-Linie dauerhaft über `ROLL_END_SLOPE`, die Rolle endet NIE → Einheit
+unsterblich trotz negativer HP. Drei Sicherheitsnetze in `_tick_roll`:
+(a) tödlicher Schaden wird nur bis zur Mindest-Rolldauer aufgeschoben,
+nicht ewig; (b) Fortschritts-Sonde: < 1 m Netto-Bewegung in 2 s → Rolle
+endet (Lebende stehen auf, Getötete sterben); (c) Hard-Cap
+`ROLL_MAX_DURATION = 30 s` → Tod als Leiche. Analog für Würfe:
+`THROWN_MAX_DURATION = 30 s` — ein nie landender Wurf/Carry endet als
+Leiche am Boden („fällt aus dem Himmel").
+
+**3. Katapulte stacken (inkl. Crew-Clipping).** Katapulte sind
+`push_immune` und wurden von der Separation KOMPLETT übersprungen — auch
+gegeneinander. Fix: neues Unit-Feld `vehicle_separation` (SiegeEngine:
+**3,2 m**, deckt Rumpf + Crew-Seiten-/Rang-Slots ab); die Separation
+verarbeitet Fahrzeuge jetzt MIT diesem Radius, aber nur gegen ANDERE
+Fahrzeuge — Fußgänger können das Gerät weiterhin nicht wegschieben, und
+geschützte Reserven (Turm-/Hütten-Crews, push_immune ohne Radius) bleiben
+ausgenommen. Die Crews folgen ihren Slots → kein Clipping mehr.
+Overlap-Escape bleibt Fußgänger-only. (Achtung Godot-Falle dabei: der
+Override `SiegeEngine.start_roll` musste die neue Default-Signatur
+spiegeln — Signatur-Mismatch ist ein Parse-Error, der die GANZE Klasse
+aus dem Spiel nimmt.)
+
+**Tests:** `tests/test_stumble_roll.gd` (neu, 7 Tests): Move-Resume nach
+Stolperer (kommt trotzdem am Ziel an), Kampfrolle räumt weiter ab,
+Kampftreffer mid-Stolperer räumt ab, Brave lässt Holz fallen + behält
+Task/Claim, V-Rinnen-Terrain (Erdbebensenken-Form): tödlicher Schaden in
+gefangener Rolle tötet binnen Sekunden, gesunde Einheit steht per
+Fortschritts-Sonde wieder auf, Endlos-Wurf stirbt am 30-s-Cap und liegt am
+Boden. `test_siege.gd`: +Fahrzeug-Separation (Geräte spreizen auf ≥ ~3 m,
+Fußgänger schiebt Gerät nicht). Suite **1619 grün (3×)**; Ladecheck,
+Stresstest-Smoke (1800 Frames) und lagtest-Smoke sauber.

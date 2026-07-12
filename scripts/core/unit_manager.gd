@@ -251,14 +251,21 @@ func _apply_separation(delta: float) -> void:
 	for index in range(_separation_phase, units.size(), slices):
 		var unit: Unit = units[index]
 		if unit.state == Unit.State.DEAD or unit.state == Unit.State.THROWN \
-				or unit.state == Unit.State.ROLL or unit.push_immune:
+				or unit.state == Unit.State.ROLL:
 			continue
+		# Vehicles (siege engines) are push_immune against pedestrians but keep
+		# a big spacing among EACH OTHER (their crews clip otherwise, phase
+		# 8.2); other push_immune units (tower/hut reserves) skip entirely.
+		var veh_r: float = unit.vehicle_separation
+		if unit.push_immune and veh_r <= 0.0:
+			continue
+		var radius: float = SEPARATION_RADIUS if veh_r <= 0.0 else veh_r
 		var push: Vector2 = Vector2.ZERO
 		var pos: Vector3 = unit.position
 		var checks: int = SEPARATION_MAX_CHECKS
 		var tight: bool = false
-		var min_key: Vector2i = hash_key(pos - Vector3(SEPARATION_RADIUS, 0.0, SEPARATION_RADIUS))
-		var max_key: Vector2i = hash_key(pos + Vector3(SEPARATION_RADIUS, 0.0, SEPARATION_RADIUS))
+		var min_key: Vector2i = hash_key(pos - Vector3(radius, 0.0, radius))
+		var max_key: Vector2i = hash_key(pos + Vector3(radius, 0.0, radius))
 		for kz in range(min_key.y, max_key.y + 1):
 			for kx in range(min_key.x, max_key.x + 1):
 				var bucket: Array = _hash.get(Vector2i(kx, kz), [])
@@ -267,18 +274,20 @@ func _apply_separation(delta: float) -> void:
 							or other.state == Unit.State.THROWN \
 							or other.state == Unit.State.ROLL:
 						continue
+					if veh_r > 0.0 and other.vehicle_separation <= 0.0:
+						continue   # vehicles are spaced only against vehicles
 					checks -= 1
 					var away: Vector2 = Vector2(pos.x - other.position.x, pos.z - other.position.z)
 					var dist: float = away.length()
-					if dist < SEPARATION_RADIUS:
-						if dist < SEPARATION_RADIUS * OVERLAP_TIGHT_FACTOR:
+					if dist < radius:
+						if dist < radius * OVERLAP_TIGHT_FACTOR:
 							tight = true   # visibly stacked (sprite flicker)
 						if dist < 0.001:
 							# Full overlap: deterministic per-unit direction.
 							var angle: float = float(unit.get_instance_id() % 628) * 0.01
 							away = Vector2(cos(angle), sin(angle))
 							dist = 0.001
-						push += away / dist * (SEPARATION_RADIUS - dist)
+						push += away / dist * (radius - dist)
 					if checks <= 0:
 						break
 				if checks <= 0:
@@ -287,7 +296,8 @@ func _apply_separation(delta: float) -> void:
 				break
 		# Anti-stacking fallback: soft separation could not free the unit for
 		# several passes (walled in) -> walk it to a free nearby cell.
-		if tight:
+		# Pedestrians only — a vehicle resolves via the push alone.
+		if tight and veh_r <= 0.0:
 			unit.overlap_ticks += 1
 			if unit.overlap_ticks >= OVERLAP_ESCAPE_PASSES \
 					and unit.state == Unit.State.IDLE:
