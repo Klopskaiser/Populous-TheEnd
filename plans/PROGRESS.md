@@ -3635,3 +3635,175 @@ Unit-Loop, Stufe C), entfällt das Spiegeln — dann ist der Fan-out
 **Damit Definition of Done Phase 8.1 erfüllt:** Stufe A umgesetzt und grün,
 Stufe B „gemessen und dokumentiert verworfen" (Plan-Option 2). Suite nach
 Revert erneut 1509 grün.
+
+---
+
+## Phase 8.2 — Kampfgruppen (1-gegen-N) & Erreichbarkeits-Fixes (2026-07-12)
+
+**Plan:** [08c_combat_groups_reachability.md](08c_combat_groups_reachability.md).
+Umfasst laut Nutzer-Vorgabe Kampfgruppen-Verhalten UND Kampf-Performance.
+
+### Diagnose-Befunde (Schritt 1, Hypothesen bestätigt)
+
+- **Debugschlacht headless** (2×800 W/FW, Diagnose-Skript
+  `tests/diag_8_2.gd`, bleibt als Messwerkzeug im Repo): Massenschwerpunkt
+  driftete **−35 m nach Norden in 30 s** (dx blieb ±1 m) und die
+  Melee-Quote lag im Peak bei nur **~25 %** der ATTACK-Einheiten
+  (254 kämpfen / 1298 in ATTACK) — Hunderte „ATTACK ohne Slot" (warten)
+  oder nur verfolgend. Beide 08c-Hypothesen bestätigt: (1) der
+  Kandidaten-Cap (`get_units_in_radius`, max 24) zählte **Freunde** mit →
+  Blob-Blindheit; (2) die Bucket-Iteration min→max (NW zuerst) wählte
+  Ziele systematisch im Norden/Westen → kollektiver Nord-Drift.
+- **Bergpass (Code-Befund):** `_approach` fiel bei fehlgeschlagenem A* auf
+  einen **blinden Direkt-Schritt** zurück → Verfolger liefen dauerhaft
+  gegen die Riegelwand (Plateau-Gegner liegen in 8-m-FLACH-Distanz im
+  Aggro-Radius). `AIController._find_supplied_plot` prüfte **keine
+  Erreichbarkeit** → begehbare, aber isolierte Plateau-Plots wurden bebaut,
+  Arbeiter kamen nie an, die tote Baustelle blockierte
+  `MAX_PARALLEL_SITES`.
+
+### Gebaut
+
+- **`scripts/core/combat_group.gd` (neu, `class_name CombatGroup`,
+  RefCounted):** genau EIN Verteidiger + 1–3 Angreifer + Warteliste
+  (zweite Reihe, Aufrück-Reihenfolge = Ankunft), Anker (folgt dem
+  Verteidiger träge). Einheit ↔ Gruppe über `Unit.combat_group`
+  (höchstens EINE Gruppe pro Einheit — 2v2/2v4 strukturell unmöglich).
+  `remove_member` füllt frei werdende Slots sofort aus der zweiten Reihe
+  nach (Regel 5).
+- **`unit.gd` — Paarungsregeln in `_bind_to_fight(enemy, allow_wait)`:**
+  freier Gegner → neue 1v1-Gruppe; Gegner-Verteidiger mit freiem Slot →
+  beitreten (bis 1v3); voll → zweite Reihe; Gegner kämpft anderswo als
+  Angreifer → **Flip** (sein 1v1 wird 2v1 auf ihn) bzw. **Pull**
+  (Nachzügler der unterlegenen Seite zieht ihn aus der vollen Gruppe:
+  1v3 → 1v2 + frisches 1v1, der Gezogene retargetet den Zieher via
+  `_switch_target_to`). Ein Verteidiger behält seinen Sitz, egal wen er
+  schlägt (Vergeltung gegen Außenstehende löst die eigene Gruppe NICHT
+  auf). `_end_attack` gibt nur Angreifer-/Wartesitze frei;
+  `_dissolve_own_group` (Tod/Konversion/Weltaustritt/Garnison) retargetet
+  alle Mitglieder. Alte Slot-API kompatibel gehalten:
+  `request_melee_slot`/`release_melee_slot`/`active_melee_attacker_count`
+  arbeiten auf der Gruppe, `melee_attackers` ist ein Read-only-Getter
+  (Feld + `incoming_attackers` + `_prune_melee_attackers` entfernt).
+- **Kampf-Tick:** gebundene Kämpfer scannen NICHT mehr (Gruppe = Bindung)
+  und pollen keine Slots; nur die zweite Reihe sucht gedrosselt nach
+  Kämpfen mit Platz. Wartende stehen am Ring um den GRUPPEN-Anker
+  (`_wait_near`) mit Idle-Animation (`_combat_waiting`) statt
+  Auf-der-Stelle-Laufens.
+- **Scan-Fixes:** `UnitManager.get_enemy_candidates(pos, radius, tribe,
+  max_count, max_examined)` — sammelt NUR Gegner (Freunde verbrauchen das
+  24er-Budget nicht mehr), Buckets ring-weise von innen nach außen (kein
+  NW-Bias), Examine-Cap (Default 300, greift mitten im Bucket) begrenzt
+  Scans im Mega-Blob. `_scan_for_enemy` bewertet mit
+  **Gruppen-Slot-Score** (`_melee_engage_cost`: frei 0 … volle Gruppe
+  10+Warteliste) statt `incoming_attackers`; Prediger-Fokus
+  (`_pick_convert_focus`) nutzt dieselbe Query. Brave-Wachscan im
+  Regroup-Pass läuft mit kleinem Budget (32).
+- **Gruppen-Mindestabstand:** UnitManager-Registry + `_apply_combat_groups`
+  pro Tick: Prune, Anker-Follow (3 m/s), Verteidiger zu naher Gruppen
+  (< 2,8 m Anker-Abstand) werden auseinandergeschoben (1,2 m/s) — der
+  Kampf franst in Grüppchen aus. Skalierungs-Guards wie bei der
+  Unit-Separation (Slices à 256 Gruppen, max 12 Nachbar-Checks,
+  zentrumszentrierte + pro Verteidiger gespiegelte Bucket-Reihenfolge
+  gegen einen eigenen Richtungs-Bias, s. Stolpersteine).
+- **Erreichbarkeit (Bergpass):** `_approach` gibt bei fehlgeschlagenem A*
+  `false` zurück (kein blinder Schritt mehr); `_tick_attack` merkt sich das
+  Ziel als unerreichbar (`_unreach_targets`, 3 s Bann, max 8 Einträge —
+  der teure Fehl-A* läuft nicht pro Scan erneut) und disengagiert.
+  **Partial-Paths:** `NavGrid.find_path(…, allow_partial)` /
+  `PathWorker.submit_request(…, allow_partial)` — Attack-Move-Routen
+  (`move_aggressive`) laufen bis zum letzten erreichbaren Punkt Richtung
+  Ziel statt leer→IDLE („Wellenziel"); Exakt-Klickpunkt-Regel nur, wenn
+  die Zielzelle wirklich erreicht wurde. Passive Moves unverändert
+  (leer = Befehl fallen lassen). **KI-Plots:**
+  `AIController._plot_reachable` (A* Basis→Plot, Pfadende muss ≤ 3 m am
+  Plot liegen — der Snap kann sonst „über die Klippe" zeigen) mit
+  Session-Cache `_unreachable_plots`; unerreichbare Kandidaten zählen
+  gegen `MAX_PLOT_CANDIDATES`.
+- Signatur-Anpassungen: `Firewarrior._scan_for_enemy`,
+  `SiegeEngine._plan_path_to` (Katapult bleibt via `_is_ranged` gruppenfrei);
+  `benchmark_mass` tickt `_apply_combat_groups` mit.
+
+### Wirkung (Debugschlacht-Diagnose vorher → nachher)
+
+- Nord-Drift: **−35 m → max ~−4 m** (kehrt gegen 0 zurück; Rest =
+  Zufalls-Random-Walk der Schubser/Rollen).
+- Melee-Quote im Peak: **~25 % → ~50–66 %** der ATTACK-Einheiten; die
+  Schlacht ist deutlich schneller entschieden (nach 900 Ticks 252 statt
+  713 Überlebende — es wird gekämpft statt gestanden).
+
+### Kampf-Performance (Deliverable 4; headless, DIESER Rechner ist
+schneller als der PROGRESS-Referenzrechner — Vorher-Werte am selben Tag
+gemessen)
+
+| Szenario | vorher Ø | nachher Ø | units-Phase | A*-Läufe/300 Ticks |
+|---|---|---|---|---|
+| combat 2000 | 26,5 ms | **15,6 ms** | 19,5 → 9,6 ms | 29 955 → ~2 100 |
+| combat 4740 | 59,8 ms | **37,3 ms** | 48,0 → 24,5 ms | 91 524 → ~4 700 |
+| move 2000 | 18,8 ms | 16,3 ms | — | — |
+| move 6000 | 47,2 ms | 42,4 ms | — | — |
+
+Größter Hebel wie im Plan erwartet: **gebundene Kämpfer sind billig**
+(kein Scan, kein Slot-Polling, kaum Replans); die sep-Phase liegt trotz
+des neuen Gruppen-Passes unter der Baseline, weil die entzerrten Kämpfe
+weniger Überlappungen erzeugen. Schlimmster Einzeltick im Kampf bleibt
+hoch (~90/210 ms, Erstkontakt-/Massensterben-Frames) — im Spiel fängt der
+2er-Step-Cap das ab.
+
+### Stolpersteine / Erkenntnisse
+
+- **Jeder gecappte Nachbar-Sweep ist ein Bias-Kandidat:** Der neue
+  Gruppen-Push drückte mit fixer min→max-Bucket-Reihenfolge + Check-Cap
+  alle Gruppen systematisch nach Süden (gleiche Fehlerklasse wie der
+  Scan-Nord-Drift!) — der Symmetrie-Wächter hat es gefangen. Fix:
+  zentrumszentrierte, pro Verteidiger gespiegelte Reihenfolge.
+- **Examine-Caps müssen IN der Bucket-Schleife greifen** — ein Check nach
+  dem Bucket iteriert im Blob trotzdem 100+ Einheiten pro Scan
+  (Regroup-Phase 1,5 → 12 ms bei move 6000, nach dem Fix 0,5 ms).
+- Ternary-Zuweisung an `Array[int]` wirft nur einen LAUFZEIT-Typfehler —
+  die Funktion bricht still ab (Suite fing es über den Abstands-Test).
+- Ein Verteidiger, der einen AUSSENSTEHENDEN schlägt (z. B. Vergeltung
+  gegen Fernkämpfer), darf seine eigene Gruppe nicht verlassen/auflösen —
+  sonst kollabiert der Melee-Ring um ihn (Reserve-Reihen-Test fing es).
+- Godot-stdout wird auf diesem System vom PowerShell-Tool verschluckt —
+  Godot-Läufe über Git-Bash ausführen.
+
+### Tests
+
+`tests/test_combat_groups.gd` (neu, 12 Tests): 6-auf-1 → 3 kämpfen +
+3 warten + Nachrücken beim Tod; Warte-Ring-Positionen; 2v2 → zwei 1v1;
+2v4 → 1v2 + 1v2; Nachzügler-Pull (1v3 → 1v2 + 1v1, Retarget);
+Invarianten-Wächter (≤ 3 Angreifer, genau eine Rolle pro Einheit,
+Rückverweise); Gruppen-Mindestabstand; Scan-findet-Gegner-im-Freundes-Blob;
+**Symmetrie-Wächter** (gespiegelte Armeen: max. Schwerpunkt-Drift < 3 m —
+alter Bias ~5+ m in diesem Setup, −35 m in der Vollschlacht — und
+Melee-Quote ≥ 35 %); unerreichbares Kampfziel wird fallengelassen
+(keine Klippen-Anläufe); Attack-Move nimmt Partial-Path (kommt bis zur
+Wand, nie darüber; passiver Move bricht sauber ab); KI-Plot-Suche
+verwirft Plateau-Plots (inkl. Cache) und wählt erreichbar. Bestehende
+Slot-/Kampf-Tests laufen unverändert auf dem Gruppen-Modell (Semantik
+1-gegen-N, N ≤ 3, erhalten).
+
+### Verifikation
+
+`--headless --import` sauber; Suite **1591 passed, 0 failed** (mehrfach
+wiederholt — der Symmetrie-Wächter enthält Zufallsanteile);
+`--headless --quit` fehlerfrei; **lagtest** (Bergpass, 3 KIs) 600 und
+**2500 Frames** fehlerfrei. **Manuelle Prüfung (Nutzer) ausstehend:**
+Debugschlacht-Optik (1-gegen-N-Grüppchen + zweite Reihe, kein Ball, kein
+Nord-Schub, FPS vorher/nachher am Referenzrechner — Ist war 60 → 12 FPS),
+langes Bergpass-Skirmish (keine Sockel-Trauben, KI baut kontinuierlich).
+
+### Abweichungen vom Plan / Offenes
+
+- „Neue Kämpfe nur mit Mindestabstand" ist als **weicher Push** umgesetzt
+  (Kämpfe entstehen, wo Einheiten sich treffen, und werden binnen Sekunden
+  auseinandergeschoben) statt als hartes Entstehungs-Verbot — robuster;
+  der Test prüft den eingeschwungenen Abstand.
+- KI-Wellen-Reissue brauchte kein eigenes Gate: Partial-Path +
+  Unreachable-Drop entschärfen das „alle 4 s gegen die Wand"; das
+  Wellenziel (nächstes Gegner-Gebäude) ist im Bergpass regulär über die
+  Pässe erreichbar.
+- `_unreachable_plots` wird bei Terraforming (Landbrücke!) nicht
+  invalidiert (Plan: kleiner Session-Cache). Falls die KI später
+  Landbrücken zur Expansion nutzt: Cache bei Terrain-Änderung leeren.

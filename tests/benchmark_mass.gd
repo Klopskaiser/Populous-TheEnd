@@ -103,6 +103,7 @@ func _simulate(label: String, um: UnitManager, ticks: int) -> void:
 		um._drain_path_queue()
 		var t3: int = Time.get_ticks_usec()
 		um._apply_separation(TICK)
+		um._apply_combat_groups(TICK)
 		var t4: int = Time.get_ticks_usec()
 		um._apply_idle_regroup(TICK)
 		um._tick_projectiles(TICK)

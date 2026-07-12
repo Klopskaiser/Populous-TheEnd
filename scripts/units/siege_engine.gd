@@ -420,7 +420,8 @@ func _set_building_target(building, keep_route: bool) -> void:
 
 
 ## Vehicle body: paths on the eroded vehicle grid (narrow gaps are closed).
-func _plan_path_to(target: Vector3) -> bool:
+## `_allow_partial` is ignored — vehicle paths stay all-or-nothing.
+func _plan_path_to(target: Vector3, _allow_partial: bool = false) -> bool:
 	if nav_grid != null:
 		var path: PackedVector3Array = nav_grid.find_vehicle_path(position, target)
 		if path.is_empty():

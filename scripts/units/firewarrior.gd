@@ -97,11 +97,11 @@ func _tick_attack(delta: float) -> void:
 ## Target selection prefers an enemy preacher in range (firewarriors hunt
 ## priests, which convert whole squads); otherwise the base nearest-enemy logic.
 ## Used by the idle/attack-move engage and by re-targeting after a kill.
-func _scan_for_enemy(radius: float) -> Unit:
+func _scan_for_enemy(radius: float, max_examined: int = 0) -> Unit:
 	var priest: Unit = _nearest_enemy_priest(radius)
 	if priest != null:
 		return priest
-	return super._scan_for_enemy(radius)
+	return super._scan_for_enemy(radius, max_examined)
 
 
 ## Nearest living enemy preacher within `radius`; null when none is in range.

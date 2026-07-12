@@ -93,6 +93,11 @@ var nav_grid: NavGrid = null
 var base_anchor: Vector2i = Vector2i.ZERO
 
 var state: AIState.State = AIState.State.BUILD
+## Plot cells proven UNREACHABLE from the base (phase 8.2): the expensive
+## failing A* runs once per candidate, then the cell is banned for the session
+## (Bergpass: walkable-but-isolated plateau tops are valid plots per
+## can_place_at, but no worker can ever reach them).
+var _unreachable_plots: Dictionary = {}
 ## Army size required for the next attack; grows after every wave
 ## (gradually bigger attacks).
 var attack_wave_size: int = AIState.ARMY_ATTACK_SIZE
@@ -729,20 +734,47 @@ func _find_plot(footprint: Vector2i) -> Vector2i:
 	return Vector2i(-1, -1)
 
 
-## Ring search for the first valid plot that has wood in reach. Gives up
-## after MAX_PLOT_CANDIDATES unsupplied candidates (then expansion takes over).
+## Ring search for the first valid plot that has wood in reach AND is
+## reachable from the base (phase 8.2). Gives up after MAX_PLOT_CANDIDATES
+## unsupplied/unreachable candidates (then expansion takes over).
 func _find_supplied_plot(anchor: Vector2i, footprint: Vector2i) -> Vector2i:
 	var checked: int = 0
 	for radius in range(0, 30):
 		for cell in ring_cells(anchor, radius):
 			if not commands.can_place_at(cell, footprint):
 				continue
-			if _trees_near_cell(cell) >= MIN_TREES_NEAR_PLOT:
-				return cell
-			checked += 1
-			if checked >= MAX_PLOT_CANDIDATES:
-				return Vector2i(-1, -1)
+			if _trees_near_cell(cell) < MIN_TREES_NEAR_PLOT or not _plot_reachable(cell):
+				checked += 1
+				if checked >= MAX_PLOT_CANDIDATES:
+					return Vector2i(-1, -1)
+				continue
+			return cell
 	return Vector2i(-1, -1)
+
+
+## True when a worker can actually WALK from the base anchor to the plot.
+## can_place_at only checks the plot itself (land/flat/free) — a walkable but
+## isolated plateau passes it, the workers never arrive and the dead
+## construction site blocks MAX_PARALLEL_SITES (Bergpass bug). The failing A*
+## is expensive (it explores the whole reachable component), so negatives go
+## into a session cache and are never re-tried.
+func _plot_reachable(cell: Vector2i) -> bool:
+	if nav_grid == null:
+		return true   # headless AI tests without terrain wiring
+	if _unreachable_plots.has(cell):
+		return false
+	var to: Vector3 = nav_grid.cell_to_world(cell)
+	var path: PackedVector3Array = nav_grid.find_path(
+		nav_grid.cell_to_world(base_anchor), to)
+	if not path.is_empty():
+		# find_path snaps an unwalkable target to the nearest walkable cell —
+		# that snap can land ACROSS the cliff, so the path must really end at
+		# the plot to count.
+		var endp: Vector3 = path[path.size() - 1]
+		if Vector2(endp.x - to.x, endp.z - to.z).length() <= 3.0:
+			return true
+	_unreachable_plots[cell] = true
+	return false
 
 
 ## True when fewer than FORESTER_MIN_TREES trees stand within PLOT_TREE_RADIUS

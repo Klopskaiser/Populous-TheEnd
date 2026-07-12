@@ -65,8 +65,15 @@ const ATTACK_COOLDOWN: float = 0.8
 ## Base target (re)search interval; a small per-unit offset staggers the scans
 ## so they never all fire on the same frame (never per-frame — see _due_to_scan).
 const TARGET_SEARCH_INTERVAL: float = 0.25
-## Max candidate units one enemy scan examines (crowd cost cap).
+## Max ENEMY candidates one scan collects (crowd cost cap). Since phase 8.2
+## friendly units no longer consume this budget (blob blindness fix) — see
+## UnitManager.get_enemy_candidates.
 const SCAN_MAX_CANDIDATES: int = 24
+## How long a combat target proven unreachable (failed A* while approaching)
+## is ignored by scans — instead of walking into the cliff wall (phase 8.2).
+const UNREACHABLE_TARGET_MS: int = 3000
+## At most this many unreachable-target entries are remembered per unit.
+const UNREACHABLE_CACHE_MAX: int = 8
 ## Radius at which idle / attack-moving combatants notice an enemy BUILDING to
 ## assault (phase 7g). Larger than the melee aggro so buildings (stationary, big
 ## targets) are reliably picked up — but still LOWEST priority: an enemy unit in
@@ -278,13 +285,24 @@ var garrison_reached: bool = false
 ## Enemy-building scan support (phase 7g); injected by UnitManager.spawn_unit()
 ## via set() for every unit (the siege engine used it first, 7f).
 var building_manager: BuildingManager = null
-## Units currently meleeing THIS unit (max MAX_MELEE_ATTACKERS get a slot).
-## Untyped on purpose: entries may be freed, and binding a freed instance to a
-## typed parameter raises a script error (see Brave._tree_valid rationale).
-var melee_attackers: Array = []
-## Count of units committed to attacking this one (targeting it, whether or not
-## they hold a slot yet). Drives 1v1 target preference even before contact.
-var incoming_attackers: int = 0
+## The 1-vs-N combat group this unit is bound to (CombatGroup, untyped for
+## freed-safety) — as its defender, one of its attackers, or a waiter in the
+## second row. At most ONE group per unit (phase 8.2 invariant: no 2v2).
+var combat_group = null
+## Compat view: units currently meleeing THIS unit (the own group's attacker
+## list while this unit is the defender). Read-only.
+var melee_attackers: Array:
+	get:
+		if combat_group != null and combat_group.defender == self:
+			return combat_group.attackers
+		var empty: Array = []
+		return empty
+## True while this unit stands in the second row of its group (drives the idle
+## animation instead of walking in place).
+var _combat_waiting: bool = false
+## Recently-unreachable combat targets: instance id -> ignore-until ticks-msec
+## (Bergpass fix: scans skip these instead of re-running failing A*).
+var _unreach_targets: Dictionary = {}
 ## Last unit that damaged this one (drives brave retaliation).
 var last_attacker: Unit = null
 var _attack_cooldown: float = 0.0
@@ -626,7 +644,7 @@ func _start_path_to(target: Vector3) -> void:
 			path_service.request_path(self)
 		_set_state(State.MOVE)
 		return
-	if not _plan_path_to(target):
+	if not _plan_path_to(target, move_aggressive):
 		# Unreachable: drop the waypoint and stop.
 		if not waypoint_queue.is_empty():
 			waypoint_queue.pop_front()
@@ -645,7 +663,7 @@ func _resolve_pending_path() -> void:
 	_pending_target = Vector3.INF
 	if state != State.MOVE:
 		return  # order was superseded while waiting
-	if not _plan_path_to(target):
+	if not _plan_path_to(target, move_aggressive):
 		if not waypoint_queue.is_empty():
 			waypoint_queue.pop_front()
 		_set_state(State.IDLE)
@@ -662,7 +680,10 @@ func _submit_path_request(worker: PathWorker) -> void:
 	_path_request_id += 1
 	var from_cell: Vector2i = nav_grid.world_to_cell(position)
 	var target_cell: Vector2i = nav_grid.world_to_cell(_pending_target)
-	worker.submit_request(get_instance_id(), _path_request_id, from_cell, target_cell)
+	# Attack-move waves accept a PARTIAL path (closest reachable point toward
+	# the target) instead of idling at an unreachable wave target (phase 8.2).
+	worker.submit_request(get_instance_id(), _path_request_id, from_cell,
+		target_cell, move_aggressive)
 
 
 ## Applies a worker result (main thread). Discards stale/superseded results and
@@ -705,12 +726,14 @@ static var dbg_plan_us: int = 0
 
 
 ## Computes and stores a path without touching the state (Brave sub-states
-## use this too). Returns false if the target is unreachable.
-func _plan_path_to(target: Vector3) -> bool:
+## use this too). Returns false if the target is unreachable. `allow_partial`
+## (attack-move routes) accepts a path to the closest REACHABLE point toward
+## an unreachable target instead of failing (phase 8.2).
+func _plan_path_to(target: Vector3, allow_partial: bool = false) -> bool:
 	var path: PackedVector3Array
 	var t0: int = Time.get_ticks_usec()
 	if nav_grid != null:
-		path = nav_grid.find_path(position, target)
+		path = nav_grid.find_path(position, target, allow_partial)
 	else:
 		path = PackedVector3Array([target])
 	dbg_plan_calls += 1
@@ -773,15 +796,12 @@ func take_damage(amount: int, attacker = null) -> void:
 
 
 func _die() -> void:
-	# Release our own slot, then tell everyone attacking us to look elsewhere so
-	# waiting attackers can back-fill onto a fresh target.
+	# Release our own binding, then dissolve the fight around us so attackers
+	# and the second row retarget onto fresh enemies right away.
 	leave_crew()
 	_end_attack()
 	_clear_building_target()
-	for a in melee_attackers.duplicate():
-		if is_instance_valid(a):
-			a._on_target_died(self)
-	melee_attackers.clear()
+	_dissolve_own_group()
 	# Corpse setup: no selection ring, no route, no hopping, no stars — the unit
 	# stays in the world as a lying "dead" sprite until the decay timer removes it.
 	selected = false
@@ -1318,11 +1338,7 @@ func convert_to_tribe(new_tribe: Tribe) -> void:
 	last_attacker = null
 	_end_attack()
 	_clear_building_target()
-	for a in melee_attackers.duplicate():
-		if is_instance_valid(a):
-			a._on_target_died(self)   # drops the target and retargets
-	melee_attackers.clear()
-	incoming_attackers = 0
+	_dissolve_own_group()   # everyone fighting the (now friendly) unit retargets
 	selected = false
 	_set_state(State.IDLE)
 	converted.emit(self)
@@ -1434,7 +1450,12 @@ func _engage_on_sight(delta: float) -> bool:
 	return _try_engage_building()
 
 
-## Pursues the current target and strikes it when in range and holding a slot.
+## Pursues the current target and strikes it when in range. The combat-group
+## binding (phase 8.2) decides the role: attackers hold a ring slot on the
+## defender, the defender brawls its opponent directly (no slot needed — the
+## pair IS the fight), waiters hold the second row until a slot frees. Bound
+## fighters run NO enemy scans (the group is the target binding) — only the
+## second row keeps its throttled look for a fight with room.
 func _tick_attack(delta: float) -> void:
 	# A converted target became friendly mid-fight -> drop it (or fall back to a
 	# building assault, phase 7g).
@@ -1444,24 +1465,40 @@ func _tick_attack(delta: float) -> void:
 	if _breaks_off_vs_sitting(attack_target):
 		return
 	var target: Unit = attack_target
-	var slot: int = target.request_melee_slot(self)
-	if slot < 0:
-		# Target is full (3 attackers). Prefer a still-free enemy (1v1), else
-		# wait around the fight until a slot opens (checked, not per-frame).
+	var g = combat_group
+	# (Re)bind when the group link is missing or stale (target switched, the
+	# group dissolved, direct set_path interference, ...).
+	if g == null or (g.defender != self and g.defender != target):
+		_bind_to_fight(target, true)
+		g = combat_group
+	_combat_waiting = false
+	if g != null and g.defender == target and g.attacker_index(self) < 0:
+		# Second row: hold the waiting ring; a throttled scan may find a fight
+		# with a free seat instead (nearest group with room / fresh 1v1).
 		_in_melee = false
+		_combat_waiting = true
 		if _due_to_scan(delta):
 			var alt: Unit = _scan_for_enemy(aggro_radius())
-			if alt != null and alt != target and alt.active_melee_attacker_count() \
-					< MAX_MELEE_ATTACKERS:
+			if alt != null and alt != target \
+					and _melee_engage_cost(alt) < MAX_MELEE_ATTACKERS:
 				_begin_attack(alt)
 				return
 		_wait_near(target, delta)
 		return
-	var slot_pos: Vector3 = target.melee_slot_position(slot)
 	var dist: float = _flat_dist(position, target.position)
 	if dist > MELEE_RANGE:
 		_in_melee = false
-		_approach(slot_pos, delta)
+		var dest: Vector3 = target.position
+		if g != null and g.defender == target:
+			var slot: int = g.attacker_index(self)
+			if slot >= 0:
+				dest = target.melee_slot_position(slot)
+		if not _approach(dest, delta):
+			# Unreachable (A* failed, e.g. an enemy up on a cliff): remember it
+			# briefly and disengage instead of running into the wall (phase 8.2).
+			_mark_target_unreachable(target)
+			_retarget_or_idle()
+			return
 		_face_point(target.position)
 		return
 	# In range: stand still, face the target and strike on cooldown.
@@ -1577,9 +1614,13 @@ func _begin_attack(enemy: Unit) -> void:
 	_on_combat_interrupt()
 	_end_attack()
 	attack_target = enemy
-	enemy.incoming_attackers += 1
 	_attack_cooldown = 0.0
 	_combat_goal = Vector3.INF
+	# Melee units bind into the target's fight right away (pairing rules);
+	# ranged units fire without a group seat and only brawl via
+	# request_melee_slot when someone closes in.
+	if not _is_ranged():
+		_bind_to_fight(enemy, true)
 	_set_state(State.ATTACK)
 
 
@@ -1848,6 +1889,7 @@ func enter_garrison(tower, slot_pos: Vector3) -> void:
 	_clear_path()
 	_end_attack()
 	_clear_building_target()
+	_dissolve_own_group()   # a protected reserve is no fight target (phase 8.2)
 	selected = false
 	position = slot_pos
 	anim_base_name = &"idle"
@@ -1904,13 +1946,15 @@ func enter_hut(hut) -> void:
 	_set_state(State.GARRISON)
 
 
-## Clears our attack and frees the slot we held on the target.
+## Clears our attack and releases our seat in the fight (attacker/waiter; a
+## freed slot is back-filled from the second row). A DEFENDER keeps its group
+## on _end_attack — the group is the others' fight against us and only
+## dissolves when we die, convert or leave the world.
 func _end_attack() -> void:
-	if attack_target != null and is_instance_valid(attack_target):
-		attack_target.release_melee_slot(self)
-		attack_target.incoming_attackers = maxi(0, attack_target.incoming_attackers - 1)
+	_leave_combat_group()
 	attack_target = null
 	_in_melee = false
+	_combat_waiting = false
 	_combat_goal = Vector3.INF
 
 
@@ -1926,6 +1970,14 @@ func _on_target_died(target) -> void:
 
 func _retarget_or_idle() -> void:
 	_end_attack()
+	# Self-defence continuity: someone is still meleeing US — fight the nearest
+	# of our own group's attackers (no scan; the fight stays in the group).
+	var own = combat_group
+	if own != null and own.defender == self:
+		var foe = own.nearest_attacker(position)
+		if foe != null:
+			_begin_attack(foe)
+			return
 	if _is_combatant():
 		var enemy: Unit = _scan_for_enemy(aggro_radius())
 		if enemy != null:
@@ -1993,61 +2045,230 @@ func _maybe_retaliate(attacker) -> void:
 		_begin_attack(attacker)
 
 
-## Nearest enemy in radius, preferring targets with fewer attackers (1v1 bias).
-## The candidate query is capped: in a mega-crowd an uncapped scan per unit
-## per 0.25 s dominated the tick (measured 60 ms with 4000 stacked units).
-func _scan_for_enemy(radius: float) -> Unit:
+## Nearest enemy in radius, scored by the group-slot cost (free enemies and
+## open seats first — 1v1 preference structurally). Candidates come from the
+## ring-ordered, enemies-only query (phase 8.2): friendly units no longer
+## consume the candidate budget (blob blindness) and buckets are visited
+## outward from the own cell (no NW-first direction bias).
+func _scan_for_enemy(radius: float, max_examined: int = 0) -> Unit:
 	if path_service == null:
 		return null
 	var flat: Vector2 = Vector2(position.x, position.z)
 	var best: Unit = null
 	var best_score: float = INF
-	for u in path_service.get_units_in_radius(position, radius, SCAN_MAX_CANDIDATES):
-		if u == self or u.state == State.DEAD or u.tribe_id == tribe_id:
+	var ranged: bool = _is_ranged()
+	var now: int = Time.get_ticks_msec()
+	var check_unreach: bool = not _unreach_targets.is_empty()
+	if max_examined <= 0:
+		max_examined = UnitManager.SCAN_MAX_EXAMINED
+	for u in path_service.get_enemy_candidates(position, radius, tribe_id,
+			SCAN_MAX_CANDIDATES, max_examined):
+		if u == self:
 			continue
 		if u.state == State.SIT:
 			continue   # sitting converts are no threat (and shall keep sitting)
-		if not u.is_targetable():
-			continue   # siege engines: attackers go for the crew instead
+		if check_unreach \
+				and int(_unreach_targets.get(u.get_instance_id(), 0)) > now:
+			continue   # recently proven unreachable (up on a cliff, phase 8.2)
 		var d: float = Vector2(u.position.x, u.position.z).distance_to(flat)
-		# Commitment count dominates the score so free enemies are picked first
-		# (1v1 preference), even before anyone is in striking range.
-		var score: float = float(u.incoming_attackers) * 1000.0 + d
+		# The engage cost dominates the score so free enemies / open seats are
+		# picked first (1-vs-N pairing); ranged units fire without a seat.
+		var score: float = d
+		if not ranged:
+			score += float(_melee_engage_cost(u)) * 1000.0
 		if score < best_score:
 			best_score = score
 			best = u
 	return best
 
 
-## Registers `attacker` on this unit's melee ring. Returns its slot index
-## (0..MAX-1) or -1 when the ring is full. Untyped param (freed-safe).
+# --- Combat groups (phase 8.2) --------------------------------------------------
+
+## Cost of engaging `u` in melee under the pairing rules: 0 = free (ungrouped /
+## waiter / one of our own attackers), 1..2 = joins or reshapes an existing
+## fight, >= 10 = full group (second row). Used as the scan score's major key.
+func _melee_engage_cost(u: Unit) -> int:
+	var g = u.combat_group
+	if g == null:
+		return 0
+	if g == combat_group and g.defender == self:
+		return 0   # one of OUR own attackers — that is our fight anyway
+	if g.defender == u:
+		var n: int = g.attackers.size()
+		if n < MAX_MELEE_ATTACKERS:
+			return n
+		return 10 + g.waiters.size()
+	if g.is_waiter(u):
+		return 0   # waiting around someone else's fight: free for a 1v1
+	return 1   # fighting elsewhere: flip (1v1 -> 2v1) or pull (fresh 1v1)
+
+
+## Binds this (melee) unit into `enemy`'s fight following the 1-vs-N pairing
+## rules (phase 8.2): free enemy -> found a new group on it; enemy defending
+## with a free seat -> take it; full -> second row (allow_wait) or -1; enemy
+## fighting as attacker/waiter elsewhere -> flip its 1v1 into a 2v1, or PULL
+## it out into a fresh 1v1 (latecomer rule: 1v3 -> 1v2 + 1v1). Returns the
+## attacker slot index, or -1 (second row / no seat).
+func _bind_to_fight(enemy: Unit, allow_wait: bool) -> int:
+	if enemy == null or not is_instance_valid(enemy) or enemy.state == State.DEAD:
+		return -1
+	# A unit DEFENDING its own live fight keeps that seat, whoever it swings
+	# at (retaliation may pick an outside enemy, e.g. a ranged attacker): the
+	# pairing structure hangs on the defender seat, not on its target choice.
+	# Only an empty leftover group is released so the seat frees up.
+	var own = combat_group
+	if own != null and own.defender == self:
+		if own.is_alive():
+			return 0
+		own.release_all()
+	var g = enemy.combat_group
+	if g != null and g == combat_group:
+		# Same fight already: we hold a seat / wait here.
+		return g.attacker_index(self)
+	if g == null:
+		_found_group_on(enemy)
+		return 0
+	if g.defender == enemy:
+		var idx: int = g.attacker_index(self)
+		if idx >= 0:
+			return idx
+		g.prune()
+		if g.attackers.size() < MAX_MELEE_ATTACKERS:
+			_leave_combat_group()
+			g.attackers.append(self)
+			combat_group = g
+			return g.attackers.size() - 1
+		if allow_wait and not g.is_waiter(self):
+			_leave_combat_group()
+			g.waiters.append(self)
+			combat_group = g
+		return -1
+	if g.is_waiter(enemy):
+		# A second-row waiter is effectively free: grab it into a fresh 1v1.
+		g.remove_member(enemy)
+		_found_group_on(enemy)
+		enemy._switch_target_to(self)
+		return 0
+	# Enemy fights as an ATTACKER in another group.
+	g.prune()
+	if g.attackers.size() <= 1:
+		# FLIP: its 1v1 becomes a 2v1 on the enemy — the old defender turns
+		# into a fellow attacker (if it is actually brawling back) and we join.
+		var od = g.defender
+		g.attackers.erase(enemy)
+		for w in g.waiters:
+			if w != null and is_instance_valid(w) and w.combat_group == g:
+				w.combat_group = null   # rebind on their next tick
+		g.waiters.clear()
+		g.defender = enemy
+		g.anchor = enemy.position
+		if od != null and is_instance_valid(od) and od.combat_group == g:
+			if od.state != State.DEAD and od.attack_target == enemy:
+				g.attackers.append(od)   # stays bound, now as a fellow attacker
+			else:
+				od.combat_group = null   # was not fighting back: unbound
+		_leave_combat_group()
+		g.attackers.append(self)
+		combat_group = g
+		return g.attackers.size() - 1
+	# PULL (latecomer of the outnumbered side): take the enemy out of its
+	# crowded group (1v3 -> 1v2); it defends a fresh 1v1 against us.
+	g.remove_member(enemy)
+	_found_group_on(enemy)
+	enemy._switch_target_to(self)
+	return 0
+
+
+## Founds a fresh group with `enemy` as its defender and us as the first
+## attacker; registered with the manager for the anchor/min-distance pass.
+func _found_group_on(enemy: Unit) -> void:
+	_leave_combat_group()
+	var fresh: CombatGroup = CombatGroup.new()
+	fresh.defender = enemy
+	fresh.anchor = enemy.position
+	fresh.attackers.append(self)
+	enemy.combat_group = fresh
+	combat_group = fresh
+	if path_service != null:
+		path_service.register_combat_group(fresh)
+
+
+## Direct opponent swap while already fighting (pulled out of a group /
+## grabbed as a waiter): the puller becomes the new target, nothing else
+## changes — the group bookkeeping happened at the pull site.
+func _switch_target_to(u: Unit) -> void:
+	if state != State.ATTACK or u == null or not is_instance_valid(u):
+		return
+	attack_target = u
+	_in_melee = false
+	_combat_goal = Vector3.INF
+
+
+## Releases our attacker/waiter seat (never the defender role — see
+## _end_attack); the group back-fills the slot from the second row.
+func _leave_combat_group() -> void:
+	var g = combat_group
+	if g == null:
+		return
+	if g.defender == self:
+		return
+	combat_group = null
+	g.remove_member(self)
+
+
+## Dissolves the fight we DEFEND (death, conversion, leaving the world,
+## engaging elsewhere): every attacker and waiter is unbound and retargets.
+func _dissolve_own_group() -> void:
+	var g = combat_group
+	if g == null or g.defender != self:
+		return
+	combat_group = null
+	g.defender = null
+	var members: Array = g.attackers.duplicate()
+	members.append_array(g.waiters)
+	g.attackers.clear()
+	g.waiters.clear()
+	for m in members:
+		if m != null and is_instance_valid(m) and m.combat_group == g:
+			m.combat_group = null
+			m._on_target_died(self)
+
+
+## Remembers a combat target as unreachable for a short while (scans skip it,
+## _tick_attack disengages) — bounded, so a mass of blocked chasers does not
+## re-run the expensive failing A* every scan (Bergpass fix, phase 8.2).
+func _mark_target_unreachable(target: Unit) -> void:
+	if _unreach_targets.size() >= UNREACHABLE_CACHE_MAX:
+		_unreach_targets.clear()
+	_unreach_targets[target.get_instance_id()] = \
+		Time.get_ticks_msec() + UNREACHABLE_TARGET_MS
+
+
+## Registers `attacker` as a melee attacker on this unit's fight (pairing
+## rules; NO second-row fallback — the ranged self-defence brawl of the
+## firewarrior fires from the reserve row instead of queueing). Returns the
+## slot index (0..MAX-1) or -1. Untyped param (freed-safe).
 func request_melee_slot(attacker) -> int:
-	_prune_melee_attackers()
-	var idx: int = melee_attackers.find(attacker)
-	if idx >= 0:
-		return idx
-	if melee_attackers.size() < MAX_MELEE_ATTACKERS:
-		melee_attackers.append(attacker)
-		return melee_attackers.size() - 1
-	return -1
+	if attacker == null or not is_instance_valid(attacker) \
+			or attacker.state == State.DEAD:
+		return -1
+	return attacker._bind_to_fight(self, false)
 
 
+## Releases `attacker`'s seat on this unit's fight (a freed slot is
+## back-filled from the second row).
 func release_melee_slot(attacker) -> void:
-	melee_attackers.erase(attacker)
+	var g = combat_group
+	if g != null and g.defender == self:
+		g.remove_member(attacker)
 
 
 func active_melee_attacker_count() -> int:
-	_prune_melee_attackers()
-	return melee_attackers.size()
-
-
-## Drops freed/dead attackers and any that have since retargeted, freeing slots.
-func _prune_melee_attackers() -> void:
-	var kept: Array = []
-	for a in melee_attackers:
-		if is_instance_valid(a) and a.state != State.DEAD and a.attack_target == self:
-			kept.append(a)
-	melee_attackers = kept
+	var g = combat_group
+	if g == null or g.defender != self:
+		return 0
+	g.prune()
+	return g.attackers.size()
 
 
 ## Ring position for slot index around this (target) unit.
@@ -2060,29 +2281,39 @@ func melee_slot_position(slot: int) -> Vector3:
 
 ## Approaches `dest`: A* while far (avoids water/obstacles), direct step when
 ## close (combat is chaotic and short-range — no need to re-path every metre).
-func _approach(dest: Vector3, delta: float) -> void:
+## Returns false when the destination is UNREACHABLE (A* failed) — the caller
+## decides; the old blind direct-step fallback made blocked chasers run into
+## cliff walls forever (Bergpass, phase 8.2).
+func _approach(dest: Vector3, delta: float) -> bool:
 	if _flat_dist(position, dest) > COMBAT_DIRECT_RANGE and nav_grid != null:
 		if not _has_path() or _flat_dist(_combat_goal, dest) > 1.0:
 			_combat_goal = dest
 			if not _plan_path_to(dest):
-				_step_toward(dest, delta)
-				return
+				return false
 		if _advance_path(delta):
 			_clear_path()
-		return
+		return true
 	_step_toward(dest, delta)
+	return true
 
 
-## Overflow attacker waits near the target until a slot frees. Standing
-## ANYWHERE close enough is fine: chasing an exact ring point that moves
-## with the target coupled the movements (waiter follows its ring point,
-## the pursuer follows the waiter's slot, ...) — whole blocks of units
-## jogged after each other forever, never striking. Only units too far out
-## close up (to a deterministic per-unit ring point, so they spread).
+## Second-row waiter holds position near its group's fight. Standing ANYWHERE
+## close enough is fine: chasing an exact ring point that moves with the
+## target coupled the movements (waiter follows its ring point, the pursuer
+## follows the waiter's slot, ...) — whole blocks of units jogged after each
+## other forever, never striking. Only units too far out close up (to a
+## deterministic per-unit ring point, so they spread). The ring is centred on
+## the group ANCHOR (follows the defender lazily) instead of sticking to the
+## target's every step.
 func _wait_near(target: Unit, delta: float) -> void:
-	if _flat_dist(position, target.position) > MELEE_WAIT_RADIUS + 0.6:
+	var center: Vector3 = target.position
+	var g = combat_group
+	if g != null and g.defender == target \
+			and _flat_dist(g.anchor, target.position) <= MELEE_WAIT_RADIUS * 2.0:
+		center = g.anchor
+	if _flat_dist(position, center) > MELEE_WAIT_RADIUS + 0.6:
 		var angle: float = float(get_instance_id() % 628) * 0.01
-		var dest: Vector3 = target.position + Vector3(
+		var dest: Vector3 = center + Vector3(
 			cos(angle) * MELEE_WAIT_RADIUS, 0.0, sin(angle) * MELEE_WAIT_RADIUS)
 		_step_toward(dest, delta)
 	_face_point(target.position)
@@ -2187,8 +2418,11 @@ func _anim_base() -> StringName:
 		State.MOVE, State.PANIC:
 			return &"walk"
 		State.ATTACK:
-			# The rolled strike's animation while fighting; walk while closing in.
-			return attack_anim if _in_melee else &"walk"
+			# The rolled strike's animation while fighting; walk while closing
+			# in; the second row stands calm instead of walking in place.
+			if _in_melee:
+				return attack_anim
+			return &"idle" if _combat_waiting else &"walk"
 		State.CAST:
 			return &"cast"
 		State.SIT:

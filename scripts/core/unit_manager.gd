@@ -67,6 +67,27 @@ class IdleGroup extends RefCounted:
 const OVERLAP_ESCAPE_PASSES: int = 8
 const OVERLAP_TIGHT_FACTOR: float = 0.35
 
+# --- Combat groups (phase 8.2) ---------------------------------------------------
+## Minimum distance between the anchors of neighbouring combat groups: closer
+## fights are pushed apart (via their defenders — the members follow their
+## rings), so a battle frays into distinct little brawls instead of one blob.
+## Small but > 0 per user spec (~2.5-3 m, tunable).
+const COMBAT_GROUP_MIN_DIST: float = 2.8
+## Push speed of the group separation (m/s, split between both defenders).
+const COMBAT_GROUP_PUSH_SPEED: float = 1.2
+## How fast a group's anchor trails its (moving) defender.
+const COMBAT_ANCHOR_FOLLOW_SPEED: float = 3.0
+## The push pass processes at most this many groups per tick (round-robin
+## slices, push delta scaled by the slice count) and each group examines at
+## most this many neighbour candidates — a mega-battle with thousands of
+## groups packed together must not blow up the tick (same guards as the unit
+## separation).
+const COMBAT_GROUPS_PER_TICK: int = 256
+const COMBAT_GROUP_MAX_CHECKS: int = 12
+## Max units one enemy scan may EXAMINE (friends included) while collecting
+## its enemy candidates — bounds the cost of a scan deep inside a mega-crowd.
+const SCAN_MAX_EXAMINED: int = 300
+
 var terrain_data: TerrainData = null
 var nav_grid: NavGrid = null
 var tribes: Array[Tribe] = []
@@ -84,6 +105,8 @@ var path_worker: PathWorker = null
 var units: Array[Unit] = []
 ## Live projectiles (Fireball), ticked here after the units.
 var projectiles: Array = []
+## Registered combat groups (phase 8.2); pruned in _apply_combat_groups.
+var combat_groups: Array = []
 var _hash: Dictionary[Vector2i, Array] = {}   # hash cell -> Array of Unit
 var _path_requests: Array[Unit] = []
 var _path_head: int = 0
@@ -134,6 +157,7 @@ func tick(delta: float) -> void:
 			_move_hash_cell(unit, new_cell)
 	_drain_path_queue()
 	_apply_separation(delta)
+	_apply_combat_groups(delta)
 	_apply_idle_regroup(delta)
 	_tick_projectiles(delta)
 
@@ -290,6 +314,100 @@ func _apply_separation(delta: float) -> void:
 	_separation_phase = (_separation_phase + 1) % slices
 
 
+# --- Combat groups (phase 8.2) -----------------------------------------------------
+
+## Registers a freshly founded combat group (called by Unit._found_group_on;
+## bare tests without a manager run their groups unregistered).
+func register_combat_group(group) -> void:
+	combat_groups.append(group)
+
+
+## Per-tick combat-group pass: prune dead fights, trail each anchor after its
+## defender, and push the DEFENDERS of too-close groups apart (min anchor
+## distance) — the attackers/waiters follow their rings, so the whole battle
+## frays into separate little brawls instead of one blob (phase 8.2).
+var _group_push_phase: int = 0
+var _group_empty_bucket: Array = []
+
+
+func _apply_combat_groups(delta: float) -> void:
+	if combat_groups.is_empty():
+		return
+	# Prune + anchor follow, every tick (cheap, O(groups)).
+	var kept: Array = []
+	var anchor_hash: Dictionary = {}
+	for g in combat_groups:
+		if not g.is_alive():
+			g.release_all()
+			continue
+		g.anchor = g.anchor.move_toward(
+			g.defender.position, COMBAT_ANCHOR_FOLLOW_SPEED * delta)
+		kept.append(g)
+		var key: Vector2i = hash_key(g.anchor)
+		if not anchor_hash.has(key):
+			anchor_hash[key] = []
+		anchor_hash[key].append(g)
+	combat_groups = kept
+	# Min-distance push, sliced + check-capped (see constant doc).
+	var slices: int = maxi(1, int(ceil(float(kept.size()) / float(COMBAT_GROUPS_PER_TICK))))
+	if _group_push_phase >= slices:
+		_group_push_phase = 0
+	var max_step: float = COMBAT_GROUP_PUSH_SPEED * delta * float(slices)
+	for index in range(_group_push_phase, kept.size(), slices):
+		var g = kept[index]
+		var defender = g.defender
+		if defender.state == Unit.State.DEAD or defender.state == Unit.State.THROWN \
+				or defender.state == Unit.State.ROLL or defender.push_immune:
+			continue
+		var pos: Vector3 = g.anchor
+		var push: Vector2 = Vector2.ZERO
+		var key: Vector2i = hash_key(pos)
+		var checks: int = COMBAT_GROUP_MAX_CHECKS
+		# Centre-first bucket order, mirrored for every second defender: a
+		# fixed min->max sweep would spend the check budget on NORTHERN
+		# neighbours first and push every crowded group systematically south
+		# (the same direction-bias class as the old scan drift).
+		var flip: int = -1 if (defender.get_instance_id() & 1) == 0 else 1
+		for rz in [0, -1, 1]:
+			var kz: int = key.y + rz * flip
+			for rx in [0, -1, 1]:
+				var kx: int = key.x + rx * flip
+				for other in anchor_hash.get(Vector2i(kx, kz), _group_empty_bucket):
+					if other == g:
+						continue
+					checks -= 1
+					var away: Vector2 = Vector2(
+						pos.x - other.anchor.x, pos.z - other.anchor.z)
+					var dist: float = away.length()
+					if dist < COMBAT_GROUP_MIN_DIST:
+						if dist < 0.001:
+							# Full overlap: deterministic per-defender direction.
+							var angle: float = float(defender.get_instance_id() % 628) * 0.01
+							away = Vector2(cos(angle), sin(angle))
+							dist = 0.001
+						push += away / dist * (COMBAT_GROUP_MIN_DIST - dist)
+					if checks <= 0:
+						break
+				if checks <= 0:
+					break
+			if checks <= 0:
+				break
+		if push == Vector2.ZERO:
+			continue
+		if push.length() > max_step:
+			push = push.normalized() * max_step
+		var nx: float = defender.position.x + push.x
+		var nz: float = defender.position.z + push.y
+		if nav_grid != null and not nav_grid.is_cell_walkable(
+				nav_grid.world_to_cell(Vector3(nx, 0.0, nz))):
+			continue
+		defender.position.x = nx
+		defender.position.z = nz
+		if terrain_data != null:
+			defender.position.y = terrain_data.get_height(nx, nz)
+	_group_push_phase = (_group_push_phase + 1) % slices
+
+
 # --- Idle regrouping (phase 7b) ---------------------------------------------------
 
 ## Sliced idle pass (phase 7b) — every unit gets a turn about once per
@@ -310,8 +428,11 @@ func _apply_idle_regroup(delta: float) -> void:
 		# idle_seconds advances here (one visit per SPREAD interval on average).
 		unit.idle_seconds += delta * float(IDLE_REGROUP_SPREAD_TICKS)
 		# Village guard (braves): engage enemies inside the small idle radius.
+		# Small examine budget: this scan runs for EVERY idle brave (sliced),
+		# and deep inside a friendly crowd the full budget would iterate
+		# hundreds of friends per scan (measured +14 ms/tick at 6000 idle).
 		if unit.idle_aggro > 0.0:
-			var enemy: Unit = unit._scan_for_enemy(unit.idle_aggro)
+			var enemy: Unit = unit._scan_for_enemy(unit.idle_aggro, 32)
 			if enemy != null:
 				unit._begin_attack(enemy)
 				continue
@@ -472,6 +593,10 @@ func register(unit: Unit) -> void:
 
 func unregister(unit: Unit) -> void:
 	units.erase(unit)
+	# Leaving the world ends the unit's fight: its own group dissolves (the
+	# attackers retarget) and any attacker/waiter seat is released (phase 8.2).
+	unit._dissolve_own_group()
+	unit._leave_combat_group()
 	if unit.died.is_connected(_on_unit_died):
 		unit.died.disconnect(_on_unit_died)
 	if unit.corpse_expired.is_connected(_on_corpse_expired):
@@ -585,6 +710,52 @@ func get_units_in_radius(pos: Vector3, radius: float, max_count: int = 0) -> Arr
 					result.append(unit)
 					if max_count > 0 and result.size() >= max_count:
 						return result
+	return result
+
+
+## Enemy-candidate query for combat scans (phase 8.2): collects up to
+## `max_count` LIVING, targetable enemies of tribe `enemy_of` within `radius`.
+## Two deliberate differences to get_units_in_radius:
+## 1. Friendly units never consume the result budget — deep inside the own
+##    blob the old capped query returned 24 friends and the scan went blind.
+## 2. Buckets are visited ring by ring OUTWARD from the own cell — the old
+##    min->max iteration found targets NW-first, which made whole battles
+##    drift north (measured -35 m in 30 s, see plans/08c).
+## The total number of EXAMINED units is capped (SCAN_MAX_EXAMINED) so one
+## scan inside a mega-crowd stays bounded.
+func get_enemy_candidates(pos: Vector3, radius: float, enemy_of: int,
+		max_count: int, max_examined: int = SCAN_MAX_EXAMINED) -> Array[Unit]:
+	var result: Array[Unit] = []
+	var center: Vector2i = hash_key(pos)
+	var cell_r: int = int(ceil(radius / HASH_CELL_SIZE))
+	var flat_pos: Vector2 = Vector2(pos.x, pos.z)
+	var examined: int = 0
+	for r in range(0, cell_r + 1):
+		var z0: int = center.y - r
+		var z1: int = center.y + r
+		for kz in range(z0, z1 + 1):
+			# Inner rows of the ring only contribute their left/right edge cells.
+			var edge_row: bool = kz == z0 or kz == z1
+			var kx: int = center.x - r
+			var x1: int = center.x + r
+			while kx <= x1:
+				var bucket: Array = _hash.get(Vector2i(kx, kz), [])
+				for unit: Unit in bucket:
+					examined += 1
+					if examined > max_examined:
+						return result   # budget spent (possibly mid-bucket)
+					if unit.tribe_id == enemy_of or unit.state == Unit.State.DEAD \
+							or not unit.is_targetable():
+						continue
+					if Vector2(unit.position.x, unit.position.z).distance_to(flat_pos) \
+							<= radius:
+						result.append(unit)
+						if result.size() >= max_count:
+							return result
+				if edge_row or r == 0:
+					kx += 1
+				else:
+					kx = x1 if kx < x1 else x1 + 1
 	return result
 
 

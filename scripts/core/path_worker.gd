@@ -35,7 +35,7 @@ var _size: int = 0
 ## Inbound mixed FIFO. Each entry is an untyped Array:
 ##   [KIND_DELTA, cells: PackedInt32Array, solids: PackedByteArray]
 ##   [KIND_REQUEST, instance_id: int, request_id: int,
-##    from_cell: Vector2i, target_cell: Vector2i]
+##    from_cell: Vector2i, target_cell: Vector2i, allow_partial: bool]
 var _queue: Array = []
 ## Outbound results: [instance_id: int, request_id: int, cells: PackedVector2Array].
 var _results: Array = []
@@ -74,13 +74,15 @@ func push_delta(cells: PackedInt32Array, solids: PackedByteArray) -> void:
 
 ## Enqueues a path request. from_cell/target_cell are grid cells (pure int math
 ## from world_to_cell — no terrain heights needed); the worker snaps both to the
-## nearest walkable cell on its clone.
+## nearest walkable cell on its clone. `allow_partial` (attack-move, phase 8.2)
+## returns the path to the closest reachable cell instead of an empty result.
 func submit_request(instance_id: int, request_id: int, from_cell: Vector2i,
-		target_cell: Vector2i) -> void:
+		target_cell: Vector2i, allow_partial: bool = false) -> void:
 	if not _running:
 		return
 	_mutex.lock()
-	_queue.append([KIND_REQUEST, instance_id, request_id, from_cell, target_cell])
+	_queue.append([KIND_REQUEST, instance_id, request_id, from_cell, target_cell,
+		allow_partial])
 	_mutex.unlock()
 	_sem.post()
 
@@ -120,7 +122,7 @@ func _run() -> void:
 			if msg[0] == KIND_DELTA:
 				_apply_delta(msg[1], msg[2])
 			else:
-				_solve_request(msg[1], msg[2], msg[3], msg[4])
+				_solve_request(msg[1], msg[2], msg[3], msg[4], msg[5])
 
 
 func _apply_delta(cells: PackedInt32Array, solids: PackedByteArray) -> void:
@@ -131,12 +133,12 @@ func _apply_delta(cells: PackedInt32Array, solids: PackedByteArray) -> void:
 
 
 func _solve_request(instance_id: int, request_id: int, from_cell: Vector2i,
-		target_cell: Vector2i) -> void:
+		target_cell: Vector2i, allow_partial: bool) -> void:
 	var cells: PackedVector2Array = PackedVector2Array()
 	var from: Vector2i = _snap(from_cell)
 	var to: Vector2i = _snap(target_cell)
 	if from.x >= 0 and to.x >= 0:
-		var id_path: Array[Vector2i] = _grid.get_id_path(from, to)
+		var id_path: Array[Vector2i] = _grid.get_id_path(from, to, allow_partial)
 		for c in id_path:
 			cells.append(Vector2(c))
 	_results_mutex.lock()

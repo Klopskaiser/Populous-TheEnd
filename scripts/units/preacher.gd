@@ -93,10 +93,11 @@ func _pick_convert_focus() -> Unit:
 	var d_free: float = INF
 	var nearest_any: Unit = null
 	var d_any: float = INF
-	for u in path_service.get_units_in_radius(position, AGGRO_RADIUS, SCAN_MAX_CANDIDATES):
-		if u == self or u.state == State.DEAD or u.tribe_id == tribe_id:
-			continue
-		if u.state == State.SIT or u.is_conversion_immune() or not u.is_targetable():
+	# Enemies-only candidates (phase 8.2): friends in the crowd no longer eat
+	# the candidate budget, and the buckets are visited without the NW bias.
+	for u in path_service.get_enemy_candidates(
+			position, AGGRO_RADIUS, tribe_id, SCAN_MAX_CANDIDATES):
+		if u == self or u.state == State.SIT or u.is_conversion_immune():
 			continue
 		var d: float = _flat_dist(position, u.position)
 		if d < d_any:

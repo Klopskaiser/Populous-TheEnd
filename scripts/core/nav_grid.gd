@@ -60,22 +60,25 @@ func cell_to_world(cell: Vector2i) -> Vector3:
 
 ## Finds a path between two world positions. Unwalkable start/target cells are
 ## snapped to the nearest walkable cell. Returns an empty array if no path
-## exists (e.g. target on a separate landmass).
-func find_path(from: Vector3, to: Vector3) -> PackedVector3Array:
+## exists (e.g. target on a separate landmass) — unless `allow_partial` is set
+## (attack-move waves, phase 8.2): then the path ends at the closest REACHABLE
+## cell toward the target instead of failing.
+func find_path(from: Vector3, to: Vector3, allow_partial: bool = false) -> PackedVector3Array:
 	var result: PackedVector3Array = PackedVector3Array()
 	var from_cell: Vector2i = nearest_walkable_cell(world_to_cell(from))
 	var target_cell: Vector2i = world_to_cell(to)
 	var to_cell: Vector2i = nearest_walkable_cell(target_cell)
 	if from_cell.x < 0 or to_cell.x < 0:
 		return result
-	var id_path: Array[Vector2i] = _astar.get_id_path(from_cell, to_cell)
+	var id_path: Array[Vector2i] = _astar.get_id_path(from_cell, to_cell, allow_partial)
 	if id_path.is_empty():
 		return result
 	for cell in id_path:
 		result.append(cell_to_world(cell))
 	# If the exact click point lies inside the reached target cell, end the
-	# path there instead of at the cell centre.
-	if to_cell == target_cell:
+	# path there instead of at the cell centre (a partial path may end
+	# elsewhere — only rewrite when the target cell was actually reached).
+	if to_cell == target_cell and id_path[id_path.size() - 1] == to_cell:
 		result[result.size() - 1] = Vector3(to.x, terrain.get_height(to.x, to.z), to.z)
 	return result
 
