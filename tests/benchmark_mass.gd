@@ -24,20 +24,16 @@ func _initialize() -> void:
 	for count in [2000, 6000]:
 		_run_move(count, false)
 		_run_move(count, true)
-		_run_move(count, true, true)
-	# Stufe-B A/B (combat is separation-heaviest): watch the `sep` phase column.
-	print("== Stufe-B A/B (Kampf) ==")
 	for count in [2000, 6000]:
-		_run_combat(count, false)
-		_run_combat(count, true)
+		_run_combat(count)
 	quit(0)
 
 
 ## Mass move: `count` braves split over 4 tribes in the map quadrants, each
 ## quadrant marching to its own gathering point (no cross-tribe contact —
 ## pure movement/hash/separation/path-queue cost).
-func _run_move(count: int, use_worker: bool = false, par_sep: bool = false) -> void:
-	var w: Dictionary = _make_world(use_worker, par_sep)
+func _run_move(count: int, use_worker: bool = false) -> void:
+	var w: Dictionary = _make_world(use_worker)
 	var um: UnitManager = w.um
 	var nav: NavGrid = w.nav
 	var anchors: Array[Vector2i] = [
@@ -56,16 +52,15 @@ func _run_move(count: int, use_worker: bool = false, par_sep: bool = false) -> v
 		spawned += 1
 	for unit in um.units:
 		unit.order_move(nav.cell_to_world(anchors[unit.tribe_id] + Vector2i(0, -10)))
-	var tag: String = "move %d " % spawned
-	tag += "[worker+sepB]" if par_sep else ("[worker]     " if use_worker else "[sync]       ")
+	var tag: String = "move %d [worker]" % spawned if use_worker else "move %d [sync]  " % spawned
 	_simulate(tag, um, MOVE_TICKS)
 	_teardown(w)
 
 
 ## Mass combat: two armies of warriors interleaved in tight rows — everyone
 ## engages via the idle scan (slots, strikes, deaths, corpses).
-func _run_combat(count: int, par_sep: bool = false) -> void:
-	var w: Dictionary = _make_world(false, par_sep)
+func _run_combat(count: int) -> void:
+	var w: Dictionary = _make_world()
 	var um: UnitManager = w.um
 	var nav: NavGrid = w.nav
 	var spawned: int = 0
@@ -81,7 +76,7 @@ func _run_combat(count: int, par_sep: bool = false) -> void:
 		if um.spawn_unit(WARRIOR_SCENE, spawned % 4, nav.cell_to_world(cell)) == null:
 			break
 		spawned += 1
-	_simulate("combat %d %s" % [spawned, "[sepB]" if par_sep else "[sync]"], um, COMBAT_TICKS)
+	_simulate("combat %d" % spawned, um, COMBAT_TICKS)
 	_teardown(w)
 
 
@@ -130,7 +125,7 @@ func _simulate(label: String, um: UnitManager, ticks: int) -> void:
 		float(regroup_us) / n / 1000.0])
 
 
-func _make_world(use_worker: bool = false, par_sep: bool = false) -> Dictionary:
+func _make_world(use_worker: bool = false) -> Dictionary:
 	var td: TerrainData = TerrainData.new()
 	td.generate_island(1337)
 	var nav: NavGrid = NavGrid.new(td)
@@ -139,7 +134,6 @@ func _make_world(use_worker: bool = false, par_sep: bool = false) -> Dictionary:
 		tribes.append(Tribe.new(i))
 	var um: UnitManager = UnitManager.new()
 	um.setup(td, nav, tribes)
-	um.separation_parallel = par_sep
 	var worker: PathWorker = null
 	if use_worker:
 		worker = PathWorker.new(

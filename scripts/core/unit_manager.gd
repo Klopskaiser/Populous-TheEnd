@@ -80,13 +80,6 @@ var building_manager: BuildingManager = null
 ## solved on the worker thread and applied here without any per-tick limit. Null
 ## → the synchronous, frame-budgeted queue below (tests, headless, A/B fallback).
 var path_worker: PathWorker = null
-## Phase 8.1 (Stufe B): two-phase separation — push vectors computed on the
-## WorkerThreadPool (coarse chunks over snapshot arrays), applied serially with
-## the same walkability/Y-snap rules. Enabled by Main on multi-core machines;
-## false → the unchanged serial pass below (tests, A/B fallback).
-var separation_parallel: bool = false
-## Work items per group task: coarse on purpose (per-task dispatch overhead).
-const SEPARATION_TASK_CHUNK: int = 256
 
 var units: Array[Unit] = []
 ## Live projectiles (Fireball), ticked here after the units.
@@ -96,27 +89,6 @@ var _path_requests: Array[Unit] = []
 var _path_head: int = 0
 var _separation_phase: int = 0
 var _regroup_index: int = 0
-
-## Stufe-B snapshot buffers. MEMBER variables on purpose: worker tasks and the
-## main thread must share the same packed-array instances (Variant packed
-## arrays share their buffer; indexed writes are in-place). All resizing
-## happens on the main thread BEFORE dispatch — tasks only read, and write
-## result slots at their own fixed indices ("anything that changes the
-## container size requires locking a mutex" — we never do).
-var _sep_pos_x: PackedFloat32Array = PackedFloat32Array()
-var _sep_pos_z: PackedFloat32Array = PackedFloat32Array()
-var _sep_flag: PackedByteArray = PackedByteArray()      # 1 = neighbour-eligible
-var _sep_bucket_of: PackedInt32Array = PackedInt32Array()
-## CSR bucket grid (counting sort): start offsets per dense hash cell + the
-## unit indices, replacing the Dictionary hash for thread-safe reads.
-var _sep_bucket_start: PackedInt32Array = PackedInt32Array()
-var _sep_bucket_items: PackedInt32Array = PackedInt32Array()
-var _sep_cursor: PackedInt32Array = PackedInt32Array()
-var _sep_work: PackedInt32Array = PackedInt32Array()    # unit indices this tick
-var _sep_push_x: PackedFloat32Array = PackedFloat32Array()
-var _sep_push_z: PackedFloat32Array = PackedFloat32Array()
-var _sep_tight: PackedByteArray = PackedByteArray()
-var _sep_grid_dim: int = 0
 
 
 func setup(p_terrain_data: TerrainData, p_nav_grid: NavGrid,
@@ -248,9 +220,6 @@ func _drain_path_queue_async() -> void:
 func _apply_separation(delta: float) -> void:
 	if units.is_empty():
 		return
-	if separation_parallel:
-		_apply_separation_parallel(delta)
-		return
 	var slices: int = maxi(1, int(ceil(float(units.size()) / float(SEPARATION_UNITS_PER_TICK))))
 	if _separation_phase >= slices:
 		_separation_phase = 0
@@ -319,188 +288,6 @@ func _apply_separation(delta: float) -> void:
 		if terrain_data != null:
 			unit.position.y = terrain_data.get_height(nx, nz)
 	_separation_phase = (_separation_phase + 1) % slices
-
-
-## Stufe-B variant of the pass above: identical rules (same slice round-robin,
-## same skip states, SEPARATION_MAX_CHECKS, tight/escape bookkeeping, walkable
-## clamp + Y-snap), but the O(work × checks) push computation runs as
-## WorkerThreadPool group tasks over a POD snapshot. Two behavioural nuances,
-## both benign: pushes are computed from the tick-start snapshot (units
-## processed later in the pass no longer see earlier pushes — pairs still
-## separate symmetrically), and the neighbour iteration order is bucket-grid
-## order instead of Dictionary order (relevant only for the checks cap).
-func _apply_separation_parallel(delta: float) -> void:
-	var n: int = units.size()
-	var slices: int = maxi(1, int(ceil(float(n) / float(SEPARATION_UNITS_PER_TICK))))
-	if _separation_phase >= slices:
-		_separation_phase = 0
-	var max_step: float = SEPARATION_SPEED * delta * float(slices)
-
-	# --- Phase 1 (main thread): snapshot + CSR bucket grid (counting sort).
-	var extent: float = 128.0 if terrain_data == null \
-		else float(terrain_data.size) * TerrainData.CELL_SIZE
-	_sep_grid_dim = maxi(1, int(ceil(extent / HASH_CELL_SIZE)))
-	var cells: int = _sep_grid_dim * _sep_grid_dim
-	if _sep_pos_x.size() != n:
-		_sep_pos_x.resize(n)
-		_sep_pos_z.resize(n)
-		_sep_flag.resize(n)
-		_sep_bucket_of.resize(n)
-		_sep_bucket_items.resize(n)
-	if _sep_bucket_start.size() != cells + 1:
-		_sep_bucket_start.resize(cells + 1)
-		_sep_cursor.resize(cells)
-	_sep_bucket_start.fill(0)
-	_sep_work.clear()
-	var dim: int = _sep_grid_dim
-	for i in range(n):
-		var u: Unit = units[i]
-		var p: Vector3 = u.position
-		_sep_pos_x[i] = p.x
-		_sep_pos_z[i] = p.z
-		var eligible: bool = u.state != Unit.State.DEAD \
-			and u.state != Unit.State.THROWN and u.state != Unit.State.ROLL
-		_sep_flag[i] = 1 if eligible else 0
-		var b: int = clampi(int(p.z / HASH_CELL_SIZE), 0, dim - 1) * dim \
-			+ clampi(int(p.x / HASH_CELL_SIZE), 0, dim - 1)
-		_sep_bucket_of[i] = b
-		_sep_bucket_start[b + 1] += 1
-		# This tick's slice: same round-robin + skip rules as the serial pass.
-		if i % slices == _separation_phase and eligible and not u.push_immune:
-			_sep_work.append(i)
-	for c in range(cells):
-		_sep_bucket_start[c + 1] += _sep_bucket_start[c]
-		_sep_cursor[c] = _sep_bucket_start[c]
-	for i in range(n):
-		var b: int = _sep_bucket_of[i]
-		_sep_bucket_items[_sep_cursor[b]] = i
-		_sep_cursor[b] += 1
-
-	# --- Phase 2: parallel push computation (each task owns fixed result slots).
-	var work: int = _sep_work.size()
-	if work > 0:
-		if _sep_push_x.size() < work:   # grow-only; tasks touch [0, work)
-			_sep_push_x.resize(work)
-			_sep_push_z.resize(work)
-			_sep_tight.resize(work)
-		var tasks: int = int(ceil(float(work) / float(SEPARATION_TASK_CHUNK)))
-		var group: int = WorkerThreadPool.add_group_task(
-			_separation_chunk, tasks, tasks, false, "unit separation")
-		WorkerThreadPool.wait_for_group_task_completion(group)
-
-	# --- Phase 3 (main thread): serial apply, identical to the serial pass.
-	for wi in range(work):
-		var idx: int = _sep_work[wi]
-		var unit: Unit = units[idx]
-		# Anti-stacking bookkeeping ONLY while IDLE (deliberate deviation from
-		# the serial pass, which accumulates in any state): with snapshot-based
-		# pushes, units escaping from the same spot pick the SAME free cell,
-		# march there overlapped (converging on the shared waypoint beats the
-		# sideways pushes), arrive with a full tight-streak and immediately
-		# escape again — an endless churn loop. Counting only IDLE ticks gives
-		# soft separation its OVERLAP_ESCAPE_PASSES window after arrival, which
-		# resolves the stack and lets the escape stay what it is: a fallback
-		# for genuinely walled-in units.
-		if unit.state != Unit.State.IDLE:
-			unit.overlap_ticks = 0
-		elif _sep_tight[wi] != 0:
-			unit.overlap_ticks += 1
-			if unit.overlap_ticks >= OVERLAP_ESCAPE_PASSES:
-				unit.overlap_ticks = 0
-				var free_cell: Vector2i = find_free_cell_near(unit.position)
-				if free_cell.x >= 0 and nav_grid != null:
-					unit.order_move(nav_grid.cell_to_world(free_cell))
-				continue
-		else:
-			unit.overlap_ticks = 0
-		var push: Vector2 = Vector2(_sep_push_x[wi], _sep_push_z[wi])
-		if push == Vector2.ZERO:
-			continue
-		if push.length() > max_step:
-			push = push.normalized() * max_step
-		var nx: float = unit.position.x + push.x
-		var nz: float = unit.position.z + push.y
-		if nav_grid != null and not nav_grid.is_cell_walkable(
-				nav_grid.world_to_cell(Vector3(nx, 0.0, nz))):
-			continue
-		unit.position.x = nx
-		unit.position.z = nz
-		if terrain_data != null:
-			unit.position.y = terrain_data.get_height(nx, nz)
-	_separation_phase = (_separation_phase + 1) % slices
-
-
-## Group-task body (worker threads): pure math over the snapshot arrays — no
-## Node/Dictionary access, no randf(), no allocation, writes only to this
-## chunk's slots of the pre-sized result arrays.
-func _separation_chunk(chunk: int) -> void:
-	var begin: int = chunk * SEPARATION_TASK_CHUNK
-	var end: int = mini(begin + SEPARATION_TASK_CHUNK, _sep_work.size())
-	var dim: int = _sep_grid_dim
-	for wi in range(begin, end):
-		var idx: int = _sep_work[wi]
-		var px: float = _sep_pos_x[idx]
-		var pz: float = _sep_pos_z[idx]
-		var push_x: float = 0.0
-		var push_z: float = 0.0
-		var tight: int = 0
-		var checks: int = SEPARATION_MAX_CHECKS
-		var min_bx: int = clampi(int((px - SEPARATION_RADIUS) / HASH_CELL_SIZE), 0, dim - 1)
-		var max_bx: int = clampi(int((px + SEPARATION_RADIUS) / HASH_CELL_SIZE), 0, dim - 1)
-		var min_bz: int = clampi(int((pz - SEPARATION_RADIUS) / HASH_CELL_SIZE), 0, dim - 1)
-		var max_bz: int = clampi(int((pz + SEPARATION_RADIUS) / HASH_CELL_SIZE), 0, dim - 1)
-		for bz in range(min_bz, max_bz + 1):
-			for bx in range(min_bx, max_bx + 1):
-				var b: int = bz * dim + bx
-				var b_start: int = _sep_bucket_start[b]
-				var b_count: int = _sep_bucket_start[b + 1] - b_start
-				# Per-unit rotated scan start: without it, stacked units under
-				# the checks cap would sample the IDENTICAL neighbour subset
-				# from the shared snapshot, receive identical pushes and move
-				# in permanent lockstep (dist 0 forever). The serial pass
-				# avoids that only via its immediate position writes.
-				var off: int = 0 if b_count < 2 else (idx * 7 + 5) % b_count
-				for k0 in range(b_count):
-					var other: int = _sep_bucket_items[b_start + (k0 + off) % b_count]
-					if other == idx or _sep_flag[other] == 0:
-						continue
-					checks -= 1
-					var ax: float = px - _sep_pos_x[other]
-					var az: float = pz - _sep_pos_z[other]
-					var dist: float = sqrt(ax * ax + az * az)
-					if dist < SEPARATION_RADIUS:
-						if dist < SEPARATION_RADIUS * OVERLAP_TIGHT_FACTOR:
-							tight = 1
-						if dist < 0.001:
-							# Full overlap: deterministic PAIR-antisymmetric
-							# direction (i pushes opposite to j). The serial
-							# pass gets away with a per-unit angle because it
-							# applies immediately; computed from one snapshot,
-							# near-identical per-unit angles would shove a
-							# stacked pile in lockstep — never separating.
-							var lo: int = mini(idx, other)
-							var hi: int = maxi(idx, other)
-							# Both factors mix, so pairs sharing one index
-							# still get decorrelated directions (a pile
-							# beyond the checks cap must not move in lockstep).
-							var angle: float = float((lo * 641 + hi * 293) % 628) * 0.01
-							if idx == hi:
-								angle += PI
-							ax = cos(angle)
-							az = sin(angle)
-							dist = 0.001
-						var f: float = (SEPARATION_RADIUS - dist) / dist
-						push_x += ax * f
-						push_z += az * f
-					if checks <= 0:
-						break
-				if checks <= 0:
-					break
-			if checks <= 0:
-				break
-		_sep_push_x[wi] = push_x
-		_sep_push_z[wi] = push_z
-		_sep_tight[wi] = tight
 
 
 # --- Idle regrouping (phase 7b) ---------------------------------------------------

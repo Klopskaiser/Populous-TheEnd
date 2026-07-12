@@ -26,10 +26,6 @@ const TREE_COUNT: int = 60
 ## PathWorker. Set to false for an A/B comparison or as an emergency fallback to
 ## the fully synchronous (pre-8.1) behaviour. Disabled with a single core.
 const USE_PATH_WORKER: bool = true
-## Phase 8.1 (Stufe B): compute unit separation on the WorkerThreadPool
-## (two-phase: parallel compute, serial apply). Same A/B/fallback contract as
-## USE_PATH_WORKER; disabled with a single core.
-const USE_PARALLEL_SEPARATION: bool = true
 
 ## Skirmish (phase 7): base anchors sit evenly spaced on this circle around
 ## the island centre (cells) — 2 players = opposite sides, 3 = triangle,
@@ -129,8 +125,6 @@ func _ready() -> void:
 			nav.solid_snapshot(), td.size)
 		nav.path_worker = worker
 		_unit_manager.path_worker = worker
-	_unit_manager.separation_parallel = \
-		USE_PARALLEL_SEPARATION and OS.get_processor_count() > 1
 
 	# Tribes: 0 = player (blue), rest = AI — identical instances.
 	var tribes: Array[Tribe] = []
