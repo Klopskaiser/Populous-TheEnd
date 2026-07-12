@@ -1,10 +1,11 @@
 # Phase 8.2 — Kampfgruppen (Original-Stil) & KI-Erreichbarkeits-Fixes
 
 > Architektur-Entscheidungen und Verifikations-Befehle: siehe [00_overview.md](00_overview.md).
-> **Reine Verhaltens-Phase, bewusst UNABHÄNGIG von der Laufzeitoptimierung**
-> ([08b_parallelization.md](08b_parallelization.md)) — Nutzerentscheid: erst
-> sauber implementieren, Performance danach neu messen/angehen.
-> Empfohlene Reihenfolge: **8.2 vor 8.1.**
+> **Stand 2026-07-12:** Phase 8.1 (Pfad-Worker) ist abgeschlossen und vom
+> Nutzer bestätigt (Bauphase ohne Lags). Diese Phase umfasst laut
+> Nutzer-Vorgabe jetzt BEIDES: das Kampfgruppen-Verhalten (Paarungsregeln
+> unten) **und** die Kampf-Performance (Deliverable 4) — Benchmark ist die
+> Debugschlacht (60 FPS → 12 FPS bei Kampfbeginn, ohne Zauber).
 
 ## Kontext (Nutzertest nach Phase-8-Rückabwicklung, 2026-07-12)
 
@@ -20,11 +21,31 @@ niedriger. Zwei neue Beobachtungen:
    gekämpft als möglich — die meisten stehen rum oder verfolgen nur, obwohl
    sich genug Prügelpaare (2-3 gegen 1) finden könnten.
 
-**Ziel-Design (Nutzer-Vorgabe, wie im Original-Populous):** Im Kampf bilden
-sich **Gruppen** (analog zu den Idle-6er-Gruppen): bis zu 4 Einheiten je
-Gruppe (**3 gegen 1**), weitere Einheiten warten drumherum auf einen
-Nahkampf-Platz. Die Gruppen halten **etwas Abstand zueinander** (klein, aber
-nicht 0), sodass der Kampf nicht ein einziger Einheiten-Blob ist.
+**Ziel-Design (Nutzer-Vorgabe 2026-07-12, wie im Original-Populous):** Im
+Nahkampf bilden sich **Kampfgruppen**, jede Gruppe ist immer **1 gegen N**
+(N = 1–3) — nie „Team gegen Team". Die Regeln im Einzelnen:
+
+1. **Normalfall 1 gegen 1:** Treffen zwei Seiten aufeinander, teilen sich die
+   Nahkämpfer in 1-gegen-1-Paare auf.
+2. **Überzahl verteilt sich:** Bleiben auf einer Seite Leute übrig (oder ist
+   die Überzahl im Vorhinein berechenbar), verteilen sie sich auf die
+   bestehenden Kämpfe — bis zu **3 gegen 1** (Vierergruppe: 1 Verteidiger +
+   3 Angreifer).
+3. **Zweite Reihe:** Sind danach noch mehr übrig, stellen sie sich bei
+   einigen der Viererkämpfe in die **zweite Reihe** (Warte-Ring) und warten
+   auf einen freien Slot.
+4. **Nachzügler der unterlegenen Seite ziehen Kämpfer ab:** Kommen neue
+   Einheiten der unterlegenen Seite an, holen sie sich Gegner aus bestehenden
+   Gruppen heraus — aus 1-gegen-3 wird z. B. **1-gegen-2 + 1-gegen-1**.
+5. **Wartende füllen Slots jederzeit auf** (Angreifer stirbt / Ziel tot /
+   Kämpfer abgezogen → nächster aus der zweiten Reihe rückt nach).
+6. **Verboten: „Team-Kämpfe".** 2 gegen 2 oder 2 gegen 4 gibt es nicht —
+   es wird immer in 1-gegen-N-Gruppen aufgeteilt: 2v2 → 1v1 + 1v1;
+   2v4 → 1v2 + 1v2.
+
+Die Gruppen halten **etwas Abstand zueinander** (klein, aber nicht 0),
+sodass der Kampf nicht ein einziger Einheiten-Blob ist („Ballbildung" in der
+Debugschlacht ist ausdrücklich Teil des Problems).
 
 ## Befund-Hypothesen (im Diagnose-Schritt zu verifizieren)
 
@@ -65,10 +86,20 @@ nicht 0), sodass der Kampf nicht ein einziger Einheiten-Blob ist.
 Vorbild ist das bestehende Idle-Gruppen-System
 (`UnitManager.IdleGroup`, `_join_or_found_group`, sticky membership):
 
-- **`CombatGroup`** (RefCounted, im UnitManager verwaltet): genau **ein Ziel**
-  + bis zu **3 Nahkampf-Angreifer** (ersetzt/übernimmt die bisherige
-  `melee_attackers`-Slot-Logik am Ziel) + **Warteliste** drumherum.
-  Gruppen-Anker = Kampfort (folgt dem Ziel träge).
+- **`CombatGroup`** (RefCounted, im UnitManager verwaltet): genau **ein
+  Verteidiger** + 1–3 Nahkampf-Angreifer (ersetzt/übernimmt die bisherige
+  `melee_attackers`-Slot-Logik am Ziel) + **Warteliste** (zweite Reihe)
+  drumherum. Gruppen-Anker = Kampfort (folgt dem Ziel träge). Invariante:
+  Gruppen sind IMMER 1-gegen-N — eine Einheit ist Mitglied höchstens EINER
+  Gruppe, entweder als Verteidiger oder als Angreifer/Wartender.
+- **Aufteilung & Rebalancing (Paarungsregeln oben):** Beim Aufeinandertreffen
+  zuerst 1v1-Paare bilden; Überzahl füllt bestehende Gruppen auf max. 3
+  Angreifer auf, weitere in die zweite Reihe. Kommt eine neue Einheit der
+  unterlegenen Seite an, **zieht sie einen Angreifer aus der vollsten Gruppe
+  ab** und eröffnet mit ihm ein neues 1v1 (1v3 → 1v2 + 1v1); frei werdende
+  Slots füllt die zweite Reihe jederzeit nach. 2v2/2v4 dürfen nie entstehen
+  (Invariante oben erzwingt das strukturell: der „Verteidiger"-Platz einer
+  Gruppe ist einfach besetzt).
 - **Gruppenabstand:** Neue Kämpfe entstehen nur an Ankern mit Mindestabstand
   zu bestehenden Gruppen (klein, aber > 0 — Startwert ~2,5–3 m, tunebar).
   Wer ein Ziel angreifen will, dessen Gruppe voll ist, wird **Wartender** am
@@ -106,13 +137,41 @@ Vorbild ist das bestehende Idle-Gruppen-System
   KI-Wellen-Reissue-Logik darf festhängende Einheiten nicht alle 4 s erneut
   gegen die Wand schicken (Reissue nur bei erreichbarem Ziel).
 
+### 4. Kampf-Performance (Nutzer-Vorgabe 2026-07-12)
+
+**Benchmark ist die Debugschlacht** (2×800, keine Zauber). Ist-Zustand auf
+einem guten Rechner: **60 FPS vor Kontakt → 12 FPS**, sobald Nah- und
+Fernkampf losgehen. Headless-Anhaltspunkt (`benchmark_mass`, combat 2000):
+`units`-Phase ~37 ms/Tick — der Kampfcode selbst ist der Treiber, nicht
+Separation/Hash.
+
+- **Erst profilieren, dann optimieren:** Kampf-Tick aufschlüsseln
+  (Gegner-Scan `_scan_for_enemy`, Angriffs-Replan/`ATTACK_ORDER_TICKS`-Reissues,
+  Slot-/Wartelogik, Fernkampf-Zielsuche, Projektile) — Befunde in PROGRESS.
+- Naheliegende Kandidaten (per Messung bestätigen): Scan-/Replan-Frequenz im
+  Kampf (Kämpfer MIT Gruppe/Slot brauchen keinen Voll-Scan pro Tick — die
+  Gruppe IST die Zielbindung; Scans nur für Ungebundene/Wartende, gestaffelt),
+  redundante Pfad-Neuplanungen auf Nahdistanz, Fernkämpfer-Zielsuche cachen.
+  Das Kampfgruppen-Modell aus Deliverable 2 ist selbst der größte Hebel:
+  gebundene Kämpfer sind billig.
+- **Ziel:** Debugschlacht nach Kontakt deutlich über 12 FPS (Messwert vorher/
+  nachher dokumentieren); Verhalten unverändert korrekt (Suite + Wächter).
+- **Nutzer-Randbedingungen bleiben:** 30-Hz-Sim, keine Genauigkeits-Tricks,
+  jede Optimierung einzeln + Langzeittest (siehe PROGRESS „Rückabwicklung
+  Phase 8" und 8.1 Stufe B).
+
 ## Tests
 
 - Bestehende Suite bleibt grün (Kampf-/Slot-Tests werden auf das
-  Gruppen-Modell angepasst, Semantik 3-gegen-1 bleibt).
+  Gruppen-Modell angepasst, Semantik 1-gegen-N mit N ≤ 3 bleibt).
 - **Neu (headless):**
   - Gruppenbildung: 6 Angreifer auf 1 Ziel → 3 kämpfen, 3 warten am Ring;
     Slot wird frei → Wartender rückt nach.
+  - Paarungsregeln: 2v2 → zwei getrennte 1v1 (nie ein 2v2-Knäuel);
+    2v4 → 1v2 + 1v2; Nachzügler der unterlegenen Seite zieht einen Angreifer
+    aus einer 1v3-Gruppe ab → 1v2 + 1v1.
+  - Performance-Wächter: combat-Benchmark (2000) — `units`-Phase nach dem
+    Umbau messbar unter dem Ist-Wert (~37 ms/Tick), Zahlen in PROGRESS.
   - Gruppenabstand: zwei benachbarte Kämpfe entstehen mit Anker-Abstand ≥
     Mindestabstand; kein Voll-Overlap der Gruppen.
   - Blob-/Bias-Wächter: symmetrische Armeen (N vs. S gespiegelt) → der
@@ -129,18 +188,25 @@ Vorbild ist das bestehende Idle-Gruppen-System
 
 ## Manuelle Prüfung (Nutzer)
 
-- Debugschlacht: Kampf zerfällt in Grüppchen (3-gegen-1 + Wartende) mit
-  kleinem Abstand; kein Nord-Schub; sichtbar mehr aktive Kämpfe.
+- Debugschlacht: Kampf zerfällt in 1-gegen-N-Grüppchen (+ zweite Reihe) mit
+  kleinem Abstand; keine Ballbildung, kein Nord-Schub; sichtbar mehr aktive
+  Kämpfe; keine 2v2-/2v4-Knäuel.
 - Bergpass-Skirmish (3 KIs, lang): keine Krieger-Trauben am Bergsockel, KI
   baut ihre Basis kontinuierlich aus, keine Baustellen auf Plateaus.
-- FPS-Anzeige im Blick behalten (Verhaltens-Umbau darf die Sim nicht
-  spürbar verteuern — grobe Kennzahl, Optimierung kommt in 8.1).
+- **FPS in der Debugschlacht:** Referenz 60 FPS vor Kontakt → bisher 12 FPS
+  im Kampf; nach dieser Phase spürbar besser (Zielrichtung, kein hartes
+  Soll — Messwerte notieren).
 
 ## Definition of Done
 
 - [ ] Diagnose-Befunde dokumentiert (PROGRESS), Hypothesen bestätigt/korrigiert
-- [ ] Kampfgruppen: 3-gegen-1 + Warte-Ring + Gruppen-Mindestabstand umgesetzt
+- [ ] Kampfgruppen: 1-gegen-N-Paarungsregeln (1v1-Aufteilung, Überzahl bis
+      1v3, zweite Reihe, Abziehen durch Nachzügler, kein 2v2/2v4) +
+      Gruppen-Mindestabstand umgesetzt
 - [ ] Scan-Fixes: kein Freundes-Cap-Blindflug, kein Richtungs-Bias
+- [ ] Kampf-Performance: Profiling-Befunde + Optimierung, combat-Benchmark
+      messbar besser (Ist: units ~37 ms/Tick bei 2000; Debugschlacht-FPS
+      vorher/nachher dokumentiert)
 - [ ] KI baut nicht mehr auf unerreichbaren Plots; keine Sockel-Trauben mehr
 - [ ] Suite grün inkl. neuer Wächter, Ladecheck + lagtest fehlerfrei
 - [ ] PROGRESS.md ergänzt, Checkbox in [00_overview.md](00_overview.md) abgehakt,
