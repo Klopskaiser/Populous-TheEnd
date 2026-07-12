@@ -1,0 +1,147 @@
+# Phase 8.2 — Kampfgruppen (Original-Stil) & KI-Erreichbarkeits-Fixes
+
+> Architektur-Entscheidungen und Verifikations-Befehle: siehe [00_overview.md](00_overview.md).
+> **Reine Verhaltens-Phase, bewusst UNABHÄNGIG von der Laufzeitoptimierung**
+> ([08b_parallelization.md](08b_parallelization.md)) — Nutzerentscheid: erst
+> sauber implementieren, Performance danach neu messen/angehen.
+> Empfohlene Reihenfolge: **8.2 vor 8.1.**
+
+## Kontext (Nutzertest nach Phase-8-Rückabwicklung, 2026-07-12)
+
+Wegpunkt-/Befehls-Bug tritt nicht mehr auf (Rollback bestätigt); FPS erwartbar
+niedriger. Zwei neue Beobachtungen:
+
+1. **Bergpass-KI buggt sich fest:** Krieger laufen unten am Bergsockel gegen
+   den Riegel (kommen oben nie an); die KI versucht, Gebäude auf
+   unerreichbaren Gebieten zu bauen (oben auf den Bergen — begehbar, aber
+   isoliert).
+2. **Debugschlacht/Nahkampf:** Sobald der Kampf losgeht, schieben sich die
+   Einheiten als ein großer Ball **nach Norden**; es wird deutlich weniger
+   gekämpft als möglich — die meisten stehen rum oder verfolgen nur, obwohl
+   sich genug Prügelpaare (2-3 gegen 1) finden könnten.
+
+**Ziel-Design (Nutzer-Vorgabe, wie im Original-Populous):** Im Kampf bilden
+sich **Gruppen** (analog zu den Idle-6er-Gruppen): bis zu 4 Einheiten je
+Gruppe (**3 gegen 1**), weitere Einheiten warten drumherum auf einen
+Nahkampf-Platz. Die Gruppen halten **etwas Abstand zueinander** (klein, aber
+nicht 0), sodass der Kampf nicht ein einziger Einheiten-Blob ist.
+
+## Befund-Hypothesen (im Diagnose-Schritt zu verifizieren)
+
+- **„Viele stehen rum" + „Ball schiebt nach Norden" haben vermutlich dieselbe
+  Wurzel im Gegner-Scan** (`Unit._scan_for_enemy` →
+  `UnitManager.get_units_in_radius(pos, radius, SCAN_MAX_CANDIDATES = 24)`):
+  1. Der Kandidaten-Cap zählt **alle** Einheiten im Radius (auch Freunde) —
+     mitten im eigenen Blob sind die ersten 24 fast nur Freunde → der Scan
+     findet keinen Gegner → Einheit läuft weiter/verfolgt statt zu kämpfen.
+  2. Die Hash-Buckets werden deterministisch von min→max iteriert (kz/kx
+     aufsteigend = **Nordwest zuerst**) → bei gecapptem Scan werden Ziele
+     systematisch im Norden/Westen gefunden → kollektiver Nord-Drift.
+- **Bergpass-Krieger am Sockel:** Attack-Move-Ziele/Formations-Offsets, die
+  in den unbegehbaren Riegel fallen, werden von
+  `NavGrid.find_path`/`nearest_walkable_cell` auf die räumlich nächste
+  begehbare Zelle gesnappt — das kann eine **Sockelzelle direkt an der Wand**
+  (erreichbar → sie laufen hin und drängeln dort) oder eine **Plateauzelle
+  oben** (unerreichbar → Pfad leer → IDLE) sein; die KI re-issued den
+  Angriffsbefehl alle 4 Ticks (`ATTACK_ORDER_TICKS`) → dauerhaftes Anlaufen.
+- **KI baut auf Plateaus:** `AIController._find_supplied_plot` prüft über
+  `can_place_at` nur Walkability/Ebenheit/Bäume — **nicht die Erreichbarkeit
+  von der Basis**. Riegel-Oberseiten sind begehbar+flach → gültige Plots;
+  Arbeiter kommen nie an, die Baustelle blockiert `MAX_PARALLEL_SITES` →
+  KI-Aufbau stockt.
+
+## Deliverables / Umsetzungsschritte
+
+### 1. Diagnose-Schritt (vor den Fixes, Befunde in PROGRESS festhalten)
+
+- Debugschlacht headless nachstellen (zwei Armeen, Kontakt) und messen:
+  Anteil Einheiten in echtem Nahkampf (`_in_melee`) vs. ATTACK-ohne-Slot vs.
+  MOVE; Schwerpunkt-Drift der Gesamtmasse über die Zeit (Nord-Bias-Nachweis).
+- Bergpass-Repro: festhängende Krieger untersuchen (State, `attack_target`,
+  Zielzelle, Pfadstatus) — Hypothesen oben bestätigen/korrigieren.
+
+### 2. Kampfgruppen-System (Original-Stil) — Kern-Deliverable
+
+Vorbild ist das bestehende Idle-Gruppen-System
+(`UnitManager.IdleGroup`, `_join_or_found_group`, sticky membership):
+
+- **`CombatGroup`** (RefCounted, im UnitManager verwaltet): genau **ein Ziel**
+  + bis zu **3 Nahkampf-Angreifer** (ersetzt/übernimmt die bisherige
+  `melee_attackers`-Slot-Logik am Ziel) + **Warteliste** drumherum.
+  Gruppen-Anker = Kampfort (folgt dem Ziel träge).
+- **Gruppenabstand:** Neue Kämpfe entstehen nur an Ankern mit Mindestabstand
+  zu bestehenden Gruppen (klein, aber > 0 — Startwert ~2,5–3 m, tunebar).
+  Wer ein Ziel angreifen will, dessen Gruppe voll ist, wird **Wartender** am
+  Ring der Gruppe (fester Slot mit Abstand, wie `_wait_near`, aber am
+  GRUPPEN-Anker statt am Ziel klebend); Wartende rücken nach, wenn ein
+  Slot frei wird (Angreifer stirbt/Ziel tot → nächster aus der Warteliste,
+  sonst nächstliegende Gruppe mit freiem Slot / neues Ziel im Abstandsraster).
+- **Separation/Blob:** Gruppen sind separationsstabil (Mitglieder um den
+  Anker wie bei Idle-Gruppen); zwischen Gruppen wirkt der Mindestabstand —
+  der Kampf franst sichtbar in Grüppchen aus statt in einen Ball.
+- **Scan-Fixes (Wurzelbehandlung):**
+  - Kandidaten-Cap zählt nur noch **Gegner-Kandidaten** (Freunde im Radius
+    verbrauchen das Budget nicht mehr) — Blob-Blindheit weg.
+  - Richtungs-Bias entfernen: Kandidaten über die Bucket-Range einsammeln und
+    nach Distanz/Score wählen statt „first-N in NW-Reihenfolge" (bzw.
+    Bucket-Besuchsreihenfolge um die eigene Zelle zentrieren).
+  - Zielwahl bevorzugt Gegner mit freiem Gruppen-Slot in Reichweite
+    (heutiger `incoming_attackers`-Score wird zum Gruppen-Slot-Score).
+- Bestehende Regeln bleiben: Fernkämpfer unterliegen keinem 3er-Cap
+  (`_is_ranged`), Prediger-/SIT-Sonderfälle, Gebäude niedrigste Priorität,
+  Flee-/Retaliate-Regeln.
+
+### 3. Bergpass-/Erreichbarkeits-Fixes
+
+- **KI-Plot-Suche:** Nach bestandenem `can_place_at` einen
+  Erreichbarkeits-Check von der Basis (`nav_grid.find_path(anchor →
+  Plot-Eingang)` einmal pro gewähltem Kandidaten; unerreichbare Kandidaten in
+  einen kleinen Session-Cache, damit der teure Fehlschlag nicht wiederholt
+  wird). Gleiches Gate für `_send_escort_if_remote`.
+- **Angriffs-/Formationsziele validieren:** Fällt ein (Formations-)Zielpunkt
+  in unbegehbares Gebiet, wird er nicht mehr blind auf die räumlich nächste
+  begehbare Zelle gesnappt, sondern auf eine **vom Ausgangspunkt erreichbare**
+  Zelle nahe dem Pfadende geclampt (Pfad leer → Wellenziel für diese Einheit
+  = letzter erreichbarer Punkt Richtung Ziel statt Dauer-Anlauf); die
+  KI-Wellen-Reissue-Logik darf festhängende Einheiten nicht alle 4 s erneut
+  gegen die Wand schicken (Reissue nur bei erreichbarem Ziel).
+
+## Tests
+
+- Bestehende Suite bleibt grün (Kampf-/Slot-Tests werden auf das
+  Gruppen-Modell angepasst, Semantik 3-gegen-1 bleibt).
+- **Neu (headless):**
+  - Gruppenbildung: 6 Angreifer auf 1 Ziel → 3 kämpfen, 3 warten am Ring;
+    Slot wird frei → Wartender rückt nach.
+  - Gruppenabstand: zwei benachbarte Kämpfe entstehen mit Anker-Abstand ≥
+    Mindestabstand; kein Voll-Overlap der Gruppen.
+  - Blob-/Bias-Wächter: symmetrische Armeen (N vs. S gespiegelt) → der
+    Massen-Schwerpunkt driftet über X Ticks nicht systematisch (Toleranz);
+    Kampfquote: nach Kontakt ist ein Mindestanteil der Nahkämpfer `_in_melee`
+    (Wächter gegen „alle stehen rum").
+  - Scan findet Gegner auch mitten im Freundes-Blob (Cap-Fix-Test).
+  - KI-Plot: Kandidat auf isoliertem Plateau wird verworfen, erreichbarer
+    Plot gewählt; Bergpass-KI-Langzeitlauf (2500+ Frames) baut weiter und
+    hängt nicht.
+  - Zielpunkt im Riegel: Einheit erhält erreichbares Ersatzziel und pendelt
+    nicht (kein Dauer-MOVE gegen die Wand über X s — Wächter analog zur
+    Wegfindungs-Regression).
+
+## Manuelle Prüfung (Nutzer)
+
+- Debugschlacht: Kampf zerfällt in Grüppchen (3-gegen-1 + Wartende) mit
+  kleinem Abstand; kein Nord-Schub; sichtbar mehr aktive Kämpfe.
+- Bergpass-Skirmish (3 KIs, lang): keine Krieger-Trauben am Bergsockel, KI
+  baut ihre Basis kontinuierlich aus, keine Baustellen auf Plateaus.
+- FPS-Anzeige im Blick behalten (Verhaltens-Umbau darf die Sim nicht
+  spürbar verteuern — grobe Kennzahl, Optimierung kommt in 8.1).
+
+## Definition of Done
+
+- [ ] Diagnose-Befunde dokumentiert (PROGRESS), Hypothesen bestätigt/korrigiert
+- [ ] Kampfgruppen: 3-gegen-1 + Warte-Ring + Gruppen-Mindestabstand umgesetzt
+- [ ] Scan-Fixes: kein Freundes-Cap-Blindflug, kein Richtungs-Bias
+- [ ] KI baut nicht mehr auf unerreichbaren Plots; keine Sockel-Trauben mehr
+- [ ] Suite grün inkl. neuer Wächter, Ladecheck + lagtest fehlerfrei
+- [ ] PROGRESS.md ergänzt, Checkbox in [00_overview.md](00_overview.md) abgehakt,
+      Commit + Push

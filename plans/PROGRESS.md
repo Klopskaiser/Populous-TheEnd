@@ -3482,3 +3482,16 @@ Tick"-Assertion).
 der Simulationsfrequenz / keine Genauigkeits-Tricks („akkurate Berechnung") —
 der 20-Hz-Plan (08a) ist verworfen. Performance-Neuanlauf (Phase 8.1 im
 Overview): Optimierungen einzeln, mit Langzeit-Verifikation, wieder einführen.
+
+**Nutzertest nach der Rückabwicklung (2026-07-12):** Wegpunkt-/Befehls-Bug
+tritt nicht mehr auf (Rollback bestätigt wirksam); FPS erwartbar wieder
+niedriger. Zwei neue Beobachtungen → als **Phase 8.2**
+([08c_combat_groups_reachability.md](08c_combat_groups_reachability.md))
+festgeschrieben, bewusst unabhängig von der Performance-Arbeit und vor 8.1:
+(1) Bergpass-KI buggt sich fest (Krieger-Trauben am Bergsockel, Bauversuche
+auf unerreichbaren Plateaus — Plot-Suche prüft keine Erreichbarkeit);
+(2) Nahkampf in der Debugschlacht: Einheiten-Ball schiebt nach Norden, wenig
+echte Kämpfe (Hypothese: Gegner-Scan-Cap zählt Freunde mit → Blob-Blindheit;
+Bucket-Iteration NW→SO → Richtungs-Bias). Ziel-Design laut Nutzer wie im
+Original: Kampfgruppen 3-gegen-1 + Wartende, Gruppen mit kleinem
+Mindestabstand (> 0) statt Blob.
