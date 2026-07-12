@@ -201,6 +201,13 @@ D:\game\Populous-TheEnd\
 - **Bekannte Einschränkung:** `--check-only` kennt keine Autoloads – Skripte, die
   `GameState`/`Events` referenzieren, melden dort fälschlich „Identifier not found".
   Maßgeblich ist der Projekt-Ladecheck (`--headless --quit`).
+- **Nach jedem `git pull` auf einem anderen Rechner einmal
+  `--headless --import` ausführen** (oder den Editor öffnen). Der globale
+  Klassen-Cache liegt in `.godot\` (nicht im Repo) und wird beim reinen
+  Spielstart NICHT aktualisiert — neue `class_name`-Skripte aus dem Pull sind
+  sonst unbekannt („Could not find type …"), betroffene Skripte kompilieren
+  nicht und es hagelt Folgefehler (z. B. Minimap-`nil`-Fehler, weil
+  `Main._ready` nie durchläuft).
 
 ## 10. Fortschritts-Doku (`plans\PROGRESS.md`)
 
