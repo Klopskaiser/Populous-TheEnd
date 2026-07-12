@@ -247,6 +247,11 @@ var _path_index: int = 0
 ## Queued move target awaiting path computation (INF = none).
 var _pending_target: Vector3 = Vector3.INF
 var _path_queued: bool = false
+## Monotonic id of the LATEST submitted async path request (phase 8.1). A new
+## order bumps it; a worker result whose id no longer matches is stale and
+## discarded — no throughput limit needed, so the phase-8 restack bug (units
+## "ignore orders") is structurally impossible.
+var _path_request_id: int = 0
 
 # --- Combat state (phase 5b) --------------------------------------------------
 ## Enemy this unit is meleeing (null = none). Typed, but every read is guarded
@@ -630,7 +635,8 @@ func _start_path_to(target: Vector3) -> void:
 	_set_state(State.MOVE)
 
 
-## Called by the UnitManager when this unit's queued path request is due.
+## Called by the UnitManager when this unit's queued path request is due
+## (synchronous path service, tests and worker-disabled fallback).
 func _resolve_pending_path() -> void:
 	_path_queued = false
 	if _pending_target == Vector3.INF:
@@ -643,6 +649,51 @@ func _resolve_pending_path() -> void:
 		if not waypoint_queue.is_empty():
 			waypoint_queue.pop_front()
 		_set_state(State.IDLE)
+
+
+## Phase 8.1 (Stufe A): hands the pending target to the off-thread PathWorker as
+## a POD request (grid cells + a fresh request id). Unlike _resolve_pending_path
+## this does NOT clear _pending_target — the unit keeps waiting (and holds
+## position, see _tick_move) until the async result lands in _apply_worker_path.
+func _submit_path_request(worker: PathWorker) -> void:
+	_path_queued = false
+	if _pending_target == Vector3.INF or state != State.MOVE or nav_grid == null:
+		return
+	_path_request_id += 1
+	var from_cell: Vector2i = nav_grid.world_to_cell(position)
+	var target_cell: Vector2i = nav_grid.world_to_cell(_pending_target)
+	worker.submit_request(get_instance_id(), _path_request_id, from_cell, target_cell)
+
+
+## Applies a worker result (main thread). Discards stale/superseded results and
+## does the world/Y conversion here (heights never cross the thread boundary):
+## cell centres via NavGrid, and — reproducing NavGrid.find_path — the exact
+## click point as the last point when the target cell was reached without a snap.
+func _apply_worker_path(request_id: int, cells: PackedVector2Array) -> void:
+	if request_id != _path_request_id:
+		return  # a newer order was issued; this answer is stale — keep waiting
+	if _pending_target == Vector3.INF:
+		return  # already consumed (e.g. set_path cancelled it)
+	# This IS the latest request: consume the pending target unconditionally, so
+	# a later return to MOVE can never wait on an id that will never arrive.
+	var target: Vector3 = _pending_target
+	_pending_target = Vector3.INF
+	if state != State.MOVE or nav_grid == null:
+		return  # order superseded while waiting
+	if cells.is_empty():
+		# Unreachable target — same outcome as the synchronous failure branch.
+		if not waypoint_queue.is_empty():
+			waypoint_queue.pop_front()
+		_set_state(State.IDLE)
+		return
+	var path: PackedVector3Array = PackedVector3Array()
+	for c in cells:
+		path.append(nav_grid.cell_to_world(Vector2i(c)))
+	if Vector2i(cells[cells.size() - 1]) == nav_grid.world_to_cell(target):
+		path[path.size() - 1] = Vector3(
+			target.x, nav_grid.terrain.get_height(target.x, target.z), target.z)
+	_path = path
+	_path_index = 0
 
 
 ## Path-planning telemetry (phase 8 tooling), read/reset by the perf

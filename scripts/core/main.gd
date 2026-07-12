@@ -22,6 +22,11 @@ const SIEGE_SCENE: PackedScene = preload("res://scenes/units/siege_engine.tscn")
 const START_BRAVES: int = 20
 const TREE_COUNT: int = 60
 
+## Phase 8.1 (Stufe A): route unit path requests through the off-main-thread
+## PathWorker. Set to false for an A/B comparison or as an emergency fallback to
+## the fully synchronous (pre-8.1) behaviour. Disabled with a single core.
+const USE_PATH_WORKER: bool = true
+
 ## Skirmish (phase 7): base anchors sit evenly spaced on this circle around
 ## the island centre (cells) — 2 players = opposite sides, 3 = triangle,
 ## 4 = quadrants.
@@ -108,6 +113,18 @@ func _ready() -> void:
 
 	var nav: NavGrid = NavGrid.new(td)
 	GameState.nav_grid = nav
+
+	# Phase 8.1: spin up the off-thread path worker seeded from the freshly built
+	# grid, then wire it into NavGrid (delta mirror) and UnitManager (async
+	# solve). Needs >1 core; UnitManager._exit_tree joins the thread on teardown.
+	if USE_PATH_WORKER and OS.get_processor_count() > 1:
+		var worker: PathWorker = PathWorker.new(
+			Rect2i(0, 0, td.size, td.size),
+			Vector2(TerrainData.CELL_SIZE, TerrainData.CELL_SIZE),
+			AStarGrid2D.DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES,
+			nav.solid_snapshot(), td.size)
+		nav.path_worker = worker
+		_unit_manager.path_worker = worker
 
 	# Tribes: 0 = player (blue), rest = AI — identical instances.
 	var tribes: Array[Tribe] = []

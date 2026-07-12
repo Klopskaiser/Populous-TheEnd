@@ -17,8 +17,13 @@ const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
 
 
 func _initialize() -> void:
+	# Phase 8.1 A/B: the same mass-move scenario with and without the off-thread
+	# PathWorker. The interesting figure is the WORST tick after the mass order
+	# (spike behaviour) — the worker should submit cheaply and never spike.
+	print("== Stufe-A A/B (Massenbewegung) ==")
 	for count in [2000, 6000]:
-		_run_move(count)
+		_run_move(count, false)
+		_run_move(count, true)
 	for count in [2000, 6000]:
 		_run_combat(count)
 	quit(0)
@@ -27,8 +32,8 @@ func _initialize() -> void:
 ## Mass move: `count` braves split over 4 tribes in the map quadrants, each
 ## quadrant marching to its own gathering point (no cross-tribe contact —
 ## pure movement/hash/separation/path-queue cost).
-func _run_move(count: int) -> void:
-	var w: Dictionary = _make_world()
+func _run_move(count: int, use_worker: bool = false) -> void:
+	var w: Dictionary = _make_world(use_worker)
 	var um: UnitManager = w.um
 	var nav: NavGrid = w.nav
 	var anchors: Array[Vector2i] = [
@@ -47,8 +52,9 @@ func _run_move(count: int) -> void:
 		spawned += 1
 	for unit in um.units:
 		unit.order_move(nav.cell_to_world(anchors[unit.tribe_id] + Vector2i(0, -10)))
-	_simulate("move %d" % spawned, um, MOVE_TICKS)
-	um.free()
+	var tag: String = "move %d [worker]" % spawned if use_worker else "move %d [sync]  " % spawned
+	_simulate(tag, um, MOVE_TICKS)
+	_teardown(w)
 
 
 ## Mass combat: two armies of warriors interleaved in tight rows — everyone
@@ -71,7 +77,7 @@ func _run_combat(count: int) -> void:
 			break
 		spawned += 1
 	_simulate("combat %d" % spawned, um, COMBAT_TICKS)
-	um.free()
+	_teardown(w)
 
 
 func _simulate(label: String, um: UnitManager, ticks: int) -> void:
@@ -119,7 +125,7 @@ func _simulate(label: String, um: UnitManager, ticks: int) -> void:
 		float(regroup_us) / n / 1000.0])
 
 
-func _make_world() -> Dictionary:
+func _make_world(use_worker: bool = false) -> Dictionary:
 	var td: TerrainData = TerrainData.new()
 	td.generate_island(1337)
 	var nav: NavGrid = NavGrid.new(td)
@@ -128,4 +134,23 @@ func _make_world() -> Dictionary:
 		tribes.append(Tribe.new(i))
 	var um: UnitManager = UnitManager.new()
 	um.setup(td, nav, tribes)
-	return {"td": td, "nav": nav, "tribes": tribes, "um": um}
+	var worker: PathWorker = null
+	if use_worker:
+		worker = PathWorker.new(
+			Rect2i(0, 0, td.size, td.size),
+			Vector2(TerrainData.CELL_SIZE, TerrainData.CELL_SIZE),
+			AStarGrid2D.DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES,
+			nav.solid_snapshot(), td.size)
+		nav.path_worker = worker
+		um.path_worker = worker
+	return {"td": td, "nav": nav, "tribes": tribes, "um": um, "worker": worker}
+
+
+## Joins the worker thread (the UnitManager lives outside the tree here, so
+## _exit_tree never fires) before freeing.
+func _teardown(w: Dictionary) -> void:
+	if w.worker != null:
+		w.worker.stop()
+		w.nav.path_worker = null
+		w.um.path_worker = null
+	w.um.free()

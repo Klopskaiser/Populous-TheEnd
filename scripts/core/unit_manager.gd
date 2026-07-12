@@ -76,6 +76,10 @@ var wood_pile_manager: WoodPileManager = null
 var unit_renderer: UnitRenderer = null
 ## Injected by Main/tests; the siege engine (7f) scans enemy buildings with it.
 var building_manager: BuildingManager = null
+## Phase 8.1 (Stufe A): off-main-thread pathfinding. When set, path requests are
+## solved on the worker thread and applied here without any per-tick limit. Null
+## → the synchronous, frame-budgeted queue below (tests, headless, A/B fallback).
+var path_worker: PathWorker = null
 
 var units: Array[Unit] = []
 ## Live projectiles (Fireball), ticked here after the units.
@@ -100,6 +104,16 @@ func setup(p_terrain_data: TerrainData, p_nav_grid: NavGrid,
 ## In-game driver: ticks all units centrally (no per-unit _physics_process —
 ## the Node callback overhead alone would dominate with thousands of units),
 ## then runs the manager systems. Tests call unit.tick()/tick() directly.
+## Joins the path worker thread on teardown (scene change / quit) so it never
+## outlives the tree. Idempotent; safe when no worker was created.
+func _exit_tree() -> void:
+	if path_worker != null:
+		path_worker.stop()
+		path_worker = null
+		if nav_grid != null:
+			nav_grid.path_worker = null
+
+
 func _physics_process(delta: float) -> void:
 	# Iterate a snapshot: an expiring corpse deregisters itself mid-loop via the
 	# corpse_expired signal (erasing from `units`), which would otherwise skip
@@ -162,6 +176,9 @@ func request_path(unit: Unit) -> void:
 
 
 func _drain_path_queue() -> void:
+	if path_worker != null:
+		_drain_path_queue_async()
+		return
 	var budget: int = PATHS_PER_TICK
 	while budget > 0 and _path_head < _path_requests.size():
 		var unit: Unit = _path_requests[_path_head]
@@ -173,6 +190,23 @@ func _drain_path_queue() -> void:
 	if _path_head >= _path_requests.size():
 		_path_requests.clear()
 		_path_head = 0
+
+
+## Worker path: submit ALL queued requests to the worker thread (no per-tick
+## limit — submitting is cheap), then apply every result the worker has ready.
+## Applying is billed only for the world/Y conversion, so no throughput cap is
+## needed either → the request queue can never back up (phase-8 restack bug).
+func _drain_path_queue_async() -> void:
+	for i in range(_path_head, _path_requests.size()):
+		var unit: Unit = _path_requests[i]
+		if is_instance_valid(unit):
+			unit._submit_path_request(path_worker)
+	_path_requests.clear()
+	_path_head = 0
+	for res in path_worker.drain_results():
+		var obj: Object = instance_from_id(res[0])
+		if obj is Unit and is_instance_valid(obj):
+			(obj as Unit)._apply_worker_path(res[1], res[2])
 
 
 # --- Separation -----------------------------------------------------------------------

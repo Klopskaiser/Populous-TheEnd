@@ -3495,3 +3495,94 @@ echte Kämpfe (Hypothese: Gegner-Scan-Cap zählt Freunde mit → Blob-Blindheit;
 Bucket-Iteration NW→SO → Richtungs-Bias). Ziel-Design laut Nutzer wie im
 Original: Kampfgruppen 3-gegen-1 + Wartende, Gruppen mit kleinem
 Mindestabstand (> 0) statt Blob.
+
+---
+
+## Phase 8.1 — Parallelisierung, Stufe A: Pfad-Worker-Thread (2026-07-12)
+
+**Ziel (aus 08b):** Wegfindung auf einen eigenen Thread verlagern — beseitigt
+Spike-Frames (fehlschlagende A*-Läufe nach Erdbeben/Massenbefehl, 50–400 ms)
+UND macht die Phase-8-Rückstau-Bug-Klasse strukturell unmöglich (kein
+Pro-Tick-Durchsatzlimit mehr auf dem Main-Thread). Akkurate 30-Hz-Sim bleibt.
+
+**Gebaut:**
+- **`scripts/core/path_worker.gd` (neu, `class_name PathWorker`, RefCounted):**
+  Ein langlebiger `Thread` + `Mutex` + `Semaphore`, EINE gemischte FIFO-Queue
+  für Grid-Deltas UND Pfad-Anfragen (garantiert: ein Terrain-Delta wirkt auf
+  alle danach gestellten Anfragen). Eigener `AStarGrid2D`-Klon des UNIT-Grids,
+  im `_init` aus `NavGrid.solid_snapshot()` geseedet (`update()` einmal, dann
+  Solid-Sync), danach nur noch vom Worker-Thread berührt (Deltas +
+  `get_id_path`). Snap (`nearest_walkable_cell`) läuft im Worker auf dem Klon.
+  Transport nur POD: Anfrage `{instance_id, request_id, from_cell, target_cell}`,
+  Antwort `{instance_id, request_id, Zell-Pfad PackedVector2Array}`. Kein
+  `randf()`, kein Node-/RefCounted-Sharing. API: `push_delta`,
+  `submit_request`, `drain_results`, `stop` (idempotent, joined den Thread).
+- **`NavGrid`:** Feld `path_worker`; `update_region` spiegelt jede
+  Unit-Grid-Solidity-Änderung als kompaktes Delta an den Worker (nach dem
+  lokalen Update, FIFO-korrekt vor Folge-Anfragen). Neu: `solid_snapshot()`
+  (voller Byte-Snapshot zum Seeden). Vehicle-Grid bleibt Main-thread-only
+  (Siege-Pfade sind synchron/selten — bewusst NICHT über den Worker in Stufe A,
+  Abweichung vom Plan-Ausblick „Vehicle-Grid im Worker").
+- **`Unit`:** `_path_request_id` (monoton, neuer Befehl bumpt → invalidiert
+  in-flight-Antworten). `_submit_path_request(worker)` (reicht Ziel als POD an
+  den Worker, lässt `_pending_target` gesetzt → Einheit wartet). 
+  `_apply_worker_path(request_id, cells)` (Main-Thread: Stale-Guard über
+  request_id, konsumiert `_pending_target` bei aktuellem Request IMMER — sonst
+  könnte ein Rückkehr-in-MOVE auf eine nie kommende id warten; Welt/Y-Konversion
+  + „letzter Punkt = exakter Klickpunkt"-Regel hier, da Heights nie über den
+  Thread gehen; leerer Pfad → IDLE + Waypoint-Pop wie synchron). Synchroner
+  Pfad (`_resolve_pending_path`/`_plan_path_to`/`find_path`) unverändert.
+- **`UnitManager`:** Feld `path_worker`; `_drain_path_queue` verzweigt zu
+  `_drain_path_queue_async` (Worker gesetzt) — submittet ALLE Queue-Einträge
+  (kein Limit) und wendet ALLE fertigen Antworten an (`instance_from_id` +
+  `is Unit` + `is_instance_valid`-Guard). Kein Zeitbudget/Cap → Rückstau
+  strukturell unmöglich. `_exit_tree` joined den Worker sauber
+  (Szenenwechsel/Quit).
+- **`Main`:** Konstante `USE_PATH_WORKER` (A/B-Schalter + Notfall-Fallback);
+  erzeugt den Worker (nur bei >1 Kern) aus `nav.solid_snapshot()` und verdrahtet
+  ihn in NavGrid (Delta-Spiegel) und UnitManager (Async-Solve).
+- **`path_service == null` / Worker nicht gesetzt = exakt das heutige synchrone
+  Verhalten** (Tests, Headless-Suite, Fallback).
+
+**Tests (`tests/test_path_worker.gd`, neu, 17 Checks, alle grün):**
+async Pfad wird erzeugt + gelaufen; Grid-Delta vor Folge-Anfrage respektiert;
+veralteter Request (zweiter Befehl) verworfen (Ziel B statt A); unerreichbar →
+IDLE; Shutdown ohne Hänger (inert nach `stop`); **Regression-Wächter**
+(200 Braves Massenbefehl + Terrain-Delta mid-flight → KEINE Einheit bleibt in
+MOVE mit leerem Pfad + offener Anfrage). `benchmark_mass` um Worker-A/B ergänzt
+(`_make_world(use_worker)`, `_teardown` joined den Thread).
+
+**Verifikation:** `--headless --import` sauber (PathWorker registriert);
+Suite **1509 passed, 0 failed** (Exit 0); `--headless --quit` fehlerfrei;
+**lagtest-Smoke** (`--quit-after 600 -- lagtest`, Bergpass 3 KIs) fehlerfrei,
+kein Leaked-Thread → In-Game-Shutdown korrekt.
+
+**A/B-Messung (benchmark_mass, headless, 30 Hz):**
+
+| Szenario | Ø Tick | schlimmster Tick | Pfade main-seitig |
+|---|---|---|---|
+| move 2000 sync | 30,6 ms | 47,5 ms | 2000 (0,28 ms) |
+| move 2000 worker | 30,5 ms | 50,6 ms | **0** (0 ms) |
+| move 6000 sync | 77,1 ms | 107 ms | 6002 (0,84 ms) |
+| move 6000 worker | 78,7 ms | 166 ms | **0** (0 ms) |
+
+**Ehrliche Einordnung:** Stufe A verschiebt die Pfadarbeit vollständig vom
+Main-Thread (Spalte „Pfade main-seitig" = 0). In diesem Benchmark war
+Wegfindung aber NIE der Engpass (0,3–0,8 ms/Tick, 0 Fehlschläge) — der
+Steady-State bleibt daher gleich; der Tick ist vom seriellen Units-Loop
+(17,8 ms @2000 / 54 ms @6000) und Separation (9–13 ms) dominiert (= Stufe C
+bzw. B). Der schlimmste Worker-Tick ist hier Scheduling-Rauschen auf Frame 0,
+kein Pfad-Kostenpunkt. Der eigentliche Gewinn von Stufe A — Spike-Glättung bei
+fehlschlagenden A*-Läufen + strukturelles Aus für den Rückstau-Bug — ist durch
+den Regression-Wächter und die manuelle Prüfung abgedeckt, nicht durch dieses
+spike-arme Benchmark.
+
+**Stufe B (Separation-Fan-out): noch offen.** Messung zeigt Separation
+9–13 ms/Tick (> 4-ms-Go-Schwelle), also lohnenswert — aber laut Plan („erst
+nach STABILER Stufe A", „Änderungen einzeln + Langzeittest") und der
+Nutzer-Vorgabe bewusst als eigener, separat abgesicherter Schritt offen
+gelassen, nicht in derselben Sitzung angehängt. Nächster isolierter Schritt.
+
+**Verifikationsstand:** Headless vollständig grün + lagtest-Smoke sauber.
+Manuelle In-Game-Prüfung (langes Bergpass-Skirmish, Massenbefehl-Spikes,
+F10-Zeitraffer, Speichern/Beenden) durch den Nutzer noch ausstehend.

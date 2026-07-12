@@ -13,6 +13,12 @@ const MAX_SNAP_RADIUS: int = 32
 
 var terrain: TerrainData = null
 
+## Phase 8.1 (Stufe A): when set, every unit-grid solidity change is mirrored to
+## the off-main-thread PathWorker as a compact delta. NavGrid stays the single
+## source of truth; the worker only holds a private clone. Null → fully
+## synchronous (tests, headless, A/B fallback).
+var path_worker: PathWorker = null
+
 var _astar: AStarGrid2D = AStarGrid2D.new()
 var _building_cells: Dictionary[Vector2i, bool] = {}  # cells blocked by buildings
 ## Second grid for wide vehicles (siege engine, phase 7f): a cell is passable
@@ -125,12 +131,34 @@ func _ring_cells(center: Vector2i, radius: int) -> Array[Vector2i]:
 ## Rect2i returned by TerrainData.raise_area after a deformation).
 func update_region(rect: Rect2i) -> void:
 	var r: Rect2i = rect.intersection(Rect2i(0, 0, terrain.size, terrain.size))
+	var delta_cells: PackedInt32Array = PackedInt32Array()
+	var delta_solids: PackedByteArray = PackedByteArray()
 	for z in range(r.position.y, r.position.y + r.size.y):
 		for x in range(r.position.x, r.position.x + r.size.x):
 			var cell: Vector2i = Vector2i(x, z)
 			var solid: bool = _building_cells.has(cell) or not terrain.is_walkable(cell)
 			_astar.set_point_solid(cell, solid)
+			if path_worker != null:
+				delta_cells.append(z * terrain.size + x)
+				delta_solids.append(1 if solid else 0)
 	_refresh_vehicle_region(r)
+	# Mirror the unit-grid change to the worker AFTER the local grid is updated,
+	# so the worker's clone converges to the same state (FIFO-ordered vs. later
+	# path requests). The vehicle grid stays main-thread only (siege pathing is
+	# synchronous and rare — not routed through the worker in Stufe A).
+	if path_worker != null and delta_cells.size() > 0:
+		path_worker.push_delta(delta_cells, delta_solids)
+
+
+## Full unit-grid solidity snapshot (index = z * size + x, 1 = solid) used to
+## seed a fresh PathWorker clone so it starts perfectly in sync.
+func solid_snapshot() -> PackedByteArray:
+	var snap: PackedByteArray = PackedByteArray()
+	snap.resize(terrain.size * terrain.size)
+	for z in range(terrain.size):
+		for x in range(terrain.size):
+			snap[z * terrain.size + x] = 1 if _astar.is_point_solid(Vector2i(x, z)) else 0
+	return snap
 
 
 # --- Vehicle navigation (siege engine, phase 7f) ----------------------------------
