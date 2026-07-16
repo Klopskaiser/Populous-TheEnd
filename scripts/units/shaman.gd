@@ -57,7 +57,10 @@ func order_cast(spell: Spell, target: Vector3, ctx: SpellContext) -> bool:
 		var origin: Vector3 = garrison_target.center_world()
 		if _flat_dist(origin, target) > spell.cast_range + Watchtower.TOWER_RANGE_BONUS:
 			return false
-		return spell.cast(tribe, target, ctx)
+		if spell.cast(tribe, target, ctx):
+			_emit_spell_cast(spell, target)
+			return true
+		return false
 	if not can_take_orders():
 		return false
 	_end_attack()
@@ -125,8 +128,19 @@ func _tick_cast(delta: float) -> void:
 	var target: Vector3 = pending_target
 	var ctx: SpellContext = pending_ctx
 	_cancel_cast()
-	spell.cast(tribe, target, ctx)
+	if spell.cast(tribe, target, ctx):
+		_emit_spell_cast(spell, target)
 	_set_state(State.IDLE)
+
+
+## Announces a successful cast on the Events bus (AudioManager plays the
+## matching spell_<id> sound).
+func _emit_spell_cast(spell: Spell, target: Vector3) -> void:
+	if not is_inside_tree():
+		return
+	var events: Node = get_node_or_null("/root/Events")
+	if events != null:
+		events.spell_cast.emit(spell.id, target)
 
 
 ## Walk frames while moving into range; the cast animation only during the

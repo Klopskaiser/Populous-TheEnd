@@ -402,8 +402,14 @@ func _release_all_occupants() -> void:
 ## axis, a wide gate on the south side and a catapult arm sticking out of an
 ## open bay (so the building reads as "siege workshop"). Authored with the
 ## entrance facing south (+z), 8 wide x 4 deep.
+func asset_kind() -> StringName:
+	return &"workshop"
+
+
 func _create_visuals() -> void:
 	super._create_visuals()
+	if _has_custom_model:
+		return
 	var w: float = float(FOOTPRINT.x)
 	var d: float = float(FOOTPRINT.y)
 

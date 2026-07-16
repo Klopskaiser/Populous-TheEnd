@@ -322,8 +322,14 @@ func _flat_dist(a: Vector3, b: Vector3) -> float:
 
 ## A tall slim tower: a stone shaft, a wider timber lookout platform on top, a
 ## dark doorway at the base (south) and the tribe flag. Authored entrance south.
+func asset_kind() -> StringName:
+	return &"watchtower"
+
+
 func _create_visuals() -> void:
 	super._create_visuals()
+	if _has_custom_model:
+		return
 	var span: float = float(FOOTPRINT.x)
 
 	var shaft: MeshInstance3D = MeshInstance3D.new()

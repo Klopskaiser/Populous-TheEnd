@@ -19,3 +19,9 @@ signal combat_hit(kind: StringName, pos: Vector3)
 ## A tribe's stored spell-charge counts changed (conversion or cast); the
 ## sidebar refreshes its charge pips.
 signal spell_charges_changed(tribe_id: int)
+## A building finished construction (AudioManager plays building_complete).
+signal building_completed(building: Node)
+## A training building released a freshly trained unit at pos.
+signal unit_trained(kind: StringName, pos: Vector3)
+## A spell was successfully cast (charge consumed) at the target position.
+signal spell_cast(spell_id: StringName, pos: Vector3)

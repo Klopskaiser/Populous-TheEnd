@@ -31,8 +31,14 @@ func display_name() -> String:
 	return "Feuertempel"
 
 
+func asset_kind() -> StringName:
+	return &"firewarrior_camp"
+
+
 func _create_visuals() -> void:
 	super._create_visuals()
+	if _has_custom_model:
+		return
 	var span: float = float(footprint.x)   # 8
 
 	# Big octagonal keep (blue-painted fur walls), tall.

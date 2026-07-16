@@ -26,7 +26,7 @@ var _chunks_root: Node3D = null
 var _static_body: StaticBody3D = null
 var _collision_shape: CollisionShape3D = null
 var _height_shape: HeightMapShape3D = null
-var _material: StandardMaterial3D = null
+var _material: Material = null
 var _chunk_count: int = TerrainData.SIZE / CHUNK  # chunks per side
 
 
@@ -41,9 +41,7 @@ func build(p_data: TerrainData) -> void:
 
 func _ensure_nodes() -> void:
 	if _material == null:
-		_material = StandardMaterial3D.new()
-		_material.vertex_color_use_as_albedo = true
-		_material.roughness = 1.0
+		_material = _create_material()
 
 	if _chunks_root == null:
 		_chunks_root = Node3D.new()
@@ -66,6 +64,29 @@ func _ensure_nodes() -> void:
 	_ensure_water()
 
 
+## Textured triplanar shader when all three ground textures exist under
+## assets/textures/terrain/, otherwise the vertex-colour placeholder material.
+## Vertex colours are always generated (fallback + soft tint input for the
+## shader), so the chunk builder is identical in both modes.
+func _create_material() -> Material:
+	var sand: Texture2D = AssetLibrary.texture("textures/terrain/sand.png")
+	var grass: Texture2D = AssetLibrary.texture("textures/terrain/grass.png")
+	var rock: Texture2D = AssetLibrary.texture("textures/terrain/rock.png")
+	if sand != null and grass != null and rock != null:
+		var shader_mat: ShaderMaterial = ShaderMaterial.new()
+		shader_mat.shader = preload("res://shaders/terrain_triplanar.gdshader")
+		shader_mat.set_shader_parameter("sand_tex", sand)
+		shader_mat.set_shader_parameter("grass_tex", grass)
+		shader_mat.set_shader_parameter("rock_tex", rock)
+		shader_mat.set_shader_parameter("sand_top", SAND_TOP)
+		shader_mat.set_shader_parameter("rock_bottom", ROCK_BOTTOM)
+		return shader_mat
+	var mat: StandardMaterial3D = StandardMaterial3D.new()
+	mat.vertex_color_use_as_albedo = true
+	mat.roughness = 1.0
+	return mat
+
+
 func _ensure_water() -> void:
 	if has_node("Water"):
 		return
@@ -82,6 +103,11 @@ func _ensure_water() -> void:
 	wmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	wmat.metallic = 0.2
 	wmat.roughness = 0.1
+	var water_tex: Texture2D = AssetLibrary.texture("textures/terrain/water.png")
+	if water_tex != null:
+		wmat.albedo_texture = water_tex
+		wmat.albedo_color = Color(0.5, 0.7, 0.9, 0.65)   # lighter tint over the texture
+		wmat.uv1_scale = Vector3(float(data.size) * 0.05, float(data.size) * 0.05, 1.0)
 	water.material_override = wmat
 	add_child(water)
 

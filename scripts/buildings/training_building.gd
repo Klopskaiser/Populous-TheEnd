@@ -125,9 +125,14 @@ func _finish_one() -> void:
 	if produces != null and unit_manager != null:
 		var pos: Vector3 = edge_spawn_position()
 		var unit: Unit = unit_manager.spawn_unit(produces, tribe_id, pos)
-		if unit != null and rally_point != Vector3.ZERO:
-			unit.order_move(rally_point + TribeCommands.group_slot_offset(_spawn_counter % 36))
-			_spawn_counter += 1
+		if unit != null:
+			if is_inside_tree():
+				var events: Node = get_node_or_null("/root/Events")
+				if events != null:
+					events.unit_trained.emit(unit.unit_kind(), pos)
+			if rally_point != Vector3.ZERO:
+				unit.order_move(rally_point + TribeCommands.group_slot_offset(_spawn_counter % 36))
+				_spawn_counter += 1
 
 
 ## World position of the index-th queue slot: a single-file line running along

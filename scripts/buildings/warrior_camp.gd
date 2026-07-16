@@ -30,9 +30,15 @@ func display_name() -> String:
 	return "Kaserne"
 
 
+func asset_kind() -> StringName:
+	return &"warrior_camp"
+
+
 ## Authored with the entrance facing south (+z); the base rotates the mesh root.
 func _create_visuals() -> void:
 	super._create_visuals()
+	if _has_custom_model:
+		return
 	var span: float = float(footprint.x)
 
 	# Ring wall around the courtyard (flattened torus = low round rampart).

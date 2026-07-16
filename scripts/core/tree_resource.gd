@@ -153,7 +153,15 @@ func _ready() -> void:
 	set_stage(stage)   # apply crown visibility now that the mesh exists
 
 
+## User-provided model (assets/models/trees/tree.glb) when present, otherwise
+## the procedural trunk+cone. Growth stages scale the whole node either way;
+## the burn flicker/crown-hiding only applies to the procedural crown (the glb
+## still shrinks while burning — _crown/_crown_mat stay null-guarded).
 func _create_visuals() -> void:
+	var model: Node3D = AssetLibrary.instantiate_model("models/trees/tree.glb")
+	if model != null:
+		add_child(model)
+		return
 	var trunk: MeshInstance3D = MeshInstance3D.new()
 	var cyl: CylinderMesh = CylinderMesh.new()
 	cyl.top_radius = 0.12

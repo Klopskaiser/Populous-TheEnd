@@ -352,6 +352,10 @@ func _set_selection(units: Array[Unit]) -> void:
 			kept.append(unit)
 			unit.set_selected(true)
 	selected = kept
+	if not kept.is_empty() and is_inside_tree():
+		var audio: Node = get_node_or_null("/root/AudioManager")
+		if audio != null:
+			audio.play_ui(&"select_unit")
 
 
 ## Selects an own building (clears any unit/building selection first).
@@ -359,6 +363,10 @@ func _select_building(building: Building) -> void:
 	_set_selection([])
 	selected_building = building
 	building.set_selected(true)
+	if is_inside_tree():
+		var audio: Node = get_node_or_null("/root/AudioManager")
+		if audio != null:
+			audio.play_ui(&"select_building")
 
 
 func _clear_selected_building() -> void:

@@ -1,12 +1,14 @@
 class_name CombatAudio extends Node
 
-## Procedural combat hit sounds — no external asset files (overview par. 7).
+## Combat hit sounds, file-based with a procedural fallback.
 ##
-## Generates a small set of AudioStreamWAV variants per attack kind (short
-## filtered-noise bursts with distinct length/timbre per kind) and plays a
-## random one per Events.combat_hit through a pooled set of positional
-## players. Throttled (global min interval + fixed pool) so mass battles
-## cannot overload the audio bus.
+## Per attack kind, numbered variants from assets/audio/sfx/combat/ are used
+## when present (<kind>_0.ogg, <kind>_1.ogg, ...); otherwise a small set of
+## AudioStreamWAV variants is generated (short filtered-noise bursts with
+## distinct length/timbre per kind). A random variant plays per
+## Events.combat_hit through a pooled set of positional players. Throttled
+## (global min interval + fixed pool) so mass battles cannot overload the
+## audio bus.
 
 const VARIANTS: int = 3
 const POOL_SIZE: int = 12
@@ -30,14 +32,17 @@ var _rng: RandomNumberGenerator = RandomNumberGenerator.new()
 func _ready() -> void:
 	_rng.seed = 4242
 	for kind in KINDS:
-		var count: int = 1 if kind in SINGLE_VARIANT_KINDS else VARIANTS
-		var variants: Array = []
-		for v in range(count):
-			variants.append(_make_stream(kind, v))
+		var variants: Array = AssetLibrary.stream_variants("audio/sfx/combat/%s" % kind)
+		if variants.is_empty():
+			var count: int = 1 if kind in SINGLE_VARIANT_KINDS else VARIANTS
+			for v in range(count):
+				variants.append(_make_stream(kind, v))
 		_sounds[kind] = variants
 	for i in range(POOL_SIZE):
 		var player: AudioStreamPlayer3D = AudioStreamPlayer3D.new()
 		player.max_distance = 60.0
+		if AudioServer.get_bus_index("SFX") != -1:
+			player.bus = "SFX"
 		add_child(player)
 		_pool.append(player)
 	var events: Node = get_node_or_null("/root/Events")

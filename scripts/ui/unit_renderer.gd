@@ -14,7 +14,10 @@ class_name UnitRenderer extends MultiMeshInstance3D
 ## linger a few seconds before expiring.
 const MAX_UNITS: int = 8192
 const VISUAL_SLICES: int = 3
-const PIXEL_SIZE: float = 0.06
+## On-screen quad size in metres — constant regardless of the frame resolution
+## in the atlas (16x24 placeholders at the historical 0.06 m/px, or real art).
+const SPRITE_WORLD_W: float = 0.96
+const SPRITE_WORLD_H: float = 1.44
 ## Diameter of the hardcoded circular blob shadow under every unit and its
 ## lift above the ground (z-fighting guard). Real shadow casting is OFF for
 ## units (phase 8 shadow rework): thousands of billboarded alpha-discard quads
@@ -41,6 +44,8 @@ shader_type spatial;
 render_mode unshaded, cull_disabled, shadows_disabled;
 
 uniform sampler2D atlas : source_color, filter_nearest;
+// L8 mask gating the tribe-colour multiply per pixel (white = full tint).
+uniform sampler2D tint_mask : filter_nearest;
 uniform vec2 frame_uv;
 uniform float depth_bias;
 uniform float elevation_gain;
@@ -89,7 +94,8 @@ void fragment() {
 			discard;
 		}
 	}
-	ALBEDO = tex.rgb * tint.rgb;
+	float m = texture(tint_mask, uv_offset + UV * frame_uv).r;
+	ALBEDO = tex.rgb * mix(vec3(1.0), tint.rgb, m);
 }
 """
 
@@ -135,21 +141,20 @@ static func make_blob_mesh(size: Vector2, color: Color = BLOB_COLOR) -> PlaneMes
 
 
 func _ready() -> void:
-	var atlas: Dictionary = PlaceholderSprites.build_atlas(KINDS)
+	var atlas: Dictionary = UnitSpriteLibrary.build_atlas(KINDS)
 	_uvs = atlas.uvs
 	_table = atlas.table
 
 	var quad: QuadMesh = QuadMesh.new()
-	quad.size = Vector2(
-		float(PlaceholderSprites.W) * PIXEL_SIZE,
-		float(PlaceholderSprites.H) * PIXEL_SIZE)
+	quad.size = Vector2(SPRITE_WORLD_W, SPRITE_WORLD_H)
 	# Feet at the instance origin.
-	quad.center_offset = Vector3(0.0, float(PlaceholderSprites.H) * PIXEL_SIZE * 0.5, 0.0)
+	quad.center_offset = Vector3(0.0, SPRITE_WORLD_H * 0.5, 0.0)
 	var shader: Shader = Shader.new()
 	shader.code = SHADER_CODE
 	var material: ShaderMaterial = ShaderMaterial.new()
 	material.shader = shader
 	material.set_shader_parameter("atlas", atlas.texture)
+	material.set_shader_parameter("tint_mask", atlas.mask_texture)
 	material.set_shader_parameter("frame_uv", atlas.frame_uv)
 	material.set_shader_parameter("depth_bias", DEPTH_BIAS)
 	material.set_shader_parameter("elevation_gain", ELEVATION_GAIN)

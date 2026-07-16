@@ -29,8 +29,14 @@ func display_name() -> String:
 	return "Tempel"
 
 
+func asset_kind() -> StringName:
+	return &"temple"
+
+
 func _create_visuals() -> void:
 	super._create_visuals()
+	if _has_custom_model:
+		return
 	var span: float = float(footprint.x)
 
 	# Domed clay hut (light plaster dome).

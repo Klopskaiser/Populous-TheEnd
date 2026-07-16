@@ -62,8 +62,14 @@ func _tick_active(delta: float) -> void:
 		unit_manager.spawn_unit(SHAMAN_SCENE, tribe_id, edge_spawn_position())
 
 
+func asset_kind() -> StringName:
+	return &"reincarnation_site"
+
+
 func _create_visuals() -> void:
 	super._create_visuals()
+	if _has_custom_model:
+		return
 	var ring: MeshInstance3D = MeshInstance3D.new()
 	var torus: TorusMesh = TorusMesh.new()
 	torus.inner_radius = 0.9

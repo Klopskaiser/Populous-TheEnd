@@ -282,10 +282,16 @@ func _spawn_brave() -> void:
 	_spawn_counter += 1
 
 
+func asset_kind() -> StringName:
+	return &"hut"
+
+
 ## Authored with the entrance facing south (+z); the mesh root is rotated by
 ## the Building base according to `orientation`.
 func _create_visuals() -> void:
 	super._create_visuals()
+	if _has_custom_model:
+		return
 	var body: MeshInstance3D = MeshInstance3D.new()
 	var box: BoxMesh = BoxMesh.new()
 	box.size = Vector3(float(footprint.x) * 0.85, 1.6, float(footprint.y) * 0.85)

@@ -3980,3 +3980,104 @@ Fortschritts-Sonde wieder auf, Endlos-Wurf stirbt am 30-s-Cap und liegt am
 Boden. `test_siege.gd`: +Fahrzeug-Separation (Geräte spreizen auf ≥ ~3 m,
 Fußgänger schiebt Gerät nicht). Suite **1619 grün (3×)**; Ladecheck,
 Stresstest-Smoke (1800 Frames) und lagtest-Smoke sauber.
+
+## Asset-Migration: Pipeline für echte Assets (vor Balancing, 2026-07-13)
+
+Umstieg von rein prozeduralen Inhalten auf nutzerlieferbare Assets — mit den
+prozeduralen Platzhaltern als **permanentem, automatischem Fallback**: fehlt
+eine Datei unter `assets\`, greift der bisherige Code; Assets können
+stückweise geliefert werden. Konventions-Doku für den Asset-Ersteller:
+**`assets\README.md`** (Ordnerbaum, Sheet-Layout, glb-Regeln, Audio-Formate,
+Import-Pflicht).
+
+**Zentrale Auflösung — `scripts/core/asset_library.gd`** (`AssetLibrary`,
+statisch): `texture/image/model/instantiate_model/stream/json/
+stream_variants/stream_folder` — alle liefern `null`/leer bei fehlender
+Datei (→ Fallback im Aufrufer), cachen Ergebnisse und warnen einmalig, wenn
+eine Datei auf der Platte liegt, aber nicht importiert ist (klassische
+`--headless --import`-Falle, §9 CLAUDE.md).
+
+**Audio (voller Umfang):**
+- Neues Autoload **`AudioManager`** (`scripts/core/audio_manager.gd`, 3.
+  Eintrag in project.godot): legt Busse **Music/Ambience/SFX/UI** idempotent
+  per Code an, `play_sfx(name, pos)` (3D-Pool, 8) / `play_ui(name)` (2D-Pool),
+  Musik-/Ambience-Playlists aus `assets/audio/music|ambience/` (leer =
+  still), statische Bus-Lautstärke-Helper für die Options-UI.
+- Neue Events-Signale: `building_completed`, `unit_trained`, `spell_cast`
+  (Emits: `building.gd` finish_construction, `training_building.gd`
+  _finish_one, `shaman.gd` beide Cast-Stellen via `_emit_spell_cast`; alle
+  mit `is_inside_tree()`-Guard — headless-Tests instanziieren außerhalb des
+  Trees). AudioManager hört darauf + `building_destroyed`; Selektions-Sounds
+  direkt in `selection_manager.gd`, `build_place` in `building_manager.place`.
+- `combat_audio.gd`: nutzt pro Kind `assets/audio/sfx/combat/<kind>_<n>.ogg`
+  wenn vorhanden, sonst unverändert die Synthese (`generate_samples` bleibt
+  statisch → test_combat grün); Pool-Player auf Bus SFX.
+
+**Gebäude:** `building.gd` — neues virtuelles `asset_kind()` +
+`_try_load_custom_model()` in `_create_visuals()` (lädt
+`assets/models/buildings/<kind>.glb`, setzt `_has_custom_model`, färbt
+`Flag`-MeshInstance3D im Modell bzw. hängt die Prozedural-Flagge an); alle
+8 Subklassen: Early-Return nach `super._create_visuals()`. Bau-Wachstum,
+Wobble, Versinken, Zerstörungslöcher (Stage-Hook) arbeiten modell-agnostisch
+auf `_mesh_root` weiter — Stufen-glbs (`<kind>_stage<N>.glb`) sind als v2
+vorgesehen, nicht umgesetzt.
+
+**Terrain:** `shaders/terrain_triplanar.gdshader` (neu) — Sand/Gras
+top-projiziert, Fels triplanar (5 statt 9 Fetches), Höhen-Blend spiegelt
+`_color_for_height`, plus Slope-Term (Klippen = Fels), weiche Multiplikation
+mit der Vertex-Farbe. `terrain.gd::_create_material()`: ShaderMaterial nur
+wenn `assets/textures/terrain/{sand,grass,rock}.png` alle existieren, sonst
+bisheriges Vertex-Farb-Material; Vertex-Farben werden IMMER erzeugt →
+`_build_chunk_mesh`/`rebuild_chunks` unverändert (Verformung robust, keine
+UVs). Wasser: optionale `water.png` als gekachelte Albedo.
+
+**Einheiten (perf-kritisch):** `scripts/ui/unit_sprite_library.gd` (neu,
+`UnitSpriteLibrary.build_atlas`) — identischer Contract wie
+`PlaceholderSprites.build_atlas` (texture/uvs/frame_uv/table) **plus
+`mask_texture`** (L8). Pro (kind, anim): Sheet
+`assets/units/<kind>/<anim>.png` gemäß `manifest.json`
+(frame_width/height Pflicht, fps optional) sliceb; 8 oder 5 Zeilen
+(5 → linke Ansichten per flip_x gespiegelt wie `MIRRORED_VIEWS`); fehlendes
+Sheet → `PlaceholderSprites._build_frames` nur für diese Anim. Eine
+einheitliche Atlas-Zelle (Maximum aller Framegrößen, Platzhalter 16×24;
+kleinere Frames nearest-hochskaliert) → `frame_uv` bleibt EIN Uniform.
+`unit_renderer.gd`: Quadgröße jetzt `SPRITE_WORLD_W/H` (0.96/1.44 m,
+ersetzt `W/H*PIXEL_SIZE`), Shader-Fragment `ALBEDO = tex.rgb *
+mix(vec3(1), tint.rgb, mask)` — Maske weiß = exakt altes Voll-Multiply;
+echte Art darf voll koloriert sein, Stammes-Bereiche via `<anim>_mask.png`.
+MultiMesh/ein Draw Call/INSTANCE_CUSTOM/Dither-Fade unangetastet.
+Kontrakt-Check headless: alte vs. neue Tabelle identisch (1288 Frames,
+TABLE_MATCH yes); Atlas-Bau 17→33 ms (einmalig beim Start).
+
+**Bäume/Katapult:** `tree_resource.gd` lädt `models/trees/tree.glb`
+(Wachstum = Skalierung funktioniert weiter; Brand-Flackern nur prozedural,
+glb schrumpft beim Brennen). `siege_engine.gd::_create_model()` lädt
+`models/units/siege_engine.glb`; optionale Nodes `Arm` (Wurfarm-Pivot) und
+`Flag` (Stammesfarbe); gemeinsamer Abschluss `_finish_model` (Shadow-Off +
+Blob).
+
+**Nicht umgesetzt (bewusst):** Zauber-Textur-Hooks (Phase 6 des Plans,
+optional/niedrigste Priorität — Visuals bleiben prozedural; Zauber-SOUNDS
+laufen bereits über `Events.spell_cast`), Gebäude-Stufen-glbs (v2),
+Options-UI für die neuen Audio-Busse, Sidebar-Porträt weiter über
+`PlaceholderSprites.make_frames`.
+
+**Stolpersteine:**
+- Neue `class_name`-Skripte → erst `--headless --import`, sonst
+  „Identifier not declared" (bekannt, §9).
+- `get_node_or_null("/root/…")` außerhalb des Scene-Trees ist ein ERROR —
+  alle neuen Emits/Audio-Aufrufe brauchen `is_inside_tree()`-Guards
+  (headless-Tests bauen Welten ohne Tree).
+- `Image.blit_rect` verlangt gleiche Formate — Sheets/Masken werden nach
+  RGBA8 konvertiert, Masken-Atlas ist L8.
+- Sheet-Hard-Cap **64×96 px** (README): 128×192 sprengt das
+  Atlas-Budget (~380 MB VRAM bzw. 16384-Limit).
+
+**Verifikation:** Suite **1619 grün** (2 Flakies in Einzelläufen —
+Zentroid-Drift 5,49 m > 4,5 und einmal test_perf — reproduzierten nicht;
+parallel lief eine andere Session auf der Maschine), Ladecheck sauber,
+Shader-Parse-Check ok, Stresstest-Smoke (4100 Einheiten, 45 s) und
+Skirmish-Smoke (30 s) ohne Script-Fehler — alles mit leerem `assets\`
+(= Fallback identisch zu vorher). **Nutzer ausstehend:** FPS-Vergleich
+Stresstest gegen Baseline am echten Bildschirm; Test mit ersten echten
+Asset-Dateien (dann `--headless --import` nicht vergessen).

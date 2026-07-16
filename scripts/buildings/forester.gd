@@ -315,8 +315,14 @@ func _release_all_occupants() -> void:
 
 ## A little forester's lodge: a log cabin with a green pitched roof and a couple
 ## of saplings out front. Authored with the entrance facing south (+z).
+func asset_kind() -> StringName:
+	return &"forester"
+
+
 func _create_visuals() -> void:
 	super._create_visuals()
+	if _has_custom_model:
+		return
 	var span: float = float(footprint.x)
 
 	var walls: MeshInstance3D = MeshInstance3D.new()

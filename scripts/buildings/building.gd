@@ -133,6 +133,9 @@ var unit_manager: UnitManager = null
 var wood_pile_manager: WoodPileManager = null
 
 var _mesh_root: Node3D = null
+## True when a user-provided .glb (assets/models/buildings/<asset_kind>.glb)
+## was loaded in _create_visuals — subclasses then skip their placeholder meshes.
+var _has_custom_model: bool = false
 var _selection_ring: MeshInstance3D = null
 var _rally_marker: Node3D = null
 var _overlay_sprite: Sprite3D = null
@@ -964,6 +967,10 @@ func finish_construction() -> void:
 	_flush_deformation()
 	_update_construction_visual()
 	construction_finished.emit(self)
+	if is_inside_tree():
+		var events: Node = get_node_or_null("/root/Events")
+		if events != null:
+			events.building_completed.emit(self)
 	if tribe != null:
 		tribe.notify_housing_changed()
 
@@ -1081,14 +1088,51 @@ func _tick_wobble(delta: float) -> void:
 	_mesh_root.rotation.x = RAID_WOBBLE_AMPLITUDE * 0.6 * sin(_wobble_time * TAU * RAID_WOBBLE_HZ * 1.3)
 
 
-# --- Visuals (placeholder meshes, created in _ready only) ----------------------------
+# --- Visuals (asset model or placeholder meshes, created in _ready only) -------------
 
-## Subclasses build their placeholder meshes under _mesh_root. The root is
-## rotated by `orientation`, so meshes are authored with the entrance south.
+## Asset lookup name for this building (assets/models/buildings/<kind>.glb);
+## empty = no asset support, always procedural.
+func asset_kind() -> StringName:
+	return &""
+
+
+## Subclasses build their placeholder meshes under _mesh_root — unless a
+## user-provided model was loaded (_has_custom_model); then they return early.
+## The root is rotated by `orientation`, so models/meshes are authored with
+## the entrance south (+Z).
 func _create_visuals() -> void:
 	_mesh_root = Node3D.new()
 	_mesh_root.name = "MeshRoot"
 	add_child(_mesh_root)
+	_try_load_custom_model()
+
+
+func _try_load_custom_model() -> void:
+	var kind: StringName = asset_kind()
+	if kind == &"":
+		return
+	var model: Node3D = AssetLibrary.instantiate_model("models/buildings/%s.glb" % kind)
+	if model == null:
+		return
+	_mesh_root.add_child(model)
+	_has_custom_model = true
+	if not _tint_flag_meshes(model):
+		_add_flag()
+
+
+## Tints every MeshInstance3D named "Flag" inside a loaded model with the
+## tribe colour; returns true when at least one was found.
+func _tint_flag_meshes(node: Node) -> bool:
+	var found: bool = false
+	if node is MeshInstance3D and node.name == "Flag":
+		var mat: StandardMaterial3D = StandardMaterial3D.new()
+		mat.albedo_color = Unit.TRIBE_COLORS[tribe_id % Unit.TRIBE_COLORS.size()]
+		(node as MeshInstance3D).material_override = mat
+		found = true
+	for child in node.get_children():
+		if _tint_flag_meshes(child):
+			found = true
+	return found
 
 
 ## Small tribe-coloured flag next to the building.

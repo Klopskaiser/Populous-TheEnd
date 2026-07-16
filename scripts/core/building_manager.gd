@@ -73,6 +73,10 @@ func place(scene: PackedScene, tribe: Tribe, cell: Vector2i,
 		building.finish_construction()
 	else:
 		building.init_construction()
+		if is_inside_tree():
+			var audio: Node = get_node_or_null("/root/AudioManager")
+			if audio != null:
+				audio.play_sfx(&"build_place", building.position)
 	return building
 
 

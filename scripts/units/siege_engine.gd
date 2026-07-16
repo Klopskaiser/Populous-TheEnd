@@ -679,6 +679,18 @@ func _create_model() -> void:
 	add_child(root)
 	_model = root
 
+	# User-provided model (assets/models/units/siege_engine.glb) when present.
+	# Optional named children: "Arm" (Node3D) pivots on firing, "Flag"
+	# (MeshInstance3D) takes the tribe colour. Without them the vehicle simply
+	# fires without the snap animation / shows no flag.
+	var custom: Node3D = AssetLibrary.instantiate_model("models/units/siege_engine.glb")
+	if custom != null:
+		root.add_child(custom)
+		_arm = custom.find_child("Arm", true, false) as Node3D
+		_flag_mesh = custom.find_child("Flag", true, false) as MeshInstance3D
+		_finish_model(root)
+		return
+
 	# Base frame (the 1x2 m body).
 	var frame: MeshInstance3D = MeshInstance3D.new()
 	var frame_box: BoxMesh = BoxMesh.new()
@@ -749,8 +761,12 @@ func _create_model() -> void:
 	_flag_mesh.position = Vector3(0.2, 1.5, 0.85)
 	root.add_child(_flag_mesh)
 
-	# Phase 8 shadow rework: units cast no real shadows — the model gets a
-	# hardcoded blob quad instead (like the sprite units' blob MultiMesh).
+	_finish_model(root)
+
+
+## Phase 8 shadow rework: units cast no real shadows — the model gets a
+## hardcoded blob quad instead (like the sprite units' blob MultiMesh).
+func _finish_model(root: Node3D) -> void:
 	for m in root.find_children("*", "MeshInstance3D", true, false):
 		(m as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var blob: MeshInstance3D = MeshInstance3D.new()
