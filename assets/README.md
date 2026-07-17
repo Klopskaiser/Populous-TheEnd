@@ -39,25 +39,20 @@ assets/
 
 ## Einheiten-Spritesheets
 
-**Eine PNG pro Animation.** Layout: **Zeilen = Blickrichtungen, Spalten = Frames.**
+**Die Einheit bestimmt der Ordner, die Animation der Dateiname:**
+`assets/units/<einheit>/<animation>.png` — eine PNG pro Animation.
+`<einheit>` ist `brave`, `warrior`, `firewarrior`, `preacher` oder `shaman`.
+Layout innerhalb der PNG: **Zeilen = Blickrichtungen, Spalten = Frames.**
 
-- **Framegröße:** einheitlich pro Einheit, angegeben in `manifest.json`
-  (`frame_width`/`frame_height`). Empfohlener Standard: **64×96 px**.
-  **Hard Cap: 64×96** — größere Frames sprengen das Textur-Atlas-Budget.
-- **Blickrichtungen (Zeilen), zwei erlaubte Varianten:**
-  - **8 Zeilen** in dieser Reihenfolge: `front, back, right, left, front_right,
-    front_left, back_right, back_left`
-  - **5 Zeilen**: `front, back, right, front_right, back_right` — die linken
-    Ansichten werden automatisch gespiegelt.
-  Die Zeilenzahl wird aus `Bildhöhe / frame_height` erkannt.
-- **Frames (Spalten):** Anzahl = `Bildbreite / frame_width`, frei wählbar pro Animation.
-- **Animationsnamen** (Dateiname = `<anim>.png`): `idle, walk, attack, punch, kick,
-  shove, jump, carry, carry_walk, dead, sit, roll` — zusätzlich `cast` (nur Schamanin/
-  Prediger) und `throw` (nur Feuerkrieger). Fehlt eine Datei, wird nur diese Animation
-  prozedural dargestellt.
-- **fps** pro Animation optional im Manifest; sonst gelten die eingebauten Defaults.
+### Beispiel: Krieger mit Lauf-Animation (6 Frames à 64×96 px)
 
-`manifest.json`-Beispiel:
+```
+assets/units/warrior/
+├── manifest.json     ← Pflicht, sobald Sheets vorhanden sind
+└── walk.png          ← 384×768 px = 6 Spalten (Frames) × 8 Zeilen (Richtungen)
+```
+
+`manifest.json`:
 
 ```json
 {
@@ -66,6 +61,42 @@ assets/
   "anims": { "walk": { "fps": 8 }, "attack": { "fps": 10 } }
 }
 ```
+
+Nur `walk.png` vorhanden? Dann läuft der Krieger mit dem eigenen Sprite und
+nutzt für alle übrigen Animationen weiter den Platzhalter — Animationen können
+einzeln nachgeliefert werden.
+
+### Regeln
+
+- **Framegröße:** einheitlich pro Einheit, angegeben in `manifest.json`
+  (`frame_width`/`frame_height`). Empfohlener Standard: **64×96 px**.
+  **Hard Cap: 64×96** — größere Frames sprengen das Textur-Atlas-Budget.
+- **Blickrichtungen (Zeilen), zwei erlaubte Varianten — Wahl gilt pro Datei:**
+
+  | Zeile | 8-Zeilen-Sheet | 5-Zeilen-Sheet |
+  |---|---|---|
+  | 1 | front | front |
+  | 2 | back | back |
+  | 3 | right | right |
+  | 4 | left | front_right |
+  | 5 | front_right | back_right |
+  | 6 | front_left | — |
+  | 7 | back_right | — |
+  | 8 | back_left | — |
+
+  - **8 Zeilen = keine Spiegelung.** Alle acht Richtungen werden exakt so
+    verwendet, wie sie gezeichnet sind — links darf sich also individuell von
+    rechts unterscheiden (Schild-/Schwertseite!).
+  - **5 Zeilen = Komfort-Variante:** left/front_left/back_left werden
+    automatisch aus den rechten Ansichten gespiegelt.
+  - Erkannt wird die Variante an der Bildhöhe (`Höhe / frame_height` = 8 oder 5);
+    `walk.png` darf 8 Zeilen haben und `dead.png` gleichzeitig 5.
+- **Frames (Spalten):** Anzahl = `Bildbreite / frame_width`, frei wählbar pro Animation.
+- **Animationsnamen** (Dateiname = `<anim>.png`): `idle, walk, attack, punch, kick,
+  shove, jump, carry, carry_walk, dead, sit, roll` — zusätzlich `cast` (nur Schamanin/
+  Prediger) und `throw` (nur Feuerkrieger). Fehlt eine Datei, wird nur diese Animation
+  prozedural dargestellt.
+- **fps** pro Animation optional im Manifest; sonst gelten die eingebauten Defaults.
 
 **Stammesfarbe:** Die Sprites dürfen voll koloriert sein. Bereiche, die die Stammesfarbe
 annehmen sollen (Kleidung, Federn, Kriegsbemalung), werden in `<anim>_mask.png`
