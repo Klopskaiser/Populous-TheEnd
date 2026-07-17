@@ -73,7 +73,12 @@ const SCAN_MAX_CANDIDATES: int = 24
 ## is ignored by scans — instead of walking into the cliff wall (phase 8.2).
 const UNREACHABLE_TARGET_MS: int = 3000
 ## At most this many unreachable-target entries are remembered per unit.
-const UNREACHABLE_CACHE_MAX: int = 8
+const UNREACHABLE_CACHE_MAX: int = 32
+## After a FAILED combat path plan (A* flooded the whole reachable region —
+## the most expensive call there is), this unit plans no further combat paths
+## for this long. Together with the unreachable cache this caps the failing-A*
+## rate of units trapped under a cliff (Ebene-Klippen lag, user bug report).
+const COMBAT_PATH_FAIL_COOLDOWN_MS: int = 800
 ## Radius at which idle / attack-moving combatants notice an enemy BUILDING to
 ## assault (phase 7g). Larger than the melee aggro so buildings (stationary, big
 ## targets) are reliably picked up — but still LOWEST priority: an enemy unit in
@@ -334,6 +339,8 @@ var attack_anim: StringName = &"punch"
 var _sit_decision_target = null
 ## Cached A* goal while approaching a target (replanned when it drifts).
 var _combat_goal: Vector3 = Vector3.INF
+## No combat path planning before this tick (set after a failed A*).
+var _combat_path_fail_until_ms: int = 0
 ## Corpse decay: seconds since death; corpse_expired fires once at the end.
 var _corpse_timer: float = 0.0
 var _corpse_done: bool = false
@@ -2384,10 +2391,24 @@ func _dissolve_own_group() -> void:
 ## _tick_attack disengages) — bounded, so a mass of blocked chasers does not
 ## re-run the expensive failing A* every scan (Bergpass fix, phase 8.2).
 func _mark_target_unreachable(target: Unit) -> void:
+	var now: int = Time.get_ticks_msec()
 	if _unreach_targets.size() >= UNREACHABLE_CACHE_MAX:
-		_unreach_targets.clear()
-	_unreach_targets[target.get_instance_id()] = \
-		Time.get_ticks_msec() + UNREACHABLE_TARGET_MS
+		# Evict expired entries; if none expired, drop the soonest-expiring
+		# one. NEVER clear wholesale: with more unreachable enemies in aggro
+		# range than the cap, the old clear() forgot everything and the
+		# expensive failing A* re-ran forever (Ebene-Klippen lag).
+		var soonest_key: int = 0
+		var soonest_expiry: int = 9223372036854775807
+		for key in _unreach_targets.keys():
+			var expiry: int = int(_unreach_targets[key])
+			if expiry <= now:
+				_unreach_targets.erase(key)
+			elif expiry < soonest_expiry:
+				soonest_expiry = expiry
+				soonest_key = int(key)
+		if _unreach_targets.size() >= UNREACHABLE_CACHE_MAX and soonest_key != 0:
+			_unreach_targets.erase(soonest_key)
+	_unreach_targets[target.get_instance_id()] = now + UNREACHABLE_TARGET_MS
 
 
 ## Registers `attacker` as a melee attacker on this unit's fight (pairing
@@ -2433,8 +2454,15 @@ func melee_slot_position(slot: int) -> Vector3:
 func _approach(dest: Vector3, delta: float) -> bool:
 	if _flat_dist(position, dest) > COMBAT_DIRECT_RANGE and nav_grid != null:
 		if not _has_path() or _flat_dist(_combat_goal, dest) > 1.0:
+			# Failed-plan cooldown: a failing A* floods the whole reachable
+			# region (worst case). One recent failure = report "unreachable"
+			# cheaply instead of flooding again for every scanned enemy.
+			var now: int = Time.get_ticks_msec()
+			if now < _combat_path_fail_until_ms:
+				return false
 			_combat_goal = dest
 			if not _plan_path_to(dest):
+				_combat_path_fail_until_ms = now + COMBAT_PATH_FAIL_COOLDOWN_MS
 				return false
 		if _advance_path(delta):
 			_clear_path()

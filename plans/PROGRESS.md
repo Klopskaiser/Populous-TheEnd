@@ -4196,3 +4196,38 @@ nur die kurzen Schadens-Sterne) plus Dauerschleifen-Sounds:
 
 **Verifikation:** Suite 1619 grün, Ladecheck sauber, Stresstest-Smoke 45 s
 (Zauber-Dauerfeuer erzeugt Panik/Brand/Verletzte in Masse) ohne Fehler.
+
+### Bugfix-Runde Ebene-Klippen (Nutzerreport, 2026-07-13)
+
+Report: Nach einem Ebene-Cast mit unerreichbarer Kante (1) fliegen
+Feuerbälle durch die Geländekante, (2) massiver Lag, sobald Einheiten unten
+an der Klippe feststecken und oben Gegner stehen.
+
+**1. Feuerball-Terrainkollision:** `Fireball` kennt jetzt `terrain_data`
+(an allen 3 Spawn-Stellen im Firewarrior gesetzt); im Flug prüft
+`_hits_terrain()` pro Tick `position.y < get_height(x,z)` → der Ball
+zerschellt wirkungslos an Klippenwand/Boden statt hindurchzufliegen. Flüge
+nach oben/übers Gelände bleiben frei; Alt-Tests ohne Terrain (null) sind
+unberührt.
+
+**2. Klippen-Lag — zwei Ursachen, beide in unit.gd:**
+- `_mark_target_unreachable` leerte bei vollem Cache (8) den KOMPLETTEN
+  Cache — standen mehr als 8 unerreichbare Gegner im Aggro-Radius,
+  vergaß die Einheit alles und lief den teuersten Pfad-Call überhaupt
+  (fehlschlagendes A* = Flood-Fill der gesamten erreichbaren Fläche)
+  endlos neu. Fix: abgelaufene Einträge räumen, sonst den am frühesten
+  ablaufenden Eintrag verdrängen — nie pauschal leeren; Cap 8 → 32.
+- Neuer **Combat-Path-Fail-Cooldown** (`COMBAT_PATH_FAIL_COOLDOWN_MS`
+  = 800): nach einem fehlgeschlagenen Kampf-Pfadplan meldet `_approach`
+  für 0,8 s sofort „unerreichbar" statt für jeden gescannten Gegner erneut
+  zu fluten → Deckel ~1,25 fehlschlagende A*/s pro Einheit, egal wie viele
+  Gegner oben stehen. Normale (erfolgreiche) Pfadplanung ist unberührt.
+
+**Tests (test_combat.gd, +4):** Klippen-Welt-Helfer (`_make_cliff_world`,
+Plateau 15 m ab x=40); Feuerball von unten auf Plateau-Ziel zerschellt ohne
+Schaden; Flachboden-Schuss trifft weiterhin; gefangener Krieger mit 12
+unerreichbaren Gegnern (> alter Cache-Cap!) produziert ≤ 8 fehlschlagende
+Pläne in 5 s (alt: einer pro 0,25-s-Scan); Cache-Eviction statt Clear-all
+(Größe bleibt gedeckelt, jüngstes Ziel bleibt gemerkt). Suite **1627 grün**,
+Ladecheck + Skirmish-Smoke sauber. **Nutzer ausstehend:** Original-Szenario
+(Ebene + KI-Feuerkrieger) im Spiel nachstellen.

@@ -161,6 +161,7 @@ func _throw_fireball(target: Unit) -> void:
 		return
 	var ball: Fireball = Fireball.new()
 	ball.setup(self, target, position + Vector3(0.0, 1.1, 0.0))
+	ball.terrain_data = terrain_data
 	path_service.register_projectile(ball)
 	_emit_combat_hit(&"throw")
 
@@ -194,6 +195,7 @@ func fire_from(origin: Vector3, target: Unit) -> void:
 		return
 	var ball: Fireball = Fireball.new()
 	ball.setup(self, target, origin)
+	ball.terrain_data = terrain_data
 	path_service.register_projectile(ball)
 	_emit_combat_hit(&"throw")
 
@@ -203,5 +205,6 @@ func _throw_fireball_at_building(building) -> void:
 		return
 	var ball: Fireball = Fireball.new()
 	ball.setup_building(self, building, position + Vector3(0.0, 1.1, 0.0))
+	ball.terrain_data = terrain_data
 	path_service.register_projectile(ball)
 	_emit_combat_hit(&"throw")

@@ -30,6 +30,9 @@ const NEIGHBOR_ROLL_CHANCE: float = 0.5
 
 var shooter = null   # untyped: may be freed mid-flight
 var target = null    # untyped: may be freed mid-flight
+## Terrain for in-flight collision: the ball fizzles against ground/cliff
+## faces instead of passing through them (null in old tests = no check).
+var terrain_data: TerrainData = null
 ## Enemy building target (phase 7g, firewarrior siege); mutually exclusive with
 ## `target`. Untyped: may be freed when the building collapses.
 var target_building = null
@@ -74,6 +77,9 @@ func tick(delta: float) -> void:
 	if _target_alive():
 		_dest = target.position + Vector3(0.0, TARGET_HEIGHT, 0.0)
 	position = position.move_toward(_dest, SPEED * delta)
+	if _hits_terrain():
+		done = true   # smacked into a cliff face / the ground — no damage
+		return
 	if position.distance_to(_dest) <= HIT_RANGE or _age >= MAX_LIFETIME:
 		_impact()
 
@@ -84,6 +90,9 @@ func _tick_building(delta: float) -> void:
 		return
 	_dest = target_building.center_world() + Vector3(0.0, TARGET_HEIGHT, 0.0)
 	position = position.move_toward(_dest, SPEED * delta)
+	if _hits_terrain():
+		done = true
+		return
 	if position.distance_to(_dest) <= BUILDING_HIT_RANGE or _age >= MAX_LIFETIME:
 		_impact_building()
 
@@ -99,6 +108,14 @@ func _impact_building() -> void:
 		var events: Node = get_node_or_null("/root/Events")
 		if events != null:
 			events.combat_hit.emit(&"fireball", position)
+
+
+## True when the ball's current position lies below the terrain surface —
+## it flew into the ground or a cliff face (e.g. a Flatten edge). Upward
+## flight stays free; only terrain blocks (user bug report, Ebene-Klippen).
+func _hits_terrain() -> bool:
+	return terrain_data != null \
+		and position.y < terrain_data.get_height(position.x, position.z)
 
 
 func _building_alive() -> bool:

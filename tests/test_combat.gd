@@ -823,3 +823,114 @@ func test_brave_retaliates_but_does_not_aggro() -> void:
 	check(brave.state == Unit.State.ATTACK, "brave retaliates when hit")
 	check(brave.attack_target == enemy, "brave targets its attacker")
 	_free_world(w)
+
+
+# --- Cliff fights (Ebene-Klippen, user bug report) -----------------------------------
+
+## Terrain with a hard cliff at x = 40: low ground (5 m) west of it, a
+## plateau (15 m) east of it, spanning the full map depth (no way around).
+func _cliff_terrain() -> TerrainData:
+	var td: TerrainData = TerrainData.new()
+	for vz in range(td.verts):
+		for vx in range(td.verts):
+			td.heights[vz * td.verts + vx] = 15.0 if vx >= 40 else 5.0
+	return td
+
+
+func _make_cliff_world() -> Dictionary:
+	var td: TerrainData = _cliff_terrain()
+	var nav: NavGrid = NavGrid.new(td)
+	var tribe0: Tribe = Tribe.new(0)
+	var tribe1: Tribe = Tribe.new(1)
+	var um: UnitManager = UnitManager.new()
+	um.setup(td, nav, [tribe0, tribe1] as Array[Tribe])
+	return {"td": td, "nav": nav, "tribe0": tribe0, "tribe1": tribe1, "unit_manager": um}
+
+
+## A fireball fired from the low ground at a target on the plateau smacks
+## into the cliff face and fizzles — no damage through terrain edges.
+func test_fireball_blocked_by_cliff_face() -> void:
+	var w: Dictionary = _make_cliff_world()
+	var shooter: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(36, 30))
+	shooter.position.y = 5.0
+	var target: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(44, 30))
+	target.position.y = 15.0
+	var hp_before: int = target.health
+	var ball: Fireball = Fireball.new()
+	ball.setup(shooter, target, shooter.position + Vector3(0.0, 1.1, 0.0))
+	ball.terrain_data = w.td
+	for i in range(60):
+		if ball.done:
+			break
+		ball.tick(TICK)
+	check(ball.done, "cliff fireball finished")
+	check(target.health == hp_before, "no damage through the cliff face")
+	ball.free()
+	_free_world(w)
+
+
+## Same shot on open flat ground still connects (the terrain check must not
+## eat legitimate hits at chest height above the floor).
+func test_fireball_still_hits_on_flat_ground() -> void:
+	var w: Dictionary = _make_world()
+	var shooter: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(30, 30))
+	shooter.position.y = 5.0
+	var target: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(35, 30))
+	target.position.y = 5.0
+	var hp_before: int = target.health
+	var ball: Fireball = Fireball.new()
+	ball.setup(shooter, target, shooter.position + Vector3(0.0, 1.1, 0.0))
+	ball.terrain_data = w.td
+	for i in range(60):
+		if ball.done:
+			break
+		ball.tick(TICK)
+	check(target.health < hp_before, "flat-ground fireball still hits")
+	ball.free()
+	_free_world(w)
+
+
+## A melee unit trapped under the cliff with MANY enemies above must not
+## re-run the expensive failing A* on every scan: the fail cooldown plus the
+## (evicting, never-clearing) unreachable cache bound the plan-fail rate.
+func test_trapped_attacker_throttles_failing_paths() -> void:
+	var w: Dictionary = _make_cliff_world()
+	var warrior: Unit = _spawn(w, WARRIOR_SCENE, 0, Vector2(38, 30))
+	warrior.position.y = 5.0
+	# 12 enemies on the plateau, inside the warrior's 8 m aggro radius but
+	# unreachable — more than the OLD cache cap of 8 (which cleared wholesale
+	# and thrashed forever).
+	for i in range(12):
+		var e: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(42.0 + float(i % 3), 27.0 + float(i / 3) * 2.0))
+		e.position.y = 15.0
+	Unit.dbg_plan_calls = 0
+	Unit.dbg_plan_fails = 0
+	for i in range(50):   # 5 simulated seconds
+		warrior.tick(TICK)
+		w.unit_manager.tick(TICK)
+	# 5 s / 0.8 s cooldown ≈ 6 failing plans max (+1 margin); the old code
+	# produced one failing FULL-REGION A* per scan interval (dozens).
+	check(Unit.dbg_plan_fails <= 8,
+		"failing A* is throttled (%d fails in 5 s)" % Unit.dbg_plan_fails)
+	check(warrior.state != Unit.State.DEAD, "warrior still alive/idle below the cliff")
+	_free_world(w)
+
+
+## The unreachable-target cache evicts single entries instead of clearing
+## wholesale (the wholesale clear caused the thrash above).
+func test_unreachable_cache_evicts_instead_of_clearing() -> void:
+	var w: Dictionary = _make_world()
+	var unit: Unit = _spawn(w, WARRIOR_SCENE, 0, Vector2(30, 30))
+	var targets: Array = []
+	for i in range(Unit.UNREACHABLE_CACHE_MAX + 2):
+		targets.append(_spawn(w, BRAVE_SCENE, 1, Vector2(60, 20 + i)))
+	for t in targets:
+		unit._mark_target_unreachable(t)
+	check(unit._unreach_targets.size() <= Unit.UNREACHABLE_CACHE_MAX,
+		"cache stays bounded")
+	check(unit._unreach_targets.size() >= Unit.UNREACHABLE_CACHE_MAX - 1,
+		"cache is NOT cleared wholesale on overflow")
+	var last: Unit = targets[targets.size() - 1]
+	check(unit._unreach_targets.has(last.get_instance_id()),
+		"the most recent target is remembered")
+	_free_world(w)
