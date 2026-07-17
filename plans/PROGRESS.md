@@ -4162,3 +4162,37 @@ Knockback-Physik, Scan-Intervalle/Budgets, Queue-/Slot-Layouts, Visuals.
 
 **Verifikation:** Suite 1619 grün (alle Werte identisch übernommen —
 verhaltensneutral), Ladecheck sauber, Stresstest-Smoke ohne Fehler.
+Nachtrag: Gebäude-Footprints ebenfalls zentralisiert (8 FOOTPRINT-Shims).
+
+### Status-Effekt-Overlays + Loop-Sounds (Nutzerwunsch, 2026-07-13)
+
+Anhaltende Zustände bekommen eigene, unterscheidbare Optik (vorher gab es
+nur die kurzen Schadens-Sterne) plus Dauerschleifen-Sounds:
+
+- **`scripts/ui/status_fx_renderer.gd`** (neu, Muster = StarsRenderer): drei
+  MultiMeshes (je 1 Draw Call, Cap 256 Instanzen) für **PANIC** (rotes
+  Ausrufezeichen über dem Kopf), **BURNING** (Flackerflamme auf dem Körper,
+  auch brennende Katapulte) und **INJURED** (< 25 % Leben =
+  `Unit.BADLY_HURT_FRAC`, rote Tropfen; nur Sprite-Einheiten — die 1-HP-
+  Konvention des Katapults zählt nicht als Verletzung). Icons prozedural
+  (2–3 Frames, geteilter Material-Frame wie bei den Sternen), ersetzbar per
+  `assets/textures/effects/<name>.png` (Einzelbild oder horizontaler
+  Streifen quadratischer Frames). Positionierung entlang Kamera-Up wie die
+  Sterne. Verkabelt in main.gd neben dem StarsRenderer.
+- **Loop-Sounds im AudioManager:** neue API `start_loop(name, owner)` /
+  `stop_loop(name, owner)` — positionaler Player folgt dem Owner
+  (`_process`), Loop per finished→play (unabhängig vom Import-Loop-Flag),
+  **Cap `LOOP_CAP_PER_NAME` = 4** gleichzeitige Emitter pro Name; weitere
+  Owner warten und werden beim Freiwerden promotet. Owner weg (freed /
+  nicht mehr im Tree) → Slot wird automatisch freigegeben.
+  Dateien: `unit_panic_loop.ogg`, `unit_burning_loop.ogg`,
+  `unit_injured_loop.ogg` (Fallback stumm).
+- **Zustands-Tracking:** Bitmaske `_status_fx_mask` + Frame-Stempel
+  `_status_fx_seen` auf der Unit; der Renderer difft die Maske pro Frame
+  (Start/Stop der Loops exakt synchron zur Optik). Einheiten, die die Welt
+  verlassen, aber am Leben bleiben (Training/Garnison — bleiben im Tree!),
+  werden über den stale Frame-Stempel abgeräumt (`_cleanup_departed`),
+  sonst liefe deren Loop weiter.
+
+**Verifikation:** Suite 1619 grün, Ladecheck sauber, Stresstest-Smoke 45 s
+(Zauber-Dauerfeuer erzeugt Panik/Brand/Verletzte in Masse) ohne Fehler.

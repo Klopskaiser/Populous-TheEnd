@@ -25,6 +25,7 @@ assets/
 │   └── trees/tree.glb
 ├── textures/
 │   ├── terrain/                 # sand.png, grass.png, rock.png, water.png (water optional)
+│   ├── effects/                 # optional: panic.png, burning.png, injured.png (Status-Icons)
 │   └── spells/                  # optional: fireball.png, swarm.png, tornado.png, lava.png
 └── audio/
     ├── music/*.ogg              # alle Dateien = Playlist (Loop)
@@ -122,6 +123,18 @@ VRAM-Kompression einstellen.
   Feuern als Wurfarm-Pivot animiert (Drehung um X, Ruheposition = gespannt).
 - Bau-Animation (Wachsen aus dem Boden) und Beschädigungs-Optik übernimmt das Spiel.
 
+## Status-Effekt-Icons (`textures/effects/`)
+
+Über Einheiten mit anhaltendem Zustand schwebt ein animiertes Icon: **Panik**
+(rotes Ausrufezeichen), **Brennen** (Flamme auf dem Körper), **stark verletzt**
+(rote Tropfen, unter 25 % Leben). Die eingebauten Pixel-Icons lassen sich pro
+Effekt ersetzen:
+
+- `panic.png`, `burning.png`, `injured.png`
+- Format: ein einzelnes Bild **oder** ein horizontaler Streifen **quadratischer**
+  Frames (Framezahl = Breite ÷ Höhe), abgespielt als Loop (~6,7 fps).
+- Transparenter Hintergrund (Alpha), Lossless-Import belassen.
+
 ## Terrain-Texturen
 
 `sand.png`, `grass.png`, `rock.png` — kachelbare (seamless) Texturen. Sobald alle drei
@@ -169,6 +182,16 @@ richtig und erwünscht.
 | `unit_burning.ogg` | Einheit fängt Feuer (Lava/Feuerzauber) |
 | `shaman_hurt.ogg` | Schamanin erleidet Schaden (max. alle 1,2 s; mehrere Varianten empfohlen) |
 | `shaman_death.ogg` | Tod der Schamanin |
+
+**Status-Loops** — `audio/sfx/` (laufen in Dauerschleife, **solange der Zustand
+anhält**; max. 4 gleichzeitige Emitter pro Sound, weitere Einheiten rücken nach,
+sobald ein Platz frei wird; Fallback = stumm):
+
+| Datei | Läuft solange … |
+|---|---|
+| `unit_panic_loop.ogg` | … die Einheit in Panik ist |
+| `unit_burning_loop.ogg` | … die Einheit/das Katapult brennt |
+| `unit_injured_loop.ogg` | … die Einheit unter 25 % Leben ist |
 
 **Katapult** — `audio/sfx/` (Fallback siehe Tabelle):
 

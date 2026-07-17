@@ -9,6 +9,9 @@ extends Node
 const SFX_POOL_SIZE: int = 8
 const UI_POOL_SIZE: int = 4
 const BUSES: Array[String] = ["Music", "Ambience", "SFX", "UI"]
+## Max simultaneous looping emitters PER loop name (status effects like
+## burning/panic); further requests wait and are promoted when a slot frees.
+const LOOP_CAP_PER_NAME: int = 4
 
 var _sfx_pool: Array[AudioStreamPlayer3D] = []
 var _sfx_index: int = 0
@@ -22,6 +25,8 @@ var _music_index: int = 0
 var _ambience_index: int = 0
 var _sfx_last_ms: Dictionary = {}      # sfx name -> last play (min-interval throttle)
 var _stream_cache: Dictionary = {}     # rel prefix -> Array[AudioStream] (all variants)
+## Looping emitters: name -> {"active": [{owner, player}], "waiting": [owner]}.
+var _loops: Dictionary = {}
 
 
 func _enter_tree() -> void:
@@ -126,6 +131,81 @@ func _streams_for(rel: String) -> Array:
 	streams.append_array(AssetLibrary.stream_variants(rel))
 	_stream_cache[rel] = streams
 	return streams
+
+
+# --- Looping status sounds -------------------------------------------------------------
+
+## Starts a positional loop (assets/audio/sfx/<name>.ogg, replayed on finish)
+## that follows `owner` until stop_loop. At most LOOP_CAP_PER_NAME emitters
+## play per name; extra owners wait and are promoted when a slot frees.
+## Missing file = no-op. Callers pair every start with a stop; freed or
+## world-removed owners are also cleaned up in _process.
+func start_loop(name: StringName, owner: Node3D) -> void:
+	if owner == null or not is_instance_valid(owner):
+		return
+	var entry: Dictionary = _loops.get_or_add(name, {"active": [], "waiting": []})
+	for a in entry.active:
+		if a.owner == owner:
+			return
+	if owner in entry.waiting:
+		return
+	if entry.active.size() >= LOOP_CAP_PER_NAME:
+		entry.waiting.append(owner)
+		return
+	_activate_loop(name, entry, owner)
+
+
+func stop_loop(name: StringName, owner: Node3D) -> void:
+	if not _loops.has(name):
+		return
+	var entry: Dictionary = _loops[name]
+	entry.waiting.erase(owner)
+	for i in range(entry.active.size()):
+		if entry.active[i].owner == owner:
+			_release_loop_slot(name, entry, i)
+			return
+
+
+func _activate_loop(name: StringName, entry: Dictionary, owner: Node3D) -> void:
+	var streams: Array = _streams_for("audio/sfx/%s" % name)
+	if streams.is_empty():
+		return
+	var player: AudioStreamPlayer3D = AudioStreamPlayer3D.new()
+	player.max_distance = 40.0
+	player.bus = "SFX"
+	player.stream = streams[randi() % streams.size()]
+	# Replay on finish -> loops regardless of the file's import loop flag.
+	player.finished.connect(player.play)
+	add_child(player)
+	player.global_position = owner.global_position
+	player.play()
+	entry.active.append({"owner": owner, "player": player})
+
+
+func _release_loop_slot(name: StringName, entry: Dictionary, index: int) -> void:
+	(entry.active[index].player as AudioStreamPlayer3D).queue_free()
+	entry.active.remove_at(index)
+	while not entry.waiting.is_empty():
+		var next = entry.waiting.pop_front()
+		if next != null and is_instance_valid(next) and (next as Node3D).is_inside_tree():
+			_activate_loop(name, entry, next)
+			return
+
+
+## Follows the owners and drops loops whose owner vanished (freed / left the
+## scene tree). A handful of dictionary entries — negligible per frame.
+func _process(_delta: float) -> void:
+	for name in _loops:
+		var entry: Dictionary = _loops[name]
+		for i in range(entry.active.size() - 1, -1, -1):
+			var a: Dictionary = entry.active[i]
+			var owner = a.owner
+			if owner == null or not is_instance_valid(owner) \
+					or not (owner as Node3D).is_inside_tree():
+				_release_loop_slot(name, entry, i)
+			else:
+				(a.player as AudioStreamPlayer3D).global_position = \
+					(owner as Node3D).global_position
 
 
 # --- Playlists -----------------------------------------------------------------------

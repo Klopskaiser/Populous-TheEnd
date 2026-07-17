@@ -408,6 +408,10 @@ var _no_combat_timer: float = 0.0
 var _regen_frac: float = 0.0
 ## Stars overlay visible until this tick-time (see has_stars()).
 var stars_until_ms: int = 0
+## Active status-effect bits + frame stamp, managed by the StatusFxRenderer
+## (panic / burning / badly hurt overlays and their loop sounds).
+var _status_fx_mask: int = 0
+var _status_fx_seen: int = 0
 ## Damage taken recently (decays over STARS_WINDOW).
 var _recent_damage: float = 0.0
 ## Cached Events bus (combat_hit emissions), resolved once when in-tree.
