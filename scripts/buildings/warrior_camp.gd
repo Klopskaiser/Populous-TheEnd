@@ -6,7 +6,7 @@ class_name WarriorCamp extends TrainingBuilding
 ## a blue-violet plume, and shields on the outer wall. War/weapon theme.
 
 const WOOD_COST: int = Balance.WARRIOR_CAMP_WOOD_COST
-const FOOTPRINT: Vector2i = Vector2i(5, 5)
+const FOOTPRINT: Vector2i = Balance.WARRIOR_CAMP_FOOTPRINT
 const TRAINING_TIME: float = Balance.WARRIOR_CAMP_TRAINING_TIME
 const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
 

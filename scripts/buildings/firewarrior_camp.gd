@@ -6,7 +6,7 @@ class_name FirewarriorCamp extends TrainingBuilding
 ## the corners. Fire theme.
 
 const WOOD_COST: int = Balance.FIREWARRIOR_CAMP_WOOD_COST
-const FOOTPRINT: Vector2i = Vector2i(8, 8)
+const FOOTPRINT: Vector2i = Balance.FIREWARRIOR_CAMP_FOOTPRINT
 const TRAINING_TIME: float = Balance.FIREWARRIOR_CAMP_TRAINING_TIME
 const FIREWARRIOR_SCENE: PackedScene = preload("res://scenes/units/firewarrior.tscn")
 

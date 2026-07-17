@@ -10,7 +10,7 @@ class_name Hut extends Building
 ## then construction with delivered wood.
 
 const WOOD_COST: int = Balance.HUT_WOOD_COST
-const FOOTPRINT: Vector2i = Vector2i(4, 4)
+const FOOTPRINT: Vector2i = Balance.HUT_FOOTPRINT
 const CAPACITY: int = Balance.HUT_CAPACITY
 const SPAWN_INTERVAL: float = Balance.HUT_SPAWN_INTERVAL   # s per brave at full crew
 ## Crew slots (production workers, braves only).

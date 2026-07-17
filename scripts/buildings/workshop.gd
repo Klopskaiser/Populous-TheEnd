@@ -31,7 +31,7 @@ class_name Workshop extends Building
 const WOOD_COST: int = Balance.WORKSHOP_WOOD_COST
 ## Twice the hut's area (hut 4x4): authored 8 wide x 4 deep, entrance south.
 ## BuildingManager swaps the footprint for east/west orientations.
-const FOOTPRINT: Vector2i = Vector2i(8, 4)
+const FOOTPRINT: Vector2i = Balance.WORKSHOP_FOOTPRINT
 const MAX_HEALTH: int = Balance.WORKSHOP_HP
 ## Worker slots (housed inside; production needs >= 1).
 const WORKER_SLOTS: int = 3

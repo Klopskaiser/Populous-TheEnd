@@ -8,7 +8,7 @@ class_name ReincarnationSite extends Building
 ## respawn: losing it is a real risk.
 
 const WOOD_COST: int = 0
-const FOOTPRINT: Vector2i = Vector2i(3, 3)
+const FOOTPRINT: Vector2i = Balance.REINCARNATION_SITE_FOOTPRINT
 ## Radius around the centre in which a brave counts as praying.
 const PRAY_RADIUS: float = 5.0
 ## Seconds between the shaman's death and her reincarnation.

@@ -6,7 +6,7 @@ class_name Temple extends TrainingBuilding
 ## finial on top, and a small arched porch. Holy/peaceful theme.
 
 const WOOD_COST: int = Balance.TEMPLE_WOOD_COST
-const FOOTPRINT: Vector2i = Vector2i(6, 6)
+const FOOTPRINT: Vector2i = Balance.TEMPLE_FOOTPRINT
 const TRAINING_TIME: float = Balance.TEMPLE_TRAINING_TIME
 const PREACHER_SCENE: PackedScene = preload("res://scenes/units/preacher.tscn")
 

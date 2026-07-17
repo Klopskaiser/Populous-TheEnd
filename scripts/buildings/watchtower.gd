@@ -20,7 +20,7 @@ class_name Watchtower extends Building
 ## max 5 melee raiders instead of 15.
 
 const WOOD_COST: int = Balance.WATCHTOWER_WOOD_COST
-const FOOTPRINT: Vector2i = Vector2i(2, 2)
+const FOOTPRINT: Vector2i = Balance.WATCHTOWER_FOOTPRINT
 const MAX_HEALTH: int = Balance.WATCHTOWER_HP
 ## Crew slots (combat units / shaman).
 const CREW_CAPACITY: int = 2

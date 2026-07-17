@@ -13,7 +13,7 @@ class_name Forester extends Building
 ## AREA_TREE_CAP trees in the area or when no free cell is left.
 
 const WOOD_COST: int = Balance.FORESTER_WOOD_COST
-const FOOTPRINT: Vector2i = Vector2i(3, 3)
+const FOOTPRINT: Vector2i = Balance.FORESTER_FOOTPRINT
 const MAX_HEALTH: int = Balance.FORESTER_HP
 ## Worker slots.
 const WORKER_SLOTS: int = 4

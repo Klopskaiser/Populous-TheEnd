@@ -221,6 +221,18 @@ const RAID_DPS_PER_RAIDER: float = 6.0
 ## Maximale gleichzeitige Nahkampf-Abreißer pro Gebäude.
 const MAX_MELEE_RAIDERS: int = 15
 
+## Bauplan-Größen (Footprint in Zellen, Breite x Tiefe; 1 Zelle = 1 m).
+## Der Eingang liegt auf der Südseite; nicht-quadratische Footprints werden
+## beim Drehen automatisch getauscht.
+const HUT_FOOTPRINT: Vector2i = Vector2i(4, 4)
+const WARRIOR_CAMP_FOOTPRINT: Vector2i = Vector2i(5, 5)
+const TEMPLE_FOOTPRINT: Vector2i = Vector2i(6, 6)
+const FIREWARRIOR_CAMP_FOOTPRINT: Vector2i = Vector2i(8, 8)
+const FORESTER_FOOTPRINT: Vector2i = Vector2i(3, 3)
+const WORKSHOP_FOOTPRINT: Vector2i = Vector2i(8, 4)
+const WATCHTOWER_FOOTPRINT: Vector2i = Vector2i(2, 2)
+const REINCARNATION_SITE_FOOTPRINT: Vector2i = Vector2i(3, 3)
+
 # --- Hütte ---
 const HUT_WOOD_COST: int = 12
 const HUT_HP: int = 300
