@@ -33,7 +33,7 @@ assets/
     │                              # fireball_0.ogg, throw_0.ogg, preach_0.ogg — beliebig
     │                              # viele nummerierte Varianten ab _0, ohne Lücken
     ├── sfx/building_complete.ogg, building_destroyed.ogg, training_done.ogg, build_place.ogg
-    ├── sfx/spell_<id>.ogg       # z. B. spell_fireball.ogg, spell_lightning.ogg
+    ├── sfx/spell_<id>.ogg       # vollständige Liste siehe Abschnitt Audio
     └── ui/select_unit.ogg, select_building.ogg, click.ogg
 ```
 
@@ -81,8 +81,10 @@ VRAM-Kompression einstellen.
 - **Ursprung:** am Boden, mittig im Footprint des Gebäudes.
 - **Ausrichtung:** Eingang zeigt Richtung **+Z (Süden)** — die Drehung aufs Gelände
   übernimmt das Spiel.
-- **Maßstab:** 1 Godot-Einheit = 1 m; das Modell muss in den Gebäude-Footprint passen
-  (Hütte 4×4, Kaserne 5×5, Tempel 6×6, Feuertempel 8×8, Wachturm 2×2 …).
+- **Maßstab:** 1 Godot-Einheit = 1 m; das Modell muss in den Gebäude-Footprint passen:
+  Hütte (`hut`) 4×4, Kaserne (`warrior_camp`) 5×5, Feuertempel (`firewarrior_camp`) 8×8,
+  Tempel (`temple`) 6×6, Förster (`forester`) 3×3, Werkstatt (`workshop`) 8×4 (breit×tief),
+  Wachturm (`watchtower`) 2×2, Reinkarnationsplatz (`reincarnation_site`) 3×3.
 - **Stammesfarbe:** Ein `MeshInstance3D` mit dem Namen `Flag` im Modell wird automatisch
   in der Stammesfarbe eingefärbt (gilt auch für `siege_engine.glb`).
 - **Katapult-Extras (`siege_engine.glb`):** Ein optionaler Node namens `Arm` wird beim
@@ -100,11 +102,58 @@ richtig und erwünscht.
 ## Audio
 
 - Format: **.ogg** (empfohlen) oder .wav.
-- `music/` und `ambience/`: alle Dateien im Ordner werden als Playlist geloopt.
+- `music/` und `ambience/`: alle Dateien im Ordner werden (alphabetisch sortiert)
+  als Playlist geloopt — Dateinamen frei wählbar.
 - Kampfsounds: nummerierte Varianten ab `_0` ohne Lücken (`punch_0.ogg, punch_1.ogg, …`);
   pro Treffer wird zufällig eine Variante gespielt.
 - Fehlende Kampfsounds werden weiterhin synthetisiert; alle anderen fehlenden Sounds
   bleiben einfach stumm.
+
+### Vollständige Liste der einsetzbaren Sounds
+
+**Kampf** — `audio/sfx/combat/` (nummerierte Varianten, Fallback = Synthese):
+
+| Datei(en) | Wird gespielt bei |
+|---|---|
+| `punch_0.ogg`, `punch_1.ogg`, … | Faustschlag (Nahkampf) |
+| `kick_0.ogg`, … | Tritt (Nahkampf) |
+| `shove_0.ogg`, … | Schubser (Nahkampf) |
+| `fireball_0.ogg`, … | Feuerball-Einschlag |
+| `throw_0.ogg`, … | Feuerball-Abschuss (Feuerkrieger) |
+| `preach_0.ogg`, … | Prediger-Gesang (Bekehrung) |
+
+**Ereignisse** — `audio/sfx/` (Fallback = stumm):
+
+| Datei | Wird gespielt bei |
+|---|---|
+| `building_complete.ogg` | Gebäude fertiggestellt |
+| `building_destroyed.ogg` | Gebäude zerstört |
+| `training_done.ogg` | Einheit fertig ausgebildet |
+| `build_place.ogg` | Bauplatz gesetzt (Baustart) |
+
+**Zauber** — `audio/sfx/spell_<id>.ogg`, gespielt beim erfolgreichen Wirken.
+Die zehn gültigen IDs (aus `scripts/spells/*.gd`):
+
+| Datei | Zauber |
+|---|---|
+| `spell_fireball.ogg` | Feuerball |
+| `spell_lightning.ogg` | Blitz |
+| `spell_swarm.ogg` | Insektenschwarm |
+| `spell_landbridge.ogg` | Landbrücke |
+| `spell_tornado.ogg` | Tornado |
+| `spell_earthquake.ogg` | Erdbeben |
+| `spell_volcano.ogg` | Vulkan |
+| `spell_firestorm.ogg` | Feuerregen |
+| `spell_flatten.ogg` | Ebene |
+| `spell_sink.ogg` | Absinken |
+
+**UI** — `audio/ui/` (Fallback = stumm):
+
+| Datei | Wird gespielt bei |
+|---|---|
+| `select_unit.ogg` | Einheiten selektiert |
+| `select_building.ogg` | Gebäude selektiert |
+| `click.ogg` | *(reserviert — noch an keinen Button angebunden)* |
 
 ## Export-Builds (Notiz für später)
 
