@@ -827,7 +827,7 @@ func take_damage(amount: int, attacker = null) -> void:
 	# Hurt sounds: the shaman calls out on every hit (throttled); everyone else
 	# only once when dropping below the badly-hurt threshold.
 	if unit_kind() == &"shaman":
-		_play_sfx(&"shaman_hurt", 800)
+		_play_sfx(&"shaman_hurt", 1200)
 	else:
 		var threshold: int = int(float(max_health) * BADLY_HURT_FRAC)
 		if health <= threshold and health_before > threshold:

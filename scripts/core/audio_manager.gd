@@ -20,8 +20,8 @@ var _music_tracks: Array[AudioStream] = []
 var _ambience_tracks: Array[AudioStream] = []
 var _music_index: int = 0
 var _ambience_index: int = 0
-var _missing_warned: Dictionary = {}   # sfx/ui name -> true
 var _sfx_last_ms: Dictionary = {}      # sfx name -> last play (min-interval throttle)
+var _stream_cache: Dictionary = {}     # rel prefix -> Array[AudioStream] (all variants)
 
 
 func _enter_tree() -> void:
@@ -69,6 +69,8 @@ func _ready() -> void:
 # --- One-shot sounds -----------------------------------------------------------------
 
 ## Plays assets/audio/sfx/<name>.ogg positionally; silent when missing.
+## Numbered variants (<name>_0.ogg, <name>_1.ogg, ...) may exist alongside or
+## instead of the base file — one is picked at random per play.
 ## min_interval_ms > 0 throttles repeats of the SAME name (mass events like
 ## panic waves or death piles collapse into one sound per interval).
 func play_sfx(name: StringName, pos: Vector3, min_interval_ms: int = 0) -> void:
@@ -77,48 +79,53 @@ func play_sfx(name: StringName, pos: Vector3, min_interval_ms: int = 0) -> void:
 		if now - int(_sfx_last_ms.get(name, -min_interval_ms)) < min_interval_ms:
 			return
 		_sfx_last_ms[name] = now
-	var stream: AudioStream = _lookup(&"sfx", "audio/sfx/%s" % name)
-	if stream == null:
+	var streams: Array = _streams_for("audio/sfx/%s" % name)
+	if streams.is_empty():
 		return
 	var player: AudioStreamPlayer3D = _sfx_pool[_sfx_index]
 	_sfx_index = (_sfx_index + 1) % SFX_POOL_SIZE
 	if player.playing:
 		return   # pool exhausted -> drop (throttle)
-	player.stream = stream
+	player.stream = streams[randi() % streams.size()]
 	player.global_position = pos
 	player.play()
 
 
 ## Plays assets/audio/ui/<name>.ogg non-positionally; silent when missing.
+## Supports the same random numbered variants as play_sfx.
 func play_ui(name: StringName) -> void:
-	var stream: AudioStream = _lookup(&"ui", "audio/ui/%s" % name)
-	if stream == null:
+	var streams: Array = _streams_for("audio/ui/%s" % name)
+	if streams.is_empty():
 		return
 	var player: AudioStreamPlayer = _ui_pool[_ui_index]
 	_ui_index = (_ui_index + 1) % UI_POOL_SIZE
 	if player.playing:
 		return
-	player.stream = stream
+	player.stream = streams[randi() % streams.size()]
 	player.play()
 
 
-## True when a file for this sfx name exists (callers with a procedural
-## fallback — e.g. the siege shot's synth whoosh — decide with this).
+## True when any file (base or numbered variant) for this sfx name exists
+## (callers with a procedural fallback — e.g. the siege shot's synth whoosh —
+## decide with this).
 func has_sfx(name: StringName) -> bool:
-	return AssetLibrary.exists("audio/sfx/%s.ogg" % name) \
-		or AssetLibrary.exists("audio/sfx/%s.wav" % name)
+	return not _streams_for("audio/sfx/%s" % name).is_empty()
 
 
-## Resolves <rel>.ogg / <rel>.wav; warns once per missing name.
-func _lookup(kind: StringName, rel: String) -> AudioStream:
+## All streams for a sound name: the base file (<rel>.ogg/.wav) plus every
+## numbered variant (<rel>_0.., gap-free). Cached — assets are session-static.
+func _streams_for(rel: String) -> Array:
+	if _stream_cache.has(rel):
+		return _stream_cache[rel]
+	var streams: Array = []
 	for ext in ["ogg", "wav"]:
-		var stream: AudioStream = AssetLibrary.stream("%s.%s" % [rel, ext])
-		if stream != null:
-			return stream
-	var key: String = "%s:%s" % [kind, rel]
-	if not _missing_warned.has(key):
-		_missing_warned[key] = true
-	return null
+		var base: AudioStream = AssetLibrary.stream("%s.%s" % [rel, ext])
+		if base != null:
+			streams.append(base)
+			break
+	streams.append_array(AssetLibrary.stream_variants(rel))
+	_stream_cache[rel] = streams
+	return streams
 
 
 # --- Playlists -----------------------------------------------------------------------

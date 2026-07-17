@@ -111,6 +111,12 @@ richtig und erwünscht.
 
 ### Vollständige Liste der einsetzbaren Sounds
 
+> **Varianten überall erlaubt:** Jeder Sound-Name (sfx **und** ui) kann statt
+> — oder zusätzlich zu — der Basisdatei nummerierte Varianten haben
+> (`<name>_0.ogg`, `<name>_1.ogg`, … lückenlos ab `_0`). Pro Abspielen wird
+> zufällig eine gewählt. Beispiel: `shaman_hurt_0.ogg` + `shaman_hurt_1.ogg`
+> + `shaman_hurt_2.ogg` für abwechslungsreiche Schmerzlaute.
+
 **Kampf** — `audio/sfx/combat/` (nummerierte Varianten, Fallback = Synthese):
 
 | Datei(en) | Wird gespielt bei |
@@ -130,7 +136,7 @@ richtig und erwünscht.
 | `unit_injured.ogg` | Einheit (nicht Schamanin) fällt unter 25 % Leben (einmal pro Unterschreitung) |
 | `unit_death.ogg` | Tod einer Einheit außer der Schamanin — gedrosselt bei Massensterben |
 | `unit_burning.ogg` | Einheit fängt Feuer (Lava/Feuerzauber) |
-| `shaman_hurt.ogg` | Schamanin erleidet Schaden (max. alle 0,8 s) |
+| `shaman_hurt.ogg` | Schamanin erleidet Schaden (max. alle 1,2 s; mehrere Varianten empfohlen) |
 | `shaman_death.ogg` | Tod der Schamanin |
 
 **Katapult** — `audio/sfx/` (Fallback siehe Tabelle):
