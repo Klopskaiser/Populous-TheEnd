@@ -164,6 +164,8 @@ const ROLL_STOP_SPEED: float = 1.0
 ## Panic effect duration (swarm) and how often a new flee direction is picked.
 const PANIC_DURATION: float = 6.0
 const PANIC_REDIRECT_INTERVAL: float = 0.5
+## Health fraction below which the one-time "badly hurt" sound plays.
+const BADLY_HURT_FRAC: float = 0.25
 
 # --- Melee shove (phase 5d) --------------------------------------------------------
 ## A shove always displaces the target slightly (the brawl shifts around)...
@@ -410,6 +412,9 @@ var _recent_damage: float = 0.0
 ## Cached Events bus (combat_hit emissions), resolved once when in-tree.
 var _events_node: Node = null
 var _events_checked: bool = false
+## Cached AudioManager (positional one-shot sounds), resolved once when in-tree.
+var _audio_node: Node = null
+var _audio_checked: bool = false
 
 
 ## Silhouette key for PlaceholderSprites; overridden by subclasses.
@@ -807,6 +812,7 @@ func is_praying() -> bool:
 func take_damage(amount: int, attacker = null) -> void:
 	if state == State.DEAD:
 		return
+	var health_before: int = health
 	health -= amount
 	_no_combat_timer = 0.0
 	_register_damage_for_stars(amount)
@@ -818,6 +824,14 @@ func take_damage(amount: int, attacker = null) -> void:
 		health = 0
 		_die()
 		return
+	# Hurt sounds: the shaman calls out on every hit (throttled); everyone else
+	# only once when dropping below the badly-hurt threshold.
+	if unit_kind() == &"shaman":
+		_play_sfx(&"shaman_hurt", 800)
+	else:
+		var threshold: int = int(float(max_health) * BADLY_HURT_FRAC)
+		if health <= threshold and health_before > threshold:
+			_play_sfx(&"unit_injured", 300)
 	_maybe_retaliate(attacker)
 
 
@@ -1180,6 +1194,7 @@ func ignite(source_pos: Vector3) -> void:
 	var fresh: bool = not is_burning()
 	_burn_time = BURN_DURATION
 	if fresh:
+		_play_sfx(&"unit_burning", 200)
 		take_damage(LAVA_CONTACT_DAMAGE)
 		if state == State.DEAD:
 			return
@@ -1248,6 +1263,7 @@ func start_panic(source_pos: Vector3, duration: float = PANIC_DURATION) -> void:
 	_panic_time = duration
 	_panic_redirect = 0.0
 	_set_state(State.PANIC)
+	_play_sfx(&"unit_panic", 150)
 
 
 func _tick_panic(delta: float) -> void:
@@ -1651,6 +1667,17 @@ func _apply_shove(target: Unit) -> void:
 	target.displace(dir, SHOVE_DISPLACE)
 	if randf() < SHOVE_ROLL_CHANCE:
 		target.start_roll(dir, MINI_ROLL_DURATION)
+
+
+## Plays a file-based one-shot at the unit's position via the AudioManager.
+## Guarded like _emit_combat_hit: absent in headless tests without autoloads.
+func _play_sfx(name: StringName, min_interval_ms: int = 0) -> void:
+	if not _audio_checked:
+		_audio_checked = true
+		if is_inside_tree():
+			_audio_node = get_node_or_null("/root/AudioManager")
+	if _audio_node != null:
+		_audio_node.play_sfx(name, position, min_interval_ms)
 
 
 ## Emits the hit on the Events bus (CombatAudio plays a matching sound).

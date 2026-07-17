@@ -4081,3 +4081,40 @@ Skirmish-Smoke (30 s) ohne Script-Fehler — alles mit leerem `assets\`
 (= Fallback identisch zu vorher). **Nutzer ausstehend:** FPS-Vergleich
 Stresstest gegen Baseline am echten Bildschirm; Test mit ersten echten
 Asset-Dateien (dann `--headless --import` nicht vergessen).
+
+### Zusätzliche Sound-Anker (Nutzerwunsch, 2026-07-13)
+
+15 weitere Einhänge-Punkte, alle rein file-basiert (Fallback = stumm, außer
+Katapult-Schuss). Vollständige Namens-Doku in `assets\README.md`.
+
+- **Einheiten (`unit.gd`):** neuer gecachter Helper `_play_sfx(name,
+  min_interval)` (Muster wie `_emit_combat_hit`). Hooks: `unit_panic`
+  (start_panic, 150 ms global gedrosselt), `unit_injured` (take_damage —
+  einmalig beim Unterschreiten von `BADLY_HURT_FRAC` = 25 %, nicht
+  Schamanin), `shaman_hurt` (jeder Treffer, 800 ms), `unit_burning`
+  (ignite, frisch). Tod zentral im AudioManager über `Events.unit_died`:
+  `shaman_death` bzw. `unit_death` (200 ms gedrosselt).
+- **Katapult:** `siege_fire` beim Schuss — NUR wenn die Datei existiert
+  (`AudioManager.has_sfx`), sonst weiter das synthetische `throw`;
+  `siege_impact` im `SiegeShot._impact`; `siege_burning` bei `ignite`.
+- **Gebäude (`building.gd`):** eigener `_play_sfx`-Helper mit
+  **Pro-Gebäude-Drossel** (`_sfx_last_ms`-Dict je Instanz).
+  `building_attack_melee` im Raid-Tick (max. 1 Sound/Gebäude je 2,5 s,
+  unabhängig von der Angreiferzahl — Nutzeranforderung),
+  `building_attack_ranged` bei `take_damage(DMG_RANGED)` (1,5 s je Gebäude),
+  `building_damaged` beim Überschreiten einer Zerstörungsstufe
+  (Stage-Vergleich vor/nach dem Schaden). KEIN Gebäude-Brand-Sound —
+  Gebäude haben keinen Brand-Zustand (nur Stufen); dem Nutzer so berichtet.
+- **Umwelt:** `tree_burning` (TreeResource.ignite), `wood_chop` zentral in
+  `TreeManager.harvest_tree` (deckt Job- UND Loose-Chop ab, 250 ms).
+- **UI (`selection_manager.gd`):** Selektion spielt `select_shaman` wenn die
+  Schamanin in der Auswahl ist, sonst `select_unit`; Move-Befehl analog
+  `move_shaman`/`move_unit` (`_play_move_sound` nach beiden
+  order_move-Zweigen in `_command_move`) — je Vorgang genau ein Sound.
+- **AudioManager:** `play_sfx` kann jetzt pro Name global drosseln
+  (`min_interval_ms`), neu `has_sfx(name)`; `unit_died`-Hook.
+
+**Verifikation:** Suite 1619 grün, Ladecheck sauber, Stresstest-Smoke (40 s,
+übt Panik/Tod/Katapult/Raid-Pfade) ohne Script-Fehler — ohne Sound-Dateien
+ändert sich nur der Katapult-Schuss nicht (Fallback-Regel), alles andere
+bleibt exakt wie vorher.

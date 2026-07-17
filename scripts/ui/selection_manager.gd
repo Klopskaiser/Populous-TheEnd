@@ -355,7 +355,8 @@ func _set_selection(units: Array[Unit]) -> void:
 	if not kept.is_empty() and is_inside_tree():
 		var audio: Node = get_node_or_null("/root/AudioManager")
 		if audio != null:
-			audio.play_ui(&"select_unit")
+			# One sound per selection action; the shaman in the group overrides.
+			audio.play_ui(&"select_shaman" if _selection_has_shaman() else &"select_unit")
 
 
 ## Selects an own building (clears any unit/building selection first).
@@ -485,9 +486,28 @@ func _command_move(screen_pos: Vector2, queue_up: bool, aggressive: bool = false
 	var target: Vector3 = hit.position
 	if _tribe_commands != null:
 		_tribe_commands.order_move(selected, target, queue_up, aggressive)
+		_play_move_sound()
 		return
 	for i in range(selected.size()):
 		selected[i].order_move(target + TribeCommands.formation_offset(i), queue_up, aggressive)
+	_play_move_sound()
+
+
+func _selection_has_shaman() -> bool:
+	for unit in selected:
+		if is_instance_valid(unit) and unit.unit_kind() == &"shaman":
+			return true
+	return false
+
+
+## Move-order acknowledgement: one sound per issued command; a shaman in the
+## group gets her own voice.
+func _play_move_sound() -> void:
+	if not is_inside_tree():
+		return
+	var audio: Node = get_node_or_null("/root/AudioManager")
+	if audio != null:
+		audio.play_ui(&"move_shaman" if _selection_has_shaman() else &"move_unit")
 
 
 ## Enemy (non-player) unit under the cursor, or null. Same sprite-rect pick as

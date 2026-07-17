@@ -79,6 +79,10 @@ func _impact() -> void:
 		if is_instance_valid(ember):
 			ember.queue_free()
 	_trail.clear()
+	if is_inside_tree():
+		var audio: Node = get_node_or_null("/root/AudioManager")
+		if audio != null:
+			audio.play_sfx(&"siege_impact", target_pos)
 	if unit_manager == null:
 		return
 	var building = _building_at_impact()

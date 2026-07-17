@@ -122,14 +122,47 @@ richtig und erwünscht.
 | `throw_0.ogg`, … | Feuerball-Abschuss (Feuerkrieger) |
 | `preach_0.ogg`, … | Prediger-Gesang (Bekehrung) |
 
-**Ereignisse** — `audio/sfx/` (Fallback = stumm):
+**Einheiten** — `audio/sfx/` (Fallback = stumm):
 
 | Datei | Wird gespielt bei |
 |---|---|
+| `unit_panic.ogg` | Einheit gerät in Panik (Schwarm, Brand) — gedrosselt bei Massenpanik |
+| `unit_injured.ogg` | Einheit (nicht Schamanin) fällt unter 25 % Leben (einmal pro Unterschreitung) |
+| `unit_death.ogg` | Tod einer Einheit außer der Schamanin — gedrosselt bei Massensterben |
+| `unit_burning.ogg` | Einheit fängt Feuer (Lava/Feuerzauber) |
+| `shaman_hurt.ogg` | Schamanin erleidet Schaden (max. alle 0,8 s) |
+| `shaman_death.ogg` | Tod der Schamanin |
+
+**Katapult** — `audio/sfx/` (Fallback siehe Tabelle):
+
+| Datei | Wird gespielt bei |
+|---|---|
+| `siege_fire.ogg` | Katapult schießt (ohne Datei ertönt das bisherige synthetische Wurfgeräusch) |
+| `siege_impact.ogg` | Katapult-Kugel schlägt ein (Fallback = stumm) |
+| `siege_burning.ogg` | Katapult fängt Feuer (Fallback = stumm) |
+
+**Gebäude & Ereignisse** — `audio/sfx/` (Fallback = stumm):
+
+| Datei | Wird gespielt bei |
+|---|---|
+| `build_place.ogg` | Bauplatz gesetzt (Baustart) |
 | `building_complete.ogg` | Gebäude fertiggestellt |
+| `building_attack_melee.ogg` | Gebäude wird im Nahkampf abgerissen (max. **ein** Sound pro Gebäude alle 2,5 s, egal wie viele Angreifer) |
+| `building_attack_ranged.ogg` | Gebäude wird von Fernkampf getroffen (pro Gebäude gedrosselt, alle 1,5 s) |
+| `building_damaged.ogg` | Gebäude erreicht eine höhere Zerstörungsstufe (30/60/90 %) |
 | `building_destroyed.ogg` | Gebäude zerstört |
 | `training_done.ogg` | Einheit fertig ausgebildet |
-| `build_place.ogg` | Bauplatz gesetzt (Baustart) |
+
+> Hinweis: Einen Brand-Sound für **Gebäude** gibt es nicht — Gebäude haben
+> (anders als Einheiten, Katapulte und Bäume) keinen Brand-Zustand, nur
+> Zerstörungsstufen.
+
+**Umwelt** — `audio/sfx/` (Fallback = stumm):
+
+| Datei | Wird gespielt bei |
+|---|---|
+| `tree_burning.ogg` | Baum fängt Feuer |
+| `wood_chop.ogg` | Brave erntet Holz von einem Baum (gedrosselt) |
 
 **Zauber** — `audio/sfx/spell_<id>.ogg`, gespielt beim erfolgreichen Wirken.
 Die zehn gültigen IDs (aus `scripts/spells/*.gd`):
@@ -147,12 +180,16 @@ Die zehn gültigen IDs (aus `scripts/spells/*.gd`):
 | `spell_flatten.ogg` | Ebene |
 | `spell_sink.ogg` | Absinken |
 
-**UI** — `audio/ui/` (Fallback = stumm):
+**UI** — `audio/ui/` (Fallback = stumm; je Auswahl-/Befehlsvorgang genau EIN Sound,
+auch bei vielen Einheiten):
 
 | Datei | Wird gespielt bei |
 |---|---|
-| `select_unit.ogg` | Einheiten selektiert |
+| `select_unit.ogg` | Einheiten selektiert (ohne Schamanin) |
+| `select_shaman.ogg` | Auswahl enthält die Schamanin |
 | `select_building.ogg` | Gebäude selektiert |
+| `move_unit.ogg` | Move-Befehl an Einheiten (ohne Schamanin) |
+| `move_shaman.ogg` | Move-Befehl an eine Gruppe mit Schamanin |
 | `click.ogg` | *(reserviert — noch an keinen Button angebunden)* |
 
 ## Export-Builds (Notiz für später)

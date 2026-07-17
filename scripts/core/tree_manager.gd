@@ -219,6 +219,10 @@ func harvest_tree(tree: TreeResource) -> int:
 	if tree == null or not is_instance_valid(tree) or tree.felled_flag:
 		return 0
 	var wood: int = tree.harvest_one()
+	if wood > 0 and is_inside_tree():
+		var audio: Node = get_node_or_null("/root/AudioManager")
+		if audio != null:
+			audio.play_sfx(&"wood_chop", tree.position, 250)
 	if tree.felled_flag:
 		_remove_tree(tree)
 	return wood

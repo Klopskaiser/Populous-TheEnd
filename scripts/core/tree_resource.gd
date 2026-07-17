@@ -123,6 +123,10 @@ func ignite() -> void:
 		return
 	_burn_time = BURN_TIME
 	claimers.clear()
+	if is_inside_tree():
+		var audio: Node = get_node_or_null("/root/AudioManager")
+		if audio != null:
+			audio.play_sfx(&"tree_burning", position, 200)
 	if _crown_mat != null:
 		_crown_mat.albedo_color = Color(0.55, 0.2, 0.08)
 		_crown_mat.emission_enabled = true

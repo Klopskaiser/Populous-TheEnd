@@ -21,6 +21,7 @@ var _ambience_tracks: Array[AudioStream] = []
 var _music_index: int = 0
 var _ambience_index: int = 0
 var _missing_warned: Dictionary = {}   # sfx/ui name -> true
+var _sfx_last_ms: Dictionary = {}      # sfx name -> last play (min-interval throttle)
 
 
 func _enter_tree() -> void:
@@ -62,12 +63,20 @@ func _ready() -> void:
 		events.unit_trained.connect(_on_unit_trained)
 		events.spell_cast.connect(_on_spell_cast)
 		events.building_destroyed.connect(_on_building_destroyed)
+		events.unit_died.connect(_on_unit_died)
 
 
 # --- One-shot sounds -----------------------------------------------------------------
 
 ## Plays assets/audio/sfx/<name>.ogg positionally; silent when missing.
-func play_sfx(name: StringName, pos: Vector3) -> void:
+## min_interval_ms > 0 throttles repeats of the SAME name (mass events like
+## panic waves or death piles collapse into one sound per interval).
+func play_sfx(name: StringName, pos: Vector3, min_interval_ms: int = 0) -> void:
+	if min_interval_ms > 0:
+		var now: int = Time.get_ticks_msec()
+		if now - int(_sfx_last_ms.get(name, -min_interval_ms)) < min_interval_ms:
+			return
+		_sfx_last_ms[name] = now
 	var stream: AudioStream = _lookup(&"sfx", "audio/sfx/%s" % name)
 	if stream == null:
 		return
@@ -91,6 +100,13 @@ func play_ui(name: StringName) -> void:
 		return
 	player.stream = stream
 	player.play()
+
+
+## True when a file for this sfx name exists (callers with a procedural
+## fallback — e.g. the siege shot's synth whoosh — decide with this).
+func has_sfx(name: StringName) -> bool:
+	return AssetLibrary.exists("audio/sfx/%s.ogg" % name) \
+		or AssetLibrary.exists("audio/sfx/%s.wav" % name)
 
 
 ## Resolves <rel>.ogg / <rel>.wav; warns once per missing name.
@@ -150,6 +166,18 @@ func _on_spell_cast(spell_id: StringName, pos: Vector3) -> void:
 func _on_building_destroyed(building: Node) -> void:
 	if building is Node3D:
 		play_sfx(&"building_destroyed", (building as Node3D).global_position)
+
+
+## Death cries: the shaman gets her own sound, everyone else shares one
+## (throttled — a firestorm wiping a squad plays one cry, not twenty).
+func _on_unit_died(unit: Node) -> void:
+	if not (unit is Node3D):
+		return
+	var kind: StringName = unit.unit_kind() if unit.has_method("unit_kind") else &""
+	if kind == &"shaman":
+		play_sfx(&"shaman_death", (unit as Node3D).position)
+	else:
+		play_sfx(&"unit_death", (unit as Node3D).position, 200)
 
 
 # --- Volume helpers (session-scoped, for the options UI) ------------------------------

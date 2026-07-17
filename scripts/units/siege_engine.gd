@@ -174,6 +174,7 @@ func ignite(_source_pos: Vector3) -> void:
 		return
 	_vehicle_burn = VEHICLE_BURN_TIME
 	_show_flame(true)
+	_play_sfx(&"siege_burning")
 
 
 func is_burning() -> bool:
@@ -619,6 +620,13 @@ func _launch_shot(target_pos: Vector3) -> void:
 	shot.setup(tribe_id, position, target_pos, self, path_service,
 		terrain_data, building_manager)
 	path_service.register_projectile(shot)
+	# Dedicated launch sound when the file exists; otherwise the shared
+	# synthesised "throw" whoosh (pre-asset behaviour).
+	if is_inside_tree():
+		var audio: Node = get_node_or_null("/root/AudioManager")
+		if audio != null and audio.has_sfx(&"siege_fire"):
+			audio.play_sfx(&"siege_fire", position)
+			return
 	_emit_combat_hit(&"throw")
 
 

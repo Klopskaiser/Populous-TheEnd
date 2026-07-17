@@ -104,6 +104,8 @@ var _slide_dir: Vector3 = Vector3.ZERO
 ## tick() then levels the footprint back until it is flat again.
 var _foundation_disturbed: bool = false
 var _damage_holes: Array[MeshInstance3D] = []
+## Per-building sound throttle: sfx name -> last play ms (see _play_sfx).
+var _sfx_last_ms: Dictionary = {}
 var _visual_stage: int = -1
 ## Worker braves currently assigned to this construction site.
 var workers: Array[Brave] = []
@@ -528,6 +530,8 @@ func _tick_raid(delta: float) -> void:
 	var whole: int = int(_raid_damage_frac)
 	if whole > 0:
 		_raid_damage_frac -= float(whole)
+		# One demolition sound per building at a time, regardless of raider count.
+		_play_sfx(&"building_attack_melee", 2500)
 		take_damage(whole)   # generic: no re-eject (occupants already handled)
 
 
@@ -981,11 +985,18 @@ func take_damage(amount: int, source: int = DMG_GENERIC) -> void:
 	if health <= 0:
 		return
 	var was_usable: bool = is_usable()
+	var stage_before: int = destruction_stage()
 	health -= amount
 	if health <= 0:
 		health = 0
 		destroy()
 		return
+	# Under-fire feedback: ranged hits get their own (per-building throttled)
+	# sound; crossing into a higher destruction stage plays the "crack".
+	if source == DMG_RANGED:
+		_play_sfx(&"building_attack_ranged", 1500)
+	if destruction_stage() > stage_before:
+		_play_sfx(&"building_damaged")
 	if was_usable and not is_usable():
 		# Just crossed into stage >= 1 (unusable). Ranged fire that reaches this
 		# on its own kills the trapped occupants; spells / melee demolition eject
@@ -1133,6 +1144,22 @@ func _tint_flag_meshes(node: Node) -> bool:
 		if _tint_flag_meshes(child):
 			found = true
 	return found
+
+
+## Plays a file-based one-shot at the building centre via the AudioManager.
+## min_interval_ms throttles PER BUILDING (each keeps its own timestamps), so
+## e.g. two raided huts each get their own demolition sound.
+func _play_sfx(name: StringName, min_interval_ms: int = 0) -> void:
+	if not is_inside_tree():
+		return
+	if min_interval_ms > 0:
+		var now: int = Time.get_ticks_msec()
+		if now - int(_sfx_last_ms.get(name, -min_interval_ms)) < min_interval_ms:
+			return
+		_sfx_last_ms[name] = now
+	var audio: Node = get_node_or_null("/root/AudioManager")
+	if audio != null:
+		audio.play_sfx(name, center_world())
 
 
 ## Small tribe-coloured flag next to the building.
