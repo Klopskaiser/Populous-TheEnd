@@ -10,9 +10,9 @@ class_name VolcanoZone extends Node3D
 ## STAGE_INTERVAL. The mountain underneath is permanent and stays after the
 ## zone despawns. Ticked via the UnitManager projectile list.
 
-const LIFETIME: float = 20.0
+const LIFETIME: float = Balance.VOLCANO_ZONE_LIFETIME
 const RADIUS: float = 5.0
-const STAGE_INTERVAL: float = 4.0
+const STAGE_INTERVAL: float = Balance.VOLCANO_ZONE_STAGE_INTERVAL
 ## Eruptions start only once the cone is at max height (morph duration).
 const SURGE_START: float = VolcanoSpell.DURATION
 const SURGE_INTERVAL: float = 4.5

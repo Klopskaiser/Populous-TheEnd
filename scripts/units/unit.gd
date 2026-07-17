@@ -48,12 +48,12 @@ const ARRIVE_EPS: float = 0.05       # metres: waypoint counts as reached
 
 # --- Melee combat tuning (phase 5b) -------------------------------------------
 ## Distance at which a unit can land a melee hit on its target.
-const MELEE_RANGE: float = 1.2
+const MELEE_RANGE: float = Balance.MELEE_RANGE
 ## Attackers pursue direct (no A*) once this close; farther away they path.
 const COMBAT_DIRECT_RANGE: float = 2.5
 ## Combat units auto-attack enemies within this radius while idle. Braves do NOT
 ## (they only retaliate when attacked — see _maybe_retaliate).
-const AGGRO_RADIUS: float = 8.0
+const AGGRO_RADIUS: float = Balance.MELEE_AGGRO_RADIUS
 ## Fleeing (passive move while being hit in melee): every this many hits the
 ## unit falls back into fighting (self-defence) — escaping a brawl works, but
 ## not always on the first try. Deterministic, not per-frame random.
@@ -61,7 +61,7 @@ const FLEE_RETALIATE_HITS: int = 3
 ## An attacker counts as "in melee" for the flee rule within this range.
 const FLEE_MELEE_RANGE: float = MELEE_RANGE * 1.5
 ## Seconds between melee strikes.
-const ATTACK_COOLDOWN: float = 0.8
+const ATTACK_COOLDOWN: float = Balance.ATTACK_COOLDOWN
 ## Base target (re)search interval; a small per-unit offset staggers the scans
 ## so they never all fire on the same frame (never per-frame — see _due_to_scan).
 const TARGET_SEARCH_INTERVAL: float = 0.25
@@ -93,16 +93,16 @@ const MELEE_WAIT_RADIUS: float = 1.7
 
 ## Damage per attack kind (Tuning-Defaults, phase 8 adjustable). The kind is
 ## rolled per strike; the warrior scales all of these by melee_strength().
-const MELEE_PUNCH: int = 6
-const MELEE_KICK: int = 8
-const MELEE_SHOVE: int = 3
+const MELEE_PUNCH: int = Balance.MELEE_PUNCH
+const MELEE_KICK: int = Balance.MELEE_KICK
+const MELEE_SHOVE: int = Balance.MELEE_SHOVE
 ## Chance of a kick / shove on any given strike (else punch). The warrior
 ## overrides _shove_chance() to shove rarely (he punches/kicks instead).
-const KICK_CHANCE: float = 0.2
-const SHOVE_CHANCE: float = 0.15
+const KICK_CHANCE: float = Balance.KICK_CHANCE
+const SHOVE_CHANCE: float = Balance.SHOVE_CHANCE
 ## Fireball impact damage (slightly above a brave punch; thrown by the
 ## firewarrior from medium range, see Firewarrior/Fireball).
-const FIREBALL_DAMAGE: int = 7
+const FIREBALL_DAMAGE: int = Balance.FIREWARRIOR_FIREBALL_DAMAGE
 
 ## When an attack target sits down under a preacher's spell, its attackers
 ## break off — only this chance (rolled ONCE per attacker per sitting spell)
@@ -110,9 +110,12 @@ const FIREBALL_DAMAGE: int = 7
 const SIT_ATTACK_CONTINUE_CHANCE: float = 0.05
 
 ## A defeated unit stays lying on the ground (dead sprite, no interaction) for
-## this long, then dissolves over CORPSE_FADE_DURATION and is removed.
-const CORPSE_DURATION: float = 5.0
-const CORPSE_FADE_DURATION: float = 1.0
+## this long, then sinks into the ground over CORPSE_SINK_DURATION and is removed.
+const CORPSE_DURATION: float = Balance.CORPSE_DURATION
+const CORPSE_SINK_DURATION: float = Balance.CORPSE_SINK_DURATION
+## How deep the corpse sprite submerges while sinking (sprite height + margin,
+## so nothing pokes out of slopes at the end).
+const CORPSE_SINK_DEPTH: float = Balance.CORPSE_SINK_DEPTH
 
 # --- Knockback (fireball, phase 5c; weakened in 5d for the roll chance) ---------
 ## Shove distance of a single un-stacked fireball hit (metres)...
@@ -162,7 +165,7 @@ const ROLL_FRICTION: float = 6.0
 ## A speed-driven roll may end once its momentum decayed below this.
 const ROLL_STOP_SPEED: float = 1.0
 ## Panic effect duration (swarm) and how often a new flee direction is picked.
-const PANIC_DURATION: float = 6.0
+const PANIC_DURATION: float = Balance.PANIC_DURATION
 const PANIC_REDIRECT_INTERVAL: float = 0.5
 ## Health fraction below which the one-time "badly hurt" sound plays.
 const BADLY_HURT_FRAC: float = 0.25
@@ -182,8 +185,8 @@ const MIN_SPEED_FACTOR: float = 0.35
 # --- Regeneration (phase 5d) ---------------------------------------------------------
 ## Seconds without ANY combat involvement (dealt/received damage, rolling)
 ## before slow healing starts.
-const REGEN_DELAY: float = 8.0
-const REGEN_RATE: float = 2.0   # HP per second
+const REGEN_DELAY: float = Balance.REGEN_DELAY
+const REGEN_RATE: float = Balance.REGEN_RATE   # HP per second
 
 # --- Stars overlay (phase 5d) -------------------------------------------------------
 ## Damage taken within STARS_WINDOW seconds that triggers the circling stars.
@@ -334,8 +337,6 @@ var _combat_goal: Vector3 = Vector3.INF
 ## Corpse decay: seconds since death; corpse_expired fires once at the end.
 var _corpse_timer: float = 0.0
 var _corpse_done: bool = false
-## Instance alpha last written to the renderer (corpse fade), managed there.
-var _render_alpha: float = 1.0
 
 # --- Knockback state (fireball, phase 5c) ---------------------------------------
 ## Hit-density accumulator: +1 per fireball hit, decays over time; scales the
@@ -854,23 +855,25 @@ func _die() -> void:
 	died.emit(self)
 
 
-## Corpse decay: lie for CORPSE_DURATION, fade over CORPSE_FADE_DURATION (the
-## renderer reads corpse_alpha()), then fire corpse_expired exactly once.
+## Corpse decay: lie for CORPSE_DURATION, sink into the ground over
+## CORPSE_SINK_DURATION (the renderer reads corpse_sink_depth()), then fire
+## corpse_expired exactly once.
 func _tick_dead(delta: float) -> void:
 	if _corpse_done:
 		return
 	_corpse_timer += delta
-	if _corpse_timer >= CORPSE_DURATION + CORPSE_FADE_DURATION:
+	if _corpse_timer >= CORPSE_DURATION + CORPSE_SINK_DURATION:
 		_corpse_done = true
 		corpse_expired.emit(self)
 
 
-## 1.0 while the corpse lies, then a linear fade to 0.0.
-func corpse_alpha() -> float:
+## 0.0 while the corpse lies, then how many metres it has sunk below its
+## ground position (linear until fully submerged at CORPSE_SINK_DEPTH).
+func corpse_sink_depth() -> float:
 	if state != State.DEAD:
-		return 1.0
-	return clampf(
-		1.0 - (_corpse_timer - CORPSE_DURATION) / CORPSE_FADE_DURATION, 0.0, 1.0)
+		return 0.0
+	return CORPSE_SINK_DEPTH * clampf(
+		(_corpse_timer - CORPSE_DURATION) / CORPSE_SINK_DURATION, 0.0, 1.0)
 
 
 # --- Knockback (fireball, phase 5c) ----------------------------------------------
@@ -1174,9 +1177,9 @@ func drown() -> void:
 
 ## Touching lava: instant contact damage, then the unit burns and scrambles
 ## around in panic for the whole burn (panic-immune units burn standing).
-const LAVA_CONTACT_DAMAGE: int = 30    # half a brave life per touch
-const BURN_DURATION: float = 4.0
-const BURN_TOTAL_DAMAGE: int = 120     # 2x brave life spread over the burn
+const LAVA_CONTACT_DAMAGE: int = Balance.LAVA_CONTACT_DAMAGE
+const BURN_DURATION: float = Balance.BURN_DURATION
+const BURN_TOTAL_DAMAGE: int = Balance.BURN_TOTAL_DAMAGE
 
 var _burn_time: float = 0.0
 var _burn_frac: float = 0.0

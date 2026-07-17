@@ -73,33 +73,33 @@ func test_damage_reduces_hp_and_kills() -> void:
 	_free_world(w)
 
 
-## A defeated unit lies as a corpse (dead sprite, fully visible) for
-## CORPSE_DURATION, then fades and is removed from the world.
-func test_corpse_lies_then_fades_and_expires() -> void:
+## A defeated unit lies as a corpse (dead sprite, on the ground) for
+## CORPSE_DURATION, then sinks into the ground and is removed from the world.
+func test_corpse_lies_then_sinks_and_expires() -> void:
 	var w: Dictionary = _make_world()
 	var unit: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
 	unit.take_damage(1000)
 	check(unit.state == Unit.State.DEAD, "unit is dead")
 	check(unit in w.unit_manager.units, "corpse remains in the world")
 	check(unit.anim_base_name == &"dead", "corpse uses the dead sprite")
-	check(unit.corpse_alpha() == 1.0, "corpse starts fully visible")
+	check(unit.corpse_sink_depth() == 0.0, "corpse starts on the ground")
 
-	# 4.5 s: still lying, fully visible.
+	# 4.5 s: still lying on the surface.
 	for i in range(45):
 		unit.tick(TICK)
 	check(unit in w.unit_manager.units, "still lying before 5 s")
-	check(unit.corpse_alpha() == 1.0, "fully visible before 5 s")
+	check(unit.corpse_sink_depth() == 0.0, "not sinking before 5 s")
 
-	# ~5.5 s: fading (alpha strictly between 0 and 1).
+	# ~5.5 s: sinking (depth strictly between 0 and the full depth).
 	for i in range(10):
 		unit.tick(TICK)
-	var alpha: float = unit.corpse_alpha()
-	check(alpha > 0.0 and alpha < 1.0, "corpse fades after 5 s")
+	var depth: float = unit.corpse_sink_depth()
+	check(depth > 0.0 and depth < Unit.CORPSE_SINK_DEPTH, "corpse sinks after 5 s")
 
-	# Past 6 s (5 s lying + 1 s fade): expired and removed.
+	# Past 6 s (5 s lying + 1 s sinking): expired and removed.
 	for i in range(10):
 		unit.tick(TICK)
-	check(unit not in w.unit_manager.units, "corpse removed after the fade")
+	check(unit not in w.unit_manager.units, "corpse removed after sinking")
 	check(w.unit_manager.get_units_in_radius(Vector3(30, 0, 30), 5.0).is_empty(),
 		"corpse removed from the spatial hash")
 	_free_world(w)

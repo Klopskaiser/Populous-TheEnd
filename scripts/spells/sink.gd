@@ -10,8 +10,8 @@ class_name SinkSpell extends Spell
 ## (as with every terrain-morphing spell). Never digs below the existing sea
 ## floor (FLOOR_LEVEL clamp).
 
-const RADIUS: float = 6.0
-const DEPTH: float = 3.0
+const RADIUS: float = Balance.SINK_RADIUS
+const DEPTH: float = Balance.SINK_DEPTH
 const DURATION: float = 1.5
 ## Sea-floor level the sink never digs below.
 const FLOOR_LEVEL: float = 0.5
@@ -20,9 +20,9 @@ const FLOOR_LEVEL: float = 0.5
 func _init() -> void:
 	id = &"sink"
 	display_name_de = "Absinken"
-	charge_cost = 60.0
-	max_charges = 3
-	cast_range = 10.0
+	charge_cost = Balance.SPELL_SINK_CHARGE_COST
+	max_charges = Balance.SPELL_SINK_MAX_CHARGES
+	cast_range = Balance.SPELL_SINK_CAST_RANGE
 
 
 func execute(_tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:

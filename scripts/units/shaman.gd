@@ -7,14 +7,14 @@ class_name Shaman extends Unit
 ## tribe receives a one-time mana bonus and the tribe's reincarnation site
 ## starts the respawn timer.
 
-const HP: int = 240                        # 4x brave life (60)
-const SHAMAN_MELEE_STRENGTH: float = 2.0   # 2x brave melee damage
+const HP: int = Balance.SHAMAN_HP                        # 4x brave life
+const SHAMAN_MELEE_STRENGTH: float = Balance.SHAMAN_MELEE_STRENGTH
 ## Wind-up of the cast animation before the effect fires. The release range
 ## is per spell (Spell.cast_range).
-const CAST_TIME: float = 0.6
+const CAST_TIME: float = Balance.SHAMAN_CAST_TIME
 ## Killing an enemy shaman grants the killer's tribe bonus mana worth this
 ## share of its total charge capacity, paid straight into spell charges.
-const KILL_BONUS_SHARE: float = 0.15
+const KILL_BONUS_SHARE: float = Balance.SHAMAN_KILL_BONUS_SHARE
 
 var pending_spell: Spell = null
 var pending_target: Vector3 = Vector3.ZERO
@@ -27,7 +27,7 @@ var _casting: bool = false
 func _init() -> void:
 	max_health = HP
 	health = HP
-	speed = 4.0
+	speed = Balance.SHAMAN_SPEED
 
 
 func unit_kind() -> StringName:

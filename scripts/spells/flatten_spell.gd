@@ -10,7 +10,7 @@ class_name FlattenSpell extends Spell
 ## The terrain-integrity rules apply as with every terrain spell — buildings
 ## caught on the new cliff edge burst apart, flooded followers drown.
 
-const HALF_EXTENT: float = 4.5      # square side 9 m
+const HALF_EXTENT: float = Balance.FLATTEN_HALF_EXTENT      # square side = 2x this
 const DURATION: float = 0.5
 ## Height change (metres) below which a unit just rides the morph.
 const FLING_THRESHOLD: float = 0.5
@@ -21,9 +21,9 @@ const DROP_OUT: float = 2.0
 func _init() -> void:
 	id = &"flatten"
 	display_name_de = "Ebene"
-	charge_cost = 90.0
-	max_charges = 3
-	cast_range = 10.0
+	charge_cost = Balance.SPELL_FLATTEN_CHARGE_COST
+	max_charges = Balance.SPELL_FLATTEN_MAX_CHARGES
+	cast_range = Balance.SPELL_FLATTEN_CAST_RANGE
 
 
 func execute(_tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:

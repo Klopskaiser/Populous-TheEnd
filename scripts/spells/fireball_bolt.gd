@@ -9,10 +9,10 @@ class_name FireballBolt extends Node3D
 
 const SPEED: float = 16.0
 const ARC_HEIGHT: float = 2.5      # extra apex height of the flight arc
-const DIRECT_DAMAGE: int = 60      # 1x brave life
-const SPLASH_DAMAGE: int = 30      # 1/2 brave life
-const DIRECT_RADIUS: float = 0.8   # counts as a direct hit
-const SPLASH_RADIUS: float = 2.5   # small area of effect
+const DIRECT_DAMAGE: int = Balance.FIREBALL_DIRECT_DAMAGE
+const SPLASH_DAMAGE: int = Balance.FIREBALL_SPLASH_DAMAGE
+const DIRECT_RADIUS: float = Balance.FIREBALL_DIRECT_RADIUS   # counts as a direct hit
+const SPLASH_RADIUS: float = Balance.FIREBALL_SPLASH_RADIUS   # small area of effect
 const THROW_BACK: float = 5.0      # horizontal launch speed away from impact
 const THROW_UP: float = 6.0        # vertical launch speed
 

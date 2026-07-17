@@ -7,9 +7,9 @@ class_name SwarmCloud extends Node3D
 ## shrug off the panic too (Unit.is_panic_immune) but take the damage.
 ## Ticked via the UnitManager projectile list.
 
-const LIFETIME: float = 10.0
-const RADIUS: float = 3.0
-const DPS: int = 3                  # light damage per second near the swarm
+const LIFETIME: float = Balance.SWARM_LIFETIME
+const RADIUS: float = Balance.SWARM_RADIUS
+const DPS: int = Balance.SWARM_DPS  # light damage per second near the swarm
 const DRIFT_SPEED: float = 1.5
 const REDIRECT_INTERVAL: float = 1.2
 const EFFECT_INTERVAL: float = 0.4  # panic refresh cadence

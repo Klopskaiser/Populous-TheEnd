@@ -6,10 +6,10 @@ class_name LightningSpell extends Spell
 ## roll (longer only on a slope, via the normal fall-line rolling). No target
 ## at all -> the cast fails and the charge is kept.
 
-const UNIT_DAMAGE: int = 240        # 4x brave life
+const UNIT_DAMAGE: int = Balance.LIGHTNING_UNIT_DAMAGE
 const TARGET_RADIUS: float = 3.0    # victim search radius around the click
 const NEIGHBOR_RADIUS: float = 1.5  # adjacent units start rolling
-const BUILDING_STAGES: int = 2
+const BUILDING_STAGES: int = Balance.LIGHTNING_BUILDING_STAGES
 ## The white beam is visible this long.
 const BEAM_TIME: float = 0.35
 
@@ -17,9 +17,9 @@ const BEAM_TIME: float = 0.35
 func _init() -> void:
 	id = &"lightning"
 	display_name_de = "Blitz"
-	charge_cost = 60.0
-	max_charges = 4
-	cast_range = 10.0
+	charge_cost = Balance.SPELL_LIGHTNING_CHARGE_COST
+	max_charges = Balance.SPELL_LIGHTNING_MAX_CHARGES
+	cast_range = Balance.SPELL_LIGHTNING_CAST_RANGE
 
 
 func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:

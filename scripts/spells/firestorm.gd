@@ -8,9 +8,9 @@ class_name FirestormSpell extends Spell
 ## shaman). A small scheduler entity on the projectile list spawns the bolts
 ## over time.
 
-const BOLT_COUNT: int = 8
-const SPREAD_RADIUS: float = 5.5
-const DURATION: float = 3.0
+const BOLT_COUNT: int = Balance.FIRESTORM_BOLT_COUNT
+const SPREAD_RADIUS: float = Balance.FIRESTORM_SPREAD_RADIUS
+const DURATION: float = Balance.FIRESTORM_DURATION
 ## Bolts spawn this high above their impact point, with a small sideways
 ## offset so the FireballBolt arc math yields a steep visible dive.
 const SKY_HEIGHT: float = 14.0
@@ -20,9 +20,9 @@ const SKY_DRIFT: float = 5.0
 func _init() -> void:
 	id = &"firestorm"
 	display_name_de = "Feuerregen"
-	charge_cost = 100.0
-	max_charges = 2
-	cast_range = 10.0
+	charge_cost = Balance.SPELL_FIRESTORM_CHARGE_COST
+	max_charges = Balance.SPELL_FIRESTORM_MAX_CHARGES
+	cast_range = Balance.SPELL_FIRESTORM_CAST_RANGE
 
 
 func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:

@@ -10,10 +10,10 @@ class_name Preacher extends Unit
 
 ## Conversion (channel) range — deliberately below the firewarrior's
 ## FIRE_RANGE, so fireballs can interrupt conversions from outside.
-const CONVERT_RANGE: float = 5.0
+const CONVERT_RANGE: float = Balance.PREACHER_CONVERT_RANGE
 ## Random per-target conversion duration.
-const CONVERT_TIME_MIN: float = 4.0
-const CONVERT_TIME_MAX: float = 9.0
+const CONVERT_TIME_MIN: float = Balance.PREACHER_CONVERT_TIME_MIN
+const CONVERT_TIME_MAX: float = Balance.PREACHER_CONVERT_TIME_MAX
 ## Fight inertia: chance per pacify attempt that an already-fighting unit
 ## keeps brawling instead of sitting down (retried on the next scan).
 const FIGHT_INERTIA_CHANCE: float = 0.4
@@ -27,9 +27,9 @@ var _preach_sound_timer: float = 0.0
 
 
 func _init() -> void:
-	max_health = 75
-	health = 75
-	speed = 4.0
+	max_health = Balance.PREACHER_HP
+	health = max_health
+	speed = Balance.PREACHER_SPEED
 
 
 func unit_kind() -> StringName:

@@ -5,15 +5,15 @@ class_name Warrior extends Unit
 ## its sprite silhouette (shield + sword) — the full melee behaviour (3x punch
 ## strength, rare shoving, aggro) is wired up in phase 5b.
 
-const MELEE_STRENGTH: float = 3.0
+const MELEE_STRENGTH: float = Balance.WARRIOR_MELEE_STRENGTH
 ## The warrior shoves rarely — he prefers to punch and kick (see plan 5b).
-const WARRIOR_SHOVE_CHANCE: float = 0.04
+const WARRIOR_SHOVE_CHANCE: float = Balance.WARRIOR_SHOVE_CHANCE
 
 
 func _init() -> void:
-	max_health = 120
-	health = 120
-	speed = 4.0
+	max_health = Balance.WARRIOR_HP
+	health = max_health
+	speed = Balance.WARRIOR_SPEED
 
 
 func unit_kind() -> StringName:

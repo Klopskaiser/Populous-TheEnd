@@ -28,17 +28,17 @@ class_name Workshop extends Building
 ## idling nearby board it automatically (one shot — nobody near means it
 ## stays, blocking the next production until manned and moved off).
 
-const WOOD_COST: int = 15
+const WOOD_COST: int = Balance.WORKSHOP_WOOD_COST
 ## Twice the hut's area (hut 4x4): authored 8 wide x 4 deep, entrance south.
 ## BuildingManager swaps the footprint for east/west orientations.
 const FOOTPRINT: Vector2i = Vector2i(8, 4)
-const MAX_HEALTH: int = 350
+const MAX_HEALTH: int = Balance.WORKSHOP_HP
 ## Worker slots (housed inside; production needs >= 1).
 const WORKER_SLOTS: int = 3
 ## Worker-seconds per catapult: 3 workers -> 30 s build time.
-const WORK_PER_CATAPULT: float = 90.0
+const WORK_PER_CATAPULT: float = Balance.WORKSHOP_WORK_PER_CATAPULT
 ## Wood consumed per catapult (taken from the entrance piles at start).
-const CATAPULT_WOOD: int = 5
+const CATAPULT_WOOD: int = Balance.WORKSHOP_CATAPULT_WOOD
 ## Stock the workers keep piled at the entrance while not producing.
 const STOCK_TARGET: int = 15
 ## A finished engine within this range of the entrance blocks the exit.

@@ -12,12 +12,12 @@ class_name EarthquakeSpell extends Spell
 ## the sea floor is never lifted; LOWERING below the sea line is allowed and
 ## floods land — tactical terrain destruction.
 
-const RADIUS: float = 7.0
+const RADIUS: float = Balance.EARTHQUAKE_RADIUS
 const DROP: float = 2.2            # subsidence at the fault (drop side)
 const LIFT: float = 0.8            # pile-up at the fault (rise side)
 const DURATION: float = 2.0
-const STAGES: int = 2
-const UNIT_DAMAGE: int = 15        # 1/4 brave life
+const STAGES: int = Balance.EARTHQUAKE_BUILDING_STAGES
+const UNIT_DAMAGE: int = Balance.EARTHQUAKE_UNIT_DAMAGE
 ## Fault lava: short streams down the scarp that disappear quickly.
 const FAULT_LAVA_RANGE: float = 3.5
 const FAULT_LAVA_LIFETIME: float = 3.5
@@ -27,9 +27,9 @@ const FAULT_LAVA_MOLTEN: float = 3.0
 func _init() -> void:
 	id = &"earthquake"
 	display_name_de = "Erdbeben"
-	charge_cost = 110.0
-	max_charges = 2
-	cast_range = 10.0
+	charge_cost = Balance.SPELL_EARTHQUAKE_CHARGE_COST
+	max_charges = Balance.SPELL_EARTHQUAKE_MAX_CHARGES
+	cast_range = Balance.SPELL_EARTHQUAKE_CAST_RANGE
 
 
 func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:

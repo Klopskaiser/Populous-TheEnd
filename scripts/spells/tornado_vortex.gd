@@ -10,8 +10,8 @@ class_name TornadoVortex extends Node3D
 ## instantly (all of that is the normal THROWN/ROLL handling). Ticked via
 ## the UnitManager projectile list; on expiry any remaining riders are flung.
 
-const LIFETIME: float = 8.0
-const RADIUS: float = 2.2            # pickup / building-hit radius
+const LIFETIME: float = Balance.TORNADO_LIFETIME
+const RADIUS: float = Balance.TORNADO_RADIUS   # pickup / building-hit radius
 ## Movement profile: parks on the cast point first, then crawls off and
 ## accelerates over ACCEL_TIME up to MAX_SPEED.
 const IDLE_TIME: float = 1.0
@@ -19,14 +19,14 @@ const ACCEL_TIME: float = 4.0
 const MIN_SPEED: float = 0.4
 const MAX_SPEED: float = 2.0
 const REDIRECT_INTERVAL: float = 1.0
-const STAGE_INTERVAL: float = 2.0    # +1 destruction stage per 2 s over a building
+const STAGE_INTERVAL: float = Balance.TORNADO_STAGE_INTERVAL   # +1 stage per interval over a building
 const TOP_HEIGHT: float = 6.0        # riders spiral up to the tip
 const LIFT_TIME: float = 0.9         # seconds to reach the tip
 const CARRY_TIME: float = 0.6        # dragged along at the tip before release
 const SPIN_SPEED: float = 7.0        # rider angular speed (rad/s)
 const FLING_SPEED: float = 12.0      # horizontal release speed
 const FLING_UP: float = 3.5
-const FALL_DAMAGE: int = 30          # 1/2 brave life, applied on landing
+const FALL_DAMAGE: int = Balance.TORNADO_FALL_DAMAGE   # applied on landing
 
 # --- Siege engines (phase 7f) ------------------------------------------------------
 ## A catapult too heavy to whirl up like a unit is instead LIFTED in place

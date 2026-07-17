@@ -5,9 +5,9 @@ class_name WarriorCamp extends TrainingBuilding
 ## a ring/horseshoe wall around a courtyard, a tall round tower with a spire and
 ## a blue-violet plume, and shields on the outer wall. War/weapon theme.
 
-const WOOD_COST: int = 5
+const WOOD_COST: int = Balance.WARRIOR_CAMP_WOOD_COST
 const FOOTPRINT: Vector2i = Vector2i(5, 5)
-const TRAINING_TIME: float = 3.0
+const TRAINING_TIME: float = Balance.WARRIOR_CAMP_TRAINING_TIME
 const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
 
 const C_WALL: Color = Color(0.5, 0.35, 0.2)
@@ -20,8 +20,8 @@ const C_METAL: Color = Color(0.7, 0.72, 0.78)
 func _init() -> void:
 	wood_cost = WOOD_COST
 	footprint = FOOTPRINT
-	max_health = 400
-	health = 400
+	max_health = Balance.WARRIOR_CAMP_HP
+	health = max_health
 	produces = WARRIOR_SCENE
 	training_time = TRAINING_TIME
 

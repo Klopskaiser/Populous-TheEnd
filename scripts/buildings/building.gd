@@ -36,7 +36,7 @@ const WOOD_RECHECK_INTERVAL: float = 30.0
 ## Damage fraction per destruction stage: stage 1 at >= 30%, 2 at >= 60%,
 ## 3 at >= 90%, 4 (destroyed) at 100%. From stage 1 on the building is
 ## unusable (no production, no capacity) until repaired.
-const STAGE_DAMAGE: float = 0.3
+const STAGE_DAMAGE: float = Balance.BUILDING_STAGE_DAMAGE
 ## Destroyed buildings sink into the ground (visual only), then free themselves.
 const SINK_DURATION: float = 2.0
 const SINK_DEPTH: float = 5.0
@@ -56,10 +56,9 @@ const DMG_GENERIC: int = 0
 const DMG_RANGED: int = 1
 ## Max melee raiders that can storm this building at once (the watchtower in
 ## phase 7h overrides this with 5). Extras wait outside like a full melee ring.
-const MAX_MELEE_RAIDERS: int = 15
-## Demolition damage per raider per second (Startwert, balance in phase 8):
-## more raiders inside = faster teardown.
-const RAID_DPS_PER_RAIDER: float = 6.0
+const MAX_MELEE_RAIDERS: int = Balance.MAX_MELEE_RAIDERS
+## Demolition damage per raider per second: more raiders = faster teardown.
+const RAID_DPS_PER_RAIDER: float = Balance.RAID_DPS_PER_RAIDER
 ## Wobble visual while raiders demolish (± this rotation, HZ below).
 const RAID_WOBBLE_AMPLITUDE: float = 0.035   # ~2 degrees
 const RAID_WOBBLE_HZ: float = 0.8

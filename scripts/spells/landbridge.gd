@@ -9,7 +9,7 @@ class_name LandbridgeSpell extends Spell
 ## (TerrainMorph); units/trees/piles/buildings ride along.
 
 ## Corridor half width (broad line) and the soft blend beyond it.
-const HALF_WIDTH: float = 1.6
+const HALF_WIDTH: float = Balance.LANDBRIDGE_HALF_WIDTH
 const EDGE: float = 1.5
 ## Bridge deck height above the water line (comfortably walkable).
 const COAST_MARGIN: float = 1.2
@@ -20,9 +20,9 @@ const DURATION: float = 3.0
 func _init() -> void:
 	id = &"landbridge"
 	display_name_de = "Landbrücke"
-	charge_cost = 60.0
-	max_charges = 4
-	cast_range = 9.0
+	charge_cost = Balance.SPELL_LANDBRIDGE_CHARGE_COST
+	max_charges = Balance.SPELL_LANDBRIDGE_MAX_CHARGES
+	cast_range = Balance.SPELL_LANDBRIDGE_CAST_RANGE
 
 
 func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:

@@ -89,9 +89,9 @@ var _loose_return_pos: Vector3 = Vector3.INF
 
 
 func _init() -> void:
-	max_health = 60
-	health = 60
-	speed = 4.0
+	max_health = Balance.BRAVE_HP
+	health = max_health
+	speed = Balance.BRAVE_SPEED
 	idle_aggro = IDLE_AGGRO_RADIUS   # small village-guard radius (phase 7b)
 	died.connect(func(_unit: Unit) -> void: _interrupt_tasks())
 
@@ -142,7 +142,7 @@ func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = fals
 ## Braves keep a small guard radius even while idling (phase 7b): enemies
 ## walking right into the village get attacked; farther ones are ignored.
 ## Applied to Unit.idle_aggro in _init (a field, not a virtual — hot path).
-const IDLE_AGGRO_RADIUS: float = 3.0
+const IDLE_AGGRO_RADIUS: float = Balance.BRAVE_IDLE_AGGRO_RADIUS
 
 
 ## Manual chop order (right-click on a tree): harvest it unit by unit, drop

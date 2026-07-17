@@ -19,15 +19,15 @@ class_name Watchtower extends Building
 ## out alive first (has_occupants -> begin_storm). Storming the tower is harder:
 ## max 5 melee raiders instead of 15.
 
-const WOOD_COST: int = 4
+const WOOD_COST: int = Balance.WATCHTOWER_WOOD_COST
 const FOOTPRINT: Vector2i = Vector2i(2, 2)
-const MAX_HEALTH: int = 200
+const MAX_HEALTH: int = Balance.WATCHTOWER_HP
 ## Crew slots (combat units / shaman).
 const CREW_CAPACITY: int = 2
 ## Extra range granted to ranged crew (fire / conversion / spells).
-const TOWER_RANGE_BONUS: float = 3.0
-## Only 5 melee raiders fit (a tower is tougher to storm than a hut's 15).
-const TOWER_MAX_RAIDERS: int = 5
+const TOWER_RANGE_BONUS: float = Balance.WATCHTOWER_RANGE_BONUS
+## Fewer melee raiders fit (a tower is tougher to storm than a hut).
+const TOWER_MAX_RAIDERS: int = Balance.WATCHTOWER_MAX_RAIDERS
 ## Height above the origin the crew fire/act from (platform level).
 const PLATFORM_Y: float = 4.0
 ## Y (above the tower base) the crew sprites STAND at — on top of the platform,

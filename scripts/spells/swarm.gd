@@ -7,9 +7,9 @@ class_name SwarmSpell extends Spell
 func _init() -> void:
 	id = &"swarm"
 	display_name_de = "Insektenschwarm"
-	charge_cost = 50.0
-	max_charges = 4
-	cast_range = 8.0
+	charge_cost = Balance.SPELL_SWARM_CHARGE_COST
+	max_charges = Balance.SPELL_SWARM_MAX_CHARGES
+	cast_range = Balance.SPELL_SWARM_CAST_RANGE
 
 
 func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:

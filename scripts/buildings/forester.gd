@@ -12,9 +12,9 @@ class_name Forester extends Building
 ## plants and walks back in (Brave.State.FORESTER). Planting pauses at
 ## AREA_TREE_CAP trees in the area or when no free cell is left.
 
-const WOOD_COST: int = 20
+const WOOD_COST: int = Balance.FORESTER_WOOD_COST
 const FOOTPRINT: Vector2i = Vector2i(3, 3)
-const MAX_HEALTH: int = 250
+const MAX_HEALTH: int = Balance.FORESTER_HP
 ## Worker slots.
 const WORKER_SLOTS: int = 4
 ## Half-size of the square planting area in cells (radius 5 -> 11x11 field).
@@ -24,9 +24,9 @@ const PLANT_SPACING: int = 1
 ## No more planting once this many trees stand in the area.
 const AREA_TREE_CAP: int = 30
 ## Mana per second drained per ACTIVE worker.
-const MANA_PER_WORKER: float = 2.0
+const MANA_PER_WORKER: float = Balance.FORESTER_MANA_PER_WORKER
 ## Worker-seconds of work per sapling: 4 active workers -> one per 15 s.
-const PLANT_WORK_PER_TREE: float = 60.0
+const PLANT_WORK_PER_TREE: float = Balance.FORESTER_PLANT_WORK_PER_TREE
 
 const C_WALL: Color = Color(0.42, 0.3, 0.16)
 const C_ROOF: Color = Color(0.2, 0.45, 0.2)

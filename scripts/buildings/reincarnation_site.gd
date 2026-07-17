@@ -12,7 +12,7 @@ const FOOTPRINT: Vector2i = Vector2i(3, 3)
 ## Radius around the centre in which a brave counts as praying.
 const PRAY_RADIUS: float = 5.0
 ## Seconds between the shaman's death and her reincarnation.
-const RESPAWN_TIME: float = 20.0
+const RESPAWN_TIME: float = Balance.SHAMAN_RESPAWN_TIME
 
 const SHAMAN_SCENE: PackedScene = preload("res://scenes/units/shaman.tscn")
 
@@ -24,8 +24,8 @@ var respawn_pending: bool = false
 func _init() -> void:
 	wood_cost = WOOD_COST
 	footprint = FOOTPRINT
-	max_health = 500
-	health = 500
+	max_health = Balance.REINCARNATION_SITE_HP
+	health = max_health
 
 
 func display_name() -> String:

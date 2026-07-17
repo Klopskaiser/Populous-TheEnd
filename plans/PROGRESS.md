@@ -4118,3 +4118,47 @@ Katapult-Schuss). Vollständige Namens-Doku in `assets\README.md`.
 übt Panik/Tod/Katapult/Raid-Pfade) ohne Script-Fehler — ohne Sound-Dateien
 ändert sich nur der Katapult-Schuss nicht (Fallback-Regel), alles andere
 bleibt exakt wie vorher.
+
+### Leichen-Versinken + zentrale Balance-Datei (Nutzerwunsch, 2026-07-13)
+
+**Leichen versinken statt zu verblassen:** Der Dither-Alpha-Fade
+(`corpse_alpha`, Shader-Farb-Updates im Renderer) ist ersetzt durch
+`Unit.corpse_sink_depth()` — nach `CORPSE_DURATION` (5 s) sinkt das
+Leichen-Sprite über `CORPSE_SINK_DURATION` linear um `CORPSE_SINK_DEPTH`
+(1,6 m) in den Boden; der Transform-Pass des UnitRenderers zieht die Tiefe
+einfach von pos.y ab (ein Draw Call unangetastet). Aufgeräumt: totes Feld
+`_render_alpha` entfernt; `test_combat` auf Sink-Semantik umgestellt.
+**Stolperstein:** Die Sink-Dauer verlängert die Lebenszeit der Leiche in der
+Welt — der Zentroid-Drift-Wächter (test_combat_groups) zählt Leichen mit und
+schlug bei 2 s Sink-Dauer DETERMINISTISCH fehl (5,03 m > 4,5, zweimal exakt
+gleich). Sink-Dauer = 1,0 s hält die Gesamtdauer bei 6 s wie vorher → grün.
+Wer den Wert in balance.gd erhöht, muss den Drift-Test im Blick haben
+(Hinweis steht als Kommentar direkt an der Konstante).
+
+**Zentrale Balance-Datei `scripts/core/balance.gd`** (`class_name Balance`,
+nur Konstanten, deutsch kommentiert): Einheiten (HP/Tempo/Nahkampfstärke/
+Schuss- und Aggro-Reichweiten/Cooldowns, Prediger-Bekehrzeit MIN/MAX,
+Schamanin inkl. Respawn-Zeit + Kill-Bonus), Nahkampf allgemein
+(Schlagschäden, Chancen, Regeneration), Leichen-Zeiten, Brand/Lava,
+alle 10 Zauber (charge_cost/max_charges/cast_range + zentrale Effektwerte
+wie Blitz-/Feuerball-/Erdbeben-Schaden, Tornado-Stufenintervall,
+Feuerregen-Boltzahl), Katapult (Tempo/Reichweiten/Cooldowns/
+Einschlag-Schaden/Gebäudestufen), Gebäude (Holzkosten/HP/Ausbildungszeiten/
+Hütten-Spawn/Crew, Förster/Werkstatt/Wachturm-Werte, Stufen-Schadensanteil,
+Raid-DPS), Wirtschaft (Mana-Raten, Einheiten-Hardcap, Baumwachstum/-Ertrag).
+
+**Verkabelungs-Muster (bewusst):** Die Klassen behalten ihre lokalen
+Konstantennamen und beziehen nur den WERT aus Balance
+(`const MELEE_PUNCH: int = Balance.MELEE_PUNCH`) — dadurch bleiben alle
+Test-Referenzen (`Unit.MELEE_PUNCH`, `Hut.CAPACITY`, `Watchtower.WOOD_COST`,
+`ReincarnationSite.RESPAWN_TIME` … ~15 Testdateien) und Querverweise
+(`RangeRenderer.range_for_kind`) unverändert gültig. Geändert: unit.gd,
+brave/warrior/firewarrior/preacher/shaman/siege_engine/siege_shot,
+building.gd + hut/warrior_camp/temple/firewarrior_camp/forester/workshop/
+watchtower/reincarnation_site, tribe.gd, tree_resource.gd, alle 10 Spell-
+Dateien + fireball_bolt/swarm_cloud/tornado_vortex/volcano_zone.
+NICHT zentralisiert (bewusst, Verhalten/Physik statt Balance): Roll-/Wurf-/
+Knockback-Physik, Scan-Intervalle/Budgets, Queue-/Slot-Layouts, Visuals.
+
+**Verifikation:** Suite 1619 grün (alle Werte identisch übernommen —
+verhaltensneutral), Ladecheck sauber, Stresstest-Smoke ohne Fehler.

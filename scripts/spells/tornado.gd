@@ -7,9 +7,9 @@ class_name TornadoSpell extends Spell
 func _init() -> void:
 	id = &"tornado"
 	display_name_de = "Tornado"
-	charge_cost = 110.0
-	max_charges = 3
-	cast_range = 8.0
+	charge_cost = Balance.SPELL_TORNADO_CHARGE_COST
+	max_charges = Balance.SPELL_TORNADO_MAX_CHARGES
+	cast_range = Balance.SPELL_TORNADO_CAST_RANGE
 
 
 func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:

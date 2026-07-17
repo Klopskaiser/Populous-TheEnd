@@ -9,14 +9,14 @@ class_name Hut extends Building
 ## the hut with braves selected. Built by braves: foundation flattening first,
 ## then construction with delivered wood.
 
-const WOOD_COST: int = 12
+const WOOD_COST: int = Balance.HUT_WOOD_COST
 const FOOTPRINT: Vector2i = Vector2i(4, 4)
-const CAPACITY: int = 40
-const SPAWN_INTERVAL: float = 10.0   # seconds per new brave at full crew
+const CAPACITY: int = Balance.HUT_CAPACITY
+const SPAWN_INTERVAL: float = Balance.HUT_SPAWN_INTERVAL   # s per brave at full crew
 ## Crew slots (production workers, braves only).
-const CREW_CAPACITY: int = 4
+const CREW_CAPACITY: int = Balance.HUT_CREW_CAPACITY
 ## A full hut produces this much faster than the old flat SPAWN_INTERVAL rate.
-const FULL_CREW_BONUS: float = 1.1
+const FULL_CREW_BONUS: float = Balance.HUT_FULL_CREW_BONUS
 ## Idle braves within this radius are auto-pulled to man the hut.
 const MAN_RADIUS: float = 16.0
 ## Growth maintenance throttle.
@@ -35,8 +35,8 @@ var _growth_timer: float = 0.0
 func _init() -> void:
 	wood_cost = WOOD_COST
 	footprint = FOOTPRINT
-	max_health = 300
-	health = 300
+	max_health = Balance.HUT_HP
+	health = max_health
 
 
 func display_name() -> String:

@@ -13,12 +13,12 @@ class_name TreeResource extends Node3D
 
 const MAX_STAGE: int = 4
 ## Remaining wood per stage: 0 = sapling (0), then 1/2/3/4.
-const YIELDS: Array[int] = [0, 1, 2, 3, 4]
+const YIELDS: Array[int] = Balance.TREE_YIELDS
 ## Stage 0 is a small stick; stages 1..4 scale up like before.
 const STAGE_SCALES: Array[float] = [0.28, 0.35, 0.55, 0.8, 1.0]
 ## Average seconds per growth stage; the actual per-stage interval is randomised
 ## around this mean (see _next_growth_time).
-const GROWTH_TIME: float = 75.0
+const GROWTH_TIME: float = Balance.TREE_GROWTH_TIME
 ## Spread factor for the randomised growth interval (mean stays GROWTH_TIME).
 const GROWTH_SPREAD: float = 0.5
 ## How long a burning tree stays alight before it is destroyed.

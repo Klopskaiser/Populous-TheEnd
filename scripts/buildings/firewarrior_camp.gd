@@ -5,9 +5,9 @@ class_name FirewarriorCamp extends TrainingBuilding
 ## keep with a stepped octagonal roof, a dark gate and four blazing fire bowls at
 ## the corners. Fire theme.
 
-const WOOD_COST: int = 20
+const WOOD_COST: int = Balance.FIREWARRIOR_CAMP_WOOD_COST
 const FOOTPRINT: Vector2i = Vector2i(8, 8)
-const TRAINING_TIME: float = 4.0
+const TRAINING_TIME: float = Balance.FIREWARRIOR_CAMP_TRAINING_TIME
 const FIREWARRIOR_SCENE: PackedScene = preload("res://scenes/units/firewarrior.tscn")
 
 ## Low radial segment count -> visibly polygonal (octagonal) placeholder body.
@@ -21,8 +21,8 @@ const C_RUNE: Color = Color(0.4, 0.55, 0.95)
 func _init() -> void:
 	wood_cost = WOOD_COST
 	footprint = FOOTPRINT
-	max_health = 600
-	health = 600
+	max_health = Balance.FIREWARRIOR_CAMP_HP
+	health = max_health
 	produces = FIREWARRIOR_SCENE
 	training_time = TRAINING_TIME
 

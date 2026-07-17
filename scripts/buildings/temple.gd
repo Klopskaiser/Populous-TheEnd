@@ -5,9 +5,9 @@ class_name Temple extends TrainingBuilding
 ## image: a domed clay hut with a wide round reed roof, a blue-gold conical
 ## finial on top, and a small arched porch. Holy/peaceful theme.
 
-const WOOD_COST: int = 15
+const WOOD_COST: int = Balance.TEMPLE_WOOD_COST
 const FOOTPRINT: Vector2i = Vector2i(6, 6)
-const TRAINING_TIME: float = 5.0
+const TRAINING_TIME: float = Balance.TEMPLE_TRAINING_TIME
 const PREACHER_SCENE: PackedScene = preload("res://scenes/units/preacher.tscn")
 
 const C_WALL: Color = Color(0.82, 0.78, 0.68)
@@ -19,8 +19,8 @@ const C_BLUE: Color = Color(0.35, 0.4, 0.85)
 func _init() -> void:
 	wood_cost = WOOD_COST
 	footprint = FOOTPRINT
-	max_health = 440
-	health = 440
+	max_health = Balance.TEMPLE_HP
+	health = max_health
 	produces = PREACHER_SCENE
 	training_time = TRAINING_TIME
 

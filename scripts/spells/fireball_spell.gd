@@ -7,9 +7,9 @@ class_name FireballSpell extends Spell
 func _init() -> void:
 	id = &"fireball"
 	display_name_de = "Feuerball"
-	charge_cost = 40.0
-	max_charges = 4
-	cast_range = 8.0
+	charge_cost = Balance.SPELL_FIREBALL_CHARGE_COST
+	max_charges = Balance.SPELL_FIREBALL_MAX_CHARGES
+	cast_range = Balance.SPELL_FIREBALL_CAST_RANGE
 
 
 func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:

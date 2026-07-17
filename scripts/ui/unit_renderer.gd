@@ -199,7 +199,6 @@ func register_unit(unit: Unit) -> void:
 	unit._render_kind = unit.unit_kind()
 	unit._render_pos = Vector3.INF
 	unit._render_frame = -1
-	unit._render_alpha = 1.0
 	unit._blob_hidden = false
 	_units.append(unit)
 	_multimesh.set_instance_color(unit._render_index,
@@ -223,9 +222,6 @@ func unregister_unit(unit: Unit) -> void:
 		moved._render_index = index
 		moved._render_pos = Vector3.INF
 		moved._render_frame = -1
-		# Colour is rewritten at full alpha; resetting the cache makes the next
-		# frame pass re-apply a fading corpse's actual alpha.
-		moved._render_alpha = 1.0
 		moved._blob_hidden = false   # re-hidden by the frame pass if DEAD
 		_multimesh.set_instance_color(index,
 			Unit.TRIBE_COLORS[moved.tribe_id % Unit.TRIBE_COLORS.size()])
@@ -238,7 +234,6 @@ func unregister_unit(unit: Unit) -> void:
 func update_unit_color(unit: Unit) -> void:
 	if unit._render_index < 0:
 		return
-	unit._render_alpha = 1.0
 	_multimesh.set_instance_color(unit._render_index,
 		Unit.TRIBE_COLORS[unit.tribe_id % Unit.TRIBE_COLORS.size()])
 
@@ -270,6 +265,8 @@ func _process(_delta: float) -> void:
 		var pos: Vector3 = unit.position
 		if unit.hop_visual:
 			pos.y += hop_offset
+		if unit.state == Unit.State.DEAD:
+			pos.y -= unit.corpse_sink_depth()
 		if pos != unit._render_pos:
 			unit._render_pos = pos
 			_multimesh.set_instance_transform(unit._render_index,
@@ -282,19 +279,13 @@ func _process(_delta: float) -> void:
 
 func _update_frame(unit: Unit, cam_forward: Vector3, cam_right: Vector3,
 		hop_offset: float, now_ms: int) -> void:
-	# Corpse fade: push the decaying alpha into the instance colour (before the
-	# frame-equality early-out below — the corpse frame itself never changes).
-	if unit.state == Unit.State.DEAD:
-		if not unit._blob_hidden:
-			unit._blob_hidden = true   # a lying corpse casts no blob
-			_blob_multimesh.set_instance_transform(unit._render_index,
-				Transform3D(Basis.IDENTITY.scaled(Vector3.ZERO), Vector3.ZERO))
-		var alpha: float = unit.corpse_alpha()
-		if absf(alpha - unit._render_alpha) > 0.01:
-			unit._render_alpha = alpha
-			var col: Color = Unit.TRIBE_COLORS[unit.tribe_id % Unit.TRIBE_COLORS.size()]
-			col.a = alpha
-			_multimesh.set_instance_color(unit._render_index, col)
+	# Corpses keep their full colour and sink into the ground instead of
+	# fading (the transform pass applies corpse_sink_depth()); only the blob
+	# shadow is dropped here.
+	if unit.state == Unit.State.DEAD and not unit._blob_hidden:
+		unit._blob_hidden = true   # a lying corpse casts no blob
+		_blob_multimesh.set_instance_transform(unit._render_index,
+			Transform3D(Basis.IDENTITY.scaled(Vector3.ZERO), Vector3.ZERO))
 	var view: int = Unit.view_index(unit.facing, cam_forward, cam_right)
 	var per_base: Dictionary = _table.get(unit._render_kind, _table[KINDS[0]])
 	var base: StringName = unit.anim_base_name

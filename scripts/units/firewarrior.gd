@@ -9,23 +9,23 @@ class_name Firewarrior extends Unit
 ## FIRE_RANGE it closes in. Any number of firewarriors may fire at one target.
 
 ## Medium range: well above melee (1.2), below the aggro radius.
-const FIRE_RANGE: float = 7.0
+const FIRE_RANGE: float = Balance.FIREWARRIOR_FIRE_RANGE
 ## Seconds between fireballs (the throw animation cycle matches this).
-const FIRE_COOLDOWN: float = 1.5
+const FIRE_COOLDOWN: float = Balance.FIREWARRIOR_FIRE_COOLDOWN
 ## Larger than the melee aggro (8) and above FIRE_RANGE: a firewarrior turns to
 ## fire on threats out to here — including an enemy shooting a neighbour — and
 ## then closes to fire range, instead of only reacting to enemies right on top.
-const RANGED_AGGRO: float = 13.0
+const RANGED_AGGRO: float = Balance.FIREWARRIOR_AGGRO_RADIUS
 ## Building damage per fireball hit (phase 7g). Roughly HALF the melee raid
 ## DPS-equivalent: 5 HP / FIRE_COOLDOWN (1.5 s) ≈ 3.3 HP/s vs. a raider's
 ## 6 HP/s (Building.RAID_DPS_PER_RAIDER). Balance in phase 8.
-const BUILDING_FIRE_DAMAGE: int = 5
+const BUILDING_FIRE_DAMAGE: int = Balance.FIREWARRIOR_BUILDING_DAMAGE
 
 
 func _init() -> void:
-	max_health = 60
-	health = 60
-	speed = 4.0
+	max_health = Balance.FIREWARRIOR_HP
+	health = max_health
+	speed = Balance.FIREWARRIOR_SPEED
 
 
 func unit_kind() -> StringName:

@@ -10,13 +10,13 @@ class_name Tribe extends RefCounted
 ## autoloads work.
 
 ## Mana per second per population member.
-const MANA_BASE_RATE: float = 0.1
+const MANA_BASE_RATE: float = Balance.MANA_BASE_RATE
 ## Extra mana per second per praying brave.
-const MANA_PRAY_BONUS: float = 0.5
+const MANA_PRAY_BONUS: float = Balance.MANA_PRAY_BONUS
 
 ## Hard unit cap per tribe (phase 7i): no hut spawn / training beyond this, on
 ## top of the housing capacity — whichever limits first.
-const MAX_UNITS: int = 1500
+const MAX_UNITS: int = Balance.TRIBE_MAX_UNITS
 
 ## Population-growth control (phase 7i): governs how huts are auto-manned by
 ## nearby idle braves. NONE empties all huts (no growth); MINIMAL keeps one crew

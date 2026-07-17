@@ -18,8 +18,8 @@ class_name SiegeShot extends Node3D
 
 const SPEED: float = 12.0
 const ARC_HEIGHT: float = 6.0          # high mortar arc
-const SHOCK_RADIUS: float = 2.0
-const SHOCK_DAMAGE: int = 15           # 1/4 brave life (60)
+const SHOCK_RADIUS: float = Balance.SIEGE_SHOT_SHOCK_RADIUS
+const SHOCK_DAMAGE: int = Balance.SIEGE_SHOT_SHOCK_DAMAGE
 ## Slope thresholds (rise per metre) for the roll chance bands.
 const SLOPE_MILD: float = 0.2
 const SLOPE_STEEP: float = 0.6
@@ -90,7 +90,7 @@ func _impact() -> void:
 		# Full destruction stage (construction sites shatter — fragile rule)
 		# and everyone stationed inside dies.
 		_kill_building_occupants(building)
-		building.apply_destruction_stages(1)
+		building.apply_destruction_stages(Balance.SIEGE_SHOT_BUILDING_STAGES)
 	else:
 		_spawn_lava()
 	_shockwave()

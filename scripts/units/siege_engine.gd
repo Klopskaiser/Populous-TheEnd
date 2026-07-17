@@ -25,19 +25,19 @@ const BOARD_RANGE: float = 2.5
 const CREW_LEASH: float = 8.0
 ## Fire range band: beyond FIRE_RANGE it advances, below MIN_RANGE the arc is
 ## too flat — it holds fire.
-const FIRE_RANGE: float = 15.0
-const MIN_RANGE: float = 3.0
+const FIRE_RANGE: float = Balance.SIEGE_FIRE_RANGE
+const MIN_RANGE: float = Balance.SIEGE_MIN_RANGE
 ## Shot cooldown by boarded crew: 2 -> slowest, 6 (full) -> fastest.
-const COOLDOWN_MIN_CREW: float = 6.0
-const COOLDOWN_FULL_CREW: float = 3.0
-## Brave speed 4.0 * 0.5 (slowest unit in the game; user-tuned from 0.75).
-const SIEGE_SPEED: float = 2.0
+const COOLDOWN_MIN_CREW: float = Balance.SIEGE_COOLDOWN_MIN_CREW
+const COOLDOWN_FULL_CREW: float = Balance.SIEGE_COOLDOWN_FULL_CREW
+## Slowest unit in the game (user-tuned).
+const SIEGE_SPEED: float = Balance.SIEGE_SPEED
 ## Crew slot layout: 3 per long side, this far out/apart.
 const CREW_SIDE_OFFSET: float = 0.95
 const CREW_RANK_SPACING: float = 0.85
 ## Auto-aggro scan radius (UNITS first, then buildings — user feedback);
 ## comfortably above the fire range so approaching enemies are engaged early.
-const SIEGE_AGGRO: float = 20.0
+const SIEGE_AGGRO: float = Balance.SIEGE_AGGRO_RADIUS
 
 ## How the device can be destroyed (user feedback): fire SPELLS or lava set
 ## it alight — it burns this long, then sinks into the ground; terrain

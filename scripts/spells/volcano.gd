@@ -6,7 +6,7 @@ class_name VolcanoSpell extends Spell
 ## its lifetime (lava knows no friends: OWN units burn too, documented
 ## design). The mountain stays after the zone despawns.
 
-const RADIUS: float = 5.0
+const RADIUS: float = Balance.VOLCANO_RADIUS
 const PEAK: float = 6.0
 const DURATION: float = 3.0
 
@@ -14,9 +14,9 @@ const DURATION: float = 3.0
 func _init() -> void:
 	id = &"volcano"
 	display_name_de = "Vulkan"
-	charge_cost = 180.0
-	max_charges = 1
-	cast_range = 12.0
+	charge_cost = Balance.SPELL_VOLCANO_CHARGE_COST
+	max_charges = Balance.SPELL_VOLCANO_MAX_CHARGES
+	cast_range = Balance.SPELL_VOLCANO_CAST_RANGE
 
 
 func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:
