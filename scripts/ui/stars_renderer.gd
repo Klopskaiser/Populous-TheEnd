@@ -1,7 +1,9 @@
 class_name StarsRenderer extends MultiMeshInstance3D
 
-## Circling-stars overlay above units that just took heavy damage
-## (Unit.has_stars()) — the ONLY damage feedback, HP is never shown.
+## Circling-stars overlay above CRITICALLY DAMAGED units (below
+## Unit.BADLY_HURT_FRAC of max health, Unit.has_stars()) — the only damage
+## feedback, HP is never shown. Burning suppresses the stars (fire has
+## display priority over every other status).
 ##
 ## One MultiMesh of billboard quads; the star texture is procedural (FRAME_COUNT
 ## frames with the three stars at rotated positions) and all active overlays
@@ -66,13 +68,10 @@ func _process(delta: float) -> void:
 	var up: Vector3 = camera.global_transform.basis.y if camera != null \
 		else Vector3.UP
 	var count: int = 0
-	# Inline has_stars() with ONE clock read: the per-unit Time call added up
-	# with thousands of units per rendered frame (phase 8).
-	var now_ms: int = Time.get_ticks_msec()
 	for unit in _unit_manager.units:
 		if count >= MAX_STARS:
 			break
-		if now_ms < unit.stars_until_ms and unit.state != Unit.State.DEAD:
+		if unit.has_stars():
 			_multimesh.set_instance_transform(count, Transform3D(
 				Basis.IDENTITY, unit.position + up * HEIGHT))
 			count += 1

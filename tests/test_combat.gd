@@ -530,15 +530,23 @@ func test_regeneration_after_delay() -> void:
 	_free_world(w)
 
 
-func test_stars_on_heavy_damage() -> void:
+## Stars = CRITICAL damage (<= 25 % health); burning has display priority.
+func test_stars_show_critical_damage_and_fire_priority() -> void:
 	var w: Dictionary = _make_world()
-	var unit: Unit = _spawn(w, BRAVE_SCENE, 0, Vector2(30, 30))
-	unit.take_damage(3)
-	check(not unit.has_stars(), "light damage shows no stars")
-	unit.take_damage(15)
-	check(unit.has_stars(), "heavy damage triggers the circling stars")
-	unit.take_damage(1000)
-	check(not unit.has_stars(), "corpses never show stars")
+	var crit: Unit = _spawn(w, BRAVE_SCENE, 0, Vector2(30, 30))
+	crit.take_damage(5)
+	check(not crit.has_stars(), "light damage shows no stars")
+	crit.take_damage(crit.health - int(float(crit.max_health) * Unit.BADLY_HURT_FRAC))
+	check(crit.has_stars(), "critical damage shows the circling stars")
+	var burning: Unit = _spawn(w, BRAVE_SCENE, 0, Vector2(34, 30))
+	burning.ignite(burning.position)   # lava contact damage + alight + panic
+	burning.take_damage(20)            # now critical AND burning
+	check(burning.is_burning(), "second unit is alight")
+	check(burning.health <= int(float(burning.max_health) * Unit.BADLY_HURT_FRAC),
+		"second unit is critical")
+	check(not burning.has_stars(), "burning suppresses the stars")
+	crit.take_damage(1000)
+	check(not crit.has_stars(), "corpses never show stars")
 	_free_world(w)
 
 

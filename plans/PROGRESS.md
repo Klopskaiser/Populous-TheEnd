@@ -4277,3 +4277,22 @@ test_economy +1 (order_pickup: Brave holt Stapel, liefert an den Drop-Spot
 der Hütte). Suite **1634 grün**, Ladecheck sauber, Stresstest-Smoke (45 s,
 Terrain-Verformungen erzwingen Insel-Rebuilds) ohne Fehler.
 **Nutzer ausstehend:** Original-Szenario (Ebene + Holzwirtschaft) im Spiel.
+
+### Zustandsanzeigen konsolidiert (Nutzerwunsch, 2026-07-13)
+
+- **Sterne = NUR noch kritischer Schaden** (<= 25 % Leben, `has_stars()`
+  umdefiniert): das ursprüngliche Phase-5d-Treffer-Feedback (>=12 Schaden
+  in 1 s -> 1,5 s Sterne) ist ENTFERNT (stars_until_ms/_recent_damage/
+  STARS_*-Konstanten/_register_damage_for_stars raus) — es lief parallel
+  zu den neuen Zustands-Icons.
+- **Brennen hat Anzeige-Priorität:** unterdrückt Panik-Icon UND Sterne
+  (`has_stars()` prüft `not is_burning()`; StatusFxRenderer maskiert das
+  visual_mask auf FX_BURNING). Brennende Einheiten sind ohnehin implizit
+  in Panik (ignite -> start_panic).
+- **Verletzt-Tropfen-Icon entfernt** — der INJURED-Zustand treibt im
+  StatusFxRenderer nur noch seinen Loop-Sound; die Optik übernehmen die
+  Sterne (StarsRenderer, jetzt via has_stars()).
+- README: effects/ nur noch panic.png + burning.png; Sterne nicht ersetzbar.
+- Test umgebaut: test_stars_show_critical_damage_and_fire_priority
+  (leichter Schaden keine Sterne, krit -> Sterne, brennend+krit -> keine,
+  Leiche -> keine). Suite **1637 grün**, Ladecheck sauber.

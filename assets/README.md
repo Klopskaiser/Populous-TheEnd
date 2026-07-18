@@ -126,11 +126,12 @@ VRAM-Kompression einstellen.
 ## Status-Effekt-Icons (`textures/effects/`)
 
 Über Einheiten mit anhaltendem Zustand schwebt ein animiertes Icon: **Panik**
-(rotes Ausrufezeichen), **Brennen** (Flamme auf dem Körper), **stark verletzt**
-(rote Tropfen, unter 25 % Leben). Die eingebauten Pixel-Icons lassen sich pro
-Effekt ersetzen:
+(rotes Ausrufezeichen) und **Brennen** (Flamme auf dem Körper). **Brennen hat
+Anzeige-Priorität** und überdeckt alle anderen Zustands-Icons. **Kritischer
+Schaden** (unter 25 % Leben) wird mit den klassischen kreisenden Sternen
+dargestellt (nicht ersetzbar). Die Pixel-Icons lassen sich pro Effekt ersetzen:
 
-- `panic.png`, `burning.png`, `injured.png`
+- `panic.png`, `burning.png`
 - Format: ein einzelnes Bild **oder** ein horizontaler Streifen **quadratischer**
   Frames (Framezahl = Breite ÷ Höhe), abgespielt als Loop (~6,7 fps).
 - Transparenter Hintergrund (Alpha), Lossless-Import belassen.

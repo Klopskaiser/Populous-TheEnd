@@ -1,9 +1,12 @@
 class_name StatusFxRenderer extends Node3D
 
-## Persistent status-effect overlays on units — PANIC (red exclamation mark),
-## BURNING (flames on the body) and INJURED (badly hurt, red drops) — one
-## MultiMesh per effect (one draw call each), following the StarsRenderer
-## pattern. The icon shows exactly as long as the state lasts.
+## Persistent status-effect overlays on units — PANIC (red exclamation mark)
+## and BURNING (flames on the body) — one MultiMesh per effect (one draw call
+## each), following the StarsRenderer pattern. The icon shows exactly as long
+## as the state lasts. Display priority: BURNING suppresses all other status
+## icons (burning units are implicitly panicking anyway). Crit damage
+## (INJURED, below 25 % health) is drawn as the classic circling stars by the
+## StarsRenderer — here it only drives its loop sound.
 ##
 ## Icons are procedural placeholders, replaceable per effect via
 ## assets/textures/effects/<panic|burning|injured>.png — a single image or a
@@ -144,9 +147,15 @@ func _process(delta: float) -> void:
 		if mask == 0:
 			continue
 		unit._status_fx_seen = _tick
+		# Display priority (user spec): BURNING overrides every other status
+		# icon; crit damage (INJURED) is drawn as circling stars by the
+		# StarsRenderer, never here. Loop sounds above follow the FULL mask.
+		var visual_mask: int = mask & ~FX_INJURED
+		if visual_mask & FX_BURNING:
+			visual_mask = FX_BURNING
 		for i in range(_effects.size()):
 			var e: Dictionary = _effects[i]
-			if mask & int(e.bit) and counts[i] < MAX_PER_EFFECT:
+			if visual_mask & int(e.bit) and counts[i] < MAX_PER_EFFECT:
 				(e.mm as MultiMesh).set_instance_transform(counts[i],
 					Transform3D(Basis.IDENTITY, unit.position + up * float(e.height)))
 				counts[i] += 1

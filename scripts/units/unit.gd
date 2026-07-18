@@ -193,13 +193,6 @@ const MIN_SPEED_FACTOR: float = 0.35
 const REGEN_DELAY: float = Balance.REGEN_DELAY
 const REGEN_RATE: float = Balance.REGEN_RATE   # HP per second
 
-# --- Stars overlay (phase 5d) -------------------------------------------------------
-## Damage taken within STARS_WINDOW seconds that triggers the circling stars.
-## (HP is NEVER shown — the stars are the only damage feedback.)
-const STARS_DAMAGE_THRESHOLD: int = 12
-const STARS_WINDOW: float = 1.0
-const STARS_DURATION_MS: int = 1500
-
 var tribe_id: int = 0
 ## Owning tribe, injected by UnitManager.spawn_unit()/Tribe.add_unit().
 var tribe: Tribe = null
@@ -409,18 +402,14 @@ var panic_source: Vector3 = Vector3.ZERO
 var _panic_time: float = 0.0
 var _panic_redirect: float = 0.0
 
-# --- Regeneration / stars state (phase 5d) --------------------------------------------
+# --- Regeneration state (phase 5d) ----------------------------------------------------
 ## Seconds since the last combat involvement; regen starts past REGEN_DELAY.
 var _no_combat_timer: float = 0.0
 var _regen_frac: float = 0.0
-## Stars overlay visible until this tick-time (see has_stars()).
-var stars_until_ms: int = 0
 ## Active status-effect bits + frame stamp, managed by the StatusFxRenderer
-## (panic / burning / badly hurt overlays and their loop sounds).
+## (panic / burning / crit-damage loop sounds + icons).
 var _status_fx_mask: int = 0
 var _status_fx_seen: int = 0
-## Damage taken recently (decays over STARS_WINDOW).
-var _recent_damage: float = 0.0
 ## Cached Events bus (combat_hit emissions), resolved once when in-tree.
 var _events_node: Node = null
 var _events_checked: bool = false
@@ -827,7 +816,6 @@ func take_damage(amount: int, attacker = null) -> void:
 	var health_before: int = health
 	health -= amount
 	_no_combat_timer = 0.0
-	_register_damage_for_stars(amount)
 	if attacker != null and is_instance_valid(attacker):
 		last_attacker = attacker
 	if health <= 0:
@@ -854,11 +842,10 @@ func _die() -> void:
 	_end_attack()
 	_clear_building_target()
 	_dissolve_own_group()
-	# Corpse setup: no selection ring, no route, no hopping, no stars — the unit
-	# stays in the world as a lying "dead" sprite until the decay timer removes it.
+	# Corpse setup: no selection ring, no route, no hopping — the unit stays in
+	# the world as a lying "dead" sprite until the decay timer removes it.
 	selected = false
 	hop_visual = false
-	stars_until_ms = 0
 	waypoint_queue.clear()
 	_clear_path()
 	_corpse_timer = 0.0
@@ -1358,12 +1345,9 @@ func _downhill_vector() -> Vector3:
 
 # --- Regeneration & stars (phase 5d) ---------------------------------------------------
 
-## Counts combat-free time and slowly heals past REGEN_DELAY; also decays the
-## recent-damage window for the stars overlay. Rolling counts as combat.
+## Counts combat-free time and slowly heals past REGEN_DELAY. Rolling counts
+## as combat.
 func _tick_regen(delta: float) -> void:
-	if _recent_damage > 0.0:
-		_recent_damage = maxf(
-			_recent_damage - float(STARS_DAMAGE_THRESHOLD) * delta / STARS_WINDOW, 0.0)
 	if state == State.DEAD:
 		return
 	if state == State.ROLL or state == State.THROWN:
@@ -1379,17 +1363,12 @@ func _tick_regen(delta: float) -> void:
 		health = mini(health + heal, max_health)
 
 
-## Heavy damage in a short window triggers the circling stars above the head
-## (drawn by the StarsRenderer; HP itself is never shown).
-func _register_damage_for_stars(amount: int) -> void:
-	_recent_damage += float(amount)
-	if _recent_damage >= float(STARS_DAMAGE_THRESHOLD):
-		stars_until_ms = Time.get_ticks_msec() + STARS_DURATION_MS
-		_recent_damage = 0.0
-
-
+## Circling stars = CRITICAL DAMAGE (below BADLY_HURT_FRAC of max health;
+## HP itself is never shown). Burning has display priority and suppresses
+## the stars; the siege engine's 1-HP convention never counts as hurt.
 func has_stars() -> bool:
-	return state != State.DEAD and Time.get_ticks_msec() < stars_until_ms
+	return state != State.DEAD and renders_as_sprite() and not is_burning() \
+		and health <= int(float(max_health) * BADLY_HURT_FRAC)
 
 
 # --- Conversion (preacher, phase 5c) ----------------------------------------------
