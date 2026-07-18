@@ -16,13 +16,13 @@ class_name SiegeEngine extends Unit
 ## - Rendered as its OWN 3D model (renders_as_sprite false): wooden frame,
 ##   wheels, throwing arm; the crew stays normal sprites around it.
 
-const MAX_CREW: int = 6
-const MIN_MOVE_CREW: int = 1
-const MIN_FIRE_CREW: int = 2
+const MAX_CREW: int = Balance.SIEGE_MAX_CREW
+const MIN_MOVE_CREW: int = Balance.SIEGE_MIN_MOVE_CREW
+const MIN_FIRE_CREW: int = Balance.SIEGE_MIN_FIRE_CREW
 ## A crew member counts as boarded/serving within this range of the engine.
-const BOARD_RANGE: float = 2.5
+const BOARD_RANGE: float = Balance.SIEGE_BOARD_RANGE
 ## Boarded members straying farther than this (self-defence chases) are lost.
-const CREW_LEASH: float = 8.0
+const CREW_LEASH: float = Balance.SIEGE_CREW_LEASH
 ## Fire range band: beyond FIRE_RANGE it advances, below MIN_RANGE the arc is
 ## too flat — it holds fire.
 const FIRE_RANGE: float = Balance.SIEGE_FIRE_RANGE
@@ -43,7 +43,7 @@ const SIEGE_AGGRO: float = Balance.SIEGE_AGGRO_RADIUS
 ## it alight — it burns this long, then sinks into the ground; terrain
 ## morphing that leaves this height span under the chassis bursts it apart.
 ## The crew survives both, is released and controllable again.
-const VEHICLE_BURN_TIME: float = 3.0
+const VEHICLE_BURN_TIME: float = Balance.SIEGE_VEHICLE_BURN_TIME
 const SINK_SPEED: float = 0.8   # m/s downward while the wreck sinks
 ## Height span under the chassis that bursts it. Deliberately ABOVE what
 ## drivable terrain can present (walkable cells allow 1.5 m/cell → ~3 m over

@@ -27,14 +27,15 @@ fällen Bäume bzw. holen Holzstapel ab und tragen das Holz zur Baustelle
 ### Mana
 Mana lädt **passiv** und skaliert mit der eigenen Bevölkerung:
 
-> **Mana/s = 0,1 × Bevölkerung + 0,5 × Anzahl betender Braves**
+> **Mana/s = 0,1 × Bevölkerung + 0,3 × Anzahl betender Braves**
 
-Betende Braves (am Reinkarnationsplatz) sind also je 6× so viel wert wie ein
+Betende Braves (am Reinkarnationsplatz) sind also je 4× so viel wert wie ein
 normales Stammesmitglied, tun aber sonst nichts. Mana wird automatisch in
-**Zauber-Ladungen** umgewandelt (siehe §7).
+**Zauber-Ladungen** umgewandelt (siehe §7). Der Förster **verbraucht** Mana
+als Arbeiter-Unterhalt (siehe §4).
 
 ### Bevölkerung & Limits
-- **Hardcap: 1500 Einheiten pro Stamm** (zusätzlich zum Bevölkerungslimit der
+- **Hardcap: 1000 Einheiten pro Stamm** (zusätzlich zum Bevölkerungslimit der
   Hütten; jede Hütte bietet Platz für 40).
 - **Hütten-Besatzung:** Eine Hütte produziert nur **mit Besatzung** (bis zu
   4 Braves, im Gebäude versteckt; sie zählen zur Bevölkerung, erzeugen aber
@@ -53,8 +54,8 @@ normales Stammesmitglied, tun aber sonst nichts. Mana wird automatisch in
 |---|---|---|---|---|
 | **Brave** | 60 | 4,0 m/s | Nahkampf ×1,0 | Arbeiter: baut, sammelt Holz, betet, bemannt Hütten/Förster/Werkstatt. Wehrt sich nur, greift nicht selbst an (Idle-Aggro nur 3 m „Dorfwache"). |
 | **Krieger** | 120 | 4,0 m/s | Nahkampf ×3,0 | Stärkster Nahkämpfer; schubst fast nie (4 % statt 15 %), schlägt lieber zu. Aggro-Radius 8 m. |
-| **Feuerkrieger** | 60 | 4,0 m/s | Feuerball: 7 HP (Einheiten) / 5 HP (Gebäude), Reichweite 7 m, alle 1,5 s | Fernkämpfer; großer Aggro-Radius (13 m). Kann Wachtürme bemannen (+3 m Reichweite). |
-| **Prediger** | 75 | 4,0 m/s | konvertiert statt zu kämpfen | **Bekehrt** Feinde (Reichweite 5 m, Dauer zufällig 4–9 s). Mehrere Prediger verteilen sich auf verschiedene Ziele; Einheiten **in Bekehrung sind kein gültiges Ziel** für Nah-/Fernkampf (Katapult ausgenommen). |
+| **Feuerkrieger** | 60 | 4,0 m/s | Feuerball: 9 HP (Einheiten) / 5 HP (Gebäude), Reichweite 8 m, alle 1,5 s | Fernkämpfer; großer Aggro-Radius (13 m). Kann Wachtürme bemannen (+3 m Reichweite). |
+| **Prediger** | 90 | 4,0 m/s | konvertiert statt zu kämpfen | **Bekehrt** Feinde (Reichweite 5 m, Dauer zufällig 4–9 s). Mehrere Prediger verteilen sich auf verschiedene Ziele; Einheiten **in Bekehrung sind kein gültiges Ziel** für Nah-/Fernkampf (Katapult ausgenommen). |
 | **Schamanin** | 240 (4× Brave) | 4,0 m/s | Nahkampf ×2,0; einzige Zauberwirkerin (Wind-up 0,6 s) | Genau eine pro Stamm. Stirbt sie, **respawnt** sie nach **20 s** am Reinkarnationsplatz; der Stamm des Tötenden erhält einmalig **15 %** seiner Ladungskapazität als Manaboost. |
 | **Katapult** | — (nicht direkt angreifbar) | 2,0 m/s | Schuss: Reichweite 3–15 m; Einschlag 15 HP im 2-m-Radius (**Friendly Fire!**); Gebäude +1 Zerstörungsstufe; Raider im eigenen Gebäude: 30 HP + Rauswurf | Fahrzeug mit Crew (bis 6): Schuss-Cooldown 6 s bei 2 Crew → 3 s bei voller Crew. Bekämpft wird die **Crew**, nicht das Fahrzeug; ein unbemanntes Katapult kann jeder Stamm übernehmen. |
 
@@ -76,7 +77,7 @@ Enum `Unit.State` in `scripts/units/unit.gd`:
 | `PANIC` | Flieht kopflos vor der Panikquelle; nicht steuerbar (Details §6 Statuseffekte). |
 | `CAST` | Schamanin wirkt einen Zauber (Wind-up, dann Release). |
 | `THROWN` | Durch die Luft geschleudert (Feuerball, Tornado) — Wurfparabel bis zur Landung. |
-| `DEAD` | Tot; Leiche liegt 5 s und versinkt dann im Boden (1 s Animation). |
+| `DEAD` | Tot; Leiche liegt 6 s und versinkt dann im Boden (1 s Animation). |
 | `SIT` | Von einem feindlichen Prediger fixiert (Bekehrung läuft). |
 | `ROLL` | Rollt/purzelt bis zum Ausrollen; nicht steuerbar, Rollschaden über Zeit (Details §6 Statuseffekte). |
 | `FORESTER` | Beim Förster einquartiert bzw. kurz draußen einen Setzling pflanzend. |
@@ -99,11 +100,11 @@ Der Eingang liegt stets auf der Südseite; beim Platzieren kann gedreht werden
 | Gebäude | Footprint | Holz | HP | Funktion |
 |---|---|---|---|---|
 | **Hütte** | 4×4 | 12 | 300 | +40 Bevölkerungsplatz; spawnt Braves (10 s bei voller Besatzung von 4; leer = nichts). |
-| **Kaserne** | 5×5 | 5 | 400 | Bildet Braves in **3 s** zu **Kriegern** aus. |
+| **Kaserne** | 5×5 | 10 | 400 | Bildet Braves in **3 s** zu **Kriegern** aus. |
 | **Tempel** | 6×6 | 15 | 440 | Bildet Braves in **5 s** zu **Predigern** aus. |
 | **Feuertempel** | 8×8 | 20 | 600 | Bildet Braves in **4 s** zu **Feuerkriegern** aus. |
-| **Förster** | 3×3 | 20 | 250 | Bis 4 Arbeiter; erzeugt **2 Mana/s je Arbeiter** und pflanzt Setzlinge (60 Arbeiter-Sekunden je Baum → 4 Arbeiter = alle 15 s einer). |
-| **Werkstatt** | 8×4 | 15 | 350 | Baut **Katapulte**: 90 Arbeiter-Sekunden (3 Arbeiter → 30 s) + 5 Holz je Stück. |
+| **Förster** | 5×2 | 18 | 250 | Bis 4 Arbeiter pflanzen Setzlinge (60 Arbeiter-Sekunden je Baum → 4 Arbeiter = alle 15 s einer). **Unterhalt: 1,5 Mana/s je aktivem Arbeiter** — reicht das Mana nicht, pausieren Arbeiter. |
+| **Werkstatt** | 8×4 | 15 | 350 | Baut **Katapulte**: 60 Arbeiter-Sekunden (3 Arbeiter → 20 s) + 5 Holz je Stück. |
 | **Wachturm** | 2×2 | 4 | 200 | 2 Plätze für Kampfeinheiten/Schamanin (keine Braves); stationierte Fernkämpfer/Prediger erhalten **+3 m Reichweite**. Klein: max. 5 gleichzeitige Abreißer statt 15. |
 | **Reinkarnationsplatz** | 3×3 | — | 500 | Respawn-Ort der Schamanin; Braves beten hier (Mana-Bonus). Kann **nicht von Einheiten gestürmt** werden (nur Beschuss/Zauber). |
 
@@ -156,7 +157,7 @@ Schaden wird flach von den HP abgezogen. Variation entsteht auf Angreiferseite:
   **2 HP/s** selbst.
 - **Klippensturz:** Wer über eine Kante (≥ 1,6 m Höhendifferenz) gestoßen wird
   oder rollt, stürzt: **6 HP je Meter Fallhöhe**, gedeckelt auf 30 HP
-  (½ Brave-Leben), danach Rollen (Dauer wächst mit der Fallhöhe, max. 2 s).
+  (½ Brave-Leben), danach Rollen (Dauer wächst mit der Fallhöhe, max. 3 s).
   Sturz **ins Wasser = Sofort-Tod**.
 
 ### Statuseffekte
@@ -176,7 +177,7 @@ wird zurückgesetzt. Angreifbar bleibt die Einheit währenddessen normal.
   steuerbar. Geschleuderte/rollende Einheiten beenden erst ihren Sturz/Roller,
   Panik greift dann nicht mehr rückwirkend.
 
-**Rollen** — Auslöser: Schubser im Nahkampf (20 % Umwerf-Chance), Landung nach
+**Rollen** — Auslöser: Schubser im Nahkampf (25 % Umwerf-Chance), Landung nach
 Feuerball-/Tornado-Schleudern, Blitz (angrenzende Einheiten), Klippensturz,
 sowie von selbst beim Hinablaufen sehr steiler Hänge (Stolpern).
 - Rollt mit **5,5 m/s** (Hangneigung addiert Tempo) und folgt an Hängen der
@@ -199,9 +200,9 @@ sowie von selbst beim Hinablaufen sehr steiler Hänge (Stolpern).
   danach Schwung-Roller. Landung **im Wasser = Sofort-Tod**.
 
 **Brand** — Auslöser für Einheiten: **nur Lavakontakt** (Vulkan, Lavaströme).
-- Erstkontakt mit Lava kostet sofort **30 HP**, dann brennt die Einheit:
-  **120 HP über 4 s** (2 Brave-Leben — für Braves und Feuerkrieger tödlich,
-  wenn nichts dazwischenkommt). Erneuter Lavakontakt frischt den Brand auf,
+- Erstkontakt mit Lava kostet sofort **20 HP**, dann brennt die Einheit:
+  **80 HP über 4 s** (für Braves und Feuerkrieger immer noch tödlich, wenn
+  nichts dazwischenkommt). Erneuter Lavakontakt frischt den Brand auf,
   stapelt aber nicht.
 - Brand **löst Panik aus** (für die Brenndauer): die Einheit rennt brennend
   umher. Die panik-immune Schamanin brennt stehend und bleibt steuerbar.
@@ -220,14 +221,14 @@ Ladungs-Pips in der Zauberleiste. Nur die Schamanin zaubert (Wind-up 0,6 s).
 
 | Taste | Zauber | Mana/Ladung | Max. Ladungen | Reichweite | Effekt |
 |---|---|---|---|---|---|
-| 1 | **Feuerball** | 40 | 4 | 8 m | Direkttreffer 60 HP (r ≤ 0,8 m), Fläche 30 HP (r ≤ 2,5 m). Getroffene werden zurückgeschleudert (kleiner Bogen), landen im Rollzustand. |
-| 2 | **Blitz** | 60 | 4 | 10 m | Einheit: **240 HP** (4× Brave; Angrenzende rollen kurz). Gebäude: **+2 Zerstörungsstufen**. |
-| 3 | **Schwarm** | 50 | 4 | 8 m | Zufällig wandernder Insektenschwarm (10 s, r = 3 m): Gegner geraten in **Panik (6 s)** und erleiden 3 HP/s. Schamanin ist gegen die Panik immun. |
+| 1 | **Feuerball** | 30 | 4 | 8 m | Direkttreffer 60 HP (r ≤ 0,8 m), Fläche 30 HP (r ≤ 2,5 m). Getroffene werden zurückgeschleudert (kleiner Bogen), landen im Rollzustand. |
+| 2 | **Blitz** | 70 | 4 | 12 m | Einheit: **240 HP** (4× Brave; Angrenzende rollen kurz). Gebäude: **+2 Zerstörungsstufen**. |
+| 3 | **Schwarm** | 50 | 4 | 8 m | Zufällig wandernder Insektenschwarm (10 s, r = 3 m): Gegner geraten in **Panik (6 s)** und erleiden 5 HP/s. Schamanin ist gegen die Panik immun. |
 | 4 | **Landbrücke** | 60 | 4 | 9 m | Kein Schaden. Hebt Terrain in breiter Linie (Halbbreite 1,6 m) an: über Wasser auf Küstenniveau, sonst auf Zielpunkt-Niveau; bei Höhendifferenz entsteht eine begehbare Schräge. |
-| 5 | **Tornado** | 110 | 3 | 8 m | Windhose (8 s, r = 2,2 m), wandert zufällig; Gebäude **+1 Stufe alle 2 s**. Einheiten werden hochgewirbelt und weggeschleudert (Sturzschaden 30 HP + Rollschaden; ins Wasser = Tod). |
-| 6 | **Erdbeben** | 110 | 2 | 10 m | Hebt/senkt Terrain entlang einer zufälligen Verwerfung (r = 7 m); Gebäude **+2 Stufen**, Einheiten 15 HP. |
+| 5 | **Tornado** | 110 | 3 | 10 m | Windhose (10 s, r = 2,2 m), wandert zufällig; Gebäude **+1 Stufe alle 2 s**. Einheiten werden hochgewirbelt und weggeschleudert (Sturzschaden 30 HP + Rollschaden; ins Wasser = Tod). |
+| 6 | **Erdbeben** | 130 | 2 | 10 m | Hebt/senkt Terrain entlang einer zufälligen Verwerfung (r = 7 m); Gebäude **+2 Stufen**, Einheiten 15 HP. |
 | 7 | **Vulkan** | 180 | 1 | 12 m | Teuerster Zauber: hebt einen Vulkankegel (r = 5 m), aktive Lavazone 20 s (Brand/Stufenschaden). |
-| 8 | **Feuerregen** | 100 | 2 | 10 m | 8 Feuerbälle regnen über 3 s im Zielgebiet (r = 5,5 m) nieder; je Bolt Feuerball-Werte (60/30 HP). |
+| 8 | **Feuerregen** | 100 | 2 | 10 m | 12 Feuerbälle regnen über 3 s im Zielgebiet (r = 5,5 m) nieder; je Bolt Feuerball-Werte (60/30 HP). |
 | 9 | **Ebene** | 90 | 3 | 10 m | Ebnet das Zielquadrat (9×9 m) exakt ein, harte Kanten. |
 | 0 | **Absinken** | 60 | 3 | 10 m | Senkt das Zielgebiet (r = 6 m) um bis zu 3 m ab — nie unter den Meeresboden. |
 

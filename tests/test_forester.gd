@@ -109,10 +109,11 @@ func test_forester_mana_upkeep() -> void:
 	w.tribe.mana = 10.0
 	f._tick_active(1.0)
 	check(f._active_workers == 4, "all four workers active while mana lasts")
-	check_near(w.tribe.mana, 2.0, "4 workers drain 4x2 = 8 mana in one second")
+	check_near(w.tribe.mana, 10.0 - 4.0 * Forester.MANA_PER_WORKER,
+		"4 workers drain their per-second upkeep")
 
-	# Only 2 mana left: at 2/s each, just one worker can be paid this second.
-	w.tribe.mana = 2.0
+	# Mana for exactly one upkeep left: just one worker can be paid this second.
+	w.tribe.mana = Forester.MANA_PER_WORKER
 	f._tick_active(1.0)
 	check(f._active_workers == 1, "scarce mana staffs only one worker")
 	check_near(w.tribe.mana, 0.0, "the affordable worker's upkeep is spent")

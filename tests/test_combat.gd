@@ -84,19 +84,20 @@ func test_corpse_lies_then_sinks_and_expires() -> void:
 	check(unit.anim_base_name == &"dead", "corpse uses the dead sprite")
 	check(unit.corpse_sink_depth() == 0.0, "corpse starts on the ground")
 
-	# 4.5 s: still lying on the surface.
-	for i in range(45):
+	# Half a second before the lie time ends: still on the surface.
+	for i in range(int((Unit.CORPSE_DURATION - 0.5) / TICK)):
 		unit.tick(TICK)
-	check(unit in w.unit_manager.units, "still lying before 5 s")
-	check(unit.corpse_sink_depth() == 0.0, "not sinking before 5 s")
+	check(unit in w.unit_manager.units, "still lying before CORPSE_DURATION")
+	check(unit.corpse_sink_depth() == 0.0, "not sinking before CORPSE_DURATION")
 
-	# ~5.5 s: sinking (depth strictly between 0 and the full depth).
+	# Half a second into the sink: depth strictly between 0 and the full depth.
 	for i in range(10):
 		unit.tick(TICK)
 	var depth: float = unit.corpse_sink_depth()
-	check(depth > 0.0 and depth < Unit.CORPSE_SINK_DEPTH, "corpse sinks after 5 s")
+	check(depth > 0.0 and depth < Unit.CORPSE_SINK_DEPTH,
+		"corpse sinks after CORPSE_DURATION")
 
-	# Past 6 s (5 s lying + 1 s sinking): expired and removed.
+	# Past lying + sinking (CORPSE_SINK_DURATION = 1 s): expired and removed.
 	for i in range(10):
 		unit.tick(TICK)
 	check(unit not in w.unit_manager.units, "corpse removed after sinking")
@@ -540,7 +541,9 @@ func test_stars_show_critical_damage_and_fire_priority() -> void:
 	check(crit.has_stars(), "critical damage shows the circling stars")
 	var burning: Unit = _spawn(w, BRAVE_SCENE, 0, Vector2(34, 30))
 	burning.ignite(burning.position)   # lava contact damage + alight + panic
-	burning.take_damage(20)            # now critical AND burning
+	# Drop to exactly the critical threshold (independent of the lava damage).
+	burning.take_damage(
+		burning.health - int(float(burning.max_health) * Unit.BADLY_HURT_FRAC))
 	check(burning.is_burning(), "second unit is alight")
 	check(burning.health <= int(float(burning.max_health) * Unit.BADLY_HURT_FRAC),
 		"second unit is critical")

@@ -32,16 +32,16 @@ const WARRIOR_SHOVE_CHANCE: float = 0.04
 # --- Feuerkrieger ---
 const FIREWARRIOR_HP: int = 60
 const FIREWARRIOR_SPEED: float = 4.0
-const FIREWARRIOR_FIRE_RANGE: float = 7.0
+const FIREWARRIOR_FIRE_RANGE: float = 8.0
 const FIREWARRIOR_FIRE_COOLDOWN: float = 1.5
 const FIREWARRIOR_AGGRO_RADIUS: float = 13.0
 ## Schaden eines Feuerballs an Einheiten.
-const FIREWARRIOR_FIREBALL_DAMAGE: int = 7
+const FIREWARRIOR_FIREBALL_DAMAGE: int = 9
 ## Schaden eines Feuerballs an Gebäuden.
 const FIREWARRIOR_BUILDING_DAMAGE: int = 5
 
 # --- Prediger ---
-const PREACHER_HP: int = 75
+const PREACHER_HP: int = 90
 const PREACHER_SPEED: float = 4.0
 const PREACHER_CONVERT_RANGE: float = 5.0
 ## Bekehrdauer: pro Ziel zufällig aus [MIN, MAX] gewürfelt.
@@ -61,6 +61,17 @@ const SHAMAN_RESPAWN_TIME: float = 20.0
 
 # --- Katapult (Belagerungswaffe) ---
 const SIEGE_SPEED: float = 2.0          # langsamste Einheit
+## Crew-Plätze: ab MIN_MOVE fährt es, ab MIN_FIRE schießt es (Cooldown skaliert
+## bis zur vollen Crew, s. u.). Nicht direkt angreifbar — bekämpft wird die Crew.
+const SIEGE_MAX_CREW: int = 6
+const SIEGE_MIN_MOVE_CREW: int = 1
+const SIEGE_MIN_FIRE_CREW: int = 2
+## Abstand, ab dem eine zusteigende Einheit als "am Fahrzeug" gilt.
+const SIEGE_BOARD_RANGE: float = 2.5
+## Leine der Crew: weiter entfernte Mitglieder (Kampf) laufen zurück/steigen ab.
+const SIEGE_CREW_LEASH: float = 8.0
+## Brenndauer des Fahrzeugs nach Feuerzauber-Treffer, dann versinkt das Wrack.
+const SIEGE_VEHICLE_BURN_TIME: float = 3.0
 const SIEGE_FIRE_RANGE: float = 15.0
 ## Ziele näher dran kann der Bogenschuss nicht treffen.
 const SIEGE_MIN_RANGE: float = 3.0
@@ -102,7 +113,7 @@ const REGEN_RATE: float = 2.0
 # =============================================================================
 
 ## Liegezeit der Leiche, danach versinkt sie im Boden.
-const CORPSE_DURATION: float = 5.0
+const CORPSE_DURATION: float = 6.0
 ## Dauer der Versink-Animation. ACHTUNG: verlängert die Gesamt-Lebenszeit von
 ## Leichen in der Welt — der Zentroid-Drift-Test (test_combat_groups) misst
 ## über alle Einheiten inkl. Leichen und reagiert auf große Änderungen.
@@ -119,22 +130,22 @@ const ROLL_SPEED: float = 5.5
 ## Dauer eines Mini-Rollers auf flachem Boden (Schubser / Feuerball-Umwerfer).
 const MINI_ROLL_DURATION: float = 0.35
 ## Noch kürzerer Purzler für angrenzende, vom Feuerball umgeworfene Einheiten.
-const NEIGHBOR_ROLL_DURATION: float = 0.22
+const NEIGHBOR_ROLL_DURATION: float = 0.25
 ## Rollschaden (HP/s); tödlicher Schaden wird bis zum Roll-Ende aufgeschoben.
 const ROLL_DPS: float = 5.0
 ## Chance, dass ein Schubser das Ziel umwirft (Mini-Roller, auch auf flachem Boden).
-const SHOVE_ROLL_CHANCE: float = 0.2
+const SHOVE_ROLL_CHANCE: float = 0.25
 ## Chance/s, beim Hinablaufen sehr steiler Hänge von selbst ins Stolpern zu geraten.
-const STEEP_ROLL_CHANCE_PER_SEC: float = 0.6
+const STEEP_ROLL_CHANCE_PER_SEC: float = 0.5
 
 # =============================================================================
 # BRAND / LAVA (Einheiten)
 # =============================================================================
 
-const LAVA_CONTACT_DAMAGE: int = 30
+const LAVA_CONTACT_DAMAGE: int = 20
 const BURN_DURATION: float = 4.0
-## Gesamtschaden über die Brenndauer (2 x Brave-Leben).
-const BURN_TOTAL_DAMAGE: int = 120
+## Gesamtschaden über die Brenndauer.
+const BURN_TOTAL_DAMAGE: int = 80
 ## Gebäude in Lavakontakt: 1 Zerstörungsstufe je VOLLE Kontaktsekunden …
 const LAVA_BUILDING_STAGE_TIME: float = 5.0
 ## … wobei der Kontaktzähler resettet, wenn so lange keine Lava anliegt.
@@ -144,13 +155,13 @@ const LAVA_BUILDING_CONTACT_GRACE: float = 1.0
 # ZAUBER — Ladungen (charge_cost = Mana pro Ladung) und Reichweite
 # =============================================================================
 
-const SPELL_FIREBALL_CHARGE_COST: float = 40.0
+const SPELL_FIREBALL_CHARGE_COST: float = 30.0
 const SPELL_FIREBALL_MAX_CHARGES: int = 4
 const SPELL_FIREBALL_CAST_RANGE: float = 8.0
 
-const SPELL_LIGHTNING_CHARGE_COST: float = 60.0
+const SPELL_LIGHTNING_CHARGE_COST: float = 70.0
 const SPELL_LIGHTNING_MAX_CHARGES: int = 4
-const SPELL_LIGHTNING_CAST_RANGE: float = 10.0
+const SPELL_LIGHTNING_CAST_RANGE: float = 12.0
 
 const SPELL_SWARM_CHARGE_COST: float = 50.0
 const SPELL_SWARM_MAX_CHARGES: int = 4
@@ -162,9 +173,9 @@ const SPELL_LANDBRIDGE_CAST_RANGE: float = 9.0
 
 const SPELL_TORNADO_CHARGE_COST: float = 110.0
 const SPELL_TORNADO_MAX_CHARGES: int = 3
-const SPELL_TORNADO_CAST_RANGE: float = 8.0
+const SPELL_TORNADO_CAST_RANGE: float = 10.0
 
-const SPELL_EARTHQUAKE_CHARGE_COST: float = 110.0
+const SPELL_EARTHQUAKE_CHARGE_COST: float = 130.0
 const SPELL_EARTHQUAKE_MAX_CHARGES: int = 2
 const SPELL_EARTHQUAKE_CAST_RANGE: float = 10.0
 
@@ -201,19 +212,19 @@ const LIGHTNING_BUILDING_STAGES: int = 2
 # --- Insektenschwarm ---
 const SWARM_LIFETIME: float = 10.0
 const SWARM_RADIUS: float = 3.0
-const SWARM_DPS: int = 3
+const SWARM_DPS: int = 5
 ## Panik-Dauer (gilt auch für andere Panik-Quellen, z. B. Brand).
 const PANIC_DURATION: float = 6.0
 
 # --- Tornado ---
-const TORNADO_LIFETIME: float = 8.0
+const TORNADO_LIFETIME: float = 10.0
 const TORNADO_RADIUS: float = 2.2
 ## Alle X Sekunden +1 Zerstörungsstufe am überstrichenen Gebäude.
 const TORNADO_STAGE_INTERVAL: float = 2.0
 const TORNADO_FALL_DAMAGE: int = 30        # 1/2 Brave-Leben
 
 # --- Feuerregen ---
-const FIRESTORM_BOLT_COUNT: int = 8
+const FIRESTORM_BOLT_COUNT: int = 12
 const FIRESTORM_SPREAD_RADIUS: float = 5.5
 const FIRESTORM_DURATION: float = 3.0
 
@@ -242,10 +253,10 @@ const CLIFF_FALL_MIN_DROP: float = 1.6
 const CLIFF_PROBE_DIST: float = 2.0
 ## Fallschaden pro gestürztem Meter, gedeckelt auf 1/2 Brave-Leben.
 const CLIFF_FALL_DAMAGE_PER_M: float = 6.0
-const CLIFF_FALL_MAX_DAMAGE: int = BRAVE_HP / 2   # 30
+const CLIFF_FALL_MAX_DAMAGE: int = 30   # 30
 ## Rolldauer pro gestürztem Meter (s), geklemmt auf [MINI_ROLL_DURATION, 2.0].
-const CLIFF_ROLL_PER_M: float = 0.25
-const CLIFF_ROLL_MAX_DURATION: float = 2.0
+const CLIFF_ROLL_PER_M: float = 0.33
+const CLIFF_ROLL_MAX_DURATION: float = 3.0
 ## Horizontale/vertikale Startgeschwindigkeit des Sturzes (m/s): der kleine
 ## Aufwärtsimpuls hebt die Einheit über die Kante, bevor sie hinabfällt.
 const CLIFF_LAUNCH_SPEED: float = 4.0
@@ -269,7 +280,7 @@ const HUT_FOOTPRINT: Vector2i = Vector2i(4, 4)
 const WARRIOR_CAMP_FOOTPRINT: Vector2i = Vector2i(5, 5)
 const TEMPLE_FOOTPRINT: Vector2i = Vector2i(6, 6)
 const FIREWARRIOR_CAMP_FOOTPRINT: Vector2i = Vector2i(8, 8)
-const FORESTER_FOOTPRINT: Vector2i = Vector2i(3, 3)
+const FORESTER_FOOTPRINT: Vector2i = Vector2i(5, 2)
 const WORKSHOP_FOOTPRINT: Vector2i = Vector2i(8, 4)
 const WATCHTOWER_FOOTPRINT: Vector2i = Vector2i(2, 2)
 const REINCARNATION_SITE_FOOTPRINT: Vector2i = Vector2i(3, 3)
@@ -283,7 +294,7 @@ const HUT_CREW_CAPACITY: int = 4
 const HUT_FULL_CREW_BONUS: float = 1.1     # volle Hütte ~10 % schneller
 
 # --- Kaserne (Krieger) ---
-const WARRIOR_CAMP_WOOD_COST: int = 5
+const WARRIOR_CAMP_WOOD_COST: int = 10
 const WARRIOR_CAMP_HP: int = 400
 const WARRIOR_CAMP_TRAINING_TIME: float = 3.0
 
@@ -298,10 +309,10 @@ const FIREWARRIOR_CAMP_HP: int = 600
 const FIREWARRIOR_CAMP_TRAINING_TIME: float = 4.0
 
 # --- Förster ---
-const FORESTER_WOOD_COST: int = 20
+const FORESTER_WOOD_COST: int = 18
 const FORESTER_HP: int = 250
 ## Mana/s je aktivem Arbeiter im Gebäude.
-const FORESTER_MANA_PER_WORKER: float = 2.0
+const FORESTER_MANA_PER_WORKER: float = 1.5
 ## Arbeiter-Sekunden pro gepflanztem Baum (4 Arbeiter -> 15 s).
 const FORESTER_PLANT_WORK_PER_TREE: float = 60.0
 
@@ -309,7 +320,7 @@ const FORESTER_PLANT_WORK_PER_TREE: float = 60.0
 const WORKSHOP_WOOD_COST: int = 15
 const WORKSHOP_HP: int = 350
 ## Arbeiter-Sekunden pro Katapult (3 Arbeiter -> 30 s).
-const WORKSHOP_WORK_PER_CATAPULT: float = 90.0
+const WORKSHOP_WORK_PER_CATAPULT: float = 60.0
 const WORKSHOP_CATAPULT_WOOD: int = 5
 
 # --- Wachturm ---
@@ -330,9 +341,9 @@ const REINCARNATION_SITE_HP: int = 500
 ## Mana/s je Bevölkerungsmitglied.
 const MANA_BASE_RATE: float = 0.1
 ## Zusätzliches Mana/s je betendem Brave.
-const MANA_PRAY_BONUS: float = 0.5
+const MANA_PRAY_BONUS: float = 0.3
 ## Hardcap Einheiten pro Stamm (zusätzlich zum Hütten-Bevölkerungslimit).
-const TRIBE_MAX_UNITS: int = 1500
+const TRIBE_MAX_UNITS: int = 1000
 
 # --- Bäume ---
 ## Mittlere Zeit pro Wachstumsstufe (real +-50 % gestreut).
