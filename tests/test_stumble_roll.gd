@@ -194,3 +194,77 @@ func test_endless_throw_dies_at_time_cap() -> void:
 	check(victim.position.y <= w.td.get_height(victim.position.x, victim.position.z) + 0.1,
 		"the corpse lies on the ground, not in the sky")
 	_free_world(w)
+
+
+# --- Cliff fall (combat shove / roll over a cliff edge) -----------------------
+
+## High plateau (vertex columns <= 40 at h=20) dropping to low ground (>= 41 at
+## h=3): the cell column x=40 is an unwalkable cliff FACE (corner diff >> 1.5).
+func _cliff_terrain() -> TerrainData:
+	var td: TerrainData = _flat_terrain(20.0)
+	for vx in range(41, td.verts):
+		for vz in range(td.verts):
+			td.set_vertex_height(vx, vz, 3.0)
+	return td
+
+
+## A gentle, fully WALKABLE ramp (slope 1.0/cell < MAX_SLOPE) from h=20 down to
+## a h=5 floor — descending it must never trigger a cliff fall.
+func _ramp_terrain() -> TerrainData:
+	var td: TerrainData = _flat_terrain(20.0)
+	for vx in range(td.verts):
+		var h: float = maxf(5.0, 20.0 - maxf(0, vx - 30) * 1.0)
+		for vz in range(td.verts):
+			td.set_vertex_height(vx, vz, h)
+	return td
+
+
+## fall_off_cliff launches the unit, applies capped fall damage and lands it
+## down off the plateau in a roll.
+func test_cliff_fall_damages_caps_and_lands_below() -> void:
+	var w: Dictionary = _make_world(_cliff_terrain())
+	var victim: Unit = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(39, 40)))
+	var hp0: int = victim.health
+	victim.fall_off_cliff(Vector3(1, 0, 0), 12.0)   # big drop -> capped damage
+	check(victim.state == Unit.State.THROWN, "the shove launches it off the cliff")
+	_run(w, 5.0)
+	check(victim.state != Unit.State.THROWN, "it has come down again")
+	var taken: int = hp0 - victim.health
+	check(taken > 0, "it took fall damage")
+	# The fall damage is capped at 1/2 brave life: an UNcapped 12 m drop would be
+	# 72 HP and kill the 60-HP brave outright — capped (30) it survives (plus a
+	# little roll damage). Total stays within cap + max roll damage.
+	check(victim.state != Unit.State.DEAD and victim.health > 0,
+		"the capped fall is survivable (uncapped 12 m would kill)")
+	check(taken <= Unit.CLIFF_FALL_MAX_DAMAGE
+			+ int(ceil(Unit.ROLL_DPS * Unit.CLIFF_ROLL_MAX_DURATION)) + 2,
+		"fall damage itself is capped at 1/2 brave life (roll damage adds a little)")
+	check(victim.position.y < 15.0, "it ended up down off the plateau")
+	_free_world(w)
+
+
+## Being shoved (knockback) over a real cliff edge falls instead of stopping.
+func test_cliff_fall_via_knockback() -> void:
+	var w: Dictionary = _make_world(_cliff_terrain())
+	var victim: Unit = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(39, 40)))
+	var hp0: int = victim.health
+	victim.displace(Vector3(1, 0, 0), 6.0)   # strong shove toward the +x cliff
+	_run(w, 4.0)
+	check(victim.position.y < 15.0, "the shoved unit fell down the cliff")
+	check(victim.health < hp0, "being shoved off the cliff hurts")
+	_free_world(w)
+
+
+## A walkable (steep-but-not-cliff) ramp must NOT trigger a fall when shoved.
+func test_walkable_ramp_no_cliff_fall() -> void:
+	var w: Dictionary = _make_world(_ramp_terrain())
+	var victim: Unit = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(35, 40)))
+	var hp0: int = victim.health
+	victim.displace(Vector3(1, 0, 0), 6.0)   # shove down the ramp
+	_run(w, 3.0)
+	check(victim.state != Unit.State.THROWN, "a walkable ramp never launches a fall")
+	check(victim.health == hp0, "no fall damage on a walkable slope")
+	_free_world(w)

@@ -73,6 +73,9 @@ const SIEGE_SHOT_SHOCK_DAMAGE: int = 15    # 1/4 Brave-Leben
 const SIEGE_SHOT_SHOCK_RADIUS: float = 2.0
 ## Zerstörungsstufen, die ein Treffer einem Gebäude zufügt.
 const SIEGE_SHOT_BUILDING_STAGES: int = 1
+## Schaden pro Treffer an feindlichen Raidern im EIGENEN Gebäude (sie werden
+## dabei rausgeworfen, nicht getötet — 1/2 Brave-Leben).
+const SIEGE_SHOT_RAIDER_DAMAGE: int = 30
 
 # =============================================================================
 # NAHKAMPF ALLGEMEIN (alle Einheiten)
@@ -115,6 +118,10 @@ const LAVA_CONTACT_DAMAGE: int = 30
 const BURN_DURATION: float = 4.0
 ## Gesamtschaden über die Brenndauer (2 x Brave-Leben).
 const BURN_TOTAL_DAMAGE: int = 120
+## Gebäude in Lavakontakt: 1 Zerstörungsstufe je VOLLE Kontaktsekunden …
+const LAVA_BUILDING_STAGE_TIME: float = 5.0
+## … wobei der Kontaktzähler resettet, wenn so lange keine Lava anliegt.
+const LAVA_BUILDING_CONTACT_GRACE: float = 1.0
 
 # =============================================================================
 # ZAUBER — Ladungen (charge_cost = Mana pro Ladung) und Reichweite
@@ -202,13 +209,30 @@ const EARTHQUAKE_UNIT_DAMAGE: int = 15     # 1/4 Brave-Leben
 const VOLCANO_RADIUS: float = 5.0
 ## Lebensdauer der aktiven Vulkanzone (Lava/Stufenschaden).
 const VOLCANO_ZONE_LIFETIME: float = 20.0
-const VOLCANO_ZONE_STAGE_INTERVAL: float = 4.0
 
 # --- Ebene / Absinken / Landbrücke ---
 const FLATTEN_HALF_EXTENT: float = 4.5     # halbe Kantenlänge des Quadrats
 const SINK_RADIUS: float = 6.0
 const SINK_DEPTH: float = 3.0
 const LANDBRIDGE_HALF_WIDTH: float = 1.6
+
+# --- Klippensturz (Kampf-Stoß / Rollen über eine Klippenkante) ---
+## Mindest-Höhendifferenz (m) voraus, ab der ein Sturz statt eines Stopps an der
+## Kante ausgelöst wird — knapp über MAX_SLOPE (1.5), damit begehbare Steilhänge
+## nicht auslösen.
+const CLIFF_FALL_MIN_DROP: float = 1.6
+## Sample-Distanz voraus (m), um die tiefer liegende Fläche jenseits der Kante zu treffen.
+const CLIFF_PROBE_DIST: float = 2.0
+## Fallschaden pro gestürztem Meter, gedeckelt auf 1/2 Brave-Leben.
+const CLIFF_FALL_DAMAGE_PER_M: float = 6.0
+const CLIFF_FALL_MAX_DAMAGE: int = BRAVE_HP / 2   # 30
+## Rolldauer pro gestürztem Meter (s), geklemmt auf [MINI_ROLL_DURATION, 2.0].
+const CLIFF_ROLL_PER_M: float = 0.25
+const CLIFF_ROLL_MAX_DURATION: float = 2.0
+## Horizontale/vertikale Startgeschwindigkeit des Sturzes (m/s): der kleine
+## Aufwärtsimpuls hebt die Einheit über die Kante, bevor sie hinabfällt.
+const CLIFF_LAUNCH_SPEED: float = 4.0
+const CLIFF_LAUNCH_UP: float = 3.5
 
 # =============================================================================
 # GEBÄUDE — Kosten, Leben, Ausbildung

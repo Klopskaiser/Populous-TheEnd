@@ -7,10 +7,16 @@ class_name SiegeShot extends Node3D
 ## Impact:
 ## - ENEMY building under the impact point (footprint grown by 1, like the
 ##   lightning): +1 destruction stage AND every unit stationed INSIDE dies
-##   (trainee / housed forester workers). Own buildings are never damaged
-##   (frustration guard); no lava is spilled on a building hit.
-## - Otherwise: a SMALL, quickly vanishing lava puddle at the impact centre
-##   (usual lava effects: ignite + burn panic).
+##   (trainee / housed forester workers).
+## - OWN building under the impact point, but ONLY while enemy raiders demolish
+##   it from the inside (anti-raider bombardment): the raiders are thrown back
+##   out HURT (they resume the assault or turn on the catapult), and the own
+##   building pays +1 destruction stage per hit. Own buildings WITHOUT raiders
+##   are never damaged (frustration guard).
+## - Always: a SMALL, quickly vanishing lava puddle at the impact centre
+##   (usual lava effects: ignite + burn panic). When the shot already damaged
+##   a building, the puddle does NOT wreck buildings on top of that; on open
+##   ground it does (sustained-contact rule, Building.add_lava_contact).
 ## - Always: a shockwave in SHOCK_RADIUS — 1/4 brave life to EVERY unit
 ##   (stones know no friends), and ENEMIES are knocked into a roll with a
 ##   slope-dependent chance (flat 40% / mild 80% / steep 100%); the roll
@@ -87,17 +93,26 @@ func _impact() -> void:
 		return
 	var building = _building_at_impact()
 	if building != null:
-		# Full destruction stage (construction sites shatter — fragile rule)
-		# and everyone stationed inside dies.
-		_kill_building_occupants(building)
+		if building.tribe_id == tribe_id:
+			# Own raided building: blast the raiders back out hurt; the
+			# building pays the same stage as any other hit.
+			building.blast_raiders(Balance.SIEGE_SHOT_RAIDER_DAMAGE,
+				shooter if (shooter != null and is_instance_valid(shooter)) else null)
+		else:
+			# Everyone stationed inside an enemy building dies.
+			_kill_building_occupants(building)
+		# Full destruction stage (construction sites shatter — fragile rule).
 		building.apply_destruction_stages(Balance.SIEGE_SHOT_BUILDING_STAGES)
+		_spawn_lava(false)   # the shot already did the building damage
 	else:
-		_spawn_lava()
+		_spawn_lava(true)
 	_shockwave()
 
 
-## Enemy building whose (slightly grown) footprint contains the impact cell —
-## the lightning's search pattern. Own buildings are skipped entirely.
+## Building whose (slightly grown) footprint contains the impact cell — the
+## lightning's search pattern. Own buildings only count while enemy raiders
+## demolish them from the inside (anti-raider bombardment); otherwise they are
+## skipped entirely (frustration guard).
 func _building_at_impact():
 	if building_manager == null:
 		return null
@@ -107,7 +122,7 @@ func _building_at_impact():
 	for b in building_manager.buildings:
 		if not is_instance_valid(b) or b.health <= 0:
 			continue
-		if b.tribe_id == tribe_id:
+		if b.tribe_id == tribe_id and not b.has_raiders():
 			continue   # own buildings are never damaged (frustration guard)
 		if Rect2i(b.cell, b.footprint).grow(1).has_point(cell):
 			return b
@@ -145,13 +160,16 @@ static func _free_unit(unit) -> void:
 
 
 ## Small, quickly vanishing lava puddle at the impact centre (usual lava
-## mechanics: contact damage + burn panic via LavaSurge/ignite).
-func _spawn_lava() -> void:
+## mechanics: contact damage + burn panic via LavaSurge/ignite). With
+## `wreck_buildings` off (the shot itself already damaged a building) the
+## puddle never adds building lava contact on top.
+func _spawn_lava(wreck_buildings: bool) -> void:
 	var surge: LavaSurge = LavaSurge.new()
 	surge.setup(Vector3(target_pos.x,
 		terrain_data.get_height(target_pos.x, target_pos.z) if terrain_data != null
 		else target_pos.y, target_pos.z),
-		unit_manager, terrain_data, LAVA_RADIUS)
+		unit_manager, terrain_data, LAVA_RADIUS, building_manager)
+	surge.damage_buildings = wreck_buildings
 	unit_manager.register_projectile(surge)
 
 

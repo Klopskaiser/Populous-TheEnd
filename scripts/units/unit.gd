@@ -169,6 +169,21 @@ const THROW_GRAVITY: float = 18.0
 const ROLL_FRICTION: float = 6.0
 ## A speed-driven roll may end once its momentum decayed below this.
 const ROLL_STOP_SPEED: float = 1.0
+
+# --- Cliff fall (combat shove / roll over a cliff edge) ------------------------------
+## Being shoved (combat/fireball) or rolling over a cliff edge launches the unit
+## off it instead of stopping at the rim: fall damage scales with the drop
+## (capped at 1/2 brave life) and it rolls away from the impact for a
+## drop-scaled duration (capped at 2 s). Steep-but-walkable slopes never trigger.
+const CLIFF_FALL_MIN_DROP: float = Balance.CLIFF_FALL_MIN_DROP
+const CLIFF_PROBE_DIST: float = Balance.CLIFF_PROBE_DIST
+const CLIFF_FALL_DAMAGE_PER_M: float = Balance.CLIFF_FALL_DAMAGE_PER_M
+const CLIFF_FALL_MAX_DAMAGE: int = Balance.CLIFF_FALL_MAX_DAMAGE
+const CLIFF_ROLL_PER_M: float = Balance.CLIFF_ROLL_PER_M
+const CLIFF_ROLL_MAX_DURATION: float = Balance.CLIFF_ROLL_MAX_DURATION
+const CLIFF_LAUNCH_SPEED: float = Balance.CLIFF_LAUNCH_SPEED
+const CLIFF_LAUNCH_UP: float = Balance.CLIFF_LAUNCH_UP
+
 ## Panic effect duration (swarm) and how often a new flee direction is picked.
 const PANIC_DURATION: float = Balance.PANIC_DURATION
 const PANIC_REDIRECT_INTERVAL: float = 0.5
@@ -390,6 +405,9 @@ var _roll_probe_timer: float = 0.0
 # --- Throw / panic state (phase 6) ----------------------------------------------------
 var _throw_velocity: Vector3 = Vector3.ZERO
 var _throw_fall_damage: int = 0
+## Roll duration applied on landing. Only a cliff fall sets a longer value
+## (drop-scaled); tornado/fireball landings keep the default mini roll.
+var _throw_roll_duration: float = MINI_ROLL_DURATION
 ## Continuous airborne time; past THROWN_MAX_DURATION the unit dies and
 ## drops out of the sky as a corpse (phase 8.2 safety net).
 var _throw_time: float = 0.0
@@ -911,14 +929,64 @@ func _tick_knockback(delta: float) -> void:
 		_knockback_remaining = Vector3.ZERO
 	var nx: float = position.x + step.x
 	var nz: float = position.z + step.z
-	# Never shove anyone into water/obstacles (overview risk 6).
+	# Never shove anyone into water/obstacles (overview risk 6) — but a downward
+	# cliff edge launches the unit off it instead of stopping at the rim.
 	if nav_grid != null and not nav_grid.is_cell_walkable(
 			nav_grid.world_to_cell(Vector3(nx, 0.0, nz))):
 		_knockback_remaining = Vector3.ZERO
+		var push_dir: Vector3 = Vector3(step.x, 0.0, step.z)
+		var drop: float = _cliff_drop_ahead(push_dir)
+		if drop > 0.0:
+			fall_off_cliff(push_dir, drop)
 		return
 	position.x = nx
 	position.z = nz
 	_snap_to_ground()
+
+
+# --- Cliff fall (combat shove / roll over a cliff edge) -----------------------------
+
+## Height drop when a genuine cliff lies ahead along `dir`, else 0. A cliff is
+## an UNWALKABLE steep FACE cell right ahead (~1 m) — this discriminates a real
+## cliff from a merely steep but walkable slope, which must NOT trigger a fall.
+## The drop that drives damage/roll duration is read from the lower ground
+## CLIFF_PROBE_DIST beyond the face; water/building bases return 0 (the caller
+## keeps its normal "don't shove into water" stop). Cheap: called only from the
+## knockback clamp and the roll tick, never in the normal walk hot path.
+func _cliff_drop_ahead(dir: Vector3) -> float:
+	if terrain_data == null or nav_grid == null:
+		return 0.0
+	var flat: Vector3 = Vector3(dir.x, 0.0, dir.z)
+	if flat.length_squared() < 0.000001:
+		return 0.0
+	flat = flat.normalized()
+	var face_cell: Vector2i = nav_grid.world_to_cell(
+		Vector3(position.x + flat.x, 0.0, position.z + flat.z))
+	if nav_grid.is_cell_walkable(face_cell) or nav_grid.is_cell_blocked_by_building(face_cell):
+		return 0.0   # walkable slope or a building ahead — not a cliff
+	var below: Vector3 = Vector3(
+		position.x + flat.x * CLIFF_PROBE_DIST, 0.0, position.z + flat.z * CLIFF_PROBE_DIST)
+	var below_h: float = terrain_data.get_height(below.x, below.z)
+	if below_h <= TerrainData.SEA_LEVEL + 0.05:
+		return 0.0   # water at the base: keep the caller's stop, do not launch in
+	var drop: float = position.y - below_h
+	return drop if drop >= CLIFF_FALL_MIN_DROP else 0.0
+
+
+## Launches the unit off a cliff edge: a scripted throw arc in `horizontal_dir`
+## carries it over the rim, then it takes drop-scaled fall damage (capped at
+## 1/2 brave life) and rolls away for a drop-scaled duration (capped at 2 s).
+func fall_off_cliff(horizontal_dir: Vector3, drop: float) -> void:
+	if state == State.DEAD or state == State.THROWN:
+		return
+	var flat: Vector3 = Vector3(horizontal_dir.x, 0.0, horizontal_dir.z)
+	if flat.length_squared() < 0.000001:
+		flat = facing
+	flat = flat.normalized()
+	var dmg: int = mini(int(drop * CLIFF_FALL_DAMAGE_PER_M), CLIFF_FALL_MAX_DAMAGE)
+	_throw_roll_duration = clampf(
+		drop * CLIFF_ROLL_PER_M, MINI_ROLL_DURATION, CLIFF_ROLL_MAX_DURATION)
+	throw_airborne(flat * CLIFF_LAUNCH_SPEED + Vector3.UP * CLIFF_LAUNCH_UP, dmg)
 
 
 # --- Rolling (phase 5d) --------------------------------------------------------------
@@ -1029,6 +1097,11 @@ func _tick_roll(delta: float) -> void:
 	if nav_grid != null and nav_grid.is_cell_blocked_by_building(
 			nav_grid.world_to_cell(Vector3(nx, 0.0, nz))):
 		_end_roll()
+		return
+	# Rolling over a real cliff edge (unwalkable, lower ground) turns into a fall.
+	var drop: float = _cliff_drop_ahead(roll_dir)
+	if drop > 0.0:
+		fall_off_cliff(roll_dir, drop)
 		return
 	position.x = nx
 	position.z = nz
@@ -1236,7 +1309,9 @@ func _land_from_throw(ground: float) -> void:
 		take_damage(fall_damage)
 		if state == State.DEAD:
 			return
-	start_roll(momentum, MINI_ROLL_DURATION, momentum.length())
+	var roll_dur: float = _throw_roll_duration
+	_throw_roll_duration = MINI_ROLL_DURATION
+	start_roll(momentum, roll_dur, momentum.length())
 
 
 # --- Panic (phase 6) --------------------------------------------------------------------

@@ -823,21 +823,86 @@ func test_volcano_cone_lava_and_permanence() -> void:
 	_free_world_with_buildings(w)
 
 
-func test_volcano_zone_building_cadence() -> void:
+## Buildings are wrecked by ACTUAL lava contact now (Building.add_lava_contact
+## via the surges — one stage per full 5 s of contact), not by a flat zone
+## cadence. Each ~5.4 s surge contributes only its ~3.8 s molten window, so the
+## first stage lands during the SECOND eruption wave.
+func test_volcano_lava_contact_wrecks_buildings() -> void:
 	var w: Dictionary = _make_world_with_buildings()
 	var hut: Building = w.bm.place(HUT_SCENE_T, w.tribe1, Vector2i(50, 50), 0, true)
 	var zone: VolcanoZone = VolcanoZone.new()
 	zone.setup(0, hut.center_world(), w.unit_manager, w.td, w.bm)
 	w.unit_manager.register_projectile(zone)
-	for i in range(39):
+	# Eruptions start at 3 s; by 7 s only the first surge's molten contact
+	# (~3.8 s) has accumulated — below the 5 s threshold.
+	for i in range(70):
 		w.unit_manager.tick(0.1)
-	check(hut.destruction_stage() == 0, "no stage before 4 s of lava contact")
-	for i in range(4):
-		w.unit_manager.tick(0.1)
-	check(hut.destruction_stage() == 1, "+1 stage after 4 s in the lava")
-	for i in range(40):
-		w.unit_manager.tick(0.1)
-	check(hut.destruction_stage() == 2, "+1 more stage after another 4 s")
+	check(hut.destruction_stage() == 0, "no stage below 5 s of lava contact")
+	for i in range(25):
+		w.unit_manager.tick(0.1)   # the second surge pushes the contact past 5 s
+	check(hut.destruction_stage() == 1, "+1 stage after 5 s of accumulated lava contact")
+	_free_world_with_buildings(w)
+
+
+## Only SUSTAINED contact wrecks: a break longer than the grace window voids
+## the accumulated contact time (Building.tick).
+func test_building_lava_contact_grace_resets() -> void:
+	var w: Dictionary = _make_world_with_buildings()
+	var hut: Building = w.bm.place(HUT_SCENE_T, w.tribe1, Vector2i(50, 50), 0, true)
+	for i in range(20):
+		hut.add_lava_contact(0.2)   # 4 s of contact
+	check(hut.destruction_stage() == 0, "4 s of contact stay below the 5 s threshold")
+	for i in range(12):
+		hut.tick(0.1)   # 1.2 s without lava > grace window: accumulator voids
+	for i in range(24):
+		hut.add_lava_contact(0.2)   # 4.8 s of FRESH contact
+	check(hut.destruction_stage() == 0, "the contact break voided the earlier 4 s")
+	hut.add_lava_contact(0.2)
+	hut.add_lava_contact(0.2)   # crosses 5 s of unbroken contact (float-safe)
+	check(hut.destruction_stage() == 1, "5 s of unbroken contact -> +1 stage")
+	_free_world_with_buildings(w)
+
+
+## The catapult puddle after a building hit runs with damage_buildings off —
+## such a surge must never stage buildings, an ordinary one does.
+func test_lava_surge_building_damage_flag() -> void:
+	var w: Dictionary = _make_world_with_buildings()
+	var hut: Building = w.bm.place(HUT_SCENE_T, w.tribe1, Vector2i(50, 50), 0, true)
+	# Two back-to-back non-wrecking surges: ~6.8 s of molten contact, no stage.
+	for round in range(2):
+		var surge: LavaSurge = LavaSurge.new()
+		surge.setup(hut.center_world(), w.unit_manager, w.td, 6.0, w.bm)
+		surge.damage_buildings = false
+		for i in range(54):
+			surge.tick(0.1)
+		surge.free()
+	check(hut.destruction_stage() == 0, "a non-wrecking surge never stages buildings")
+	# The same two surges with wrecking on: the contact crosses 5 s -> stage 1.
+	for round in range(2):
+		var surge: LavaSurge = LavaSurge.new()
+		surge.setup(hut.center_world(), w.unit_manager, w.td, 6.0, w.bm)
+		for i in range(54):
+			surge.tick(0.1)
+		surge.free()
+	check(hut.destruction_stage() == 1, "wrecking surges stage after 5 s of contact")
+	_free_world_with_buildings(w)
+
+
+## The per-surge molten windows leave short burn-free gaps between eruption
+## waves — the ZONE itself must ignite units in the lava reach continuously.
+## Ticked alone (its spawned surges never tick), so the burn can only come
+## from the zone's own ignition loop.
+func test_volcano_zone_ignites_units_continuously() -> void:
+	var w: Dictionary = _make_world_with_buildings()
+	var victim: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, Vector3(46.5, 5, 40))
+	check(not victim.is_burning(), "victim starts unburnt")
+	var zone: VolcanoZone = VolcanoZone.new()
+	zone.setup(0, Vector3(40, 5, 40), w.unit_manager, w.td, w.bm)
+	for i in range(32):
+		zone.tick(0.1)   # past SURGE_START (3 s): eruption phase
+	check(victim.is_burning(),
+		"the erupting zone itself ignites units in the lava reach")
+	zone.free()
 	_free_world_with_buildings(w)
 
 

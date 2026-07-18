@@ -106,6 +106,12 @@ var _damage_holes: Array[MeshInstance3D] = []
 ## Per-building sound throttle: sfx name -> last play ms (see _play_sfx).
 var _sfx_last_ms: Dictionary = {}
 var _visual_stage: int = -1
+## Custom-model texture-swap state (only used when _has_custom_model). The
+## loaded .glb's texturable surfaces (flags excluded); the last applied
+## build-stage index; a small cache of stage/build textures by relative path.
+var _model_surfaces: Array[MeshInstance3D] = []
+var _build_visual_stage: int = -1
+var _stage_tex_cache: Dictionary = {}
 ## Worker braves currently assigned to this construction site.
 var workers: Array[Brave] = []
 
@@ -118,6 +124,12 @@ var _wobble_time: float = 0.0
 ## True once the storm ejected this building's occupants (idempotent guard so
 ## they are only thrown out once per storm).
 var _storm_started: bool = false
+
+## Lava wrecks buildings: accumulated seconds of ongoing lava contact (surge/
+## flow) and the grace window left before the accumulator resets — only
+## SUSTAINED contact deals destruction stages (see add_lava_contact()).
+var _lava_contact_accum: float = 0.0
+var _lava_contact_grace: float = 0.0
 
 ## Selection state (buildings are selectable: left-click; right-click then sets
 ## the rally point). `hovered` is set by the SelectionManager on mouse-over.
@@ -162,6 +174,17 @@ func housing_capacity() -> int:
 
 func footprint_rect() -> Rect2i:
 	return Rect2i(cell, footprint)
+
+
+## Flat world-space distance from `flat` (x/z) to the nearest point of the
+## footprint rectangle — 0 inside it. Used by the lava contact checks.
+func footprint_distance_to(flat: Vector2) -> float:
+	var origin: Vector2 = Vector2(cell) * TerrainData.CELL_SIZE
+	var size: Vector2 = Vector2(footprint) * TerrainData.CELL_SIZE
+	var nearest: Vector2 = Vector2(
+		clampf(flat.x, origin.x, origin.x + size.x),
+		clampf(flat.y, origin.y, origin.y + size.y))
+	return nearest.distance_to(flat)
 
 
 ## World-space centre of the footprint, Y from the terrain.
@@ -283,13 +306,19 @@ func init_construction() -> void:
 # --- Gameplay tick (driven by BuildingManager) -----------------------------------
 
 func tick(delta: float) -> void:
+	# Lava contact must be CONTINUOUS to wreck: once the grace window runs out
+	# without a fresh add_lava_contact(), the accumulated contact time is void.
+	if _lava_contact_grace > 0.0:
+		_lava_contact_grace -= delta
+		if _lava_contact_grace <= 0.0:
+			_lava_contact_accum = 0.0
 	if under_construction:
 		_tick_construction(delta)
 	else:
 		if _foundation_disturbed and health > 0:
 			_tick_foundation_smoothing(delta)
 		_tick_raid(delta)
-		if health > 0 and health < max_health:
+		if health > 0 and health < max_health and _absorbs_repair_wood():
 			_tick_repair_absorb(delta)
 		# A building being stormed from the inside stops producing (the stage
 		# gate also disables it once the demolition passes 30 %).
@@ -334,6 +363,24 @@ func apply_destruction_stages(count: int) -> void:
 		destroy()
 		return
 	take_damage(int(ceil(STAGE_DAMAGE * float(max_health))) * count)
+
+
+## Lava contact (LavaSurge/LavaFlow, throttled check ticks): accumulates the
+## contact seconds; every FULL Balance.LAVA_BUILDING_STAGE_TIME the building
+## takes one destruction stage. Each call re-arms the grace window — tick()
+## voids the accumulator once no lava has touched the building for
+## Balance.LAVA_BUILDING_CONTACT_GRACE seconds. Construction sites shatter on
+## their first stage (fragile rule in apply_destruction_stages).
+func add_lava_contact(seconds: float) -> void:
+	if health <= 0 or seconds <= 0.0:
+		return
+	_lava_contact_grace = Balance.LAVA_BUILDING_CONTACT_GRACE
+	_lava_contact_accum += seconds
+	while _lava_contact_accum >= Balance.LAVA_BUILDING_STAGE_TIME:
+		_lava_contact_accum -= Balance.LAVA_BUILDING_STAGE_TIME
+		apply_destruction_stages(1)
+		if health <= 0:
+			return
 
 
 ## HP of repair work one delivered wood pays for.
@@ -441,6 +488,36 @@ func max_melee_raiders() -> int:
 func has_raider_room() -> bool:
 	_prune_raiders()
 	return raiders.size() < max_melee_raiders()
+
+
+## True while enemy raiders are demolishing inside. Makes the building a valid
+## catapult target for its OWN tribe (anti-raider bombardment, phase 7f).
+func has_raiders() -> bool:
+	_prune_raiders()
+	return not raiders.is_empty()
+
+
+## Catapult hit on the OWN building: every raider inside is thrown back out
+## HURT (damage, then a short tumble away from the building) instead of killed.
+## Ejected with this building as their target they resume the assault once the
+## dust settles — or turn on the catapult — exactly like an entrance-threat
+## ejection (_eject_raiders_to_fight).
+func blast_raiders(damage: int, attacker = null) -> void:
+	var center: Vector3 = center_world()
+	for r in raiders:
+		if not is_instance_valid(r) or r.state == Unit.State.DEAD:
+			continue
+		if unit_manager != null:
+			unit_manager.register(r)
+		r.exit_building_as_raider(edge_spawn_position(), self)
+		r.take_damage(damage, attacker)
+		if r.state == Unit.State.DEAD:
+			continue
+		var away: Vector3 = Vector3(r.position.x - center.x, 0.0, r.position.z - center.z)
+		if away.length_squared() < 0.000001:
+			away = Vector3(1, 0, 0).rotated(Vector3.UP, randf() * TAU)
+		r.start_roll(away.normalized(), 1.0)
+	raiders.clear()
 
 
 ## True when this building houses occupants that a storm should throw out
@@ -595,6 +672,14 @@ func _tick_foundation_smoothing(delta: float) -> void:
 		_flush_deformation()
 	if level:
 		_foundation_disturbed = false
+
+
+## Whether a damaged building passively pulls nearby wood piles into its repair
+## buffer. Default true (delivered repair wood is banked before a worker hammers).
+## The workshop overrides this so its entrance PRODUCTION stock is only consumed
+## during an actively staffed repair — never silently eaten on damage.
+func _absorbs_repair_wood() -> bool:
+	return true
 
 
 ## While damaged: absorb wood piles near the entrance into the repair buffer
@@ -1012,6 +1097,7 @@ func take_damage(amount: int, source: int = DMG_GENERIC) -> void:
 		_play_sfx(&"building_attack_ranged", 1500)
 	if destruction_stage() > stage_before:
 		_play_sfx(&"building_damaged")
+		_spawn_damage_burst()
 	if was_usable and not is_usable():
 		# Just crossed into stage >= 1 (unusable). Ranged fire that reaches this
 		# on its own kills the trapped occupants; spells / melee demolition eject
@@ -1142,8 +1228,44 @@ func _try_load_custom_model() -> void:
 		return
 	_mesh_root.add_child(model)
 	_has_custom_model = true
+	_collect_surfaces(model)
 	if not _tint_flag_meshes(model):
 		_add_flag()
+
+
+## Gathers the loaded model's texturable MeshInstance3D surfaces (excluding
+## "Flag" meshes, which keep the tribe tint) for the stage/build texture swap.
+func _collect_surfaces(node: Node) -> void:
+	if node is MeshInstance3D and node.name != "Flag":
+		_model_surfaces.append(node)
+	for child in node.get_children():
+		_collect_surfaces(child)
+
+
+## Loads a stage/build texture by relative path (cached; null when missing).
+func _stage_texture(rel: String) -> Texture2D:
+	if _stage_tex_cache.has(rel):
+		return _stage_tex_cache[rel]
+	var tex: Texture2D = AssetLibrary.texture(rel)
+	_stage_tex_cache[rel] = tex
+	return tex
+
+
+## Swaps the albedo texture on all custom-model surfaces. null restores the
+## model's baked material (= intact / finished). Alpha is rendered as
+## alpha-scissor so transparent texture regions punch holes (see plan).
+func _apply_surface_texture(tex: Texture2D) -> void:
+	if tex == null:
+		for surf in _model_surfaces:
+			surf.material_override = null
+		return
+	var mat: StandardMaterial3D = StandardMaterial3D.new()
+	mat.albedo_texture = tex
+	mat.roughness = 1.0
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+	mat.alpha_scissor_threshold = 0.5
+	for surf in _model_surfaces:
+		surf.material_override = mat
 
 
 ## Tints every MeshInstance3D named "Flag" inside a loaded model with the
@@ -1237,8 +1359,32 @@ func _click_body_height() -> float:
 func _update_construction_visual() -> void:
 	if _mesh_root == null:
 		return
+	# Asset-driven path: full-size model, texture swapped per build stage
+	# (4 stages over build_progress; finished -> baked/default texture).
+	if _has_custom_model and _has_build_textures():
+		_mesh_root.scale = Vector3.ONE
+		if not under_construction:
+			if _build_visual_stage != 0:
+				_build_visual_stage = 0
+				_apply_surface_texture(null)
+			return
+		var idx: int = 1 if not foundation_done else clampi(int(build_progress * 4.0), 0, 3) + 1
+		if idx != _build_visual_stage:
+			_build_visual_stage = idx
+			_apply_surface_texture(_stage_texture(_build_tex_rel(idx)))
+		return
+	# Fallback: the placeholder "grows out of the ground" via Y scaling.
 	var s: float = 1.0 if not under_construction else 0.1 + 0.9 * build_progress
 	_mesh_root.scale = Vector3(1.0, maxf(s, 0.05), 1.0)
+
+
+func _build_tex_rel(idx: int) -> String:
+	return "textures/buildings/%s_build%d.png" % [asset_kind(), idx]
+
+
+## True when at least the first build-stage texture exists for this kind.
+func _has_build_textures() -> bool:
+	return _stage_texture(_build_tex_rel(1)) != null
 
 
 ## Placeholder damage visual: per destruction stage, two more dark chunks
@@ -1251,6 +1397,15 @@ func _update_damage_visual() -> void:
 	if stage == _visual_stage:
 		return
 	_visual_stage = stage
+	# Asset-driven path: swap in the stage texture (stage 0 -> baked/default).
+	if _has_custom_model:
+		var stage_tex: Texture2D = null
+		if stage > 0:
+			stage_tex = _stage_texture("textures/buildings/%s_stage%d.png" % [asset_kind(), stage])
+		if stage == 0 or stage_tex != null:
+			_apply_surface_texture(stage_tex)
+			return
+	# Fallback: per stage, two more dark chunks appear "broken out".
 	if _damage_holes.is_empty():
 		if stage == 0:
 			return
@@ -1278,3 +1433,18 @@ func _create_damage_holes() -> void:
 		hole.visible = false
 		_mesh_root.add_child(hole)
 		_damage_holes.append(hole)
+
+
+## Spawns a short-lived burst of falling fragments around the model when a new
+## destruction stage is reached ("bits of texture flake off"). Ticked via the
+## UnitManager projectile list; independent of assets (fallback fragments).
+func _spawn_damage_burst() -> void:
+	if unit_manager == null or under_construction:
+		return
+	var burst: BuildingDamageBurst = BuildingDamageBurst.new()
+	burst.setup(
+		center_world(),
+		float(maxi(footprint.x, footprint.y)) * 0.5 * TerrainData.CELL_SIZE,
+		terrain_data,
+		Color(0.5, 0.4, 0.28))
+	unit_manager.register_projectile(burst)

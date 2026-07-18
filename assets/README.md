@@ -121,7 +121,29 @@ VRAM-Kompression einstellen.
   in der Stammesfarbe eingefärbt (gilt auch für `siege_engine.glb`).
 - **Katapult-Extras (`siege_engine.glb`):** Ein optionaler Node namens `Arm` wird beim
   Feuern als Wurfarm-Pivot animiert (Drehung um X, Ruheposition = gespannt).
-- Bau-Animation (Wachsen aus dem Boden) und Beschädigungs-Optik übernimmt das Spiel.
+- **Bau-/Zerstörungs-Optik:** Ohne die unten genannten Stufen-Texturen übernimmt das Spiel
+  die prozedurale Optik (Bau = Wachsen aus dem Boden, Schaden = dunkle Bruchstücke).
+
+## Bau-/Zerstörungs-Stufentexturen (`textures/buildings/`)
+
+Optionaler Textur-Tausch auf dem **gemeinsamen Basismodell** `<kind>.glb`. Die Texturen
+müssen auf dessen UV-Layout gemappt sein; sie werden auf **allen** Modellflächen (außer
+`Flag`) als Albedo ausgetauscht. **Alpha wird als Alpha-Scissor gerendert** (harte Kante,
+Schwellwert 0,5): vollständig transparente Bereiche werden zu Löchern (fehlende Wand/Dach).
+Alles optional — fehlt eine Textur, greift automatisch der prozedurale Fallback.
+
+- **Zerstörung:** `<kind>_stage1.png`, `<kind>_stage2.png`, `<kind>_stage3.png`
+  (ab 30 % / 60 % / 90 % Schaden; Stufe 0 = die im Modell eingebackene Standard-Textur).
+- **Bau:** `<kind>_build1.png` … `<kind>_build4.png` (vier Baustadien über den Fortschritt;
+  fertig = Standard-Textur). Ist mindestens `_build1.png` vorhanden, entfällt das Wachsen
+  aus dem Boden zugunsten des Textur-Tauschs.
+
+## Abfall-Effekt (`textures/fx/`)
+
+- `building_flake.png` — optionales alpha-fähiges Quad für die Bruchstücke, die bei jedem
+  Erreichen einer neuen Zerstörungsstufe ums Gebäude abfallen. Als Billboard mit
+  Alpha-Scissor (Schwellwert 0,5) und in einer neutralen Bauteilfarbe getönt gerendert.
+  Fehlt die Datei, werden einfache getönte Box-Fragmente verwendet.
 
 ## Status-Effekt-Icons (`textures/effects/`)
 

@@ -266,14 +266,17 @@ func order_crew(units: Array[Unit], engine: Unit) -> void:
 ## Assault order on an enemy building (7f siege bombardment + 7g melee storm /
 ## fireball siege): every unit type acts on it — melee units storm the entrance,
 ## firewarriors bombard, siege engines lob shots, braves storm on this explicit
-## order. Own units and own-tribe targets are skipped.
+## order. Own units and own-tribe targets are skipped — EXCEPT a siege engine
+## sent against its OWN building while enemy raiders demolish it (anti-raider
+## bombardment; the engine's order_attack_building enforces the raider rule).
 func order_attack_building(units: Array[Unit], building: Building) -> void:
 	if building == null or not is_instance_valid(building) or building.health <= 0:
 		return
 	for unit in units:
 		if unit == null or not is_instance_valid(unit) or unit.state == Unit.State.DEAD:
 			continue
-		if unit.tribe_id == building.tribe_id:
+		if unit.tribe_id == building.tribe_id \
+				and not (unit is SiegeEngine and building.has_raiders()):
 			continue
 		unit.order_attack_building(building)
 

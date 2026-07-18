@@ -121,7 +121,8 @@ func _spawn_fault_lava(target: Vector3, plan: Dictionary, ctx: SpellContext) -> 
 		at.y = ctx.terrain_data.get_height(at.x, at.z)
 		var flow: LavaFlow = LavaFlow.new()
 		flow.setup(at, downhill, ctx.unit_manager, ctx.terrain_data,
-			FAULT_LAVA_RANGE, FAULT_LAVA_LIFETIME, FAULT_LAVA_MOLTEN, false)
+			FAULT_LAVA_RANGE, FAULT_LAVA_LIFETIME, FAULT_LAVA_MOLTEN, false,
+			ctx.building_manager)
 		ctx.unit_manager.register_projectile(flow)
 
 

@@ -462,6 +462,97 @@ func test_bombard_building_stage_and_occupant_kill() -> void:
 	_free_world(w)
 
 
+## A building hit still spills the lava puddle (units at the impact burn), but
+## that puddle never wrecks buildings on top of the shot's own stage damage.
+func test_building_hit_spills_nonwrecking_lava() -> void:
+	var w: Dictionary = _make_world()
+	var camp: WarriorCamp = w.building_manager.place(
+		WARRIOR_CAMP_SCENE, w.tribe1, Vector2i(70, 60), 0, true) as WarriorCamp
+	var shot: SiegeShot = SiegeShot.new()
+	shot.setup(0, w.nav.cell_to_world(Vector2i(60, 60)), camp.center_world(),
+		null, w.unit_manager, w.td, w.building_manager)
+	while not shot.done:
+		shot.tick(TICK)
+	var surges: Array = w.unit_manager.projectiles.filter(func(p): return p is LavaSurge)
+	check(surges.size() == 1, "a building hit STILL spills a lava puddle")
+	if surges.size() == 1:
+		check(not surges[0].damage_buildings,
+			"the puddle does not wreck buildings (the shot already did that)")
+	shot.free()
+	_free_world(w)
+
+
+func test_open_ground_lava_puddle_keeps_wrecking_on() -> void:
+	var w: Dictionary = _make_world()
+	var impact: Vector3 = w.nav.cell_to_world(Vector2i(60, 60))
+	var shot: SiegeShot = SiegeShot.new()
+	shot.setup(0, impact + Vector3(-10.0, 0.0, 0.0), impact,
+		null, w.unit_manager, w.td, w.building_manager)
+	while not shot.done:
+		shot.tick(TICK)
+	var surges: Array = w.unit_manager.projectiles.filter(func(p): return p is LavaSurge)
+	check(surges.size() == 1 and surges[0].damage_buildings,
+		"an open-ground puddle keeps the sustained-contact wrecking rule on")
+	shot.free()
+	_free_world(w)
+
+
+## Anti-raider bombardment: a hit on the OWN building with enemy raiders inside
+## blasts them back out hurt (alive, back in the world) and the own building
+## pays one destruction stage.
+func test_bombard_own_raided_building() -> void:
+	var w: Dictionary = _make_world()
+	var hut: Hut = w.building_manager.place(
+		HUT_SCENE, w.tribe, Vector2i(70, 60), 0, true) as Hut
+	var raider: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 1, hut.entrance_world())
+	check(hut.admit_raider(raider), "the enemy warrior slips inside to demolish")
+	check(hut.has_raiders(), "raiders registered inside")
+	var health_before: int = raider.health
+
+	var shot: SiegeShot = SiegeShot.new()
+	shot.setup(0, w.nav.cell_to_world(Vector2i(60, 60)), hut.center_world(),
+		null, w.unit_manager, w.td, w.building_manager)
+	while not shot.done:
+		shot.tick(TICK)
+	check(hut.destruction_stage() >= 1,
+		"the own building pays a stage for the anti-raider shot")
+	check(not hut.has_raiders(), "the raiders were blasted back out")
+	check(raider.state != Unit.State.DEAD, "the raider survives the hit")
+	check(raider.raiding_building == null and raider.health < health_before,
+		"...hurt and back in the world")
+	shot.free()
+	_free_world(w)
+
+
+## The order path: an own building is only a valid bombardment target while
+## raiders demolish it — and only for siege engines, never for foot units.
+func test_order_attack_own_building_only_with_raiders() -> void:
+	var w: Dictionary = _make_world()
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, Vector3(40, 0, 40)) as SiegeEngine
+	var hut: Hut = w.building_manager.place(
+		HUT_SCENE, w.tribe, Vector2i(50, 50), 0, true) as Hut
+	engine.order_attack_building(hut)
+	check(engine.attack_building == null, "own building without raiders is refused")
+
+	var raider: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 1, hut.entrance_world())
+	check(hut.admit_raider(raider), "raider slips inside")
+	engine.order_attack_building(hut)
+	check(engine.attack_building == hut, "own building WITH raiders is a valid order")
+	check(engine._building_target_valid(), "focus valid while the raiders demolish")
+	hut.blast_raiders(0, null)   # raiders leave: the anti-raider focus dies too
+	check(not engine._building_target_valid(), "focus dropped once the raiders are gone")
+
+	# TribeCommands routes the own-building order to engines only.
+	check(hut.admit_raider(raider), "the ejected raider re-enters")
+	var warrior: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, Vector3(45, 0, 45))
+	engine.attack_building = null
+	w.commands.order_attack_building([warrior, engine] as Array[Unit], hut)
+	check(warrior.attack_building != hut, "foot units never storm the own building")
+	check(engine.attack_building == hut, "TribeCommands routes the order to the engine")
+	_free_world(w)
+
+
 func test_bombard_construction_site_shatters() -> void:
 	var w: Dictionary = _make_world()
 	var site: Hut = w.building_manager.place(
@@ -1061,4 +1152,25 @@ func test_vehicle_separation_spreads_engines() -> void:
 		_tick_world(w)
 	check(Vector2(e1.position.x - before.x, e1.position.z - before.z).length() < 0.5,
 		"a pedestrian cannot push the vehicle away")
+	_free_world(w)
+
+
+# --- Damaged workshop keeps its production stock ------------------------------
+
+## A merely damaged workshop leaves its entrance catapult-stock on the ground —
+## the passive repair-absorb must NOT eat it (this was the catapult-shot bug).
+## Only an actively staffed repair (or fire) consumes it.
+func test_damaged_workshop_keeps_stock() -> void:
+	var w: Dictionary = _make_world()
+	var ws: Workshop = _place_workshop(w)
+	w.wood_pile_manager.deposit(ws.delivery_point(), 15)
+	var stock0: int = ws.stock_wood()
+	check(stock0 > 0, "stock piled at the entrance")
+	ws.apply_destruction_stages(1)   # damage into stage 1, nobody repairing
+	check(ws.destruction_stage() >= 1 and ws.health > 0, "workshop damaged but standing")
+	check(ws.workers.is_empty(), "no repair crew assigned")
+	check(not ws._absorbs_repair_wood(), "no passive absorb without a repair crew")
+	for i in range(300):
+		_tick_world(w)
+	check(ws.stock_wood() == stock0, "the damaged workshop leaves its stock lying")
 	_free_world(w)

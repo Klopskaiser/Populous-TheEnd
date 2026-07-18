@@ -97,7 +97,8 @@ func _pick_convert_focus() -> Unit:
 	# the candidate budget, and the buckets are visited without the NW bias.
 	for u in path_service.get_enemy_candidates(
 			position, AGGRO_RADIUS, tribe_id, SCAN_MAX_CANDIDATES):
-		if u == self or u.state == State.SIT or u.is_conversion_immune():
+		if u == self or u.state == State.SIT or u.is_conversion_immune() \
+				or not u.is_targetable():
 			continue
 		var d: float = _flat_dist(position, u.position)
 		if d < d_any:
@@ -126,7 +127,14 @@ func order_attack(enemy: Unit) -> void:
 ## While assaulting a building, clear the entrance by CONVERTING convertible
 ## defenders (enemy priests / shamans are fought in melee instead). The building
 ## stays the target, so the assault resumes once the doorway is clear.
+## Exception: a garrisoned WATCHTOWER — its crew is a protected reserve that
+## can't be converted while housed, so the preacher tears the tower down in
+## melee (free-standing convertibles nearby are still handled by normal aggro).
 func _engage_assault_foe(foe: Unit) -> void:
+	var b = attack_building
+	if b != null and is_instance_valid(b) and b is Watchtower:
+		_begin_attack(foe)
+		return
 	if foe != null and is_instance_valid(foe) and not foe.is_conversion_immune():
 		_convert_target = foe
 		_set_state(State.CAST)
@@ -173,6 +181,10 @@ func _refresh_conversion() -> void:
 	var d_any: float = INF
 	for u in path_service.get_units_in_radius(position, AGGRO_RADIUS):
 		if u == self or u.state == State.DEAD or u.tribe_id == tribe_id:
+			continue
+		# Housed/protected units (e.g. a tower's crew reserve) are never a
+		# conversion target — same guard as Watchtower._nearest_convertible.
+		if not u.is_targetable():
 			continue
 		var d: float = _flat_dist(position, u.position)
 		if u.is_conversion_immune():

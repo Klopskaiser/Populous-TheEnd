@@ -573,13 +573,39 @@ func _dispatch_enemy_building(hit: Dictionary) -> bool:
 	if node == null or not node.has_meta("building"):
 		return false
 	var building: Building = node.get_meta("building") as Building
-	if building == null or building.tribe_id == player_tribe_id or building.health <= 0:
+	if building == null or building.health <= 0:
 		return false
+	if building.tribe_id == player_tribe_id:
+		return _dispatch_own_raided_building(building)
 	if not building.is_assailable_by_units():
 		# e.g. reincarnation site: units cannot storm it. Fall through to a plain
 		# move order (a selected catapult auto-bombards it once in range).
 		return false
 	_tribe_commands.order_attack_building(selected, building)
+	return true
+
+
+## Right-click on an OWN building that enemy raiders are demolishing, with at
+## least one siege engine selected: the engines bombard the raiders out of it
+## (anti-raider shot, phase 7f — the own building pays a stage per hit), every
+## other selected unit lines up at the perimeter to meet the ejected raiders.
+## Returns false otherwise so the click falls through to the usual own-building
+## context commands (staff/garrison/repair).
+func _dispatch_own_raided_building(building: Building) -> bool:
+	if not building.has_raiders():
+		return false
+	var engines: Array[Unit] = []
+	var rest: Array[Unit] = []
+	for u in selected:
+		if u is SiegeEngine:
+			engines.append(u)
+		else:
+			rest.append(u)
+	if engines.is_empty():
+		return false
+	_tribe_commands.order_attack_building(engines, building)
+	if not rest.is_empty():
+		_tribe_commands.order_move(rest, building.edge_spawn_position())
 	return true
 
 

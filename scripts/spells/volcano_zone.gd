@@ -3,19 +3,24 @@ class_name VolcanoZone extends Node3D
 ## The volcano's eruption controller: sits on the growing cone for LIFETIME
 ## seconds. Once the cone has reached its full height (the morph is done),
 ## the crater starts to erupt: every SURGE_INTERVAL a LavaSurge wells up and
-## runs down ALL flanks simultaneously (ignites everything it covers — lava
-## knows no friends — and leaves a black scorch skirt), and an ANIMATED
-## smoke column rises from the crater (looping puffs that grow and fade;
-## in-game only). Buildings in reach take +1 destruction stage every
-## STAGE_INTERVAL. The mountain underneath is permanent and stays after the
-## zone despawns. Ticked via the UnitManager projectile list.
+## runs down ALL flanks simultaneously (leaves a black scorch skirt), and an
+## ANIMATED smoke column rises from the crater (looping puffs that grow and
+## fade; in-game only). While erupting the zone itself CONTINUOUSLY ignites
+## every unit in the lava reach — lava knows no friends, and the per-surge
+## molten window alone left burn-free gaps between waves. Buildings are
+## wrecked by actual lava contact only (Building.add_lava_contact via the
+## surges — one stage per full contact interval). The mountain underneath is
+## permanent and stays after the zone despawns. Ticked via the UnitManager
+## projectile list.
 
 const LIFETIME: float = Balance.VOLCANO_ZONE_LIFETIME
 const RADIUS: float = 5.0
-const STAGE_INTERVAL: float = Balance.VOLCANO_ZONE_STAGE_INTERVAL
+## How far the lava sheets run past the cone (surge radius = lava reach).
+const LAVA_REACH: float = RADIUS + 2.5
 ## Eruptions start only once the cone is at max height (morph duration).
 const SURGE_START: float = VolcanoSpell.DURATION
 const SURGE_INTERVAL: float = 4.5
+const IGNITE_INTERVAL: float = 0.2
 ## Smoke animation: puff cycle length, rise height and speed source values.
 const SMOKE_PUFFS: int = 5
 const SMOKE_CYCLE: float = 3.2
@@ -28,8 +33,8 @@ var terrain_data: TerrainData = null
 var building_manager: BuildingManager = null
 
 var _time: float = 0.0
-var _stage_timer: float = STAGE_INTERVAL
 var _surge_timer: float = 0.0
+var _ignite_timer: float = 0.0
 var _smoke: Array[MeshInstance3D] = []
 var _smoke_mats: Array[StandardMaterial3D] = []
 
@@ -58,11 +63,11 @@ func tick(delta: float) -> void:
 		if _surge_timer <= 0.0:
 			_surge_timer = SURGE_INTERVAL
 			_spawn_surge()
+		_ignite_timer -= delta
+		if _ignite_timer <= 0.0:
+			_ignite_timer = IGNITE_INTERVAL
+			_ignite_covered_units()
 	_animate_smoke()
-	_stage_timer -= delta
-	if _stage_timer <= 0.0:
-		_stage_timer = STAGE_INTERVAL
-		_wreck_buildings()
 
 
 ## Liquid lava wells up at the crater and races down every flank at once,
@@ -71,20 +76,21 @@ func _spawn_surge() -> void:
 	if unit_manager == null:
 		return
 	var surge: LavaSurge = LavaSurge.new()
-	surge.setup(position, unit_manager, terrain_data, RADIUS + 2.5)
+	surge.setup(position, unit_manager, terrain_data, LAVA_REACH, building_manager)
 	unit_manager.register_projectile(surge)
 
 
-func _wreck_buildings() -> void:
-	if building_manager == null:
+## Continuous burn while the volcano is erupting: units anywhere in the lava
+## reach ignite, independent of the individual surges' molten windows (those
+## alone left ~1 s burn-free gaps between waves). Same skip rule as LavaSurge:
+## airborne (THROWN) units pass over the lava.
+func _ignite_covered_units() -> void:
+	if unit_manager == null:
 		return
-	var flat: Vector2 = Vector2(position.x, position.z)
-	for b in building_manager.buildings.duplicate():
-		if not is_instance_valid(b) or b.health <= 0:
+	for u in unit_manager.get_units_in_radius(position, LAVA_REACH):
+		if u.state == Unit.State.DEAD or u.state == Unit.State.THROWN:
 			continue
-		var c: Vector3 = b.center_world()
-		if Vector2(c.x, c.z).distance_to(flat) <= RADIUS:
-			b.apply_destruction_stages(1)
+		u.ignite(position)
 
 
 # --- Animated smoke column (in-game only) ----------------------------------------------

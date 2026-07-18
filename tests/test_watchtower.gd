@@ -14,6 +14,7 @@ const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
 const FIREWARRIOR_SCENE: PackedScene = preload("res://scenes/units/firewarrior.tscn")
 const PREACHER_SCENE: PackedScene = preload("res://scenes/units/preacher.tscn")
 const SHAMAN_SCENE: PackedScene = preload("res://scenes/units/shaman.tscn")
+const HUT_SCENE: PackedScene = preload("res://scenes/buildings/hut.tscn")
 
 
 ## Minimal spell that always releases (for the shaman cast-range test).
@@ -357,4 +358,36 @@ func test_cost_and_footprint() -> void:
 	check(site.footprint == Vector2i(2, 2), "2x2 footprint")
 	check(not w.nav.is_cell_walkable(Vector2i(30, 30)), "footprint blocks the NavGrid")
 	check(not w.nav.is_cell_walkable(Vector2i(31, 31)), "whole footprint solid")
+	_free_world(w)
+
+
+# --- Preacher assaults a tower: melee, don't try to convert the housed crew --
+
+## A preacher assaulting a garrisoned watchtower tears it down in melee — its
+## crew can't be converted while housed, so the door defender is fought, not
+## pacified.
+func test_preacher_melees_watchtower_defender() -> void:
+	var w: Dictionary = _make_world()
+	var tower: Watchtower = _tower(w, w.tribe1)
+	var preacher: Preacher = w.unit_manager.spawn_unit(
+		PREACHER_SCENE, 0, Vector3(31, 5, 33)) as Preacher
+	var foe: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 1, Vector3(31, 5, 34))
+	preacher.attack_building = tower
+	preacher._engage_assault_foe(foe)
+	check(preacher.state == Unit.State.ATTACK,
+		"the preacher melees the tower defender instead of converting it")
+	_free_world(w)
+
+
+## Control: assaulting a NON-tower building still converts its (ejected) defender.
+func test_preacher_converts_non_tower_defender() -> void:
+	var w: Dictionary = _make_world()
+	var hut: Building = w.bm.place(HUT_SCENE, w.tribe1, Vector2i(30, 30), 0, true) as Building
+	var preacher: Preacher = w.unit_manager.spawn_unit(
+		PREACHER_SCENE, 0, Vector3(34, 5, 33)) as Preacher
+	var foe: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 1, Vector3(34, 5, 34))
+	preacher.attack_building = hut
+	preacher._engage_assault_foe(foe)
+	check(preacher.state == Unit.State.CAST,
+		"a non-tower building's defender is still converted")
 	_free_world(w)

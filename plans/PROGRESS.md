@@ -4296,3 +4296,47 @@ Terrain-Verformungen erzwingen Insel-Rebuilds) ohne Fehler.
 - Test umgebaut: test_stars_show_critical_damage_and_fire_priority
   (leichter Schaden keine Sterne, krit -> Sterne, brennend+krit -> keine,
   Leiche -> keine). Suite **1637 grün**, Ladecheck sauber.
+
+### Bugfix-Pass Katapult & Feuermechanik (Nutzerbericht, 2026-07-18)
+
+Vier zusammenhängende Bugs (Details/Soll: `bugs_backlog.md` Bug 5, behoben):
+
+- **Katapult-Treffer auf Gebäude spillt jetzt IMMER die Lavapfütze**
+  (`SiegeShot._impact()`): Einheiten am Einschlag brennen auch bei
+  Gebäudetreffern. Bei Gebäudetreffern läuft die Pfütze mit
+  `damage_buildings = false` (kein Doppelschaden zum Stufen-Treffer).
+- **Lava beschädigt Gebäude:** neues `Building.add_lava_contact(seconds)` —
+  1 Zerstörungsstufe je volle 5 s Kontakt (`Balance.LAVA_BUILDING_STAGE_TIME`),
+  Reset nach 1 s ohne Kontakt (`LAVA_BUILDING_CONTACT_GRACE`, Grace tickt in
+  `Building.tick`; die 1 s überbrückt die ~0,9-s-Lücke zwischen
+  Vulkan-Wellen). `LavaSurge._touch_buildings()` (Kreis vs. Footprint via
+  neuem `Building.footprint_distance_to`) und `LavaFlow._touch_buildings()`
+  (Segmente, pro Check-Tick dedupet) melden Kontakt im 0,2-s-Takt; beide
+  bekamen `building_manager`-Setup-Param + `damage_buildings`-Flag
+  (Aufrufer: VolcanoZone, SiegeShot, Earthquake-Verwerfungslava).
+- **VolcanoZone: Pauschalschaden ERSETZT** — `_wreck_buildings()`/
+  `_stage_timer`/`Balance.VOLCANO_ZONE_STAGE_INTERVAL` entfernt;
+  Gebäudeschaden nur noch über echten Lavakontakt der Surges
+  (Reichweite `LAVA_REACH` = 7,5 statt Zonen-Radius 5). Zusätzlich zündet
+  die Zone während der Eruption selbst kontinuierlich alle 0,2 s alle
+  Einheiten im Lavabereich (`_ignite_covered_units`) — vorher ließen die
+  molten-Fenster der Einzelwellen (~3,7 s je 4,5 s) Brennlücken.
+- **Anti-Raider-Beschuss:** eigenes Gebäude MIT Raidern ist gültiges
+  Katapultziel. `Building.has_raiders()`/`blast_raiders(damage, attacker)`
+  (Raider fliegen verletzt raus — `Balance.SIEGE_SHOT_RAIDER_DAMAGE` = 30 —
+  mit Roll, nehmen den Sturm danach wieder auf oder greifen an);
+  `SiegeShot._building_at_impact` matcht eigene Gebäude nur mit Raidern,
+  das eigene Gebäude zahlt 1 Stufe pro Treffer. `SiegeEngine` überschreibt
+  `_building_target_valid()` (Fokus fällt, sobald die Raider weg sind);
+  `TribeCommands.order_attack_building` lässt Katapulte gegen eigene
+  Raider-Gebäude durch; UI: `SelectionManager._dispatch_own_raided_building`
+  (Katapulte bombardieren, Rest der Selektion stellt sich an den
+  Gebäuderand). Eigene Gebäude OHNE Raider bleiben unantastbar.
+
+**Tests:** test_siege +4 (nicht-wreckende Pfütze bei Gebäudetreffer,
+Open-Ground-Pfütze wreckt, Raider-Blast, Order-/Routing-Regeln),
+test_spells: Vulkan-Kadenz-Test auf Kontaktregel umgeschrieben, +3
+(Grace-Reset, damage_buildings-Flag, kontinuierliches Zünden).
+Suite **1677 grün**, Ladecheck sauber.
+**Nutzer ausstehend:** Spieltest der drei Szenarien (Katapult neben
+feindlichem Gebäude, Vulkan an Hütte, Raider im eigenen Gebäude).

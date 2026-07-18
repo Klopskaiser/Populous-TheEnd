@@ -27,6 +27,11 @@ var done: bool = false
 var unit_manager: UnitManager = null
 var terrain_data: TerrainData = null
 var max_radius: float = 5.5
+var building_manager: BuildingManager = null
+## Buildings touched by the molten sheet accumulate lava contact (destruction
+## stages, see Building.add_lava_contact). Off for the catapult puddle when the
+## projectile itself already damaged a building (no double punishment).
+var damage_buildings: bool = true
 
 var _radius: float = INNER_RADIUS
 var _life: float = 0.0
@@ -36,11 +41,13 @@ var _mesh: MeshInstance3D = null
 
 
 func setup(at: Vector3, p_unit_manager: UnitManager,
-		p_terrain_data: TerrainData, p_max_radius: float = 5.5) -> void:
+		p_terrain_data: TerrainData, p_max_radius: float = 5.5,
+		p_building_manager: BuildingManager = null) -> void:
 	position = at
 	unit_manager = p_unit_manager
 	terrain_data = p_terrain_data
 	max_radius = p_max_radius
+	building_manager = p_building_manager
 
 
 ## True while any band of the sheet is still glowing (damage window).
@@ -62,6 +69,7 @@ func tick(delta: float) -> void:
 		if _check_timer <= 0.0:
 			_check_timer = CHECK_INTERVAL
 			_ignite_covered_units()
+			_touch_buildings()
 	_visual_timer -= delta
 	if _visual_timer <= 0.0:
 		_visual_timer = VISUAL_INTERVAL
@@ -80,6 +88,19 @@ func _ignite_covered_units() -> void:
 		unit_manager.tree_manager.ignite_in_radius(position, _radius)
 	if unit_manager.wood_pile_manager != null:
 		unit_manager.wood_pile_manager.ignite_in_radius(position, _radius)
+
+
+## Buildings covered by the molten sheet rack up lava contact time — one
+## destruction stage per full Balance.LAVA_BUILDING_STAGE_TIME of it.
+func _touch_buildings() -> void:
+	if building_manager == null or not damage_buildings:
+		return
+	var flat: Vector2 = Vector2(position.x, position.z)
+	for b in building_manager.buildings.duplicate():
+		if not is_instance_valid(b) or b.health <= 0:
+			continue
+		if b.footprint_distance_to(flat) <= _radius:
+			b.add_lava_contact(CHECK_INTERVAL)
 
 
 # --- Radial sheet visual (in-game only) -----------------------------------------------

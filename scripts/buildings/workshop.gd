@@ -355,6 +355,14 @@ func production_progress() -> float:
 
 # --- Disable / destruction -----------------------------------------------------------
 
+## The entrance piles are this workshop's catapult PRODUCTION stock — not repair
+## wood. Only pull them into the repair buffer while a repair is actually staffed
+## (assigned workers); a merely damaged workshop leaves its stock on the ground
+## (it stays put even when the building is gone — only fire removes it).
+func _absorbs_repair_wood() -> bool:
+	return not workers.is_empty()
+
+
 ## Damaged into stage >= 1: the running production is lost (no refund) and
 ## the workers are released (like the forester); re-staffing is manual.
 func _on_disabled() -> void:

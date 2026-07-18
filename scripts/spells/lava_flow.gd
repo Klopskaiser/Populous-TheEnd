@@ -25,6 +25,10 @@ const SINK_DEPTH: float = 0.8
 var done: bool = false
 var unit_manager: UnitManager = null
 var terrain_data: TerrainData = null
+var building_manager: BuildingManager = null
+## Buildings touched by molten segments accumulate lava contact (destruction
+## stages, see Building.add_lava_contact).
+var damage_buildings: bool = true
 ## Per-use tuning: the volcano's flows scorch the ground black, the
 ## earthquake's fault lava is short and vanishes quickly without a trace.
 var flow_range: float = 7.0
@@ -48,11 +52,12 @@ var _ribbon: MeshInstance3D = null
 func setup(at: Vector3, dir: Vector3, p_unit_manager: UnitManager,
 		p_terrain_data: TerrainData, p_range: float = 7.0,
 		p_lifetime: float = 12.0, p_molten: float = 4.0,
-		p_scorch: bool = true) -> void:
+		p_scorch: bool = true, p_building_manager: BuildingManager = null) -> void:
 	position = at
 	_head = at
 	unit_manager = p_unit_manager
 	terrain_data = p_terrain_data
+	building_manager = p_building_manager
 	flow_range = p_range
 	lifetime = p_lifetime
 	molten_time = p_molten
@@ -136,6 +141,26 @@ func _ignite_touching_units() -> void:
 			tm.ignite_in_radius(seg.pos, CONTACT_RADIUS)
 		if wpm != null:
 			wpm.ignite_in_radius(seg.pos, CONTACT_RADIUS)
+	_touch_buildings()
+
+
+## Buildings touched by any molten segment rack up lava contact time — once per
+## check tick, no matter how many overlapping segments touch them.
+func _touch_buildings() -> void:
+	if building_manager == null or not damage_buildings:
+		return
+	var touched: Dictionary = {}
+	for b in building_manager.buildings:
+		if not is_instance_valid(b) or b.health <= 0:
+			continue
+		for seg in _segments:
+			if seg.cooled:
+				continue
+			if b.footprint_distance_to(Vector2(seg.pos.x, seg.pos.z)) <= CONTACT_RADIUS:
+				touched[b] = true
+				break
+	for b in touched.keys():
+		b.add_lava_contact(CHECK_INTERVAL)
 
 
 # --- Ribbon visual (in-game only) ----------------------------------------------------

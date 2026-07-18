@@ -402,14 +402,27 @@ func _end_attack() -> void:
 	super._end_attack()
 
 
-## Explicit bombard order on an enemy building (right-click, AI): replaces any
-## pending route.
+## Explicit bombard order on a building (right-click, AI): replaces any pending
+## route. Enemy buildings always; the OWN building only while enemy raiders
+## demolish it from the inside (anti-raider bombardment, phase 7f).
 func order_attack_building(building) -> void:
 	if building == null or not is_instance_valid(building) or building.health <= 0:
 		return
-	if building.tribe_id == tribe_id:
+	if building.tribe_id == tribe_id and not building.has_raiders():
 		return
 	_set_building_target(building, false)
+
+
+## Bombardment focus stays valid for a live enemy building — or the OWN
+## building while enemy raiders are still demolishing it (once they are gone
+## or thrown out for good, the focus is dropped).
+func _building_target_valid() -> bool:
+	if attack_building == null or not is_instance_valid(attack_building) \
+			or attack_building.health <= 0:
+		return false
+	if attack_building.tribe_id != tribe_id:
+		return true
+	return attack_building.has_raiders()
 
 
 ## Focuses a building for bombardment. `keep_route` preserves the pending
@@ -506,8 +519,7 @@ func _tick_attack(delta: float) -> void:
 		return
 	if attack_target != null:
 		_end_attack()   # dead/converted unit target: drop it cleanly
-	if attack_building != null and is_instance_valid(attack_building) \
-			and attack_building.health > 0 and attack_building.tribe_id != tribe_id:
+	if _building_target_valid():
 		# A unit stepping into the fire band interrupts the siege (throttled);
 		# the building focus stays as the fallback afterwards.
 		if _due_to_scan(delta):
