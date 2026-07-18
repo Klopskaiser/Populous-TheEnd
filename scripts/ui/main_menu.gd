@@ -29,6 +29,9 @@ static func _map_description(map_id: String) -> String:
 func _ready() -> void:
 	# Leaving a match with an active time-lapse (F10) must not speed up the menu.
 	Engine.time_scale = 1.0
+	# Apply the persisted window resolution once at startup (main_menu is the
+	# main scene); afterwards only the options menu changes it.
+	GameSettings.apply_resolution()
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_STOP
 
@@ -194,6 +197,23 @@ func _build_options_page() -> Control:
 	fps_check.button_pressed = GameSettings.show_fps()
 	fps_check.toggled.connect(GameSettings.set_show_fps)
 	vb.add_child(fps_check)
+
+	# Window resolution (bug backlog #1), persisted via GameSettings.
+	var resolution_label: Label = Label.new()
+	resolution_label.text = "Auflösung"
+	resolution_label.add_theme_color_override("font_color", UiTheme.GOLD_BRIGHT)
+	vb.add_child(resolution_label)
+
+	var resolution_option: OptionButton = OptionButton.new()
+	UiTheme.style_button(resolution_option)
+	for res in GameSettings.RESOLUTIONS:
+		resolution_option.add_item("%d × %d" % [res.x, res.y])
+	var current_index: int = GameSettings.RESOLUTIONS.find(GameSettings.resolution())
+	resolution_option.select(maxi(current_index, 0))
+	resolution_option.item_selected.connect(func(index: int) -> void:
+		GameSettings.set_resolution(GameSettings.RESOLUTIONS[index])
+		GameSettings.apply_resolution())
+	vb.add_child(resolution_option)
 
 	vb.add_child(HSeparator.new())
 	_add_button(vb, "Zurück", func() -> void: _show_page(0))

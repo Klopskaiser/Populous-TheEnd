@@ -16,6 +16,13 @@ class_name Sidebar extends Control
 
 const PANEL_WIDTH: float = 260.0
 const MINIMAP_SIZE: float = 236.0
+## Min height of the tab content area: tall enough for the building tab's full
+## list. While a building/crew panel (forester/workshop/siege/watchtower) is
+## shown below it, the area shrinks to the compact height so the panel's bottom
+## rows (e.g. the workshop's max-catapult stepper) stay on screen at 1080p —
+## the building tab itself scrolls, so nothing becomes unreachable.
+const TAB_CONTENT_HEIGHT: float = 300.0
+const TAB_CONTENT_HEIGHT_COMPACT: float = 120.0
 const MANA_SEGMENTS: int = 20
 ## Mana value that fills the whole segmented bar (display only).
 const MANA_DISPLAY_CAP: float = 1000.0
@@ -67,6 +74,7 @@ var _growth_slider: HSlider = null   # hut growth control (phase 7i)
 var _growth_label: Label = null
 var _tab_buttons: Array[Button] = []
 var _tab_panels: Array[Control] = []
+var _tab_content: Control = null
 var _spell_ui: Dictionary = {}       # id -> {"button": Button, "pips": Array[ColorRect]}
 var _follower_labels: Dictionary = {}  # kind -> Label
 var _idle_button: Button = null
@@ -257,6 +265,7 @@ func _process(delta: float) -> void:
 	_refresh_workshop_panel()
 	_refresh_siege_panel()
 	_refresh_watchtower_panel()
+	_update_tab_content_height()
 	_follower_timer -= delta
 	if _follower_timer <= 0.0:
 		_follower_timer = FOLLOWER_INTERVAL
@@ -473,15 +482,31 @@ func _build_tab_content(root: Control) -> void:
 	var content: Control = Control.new()
 	# Tall enough for the building tab's full list (7 entries incl. the
 	# watchtower); the tab itself also scrolls as a safety net (short windows).
-	content.custom_minimum_size = Vector2(0, 300)
+	content.custom_minimum_size = Vector2(0, TAB_CONTENT_HEIGHT)
 	content.size_flags_vertical = Control.SIZE_FILL
+	content.clip_contents = true   # compact mode must not paint over the panel below
 	root.add_child(content)
+	_tab_content = content
 	_tab_panels.append(_build_building_tab())
 	_tab_panels.append(_build_spell_tab())
 	_tab_panels.append(_build_followers_tab())
 	for p in _tab_panels:
 		p.set_anchors_preset(Control.PRESET_FULL_RECT)
 		content.add_child(p)
+
+
+## Shrinks the tab content while a building/crew panel is visible below it
+## (see TAB_CONTENT_HEIGHT_COMPACT) and restores the full height otherwise.
+func _update_tab_content_height() -> void:
+	if _tab_content == null:
+		return
+	var panel_open: bool = (_forester_panel != null and _forester_panel.visible) \
+		or (_workshop_panel != null and _workshop_panel.visible) \
+		or (_siege_panel != null and _siege_panel.visible) \
+		or (_watchtower_panel != null and _watchtower_panel.visible)
+	var target: float = TAB_CONTENT_HEIGHT_COMPACT if panel_open else TAB_CONTENT_HEIGHT
+	if _tab_content.custom_minimum_size.y != target:
+		_tab_content.custom_minimum_size.y = target
 
 
 func _build_building_tab() -> Control:
@@ -516,13 +541,20 @@ func _build_building_tab() -> Control:
 
 
 func _build_spell_tab() -> Control:
+	# Scrolls like the building tab: the tab area shrinks while a building/crew
+	# panel is open (see _update_tab_content_height), so all rows must stay
+	# reachable at the compact height too.
+	var scroll: ScrollContainer = ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	var grid: GridContainer = GridContainer.new()
 	grid.columns = 3
+	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	grid.add_theme_constant_override("h_separation", 4)
 	grid.add_theme_constant_override("v_separation", 6)
 	for entry in default_spell_entries():
 		grid.add_child(_make_spell_cell(entry))
-	return grid
+	scroll.add_child(grid)
+	return scroll
 
 
 func _make_spell_cell(entry: Dictionary) -> Control:
@@ -557,7 +589,12 @@ func _make_spell_cell(entry: Dictionary) -> Control:
 
 
 func _build_followers_tab() -> Control:
+	# Scrolls for the same reason as the spell tab (compact tab height while a
+	# building/crew panel is open).
+	var scroll: ScrollContainer = ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	var vb: VBoxContainer = VBoxContainer.new()
+	vb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	vb.add_theme_constant_override("separation", 4)
 	for row in FOLLOWER_ROWS:
 		var lbl: Label = Label.new()
@@ -574,7 +611,8 @@ func _build_followers_tab() -> Control:
 	UiTheme.style_button(_idle_button)
 	_idle_button.pressed.connect(_on_select_idle)
 	vb.add_child(_idle_button)
-	return vb
+	scroll.add_child(vb)
+	return scroll
 
 
 ## Inmate panel for a selected forester: title + four slot buttons. Hidden until

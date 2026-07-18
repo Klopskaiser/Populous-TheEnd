@@ -1516,7 +1516,8 @@ Ladungsschub beim Gegner → Respawn-Countdown im Porträt).
   (Countdown lebt jetzt im großen Porträt).
 - **Fenstergröße:** `display/window/size` auf **1280×800** gesetzt — mit dem
   Godot-Default (1152×648) wäre die höhere Sidebar unten übergelaufen (sie
-  war schon vorher praktisch voll).
+  war schon vorher praktisch voll). *(Überholt seit 2026-07-18: Basis
+  1920×1080 + Stretch-Mode, siehe „Bugfix Backlog #1".)*
 - Suite 643 grün, `--quit-after 240` fehlerfrei (Porträt baut auch headless).
 
 **Manuelle Prüfung durch Nutzer: BESTANDEN** („ok, passt" — Zauber, Landbrücke,
@@ -4340,3 +4341,42 @@ test_spells: Vulkan-Kadenz-Test auf Kontaktregel umgeschrieben, +3
 Suite **1677 grün**, Ladecheck sauber.
 **Nutzer ausstehend:** Spieltest der drei Szenarien (Katapult neben
 feindlichem Gebäude, Vulkan an Hütte, Raider im eigenen Gebäude).
+
+## Bugfix Backlog #1 — UI-Skalierung / Auflösung (2026-07-18)
+
+Behebung von [bugs_backlog.md](bugs_backlog.md) Bug 1: Bei 1080p war im
+Werkstatt-Panel unten die Katapult-Anzahl abgeschnitten; Zielauflösungen sind
+1920×1080 und 2560×1440.
+
+**Ursache:** `project.godot` hatte Basis 1280×800 **ohne Stretch-Mode** — das
+UI skalierte nicht mit dem Fenster (die alte Notiz „Fenstergröße 1280×800" aus
+Phase 6 ist damit überholt). Zusätzlich stapelte die Sidebar-VBox Tab-Content
+(min. 300 px) + Gebäudepanel über die Panelhöhe hinaus.
+
+**Umsetzung:**
+- `project.godot`: Basisauflösung **1920×1080**,
+  `window/stretch/mode="canvas_items"` + `aspect="expand"` — bei 1080p rendert
+  das UI 1:1, bei 1440p einheitlich ×1,33 skaliert. Die Screen-Space-Logik
+  (Box-Select, BuildMenu, SpellTargeting, Cursor-Label) arbeitet komplett im
+  Stretch-Basisraum und bleibt konsistent.
+- `scripts/core/game_settings.gd`: Auflösung persistiert nach dem
+  `show_fps`-Muster (`resolution_w`/`resolution_h`, Sektion `display`,
+  `user://settings.cfg`). Neu: `resolution()`, `set_resolution()`,
+  `apply_resolution()` (setzt + zentriert das Fenster; No-op headless und in
+  Nicht-Windowed-Modi), Konstante `RESOLUTIONS` (1920×1080, 2560×1440).
+- `scripts/ui/main_menu.gd`: Optionspunkt **„Auflösung"** (OptionButton) auf
+  der Optionsseite; Auswahl wendet sofort an und speichert. In `_ready()` wird
+  die gespeicherte Auflösung einmalig beim Start angewendet.
+- `scripts/ui/sidebar.gd`: **Kompakt-Modus des Tab-Contents** — solange ein
+  Gebäude-/Crew-Panel (Förster/Werkstatt/Katapult/Wachturm) sichtbar ist,
+  schrumpft die Tab-Fläche von 300 auf 120 px (`_update_tab_content_height()`,
+  im `_process`-Refresh), damit die untersten Panel-Zeilen (Katapult-Stepper)
+  sicher im Sichtbereich bleiben. Damit dabei nichts unerreichbar wird,
+  scrollen jetzt auch **Zauber- und Gefolgsleute-Tab** in ScrollContainern
+  (wie der Gebäude-Tab); `clip_contents` auf der Tab-Fläche verhindert
+  Überzeichnen des Panels darunter.
+
+**Verifikation:** Ladecheck `--headless --quit` sauber; Headless-Skirmish
+(`--quit-after 600 -- skirmish=1`) fehlerfrei. Manuelle Prüfung durch Nutzer
+(1080p/1440p: Werkstatt-Panel vollständig, Klicks/Box-Select korrekt)
+ausstehend.

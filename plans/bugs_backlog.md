@@ -7,7 +7,7 @@
 
 ## Bug 1 — UI-Skalierung / Auflösung
 
-- [ ] **Status: offen**
+- [x] **Status: behoben (2026-07-18)**
 
 **Symptom:** UI ist ungünstig skaliert. Bei 1080p ist z. B. im Werkstatt-Panel unten
 die Katapult-Anzahl abgeschnitten und die Arbeiterplätze sind nicht alle sichtbar.
@@ -18,15 +18,20 @@ die Katapult-Anzahl abgeschnitten und die Arbeiterplätze sind nicht alle sichtb
 - **Neuer Optionspunkt „Auflösung"** im Optionsmenü (Auswahl der Fensterauflösung,
   mind. 1080p und 1440p).
 
-**Ansatzpunkte:**
-- `project.godot`: aktuell `window/size/viewport_width=1280`, `viewport_height=800`,
-  kein Stretch-Mode konfiguriert → Basisauflösung/Stretch-Strategie festlegen
-  (z. B. `canvas_items` + `aspect=expand`), damit das UI bei 1080p/1440p konsistent skaliert.
-- Werkstatt-/Gebäudepanel: `scripts/ui/selection_manager.gd`, `scripts/ui/sidebar.gd`
-  (Katapult-Anzahl, Arbeiterplätze) — feste Pixelmaße/Offsets prüfen, Panel darf bei
-  Zielauflösungen nicht abschneiden.
-- Optionsmenü (bestehende Optionen, z. B. FPS-Anzeige) um Auflösungs-Auswahl erweitern;
-  Einstellung persistieren wie die vorhandenen Optionen.
+**Ursache/Fix (2026-07-18):**
+- Ursache: `project.godot` hatte Basis 1280×800 **ohne Stretch-Mode** (UI skalierte
+  nicht mit dem Fenster), und die Sidebar-VBox stapelte Tab-Content (min. 300 px)
+  + Gebäudepanel über die verfügbare Höhe hinaus → Werkstatt-Panel unten abgeschnitten.
+- `project.godot`: Basisauflösung **1920×1080**, `window/stretch/mode="canvas_items"`,
+  `aspect="expand"` — bei 1080p rendert das UI 1:1, bei 1440p skaliert es ×1,33.
+- `game_settings.gd`: Auflösung persistiert (`resolution_w/h` in `user://settings.cfg`,
+  Sektion `display`), `apply_resolution()` setzt/zentriert das Fenster
+  (Headless-Guard für Tests).
+- `main_menu.gd`: Optionspunkt „Auflösung" (OptionButton 1920×1080 / 2560×1440),
+  Anwendung beim Start in `_ready()`.
+- `sidebar.gd`: Tab-Content schrumpft auf Kompakt-Höhe (120 px), solange ein
+  Gebäude-/Crew-Panel offen ist (`_update_tab_content_height()`); Zauber- und
+  Gefolgsleute-Tab scrollen dafür jetzt wie der Gebäude-Tab.
 
 ## Bug 2 — Unfertige Gebäude durch Einheiten nicht zerstörbar
 
