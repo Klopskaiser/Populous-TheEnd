@@ -73,12 +73,12 @@ Enum `Unit.State` in `scripts/units/unit.gd`:
 | `BUILD` | Brave arbeitet an einer Baustelle/Reparatur (mit Sub-Tasks, s. u.). |
 | `ATTACK` | Kämpft im Nahkampf/Fernkampf gegen ein Einheitenziel. |
 | `TRAIN` | In einem Trainingsgebäude; kommt als Kampfeinheit wieder heraus. |
-| `PANIC` | Flieht kopflos (Schwarm, Brand); Dauer 6 s. Schamanin ist gegen Schwarm-Panik immun. |
+| `PANIC` | Flieht kopflos vor der Panikquelle; nicht steuerbar (Details §6 Statuseffekte). |
 | `CAST` | Schamanin wirkt einen Zauber (Wind-up, dann Release). |
 | `THROWN` | Durch die Luft geschleudert (Feuerball, Tornado) — Wurfparabel bis zur Landung. |
 | `DEAD` | Tot; Leiche liegt 5 s und versinkt dann im Boden (1 s Animation). |
 | `SIT` | Von einem feindlichen Prediger fixiert (Bekehrung läuft). |
-| `ROLL` | Rollt (nach Landung, Schubser oder Klippensturz) bis zum Ausrollen. |
+| `ROLL` | Rollt/purzelt bis zum Ausrollen; nicht steuerbar, Rollschaden über Zeit (Details §6 Statuseffekte). |
 | `FORESTER` | Beim Förster einquartiert bzw. kurz draußen einen Setzling pflanzend. |
 | `CREW` | Bemannt ein Katapult (läuft an dessen Seitenslot mit, wehrt sich bei Angriff). |
 | `RAID` | Nahkampf-Abreißer **im Inneren** eines feindlichen Gebäudes; steigt lebend aus, wenn es einstürzt. |
@@ -154,12 +154,60 @@ Schaden wird flach von den HP abgezogen. Variation entsteht auf Angreiferseite:
   weitere warten in zweiter Reihe und rücken nach.
 - **Regeneration:** **8 s** nach dem letzten Kampfkontakt heilen Einheiten mit
   **2 HP/s** selbst.
-- **Brand:** Brennende Einheiten erleiden **120 HP über 4 s** und geraten in
-  Panik; direkter Lavakontakt kostet 30 HP.
 - **Klippensturz:** Wer über eine Kante (≥ 1,6 m Höhendifferenz) gestoßen wird
   oder rollt, stürzt: **6 HP je Meter Fallhöhe**, gedeckelt auf 30 HP
-  (½ Brave-Leben), danach Rollen (bis 2 s). Sturz **ins Wasser = Sofort-Tod**
-  (Tornado-Schleudern).
+  (½ Brave-Leben), danach Rollen (Dauer wächst mit der Fallhöhe, max. 2 s).
+  Sturz **ins Wasser = Sofort-Tod**.
+
+### Statuseffekte
+
+Alle vier Effekte machen die Einheit **unsteuerbar** (sie nimmt keine Befehle
+an, bis der Effekt endet). Panik und Rollen brechen den laufenden Kampf ab und
+**löschen die Wegpunkt-Route** — die Einheit steht danach untätig (`IDLE`) da
+und braucht neue Befehle. Auch eine laufende Bekehrung durch einen Prediger
+wird zurückgesetzt. Angreifbar bleibt die Einheit währenddessen normal.
+
+**Panik** — Auslöser: Insektenschwarm (6 s) und Brand (für die Brenndauer).
+- Die Einheit flieht in kurzen, zufällig wechselnden Richtungshüpfern **von der
+  Panikquelle weg** (kopfloses Rennen, keine Wegfindung); sie kämpft nicht und
+  wehrt sich nicht.
+- Erneute Panik **verlängert** den Timer (kein Stapeln).
+- Die **Schamanin ist immun** — sie brennt z. B. stehend weiter und bleibt
+  steuerbar. Geschleuderte/rollende Einheiten beenden erst ihren Sturz/Roller,
+  Panik greift dann nicht mehr rückwirkend.
+
+**Rollen** — Auslöser: Schubser im Nahkampf (20 % Umwerf-Chance), Landung nach
+Feuerball-/Tornado-Schleudern, Blitz (angrenzende Einheiten), Klippensturz,
+sowie von selbst beim Hinablaufen sehr steiler Hänge (Stolpern).
+- Rollt mit **5,5 m/s** (Hangneigung addiert Tempo) und folgt an Hängen der
+  Falllinie, bis der Boden flach genug ist; Wurf-Landungen rollen mit ihrem
+  Schwung weiter, der über Reibung abklingt. Auf flachem Boden endet ein
+  Mini-Roller nach ~0,35 s.
+- **Rollschaden: 5 HP/s.** Tödlicher Schaden wird bis zum Ende des Rollers
+  **aufgeschoben** — die Einheit stirbt erst beim Ausrollen, nicht mittendrin.
+- Rollen **ins Wasser = Sofort-Tod**; Gebäude stoppen den Roller; rollt die
+  Einheit über eine Klippenkante, geht der Roller in einen **Sturz** über
+  (Fallschaden, §oben). Harte Sicherheitsgrenze: 30 s, danach endet jeder
+  Roller.
+- Sonderfall **Stolpern** (steiler Hang, ohne Kampfeinwirkung): harmlos — die
+  Einheit nimmt ihre vorherige Tätigkeit danach wieder auf (ein Brave lässt
+  getragenes Holz fallen und hebt es wieder auf). Ein Treffer während des
+  Stolperns macht daraus einen normalen Kampf-Roller inkl. Befehlsverlust.
+
+**Schleudern (`THROWN`)** — Auslöser: Feuerball-Rückstoß, Tornado.
+- Wurfparabel durch die Luft, bei der Landung Fallschaden (je nach Höhe),
+  danach Schwung-Roller. Landung **im Wasser = Sofort-Tod**.
+
+**Brand** — Auslöser für Einheiten: **nur Lavakontakt** (Vulkan, Lavaströme).
+- Erstkontakt mit Lava kostet sofort **30 HP**, dann brennt die Einheit:
+  **120 HP über 4 s** (2 Brave-Leben — für Braves und Feuerkrieger tödlich,
+  wenn nichts dazwischenkommt). Erneuter Lavakontakt frischt den Brand auf,
+  stapelt aber nicht.
+- Brand **löst Panik aus** (für die Brenndauer): die Einheit rennt brennend
+  umher. Die panik-immune Schamanin brennt stehend und bleibt steuerbar.
+- Feuerball/Feuerregen zünden Einheiten **nicht** an — Feuerzauber setzen aber
+  **Bäume, Holzstapel und Katapulte** in Brand (das hölzerne Fahrzeug brennt
+  ab und versinkt; die Crew erleidet nur den normalen Flächenschaden).
 
 ---
 
