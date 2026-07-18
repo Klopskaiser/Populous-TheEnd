@@ -137,10 +137,12 @@ Gebäude haben **4 Zerstörungsstufen** (`Building.destruction_stage()`), je
   Katapultbeschuss auf das **eigene** geraidete Gebäude wirft Raider lebend
   hinaus (30 HP Schaden je Treffer, kostet das eigene Gebäude 1 Stufe).
 - **Insassen bei Beschuss:** Schaltet **Fernkampf** (Feuerkrieger, Katapult)
-  ein besetztes Gebäude aus, werden die Insassen hinausgeworfen: sie **rollen
-  vom Gebäude weg und sterben, sobald sie zur Ruhe kommen** (aufgeschobener
-  Roll-Tod, §6 Statuseffekte). **Zauber und Nahkampf-Sturm** werfen sie
-  dagegen **lebend** hinaus (gleicher Roller, aber ohne tödlichen Schaden).
+  ein besetztes Gebäude aus, werden die Insassen hinausgeworfen und rollen vom
+  Gebäude weg — mit **1 Brave-Leben (60 HP) Schaden**, plus dem üblichen
+  Rollschaden. Braves und Feuerkrieger (60 HP) sterben daran beim Ausrollen
+  (aufgeschobener Roll-Tod, §6); zähere Einheiten wie Krieger, Prediger oder
+  die Schamanin **können den Rauswurf verletzt überleben**. **Zauber und
+  Nahkampf-Sturm** werfen die Insassen dagegen unverletzt hinaus.
 
 ---
 

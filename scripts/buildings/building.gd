@@ -56,8 +56,9 @@ const MAX_DAMAGE_HOLES: int = 6
 
 # --- Building assault (phase 7g) ----------------------------------------------
 ## Damage source tags for take_damage: ranged fire (firewarrior) that reaches
-## stage 1 on its own KILLS the trapped occupants, everything else (spells,
-## melee demolition) ejects them alive.
+## stage 1 on its own HURTS the ejected occupants (EJECT_RANGED_DAMAGE — weak
+## units die in the tumble), everything else (spells, melee demolition) ejects
+## them alive and unhurt.
 const DMG_GENERIC: int = 0
 const DMG_RANGED: int = 1
 ## Max melee raiders that can storm this building at once (the watchtower in
@@ -460,19 +461,26 @@ func _on_disabled() -> void:
 	eject_occupants(false)
 
 
+## Damage the ranged eject (`killed` = true) deals to each occupant: one brave
+## life. Braves/firewarriors die in the tumble, tougher units can survive.
+const EJECT_RANGED_DAMAGE: int = Balance.BUILDING_EJECT_RANGED_DAMAGE
+
+
 ## Ejects any units housed inside (training trainee; tower crew in 7h). Base
-## buildings have none. `killed` = the eject is lethal (ranged fire / catapult
-## hit): the occupants roll out and die once the tumble ends; otherwise they
-## are pushed out alive (spells, melee storm start).
+## buildings have none. `killed` = ranged eject (firewarrior stage-1 fire /
+## catapult hit): the occupants roll out with EJECT_RANGED_DAMAGE — weak units
+## die once the tumble ends, tough ones survive hurt. Otherwise they are
+## pushed out alive and unhurt (spells, melee storm start).
 func eject_occupants(_killed: bool) -> void:
 	pass
 
 
 ## Ejects one occupant that has just been put back into the world: it is shoved
 ## away from the building into a short tumble. `killed` (ranged fire / catapult)
-## makes the tumble lethal — death is deferred by the ROLL state, so the unit
-## visibly rolls out and only collapses once it comes to rest (like any lethal
-## hit taken while rolling). Untyped param (freed-safe).
+## deals EJECT_RANGED_DAMAGE on top — for weak units that is lethal, and the
+## ROLL state defers their death, so they visibly roll out and only collapse
+## once at rest; tougher units come to rest hurt but alive. The usual roll
+## damage applies during the tumble either way. Untyped param (freed-safe).
 func _eject_unit(u, killed: bool) -> void:
 	if not is_instance_valid(u) or u.state == Unit.State.DEAD:
 		return
@@ -483,7 +491,7 @@ func _eject_unit(u, killed: bool) -> void:
 	u.displace(dir, Unit.SHOVE_DISPLACE)
 	u.start_roll(dir, Unit.MINI_ROLL_DURATION)
 	if killed:
-		u.take_damage(u.health + 1000)
+		u.take_damage(EJECT_RANGED_DAMAGE)
 
 
 # --- Melee raiders / storm (phase 7g) --------------------------------------------
@@ -1171,8 +1179,9 @@ func take_damage(amount: int, source: int = DMG_GENERIC) -> void:
 		_spawn_damage_burst()
 	if was_usable and not is_usable():
 		# Just crossed into stage >= 1 (unusable). Ranged fire that reaches this
-		# on its own kills the trapped occupants; spells / melee demolition eject
-		# them alive (melee already ejected them at the storm start -> no-op).
+		# on its own hurls the occupants out hurt (weak units die in the tumble);
+		# spells / melee demolition eject them alive (melee already ejected them
+		# at the storm start -> no-op).
 		if source == DMG_RANGED and raiders.is_empty():
 			eject_occupants(true)
 		else:

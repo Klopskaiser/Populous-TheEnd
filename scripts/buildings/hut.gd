@@ -92,8 +92,9 @@ func eject_crew(index: int) -> void:
 	_release_crew_member(u, rally_point if rally_point != Vector3.ZERO else Vector3.INF)
 
 
-## Ejects every crew member. `killed` (ranged stage-1 fire) kills them at the
-## door; otherwise they are shoved out alive (storm / damage / destruction).
+## Ejects every crew member. `killed` (ranged stage-1 fire / catapult hit)
+## hurls them out with one brave life of damage (braves die in the tumble);
+## otherwise they are shoved out alive (storm / damage / destruction).
 func eject_occupants(killed: bool) -> void:
 	_prune_crew()
 	for u in crew.duplicate():

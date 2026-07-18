@@ -316,7 +316,7 @@ func test_storm_ejects_crew_alive() -> void:
 	_free_world(w)
 
 
-func test_ranged_stage1_kills_crew() -> void:
+func test_ranged_stage1_hurts_crew_weak_die() -> void:
 	var w: Dictionary = _make_world()
 	var tower: Watchtower = _tower(w, w.tribe1)
 	var warrior: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 1, Vector3(31, 0, 32))
@@ -329,7 +329,7 @@ func test_ranged_stage1_kills_crew() -> void:
 	check(tower.destruction_stage() == 1, "tower at stage 1")
 	check(tower.crew.is_empty(), "crew ejected")
 	check(warrior.state == Unit.State.ROLL and fire.state == Unit.State.ROLL,
-		"ranged stage-1 fire sends the trapped crew into a lethal tumble")
+		"ranged stage-1 fire hurls the crew into a tumble")
 	var ticks: int = 0
 	while ticks < 100 \
 			and (warrior.state == Unit.State.ROLL or fire.state == Unit.State.ROLL):
@@ -338,9 +338,13 @@ func test_ranged_stage1_kills_crew() -> void:
 		if fire.state == Unit.State.ROLL:
 			fire.tick(TICK)
 		ticks += 1
-	check(warrior.state == Unit.State.DEAD and fire.state == Unit.State.DEAD,
-		"the crew dies once the tumble ends (deferred roll death)")
-	check(w.tribe1.population() == pop_before - 2, "population dropped by the dead crew")
+	check(fire.state == Unit.State.DEAD,
+		"the 60-HP firewarrior dies of the eject damage once the tumble ends")
+	check(warrior.state != Unit.State.DEAD
+			and warrior.health <= warrior.max_health - Building.EJECT_RANGED_DAMAGE,
+		"the tougher warrior survives the eject, hurt by one brave life")
+	check(w.tribe1.population() == pop_before - 1,
+		"population dropped only by the dead crew member")
 	_free_world(w)
 
 

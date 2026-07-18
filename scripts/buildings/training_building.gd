@@ -241,8 +241,9 @@ func production_progress() -> float:
 
 ## Damaged into stage >= 1 (or stormed): training stops. The trainee is ejected
 ## — pushed out alive for spells / the melee storm (`killed` = false), or
-## tumbling out lethally (dies once the roll ends) when RANGED fire / a
-## catapult hit did it (`killed` = true). The queued braves are always released.
+## tumbling out with one brave life of damage (a brave trainee dies once the
+## roll ends) when RANGED fire / a catapult hit did it (`killed` = true).
+## The queued braves are always released.
 func eject_occupants(killed: bool) -> void:
 	if is_instance_valid(trainee):
 		var t: Brave = trainee

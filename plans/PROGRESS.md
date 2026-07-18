@@ -4561,3 +4561,17 @@ Werkstatt-Arbeiter, Hütten-Besatzung und Wachturm-Crew, sowohl beim
 Feuerkrieger-Pfad (`DMG_RANGED`-Stufe-1) als auch beim Katapult-Einschlag.
 Tests angepasst (5 Checks: erst ROLL, nach Ausrollen DEAD + Population),
 Doku §5 aktualisiert. Suite 1753 Tests grün.
+
+### Nachschärfung 2: Fernkampf-Rauswurf verletzt statt tötet (2026-07-18, Nutzerwunsch)
+
+Der tödliche Insassen-Eject war zu hart (Wachturm-Crew überlebte vorher
+teilweise). Neue, kalkulierbare Regel: Fernkampf-Rauswurf (Feuerkrieger-
+Stufe-1, Katapult-Treffer) verursacht **1 Brave-Leben Schaden**
+(`Balance.BUILDING_EJECT_RANGED_DAMAGE` = 60, neu im Balance-Sheet) plus den
+normalen Rollschaden des Rausrollens. Braves/Feuerkrieger (60 HP) sterben
+beim Ausrollen (aufgeschobener Roll-Tod), Krieger/Prediger/Schamanin können
+verletzt überleben. Zentral in `Building._eject_unit`; gilt einheitlich für
+alle Gebäudetypen und beide Beschuss-Pfade.
+Tests: Wachturm-Test differenziert jetzt (Feuerkrieger stirbt, Krieger
+überlebt mit −60 HP, Population −1); Brave-Insassen-Tests unverändert gültig
+(60 HP → Tod). Doku §5 aktualisiert. Suite 1754 Tests grün.

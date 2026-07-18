@@ -268,6 +268,11 @@ const CLIFF_LAUNCH_UP: float = 3.5
 
 ## Schadensanteil pro Zerstörungsstufe (Stufen bei 30/60/90/100 %).
 const BUILDING_STAGE_DAMAGE: float = 0.3
+## Schaden am Insassen beim Fernkampf-Rauswurf (Feuerkrieger-Stufe-1,
+## Katapult-Treffer): 1 x Brave-Leben. Braves/Feuerkrieger sterben daran beim
+## Ausrollen, zähere Einheiten (Krieger, Prediger, Schamanin) können den
+## Rauswurf überleben; der normale Rollschaden kommt obendrauf.
+const BUILDING_EJECT_RANGED_DAMAGE: int = 60
 ## Abriss-Schaden pro Nahkampf-Angreifer im Gebäude (HP/s).
 const RAID_DPS_PER_RAIDER: float = 6.0
 ## Maximale gleichzeitige Nahkampf-Abreißer pro Gebäude.

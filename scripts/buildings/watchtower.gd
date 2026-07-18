@@ -154,8 +154,9 @@ func _prune_crew() -> void:
 	crew = kept
 
 
-## Ejects all crew: `killed` (ranged stage-1 fire) flings them out dead at the
-## door; otherwise they are shoved out alive (melee storm / spell disable).
+## Ejects all crew: `killed` (ranged stage-1 fire / catapult hit) hurls them
+## out with one brave life of damage — weak crew dies in the tumble; otherwise
+## they are shoved out alive (melee storm / spell disable).
 func eject_occupants(killed: bool) -> void:
 	_eject_all(killed, Vector3.INF)
 

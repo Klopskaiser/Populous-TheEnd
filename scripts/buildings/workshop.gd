@@ -372,8 +372,9 @@ func _on_disabled() -> void:
 
 
 ## Building assault (phase 7g): running production is lost and all housed crew
-## is ejected. `killed` (ranged stage-1 fire) kills them at the door; the melee
-## storm pushes them out alive.
+## is ejected. `killed` (ranged stage-1 fire / catapult hit) hurls them out
+## with one brave life of damage (workers die in the tumble); the melee storm
+## pushes them out alive.
 func eject_occupants(killed: bool) -> void:
 	production_active = false
 	work_done = 0.0

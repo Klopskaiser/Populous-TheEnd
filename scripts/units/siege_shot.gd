@@ -100,9 +100,9 @@ func _impact() -> void:
 				shooter if (shooter != null and is_instance_valid(shooter)) else null)
 		else:
 			# Ranged rule (same as firewarrior fire reaching stage 1): everyone
-			# stationed inside an enemy building dies VISIBLY — ejected into the
-			# world, rolling away from the building, collapsing once at rest.
-			# Never silently deleted: the defender must see the crew fall.
+			# stationed inside an enemy building is hurled out VISIBLY with one
+			# brave life of damage — weak units collapse once their tumble ends,
+			# tough ones survive hurt. Never silently deleted.
 			building.eject_occupants(true)
 		# Full destruction stage (construction sites shatter — fragile rule).
 		building.apply_destruction_stages(Balance.SIEGE_SHOT_BUILDING_STAGES)
