@@ -196,21 +196,32 @@ func release_claim(tree: TreeResource, claimer: Object) -> void:
 		tree.remove_claimer(claimer)
 
 
+## Height-detour malus (bug backlog #4): effective metres added per metre of
+## height difference between the searcher and a tree. A tree on another level
+## (below a cliff / atop a plateau) is usually only reachable via a ramp detour
+## the beeline does not see — same-level trees within the malus win instead of
+## luring workers down cliffs. Cheap O(1) per tree (no pathfinding in the scan).
+const HEIGHT_DETOUR_PENALTY: float = 6.0
+
+
 func _nearest(pos: Vector3, radius: float, claimable_only: bool) -> TreeResource:
 	var best: TreeResource = null
-	var best_dist: float = radius * radius
+	var best_score: float = INF
 	var flat: Vector2 = Vector2(pos.x, pos.z)
 	for tree in trees:
 		if not is_instance_valid(tree) or tree.felled_flag:
 			continue
 		if claimable_only and not tree.can_claim():
 			continue
-		var d: float = Vector2(tree.position.x, tree.position.z).distance_squared_to(flat)
-		if d >= best_dist:
+		var d: float = Vector2(tree.position.x, tree.position.z).distance_to(flat)
+		if d > radius:
+			continue
+		var score: float = d + HEIGHT_DETOUR_PENALTY * absf(tree.position.y - pos.y)
+		if score >= best_score:
 			continue
 		if nav_grid != null and not nav_grid.same_island(pos, tree.position):
-			continue   # beeline-near but unreachable (below a cliff)
-		best_dist = d
+			continue   # beeline-near but unreachable (no ramp connects at all)
+		best_score = score
 		best = tree
 	return best
 

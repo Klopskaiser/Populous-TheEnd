@@ -35,7 +35,7 @@ die Katapult-Anzahl abgeschnitten und die Arbeiterplätze sind nicht alle sichtb
 
 ## Bug 2 — Unfertige Gebäude durch Einheiten nicht zerstörbar
 
-- [ ] **Status: offen**
+- [x] **Status: behoben (2026-07-18)**
 
 **Symptom:** Nicht fertig errichtete Gebäude (Baustellen) können von Einheiten
 angegriffen werden, werden aber nie zerstört — nur Katapulte (und Zauber, siehe
@@ -59,6 +59,22 @@ angegriffen werden, werden aber nie zerstört — nur Katapulte (und Zauber, sie
 - Phase-7g-Logik (Sturmangriff, Insassen-Auswurf) gegen Baustellen absichern
   (Baustellen haben keine Insassen/Raiders).
 
+**Ursache/Fix (2026-07-18):**
+- Bestätigt per Repro-Test: Baustellen starteten mit **vollen HP** (300), und
+  `Building.tick()` rief `_tick_raid()` nur für **fertige** Gebäude auf —
+  Nahkampf-Raider wurden zwar eingelassen, machten aber nie Schaden.
+  (Feuerkrieger-Beschuss konnte Baustellen schon vorher zerstören, nur eben
+  gegen volle 300 HP.)
+- Fix in `building.gd`: Baustellen-HP-Modell — `health` startet bei
+  `SITE_MIN_HP` (1) und wächst mit dem angelieferten Holz
+  (`wood_delivered / wood_cost × max_health`, Deckel `SITE_HP_CAP_FRACTION`
+  = 3/4 der Voll-HP = 3 von 4 Zerstörungsstufen). Schaden bleibt beim
+  HP-Wachstum erhalten (nur das Deckel-Delta wird addiert) und wird bei
+  `finish_construction()` in das Voll-HP-Modell übernommen (reparierbar).
+  `tick()` ruft `_tick_raid()` jetzt auch während der Bauphase auf.
+- Tests: `tests/test_construction_assault.gd` (neu, 17 Checks: HP-Modell,
+  Nahkampf-Raid, Befehls-Pipeline, Feuerkrieger, Pre-Built unverändert).
+
 ## ~~Bug 3 — Reparatur von Gebäuden~~ (gestrichen)
 
 **Gestrichen 2026-07-13:** Reparatur ist bereits implementiert und funktioniert
@@ -68,7 +84,7 @@ Kein Handlungsbedarf.
 
 ## Bug 4 — Holzsuche: Priorisierung nach Luftlinie führt zu Umwegen
 
-- [ ] **Status: offen**
+- [x] **Status: behoben (2026-07-18)**
 
 **Symptom:** Braves machen große Umwege, um Bäume zu fällen, die z. B. mitten an einer
 Klippe wachsen (Arbeiter muss erst eine Rampe hinunter), obwohl näher erreichbare Bäume
@@ -94,6 +110,19 @@ auf der gleichen Ebene stehen.
 - Betroffene Stellen: `tree_manager.gd` (`_nearest`, `claim_nearest_tree`,
   `nearest_tree`), Aufrufer `brave.gd` (CHOP_CHAIN_RADIUS-Suche) und
   `ai_controller.gd:884`.
+
+**Ursache/Fix (2026-07-18):**
+- Ein `same_island`-Check existierte bereits (völlig unerreichbare Bäume
+  wurden übersprungen), half aber nicht im Plateau-Fall: Der Baum unter der
+  Klippe IST über die Rampe erreichbar (gleiche Insel) — nur mit Riesenumweg.
+- Fix in `TreeManager._nearest()`: **Höhendifferenz-Malus** statt reiner
+  Luftlinie — Score = Flachdistanz + `HEIGHT_DETOUR_PENALTY` (6,0) ×
+  |Höhendifferenz|. Bäume auf gleicher Ebene gewinnen gegen luftlinien-nähere
+  Bäume auf anderer Ebene; ohne Alternative wird der erreichbare Klippen-Baum
+  weiterhin gewählt. Bewusst O(1) pro Baum (kein `find_path` im Scan —
+  Perf-Vorgabe). Gilt automatisch auch für die KI (`nearest_tree`).
+- Tests: `tests/test_tree_priority.gd` (neu, 11 Checks mit Plateau+Rampen-
+  Terrain: gleiche Ebene gewinnt, Fallback, Radius, Gleichstand).
 
 ## ~~Bug 5 — Katapult & Feuermechanik (Lava, Brennen, Raider-Beschuss)~~ (behoben)
 
@@ -127,3 +156,27 @@ Vier zusammenhängende Bugs, alle behoben:
 
 Tests: `test_siege.gd` (+4 Tests) und `test_spells.gd` (Kadenz-Test umgeschrieben,
 +3 Tests) decken alle vier Fälle ab.
+
+## Bug 6 — Angriff auf bemannten Wachturm: Einheiten laufen nicht los
+
+- [x] **Status: behoben (2026-07-18)** (gemeldet und gefixt am selben Tag)
+
+**Symptom:** Prediger oder Nahkämpfer mit Gebäude-Angriffsbefehl auf einen
+(bemannten) Wachturm zeigen die Bewegungsanimation, laufen aber nicht los und
+können den Turm nie angreifen. Bei anderen Gebäuden funktioniert der Befehl.
+Nachstellbar auf der Startmission.
+
+**Ursache:** `Building.nearest_entrance_threat()` filterte nicht auf
+`is_targetable()`. Die garnisonierte Turm-Crew (geschützte Reserve, bleibt in
+der Welt registriert und steht auf der Plattform nahe dem Eingang) zählte
+dadurch als „Bedrohung am Eingang". `_storm_building()` versuchte jeden Tick,
+diese Bedrohung per `_begin_attack()` anzugreifen — das weist nicht-zielbare
+Einheiten aber grundsätzlich ab (Katapult-/Turm-Crew-Schutzregel). Ergebnis:
+Deadlock — kein Anmarsch, kein Sturm, nur stehende „Lauf"-Animation.
+
+**Fix:** `nearest_entrance_threat()` überspringt nicht-zielbare Einheiten.
+Die Crew ist IM Turm, nicht an der Tür — der Sturm beginnt normal, wirft die
+Crew lebend raus (dann ist sie zielbar und verteidigt), danach wird abgerissen.
+
+Tests: `test_watchtower.gd` +3 (Crew ≠ Eingangs-Bedrohung; Prediger marschiert
+los — ohne Fix „moved 0.0 m"; volle Pipeline: Krieger schleifen bemannten Turm).

@@ -37,6 +37,12 @@ const WOOD_RECHECK_INTERVAL: float = 30.0
 ## 3 at >= 90%, 4 (destroyed) at 100%. From stage 1 on the building is
 ## unusable (no production, no capacity) until repaired.
 const STAGE_DAMAGE: float = Balance.BUILDING_STAGE_DAMAGE
+## Construction-site HP (bug backlog #2): a site's HP scale with the
+## delivered-wood fraction, capped at this fraction of the full HP (3 of the
+## 4 destruction stages — a site is never as sturdy as the finished building).
+const SITE_HP_CAP_FRACTION: float = 0.75
+## HP of a site with nothing built in yet (one hit fells the bare plot).
+const SITE_MIN_HP: int = 1
 ## Destroyed buildings sink into the ground (visual only), then free themselves.
 const SINK_DURATION: float = 2.0
 const SINK_DEPTH: float = 5.0
@@ -81,6 +87,9 @@ var rally_point: Vector3 = Vector3.ZERO
 var under_construction: bool = true
 var build_progress: float = 0.0            # 0..1
 var wood_delivered: int = 0
+## Current site HP ceiling (grows with delivered wood); 0 once finished /
+## for pre-built buildings (they keep the plain max_health model).
+var _site_hp_cap: int = 0
 var foundation_done: bool = false
 var flatten_target: float = 0.0
 ## True while the site waits for wood with no source in reach: workers left
@@ -284,6 +293,8 @@ func _ready() -> void:
 
 ## Prepares the flatten phase: target height = average footprint vertex height.
 func init_construction() -> void:
+	_site_hp_cap = _construction_hp_cap()
+	health = _site_hp_cap
 	foundation_done = false
 	_flatten_remaining.clear()
 	_flatten_claims.clear()
@@ -314,6 +325,11 @@ func tick(delta: float) -> void:
 			_lava_contact_accum = 0.0
 	if under_construction:
 		_tick_construction(delta)
+		# Sites are raidable too (bug backlog #2): melee demolition ticks the
+		# (wood-scaled) site HP down; destroy() frees the plot mid-tick.
+		_tick_raid(delta)
+		if _destroyed:
+			return
 	else:
 		if _foundation_disturbed and health > 0:
 			_tick_foundation_smoothing(delta)
@@ -549,6 +565,12 @@ func nearest_entrance_threat() -> Unit:
 	var best_d: float = ENTRANCE_CLEAR_RADIUS
 	for u in unit_manager.get_units_in_radius(entrance, ENTRANCE_CLEAR_RADIUS):
 		if u.tribe_id != tribe_id or u.state == Unit.State.DEAD or u.state == Unit.State.SIT:
+			continue
+		# A protected reserve (garrisoned tower crew) is INSIDE, not at the door:
+		# attackers cannot engage it (_begin_attack refuses non-targetable units),
+		# so counting it here dead-locked every assault on a manned watchtower
+		# (walk anim in place, no approach, no storm — user bug report).
+		if not u.is_targetable():
 			continue
 		var d: float = Vector2(u.position.x, u.position.z).distance_to(flat)
 		if d < best_d:
@@ -1017,6 +1039,26 @@ func wants_more_wood() -> bool:
 	return under_construction and wood_needed_total() > wood_incoming()
 
 
+## HP ceiling of the construction site from the delivered-wood fraction,
+## capped at SITE_HP_CAP_FRACTION of the full HP (bug backlog #2).
+func _construction_hp_cap() -> int:
+	var frac: float = SITE_HP_CAP_FRACTION
+	if wood_cost > 0:
+		frac = minf(float(wood_delivered) / float(wood_cost), SITE_HP_CAP_FRACTION)
+	return maxi(SITE_MIN_HP, int(round(float(max_health) * frac)))
+
+
+## Raises the site's HP along with freshly delivered wood. Only the ceiling
+## delta is added, so damage the site already took persists.
+func _grow_site_hp() -> void:
+	if not under_construction:
+		return
+	var cap: int = _construction_hp_cap()
+	if cap > _site_hp_cap:
+		health += cap - _site_hp_cap
+		_site_hp_cap = cap
+
+
 ## Progress ceiling from the delivered-wood fraction.
 func progress_cap() -> float:
 	if wood_cost <= 0:
@@ -1044,6 +1086,7 @@ func _absorb_piles() -> void:
 	if taken > 0:
 		wood_delivered += taken
 		wood_stalled = false  # fresh wood on site: back to work
+		_grow_site_hp()
 
 
 # --- Build phase --------------------------------------------------------------------------
@@ -1066,6 +1109,12 @@ func finish_construction() -> void:
 	under_construction = false
 	foundation_done = true
 	build_progress = 1.0
+	# Leave the site HP model: the finished building has the full max_health,
+	# minus any damage the site took (repairable like any other damage).
+	if _site_hp_cap > 0:
+		health = clampi(max_health - (_site_hp_cap - health), SITE_MIN_HP, max_health)
+		_site_hp_cap = 0
+		_update_damage_visual()
 	_flatten_remaining.clear()
 	_flatten_claims.clear()
 	_flush_deformation()

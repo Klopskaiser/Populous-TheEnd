@@ -391,3 +391,58 @@ func test_preacher_converts_non_tower_defender() -> void:
 	check(preacher.state == Unit.State.CAST,
 		"a non-tower building's defender is still converted")
 	_free_world(w)
+
+
+# --- Assault on a MANNED tower (bugfix 2026-07-18) -----------------------------
+
+## The garrisoned crew is a protected reserve INSIDE the tower — it must not
+## count as an entrance threat: attackers can neither engage it (_begin_attack
+## refuses non-targetable units) nor would they ever approach, dead-locking
+## every melee/preacher assault on a manned tower (user bug report).
+func test_manned_tower_crew_is_no_entrance_threat() -> void:
+	var w: Dictionary = _make_world()
+	var tower: Watchtower = _tower(w, w.tribe1)
+	tower.admit_crew(w.unit_manager.spawn_unit(WARRIOR_SCENE, 1, Vector3(31, 5, 33)))
+	check(tower.crew_count() == 1, "tower is manned")
+	check(not tower.has_entrance_threat(),
+		"housed crew does not count as an entrance threat")
+	_free_world(w)
+
+
+## Symptom check: a preacher ordered onto a manned enemy tower must actually
+## walk toward it (the bug left it standing in place with a walk animation).
+func test_preacher_approaches_manned_tower() -> void:
+	var w: Dictionary = _make_world()
+	var tower: Watchtower = _tower(w, w.tribe1)
+	tower.admit_crew(w.unit_manager.spawn_unit(WARRIOR_SCENE, 1, Vector3(31, 5, 33)))
+	var preacher: Preacher = w.unit_manager.spawn_unit(
+		PREACHER_SCENE, 0, Vector3(20, 5, 20)) as Preacher
+	preacher.order_attack_building(tower)
+	var start: Vector3 = preacher.position
+	for i in range(80):
+		preacher.tick(TICK)
+		w.unit_manager.tick(TICK)
+		w.bm.tick(TICK)
+	var moved: float = Vector2(preacher.position.x - start.x,
+		preacher.position.z - start.z).length()
+	check(moved > 2.0, "preacher approaches the manned tower (moved %.1f m)" % moved)
+	_free_world(w)
+
+
+## Full pipeline: ordered warriors approach the manned enemy tower, the storm
+## throws the crew out, the doorway is fought clear and the tower is razed.
+func test_ordered_warriors_raze_manned_tower() -> void:
+	var w: Dictionary = _make_world()
+	var tower: Watchtower = _tower(w, w.tribe1)
+	var crew: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 1, Vector3(31, 5, 33))
+	tower.admit_crew(crew)
+	var squad: Array[Unit] = []
+	for i in range(4):
+		var wr: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, Vector3(24 + i, 5, 24))
+		wr.order_attack_building(tower)
+		squad.append(wr)
+	var all_units: Array = squad + [crew]
+	var razed: int = _run(w, all_units, func() -> bool: return tower.health <= 0)
+	check(razed < MAX_TICKS, "ordered warriors raze the manned watchtower")
+	check(tower not in w.bm.buildings, "razed tower deregistered")
+	_free_world(w)
