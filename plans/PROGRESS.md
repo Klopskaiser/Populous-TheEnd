@@ -4547,3 +4547,17 @@ entfernt.
 sichtbare Leiche statt des stillen Löschens; neu
 `test_bombard_forester_kills_workers_visibly` (Ende-zu-Ende: 2 eingelagerte
 Arbeiter → Beschuss → Leichen in der Welt, Slots leer). Suite 1748 Tests grün.
+
+### Nachschärfung: tödlicher Insassen-Eject als Roll-Tod (2026-07-18, Nutzerwunsch)
+
+Insassen, die durch Fernkampf/Katapult aus einem Gebäude geworfen werden,
+sterben nicht mehr schlagartig an der Tür, sondern **rollen vom Gebäude weg
+und sterben beim Ausrollen** (nutzt den bestehenden aufgeschobenen Roll-Tod:
+`start_roll` vor dem tödlichen `take_damage` → `_end_roll` vollendet).
+Umsetzung zentral in `Building._eject_unit` (killed-Zweig: gleicher
+Schubs+Roller wie der Lebend-Eject, danach tödlicher Schaden) — gilt damit
+einheitlich für Kaserne/Tempel/Feuertempel-Trainee, Förster- und
+Werkstatt-Arbeiter, Hütten-Besatzung und Wachturm-Crew, sowohl beim
+Feuerkrieger-Pfad (`DMG_RANGED`-Stufe-1) als auch beim Katapult-Einschlag.
+Tests angepasst (5 Checks: erst ROLL, nach Ausrollen DEAD + Population),
+Doku §5 aktualisiert. Suite 1753 Tests grün.

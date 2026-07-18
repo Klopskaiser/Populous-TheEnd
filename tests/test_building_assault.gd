@@ -168,8 +168,14 @@ func test_ranged_stage1_kills_occupants() -> void:
 	camp.take_damage(120, Building.DMG_RANGED)
 	check(camp.destruction_stage() == 1, "camp at stage 1")
 	check(camp.trainee == null, "bay cleared")
-	check(is_instance_valid(trainee) and trainee.state == Unit.State.DEAD,
-		"ranged stage-1 fire KILLS the trapped occupant")
+	check(is_instance_valid(trainee) and trainee.state == Unit.State.ROLL,
+		"ranged stage-1 fire sends the occupant into a lethal tumble")
+	var ticks: int = 0
+	while trainee.state == Unit.State.ROLL and ticks < 100:
+		trainee.tick(TICK)
+		ticks += 1
+	check(trainee.state == Unit.State.DEAD,
+		"the occupant dies once the tumble ends (deferred roll death)")
 	check(w.tribe0.population() == pop_before - 1, "population dropped by the dead trainee")
 	_free_world(w)
 
@@ -466,6 +472,11 @@ func test_ranged_stage1_kills_forester_workers() -> void:
 	f.take_damage(int(ceil(0.3 * float(f.max_health))), Building.DMG_RANGED)
 	check(f.destruction_stage() >= 1, "forester at stage >= 1")
 	check(f.occupants.is_empty(), "workers ejected")
+	# The workers tumble out lethally; they die once their roll ends.
+	for i in range(100):
+		for u in w.unit_manager.units.duplicate():
+			if is_instance_valid(u) and u.state == Unit.State.ROLL:
+				u.tick(TICK)
 	check(w.tribe1.population() == pop_before - Forester.WORKER_SLOTS,
 		"ranged stage-1 fire kills the housed forester workers")
 	_free_world(w)

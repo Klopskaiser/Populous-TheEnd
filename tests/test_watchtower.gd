@@ -328,8 +328,18 @@ func test_ranged_stage1_kills_crew() -> void:
 	tower.take_damage(60, Building.DMG_RANGED)
 	check(tower.destruction_stage() == 1, "tower at stage 1")
 	check(tower.crew.is_empty(), "crew ejected")
+	check(warrior.state == Unit.State.ROLL and fire.state == Unit.State.ROLL,
+		"ranged stage-1 fire sends the trapped crew into a lethal tumble")
+	var ticks: int = 0
+	while ticks < 100 \
+			and (warrior.state == Unit.State.ROLL or fire.state == Unit.State.ROLL):
+		if warrior.state == Unit.State.ROLL:
+			warrior.tick(TICK)
+		if fire.state == Unit.State.ROLL:
+			fire.tick(TICK)
+		ticks += 1
 	check(warrior.state == Unit.State.DEAD and fire.state == Unit.State.DEAD,
-		"ranged stage-1 fire KILLS the trapped crew")
+		"the crew dies once the tumble ends (deferred roll death)")
 	check(w.tribe1.population() == pop_before - 2, "population dropped by the dead crew")
 	_free_world(w)
 

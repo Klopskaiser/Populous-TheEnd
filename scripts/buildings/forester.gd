@@ -278,7 +278,8 @@ func _on_disabled() -> void:
 
 
 ## Building assault (phase 7g): eject all housed workers. `killed` (ranged
-## stage-1 fire) kills them at the door; the melee storm pushes them out alive.
+## fire / catapult hit) sends them into a lethal tumble — they roll out and
+## die once at rest; the melee storm pushes them out alive.
 func eject_occupants(killed: bool) -> void:
 	for b in occupants.duplicate():
 		if not is_instance_valid(b):

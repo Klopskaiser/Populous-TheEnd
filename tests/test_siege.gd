@@ -448,8 +448,14 @@ func test_bombard_building_stage_and_occupant_kill() -> void:
 	check(camp.health < health_before, "the hit building took damage")
 	check(camp.destruction_stage() >= 1, "one full destruction stage was applied")
 	check(camp.trainee == null, "the training slot is empty after the strike")
-	check(is_instance_valid(trainee) and trainee.state == Unit.State.DEAD,
-		"the stationed trainee died VISIBLY at the door (corpse, not deleted)")
+	check(is_instance_valid(trainee) and trainee.state == Unit.State.ROLL,
+		"the stationed trainee tumbles VISIBLY out of the building")
+	var roll_ticks: int = 0
+	while trainee.state == Unit.State.ROLL and roll_ticks < 100:
+		trainee.tick(TICK)
+		roll_ticks += 1
+	check(trainee.state == Unit.State.DEAD,
+		"the trainee dies once the tumble ends (deferred roll death)")
 	check(trainee in w.unit_manager.units, "the trainee's corpse lies in the world")
 	check(own_hut.health == own_hut.max_health, "own buildings are never damaged")
 	shot.free()
@@ -492,8 +498,16 @@ func test_bombard_forester_kills_workers_visibly() -> void:
 		shot.tick(TICK)
 	check(forester.destruction_stage() >= 1, "the forester took a destruction stage")
 	for b in workers:
+		check(is_instance_valid(b) and b.state == Unit.State.ROLL,
+			"a housed worker tumbles visibly out of the building")
+	var roll_ticks: int = 0
+	while roll_ticks < 100 \
+			and workers.any(func(b: Brave) -> bool: return b.state == Unit.State.ROLL):
+		_tick_world(w)
+		roll_ticks += 1
+	for b in workers:
 		check(is_instance_valid(b) and b.state == Unit.State.DEAD,
-			"a housed worker died visibly at the door")
+			"a housed worker dies once the tumble ends (deferred roll death)")
 		check(b in w.unit_manager.units, "the worker's corpse lies in the world")
 	check(forester.occupants.is_empty(), "no worker slot stays occupied")
 	shot.free()

@@ -461,20 +461,20 @@ func _on_disabled() -> void:
 
 
 ## Ejects any units housed inside (training trainee; tower crew in 7h). Base
-## buildings have none. `killed` = ejected units die at the door (ranged fire
-## reached stage 1); otherwise they are pushed out alive (melee storm start).
+## buildings have none. `killed` = the eject is lethal (ranged fire / catapult
+## hit): the occupants roll out and die once the tumble ends; otherwise they
+## are pushed out alive (spells, melee storm start).
 func eject_occupants(_killed: bool) -> void:
 	pass
 
 
-## Ejects one occupant that has just been put back into the world: `killed`
-## flings it out and kills it at the door (ranged stage-1 fire), otherwise it is
-## shoved away from the building into a short tumble. Untyped param (freed-safe).
+## Ejects one occupant that has just been put back into the world: it is shoved
+## away from the building into a short tumble. `killed` (ranged fire / catapult)
+## makes the tumble lethal — death is deferred by the ROLL state, so the unit
+## visibly rolls out and only collapses once it comes to rest (like any lethal
+## hit taken while rolling). Untyped param (freed-safe).
 func _eject_unit(u, killed: bool) -> void:
 	if not is_instance_valid(u) or u.state == Unit.State.DEAD:
-		return
-	if killed:
-		u.take_damage(u.health + 1000)
 		return
 	var dir: Vector3 = u.position - center_world()
 	dir.y = 0.0
@@ -482,6 +482,8 @@ func _eject_unit(u, killed: bool) -> void:
 		dir = Vector3(1.0, 0.0, 0.0)
 	u.displace(dir, Unit.SHOVE_DISPLACE)
 	u.start_roll(dir, Unit.MINI_ROLL_DURATION)
+	if killed:
+		u.take_damage(u.health + 1000)
 
 
 # --- Melee raiders / storm (phase 7g) --------------------------------------------
