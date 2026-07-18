@@ -101,6 +101,38 @@ func test_state_transitions() -> void:
 		"healthy attack keeps running")
 
 
+## Seenland early-game lag: several AIs must not tick in the SAME frame —
+## stagger_offset phase-shifts each 1-Hz tick so the per-second work spreads
+## across the second (still exactly one tick per second per AI).
+func test_ai_tick_stagger() -> void:
+	var w: Dictionary = _make_world()
+	var ais: Array[AIController] = []
+	for i in range(3):
+		var ai: AIController = _make_ai(w, w.tribes[1], Vector2i(64, 64))
+		ai.stagger_offset(float(i) / 3.0)
+		ais.append(ai)
+	# Feed 30-Hz deltas through the production _process path and record the
+	# frame of each AI's first tick (visible via _tick_count).
+	var first_frame: Array[int] = [-1, -1, -1]
+	for f in range(120):
+		for i in range(3):
+			ais[i]._process(1.0 / 30.0)
+			if first_frame[i] < 0 and ais[i]._tick_count > 0:
+				first_frame[i] = f
+	check(first_frame[0] >= 0 and first_frame[1] >= 0 and first_frame[2] >= 0,
+		"every staggered AI ticked within the first 4 s")
+	check(first_frame[0] != first_frame[1] and first_frame[1] != first_frame[2]
+		and first_frame[0] != first_frame[2],
+		"staggered AIs tick in three different frames (%s)" % [first_frame])
+	# Still 1 Hz each: after 120 frames (4 s) every AI ticked 3-4 times.
+	for i in range(3):
+		check(ais[i]._tick_count >= 3 and ais[i]._tick_count <= 4,
+			"AI %d keeps its 1-Hz cadence (%d ticks in 4 s)" % [i, ais[i]._tick_count])
+	for ai in ais:
+		ai.free()
+	_free_world(w)
+
+
 func test_training_mix() -> void:
 	check(AIState.next_training_kind(0, 0, 0) == &"warrior",
 		"empty army trains a warrior first (biggest share)")
@@ -195,6 +227,84 @@ func test_build_tick_places_and_prays() -> void:
 	check(ai_tribe.buildings.size() == buildings_before + 2,
 		"the parallel-site cap holds (no third site with 20 braves)")
 
+	ai.free()
+	_free_world(w)
+
+
+## Seenland early-game lag: a failed plot search backs off for a few ticks
+## instead of re-running the expensive double ring scan every second.
+func test_plot_search_cooldown_after_failure() -> void:
+	var w: Dictionary = _make_world()
+	var ai: AIController = _make_ai(w, w.tribes[1], Vector2i(64, 64))
+	# No trees anywhere -> no supplied plot, no expansion anchor -> failure.
+	AIController.dbg_plot_scans = 0
+	ai.tick_ai()
+	check(AIController.dbg_plot_scans == 1, "first tick runs the plot search")
+	for i in range(AIController.PLOT_FAIL_COOLDOWN_TICKS):
+		ai.tick_ai()
+	check(AIController.dbg_plot_scans == 1,
+		"the search is skipped during the cooldown")
+	ai.tick_ai()
+	check(AIController.dbg_plot_scans == 2,
+		"after the cooldown the search runs again")
+	ai.free()
+	_free_world(w)
+
+
+## On maps where can_place_at fails over huge areas (water) the ring scan is
+## capped: it must not sweep all ~2800 cells of the 30-ring every tick.
+func test_plot_search_scan_cap() -> void:
+	var w: Dictionary = _make_world(1.0)   # below sea level -> nothing placeable
+	var ai: AIController = _make_ai(w, w.tribes[1], Vector2i(64, 64))
+	AIController.dbg_plot_cells = 0
+	ai.tick_ai()
+	check(AIController.dbg_plot_cells <= AIController.MAX_PLOT_SCAN_CELLS + 1,
+		"the ring scan stops at the cell cap (%d cells)" % AIController.dbg_plot_cells)
+	ai.free()
+	_free_world(w)
+
+
+## Proven-reachable plots are cached while walkability is unchanged; any
+## walkability change invalidates the proof (change_version), never staleness.
+func test_plot_reachable_success_cache() -> void:
+	var w: Dictionary = _make_world()
+	var ai: AIController = _make_ai(w, w.tribes[1], Vector2i(64, 64))
+	var cell: Vector2i = Vector2i(70, 64)
+	check(ai._plot_reachable(cell), "flat plot is reachable")
+	check(ai._reachable_plots.get(cell, -1) == w.nav.change_version,
+		"the proof is cached with the current grid version")
+	w.nav.update_region(Rect2i(100, 100, 2, 2))
+	check(ai._reachable_plots.get(cell, -1) != w.nav.change_version,
+		"a walkability change makes the cached proof stale")
+	check(ai._plot_reachable(cell), "the stale plot is re-proven on demand")
+	check(ai._reachable_plots.get(cell, -1) == w.nav.change_version,
+		"the re-proof refreshes the cache")
+	ai.free()
+	_free_world(w)
+
+
+## The expansion anchor (nearest tree to the base) is cached for a few ticks
+## and drops out when the tree disappears.
+func test_expansion_anchor_cache() -> void:
+	var w: Dictionary = _make_world()
+	var ai: AIController = _make_ai(w, w.tribes[1], Vector2i(64, 64))
+	var tree: TreeResource = w.tree_manager.spawn_tree(Vector2i(90, 64), 3)
+	var anchor: Vector2i = ai._expansion_anchor()
+	check(anchor == Vector2i(90, 64), "anchor is the nearest tree's cell")
+	# A nearer tree appears — the cached anchor is kept during the TTL...
+	w.tree_manager.spawn_tree(Vector2i(80, 64), 3)
+	check(ai._expansion_anchor() == Vector2i(90, 64),
+		"within the TTL the cached anchor is reused")
+	# ...and re-picked after it.
+	for i in range(AIController.EXPANSION_ANCHOR_TTL_TICKS + 1):
+		ai._expansion_anchor()
+	check(ai._expansion_anchor() == Vector2i(80, 64),
+		"after the TTL the anchor is re-picked (nearer grove wins)")
+	# A vanished anchor tree forces an immediate re-pick.
+	w.tree_manager._remove_tree(w.tree_manager._occupied[Vector2i(80, 64)])
+	w.tree_manager._remove_tree(tree)
+	check(ai._expansion_anchor() == Vector2i(-1, -1),
+		"without trees the anchor is empty again")
 	ai.free()
 	_free_world(w)
 

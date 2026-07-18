@@ -100,6 +100,15 @@ var _islands: PackedInt32Array = PackedInt32Array()
 var _islands_dirty: bool = true
 var _islands_computed_ms: int = 0
 
+## Monotonic walkability-change counter (bumped by every update_region).
+## Consumers use it to invalidate cached reachability verdicts the moment the
+## grid changes (e.g. TreeManager.best_tree's negative-path cache).
+var change_version: int = 0
+
+## Telemetry for the benchmarks (pattern: Unit.dbg_plan_*) — pure counters.
+static var dbg_island_fills: int = 0
+static var dbg_island_us: int = 0
+
 
 func same_island(a: Vector3, b: Vector3) -> bool:
 	var ia: int = island_at(nearest_walkable_cell(world_to_cell(a)))
@@ -124,6 +133,8 @@ func _ensure_islands() -> void:
 		return
 	_islands_dirty = false
 	_islands_computed_ms = now
+	var t0: int = Time.get_ticks_usec()
+	dbg_island_fills += 1
 	var size: int = terrain.size
 	_islands.resize(size * size)
 	_islands.fill(-1)
@@ -152,6 +163,7 @@ func _ensure_islands() -> void:
 				_islands[n] = next_id
 				queue.push_back(n)
 		next_id += 1
+	dbg_island_us += Time.get_ticks_usec() - t0
 
 
 ## True when the cell is reserved by a building footprint (steep-but-empty
@@ -200,6 +212,7 @@ func _ring_cells(center: Vector2i, radius: int) -> Array[Vector2i]:
 ## Re-reads walkability of all cells in the rect from TerrainData (call with the
 ## Rect2i returned by TerrainData.raise_area after a deformation).
 func update_region(rect: Rect2i) -> void:
+	change_version += 1
 	var r: Rect2i = rect.intersection(Rect2i(0, 0, terrain.size, terrain.size))
 	var delta_cells: PackedInt32Array = PackedInt32Array()
 	var delta_solids: PackedByteArray = PackedByteArray()

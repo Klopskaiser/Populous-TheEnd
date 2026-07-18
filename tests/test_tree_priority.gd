@@ -164,3 +164,65 @@ func test_chop_chain_refuses_cliff_detour() -> void:
 	check(w.tm.claim_nearest_tree(_edge_pos(w), 8.0, self, _edge_pos(w)) == null,
 		"chain radius 8: the ~95 m ramp walk is rejected")
 	_free_world(w)
+
+
+# --- Negative-verdict cache (Seenland early-game lag) ---------------------------
+
+## Rejected candidates (too far on foot) are cached: the SAME expensive A*
+## must not run again on the next search, and cached negatives no longer eat
+## the PATH_CANDIDATES budget — deeper candidates get verified instead.
+func test_negative_verdicts_are_cached_and_budget_moves_on() -> void:
+	var w: Dictionary = _make_world()
+	# Four cliff trees rank first (beeline + malus < 46) but walk ~95 m; the
+	# plateau tree at 46 m ranks fifth and is directly reachable.
+	w.tm.spawn_tree(Vector2i(44, 20), 3)
+	w.tm.spawn_tree(Vector2i(44, 23), 3)
+	w.tm.spawn_tree(Vector2i(46, 20), 3)
+	w.tm.spawn_tree(Vector2i(44, 17), 3)
+	var plateau: TreeResource = w.tm.spawn_tree(Vector2i(38, 66), 3)
+	var origin: Vector3 = _edge_pos(w)
+
+	TreeManager.dbg_best_tree_paths = 0
+	var first: TreeResource = w.tm.best_tree(origin, origin, 50.0, false)
+	check(TreeManager.dbg_best_tree_paths == 4,
+		"first search burns its 4 A* slots on the cliff trees")
+	check(first == null, "all 4 verified candidates are too far -> no pick")
+
+	TreeManager.dbg_best_tree_paths = 0
+	var second: TreeResource = w.tm.best_tree(origin, origin, 50.0, false)
+	check(TreeManager.dbg_best_tree_paths == 1,
+		"second search skips the cached negatives (1 A* for the plateau tree)")
+	check(second == plateau,
+		"the budget moves past cached negatives to the reachable tree")
+	_free_world(w)
+
+
+## A cached NO_PATH verdict dies with the next walkability change — a
+## construction footprint that blocked the way must not ban a tree for long.
+func test_no_path_verdict_invalidated_by_grid_change() -> void:
+	var w: Dictionary = _make_world()
+	var tree: TreeResource = w.tm.spawn_tree(Vector2i(38, 66), 3)
+	var origin: Vector3 = _edge_pos(w)
+	var bucket: Vector2i = w.nav.world_to_cell(origin)
+	bucket = Vector2i(bucket.x >> TreeManager.VERDICT_BUCKET_SHIFT,
+		bucket.y >> TreeManager.VERDICT_BUCKET_SHIFT)
+	var key: Vector4i = Vector4i(bucket.x, bucket.y, 38, 66)
+	var now: int = Time.get_ticks_msec()
+
+	# Seed a fresh NO_PATH verdict: the search skips the tree without an A*.
+	w.tm._verdict_cache[key] = [TreeManager.VERDICT_NO_PATH, now + 100000,
+		w.nav.change_version]
+	check(w.tm.best_tree(origin, origin, 50.0, false) == null,
+		"a fresh NO_PATH verdict suppresses the tree")
+
+	# Any walkability change bumps change_version -> verdict is stale.
+	w.nav.update_region(Rect2i(100, 100, 2, 2))
+	check(w.tm.best_tree(origin, origin, 50.0, false) == tree,
+		"a grid change invalidates the NO_PATH verdict immediately")
+
+	# An expired verdict (TTL) is also re-checked.
+	w.tm._verdict_cache[key] = [TreeManager.VERDICT_NO_PATH, now - 1,
+		w.nav.change_version]
+	check(w.tm.best_tree(origin, origin, 50.0, false) == tree,
+		"an expired verdict is re-checked")
+	_free_world(w)

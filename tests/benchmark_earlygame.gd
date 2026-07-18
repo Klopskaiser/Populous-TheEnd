@@ -9,6 +9,8 @@ extends SceneTree
 ##
 ## NOT part of the test suite (no test_ prefix). Run with:
 ##   godot --headless -s res://tests/benchmark_earlygame.gd
+## Optional user args (after --): map=<id> sim=<seconds>, e.g.
+##   godot --headless -s res://tests/benchmark_earlygame.gd -- map=seenland sim=300
 
 const MAP_ID: String = "bergpass"
 const TRIBE_COUNT: int = 4
@@ -24,8 +26,20 @@ const SITE_SCENE: PackedScene = preload("res://scenes/buildings/reincarnation_si
 
 
 func _initialize() -> void:
+	var map_id: String = MAP_ID
+	var sim_seconds: float = SIM_SECONDS
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("map="):
+			map_id = arg.trim_prefix("map=")
+		elif arg.begins_with("sim="):
+			sim_seconds = float(arg.trim_prefix("sim="))
+	if not MapGenerator.map_ids().has(map_id):
+		push_error("Unbekannte Karte: %s" % map_id)
+		quit(1)
+		return
+	print("Karte: %s, Sim: %.0f s" % [map_id, sim_seconds])
 	var setup_start: int = Time.get_ticks_usec()
-	var td: TerrainData = MapGenerator.create_terrain(MAP_ID, 1337)
+	var td: TerrainData = MapGenerator.create_terrain(map_id, 1337)
 	var nav: NavGrid = NavGrid.new(td)
 	var tribes: Array[Tribe] = []
 	for i in range(TRIBE_COUNT):
@@ -51,7 +65,7 @@ func _initialize() -> void:
 	tc.spell_context = spell_ctx
 
 	tm.spawn_trees(TREE_COUNT, 1337)
-	var anchors: Array[Vector2i] = MapGenerator.spawn_anchors(td, MAP_ID, TRIBE_COUNT)
+	var anchors: Array[Vector2i] = MapGenerator.spawn_anchors(td, map_id, TRIBE_COUNT)
 	var ais: Array[AIController] = []
 	for tribe in tribes:
 		tribe.set_spells(Spell.create_default_set())
@@ -65,7 +79,7 @@ func _initialize() -> void:
 		um.units.size(), tm.trees.size()])
 
 	# --- Simulation with per-system timing, reported in 30-s windows ---------
-	var frames: int = int(SIM_SECONDS / TICK)
+	var frames: int = int(sim_seconds / TICK)
 	var window_frames: int = int(30.0 / TICK)
 	var t_units: int = 0
 	var t_manager: int = 0
@@ -144,6 +158,20 @@ func _initialize() -> void:
 			Unit.dbg_plan_calls = 0
 			Unit.dbg_plan_fails = 0
 			Unit.dbg_plan_us = 0
+			print("  best_tree: %d calls, %d paths, %.1f ms | islands: %d fills, %.1f ms | plots: %d scans, %d cells, %.1f ms" % [
+				TreeManager.dbg_best_tree_calls, TreeManager.dbg_best_tree_paths,
+				float(TreeManager.dbg_best_tree_us) / 1000.0,
+				NavGrid.dbg_island_fills, float(NavGrid.dbg_island_us) / 1000.0,
+				AIController.dbg_plot_scans, AIController.dbg_plot_cells,
+				float(AIController.dbg_plot_us) / 1000.0])
+			TreeManager.dbg_best_tree_calls = 0
+			TreeManager.dbg_best_tree_paths = 0
+			TreeManager.dbg_best_tree_us = 0
+			NavGrid.dbg_island_fills = 0
+			NavGrid.dbg_island_us = 0
+			AIController.dbg_plot_scans = 0
+			AIController.dbg_plot_cells = 0
+			AIController.dbg_plot_us = 0
 	print("Schlimmster Frame: %.2f ms (bei t=%.0fs) | schlimmster KI-Tick: %.2f ms (Budget ~33 ms)" % [
 		float(worst_frame) / 1000.0, worst_frame_at, float(worst_ai) / 1000.0])
 

@@ -48,6 +48,17 @@ const FORESTER_WORKERS: int = 2
 ## Braves the AI keeps working in its workshop (7f; full crew = 30-s catapults).
 const WORKSHOP_WORKERS: int = 3
 const MAX_PLOT_CANDIDATES: int = 40
+## Hard cap on ring cells INSPECTED per plot search (covers radius ~14 in
+## full). Water/blocked cells fail can_place_at without counting toward
+## MAX_PLOT_CANDIDATES — on lakeside anchors (Seenland) the ring search would
+## otherwise sweep all ~3480 cells every tick.
+const MAX_PLOT_SCAN_CELLS: int = 800
+## Ticks (seconds) the build tick skips the plot search after it came up
+## empty — the full double search (base + expansion) is the most expensive
+## thing the AI does and repeating it every second changes nothing.
+const PLOT_FAIL_COOLDOWN_TICKS: int = 5
+## Ticks a resolved expansion anchor is reused before re-picking.
+const EXPANSION_ANCHOR_TTL_TICKS: int = 10
 ## Idle braves sent along to a remote expansion site (the BuildingManager
 ## only recruits workers within ~30 m of a site).
 const EXPANSION_ESCORT: int = 6
@@ -98,6 +109,12 @@ var state: AIState.State = AIState.State.BUILD
 ## (Bergpass: walkable-but-isolated plateau tops are valid plots per
 ## can_place_at, but no worker can ever reach them).
 var _unreachable_plots: Dictionary = {}
+## Plot cells proven reachable, valid as long as walkability is unchanged
+## (value = NavGrid.change_version at proof time) — exact, no TTL guessing.
+var _reachable_plots: Dictionary[Vector2i, int] = {}
+var _plot_fail_ticks: int = 0
+var _expansion_anchor_cache: Vector2i = Vector2i(-1, -1)
+var _expansion_anchor_age: int = 0
 ## Army size required for the next attack; grows after every wave
 ## (gradually bigger attacks).
 var attack_wave_size: int = AIState.ARMY_ATTACK_SIZE
@@ -133,6 +150,12 @@ func setup(p_tribe: Tribe, p_commands: TribeCommands, p_unit_manager: UnitManage
 	tree_manager = p_tree_manager
 	nav_grid = p_nav_grid
 	base_anchor = p_base_anchor
+
+
+## Phase-shifts this AI's 1-Hz tick by `fraction` of the interval so several
+## AIs spread their work across different frames (still exactly 1 Hz each).
+func stagger_offset(fraction: float) -> void:
+	_accumulator = -TICK_INTERVAL * clampf(fraction, 0.0, 1.0)
 
 
 func _process(delta: float) -> void:
@@ -213,6 +236,9 @@ func make_snapshot() -> Dictionary:
 func _tick_build(snap: Dictionary) -> void:
 	if _rebuild_ticks > 0:
 		return
+	if _plot_fail_ticks > 0:
+		_plot_fail_ticks -= 1
+		return
 	var max_sites: int = clampi(snap.get("braves", 0) / BRAVES_PER_SITE,
 		1, MAX_PARALLEL_SITES)
 	if _construction_site_count() >= max_sites:
@@ -225,6 +251,9 @@ func _tick_build(snap: Dictionary) -> void:
 	probe.free()
 	var cell: Vector2i = _find_plot(footprint)
 	if cell.x < 0:
+		# Nothing buildable right now — repeating the expensive double ring
+		# search every second changes nothing, so back off for a few ticks.
+		_plot_fail_ticks = PLOT_FAIL_COOLDOWN_TICKS
 		return
 	if commands.place_building(tribe, scene, cell) != null:
 		_send_escort_if_remote(cell)
@@ -865,17 +894,25 @@ func _usable_camp_for(kind: StringName) -> TrainingBuilding:
 	return null
 
 
+## Telemetry for the benchmarks (pattern: Unit.dbg_plan_*) — pure counters.
+static var dbg_plot_scans: int = 0
+static var dbg_plot_cells: int = 0
+static var dbg_plot_us: int = 0
+
+
 ## Plot search with wood supply: first around the base anchor, and when no
 ## supplied plot exists there any more, EXPAND toward the nearest wood
 ## source (relevant on bigger maps — the tribe follows the trees).
 func _find_plot(footprint: Vector2i) -> Vector2i:
+	var t0: int = Time.get_ticks_usec()
+	dbg_plot_scans += 1
 	var cell: Vector2i = _find_supplied_plot(base_anchor, footprint)
-	if cell.x >= 0:
-		return cell
-	var expansion: Vector2i = _expansion_anchor()
-	if expansion.x >= 0:
-		return _find_supplied_plot(expansion, footprint)
-	return Vector2i(-1, -1)
+	if cell.x < 0:
+		var expansion: Vector2i = _expansion_anchor()
+		if expansion.x >= 0:
+			cell = _find_supplied_plot(expansion, footprint)
+	dbg_plot_us += Time.get_ticks_usec() - t0
+	return cell
 
 
 ## Ring search for the first valid plot that has wood in reach AND is
@@ -883,8 +920,13 @@ func _find_plot(footprint: Vector2i) -> Vector2i:
 ## unsupplied/unreachable candidates (then expansion takes over).
 func _find_supplied_plot(anchor: Vector2i, footprint: Vector2i) -> Vector2i:
 	var checked: int = 0
+	var scanned: int = 0
 	for radius in range(0, 30):
 		for cell in ring_cells(anchor, radius):
+			dbg_plot_cells += 1
+			scanned += 1
+			if scanned > MAX_PLOT_SCAN_CELLS:
+				return Vector2i(-1, -1)
 			if not commands.can_place_at(cell, footprint):
 				continue
 			if _trees_near_cell(cell) < MIN_TREES_NEAR_PLOT or not _plot_reachable(cell):
@@ -907,6 +949,10 @@ func _plot_reachable(cell: Vector2i) -> bool:
 		return true   # headless AI tests without terrain wiring
 	if _unreachable_plots.has(cell):
 		return false
+	# A proven-reachable plot stays proven while walkability is unchanged
+	# (exact — every walkability change bumps change_version).
+	if _reachable_plots.get(cell, -1) == nav_grid.change_version:
+		return true
 	var to: Vector3 = nav_grid.cell_to_world(cell)
 	var path: PackedVector3Array = nav_grid.find_path(
 		nav_grid.cell_to_world(base_anchor), to)
@@ -916,6 +962,7 @@ func _plot_reachable(cell: Vector2i) -> bool:
 		# the plot to count.
 		var endp: Vector3 = path[path.size() - 1]
 		if Vector2(endp.x - to.x, endp.z - to.z).length() <= 3.0:
+			_reachable_plots[cell] = nav_grid.change_version
 			return true
 	_unreachable_plots[cell] = true
 	return false
@@ -927,11 +974,7 @@ func _wood_thin_near_base() -> bool:
 	if tree_manager == null or nav_grid == null:
 		return false
 	var pos: Vector3 = nav_grid.cell_to_world(base_anchor)
-	var count: int = 0
-	for tree in tree_manager.trees:
-		if is_instance_valid(tree) and tree.position.distance_to(pos) <= PLOT_TREE_RADIUS:
-			count += 1
-	return count < FORESTER_MIN_TREES
+	return tree_manager.count_trees_near(pos, PLOT_TREE_RADIUS) < FORESTER_MIN_TREES
 
 
 ## Keeps up to FORESTER_WORKERS idle braves working in each usable forester
@@ -1013,22 +1056,27 @@ func _trees_near_cell(cell: Vector2i) -> int:
 	if tree_manager == null or nav_grid == null:
 		return MIN_TREES_NEAR_PLOT   # no tree data (tests): treat as supplied
 	var pos: Vector3 = nav_grid.cell_to_world(cell)
-	var count: int = 0
-	for tree in tree_manager.trees:
-		if is_instance_valid(tree) and tree.position.distance_to(pos) <= PLOT_TREE_RADIUS:
-			count += 1
-	return count
+	return tree_manager.count_trees_near(pos, PLOT_TREE_RADIUS)
 
 
 ## Cell of the nearest tree to the base — the anchor for expanding the base
-## toward fresh wood.
+## toward fresh wood. Cached for a few ticks: the pick scans every tree with
+## an island check each, and the nearest grove does not move second-to-second.
 func _expansion_anchor() -> Vector2i:
 	if tree_manager == null or nav_grid == null:
 		return Vector2i(-1, -1)
+	_expansion_anchor_age += 1
+	if _expansion_anchor_cache.x >= 0 \
+			and _expansion_anchor_age <= EXPANSION_ANCHOR_TTL_TICKS \
+			and tree_manager.has_tree_at(_expansion_anchor_cache):
+		return _expansion_anchor_cache
 	var tree = tree_manager.nearest_tree(nav_grid.cell_to_world(base_anchor))
 	if tree == null or not is_instance_valid(tree):
+		_expansion_anchor_cache = Vector2i(-1, -1)
 		return Vector2i(-1, -1)
-	return nav_grid.world_to_cell(tree.position)
+	_expansion_anchor_cache = nav_grid.world_to_cell(tree.position)
+	_expansion_anchor_age = 0
+	return _expansion_anchor_cache
 
 
 ## A site far from the base gets an escort of idle braves — the

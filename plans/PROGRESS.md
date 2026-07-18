@@ -4598,3 +4598,94 @@ bei fehlender `<name>_loop`-Datei auf die One-Shot-Streams des Basisnamens
 zurück und wiederholt sie (finished→play). Damit laufen Brennen-, Panik- und
 Kritisch-verwundet-Sound kontinuierlich, solange der Zustand anhält; eigene
 Loop-Dateien haben weiterhin Vorrang. Suite 1758 Tests grün.
+
+---
+
+## Phase 8.3 — Seenland-Früh-Lag (2026-07-19, Nutzerreport)
+
+**Anlass:** Skirmish mit 3 KIs auf Seenland bricht nach 1–2 min auf ~14 FPS
+ein, obwohl kaum Einheiten existieren (Kampfbenchmark 1600 Einheiten läuft
+mit 60 FPS). Plan: Ursachenanalyse + gezielte Fixes ohne die
+Phase-8-Regressionsklasse (kein globales Pfad-Budget, keine
+Sim-Frequenz-Tricks; Nutzer-Vorgabe PROGRESS.md „Rückabwicklung Phase 8").
+
+**Diagnose (gemessen, `benchmark_earlygame -- map=seenland sim=300`):**
+Ø-Unit-Tick ab t=90 s bei **61–102 ms/Frame** (Budget 33 ms); Treiber:
+- **A*-Fehlschlag-Sturm:** ~13.500 fehlschlagende Pfad-Läufe pro
+  30-s-Fenster (≈80 s CPU je Fenster!), dominiert von Bau-Arbeitern in
+  FLATTEN/DELIVER. Seenland erzeugt See+Footprint-Taschen, deren Insassen
+  jeden Pfad fehlschlagen; `_end_subtask` setzte den Retry auf 0 →
+  Neuwahl im 30-Hz-Takt, jeder Fehlschlag exploriert die ganze ~50k-Zellen-
+  Landmasse (~6,5 ms). Der Phase-8-Schutz war mit dem Rollback weg.
+- **`best_tree`-See-Entartung:** Luftlinien-Ranking wählt Gegenufer-Bäume,
+  `same_island` greift nicht (eine Landmasse), Early-Accept nie → bis 4
+  teure Um-den-See-A* pro Suche, bis 2,8 s je Fenster.
+- **KI-Bauplatzsuche:** Wasserzellen zählten nicht gegen den 40er-
+  Kandidaten-Cap → Voll-Ringscan (~3480 Zellen) ×2 (Basis+Expansion) jede
+  Sekunde pro KI sobald Holz knapp; je Kandidat 400-Baum-Linearscan +
+  synchroner A*; alle 3 KIs im selben Frame (kein Stagger).
+- Insel-Flood-Fill (65536 Zellen, ~40 ms) bis 47×/Fenster.
+
+**Fixes (einzeln getestet):**
+1. **Retry-Backoff nur im Fehlerpfad** (`brave.gd`): `_end_subtask(retry)`;
+   `_on_seek_failed`/Invalid-Baum/Invalid-Pile übergeben `TASK_RETRY`
+   (0,6 s), Erfolgspfade bleiben bei 0 (Responsivität). Dazu **eskalierender
+   Backoff** (Verdopplung bis `TASK_RETRY_MAX` 4,8 s, `_seek_fail_streak`,
+   Reset bei Erfolg) und **Job-Aufgabe nach 6 Fehlschlägen in Folge**
+   (`SEEK_FAIL_QUIT_STREAK`; Worker geht IDLE, das periodische Recruiting
+   holt ihn zurück, wenn die Baustelle wieder erreichbar ist). Rein pro
+   Einheit — kein geteiltes Budget/keine Queue (Phase-8-sicher).
+2. **Grid-versionierter Negativ-Cache in `best_tree`**
+   (`tree_manager.gd`/`nav_grid.gd`): `NavGrid.change_version` (Inkrement in
+   `update_region`); Verdikte TOO_FAR (TTL 5 s) und NO_PATH (TTL 1,5 s +
+   Sofort-Invalidierung bei Grid-Änderung) je (Walker-8×8-Bucket, Baumzelle).
+   Positive nie gecacht. Gecachte Negative kosten kein A* und **verbrauchen
+   keinen der 4 Verifikations-Slots** mehr — tiefere Kandidaten rücken nach
+   (vorher blockierten 4 Gegenufer-Bäume die Suche komplett → null trotz
+   erreichbarer Bäume). Lazy-Prune (Clear) ab 4096 Einträgen.
+3. **KI-Tick-Stagger** (`main.gd`/`ai_controller.gd`): `stagger_offset()`
+   phasenverschiebt die 1-Hz-Ticks der KIs über die Sekunde (weiter exakt
+   1 Hz je KI).
+4. **Baum-Bucket-Index** (`tree_manager.gd`): `_pos_buckets` (8-m-Buckets,
+   gepflegt in register/_remove_tree), `count_trees_near()` exakt äquivalent
+   zum Linearscan (gleicher 3D-Distanz-Term, Äquivalenztest); Nutzer:
+   `_trees_near_cell`, `_wood_thin_near_base`.
+5. **KI-Plot-Suche gezähmt** (`ai_controller.gd`): Zell-Scan-Cap
+   `MAX_PLOT_SCAN_CELLS` 800 (Kandidaten-Cap 40 bleibt; bewusst NICHT
+   can_place_at-Fehlschläge in den 40er zählen — am Ufer bräche die Suche
+   nach Radius ~3 ab); Fehlschlag-Cooldown `PLOT_FAIL_COOLDOWN_TICKS` 5;
+   `_expansion_anchor`-Cache (TTL 10 Ticks, invalid wenn Baum weg);
+   Erfolgs-Cache `_reachable_plots` (Wert = change_version, exakt-konservativ;
+   der Session-Bann `_unreachable_plots` bleibt unverändert).
+6. **Insel-Flood-Fill:** gemessen 4–5 Fills/Fenster ≈ 5–6 ms/s → unter der
+   10-ms/s-Schwelle, Verlagerung auf den PathWorker bewusst NICHT umgesetzt.
+
+**Messwerkzeuge (neu):** `benchmark_earlygame` per User-Args
+parametrisierbar (`-- map=seenland sim=300`, Default bergpass); statische
+Zähler `TreeManager.dbg_best_tree_calls/_paths/_us`,
+`NavGrid.dbg_island_fills/_us`, `AIController.dbg_plot_scans/_cells/_us`
+(Ausgabe je 30-s-Fenster).
+
+**Ergebnis (Seenland 300 s, vorher → nachher):** Ø-Unit-Tick Spitze
+102 → **4,0 ms**; Pfad-Fehlschläge je Fenster 13.738 → **~200–400**;
+Pfad-CPU je Fenster 89 s → 0,8–2,0 s; schlimmster Frame 279 → **89 ms**
+(Einzelspike; im Spiel zusätzlich durch Stagger entschärft — das Benchmark
+tickt alle 4 KIs im selben Frame). **Bergpass-Gegenprobe: unverändert
+gesund** (Ø 0,8–1,5 ms). Hinweis: Im echten Spiel laufen die Unit-Pfade über
+den PathWorker-Thread; die Benchmark-Zahlen sind der konservative
+Sync-Fall.
+
+**Tests:** neu `test_failed_subtask_backs_off` (+Eskalation/Quit,
+test_economy), `test_count_trees_near_matches_linear_scan` (test_economy),
+`test_negative_verdicts_are_cached_and_budget_moves_on` +
+`test_no_path_verdict_invalidated_by_grid_change` (test_tree_priority),
+`test_ai_tick_stagger`, `test_plot_search_cooldown_after_failure`,
+`test_plot_search_scan_cap`, `test_plot_reachable_success_cache`,
+`test_expansion_anchor_cache` (test_ai),
+`test_seenland_churn_budget_and_command_response` (test_perf —
+Budget-Wächter UND Phase-8-Klasse-Wächter: Move-Befehle an 20 frische
+Braves müssen während des Wirtschafts-Churns sofort reagieren).
+
+**Manuelle Prüfung durch Nutzer ausstehend:** Langzeittest Seenland-Skirmish
+mit 3 KIs (10+ min, FPS-Anzeige; Erdbeben/Terrain-Verformung; Truppbefehle
+müssen jederzeit sofort greifen — Phase-8-Klasse).

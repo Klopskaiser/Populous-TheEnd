@@ -193,6 +193,41 @@ func test_tree_reproduction() -> void:
 
 # --- Wood piles ---------------------------------------------------------------------
 
+## The bucket-indexed tree counting must be EXACTLY equivalent to the old
+## linear scan over all trees (same 3D-distance term) — including after
+## removals and across bucket borders.
+func test_count_trees_near_matches_linear_scan() -> void:
+	var w: Dictionary = _make_world()
+	var tm: TreeManager = w.tree_manager
+	tm.spawn_trees(80, 42)
+	check(tm.trees.size() > 40, "enough trees for a meaningful comparison")
+	var probes: Array[Vector3] = [
+		w.nav.cell_to_world(Vector2i(64, 64)),
+		w.nav.cell_to_world(Vector2i(8, 8)),
+		w.nav.cell_to_world(Vector2i(120, 30)),
+		Vector3(63.9, 5.0, 64.1),   # off-grid, near bucket borders
+	]
+	for radius: float in [6.0, 22.0, 40.0]:
+		for pos in probes:
+			var linear: int = 0
+			for tree in tm.trees:
+				if is_instance_valid(tree) and tree.position.distance_to(pos) <= radius:
+					linear += 1
+			check(tm.count_trees_near(pos, radius) == linear,
+				"bucket count == linear count (r=%.0f @ %s)" % [radius, pos])
+	# Removals keep the index in sync.
+	for i in range(10):
+		tm._remove_tree(tm.trees[0])
+	var pos0: Vector3 = probes[0]
+	var linear0: int = 0
+	for tree in tm.trees:
+		if is_instance_valid(tree) and tree.position.distance_to(pos0) <= 40.0:
+			linear0 += 1
+	check(tm.count_trees_near(pos0, 40.0) == linear0,
+		"bucket count stays in sync after removals")
+	_free_world(w)
+
+
 func test_wood_piles() -> void:
 	var w: Dictionary = _make_world()
 	var wpm: WoodPileManager = w.wood_pile_manager
@@ -362,6 +397,68 @@ func test_progress_requires_wood_and_site_stalls() -> void:
 		ticks += 1
 	check(not hut.under_construction, "build finishes once the wood is on site")
 	check(hut.wood_delivered == Hut.WOOD_COST, "the piles were absorbed into the site")
+	_free_world(w)
+
+
+## Seenland early-game lag: a FAILED sub-task (vanished tree/pile, unreachable
+## goal) must re-choose only after TASK_RETRY — otherwise a stuck worker
+## re-runs the expensive path-verified tree search every sim tick (30 Hz).
+## Success paths keep the immediate re-choose (responsiveness).
+func test_failed_subtask_backs_off() -> void:
+	var w: Dictionary = _make_world()
+	var hut: Hut = w.commands.place_building(w.tribe, HUT_SCENE, Vector2i(60, 60)) as Hut
+	var brave: Brave = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(57, 60))) as Brave
+	brave.order_build(hut)
+	check(brave.state == Unit.State.BUILD, "worker joined the job")
+
+	# Vanished tree: the sub-task ends with a retry delay, and the expensive
+	# tree search does NOT run again within the backoff window.
+	brave.task = Brave.Task.CHOP
+	brave.task_tree = null
+	TreeManager.dbg_best_tree_calls = 0
+	brave.tick(TICK)
+	check(brave.task == Brave.Task.NONE, "invalid tree ends the sub-task")
+	check_near(brave._retry_timer, Brave.TASK_RETRY,
+		"failed chop backs off by TASK_RETRY", 0.001)
+	for i in range(int(Brave.TASK_RETRY / TICK) - 2):
+		brave.tick(TICK)
+	check(TreeManager.dbg_best_tree_calls == 0,
+		"no tree search inside the backoff window")
+
+	# Vanished pile: same backoff.
+	brave.task = Brave.Task.PICKUP
+	brave.task_pile = null
+	brave._retry_timer = 0.0
+	brave.tick(TICK)
+	check_near(brave._retry_timer, Brave.TASK_RETRY,
+		"failed pickup backs off by TASK_RETRY", 0.001)
+
+	# Unreachable goal (seek failure) in BUILD: ends the sub-task with backoff.
+	brave.task = Brave.Task.DELIVER
+	brave._on_seek_failed()
+	check(brave.task == Brave.Task.NONE, "seek failure ends the sub-task")
+	check_near(brave._retry_timer, Brave.TASK_RETRY,
+		"seek failure backs off by TASK_RETRY", 0.001)
+
+	# Success path keeps the immediate re-choose and resets the fail streak.
+	brave._end_subtask()
+	check_near(brave._retry_timer, 0.0, "plain _end_subtask re-chooses at once", 0.001)
+	check(brave._seek_fail_streak == 0, "a successful sub-task resets the streak")
+
+	# Consecutive seek failures escalate the delay and finally quit the job.
+	brave._on_seek_failed()
+	check_near(brave._retry_timer, Brave.TASK_RETRY, "streak 1: base delay", 0.001)
+	brave._on_seek_failed()
+	check_near(brave._retry_timer, Brave.TASK_RETRY * 2.0, "streak 2: doubled", 0.001)
+	brave._on_seek_failed()
+	brave._on_seek_failed()
+	check_near(brave._retry_timer, Brave.TASK_RETRY_MAX, "streak 4: capped", 0.001)
+	brave._on_seek_failed()
+	check(brave.state == Unit.State.BUILD, "streak 5: still on the job")
+	brave._on_seek_failed()
+	check(brave.state == Unit.State.IDLE, "streak 6: the worker quits the job")
+	check(brave.job == null, "the quit worker left the job")
 	_free_world(w)
 
 

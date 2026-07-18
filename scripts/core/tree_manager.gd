@@ -31,6 +31,9 @@ var nav_grid: NavGrid = null
 var trees: Array[TreeResource] = []
 var _occupied: Dictionary[Vector2i, TreeResource] = {}
 var _tree_cells: Dictionary[TreeResource, Vector2i] = {}
+## Spatial index for radius counting: world-position bucket (8 m) -> trees.
+## Mirrors `trees` membership exactly (trees never move once registered).
+var _pos_buckets: Dictionary[Vector2i, Array] = {}
 var _rng: RandomNumberGenerator = RandomNumberGenerator.new()
 var _repro_timer: float = REPRO_INTERVAL
 
@@ -103,10 +106,38 @@ func register(tree: TreeResource, c: Vector2i = Vector2i(-1, -1)) -> void:
 	if c.x >= 0:
 		_occupied[c] = tree
 		_tree_cells[tree] = c
+	var bucket: Vector2i = _pos_bucket(tree.position)
+	if not _pos_buckets.has(bucket):
+		_pos_buckets[bucket] = []
+	_pos_buckets[bucket].append(tree)
 
 
 func has_tree_at(c: Vector2i) -> bool:
 	return _occupied.has(c)
+
+
+const POS_BUCKET_SIZE: float = 8.0
+
+static func _pos_bucket(pos: Vector3) -> Vector2i:
+	return Vector2i(int(floorf(pos.x / POS_BUCKET_SIZE)),
+		int(floorf(pos.z / POS_BUCKET_SIZE)))
+
+
+## Number of standing trees within `radius` of `pos` (3D distance — the same
+## term the old linear scans used). Bucket-indexed: only trees near `pos` are
+## touched instead of the whole registry (AI plot scans call this per
+## candidate cell — the linear scan was 400 distance checks each).
+func count_trees_near(pos: Vector3, radius: float) -> int:
+	var lo: Vector2i = _pos_bucket(Vector3(pos.x - radius, 0.0, pos.z - radius))
+	var hi: Vector2i = _pos_bucket(Vector3(pos.x + radius, 0.0, pos.z + radius))
+	var count: int = 0
+	for bz in range(lo.y, hi.y + 1):
+		for bx in range(lo.x, hi.x + 1):
+			var bucket: Array = _pos_buckets.get(Vector2i(bx, bz), [])
+			for tree in bucket:
+				if is_instance_valid(tree) and tree.position.distance_to(pos) <= radius:
+					count += 1
+	return count
 
 
 # --- Reproduction ----------------------------------------------------------------
@@ -220,10 +251,42 @@ const PATH_ACCEPT_SLACK: float = 2.0
 ## Finite search radius: walks longer than this x radius are rejected.
 const PATH_RADIUS_FACTOR: float = 1.5
 
+## Negative path verdicts are cached briefly so stuck workers do not re-run
+## the SAME expensive A* over and over (Seenland: the beeline-nearest trees
+## sit across the lake — the walk check is a multi-ms around-the-lake A*
+## every time). Keyed by walker bucket (8x8 cells) + tree cell. Positive
+## verdicts are never cached.
+const VERDICT_TOO_FAR: int = 1     # path exists but is beyond max_walk
+const VERDICT_NO_PATH: int = 2     # A* found no path at all
+## Walk distance barely changes with transient blockades -> plain TTL.
+const VERDICT_TOO_FAR_TTL_MS: int = 5000
+## "No path" CAN be a transient blockade (construction footprint) -> short
+## TTL and instant invalidation on any walkability change (change_version).
+const VERDICT_NO_PATH_TTL_MS: int = 1500
+const VERDICT_CACHE_MAX: int = 4096
+const VERDICT_BUCKET_SHIFT: int = 3
+
+var _verdict_cache: Dictionary[Vector4i, Array] = {}
+
+## Telemetry for the benchmarks (pattern: Unit.dbg_plan_*) — pure counters.
+static var dbg_best_tree_calls: int = 0
+static var dbg_best_tree_paths: int = 0
+static var dbg_best_tree_us: int = 0
+
 
 ## Best tree around `origin` (site/search centre) for a walker standing at
 ## `walker`. `filter` (optional) may veto candidates (e.g. enemies nearby).
 func best_tree(origin: Vector3, walker: Vector3, radius: float,
+		claimable_only: bool, filter: Callable = Callable()) -> TreeResource:
+	var t0: int = Time.get_ticks_usec()
+	var result: TreeResource = _best_tree_inner(origin, walker, radius,
+		claimable_only, filter)
+	dbg_best_tree_calls += 1
+	dbg_best_tree_us += Time.get_ticks_usec() - t0
+	return result
+
+
+func _best_tree_inner(origin: Vector3, walker: Vector3, radius: float,
 		claimable_only: bool, filter: Callable = Callable()) -> TreeResource:
 	var flat_origin: Vector2 = Vector2(origin.x, origin.z)
 	var scored: Array = []   # [score, tree] pairs
@@ -254,14 +317,41 @@ func best_tree(origin: Vector3, walker: Vector3, radius: float,
 	var max_walk: float = radius * PATH_RADIUS_FACTOR
 	var best: TreeResource = null
 	var best_len: float = INF
-	for i in range(mini(PATH_CANDIDATES, scored.size())):
-		var tree: TreeResource = scored[i][1]
+	var now: int = Time.get_ticks_msec()
+	var nav_version: int = nav_grid.change_version
+	var walker_bucket: Vector2i = nav_grid.world_to_cell(walker)
+	walker_bucket = Vector2i(walker_bucket.x >> VERDICT_BUCKET_SHIFT,
+		walker_bucket.y >> VERDICT_BUCKET_SHIFT)
+	# Cached negatives are skipped WITHOUT an A* and the list moves on to the
+	# next candidate — the budget of PATH_CANDIDATES counts real A* runs only
+	# (otherwise a handful of across-the-lake trees would eat every slot and
+	# hide perfectly reachable trees further down the ranking).
+	var paths_run: int = 0
+	var idx: int = 0
+	while idx < scored.size() and paths_run < PATH_CANDIDATES:
+		var tree: TreeResource = scored[idx][1]
+		idx += 1
+		var tree_cell: Vector2i = _tree_cells.get(tree, Vector2i(-1, -1))
+		var key: Vector4i = Vector4i(walker_bucket.x, walker_bucket.y,
+			tree_cell.x, tree_cell.y)
+		var cached: Array = _verdict_cache.get(key, [])
+		if not cached.is_empty():
+			var fresh: bool = now < int(cached[1]) and (int(cached[0]) == VERDICT_TOO_FAR
+				or int(cached[2]) == nav_version)
+			if fresh:
+				continue   # known-bad, no A* needed
+			_verdict_cache.erase(key)
+		paths_run += 1
+		dbg_best_tree_paths += 1
 		var path: PackedVector3Array = nav_grid.find_path(walker, tree.position)
 		if path.is_empty():
+			_cache_verdict(key, VERDICT_NO_PATH, now + VERDICT_NO_PATH_TTL_MS, nav_version)
 			continue
 		var length: float = _path_length(path)
 		if length > max_walk:
-			continue   # legal but absurdly far on foot — not worth the walk
+			# Legal but absurdly far on foot — not worth the walk.
+			_cache_verdict(key, VERDICT_TOO_FAR, now + VERDICT_TOO_FAR_TTL_MS, nav_version)
+			continue
 		var beeline: float = Vector2(tree.position.x, tree.position.z).distance_to(flat_walker)
 		if length <= beeline * PATH_ACCEPT_FACTOR + PATH_ACCEPT_SLACK:
 			return tree   # direct enough — no need to check the rest
@@ -269,6 +359,14 @@ func best_tree(origin: Vector3, walker: Vector3, radius: float,
 			best_len = length
 			best = tree
 	return best
+
+
+func _cache_verdict(key: Vector4i, verdict: int, expiry_ms: int, nav_version: int) -> void:
+	# Lazy prune: the cache is purely advisory — dropping it wholesale on
+	# overflow is cheaper than bookkeeping and self-heals within one TTL.
+	if _verdict_cache.size() >= VERDICT_CACHE_MAX:
+		_verdict_cache.clear()
+	_verdict_cache[key] = [verdict, expiry_ms, nav_version]
 
 
 static func _path_length(path: PackedVector3Array) -> float:
@@ -300,6 +398,11 @@ func _remove_tree(tree: TreeResource) -> void:
 	if not (tree in trees):
 		return
 	trees.erase(tree)
+	var bucket: Vector2i = _pos_bucket(tree.position)
+	if _pos_buckets.has(bucket):
+		_pos_buckets[bucket].erase(tree)
+		if _pos_buckets[bucket].is_empty():
+			_pos_buckets.erase(bucket)
 	var c: Vector2i = _tree_cells.get(tree, Vector2i(-1, -1))
 	_tree_cells.erase(tree)
 	if c.x >= 0:

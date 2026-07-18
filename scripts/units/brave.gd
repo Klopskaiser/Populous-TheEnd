@@ -43,6 +43,15 @@ const REPAIR_RATE: float = 10.0     # building HP repaired per second per worker
 const JOB_TREE_RADIUS: float = 40.0 # tree search radius around the site
 const CHOP_CHAIN_RADIUS: float = 8.0
 const TASK_RETRY: float = 0.6
+## Consecutive seek failures double the retry delay up to this cap (a worker
+## whose goals stay unreachable must not burn a full-map failing A* at the
+## base cadence forever)...
+const TASK_RETRY_MAX: float = 4.8
+## ...and after this many consecutive failures the worker QUITS the job
+## (goes IDLE like a wood-stalled site's crew). The BuildingManager re-drafts
+## idle braves periodically, so a transiently blocked site self-heals while a
+## truly unreachable one stops eating pathfinding time.
+const SEEK_FAIL_QUIT_STREAK: int = 6
 ## A wood pile is only preferred over chopping when it lies within this radius
 ## of the construction site (otherwise fetching it is not worth it) AND no enemy
 ## is within WOOD_ENEMY_RADIUS of it — a pile guarded by enemies is skipped in
@@ -82,6 +91,9 @@ var _kneel_timer: float = 0.0
 
 var _chop_timer: float = 0.0
 var _retry_timer: float = 0.0
+## Consecutive unreachable-goal failures (escalating backoff, see
+## _on_seek_failed); reset by any successfully completed sub-task.
+var _seek_fail_streak: int = 0
 var _working: bool = false
 var _seek_goal: Vector3 = Vector3.INF
 ## Where the loose-chopping brave was working, to return after a delivery.
@@ -611,7 +623,7 @@ func _tick_flatten(delta: float) -> void:
 func _tick_job_chop(delta: float) -> void:
 	if not _tree_valid(task_tree):
 		task_tree = null
-		_end_subtask()
+		_end_subtask(TASK_RETRY)
 		return
 	if not _seek(task_tree.position, CHOP_RANGE, delta):
 		return
@@ -635,7 +647,7 @@ func _tick_job_chop(delta: float) -> void:
 func _tick_pickup(delta: float) -> void:
 	if task_pile == null or not is_instance_valid(task_pile) or task_pile.amount <= 0:
 		task_pile = null
-		_end_subtask()
+		_end_subtask(TASK_RETRY)
 		return
 	if not _seek(task_pile.position, PICKUP_RANGE, delta):
 		return
@@ -705,13 +717,20 @@ func _job_wants_wood() -> bool:
 	return job.wants_more_repair_wood()
 
 
-func _end_subtask() -> void:
+## Ends the current sub-task and re-chooses after `retry` seconds. Success
+## paths pass 0.0 (immediate re-choose keeps workers responsive); FAILURE
+## paths (unreachable goal, vanished tree/pile) pass TASK_RETRY — otherwise a
+## stuck worker re-runs the expensive tree/pile search every sim tick (30 Hz)
+## instead of at the nominal task cadence (phase 8 early-game lag).
+func _end_subtask(retry: float = 0.0) -> void:
 	task = Task.NONE
 	task_cell = Vector2i(-1, -1)
 	hop_visual = false
 	_set_working(false)
 	_reset_seek()
-	_retry_timer = 0.0
+	_retry_timer = retry
+	if retry <= 0.0:
+		_seek_fail_streak = 0   # a successful sub-task ends the failure streak
 
 
 # --- Loose chopping (manual order, no job) ----------------------------------------
@@ -1020,7 +1039,10 @@ func _seek(target_pos: Vector3, arrive_range: float, delta: float,
 
 
 ## Unreachable goal: give up the current sub-task (job workers pick a new
-## task, everything else stops).
+## task, everything else stops). Consecutive failures escalate the retry
+## delay (each failing A* explores the whole reachable component — multi-ms
+## on big maps) and finally make the worker quit the job entirely; the
+## periodic worker recruiting re-drafts it if the site frees up again.
 func _on_seek_failed() -> void:
 	if state == State.BUILD and job != null and is_instance_valid(job):
 		if task_cell.x >= 0:
@@ -1029,7 +1051,13 @@ func _on_seek_failed() -> void:
 			tree_manager.release_claim(task_tree, self)
 		task_tree = null
 		task_pile = null
-		_end_subtask()
+		_seek_fail_streak += 1
+		if _seek_fail_streak >= SEEK_FAIL_QUIT_STREAK:
+			_seek_fail_streak = 0
+			_stop_all()
+			return
+		_end_subtask(minf(TASK_RETRY * pow(2.0, float(_seek_fail_streak - 1)),
+			TASK_RETRY_MAX))
 	else:
 		_stop_all()
 

@@ -330,6 +330,10 @@ func _setup_skirmish(tribes: Array[Tribe], nav: NavGrid) -> Vector2i:
 			var ai: AIController = AIController.new()
 			ai.name = "AIController%d" % tribe.id
 			ai.debug_log = OS.get_cmdline_user_args().has("ai-log")
+			# Stagger the 1-Hz AI ticks across the second — without an offset
+			# all AIs tick in the SAME frame and their (potentially expensive)
+			# build/plot scans stack into one hitch per second.
+			ai.stagger_offset(float(tribe.id) / float(tribes.size()))
 			add_child(ai)
 			ai.setup(tribe, _tribe_commands, _unit_manager, _building_manager,
 				_tree_manager, nav, anchor)
