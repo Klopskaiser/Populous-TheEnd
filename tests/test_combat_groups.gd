@@ -241,6 +241,7 @@ func test_group_invariants_hold_in_a_brawl() -> void:
 ## Two adjacent fights are pushed apart until their anchors keep the minimum
 ## group distance — the battle frays into separate brawls instead of a blob.
 func test_adjacent_fights_keep_min_distance() -> void:
+	seed(1337)   # trim the strike/shove/roll randomness between runs
 	var w: Dictionary = _make_world()
 	var r1: Unit = _spawn(w, WARRIOR_SCENE, 1, Vector2(30, 30), true)
 	var r2: Unit = _spawn(w, WARRIOR_SCENE, 1, Vector2(31, 30), true)

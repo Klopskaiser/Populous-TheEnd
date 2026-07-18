@@ -4380,3 +4380,61 @@ Phase 6 ist damit überholt). Zusätzlich stapelte die Sidebar-VBox Tab-Content
 (`--quit-after 600 -- skirmish=1`) fehlerfrei. Manuelle Prüfung durch Nutzer
 (1080p/1440p: Werkstatt-Panel vollständig, Klicks/Box-Select korrekt)
 ausstehend.
+
+---
+
+## Bugfix-Pass 2 (Nutzertest, 2026-07-18) — Backlog #2/#4, Wachturm-Deadlock, KI-Wegfreimachung
+
+**Bug 2 — Baustellen durch Einheiten zerstörbar (`building.gd`):**
+- Baustellen-HP-Modell: `health` startet bei `SITE_MIN_HP` (1) und wächst mit
+  dem angelieferten Holz (`_grow_site_hp()` in `_absorb_piles`), Deckel
+  `SITE_HP_CAP_FRACTION` (3/4 der Voll-HP = 3 von 4 Stufen). Schaden bleibt
+  beim Wachstum erhalten (nur Deckel-Delta wird addiert); bei
+  `finish_construction()` Übernahme ins Voll-HP-Modell (`max_health` minus
+  offenem Schaden, reparierbar). `tick()` ruft `_tick_raid()` jetzt auch
+  während der Bauphase auf (vorher: Raider in Baustellen machten NIE Schaden).
+- Neu: `tests/test_construction_assault.gd` (17 Checks).
+
+**Bug 4 — Holzsuche Luftlinie (`tree_manager.gd`):**
+- `_nearest()` bewertet jetzt Score = Flachdistanz + `HEIGHT_DETOUR_PENALTY`
+  (6,0) × |Höhendifferenz| statt reiner XZ-Luftlinie. Plateau-Fall: Baum unter
+  der Klippe ist per `same_island` erreichbar (Rampe), wurde aber trotz
+  Riesenumweg bevorzugt. Bewusst O(1) je Baum, kein `find_path` im Scan
+  (Perf-Vorgabe Phase 8). Gilt auch für die KI (`nearest_tree`).
+- Neu: `tests/test_tree_priority.gd` (11 Checks, Plateau+Rampen-Terrain).
+
+**Bug 6 — Angriff auf bemannten Wachturm lief nie los (`building.gd`):**
+- `nearest_entrance_threat()` zählte die garnisonierte Turm-Crew (geschützte
+  Reserve, bleibt in der Welt registriert) als Eingangs-Bedrohung;
+  `_begin_attack()` weist nicht-zielbare Ziele ab → Deadlock (Lauf-Anim im
+  Stand, kein Anmarsch). Fix: nicht-zielbare Einheiten überspringen — der
+  Sturm wirft die Crew normal raus, dann wird gekämpft/abgerissen.
+- `test_watchtower.gd` +3 Checks (ohne Fix: „moved 0.0 m").
+
+**KI-Wegfreimachung (Landbrücke/Absinken, `ai_controller.gd`):**
+- Neu `_tick_unblock_path(target)` im ATTACK-State: Liegt das Angriffsziel auf
+  einer anderen Nav-Insel (z. B. Rampe zur Basis weggezaubert), läuft die
+  Schamanin an die Inselkante Richtung Ziel (`_island_edge_toward`, Sampling
+  der Sichtlinie über `island_at`) und wirkt **Landbrücke** über die Lücke
+  (`_bridge_cast_point`: Punkt der Gegeninsel in Castreichweite, sonst
+  maximale Reichweite = Teilbrücke; jeder Cast vergrößert die Insel, bis der
+  Weg verbunden ist). **Absinken** als Fallback auf erhöhte Barrieren
+  (`_wall_point_toward`), mit Flut-Guard `_sink_would_flood_caster()` (der
+  Smoothstep-Falloff des Sinks würde auf Küstenniveau den eigenen Boden unter
+  Wasser drücken). Armee marschiert währenddessen normal weiter (Attack-Move
+  sammelt sie per Partial-Path an der Kante).
+- Neu: `tests/test_ai_unblock.gd` (21 Checks inkl. Ende-zu-Ende: Inseln
+  verbinden sich, Pfad existiert danach).
+
+**Sonstiges:**
+- Neu `tests/run_one.gd`: Einzeldatei-Testrunner
+  (`-s res://tests/run_one.gd -- res://tests/test_x.gd [methode]`).
+- `test_combat_groups.gd`: `test_adjacent_fights_keep_min_distance` seedet
+  jetzt wie der Drift-Test (`seed(1337)`) — beide Metrik-Tests waren im
+  Suite-Kontext einmalig grenzwertig geflaked (1,16 m / 4,83 m), isoliert und
+  im Wiederholungslauf stabil grün. Rest-Flakiness (Echtzeit-Throttle der
+  Insel-Labels) ist bekannt, aber selten.
+
+**Verifikation:** Suite **1731 Tests grün**, Ladecheck `--headless --quit`
+sauber. Manuelle Prüfung durch Nutzer (Startmission: bemannter Wachturm;
+Plateau-Karte: Holzsuche + KI-Blockade) ausstehend.

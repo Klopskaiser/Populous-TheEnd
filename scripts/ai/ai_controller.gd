@@ -359,10 +359,154 @@ func _tick_attack() -> void:
 		return
 	var squad: Array[Unit] = _army_units()
 	var shaman: Unit = tribe.shaman
-	if _shaman_alive() and shaman.state != Unit.State.CAST:
+	if _shaman_alive() and shaman.state != Unit.State.CAST \
+			and not _tick_unblock_path(target):
 		squad.append(shaman)
 	if not squad.is_empty():
 		commands.order_move(squad, target, false, true)   # attack-move
+
+
+# --- Terrain unblocking (attack path via landbridge/sink) --------------------------
+
+## Terrain spells can cut the AI off (e.g. the only ramp to a plateau base
+## removed): the attack target then sits on another nav island. The shaman
+## walks to the edge of her island toward the target and casts LANDBRIDGE
+## across the gap — partial bridges allowed (capped at the cast range); every
+## cast grows her island until the ways are joined and the march resumes.
+## SINK on a raised barrier is the fallback when the landbridge is out of
+## charges. The army keeps its attack-move order meanwhile (partial paths
+## gather it at the edge).
+
+## The shaman counts as "at the island edge" within this distance of it.
+const UNBLOCK_EDGE_DIST: float = 2.5
+## Sampling step (metres) along the shaman->target line.
+const UNBLOCK_STEP: float = 1.0
+## A barrier at least this much above the island edge counts as a wall the
+## sink fallback may cut down (lower gaps are the landbridge's job).
+const UNBLOCK_WALL_MIN_STEP: float = 1.5
+
+## Returns true while the shaman is busy unblocking the path to `target`
+## (the caller then leaves her out of the march order). False when the target
+## is reachable on foot — the normal attack-move handles it.
+func _tick_unblock_path(target: Vector3) -> bool:
+	if nav_grid == null or commands == null or not _shaman_alive():
+		return false
+	var shaman: Unit = tribe.shaman
+	if shaman.garrison_housed:
+		return false
+	if nav_grid.same_island(shaman.position, target):
+		return false
+	var edge: Vector3 = _island_edge_toward(shaman.position, target)
+	if edge == Vector3.INF:
+		return false
+	if Vector2(shaman.position.x - edge.x, shaman.position.z - edge.z).length() \
+			> UNBLOCK_EDGE_DIST:
+		commands.order_move([shaman] as Array[Unit], edge)
+		return true
+	# At the edge: bridge toward the target. A point on the far island within
+	# cast range connects directly; otherwise the farthest point along the
+	# line (partial bridge over the gap, continued next casts).
+	var bridge: Spell = tribe.get_spell(&"landbridge")
+	if bridge != null and bridge.charges > 0:
+		var cast_at: Vector3 = _bridge_cast_point(shaman.position, target,
+			bridge.cast_range - 1.0)
+		if commands.cast_spell(tribe, &"landbridge", cast_at):
+			if debug_log:
+				print("KI %d: Landbrücke zum Angriffsziel (%.0f/%.0f)" % [
+					tribe.id, cast_at.x, cast_at.z])
+			return true
+	var sink: Spell = tribe.get_spell(&"sink")
+	if sink != null and sink.charges > 0:
+		var wall: Vector3 = _wall_point_toward(shaman.position, target,
+			sink.cast_range - 1.0)
+		if wall != Vector3.INF and _sink_would_flood_caster(shaman, wall):
+			wall = Vector3.INF   # too close on low ground — wait for a landbridge
+		if wall != Vector3.INF and commands.cast_spell(tribe, &"sink", wall):
+			if debug_log:
+				print("KI %d: Absinken schneidet Barriere (%.0f/%.0f)" % [
+					tribe.id, wall.x, wall.z])
+			return true
+	return true   # blocked, nothing castable yet — hold at the edge for charges
+
+
+## Walkable point on the shaman's island nearest to `target` along the
+## straight line — the "shore" the bridge is built from. INF without an
+## island label (shouldn't happen for a live shaman).
+func _island_edge_toward(from: Vector3, target: Vector3) -> Vector3:
+	var my_island: int = nav_grid.island_at(
+		nav_grid.nearest_walkable_cell(nav_grid.world_to_cell(from)))
+	if my_island < 0:
+		return Vector3.INF
+	var flat_from: Vector2 = Vector2(from.x, from.z)
+	var flat_to: Vector2 = Vector2(target.x, target.z)
+	var dist: float = flat_from.distance_to(flat_to)
+	if dist < 0.001:
+		return from
+	var dir: Vector2 = (flat_to - flat_from) / dist
+	var edge_cell: Vector2i = nav_grid.world_to_cell(from)
+	var t: float = UNBLOCK_STEP
+	while t < dist:
+		var p: Vector2 = flat_from + dir * t
+		var cell: Vector2i = nav_grid.world_to_cell(Vector3(p.x, 0.0, p.y))
+		if nav_grid.island_at(cell) == my_island:
+			edge_cell = cell
+		t += UNBLOCK_STEP
+	return nav_grid.cell_to_world(edge_cell)
+
+
+## Landbridge target: the first point of ANOTHER island along the line within
+## `reach` (direct connection), else the farthest point at `reach` (partial
+## bridge over water / down a canyon).
+func _bridge_cast_point(from: Vector3, target: Vector3, reach: float) -> Vector3:
+	var flat_from: Vector2 = Vector2(from.x, from.z)
+	var flat_to: Vector2 = Vector2(target.x, target.z)
+	var dist: float = flat_from.distance_to(flat_to)
+	var dir: Vector2 = (flat_to - flat_from) / maxf(dist, 0.001)
+	var my_island: int = nav_grid.island_at(
+		nav_grid.nearest_walkable_cell(nav_grid.world_to_cell(from)))
+	var limit: float = minf(reach, dist)
+	var t: float = UNBLOCK_STEP
+	while t <= limit:
+		var p: Vector2 = flat_from + dir * t
+		var isl: int = nav_grid.island_at(nav_grid.world_to_cell(Vector3(p.x, 0.0, p.y)))
+		if isl >= 0 and isl != my_island:
+			return Vector3(p.x, 0.0, p.y)   # lands on the far shore
+		t += UNBLOCK_STEP
+	var far: Vector2 = flat_from + dir * limit
+	return Vector3(far.x, 0.0, far.y)
+
+
+## The sink also lowers the ground under the caster (smoothstep falloff over
+## its radius): on low coastal ground that would flood the shaman's own feet
+## and drown her. True when casting at `wall` is unsafe for the caster.
+func _sink_would_flood_caster(shaman: Unit, wall: Vector3) -> bool:
+	var d: float = Vector2(wall.x - shaman.position.x,
+		wall.z - shaman.position.z).length()
+	if d >= SinkSpell.RADIUS:
+		return false
+	var t: float = clampf((SinkSpell.RADIUS - d) / SinkSpell.RADIUS, 0.0, 1.0)
+	var falloff: float = t * t * (3.0 - 2.0 * t)
+	return shaman.position.y - SinkSpell.DEPTH * falloff <= TerrainData.SEA_LEVEL + 0.4
+
+
+## First point along the line (within `reach`) whose ground rises clearly
+## ABOVE the shaman's level — a raised wall the sink fallback can cut down.
+## INF when the blockade is not a wall (water/chasm -> landbridge only).
+func _wall_point_toward(from: Vector3, target: Vector3, reach: float) -> Vector3:
+	var flat_from: Vector2 = Vector2(from.x, from.z)
+	var flat_to: Vector2 = Vector2(target.x, target.z)
+	var dist: float = flat_from.distance_to(flat_to)
+	var dir: Vector2 = (flat_to - flat_from) / maxf(dist, 0.001)
+	var limit: float = minf(reach, dist)
+	var t: float = UNBLOCK_STEP
+	while t <= limit:
+		var p: Vector2 = flat_from + dir * t
+		var cell: Vector2i = nav_grid.world_to_cell(Vector3(p.x, 0.0, p.y))
+		var h: float = nav_grid.cell_to_world(cell).y
+		if h > from.y + UNBLOCK_WALL_MIN_STEP:
+			return Vector3(p.x, 0.0, p.y)
+		t += UNBLOCK_STEP
+	return Vector3.INF
 
 
 # --- DEFEND ------------------------------------------------------------------------
