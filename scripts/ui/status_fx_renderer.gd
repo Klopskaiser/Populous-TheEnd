@@ -42,14 +42,17 @@ func setup(p_unit_manager: UnitManager) -> void:
 
 func _ready() -> void:
 	_audio = get_node_or_null("/root/AudioManager")
+	# The flame sits on the upper body and is nudged toward the camera so the
+	# unit's own billboard (same world position) cannot hide it while standing.
 	_effects = [
 		_make_effect(FX_PANIC, &"panic", 1.95, Vector2(0.45, 0.6)),
-		_make_effect(FX_BURNING, &"burning", 0.85, Vector2(0.85, 1.0)),
+		_make_effect(FX_BURNING, &"burning", 1.25, Vector2(1.1, 1.3), 0.35),
 		_make_effect(FX_INJURED, &"injured", 1.55, Vector2(0.8, 0.4)),
 	]
 
 
-func _make_effect(bit: int, fx_name: StringName, height: float, size: Vector2) -> Dictionary:
+func _make_effect(bit: int, fx_name: StringName, height: float, size: Vector2,
+		toward_cam: float = 0.0) -> Dictionary:
 	var textures: Array[Texture2D] = _load_textures(fx_name)
 	var quad: QuadMesh = QuadMesh.new()
 	quad.size = size
@@ -76,6 +79,7 @@ func _make_effect(bit: int, fx_name: StringName, height: float, size: Vector2) -
 		"bit": bit,
 		"loop_name": StringName("unit_%s_loop" % fx_name),
 		"height": height,
+		"toward_cam": toward_cam,
 		"mm": multimesh,
 		"material": material,
 		"textures": textures,
@@ -124,6 +128,10 @@ func _process(delta: float) -> void:
 	# head at every pitch (same reasoning as the StarsRenderer).
 	var up: Vector3 = camera.global_transform.basis.y if camera != null \
 		else Vector3.UP
+	# Toward the viewer (camera looks along -Z): used to pull body-level icons
+	# like the flame in front of the unit's own billboard.
+	var toward: Vector3 = camera.global_transform.basis.z if camera != null \
+		else Vector3.ZERO
 	var counts: Array[int] = [0, 0, 0]
 	for unit in _unit_manager.units:
 		var mask: int = 0
@@ -157,7 +165,8 @@ func _process(delta: float) -> void:
 			var e: Dictionary = _effects[i]
 			if visual_mask & int(e.bit) and counts[i] < MAX_PER_EFFECT:
 				(e.mm as MultiMesh).set_instance_transform(counts[i],
-					Transform3D(Basis.IDENTITY, unit.position + up * float(e.height)))
+					Transform3D(Basis.IDENTITY, unit.position
+						+ up * float(e.height) + toward * float(e.toward_cam)))
 				counts[i] += 1
 	for i in range(_effects.size()):
 		(_effects[i].mm as MultiMesh).visible_instance_count = counts[i]
