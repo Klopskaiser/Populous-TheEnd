@@ -562,22 +562,14 @@ func _claim_safe_tree() -> TreeResource:
 func _nearest_claimable_tree(require_safe: bool) -> TreeResource:
 	if tree_manager == null or job == null or not is_instance_valid(job):
 		return null
-	var origin: Vector2 = Vector2(job.center_world().x, job.center_world().z)
-	var best: TreeResource = null
-	var best_d: float = JOB_TREE_RADIUS * JOB_TREE_RADIUS
-	for tree in tree_manager.trees:
-		if not is_instance_valid(tree) or not tree.can_claim():
-			continue
-		var d: float = Vector2(tree.position.x, tree.position.z).distance_squared_to(origin)
-		if d > best_d:
-			continue
-		if require_safe and _enemies_near(tree.position, WOOD_ENEMY_RADIUS):
-			continue
-		if nav_grid != null and not nav_grid.same_island(position, tree.position):
-			continue   # beeline-near but unreachable (below a cliff)
-		best_d = d
-		best = tree
-	return best
+	# Central path-verified pick (bug backlog #4): ranked around the site,
+	# walk distance checked from THIS worker — no more cliff detours.
+	var filter: Callable = Callable()
+	if require_safe:
+		filter = func(tree: TreeResource) -> bool:
+			return not _enemies_near(tree.position, WOOD_ENEMY_RADIUS)
+	return tree_manager.best_tree(
+		job.center_world(), position, JOB_TREE_RADIUS, true, filter)
 
 
 ## True when a living enemy of another tribe stands within `radius` of `pos`.
@@ -843,7 +835,8 @@ func _next_loose_tree() -> bool:
 	if tree_manager == null:
 		return false
 	var search_from: Vector3 = _loose_return_pos if _loose_return_pos != Vector3.INF else position
-	var tree: TreeResource = tree_manager.claim_nearest_tree(search_from, CHOP_CHAIN_RADIUS, self)
+	var tree: TreeResource = tree_manager.claim_nearest_tree(
+		search_from, CHOP_CHAIN_RADIUS, self, position)
 	if tree == null:
 		return false
 	task_tree = tree

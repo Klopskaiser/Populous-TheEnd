@@ -176,16 +176,19 @@ func _too_close(c: Vector2i) -> bool:
 
 # --- Queries & claiming -------------------------------------------------------------
 
-## Nearest standing tree (XZ distance); ignores claims. Null if none.
+## Nearest standing tree (walk distance, see best_tree); ignores claims.
 func nearest_tree(pos: Vector3) -> TreeResource:
-	return _nearest(pos, INF, false)
+	return best_tree(pos, pos, INF, false)
 
 
 ## Nearest tree within radius that still has a free harvest slot (a tree
 ## supports as many parallel harvesters as it has wood, max 3); claims a slot
-## for the claimer.
-func claim_nearest_tree(pos: Vector3, radius: float, claimer: Object) -> TreeResource:
-	var tree: TreeResource = _nearest(pos, radius, true)
+## for the claimer. `walker` is where the claimer actually stands (defaults
+## to the search origin) — the walk-path check runs from there.
+func claim_nearest_tree(pos: Vector3, radius: float, claimer: Object,
+		walker: Vector3 = Vector3.INF) -> TreeResource:
+	var start: Vector3 = walker if walker != Vector3.INF else pos
+	var tree: TreeResource = best_tree(pos, start, radius, true)
 	if tree != null:
 		tree.add_claimer(claimer)
 	return tree
@@ -196,34 +199,83 @@ func release_claim(tree: TreeResource, claimer: Object) -> void:
 		tree.remove_claimer(claimer)
 
 
-## Height-detour malus (bug backlog #4): effective metres added per metre of
-## height difference between the searcher and a tree. A tree on another level
-## (below a cliff / atop a plateau) is usually only reachable via a ramp detour
-## the beeline does not see — same-level trees within the malus win instead of
-## luring workers down cliffs. Cheap O(1) per tree (no pathfinding in the scan).
+# --- Path-verified tree pick (bug backlog #4) ---------------------------------
+
+## Beeline is only the RANKING of a tree pick — the actual WALK distance
+## decides: a tree below a cliff can be beeline-near yet a huge ramp detour
+## away. Candidates around `origin` are ranked by beeline + height malus,
+## then the best few are verified with a real NavGrid path from `walker`.
+## A candidate whose path is roughly its beeline is accepted immediately —
+## the typical pick costs ONE cheap find_path (~10-40 us, measured); the
+## expensive detour paths (~0.5 ms) only run in blocked layouts, where they
+## either find the truly nearest tree or reject walks beyond
+## PATH_RADIUS_FACTOR x the search radius (the job then stalls/stops instead
+## of luring workers down the cliff).
 const HEIGHT_DETOUR_PENALTY: float = 6.0
+## Max candidates verified with a real path per pick.
+const PATH_CANDIDATES: int = 4
+## A path within this factor (+slack) of the beeline counts as direct.
+const PATH_ACCEPT_FACTOR: float = 1.35
+const PATH_ACCEPT_SLACK: float = 2.0
+## Finite search radius: walks longer than this x radius are rejected.
+const PATH_RADIUS_FACTOR: float = 1.5
 
 
-func _nearest(pos: Vector3, radius: float, claimable_only: bool) -> TreeResource:
-	var best: TreeResource = null
-	var best_score: float = INF
-	var flat: Vector2 = Vector2(pos.x, pos.z)
+## Best tree around `origin` (site/search centre) for a walker standing at
+## `walker`. `filter` (optional) may veto candidates (e.g. enemies nearby).
+func best_tree(origin: Vector3, walker: Vector3, radius: float,
+		claimable_only: bool, filter: Callable = Callable()) -> TreeResource:
+	var flat_origin: Vector2 = Vector2(origin.x, origin.z)
+	var scored: Array = []   # [score, tree] pairs
 	for tree in trees:
 		if not is_instance_valid(tree) or tree.felled_flag:
 			continue
 		if claimable_only and not tree.can_claim():
 			continue
-		var d: float = Vector2(tree.position.x, tree.position.z).distance_to(flat)
+		var d: float = Vector2(tree.position.x, tree.position.z).distance_to(flat_origin)
 		if d > radius:
 			continue
-		var score: float = d + HEIGHT_DETOUR_PENALTY * absf(tree.position.y - pos.y)
-		if score >= best_score:
+		if filter.is_valid() and not filter.call(tree):
 			continue
-		if nav_grid != null and not nav_grid.same_island(pos, tree.position):
-			continue   # beeline-near but unreachable (no ramp connects at all)
-		best_score = score
-		best = tree
+		if nav_grid != null and not nav_grid.same_island(walker, tree.position):
+			continue   # unreachable outright (no ramp connects at all)
+		var score: float = d + HEIGHT_DETOUR_PENALTY * absf(tree.position.y - origin.y)
+		scored.append([score, tree])
+	if scored.is_empty():
+		return null
+	scored.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
+	# Unbounded searches (AI expansion anchor) skip the path verification:
+	# cross-map A* on big maps costs milliseconds per candidate, and a rough
+	# malus-ranked anchor is all the caller needs there. Workers always search
+	# with a finite radius and get the exact walk check below.
+	if nav_grid == null or radius == INF:
+		return scored[0][1]
+	var flat_walker: Vector2 = Vector2(walker.x, walker.z)
+	var max_walk: float = radius * PATH_RADIUS_FACTOR
+	var best: TreeResource = null
+	var best_len: float = INF
+	for i in range(mini(PATH_CANDIDATES, scored.size())):
+		var tree: TreeResource = scored[i][1]
+		var path: PackedVector3Array = nav_grid.find_path(walker, tree.position)
+		if path.is_empty():
+			continue
+		var length: float = _path_length(path)
+		if length > max_walk:
+			continue   # legal but absurdly far on foot — not worth the walk
+		var beeline: float = Vector2(tree.position.x, tree.position.z).distance_to(flat_walker)
+		if length <= beeline * PATH_ACCEPT_FACTOR + PATH_ACCEPT_SLACK:
+			return tree   # direct enough — no need to check the rest
+		if length < best_len:
+			best_len = length
+			best = tree
 	return best
+
+
+static func _path_length(path: PackedVector3Array) -> float:
+	var total: float = 0.0
+	for i in range(1, path.size()):
+		total += Vector2(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z).length()
+	return total
 
 
 ## Takes one unit of wood from the tree (the tree drops a growth stage). When

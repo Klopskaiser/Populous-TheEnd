@@ -4438,3 +4438,19 @@ ausstehend.
 **Verifikation:** Suite **1731 Tests grün**, Ladecheck `--headless --quit`
 sauber. Manuelle Prüfung durch Nutzer (Startmission: bemannter Wachturm;
 Plateau-Karte: Holzsuche + KI-Blockade) ausstehend.
+
+### Bug 4 Nachbesserung: pfadverifizierte Holzsuche (2026-07-18, nach Nutzertest)
+
+Der Höhen-Malus allein reichte nicht — die **Bau-Holzsuche** lief über einen
+eigenen, ungefixten Luftlinien-Scan (`Brave._nearest_claimable_tree`). Neu:
+**`TreeManager.best_tree(origin, walker, radius, claimable_only, filter)`** als
+zentrale Auswahl für Chop-Kette, Bau-Suche und KI — Ranking per Luftlinie +
+Höhen-Malus, dann Verifikation der Top-4 per echter `find_path`-Länge mit
+Early-Accept (Pfad ≈ Luftlinie → sofort nehmen; Normalfall = EIN Pfadaufruf,
+12–37 µs). Läufe > 1,5 × Suchradius werden abgelehnt (Site stallt statt
+Klippenlauf); unbegrenzter Radius (KI-Anker) prüft keine Pfade. Gemessen mit
+`tests/benchmark_pathcost.gd` (neu) und `benchmark_earlygame`: Pfadkosten je
+Fenster 157→50 ms, Ø Unit-Tick 3,75→1,95 ms, schlimmster Frame 57→53 ms —
+netto schneller, weil sinnlose Klippen-Märsche und deren Pfad-Fehlversuche
+entfallen. `test_tree_priority.gd` auf 15 Checks erweitert (Site-Worker-Repro).
+Suite: 1735 Tests grün.

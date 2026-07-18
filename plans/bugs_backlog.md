@@ -111,18 +111,32 @@ auf der gleichen Ebene stehen.
   `nearest_tree`), Aufrufer `brave.gd` (CHOP_CHAIN_RADIUS-Suche) und
   `ai_controller.gd:884`.
 
-**Ursache/Fix (2026-07-18):**
+**Ursache/Fix (2026-07-18), 2 Anläufe:**
 - Ein `same_island`-Check existierte bereits (völlig unerreichbare Bäume
   wurden übersprungen), half aber nicht im Plateau-Fall: Der Baum unter der
   Klippe IST über die Rampe erreichbar (gleiche Insel) — nur mit Riesenumweg.
-- Fix in `TreeManager._nearest()`: **Höhendifferenz-Malus** statt reiner
-  Luftlinie — Score = Flachdistanz + `HEIGHT_DETOUR_PENALTY` (6,0) ×
-  |Höhendifferenz|. Bäume auf gleicher Ebene gewinnen gegen luftlinien-nähere
-  Bäume auf anderer Ebene; ohne Alternative wird der erreichbare Klippen-Baum
-  weiterhin gewählt. Bewusst O(1) pro Baum (kein `find_path` im Scan —
-  Perf-Vorgabe). Gilt automatisch auch für die KI (`nearest_tree`).
-- Tests: `tests/test_tree_priority.gd` (neu, 11 Checks mit Plateau+Rampen-
-  Terrain: gleiche Ebene gewinnt, Fallback, Radius, Gleichstand).
+- **Anlauf 1 (reichte nicht):** Höhendifferenz-Malus in `TreeManager._nearest`.
+  Nutzertest weiterhin fehlerhaft — Hauptgrund: Die **Bau-Holzsuche** läuft
+  gar nicht über den TreeManager, sondern über den eigenen Scan
+  `Brave._nearest_claimable_tree()` (JOB_TREE_RADIUS 40 um die Site, reine
+  Luftlinie) — der war ungefixt; außerdem gewinnt der Klippen-Baum ohne
+  Ebenen-Alternative im Radius trotzdem (Fallback).
+- **Anlauf 2 (final): pfadverifizierte Auswahl `TreeManager.best_tree()`**,
+  genutzt von Chop-Kette, Bau-Suche (Brave, mit Safe-Filter-Callable) und KI:
+  Kandidaten per Luftlinie+Malus geranked, dann bis zu `PATH_CANDIDATES` (4)
+  per echter `find_path`-Länge verifiziert. **Early-Accept**: Pfad ≈ Luftlinie
+  (Faktor 1,35 + 2 m) → sofort nehmen; der Normalfall kostet damit EINEN
+  billigen Pfad. Läufe über `PATH_RADIUS_FACTOR` (1,5) × Suchradius werden
+  abgelehnt → Site stallt (30-s-Recheck), statt Arbeiter die Klippe
+  runterzuschicken. Unbegrenzter Radius (KI-Anker) prüft keine Pfade
+  (Cross-Map-A* wäre ms-teuer, grober Anker reicht).
+- **Gemessen** (`tests/benchmark_pathcost.gd`): direkte Pfade 12–37 µs,
+  Umwegpfad ~550 µs, `same_island` ~10 µs. `benchmark_earlygame` (Bergpass,
+  4 KIs): Pfadkosten je 30-s-Fenster 157→50 ms, Ø Unit-Tick bei t=150 s
+  3,75→1,95 ms — netto SCHNELLER, weil die sinnlosen Klippen-Märsche samt
+  ihrer Pfad-Fehlversuche wegfallen. Schlimmster Frame 57→53 ms.
+- Tests: `tests/test_tree_priority.gd` (15 Checks inkl. Site-Worker-Repro
+  am Plateaurand, Umweg-Ablehnung, Chop-Ketten-Ablehnung).
 
 ## ~~Bug 5 — Katapult & Feuermechanik (Lava, Brennen, Raider-Beschuss)~~ (behoben)
 
