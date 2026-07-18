@@ -4525,3 +4525,25 @@ externe Verweise wie `Unit.MINI_ROLL_DURATION` unverändert). Interne
 Physik-/Sicherheitswerte (ROLL_END_SLOPE, ROLL_FRICTION, ROLL_MAX_DURATION,
 Probe-Konstanten) bleiben bewusst lokal. Suite 1735 Tests grün, Ladecheck
 sauber.
+
+### Bugfix: Katapult löschte Gebäude-Insassen unsichtbar (2026-07-18, Nutzerreport)
+
+**Repro (Startmission):** Katapult beschießt besetzte gegnerische Försterei —
+niemand wird sichtbar rausgeworfen, das Gebäude stirbt "leer".
+**Ursache:** `siege_shot.gd::_kill_building_occupants` hat Förster-Arbeiter und
+Trainees **still gelöscht** (aus Stamm entfernt + `queue_free`, nie in die Welt
+zurückgesetzt → keine Leiche, kein Effekt sichtbar). Hütte/Werkstatt/Wachturm
+waren gar nicht abgedeckt (deren Insassen flogen über den GENERIC-Pfad lebend
+raus — inkonsistent zur Fernkampf-Regel).
+**Fix:** Der Treffer ruft jetzt einheitlich `building.eject_occupants(true)` —
+dieselbe "Fernkampf tötet Insassen an der Tür"-Regel wie Feuerkrieger-Beschuss
+(`DMG_RANGED`): Insassen werden in die Welt zurückgesetzt und sterben sichtbar
+als Leiche am Eingang. Gilt jetzt für alle Gebäudetypen (auch Hütten-Besatzung,
+Werkstatt-Arbeiter, Wachturm-Crew). `_kill_building_occupants`/`_free_unit`
+entfernt.
+**Doku-Korrektur:** `docs/game_mechanics.md` §5 behauptete das Gegenteil
+("Fernkampf tötet Insassen nicht") — richtiggestellt.
+**Tests:** `test_bombard_building_stage_and_occupant_kill` prüft jetzt die
+sichtbare Leiche statt des stillen Löschens; neu
+`test_bombard_forester_kills_workers_visibly` (Ende-zu-Ende: 2 eingelagerte
+Arbeiter → Beschuss → Leichen in der Welt, Slots leer). Suite 1748 Tests grün.

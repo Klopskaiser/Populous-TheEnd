@@ -99,8 +99,11 @@ func _impact() -> void:
 			building.blast_raiders(Balance.SIEGE_SHOT_RAIDER_DAMAGE,
 				shooter if (shooter != null and is_instance_valid(shooter)) else null)
 		else:
-			# Everyone stationed inside an enemy building dies.
-			_kill_building_occupants(building)
+			# Ranged rule (same as firewarrior fire reaching stage 1): everyone
+			# stationed inside an enemy building dies VISIBLY at the door —
+			# ejected into the world, then killed (corpse). Never silently
+			# deleted: the defender must see the crew fall.
+			building.eject_occupants(true)
 		# Full destruction stage (construction sites shatter — fragile rule).
 		building.apply_destruction_stages(Balance.SIEGE_SHOT_BUILDING_STAGES)
 		_spawn_lava(false)   # the shot already did the building damage
@@ -129,34 +132,6 @@ func _building_at_impact():
 	return null
 
 
-## Kills every unit stationed INSIDE the hit building: the training bay's
-## trainee and housed forester workers. Queued/outside units are ordinary
-## world units and only take the shockwave.
-func _kill_building_occupants(building) -> void:
-	if building is TrainingBuilding:
-		var trainee = building.trainee
-		building.trainee = null
-		if trainee != null and is_instance_valid(trainee):
-			if trainee.tribe != null:
-				trainee.tribe.remove_unit(trainee)
-			_free_unit(trainee)
-	elif building is Forester:
-		for b in building.occupants.duplicate():
-			if not is_instance_valid(b):
-				continue
-			if b.forester_inside:
-				building.release_worker(b)
-				if b.tribe != null:
-					b.tribe.remove_unit(b)
-				_free_unit(b)
-
-
-## queue_free in-game (safe mid-frame), direct free outside the tree (tests).
-static func _free_unit(unit) -> void:
-	if unit.is_inside_tree():
-		unit.queue_free()
-	else:
-		unit.free()
 
 
 ## Small, quickly vanishing lava puddle at the impact centre (usual lava

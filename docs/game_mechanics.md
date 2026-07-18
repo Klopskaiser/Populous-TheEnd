@@ -136,8 +136,10 @@ Gebäude haben **4 Zerstörungsstufen** (`Building.destruction_stage()`), je
   innen ab — **6 HP/s je Raider**, max. **15** gleichzeitig (Wachturm: 5).
   Katapultbeschuss auf das **eigene** geraidete Gebäude wirft Raider lebend
   hinaus (30 HP Schaden je Treffer, kostet das eigene Gebäude 1 Stufe).
-- Fernkampfschaden auf Gebäude tötet eingeschlossene Insassen nicht — sie
-  werden beim Einsturz lebend ausgeworfen.
+- **Insassen bei Beschuss:** Schaltet **Fernkampf** (Feuerkrieger, Katapult)
+  ein besetztes Gebäude aus, sterben die Insassen **sichtbar an der Tür**
+  (Leichen am Eingang). **Zauber und Nahkampf-Sturm** werfen sie dagegen
+  **lebend** hinaus (kurzer Roller vom Gebäude weg).
 
 ---
 

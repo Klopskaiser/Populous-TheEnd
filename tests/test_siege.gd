@@ -11,6 +11,7 @@ const MAX_TICKS: int = 3000
 
 const WORKSHOP_SCENE: PackedScene = preload("res://scenes/buildings/workshop.tscn")
 const WARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/warrior_camp.tscn")
+const FORESTER_SCENE: PackedScene = preload("res://scenes/buildings/forester.tscn")
 const HUT_SCENE: PackedScene = preload("res://scenes/buildings/hut.tscn")
 const SIEGE_SCENE: PackedScene = preload("res://scenes/units/siege_engine.tscn")
 const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
@@ -446,8 +447,10 @@ func test_bombard_building_stage_and_occupant_kill() -> void:
 		shot.tick(TICK)
 	check(camp.health < health_before, "the hit building took damage")
 	check(camp.destruction_stage() >= 1, "one full destruction stage was applied")
-	check(camp.trainee == null and not is_instance_valid(trainee),
-		"the stationed trainee died in the strike")
+	check(camp.trainee == null, "the training slot is empty after the strike")
+	check(is_instance_valid(trainee) and trainee.state == Unit.State.DEAD,
+		"the stationed trainee died VISIBLY at the door (corpse, not deleted)")
+	check(trainee in w.unit_manager.units, "the trainee's corpse lies in the world")
 	check(own_hut.health == own_hut.max_health, "own buildings are never damaged")
 	shot.free()
 
@@ -459,6 +462,41 @@ func test_bombard_building_stage_and_occupant_kill() -> void:
 		shot2.tick(TICK)
 	check(own_hut.health == own_hut.max_health, "friendly fire never wrecks own buildings")
 	shot2.free()
+	_free_world(w)
+
+
+## Regression: a catapult hit on an enemy STAFFED forester silently deleted the
+## housed workers — nothing ever became visible outside the building. Ranged
+## rule now: they die at the door as corpses lying in the world.
+func test_bombard_forester_kills_workers_visibly() -> void:
+	var w: Dictionary = _make_world()
+	var forester: Forester = w.building_manager.place(
+		FORESTER_SCENE, w.tribe1, Vector2i(70, 60), 0, true) as Forester
+	var workers: Array[Brave] = []
+	for i in range(2):
+		var b: Brave = w.unit_manager.spawn_unit(BRAVE_SCENE, 1,
+			forester.entrance_world() + Vector3(float(i), 0.0, 1.0)) as Brave
+		b.order_forester(forester)
+		workers.append(b)
+	var ticks: int = 0
+	while ticks < MAX_TICKS \
+			and workers.any(func(b: Brave) -> bool: return not b.forester_inside):
+		_tick_world(w)
+		ticks += 1
+	check(forester.occupants.size() == 2, "two enemy workers are housed inside")
+
+	var shot: SiegeShot = SiegeShot.new()
+	shot.setup(0, w.nav.cell_to_world(Vector2i(60, 60)), forester.center_world(),
+		null, w.unit_manager, w.td, w.building_manager)
+	while not shot.done:
+		shot.tick(TICK)
+	check(forester.destruction_stage() >= 1, "the forester took a destruction stage")
+	for b in workers:
+		check(is_instance_valid(b) and b.state == Unit.State.DEAD,
+			"a housed worker died visibly at the door")
+		check(b in w.unit_manager.units, "the worker's corpse lies in the world")
+	check(forester.occupants.is_empty(), "no worker slot stays occupied")
+	shot.free()
 	_free_world(w)
 
 
