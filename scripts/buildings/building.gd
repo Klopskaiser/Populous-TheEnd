@@ -744,20 +744,40 @@ func set_hovered(p_hovered: bool) -> void:
 	hovered = p_hovered
 
 
+## Selection-ring gold; flash_ring() restores it after a coloured flash.
+const RING_COLOR: Color = Color(0.98, 0.85, 0.45)
+## Red flash when this building becomes the target of an attack order.
+const ATTACK_FLASH_COLOR: Color = Color(0.9, 0.2, 0.15)
+
+## Active flash tween; killed before a new flash so two quick orders in a row
+## cannot run overlapping blink loops (visible now that colours can differ).
+var _flash_tween: Tween = null
+
+
 ## Blinks the selection ring twice — feedback when units are sent inside
-## (manning/training/garrison/crew) or a rally point lands on this building.
-## Restores the ring to the current selection state afterwards.
-func flash_ring() -> void:
+## (manning/training/garrison/crew), a rally point lands on this building, or
+## (in red) an attack order targets it. Restores the ring colour and the
+## current selection state afterwards.
+func flash_ring(color: Color = RING_COLOR) -> void:
 	if _selection_ring == null or not is_inside_tree():
 		return
 	var ring: MeshInstance3D = _selection_ring
+	var mat: StandardMaterial3D = ring.material_override as StandardMaterial3D
+	if _flash_tween != null and _flash_tween.is_valid():
+		_flash_tween.kill()
+	if mat != null:
+		mat.albedo_color = color
 	var tween: Tween = create_tween()
+	_flash_tween = tween
 	for i in range(2):
 		tween.tween_callback(func() -> void: ring.visible = true)
 		tween.tween_interval(0.16)
 		tween.tween_callback(func() -> void: ring.visible = false)
 		tween.tween_interval(0.12)
-	tween.tween_callback(func() -> void: ring.visible = selected)
+	tween.tween_callback(func() -> void:
+		if mat != null:
+			mat.albedo_color = RING_COLOR
+		ring.visible = selected)
 
 
 func _create_selection_ring() -> void:
@@ -770,7 +790,7 @@ func _create_selection_ring() -> void:
 	torus.outer_radius = r
 	_selection_ring.mesh = torus
 	var mat: StandardMaterial3D = StandardMaterial3D.new()
-	mat.albedo_color = Color(0.98, 0.85, 0.45)
+	mat.albedo_color = RING_COLOR
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_selection_ring.material_override = mat
 	_selection_ring.position.y = 0.12

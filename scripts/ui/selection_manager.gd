@@ -42,9 +42,13 @@ const DESELECT_GRACE_S: float = 0.3
 
 var player_tribe_id: int = 0
 var selected: Array[Unit] = []
-## Selected own building (mutually exclusive with unit selection). Right-click
-## then sets its rally point.
+## Primary selected own building (mutually exclusive with unit selection) —
+## the sidebar panels read this one. Right-click sets the rally point.
 var selected_building: Building = null
+## Full building selection ("multi-select light"): the type hotkeys (B/K/T/J)
+## select every own building of a kind at once; a plain click keeps exactly one
+## entry. selected_building is always selected_buildings[0] (or null/empty).
+var selected_buildings: Array[Building] = []
 ## Building currently under the mouse (drives its production-bar visibility).
 var _hovered_building: Building = null
 
@@ -57,6 +61,7 @@ var _unit_manager: UnitManager = null
 var _tribe_commands: TribeCommands = null
 var _build_menu: BuildMenu = null
 var _spell_targeting: SpellTargeting = null
+var _building_manager: BuildingManager = null
 var _dragging: bool = false
 var _drag_start: Vector2 = Vector2.ZERO
 var _drag_current: Vector2 = Vector2.ZERO
@@ -68,11 +73,13 @@ var _last_box_select_ms: int = -100000
 
 
 func setup(p_unit_manager: UnitManager, p_tribe_commands: TribeCommands = null,
-		p_build_menu: BuildMenu = null, p_spell_targeting: SpellTargeting = null) -> void:
+		p_build_menu: BuildMenu = null, p_spell_targeting: SpellTargeting = null,
+		p_building_manager: BuildingManager = null) -> void:
 	_unit_manager = p_unit_manager
 	_tribe_commands = p_tribe_commands
 	_build_menu = p_build_menu
 	_spell_targeting = p_spell_targeting
+	_building_manager = p_building_manager
 
 
 func _ready() -> void:
@@ -134,7 +141,8 @@ func _unhandled_input(event: InputEvent) -> void:
 					_box_select(_drag_rect(mb.position))
 			queue_redraw()
 		elif mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
-			if selected_building != null and is_instance_valid(selected_building):
+			_prune_selected_buildings()
+			if not selected_buildings.is_empty():
 				# Right-click sets the rally/delivery point for ALL buildings
 				# (incl. the watchtower) — it never ejects the crew; that is done
 				# per slot in the sidebar panel.
@@ -163,6 +171,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		if not selected.is_empty():
 			attack_arm_active = true
 			queue_redraw()
+	elif event.is_action_pressed("select_all_huts"):
+		_select_all_of_type(func(b: Building) -> bool: return b is Hut)
+	elif event.is_action_pressed("select_all_warrior_camps"):
+		_select_all_of_type(func(b: Building) -> bool: return b is WarriorCamp)
+	elif event.is_action_pressed("select_all_temples"):
+		_select_all_of_type(func(b: Building) -> bool: return b is Temple)
+	elif event.is_action_pressed("select_all_firewarrior_camps"):
+		_select_all_of_type(func(b: Building) -> bool: return b is FirewarriorCamp)
 	elif event.is_action_pressed("ui_cancel") and attack_arm_active:
 		attack_arm_active = false
 		queue_redraw()
@@ -361,33 +377,74 @@ func _set_selection(units: Array[Unit]) -> void:
 
 ## Selects an own building (clears any unit/building selection first).
 func _select_building(building: Building) -> void:
+	_select_buildings([building])
+
+
+## Selects several own buildings at once (type hotkeys). The first entry
+## becomes the primary building the sidebar panels show; every building gets
+## its selection ring, the select sound plays once.
+func _select_buildings(list: Array[Building]) -> void:
 	_set_selection([])
-	selected_building = building
-	building.set_selected(true)
-	if is_inside_tree():
+	selected_buildings = list
+	selected_building = list[0] if not list.is_empty() else null
+	for b in selected_buildings:
+		if is_instance_valid(b):
+			b.set_selected(true)
+	if not list.is_empty() and is_inside_tree():
 		var audio: Node = get_node_or_null("/root/AudioManager")
 		if audio != null:
 			audio.play_ui(&"select_building")
 
 
+## Selects every own, finished building that `matches` accepts (map-wide type
+## hotkey). No hit -> the current selection stays untouched (a fumbled hotkey
+## must not deselect).
+func _select_all_of_type(matches: Callable) -> void:
+	if _building_manager == null:
+		return
+	var picked: Array[Building] = []
+	for b in _building_manager.get_buildings_of_tribe(player_tribe_id):
+		if is_instance_valid(b) and b.health > 0 and not b.under_construction \
+				and matches.call(b):
+			picked.append(b)
+	if picked.is_empty():
+		return
+	_select_buildings(picked)
+
+
 func _clear_selected_building() -> void:
-	if selected_building != null and is_instance_valid(selected_building):
-		selected_building.set_selected(false)
+	for b in selected_buildings:
+		if is_instance_valid(b):
+			b.set_selected(false)
+	selected_buildings = []
 	selected_building = null
 
 
-## Sets the selected building's rally point to the clicked terrain position.
-## A building under the cursor blinks as feedback (e.g. a training camp's
-## rally dropped onto a hut/tower so graduates walk in).
+## Drops freed, destroyed or no-longer-own buildings from the selection; the
+## primary building moves up (the sidebar polls selected_building every frame).
+func _prune_selected_buildings() -> void:
+	var kept: Array[Building] = []
+	for b in selected_buildings:
+		if is_instance_valid(b) and b.health > 0 and b.tribe_id == player_tribe_id:
+			kept.append(b)
+	selected_buildings = kept
+	selected_building = kept[0] if not kept.is_empty() else null
+
+
+## Sets the rally point of ALL selected buildings to the clicked terrain
+## position. A building under the cursor blinks as feedback (e.g. a training
+## camp's rally dropped onto a hut/tower so graduates walk in).
 func _set_rally(screen_pos: Vector2) -> void:
 	var hit: Dictionary = _raycast(screen_pos, TERRAIN_MASK)
 	if hit.is_empty():
 		return
-	selected_building.rally_point = hit.position
+	for b in selected_buildings:
+		if is_instance_valid(b):
+			b.rally_point = hit.position
 	var bhit: Dictionary = _raycast(screen_pos, BUILDING_MASK)
 	if not bhit.is_empty():
 		var target = bhit.collider.get_meta("building") if bhit.collider.has_meta("building") else null
-		if target != null and is_instance_valid(target) and target != selected_building:
+		if target != null and is_instance_valid(target) and not (target in selected_buildings):
 			target.flash_ring()
 
 
@@ -469,6 +526,7 @@ func _command_move(screen_pos: Vector2, queue_up: bool, aggressive: bool = false
 	var enemy: Unit = _enemy_under_cursor(screen_pos, camera)
 	if enemy != null and _tribe_commands != null:
 		_tribe_commands.order_attack(selected, enemy)
+		enemy.flash_target_ring()   # red blink marks the attack target
 		return
 	var from: Vector3 = camera.project_ray_origin(screen_pos)
 	var dir: Vector3 = camera.project_ray_normal(screen_pos)
@@ -582,6 +640,7 @@ func _dispatch_enemy_building(hit: Dictionary) -> bool:
 		# move order (a selected catapult auto-bombards it once in range).
 		return false
 	_tribe_commands.order_attack_building(selected, building)
+	building.flash_ring(Building.ATTACK_FLASH_COLOR)
 	return true
 
 
@@ -604,6 +663,7 @@ func _dispatch_own_raided_building(building: Building) -> bool:
 	if engines.is_empty():
 		return false
 	_tribe_commands.order_attack_building(engines, building)
+	building.flash_ring(Building.ATTACK_FLASH_COLOR)
 	if not rest.is_empty():
 		_tribe_commands.order_move(rest, building.edge_spawn_position())
 	return true

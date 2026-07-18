@@ -182,7 +182,8 @@ func _ready() -> void:
 		if config.mode != MatchConfig.Mode.SKIRMISH:
 			for spell in tribe.spells:
 				spell.charges = 1
-	_selection.setup(_unit_manager, _tribe_commands, _build_menu, _spell_targeting)
+	_selection.setup(_unit_manager, _tribe_commands, _build_menu, _spell_targeting,
+		_building_manager)
 	_ring_renderer.setup(_selection)
 	_build_menu.setup(_tribe_commands, nav, self, tribes[GameState.PLAYER_TRIBE])
 	_spell_targeting.setup(_tribe_commands, tribes[GameState.PLAYER_TRIBE], self,

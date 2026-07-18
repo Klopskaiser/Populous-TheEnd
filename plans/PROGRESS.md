@@ -4465,3 +4465,50 @@ Suite: 1735 Tests grün.
   Schwachstellen: Kanten-/Castpunktwahl nur entlang der Sichtlinie, greift
   nur im ATTACK-State, kein Fortschritts-Tracking bei wiederholt
   wirkungslosen Casts, Teilbrücken brauchen viele teure Ladungen.
+
+### UI-Komfort: Steuerungsmenü, Gebäude-Hotkeys, Angriffs-Flash + Mechanik-Doku (2026-07-18)
+
+**Steuerungsmenü (Rebinding):**
+- Neu `scripts/core/input_settings.gd` (`InputSettings`, statisch nach
+  `GameSettings`-Muster): rebindbare Actions mit deutschen Labels/Kategorien,
+  Persistenz **nur der Overrides** (physical keycode) in `user://settings.cfg`
+  Sektion `[input]`; Anwendung beim Start via `GameState._ready()` →
+  `InputSettings.apply_overrides()` (InputMap `action_erase_events` +
+  `action_add_event`). Nicht rebindbar (bewusst): Maus-Actions (Code fragt
+  rohe `MOUSE_BUTTON_*` ab), `ui_cancel` (Esc), Debug-F1/F2 — deren Tasten
+  sind zusätzlich als Konflikt gesperrt.
+- `main_menu.gd`: neue Seite „Steuerung" (Index 3, Optionen → Steuerung):
+  ScrollContainer-Liste (Label + Key-Button je Action, Kategorie-Header),
+  Erfassungsmodus über `_input()` (Fokus-Falle: `release_focus()`, sonst
+  bindet Space/Enter den Button statt der Taste), Esc bricht ab, Konflikte
+  werden mit Meldung abgelehnt (kein Auto-Swap), „Auf Standard zurücksetzen".
+  `key_display_name` mappt physical→Layout nur mit echtem DisplayServer
+  (Headless-Guard, sonst ERROR-Spam im Ladecheck).
+
+**Gebäude-Typ-Hotkeys (B/K/T/J) + Mehrfach-Gebäudeselektion „light":**
+- 4 neue Actions in `project.godot`: `select_all_huts` (B),
+  `select_all_warrior_camps` (K), `select_all_temples` (T),
+  `select_all_firewarrior_camps` (J) — kartenweite Selektion aller eigenen,
+  fertigen Gebäude des Typs (kein Treffer = Selektion bleibt).
+- `selection_manager.gd`: neu `selected_buildings: Array[Building]`;
+  `selected_building` bleibt Primärgebäude (Sidebar-Panels unverändert).
+  `_select_buildings()`/`_prune_selected_buildings()`; Rechtsklick setzt den
+  Rally-Point für **alle** selektierten Gebäude. `setup()` bekommt den
+  `BuildingManager` als 5. Parameter (main.gd angepasst).
+
+**Roter Angriffs-Flash:**
+- `Building.flash_ring(color := RING_COLOR)` + `ATTACK_FLASH_COLOR`; laufender
+  Flash-Tween wird vor Neuanlage gekillt (kein Gold/Rot-Flackern), Farbe wird
+  am Ende zurückgesetzt. Bestandsaufrufer weiter gold.
+- Neu `Unit.flash_target_ring()`: kurzlebiges rotes Torus-Mesh am Ziel (Muster
+  `SiegeEngine.flash_ring`), als Kind der Unit (folgt dem Ziel), Tween am Ring
+  (stirbt mit dem Ziel). Aufrufe im SelectionManager nach `order_attack`,
+  `order_attack_building` und Anti-Raider-Beschuss.
+
+**Doku:** Neu `docs/game_mechanics.md` — Spielmechanik-Handbuch (Wirtschaft,
+Einheiten, Zustände, Gebäude, Zerstörungsstufen, Schadenssystem, Zauber,
+Steuerung), Werte aus `balance.gd` mit Quellenhinweis.
+
+**Verifikation:** `--headless --import` + `--headless --quit` sauber (keine
+Parse-/Ladefehler). Manueller Funktionstest (Rebinding, Hotkeys, roter Flash)
+ausstehend.

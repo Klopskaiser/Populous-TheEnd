@@ -15,6 +15,12 @@ var _map_desc: Label = null
 ## Selectable map ids, index-aligned with the OptionButton items.
 var _map_ids: PackedStringArray = MapGenerator.map_ids()
 
+## Controls page (rebinding): action currently waiting for a key press,
+## &"" = no capture running.
+var _rebind_action: StringName = &""
+var _key_buttons: Dictionary = {}   # StringName action -> Button
+var _rebind_hint: Label = null
+
 
 ## Short German blurb per map, shown under the selector.
 static func _map_description(map_id: String) -> String:
@@ -49,6 +55,7 @@ func _ready() -> void:
 	_pages.append(_build_root_page())
 	_pages.append(_build_skirmish_page())
 	_pages.append(_build_options_page())
+	_pages.append(_build_controls_page())
 	_show_page(0)
 
 	# Headless verification hook: `godot ... -- skirmish=N [map=<id>]` skips the
@@ -216,8 +223,132 @@ func _build_options_page() -> Control:
 	vb.add_child(resolution_option)
 
 	vb.add_child(HSeparator.new())
+	_add_button(vb, "Steuerung", func() -> void: _show_page(3))
 	_add_button(vb, "Zurück", func() -> void: _show_page(0))
 	return vb.get_parent() as Control
+
+
+## Controls page (index 3): every rebindable action as a label + key button.
+## Clicking a key button starts the capture mode (_input); the next key press
+## rebinds via InputSettings, Esc cancels, conflicts are rejected with a hint.
+func _build_controls_page() -> Control:
+	var vb: VBoxContainer = _make_page("Steuerung")
+
+	var scroll: ScrollContainer = ScrollContainer.new()
+	# ~25 rows would blow past the window height — scroll inside the panel.
+	scroll.custom_minimum_size = Vector2(460, 420)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	vb.add_child(scroll)
+
+	var list: VBoxContainer = VBoxContainer.new()
+	list.add_theme_constant_override("separation", 4)
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(list)
+
+	var last_category: String = ""
+	for entry in InputSettings.ACTIONS:
+		var action: StringName = entry[0]
+		var category: String = entry[2]
+		if category != last_category:
+			last_category = category
+			var header: Label = Label.new()
+			header.text = category
+			header.add_theme_color_override("font_color", UiTheme.GOLD_BRIGHT)
+			list.add_child(header)
+
+		var row: HBoxContainer = HBoxContainer.new()
+		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		list.add_child(row)
+
+		var name_label: Label = Label.new()
+		name_label.text = entry[1]
+		name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(name_label)
+
+		var key_button: Button = Button.new()
+		key_button.text = InputSettings.key_display_name(action)
+		key_button.custom_minimum_size = Vector2(90, 0)
+		UiTheme.style_button(key_button)
+		key_button.pressed.connect(_start_rebind.bind(action))
+		row.add_child(key_button)
+		_key_buttons[action] = key_button
+
+	vb.add_child(HSeparator.new())
+	_rebind_hint = Label.new()
+	_rebind_hint.text = " "
+	_rebind_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_rebind_hint.custom_minimum_size = Vector2(300, 0)
+	_rebind_hint.add_theme_color_override("font_color", UiTheme.GOLD)
+	vb.add_child(_rebind_hint)
+
+	_add_button(vb, "Auf Standard zurücksetzen", _on_reset_bindings)
+	_add_button(vb, "Zurück", func() -> void:
+		_end_rebind()
+		_show_page(2))
+	return vb.get_parent() as Control
+
+
+func _start_rebind(action: StringName) -> void:
+	# Refresh a possibly still-capturing previous button first.
+	_end_rebind()
+	_rebind_action = action
+	var button: Button = _key_buttons[action]
+	button.text = "Taste drücken…"
+	# Without this, Space/Enter would activate the focused button again
+	# instead of being captured as the new binding.
+	button.release_focus()
+	_rebind_hint.text = "Neue Taste für »%s« drücken — Esc bricht ab." \
+		% InputSettings.action_label(action)
+
+
+func _end_rebind() -> void:
+	_rebind_action = &""
+	for action in _key_buttons:
+		(_key_buttons[action] as Button).text = InputSettings.key_display_name(action)
+
+
+func _on_reset_bindings() -> void:
+	_end_rebind()
+	InputSettings.reset_all()
+	for action in _key_buttons:
+		(_key_buttons[action] as Button).text = InputSettings.key_display_name(action)
+	_rebind_hint.text = "Alle Tasten auf Standard zurückgesetzt."
+
+
+## Key capture for the controls page. _input (not _unhandled_input) so the
+## pressed key cannot be swallowed by a focused control first.
+func _input(event: InputEvent) -> void:
+	if _rebind_action == &"" or not (event is InputEventKey):
+		return
+	var key: InputEventKey = event
+	if not key.pressed or key.echo:
+		return
+	get_viewport().set_input_as_handled()
+	if key.physical_keycode == KEY_ESCAPE:
+		_end_rebind()
+		_rebind_hint.text = "Abgebrochen."
+		return
+	var other: StringName = InputSettings.action_using_keycode(
+		int(key.physical_keycode), _rebind_action)
+	if other == _rebind_action:
+		# Same key again: nothing to change, just leave the capture mode.
+		_end_rebind()
+		_rebind_hint.text = " "
+		return
+	if other != &"":
+		var owner_label: String = InputSettings.action_label(other)
+		if other == &"ui_cancel":
+			owner_label = "Abbrechen/Pause (Esc)"
+		elif other in InputSettings._BLOCKED_ACTIONS:
+			owner_label = "Debug (%s)" % OS.get_keycode_string(key.physical_keycode)
+		_rebind_hint.text = "Taste bereits belegt: %s — andere Taste drücken." % owner_label
+		return
+	var rebound: StringName = _rebind_action
+	InputSettings.rebind(rebound, int(key.physical_keycode))
+	_end_rebind()
+	_rebind_hint.text = "»%s« liegt jetzt auf %s." % [
+		InputSettings.action_label(rebound),
+		InputSettings.key_display_name(rebound)]
 
 
 # --- Match start -----------------------------------------------------------------

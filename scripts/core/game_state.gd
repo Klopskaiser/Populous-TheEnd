@@ -46,6 +46,12 @@ var _defeated: Dictionary[int, bool] = {}
 var _defeat_timer: float = 0.0
 
 
+func _ready() -> void:
+	# First autoload: apply persisted keyboard overrides to the InputMap once,
+	# before any scene (menu or match) processes input.
+	InputSettings.apply_overrides()
+
+
 func _process(delta: float) -> void:
 	for tribe in tribes:
 		tribe.tick(delta)
