@@ -4454,3 +4454,14 @@ Fenster 157→50 ms, Ø Unit-Tick 3,75→1,95 ms, schlimmster Frame 57→53 ms �
 netto schneller, weil sinnlose Klippen-Märsche und deren Pfad-Fehlversuche
 entfallen. `test_tree_priority.gd` auf 15 Checks erweitert (Site-Worker-Repro).
 Suite: 1735 Tests grün.
+
+### Nutzertest-Stand Bugfix-Pass 2 (2026-07-18, Abend)
+
+- **Holzsuche (Bug 4): vom Nutzer bestätigt funktionierend** (Plateau-Karte,
+  Hütte am Rand — Arbeiter bleiben oben).
+- **KI-Wegfreimachung (Landbrücke/Absinken): klappt im echten Spiel noch
+  nicht gut**, reicht laut Nutzer aber erstmal. Als **Bug 7** im
+  `bugs_backlog.md` vermerkt (Nachbesserung, niedrige Prio) — bekannte
+  Schwachstellen: Kanten-/Castpunktwahl nur entlang der Sichtlinie, greift
+  nur im ATTACK-State, kein Fortschritts-Tracking bei wiederholt
+  wirkungslosen Casts, Teilbrücken brauchen viele teure Ladungen.

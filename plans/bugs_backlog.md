@@ -137,6 +137,8 @@ auf der gleichen Ebene stehen.
   ihrer Pfad-Fehlversuche wegfallen. Schlimmster Frame 57→53 ms.
 - Tests: `tests/test_tree_priority.gd` (15 Checks inkl. Site-Worker-Repro
   am Plateaurand, Umweg-Ablehnung, Chop-Ketten-Ablehnung).
+- **Nutzertest 2026-07-18: bestätigt funktionierend** (Plateau-Karte, Hütte
+  am Rand — Arbeiter bleiben oben).
 
 ## ~~Bug 5 — Katapult & Feuermechanik (Lava, Brennen, Raider-Beschuss)~~ (behoben)
 
@@ -194,3 +196,29 @@ Crew lebend raus (dann ist sie zielbar und verteidigt), danach wird abgerissen.
 
 Tests: `test_watchtower.gd` +3 (Crew ≠ Eingangs-Bedrohung; Prediger marschiert
 los — ohne Fix „moved 0.0 m"; volle Pipeline: Krieger schleifen bemannten Turm).
+
+## Bug 7 — KI-Wegfreimachung (Landbrücke/Absinken) noch unzuverlässig
+
+- [ ] **Status: offen (Nachbesserung, niedrige Prio)**
+
+**Stand 2026-07-18:** Die Mechanik aus `ai_controller.gd`
+(`_tick_unblock_path`: Schamanin läuft zur Inselkante Richtung Angriffsziel,
+wirkt Landbrücke über die Lücke, Absinken als Wand-Fallback mit Flut-Guard)
+ist implementiert und headless getestet (`tests/test_ai_unblock.gd`, 21
+Checks inkl. Ende-zu-Ende auf synthetischem Terrain). **Nutzertest: klappt im
+echten Spiel noch nicht gut** — reicht laut Nutzer aber erstmal.
+
+**Bekannte Schwachstellen / Ansatzpunkte für die Nachbesserung:**
+- Kanten-/Castpunktwahl folgt stur der Sichtlinie Schamanin→Ziel
+  (`_island_edge_toward`-Sampling): Liegt die beste Überbrückungsstelle
+  seitlich (schmalste Lücke statt Lücke auf der Linie), wird sie nicht
+  gefunden; ggf. mehrere Richtungen/Kandidaten sampeln.
+- Greift nur im **ATTACK-State** (alle 4 KI-Ticks). Ist die KI in
+  BUILD/TRAIN eingeschlossen (z. B. eigene Basis vom Spieler isoliert,
+  Arbeiter draußen), wird nichts überbrückt.
+- Kein Fortschritts-Tracking: Schlägt der Brückenschlag wiederholt fehl
+  (Cast verpufft, Morph ändert nichts an der Begehbarkeit), gibt es keinen
+  Strategiewechsel (andere Stelle probieren / mehr Ladungen sparen).
+- Teilbrücken über breite Lücken brauchen mehrere Casts mit je ~60 Mana —
+  bei knapper Mana-Lage dauert das lange; evtl. Ladungen für die
+  Wegfreimachung reservieren, sobald `same_island` zum Ziel false ist.
