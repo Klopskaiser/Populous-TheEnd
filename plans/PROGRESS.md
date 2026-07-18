@@ -4575,3 +4575,26 @@ alle Gebäudetypen und beide Beschuss-Pfade.
 Tests: Wachturm-Test differenziert jetzt (Feuerkrieger stirbt, Krieger
 überlebt mit −60 HP, Population −1); Brave-Insassen-Tests unverändert gültig
 (60 HP → Tod). Doku §5 aktualisiert. Suite 1754 Tests grün.
+
+### Bugfix: Brennen ohne Panik + stumme Status-Loops (2026-07-18, Nutzerreport)
+
+**Bug 1 — brennende Einheiten ohne Panik:** `Unit.ignite()` rief `start_panic`
+nur einmal beim Kontakt; `start_panic` verweigert aber bei THROWN/ROLL. Eine
+Einheit, die beim Entzünden gerade flog/rollte (Feuerball-Wurf in Lava,
+Vulkan), brannte danach stehend weiter und konnte sogar kämpfen. Fix:
+Invariante in `_tick_burning` — solange die Einheit brennt und weder
+PANIC/THROWN/ROLL/DEAD noch panik-immun ist, wird `start_panic(position,
+Restbrenndauer)` nachgezogen (nach dem Ausrollen geht es sofort in Panik
+weiter; Schamanin brennt weiterhin bewusst stehend). Regressionstest neu:
+`test_ignited_while_rolling_panics_after_the_tumble` (test_spells.gd).
+
+**Bug 2 — Status-Sounds nur einmalig:** Das Loop-System existiert und ist
+verdrahtet (StatusFxRenderer → `AudioManager.start_loop`, positional, folgt
+der Einheit, Cap 4 Emitter je Effekt, sauberes Stop bei Zustandsende/
+Weltaustritt) — es erwartet aber eigene Dateien `unit_panic_loop.ogg` /
+`unit_burning_loop.ogg` / `unit_injured_loop.ogg`; fehlen die, war es stumm
+und nur der One-Shot beim Eintritt war hörbar. Fix: `_activate_loop` fällt
+bei fehlender `<name>_loop`-Datei auf die One-Shot-Streams des Basisnamens
+zurück und wiederholt sie (finished→play). Damit laufen Brennen-, Panik- und
+Kritisch-verwundet-Sound kontinuierlich, solange der Zustand anhält; eigene
+Loop-Dateien haben weiterhin Vorrang. Suite 1758 Tests grün.

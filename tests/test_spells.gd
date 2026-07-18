@@ -789,6 +789,29 @@ func test_ignite_shaman_burns_without_panicking() -> void:
 	_free_world(w)
 
 
+## Regression: a unit ignited while tumbling (start_panic refuses THROWN/ROLL)
+## used to finish its roll and then burn standing around — it could even keep
+## fighting. Burning must ALWAYS re-enter panic once the unit is on its feet.
+func test_ignited_while_rolling_panics_after_the_tumble() -> void:
+	var w: Dictionary = _make_world()
+	var brave: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, Vector3(40, 5, 40))
+	brave.start_roll(Vector3(1, 0, 0), Unit.MINI_ROLL_DURATION)
+	brave.ignite(Vector3(41, 5, 40))
+	check(brave.is_burning(), "the rolling brave is alight")
+	check(brave.state == Unit.State.ROLL, "the tumble keeps running (no panic mid-roll)")
+	var ticks: int = 0
+	while brave.state == Unit.State.ROLL and ticks < 100:
+		brave.tick(0.1)
+		ticks += 1
+	# _tick_burning runs before the state tick, so the re-assert lands on the
+	# first full tick after the tumble ended.
+	brave.tick(0.1)
+	check(brave.is_burning(), "still burning after the short tumble")
+	check(brave.state == Unit.State.PANIC,
+		"back on its feet, the burning brave re-enters panic")
+	_free_world(w)
+
+
 # --- Phase 7c: volcano ---------------------------------------------------------------
 
 func test_volcano_cone_lava_and_permanence() -> void:

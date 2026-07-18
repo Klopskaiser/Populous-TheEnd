@@ -168,6 +168,11 @@ func stop_loop(name: StringName, owner: Node3D) -> void:
 
 func _activate_loop(name: StringName, entry: Dictionary, owner: Node3D) -> void:
 	var streams: Array = _streams_for("audio/sfx/%s" % name)
+	if streams.is_empty() and String(name).ends_with("_loop"):
+		# No dedicated loop file: fall back to the one-shot of the same effect
+		# (unit_burning_loop -> unit_burning) and repeat it — a status stays
+		# audible for its whole duration even when only one-shots are provided.
+		streams = _streams_for("audio/sfx/%s" % String(name).trim_suffix("_loop"))
 	if streams.is_empty():
 		return
 	var player: AudioStreamPlayer3D = AudioStreamPlayer3D.new()

@@ -1313,6 +1313,14 @@ func _tick_burning(delta: float) -> void:
 	if whole > 0:
 		_burn_frac -= float(whole)
 		take_damage(whole)
+	# Invariant: burning ALWAYS panics (visible scramble). ignite()'s own
+	# start_panic is refused while the unit is mid-air/tumbling — without this
+	# re-assert such a unit finished its tumble, then burned standing around
+	# and could even fight. Immune units (shaman) burn standing on purpose.
+	if _burn_time > 0.0 and state != State.PANIC and state != State.DEAD \
+			and state != State.THROWN and state != State.ROLL \
+			and not is_panic_immune():
+		start_panic(position, _burn_time)
 
 
 ## Landing: water kills instantly; building footprints are snapped out of;
