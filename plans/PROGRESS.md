@@ -4512,3 +4512,16 @@ Steuerung), Werte aus `balance.gd` mit Quellenhinweis.
 **Verifikation:** `--headless --import` + `--headless --quit` sauber (keine
 Parse-/Ladefehler). Manueller Funktionstest (Rebinding, Hotkeys, roter Flash)
 ausstehend.
+
+### Balance-Nachzug: Roll-Statuseffekt-Werte zentralisiert (2026-07-18)
+
+Die Rollen-Werte waren als einzige Statuseffekt-Werte noch in `unit.gd`
+hartkodiert (Panik/Brand/Lava lagen bereits in `balance.gd`). Neu in
+`balance.gd`, Sektion „ROLLEN (Statuseffekt)": `ROLL_SPEED` (5,5),
+`MINI_ROLL_DURATION` (0,35), `NEIGHBOR_ROLL_DURATION` (0,22), `ROLL_DPS` (5),
+`SHOVE_ROLL_CHANCE` (0,2), `STEEP_ROLL_CHANCE_PER_SEC` (0,6) — `unit.gd`
+referenziert sie nach dem üblichen Muster (lokale Konstantennamen bleiben,
+externe Verweise wie `Unit.MINI_ROLL_DURATION` unverändert). Interne
+Physik-/Sicherheitswerte (ROLL_END_SLOPE, ROLL_FRICTION, ROLL_MAX_DURATION,
+Probe-Konstanten) bleiben bewusst lokal. Suite 1735 Tests grün, Ladecheck
+sauber.

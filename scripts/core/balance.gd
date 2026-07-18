@@ -111,6 +111,23 @@ const CORPSE_SINK_DURATION: float = 1.0
 const CORPSE_SINK_DEPTH: float = 1.6
 
 # =============================================================================
+# ROLLEN (Statuseffekt — Schubser, Wurf-Landungen, Stolpern)
+# =============================================================================
+
+## Bodengeschwindigkeit beim Rollen (Hangneigung addiert etwas Tempo).
+const ROLL_SPEED: float = 5.5
+## Dauer eines Mini-Rollers auf flachem Boden (Schubser / Feuerball-Umwerfer).
+const MINI_ROLL_DURATION: float = 0.35
+## Noch kürzerer Purzler für angrenzende, vom Feuerball umgeworfene Einheiten.
+const NEIGHBOR_ROLL_DURATION: float = 0.22
+## Rollschaden (HP/s); tödlicher Schaden wird bis zum Roll-Ende aufgeschoben.
+const ROLL_DPS: float = 5.0
+## Chance, dass ein Schubser das Ziel umwirft (Mini-Roller, auch auf flachem Boden).
+const SHOVE_ROLL_CHANCE: float = 0.2
+## Chance/s, beim Hinablaufen sehr steiler Hänge von selbst ins Stolpern zu geraten.
+const STEEP_ROLL_CHANCE_PER_SEC: float = 0.6
+
+# =============================================================================
 # BRAND / LAVA (Einheiten)
 # =============================================================================
 

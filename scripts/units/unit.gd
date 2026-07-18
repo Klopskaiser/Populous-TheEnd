@@ -135,13 +135,13 @@ const KNOCKBACK_ACCUM_DECAY: float = 0.8
 
 # --- Rolling (phase 5d) ----------------------------------------------------------
 ## Ground speed while rolling (slope adds a bit on top).
-const ROLL_SPEED: float = 5.5
+const ROLL_SPEED: float = Balance.ROLL_SPEED
 ## Duration of a flat-ground mini roll (shove / fireball knock-over).
-const MINI_ROLL_DURATION: float = 0.35
+const MINI_ROLL_DURATION: float = Balance.MINI_ROLL_DURATION
 ## Even shorter tumble for adjacent units knocked over by a fireball roll.
-const NEIGHBOR_ROLL_DURATION: float = 0.22
+const NEIGHBOR_ROLL_DURATION: float = Balance.NEIGHBOR_ROLL_DURATION
 ## Rolling hurts a little, scaling with how long it lasts.
-const ROLL_DPS: float = 5.0
+const ROLL_DPS: float = Balance.ROLL_DPS
 ## The roll keeps following the fall line while the downhill slope exceeds
 ## this; on flatter ground it ends once the (mini) duration ran out.
 const ROLL_END_SLOPE: float = 0.5
@@ -159,7 +159,7 @@ const THROWN_MAX_DURATION: float = 30.0
 ## Walking DOWN a slope steeper than this may trigger a roll on its own...
 const STEEP_ROLL_SLOPE: float = 1.0
 ## ...with this chance per second.
-const STEEP_ROLL_CHANCE_PER_SEC: float = 0.6
+const STEEP_ROLL_CHANCE_PER_SEC: float = Balance.STEEP_ROLL_CHANCE_PER_SEC
 
 # --- Throw & panic (phase 6) ---------------------------------------------------------
 ## Gravity of scripted throw arcs (slightly snappy for gameplay feel).
@@ -194,7 +194,7 @@ const BADLY_HURT_FRAC: float = 0.25
 ## A shove always displaces the target slightly (the brawl shifts around)...
 const SHOVE_DISPLACE: float = 0.35
 ## ...and sometimes knocks it over into a very short roll, even on flat ground.
-const SHOVE_ROLL_CHANCE: float = 0.2
+const SHOVE_ROLL_CHANCE: float = Balance.SHOVE_ROLL_CHANCE
 
 # --- Hill movement (phase 5d) ------------------------------------------------------
 ## Speed factor lost per unit of uphill slope (rise per metre)...
