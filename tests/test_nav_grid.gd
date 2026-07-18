@@ -104,3 +104,20 @@ func test_fill_solid_region_blocks_and_unblocks() -> void:
 			crosses_wall = true
 			break
 	check(crosses_wall, "wall removed: direct path passes through the region again")
+
+
+# --- Islands (reachability prefilter, Ebene-Klippen fix) ------------------------------
+
+func test_islands_split_and_merge() -> void:
+	var td: TerrainData = _valley_terrain()
+	var nav: NavGrid = NavGrid.new(td)
+	var west: Vector3 = Vector3(20.5, 0, 40.5)
+	var east: Vector3 = Vector3(100.5, 0, 40.5)
+	check(nav.same_island(west, Vector3(30.5, 0, 60.5)), "same landmass -> same island")
+	check(not nav.same_island(west, east), "across the water -> different islands")
+	# Open a corridor (landbridge): after the walkability update the two sides
+	# must merge. Bypass the refresh throttle like a later frame would.
+	var rect: Rect2i = td.raise_area(Vector2(64.0, 40.0), 12.0, 3.0)
+	nav.update_region(rect)
+	nav._islands_computed_ms = -100000
+	check(nav.same_island(west, east), "landbridge merges the islands")

@@ -4231,3 +4231,49 @@ Pläne in 5 s (alt: einer pro 0,25-s-Scan); Cache-Eviction statt Clear-all
 (Größe bleibt gedeckelt, jüngstes Ziel bleibt gemerkt). Suite **1627 grün**,
 Ladecheck + Skirmish-Smoke sauber. **Nutzer ausstehend:** Original-Szenario
 (Ebene + KI-Feuerkrieger) im Spiel nachstellen.
+
+### Holz-Bugs + UI-Features (Nutzerreport, 2026-07-13)
+
+**NavGrid-Inseln (neu):** `same_island(a,b)`/`island_at(cell)` — Connected-
+Component-Labels über das begehbare Grid (4er-Nachbarschaft = konsistent zu
+DIAGONAL_ONLY_IF_NO_OBSTACLES), lazy nach Walkability-Änderungen neu
+berechnet, gedrosselt auf max. 1x/s (`ISLAND_REFRESH_MS`; kurz veraltete
+Labels heilen sich selbst). O(1)-Erreichbarkeits-Vorfilter.
+
+**Bug „Bäume unterhalb der Klippe bevorzugt":** Alle Holz-Zielwahlen
+rankten nach Luftlinie OHNE Erreichbarkeit. Insel-Filter ergänzt in:
+`Brave._nearest_claimable_tree`, `Brave._best_safe_pile`,
+`Brave._nearest_own_building` (+ delivery_point), `TreeManager._nearest`
+(Loose-Chop-Kette). „Holz auf dem Luftweg" = Lieferziel unerreichbar nah.
+
+**Bug „Sammler dreht auf der Stelle":** `_tick_loose_deliver` wählte
+Gebäude+Stapel JEDEN Tick neu — bei nahezu gleich weiten Zielen flippte das
+Ziel pro Tick (Replan + Facing-Flip, Null-Fortschritt). Jetzt: Ziel wird
+einmal pro Lieferung gewählt (`_loose_deliver_goal`), Re-Check nur alle
+1,5 s und Wechsel nur, wenn das neue Ziel >= 2 m näher ist (Hysterese).
+
+**Feature Rechtsklick auf Holzstapel:** WoodPile hat jetzt einen ClickBody
+(Layer 4, meta `wood_pile`); `_dispatch_context_command` → neues
+`TribeCommands.order_pickup` → `Brave.order_pickup(pile)` (Task.PICKUP im
+GATHER-State, neue Routing-Zeile in `_tick_state`); Lieferung läuft über die
+bestehende Loose-Deliver-Pipeline (nächstes eigenes Gebäude). Shift-Queue
+wie beim Baum-Befehl.
+
+**Feature Cursor-Zähler:** `scripts/ui/cursor_count_label.gd` (neu,
+`CursorCountLabel`), folgt der Maus, zeigt die Zahl selektierter lebender
+Einheiten (Polling wie die Sidebar), in main.gd unter $UI verdrahtet.
+
+**Feature Blink-Feedback:** `Building.flash_ring()` (Tween, 2x blinken,
+stellt Selektionszustand wieder her) — ausgelöst in
+`_apply_building_command` für alle „Reingehen"-Befehle (Förster/Werkstatt/
+Wachturm/Hütte/Training), beim Katapult-Crew-Befehl
+(`SiegeEngine.flash_ring()`, temporärer Ring — Einheitenringe sind zentral
+im MultiMesh) und in `_set_rally`, wenn der Rally-Punkt per zweitem Raycast
+(BUILDING_MASK) auf einem Gebäude landet.
+
+**Tests:** test_nav_grid +1 (Inseln: getrennt über Wasser, Merge nach
+Landbrücke — Drossel im Test via `_islands_computed_ms` umgangen),
+test_economy +1 (order_pickup: Brave holt Stapel, liefert an den Drop-Spot
+der Hütte). Suite **1634 grün**, Ladecheck sauber, Stresstest-Smoke (45 s,
+Terrain-Verformungen erzwingen Insel-Rebuilds) ohne Fehler.
+**Nutzer ausstehend:** Original-Szenario (Ebene + Holzwirtschaft) im Spiel.

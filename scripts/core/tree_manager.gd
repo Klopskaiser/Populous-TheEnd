@@ -206,9 +206,12 @@ func _nearest(pos: Vector3, radius: float, claimable_only: bool) -> TreeResource
 		if claimable_only and not tree.can_claim():
 			continue
 		var d: float = Vector2(tree.position.x, tree.position.z).distance_squared_to(flat)
-		if d < best_dist:
-			best_dist = d
-			best = tree
+		if d >= best_dist:
+			continue
+		if nav_grid != null and not nav_grid.same_island(pos, tree.position):
+			continue   # beeline-near but unreachable (below a cliff)
+		best_dist = d
+		best = tree
 	return best
 
 

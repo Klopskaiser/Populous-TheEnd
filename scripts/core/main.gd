@@ -214,6 +214,11 @@ func _ready() -> void:
 	var fps_overlay: FpsOverlay = FpsOverlay.new()
 	fps_overlay.name = "FpsOverlay"
 	$UI.add_child(fps_overlay)
+	# Selected-unit counter following the mouse cursor.
+	var cursor_count: CursorCountLabel = CursorCountLabel.new()
+	cursor_count.name = "CursorCountLabel"
+	$UI.add_child(cursor_count)
+	cursor_count.setup(_selection)
 
 	# Terrain deformations (foundation flattening, later Landbridge) rebuild
 	# the affected mesh chunks + collision here.

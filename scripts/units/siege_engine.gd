@@ -681,6 +681,33 @@ func _ready() -> void:
 	_refresh_flag_color()
 
 
+## Blinks a temporary gold ring twice — feedback for a crew order. The unit
+## selection rings are drawn centrally (MultiMesh, selected units only), so
+## the vehicle spawns its own short-lived ring mesh.
+func flash_ring() -> void:
+	if not is_inside_tree():
+		return
+	var ring: MeshInstance3D = MeshInstance3D.new()
+	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var torus: TorusMesh = TorusMesh.new()
+	torus.inner_radius = 0.26 * selection_ring_scale()
+	torus.outer_radius = 0.34 * selection_ring_scale()
+	ring.mesh = torus
+	var mat: StandardMaterial3D = StandardMaterial3D.new()
+	mat.albedo_color = Color(1.0, 0.95, 0.3)
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	ring.material_override = mat
+	ring.position.y = 0.1
+	add_child(ring)
+	var tween: Tween = create_tween()
+	for i in range(2):
+		tween.tween_callback(func() -> void: ring.visible = true)
+		tween.tween_interval(0.16)
+		tween.tween_callback(func() -> void: ring.visible = false)
+		tween.tween_interval(0.12)
+	tween.tween_callback(ring.queue_free)
+
+
 func _create_model() -> void:
 	var root: Node3D = Node3D.new()
 	root.name = "Model"

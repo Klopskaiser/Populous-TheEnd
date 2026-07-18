@@ -377,11 +377,18 @@ func _clear_selected_building() -> void:
 
 
 ## Sets the selected building's rally point to the clicked terrain position.
+## A building under the cursor blinks as feedback (e.g. a training camp's
+## rally dropped onto a hut/tower so graduates walk in).
 func _set_rally(screen_pos: Vector2) -> void:
 	var hit: Dictionary = _raycast(screen_pos, TERRAIN_MASK)
 	if hit.is_empty():
 		return
 	selected_building.rally_point = hit.position
+	var bhit: Dictionary = _raycast(screen_pos, BUILDING_MASK)
+	if not bhit.is_empty():
+		var target = bhit.collider.get_meta("building") if bhit.collider.has_meta("building") else null
+		if target != null and is_instance_valid(target) and target != selected_building:
+			target.flash_ring()
 
 
 ## True while at least one selected unit can man a watchtower (combat / shaman).
@@ -552,6 +559,8 @@ func _try_crew_assignment(screen_pos: Vector2, camera: Camera3D, queue_up: bool 
 			unit.route_end_action = (func(target: Unit) -> void: target.order_crew(eng)).bind(unit)
 	else:
 		_tribe_commands.order_crew(crewable, engine)
+	if engine is SiegeEngine:
+		(engine as SiegeEngine).flash_ring()
 	return true
 
 
@@ -584,6 +593,16 @@ func _dispatch_context_command(hit: Dictionary, queue_up: bool = false) -> bool:
 	var node: Node = collider as Node
 	if node == null:
 		return false
+	if node.has_meta("wood_pile"):
+		var pile: WoodPile = node.get_meta("wood_pile") as WoodPile
+		if pile == null or pile.amount <= 0:
+			return false
+		if queue_up:
+			_queue_route_action(pile.position,
+				func(u: Unit) -> void: _tribe_commands.order_pickup([u] as Array[Unit], pile))
+		else:
+			_tribe_commands.order_pickup(selected, pile)
+		return true
 	if node.has_meta("tree_resource"):
 		var tree: TreeResource = node.get_meta("tree_resource") as TreeResource
 		if tree == null or tree.felled_flag:
@@ -642,14 +661,19 @@ func _apply_building_command(units: Array[Unit], building: Building) -> void:
 			_tribe_commands.order_pray(units, building)
 		elif building is Forester:
 			_tribe_commands.order_forester(units, building)
+			building.flash_ring()
 		elif building is Workshop:
 			_tribe_commands.order_workshop(units, building)
+			building.flash_ring()
 		elif building is Watchtower:
 			_tribe_commands.order_garrison(units, building as Watchtower)
+			building.flash_ring()
 		elif building is Hut:
 			_tribe_commands.order_man_hut(units, building as Hut)
+			building.flash_ring()
 		elif building is TrainingBuilding:
 			_tribe_commands.order_train(building, units)
+			building.flash_ring()
 		return
 	if building.health < building.max_health and building.health > 0:
 		_tribe_commands.order_repair(units, building)

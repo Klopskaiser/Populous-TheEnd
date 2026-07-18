@@ -87,6 +87,73 @@ func is_cell_walkable(cell: Vector2i) -> bool:
 	return terrain.in_bounds(cell) and not _astar.is_point_solid(cell)
 
 
+# --- Islands (connected components) ----------------------------------------------
+
+## Two world positions share an island when they are mutually reachable on
+## foot — an O(1) reachability prefilter for target choosers (trees, piles,
+## delivery buildings), so braves stop picking beeline-near but blocked
+## targets below cliffs. Labels refresh lazily after walkability changes, at
+## most once per ISLAND_REFRESH_MS (briefly stale labels self-heal).
+const ISLAND_REFRESH_MS: int = 1000
+
+var _islands: PackedInt32Array = PackedInt32Array()
+var _islands_dirty: bool = true
+var _islands_computed_ms: int = 0
+
+
+func same_island(a: Vector3, b: Vector3) -> bool:
+	var ia: int = island_at(nearest_walkable_cell(world_to_cell(a)))
+	return ia >= 0 and ia == island_at(nearest_walkable_cell(world_to_cell(b)))
+
+
+func island_at(cell: Vector2i) -> int:
+	if cell.x < 0 or not terrain.in_bounds(cell):
+		return -1
+	_ensure_islands()
+	return _islands[cell.y * terrain.size + cell.x]
+
+
+## Flood-fill labelling over the walkable grid (4-connected — matching
+## DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES, where a diagonal never connects cells
+## that are not already 4-connected).
+func _ensure_islands() -> void:
+	if not _islands_dirty:
+		return
+	var now: int = Time.get_ticks_msec()
+	if not _islands.is_empty() and now - _islands_computed_ms < ISLAND_REFRESH_MS:
+		return
+	_islands_dirty = false
+	_islands_computed_ms = now
+	var size: int = terrain.size
+	_islands.resize(size * size)
+	_islands.fill(-1)
+	var next_id: int = 0
+	var queue: PackedInt32Array = PackedInt32Array()
+	for start in range(size * size):
+		if _islands[start] != -1 \
+				or _astar.is_point_solid(Vector2i(start % size, start / size)):
+			continue
+		queue.resize(0)
+		queue.push_back(start)
+		_islands[start] = next_id
+		var head: int = 0
+		while head < queue.size():
+			var idx: int = queue[head]
+			head += 1
+			var cz: int = idx / size
+			for n in [idx - 1, idx + 1, idx - size, idx + size]:
+				if n < 0 or n >= size * size or _islands[n] != -1:
+					continue
+				# Row wrap guard for the +-1 neighbours.
+				if absi(n - idx) == 1 and n / size != cz:
+					continue
+				if _astar.is_point_solid(Vector2i(n % size, n / size)):
+					continue
+				_islands[n] = next_id
+				queue.push_back(n)
+		next_id += 1
+
+
 ## True when the cell is reserved by a building footprint (steep-but-empty
 ## cells are not "blocked" in this sense — they can be flattened).
 func is_cell_blocked_by_building(cell: Vector2i) -> bool:
@@ -145,6 +212,7 @@ func update_region(rect: Rect2i) -> void:
 				delta_cells.append(z * terrain.size + x)
 				delta_solids.append(1 if solid else 0)
 	_refresh_vehicle_region(r)
+	_islands_dirty = true
 	# Mirror the unit-grid change to the worker AFTER the local grid is updated,
 	# so the worker's clone converges to the same state (FIFO-ordered vs. later
 	# path requests). The vehicle grid stays main-thread only (siege pathing is

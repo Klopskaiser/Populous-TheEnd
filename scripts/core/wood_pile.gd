@@ -72,6 +72,24 @@ func set_amount(value: int) -> void:
 
 func _ready() -> void:
 	_update_visual()
+	_create_click_body()
+
+
+## StaticBody3D on layer 3 (value 4, like trees) so right-clicks can target
+## the pile (order_pickup); no physics interaction (mask 0).
+func _create_click_body() -> void:
+	var body: StaticBody3D = StaticBody3D.new()
+	body.name = "ClickBody"
+	body.collision_layer = 4
+	body.collision_mask = 0
+	body.set_meta("wood_pile", self)
+	var shape: CollisionShape3D = CollisionShape3D.new()
+	var box: BoxShape3D = BoxShape3D.new()
+	box.size = Vector3(1.0, 1.0, 1.0)
+	shape.shape = box
+	shape.position.y = 0.5
+	body.add_child(shape)
+	add_child(body)
 
 
 func _update_visual() -> void:

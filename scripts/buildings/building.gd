@@ -637,6 +637,22 @@ func set_hovered(p_hovered: bool) -> void:
 	hovered = p_hovered
 
 
+## Blinks the selection ring twice — feedback when units are sent inside
+## (manning/training/garrison/crew) or a rally point lands on this building.
+## Restores the ring to the current selection state afterwards.
+func flash_ring() -> void:
+	if _selection_ring == null or not is_inside_tree():
+		return
+	var ring: MeshInstance3D = _selection_ring
+	var tween: Tween = create_tween()
+	for i in range(2):
+		tween.tween_callback(func() -> void: ring.visible = true)
+		tween.tween_interval(0.16)
+		tween.tween_callback(func() -> void: ring.visible = false)
+		tween.tween_interval(0.12)
+	tween.tween_callback(func() -> void: ring.visible = selected)
+
+
 func _create_selection_ring() -> void:
 	_selection_ring = MeshInstance3D.new()
 	_selection_ring.name = "SelectionRing"

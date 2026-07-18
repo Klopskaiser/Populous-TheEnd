@@ -715,3 +715,31 @@ func test_wood_pile_manager_near_queries() -> void:
 	check(wpm.pile_with_space_near(Vector3(0.0, 0.0, 0.0), 5.0) == null,
 		"no pile in radius -> null")
 	_free_world(w)
+
+
+## Right-click pickup order (user feature): the brave fetches the pile and
+## delivers it to the nearest own building's drop spot like loose-chopped wood.
+func test_order_pickup_fetches_pile_and_delivers() -> void:
+	var w: Dictionary = _make_world()
+	var hut: Hut = w.building_manager.place(HUT_SCENE, w.tribe, Vector2i(30, 30), 0, true)
+	var brave: Brave = w.unit_manager.spawn_unit(BRAVE_SCENE, 0, Vector3(50.5, 0, 30.5))
+	w.wood_pile_manager.deposit(Vector3(52.5, 5.0, 30.5), 3)
+	var pile: WoodPile = w.wood_pile_manager.piles[0]
+	w.commands.order_pickup([brave] as Array[Unit], pile)
+	check(brave.state == Unit.State.GATHER, "pickup order enters GATHER")
+	check(brave.task == Brave.Task.PICKUP, "pickup order sets Task.PICKUP")
+	var drop: Vector3 = hut.delivery_point()
+	var delivered: bool = false
+	for i in range(600):
+		brave.tick(0.1)
+		w.unit_manager.tick(0.1)
+		for p in w.wood_pile_manager.piles:
+			if is_instance_valid(p) and p.amount >= 3 \
+					and Vector2(p.position.x, p.position.z).distance_to(
+						Vector2(drop.x, drop.z)) <= 6.0:
+				delivered = true
+		if delivered:
+			break
+	check(delivered, "wood ends up on a pile at the hut's drop spot")
+	check(brave.carried_wood == 0, "brave dropped everything")
+	_free_world(w)

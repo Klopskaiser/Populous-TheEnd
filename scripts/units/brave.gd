@@ -86,6 +86,10 @@ var _working: bool = false
 var _seek_goal: Vector3 = Vector3.INF
 ## Where the loose-chopping brave was working, to return after a delivery.
 var _loose_return_pos: Vector3 = Vector3.INF
+## Cached loose-delivery drop target (re-picked on a slow cadence with
+## hysteresis — per-tick re-picking made carrying braves spin in place).
+var _loose_deliver_goal: Vector3 = Vector3.INF
+var _loose_deliver_recheck: float = 0.0
 
 
 func _init() -> void:
@@ -143,6 +147,20 @@ func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = fals
 ## walking right into the village get attacked; farther ones are ignored.
 ## Applied to Unit.idle_aggro in _init (a field, not a virtual — hot path).
 const IDLE_AGGRO_RADIUS: float = Balance.BRAVE_IDLE_AGGRO_RADIUS
+
+
+## Manual pickup order (right-click on a wood pile): fetch the pile, then
+## deliver like loose-chopped wood (nearest own building's drop spot).
+func order_pickup(pile: WoodPile) -> void:
+	if not can_take_orders():
+		return
+	if pile == null or not is_instance_valid(pile) or pile.amount <= 0:
+		return
+	_interrupt_tasks()
+	task_pile = pile
+	task = Task.PICKUP
+	_loose_return_pos = Vector3.INF
+	_set_state(State.GATHER)
 
 
 ## Manual chop order (right-click on a tree): harvest it unit by unit, drop
@@ -340,6 +358,8 @@ func _tick_state(delta: float) -> void:
 		State.GATHER:
 			if task == Task.DELIVER:
 				_tick_loose_deliver(delta)
+			elif task == Task.PICKUP:
+				_tick_pickup(delta)
 			else:
 				_tick_loose_chop(delta)
 		State.BUILD:
@@ -518,6 +538,8 @@ func _best_safe_pile() -> WoodPile:
 			continue   # too far to be worth fetching over chopping
 		if _enemies_near(pile.position, WOOD_ENEMY_RADIUS):
 			continue   # guarded by enemies -> chop a tree instead
+		if nav_grid != null and not nav_grid.same_island(position, pile.position):
+			continue   # beeline-near but unreachable (below a cliff)
 		var d: float = pf.distance_squared_to(worker)
 		if d < best_d:
 			best_d = d
@@ -551,6 +573,8 @@ func _nearest_claimable_tree(require_safe: bool) -> TreeResource:
 			continue
 		if require_safe and _enemies_near(tree.position, WOOD_ENEMY_RADIUS):
 			continue
+		if nav_grid != null and not nav_grid.same_island(position, tree.position):
+			continue   # beeline-near but unreachable (below a cliff)
 		best_d = d
 		best = tree
 	return best
@@ -735,6 +759,8 @@ func _tick_loose_chop(delta: float) -> void:
 
 func _start_loose_deliver() -> void:
 	task = Task.DELIVER
+	_loose_deliver_goal = Vector3.INF
+	_loose_deliver_recheck = 0.0
 	_set_working(false)
 	_reset_seek()
 
@@ -745,21 +771,34 @@ func _tick_loose_deliver(delta: float) -> void:
 		if not _next_loose_tree():
 			_stop_all()
 		return
-	var building: Building = _nearest_own_building()
-	if building == null:
-		# No building anywhere: drop the wood on the spot (old behaviour).
-		if wood_pile_manager != null:
-			wood_pile_manager.deposit(position, carried_wood)
-			carried_wood = 0
-		task = Task.CHOP
-		if not _next_loose_tree():
-			_stop_all()
-		return
-	if not _seek(_loose_drop_target(building), DELIVER_RANGE, delta, true):
+	# The drop target is picked ONCE per delivery and only re-evaluated on a
+	# slow cadence with hysteresis. Recomputing building+pile every tick
+	# flip-flopped between near-equidistant targets: the brave replanned each
+	# tick and spun on the spot without moving (user bug report).
+	_loose_deliver_recheck -= delta
+	if _loose_deliver_goal == Vector3.INF or _loose_deliver_recheck <= 0.0:
+		_loose_deliver_recheck = 1.5
+		var building: Building = _nearest_own_building()
+		if building == null:
+			# No building anywhere: drop the wood on the spot (old behaviour).
+			if wood_pile_manager != null:
+				wood_pile_manager.deposit(position, carried_wood)
+				carried_wood = 0
+			task = Task.CHOP
+			if not _next_loose_tree():
+				_stop_all()
+			return
+		var goal: Vector3 = _loose_drop_target(building)
+		# Switch only when the fresh target is clearly (2 m) closer.
+		if _loose_deliver_goal == Vector3.INF \
+				or _flat_dist(position, goal) + 2.0 < _flat_dist(position, _loose_deliver_goal):
+			_loose_deliver_goal = goal
+	if not _seek(_loose_deliver_goal, DELIVER_RANGE, delta, true):
 		return
 	if wood_pile_manager != null:
 		wood_pile_manager.deposit(position, carried_wood)
 		carried_wood = 0
+	_loose_deliver_goal = Vector3.INF
 	task = Task.CHOP
 	if not _next_loose_tree():
 		_stop_all()
@@ -789,9 +828,12 @@ func _nearest_own_building() -> Building:
 		if not is_instance_valid(building):
 			continue
 		var d: float = Vector2(building.position.x, building.position.z).distance_squared_to(flat)
-		if d < best_dist:
-			best_dist = d
-			best = building
+		if d >= best_dist:
+			continue
+		if nav_grid != null and not nav_grid.same_island(position, building.delivery_point()):
+			continue   # beeline-near but unreachable (below a cliff)
+		best_dist = d
+		best = building
 	return best
 
 
