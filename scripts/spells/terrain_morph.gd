@@ -61,14 +61,16 @@ func tick(delta: float) -> void:
 
 ## Keeps everything on the moving ground: units (idle ones never re-snap
 ## their Y on their own), trees and wood piles inside the rect follow the
-## surface, buildings re-seat on their footprint centre. Airborne (thrown)
-## units keep flying.
+## surface, buildings re-seat on their footprint centre. Airborne units
+## (thrown/whirled or riding an airship deck) and airships themselves keep
+## flying — the airship runs its own soft altitude model and must never be
+## yanked to the ground while the terrain reshapes beneath it.
 func _snap_props() -> void:
 	var td: TerrainData = ctx.terrain_data
 	var grown: Rect2i = _rect.grow(1)
 	if ctx.unit_manager != null:
 		for u in ctx.unit_manager.units:
-			if not is_instance_valid(u) or u.state == Unit.State.THROWN:
+			if not is_instance_valid(u) or u.is_airborne() or u is Airship:
 				continue
 			if grown.has_point(_world_cell(u.position)):
 				u.position.y = td.get_height(u.position.x, u.position.z)
