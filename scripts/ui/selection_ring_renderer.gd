@@ -52,10 +52,14 @@ func _process(_delta: float) -> void:
 		if not unit.selected:
 			continue
 		# Per-unit ring size via the instance scale (siege engine: one big
-		# ring around vehicle + crew, phase 7f).
-		var s: float = unit.selection_ring_scale()
+		# ring around vehicle + crew, phase 7f). Non-circular rings (airship
+		# deck) scale per axis and rotate to the unit's facing.
+		var ext: Vector2 = unit.selection_ring_extents()
+		var basis: Basis = Basis.IDENTITY
+		if unit.selection_ring_oriented() and unit.facing.length_squared() > 0.000001:
+			basis = Basis(Vector3.UP, atan2(unit.facing.x, unit.facing.z))
+		basis = basis.scaled(Vector3(ext.x, 1.0, ext.y))
 		_multimesh.set_instance_transform(count, Transform3D(
-			Basis.IDENTITY.scaled(Vector3(s, 1.0, s)),
-			unit.position + Vector3(0.0, RING_HEIGHT, 0.0)))
+			basis, unit.position + Vector3(0.0, RING_HEIGHT, 0.0)))
 		count += 1
 	_multimesh.visible_instance_count = count

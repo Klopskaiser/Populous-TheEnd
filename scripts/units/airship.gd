@@ -98,9 +98,40 @@ func crew_rides_on_deck() -> bool:
 
 
 ## The whole balloon + gondola is clickable (user feedback: the default
-## sprite-sized pick rect made the high-hovering ship fiddly to select).
+## sprite-sized pick rect made the high-hovering ship fiddly to select). The
+## screen rect is actually built from pick_world_points() below (deck corners),
+## so it follows the deck's rotation; this stays as a floor size.
 func pick_size_m() -> Vector2:
 	return Vector2(6.0, 3.5)
+
+
+## Deck-corner (and balloon) world points so the pick rect frames the actual
+## rotating platform — clicks on the deck CORNERS select / target the ship at
+## any heading (user request). Deck is 1.6 m wide x 3.6 m long at DECK_Y.
+func pick_world_points() -> PackedVector3Array:
+	var forward: Vector3 = facing.normalized() if facing.length_squared() > 0.000001 \
+		else Vector3(0, 0, 1)
+	var right: Vector3 = Vector3(-forward.z, 0.0, forward.x)
+	var half_w: float = 1.1   # a touch beyond the 1.6 m deck for easy corner hits
+	var half_l: float = 2.1   # a touch beyond the 3.6 m deck
+	var deck: Vector3 = position + Vector3(0.0, DECK_Y, 0.0)
+	var pts: PackedVector3Array = PackedVector3Array()
+	for sl in [-half_l, half_l]:
+		for sw in [-half_w, half_w]:
+			pts.append(deck + forward * sl + right * sw)
+	# Balloon top so the whole silhouette (not just the deck) stays clickable.
+	pts.append(position + Vector3(0.0, 4.3, 0.0))
+	return pts
+
+
+## An elongated ring framing the rectangular deck, aligned to the heading
+## (base torus radius 0.34: x ~1.1 m half-width, z ~2.0 m half-length).
+func selection_ring_extents() -> Vector2:
+	return Vector2(3.3, 6.0)
+
+
+func selection_ring_oriented() -> bool:
+	return true
 
 
 ## The airship itself never attacks — its CREW does (deck combat tick), so

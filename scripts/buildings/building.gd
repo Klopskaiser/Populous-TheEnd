@@ -168,6 +168,11 @@ var _selection_ring: MeshInstance3D = null
 var _rally_marker: Node3D = null
 var _overlay_sprite: Sprite3D = null
 var _overlay_progress: float = -1.0
+## Crew-pip overlay (world-space, below the production bar), shown on
+## select/hover for every building that reports a crew capacity (all except the
+## watchtower — see crew_display_capacity).
+var _crew_sprite: Sprite3D = null
+var _crew_shown: int = -1
 var _flatten_remaining: Dictionary[Vector2i, bool] = {}
 var _flatten_claims: Dictionary[Vector2i, int] = {}
 var _dirty: Rect2i = Rect2i()
@@ -347,6 +352,7 @@ func tick(delta: float) -> void:
 		if is_usable() and raiders.is_empty():
 			_tick_active(delta)
 	_update_overlay()
+	_update_crew_overlay()
 	_update_rally_marker()
 
 
@@ -866,6 +872,17 @@ func _create_overlay() -> void:
 	_overlay_sprite.position.y = OVERLAY_Y
 	_overlay_sprite.visible = false
 	add_child(_overlay_sprite)
+	# Crew-pip overlay just below the production bar (all crew buildings).
+	_crew_sprite = Sprite3D.new()
+	_crew_sprite.name = "CrewPips"
+	_crew_sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	_crew_sprite.shaded = false
+	_crew_sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	_crew_sprite.set_draw_flag(SpriteBase3D.FLAG_DISABLE_DEPTH_TEST, true)
+	_crew_sprite.pixel_size = 0.07
+	_crew_sprite.position.y = OVERLAY_Y - 0.6
+	_crew_sprite.visible = false
+	add_child(_crew_sprite)
 
 
 ## Shows a progress bar above the building — only while it is selected or
@@ -885,6 +902,50 @@ func _update_overlay() -> void:
 		return
 	_overlay_progress = p
 	_overlay_sprite.texture = _make_bar_texture(p)
+
+
+## Crew occupancy shown as pips on select/hover (hut pattern, generalised to
+## every crew building; the watchtower opts out via crew_display_capacity 0).
+func _update_crew_overlay() -> void:
+	if _crew_sprite == null:
+		return
+	var cap: int = crew_display_capacity()
+	if cap <= 0 or not (selected or hovered) or not is_usable():
+		if _crew_sprite.visible:
+			_crew_sprite.visible = false
+		_crew_shown = -1
+		return
+	_crew_sprite.visible = true
+	var n: int = crew_display_filled()
+	if n == _crew_shown:
+		return
+	_crew_shown = n
+	_crew_sprite.texture = _make_crew_texture(n, cap)
+
+
+## Crew-pip capacity for the hover overlay. Default 0 = no crew pips (wood
+## depot, reincarnation site, AND the watchtower, which opts out by design).
+## Crew buildings override this and crew_display_filled().
+func crew_display_capacity() -> int:
+	return 0
+
+
+func crew_display_filled() -> int:
+	return 0
+
+
+## One square pip per slot: gold = occupied, dark = free.
+static func _make_crew_texture(filled: int, capacity: int) -> ImageTexture:
+	var pip: int = 6
+	var gap: int = 2
+	var cap: int = maxi(capacity, 1)
+	var w: int = cap * pip + (cap - 1) * gap
+	var img: Image = Image.create_empty(w, pip, false, Image.FORMAT_RGBA8)
+	for i in cap:
+		var color: Color = Color(0.85, 0.68, 0.30) if i < filled \
+			else Color(0.09, 0.06, 0.03, 0.9)
+		img.fill_rect(Rect2i(i * (pip + gap), 0, pip, pip), color)
+	return ImageTexture.create_from_image(img)
 
 
 ## Dark bar background with a gold fill proportional to progress.

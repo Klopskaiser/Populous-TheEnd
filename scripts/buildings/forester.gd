@@ -60,6 +60,16 @@ func housing_capacity() -> int:
 	return 0
 
 
+## Hover crew pips: the four worker slots.
+func crew_display_capacity() -> int:
+	return WORKER_SLOTS
+
+
+func crew_display_filled() -> int:
+	_prune_occupants()
+	return occupants.size()
+
+
 # --- Worker slots -------------------------------------------------------------
 
 func has_free_slot() -> bool:

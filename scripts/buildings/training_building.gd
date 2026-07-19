@@ -42,6 +42,15 @@ func housing_capacity() -> int:
 	return 0
 
 
+## Hover crew pips: the single trainee bay (filled while someone trains).
+func crew_display_capacity() -> int:
+	return 1
+
+
+func crew_display_filled() -> int:
+	return 1 if is_instance_valid(trainee) else 0
+
+
 ## A trainee inside is a storm occupant (thrown out when the storm begins).
 func has_occupants() -> bool:
 	return is_instance_valid(trainee)

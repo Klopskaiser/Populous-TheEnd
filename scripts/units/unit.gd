@@ -518,12 +518,33 @@ func selection_ring_scale() -> float:
 	return 1.0
 
 
+## Per-axis ring scale (x = width across facing, z = length along facing). The
+## default is the uniform selection_ring_scale() (a circle); the airship
+## overrides this with an elongated pair to frame its rectangular deck.
+func selection_ring_extents() -> Vector2:
+	var s: float = selection_ring_scale()
+	return Vector2(s, s)
+
+
+## When true the selection ring is rotated to the unit's facing (needed for a
+## non-circular ring to line up with the hull); circular rings ignore it.
+func selection_ring_oriented() -> bool:
+	return false
+
+
 ## World-space clickable size (width x height, metres) for the screen-space
 ## pick rect (SelectionManager). ZERO means "the default billboard sprite
 ## size"; vehicles override this with their hull dimensions so their whole
 ## 3D model is clickable.
 func pick_size_m() -> Vector2:
 	return Vector2.ZERO
+
+
+## Optional world-space points whose screen projection bounds the pick rect —
+## used for a rotated/elongated hull (airship deck) so clicks on the deck
+## CORNERS register regardless of the ship's heading. Empty = use pick_size_m().
+func pick_world_points() -> PackedVector3Array:
+	return PackedVector3Array()
 
 
 ## Blinks a short-lived red ring at this unit's feet (2x on/off) — feedback

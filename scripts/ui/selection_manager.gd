@@ -320,6 +320,11 @@ func _box_select(rect: Rect2) -> void:
 ## whole 3D model is clickable (user feedback: the high-hovering airship was
 ## fiddly to hit with the sprite-sized rect).
 func _unit_screen_rect(unit: Unit, camera: Camera3D) -> Rect2:
+	# Hulls that rotate (airship deck) supply world points so the rect frames
+	# the actual oriented platform — clicks on the deck corners register.
+	var points: PackedVector3Array = unit.pick_world_points()
+	if not points.is_empty():
+		return _screen_rect_from_points(points, camera)
 	var size_m: Vector2 = unit.pick_size_m()
 	if size_m.y <= 0.0:
 		size_m = Vector2(SPRITE_HEIGHT_M * SPRITE_ASPECT, SPRITE_HEIGHT_M)
@@ -336,6 +341,25 @@ func _unit_screen_rect(unit: Unit, camera: Camera3D) -> Rect2:
 	var cx: float = (p_feet.x + p_head.x) * 0.5
 	var top: float = minf(p_feet.y, p_head.y)
 	return Rect2(cx - half_w, top, half_w * 2.0, height)
+
+
+## Screen-space bounding rect of a set of world points (all must be in front of
+## the camera). Empty rect if any point is behind. Clamped to a minimum size so
+## a tiny on-screen footprint stays clickable.
+func _screen_rect_from_points(points: PackedVector3Array, camera: Camera3D) -> Rect2:
+	var min_p: Vector2 = Vector2(INF, INF)
+	var max_p: Vector2 = Vector2(-INF, -INF)
+	for p in points:
+		if camera.is_position_behind(p):
+			return Rect2()
+		var sp: Vector2 = camera.unproject_position(p)
+		min_p = min_p.min(sp)
+		max_p = max_p.max(sp)
+	var size: Vector2 = max_p - min_p
+	var center: Vector2 = (min_p + max_p) * 0.5
+	size.x = maxf(size.x, MIN_PICK_SIZE_PX)
+	size.y = maxf(size.y, MIN_PICK_SIZE_PX)
+	return Rect2(center - size * 0.5, size)
 
 
 ## Nearest unit of `tribe_id` (or any ENEMY when negative) whose sprite rect

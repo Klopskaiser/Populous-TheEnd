@@ -22,8 +22,14 @@ class_name Workshop extends Building
 ## progress AND the consumed wood.
 ##
 ## While NOT producing, the workers keep the entrance stock topped up to
-## STOCK_TARGET; with no reachable wood the fetch stalls for
-## WOOD_RECHECK_INTERVAL (base Building wood_stalled mechanism).
+## stock_target() — enough wood for exactly ONE product (a siege engine's
+## worth); with no reachable wood the fetch stalls for WOOD_RECHECK_INTERVAL
+## (base Building wood_stalled mechanism).
+##
+## Wood ownership (user rule): entrance piles belong to the NEAREST workshop.
+## Another workshop may only absorb them while the owner is UNOCCUPIED — an
+## occupied workshop's stock is protected, so two adjacent workshops no longer
+## drain each other (stock_wood / the production take skip reserved piles).
 ##
 ## The finished catapult appears at the entrance; up to AUTO_CREW braves
 ## idling nearby board it automatically (one shot — nobody near means it
@@ -40,8 +46,6 @@ const WORKER_SLOTS: int = 3
 const WORK_PER_CATAPULT: float = Balance.WORKSHOP_WORK_PER_CATAPULT
 ## Wood consumed per catapult (taken from the entrance piles at start).
 const CATAPULT_WOOD: int = Balance.WORKSHOP_CATAPULT_WOOD
-## Stock the workers keep piled at the entrance while not producing.
-const STOCK_TARGET: int = 15
 ## A finished engine within this range of the entrance blocks the exit.
 const EXIT_CLEAR_RADIUS: float = 3.0
 ## Auto-manning: this many IDLE braves within AUTO_CREW_RADIUS board the
@@ -84,6 +88,17 @@ func housing_capacity() -> int:
 	return 0
 
 
+## Hover crew pips: the worker slots (occupants holding a slot). Inherited by
+## the fire-ram workshop and airship wharf via worker_slots().
+func crew_display_capacity() -> int:
+	return worker_slots()
+
+
+func crew_display_filled() -> int:
+	_prune_occupants()
+	return occupants.size()
+
+
 # --- Product hooks (overridden by the fire-ram workshop / airship wharf) -------------
 # GDScript cannot override constants, so the production loop reads these
 # virtual getters; the defaults preserve the catapult workshop exactly.
@@ -102,6 +117,13 @@ func work_per_product() -> float:
 
 func worker_slots() -> int:
 	return WORKER_SLOTS
+
+
+## Stock the workers keep bunkered at the entrance while idle: exactly one
+## product's worth of wood (user spec — "enough for one siege engine"). It is
+## consumed the moment production starts and then re-stocked.
+func stock_target() -> int:
+	return product_wood()
 
 
 ## True once the tribe owns as many vehicles of this workshop's kind as its
@@ -205,15 +227,50 @@ func _dispatch_fetch(brave: Brave) -> void:
 
 ## Wood lying in piles near the entrance — the visible stock. Nothing is
 ## absorbed into a buffer; the piles stay on the ground until production
-## consumes them.
+## consumes them. Piles reserved by an occupied neighbour workshop do NOT count
+## (they are that workshop's protected stock — user anti-theft rule).
 func stock_wood() -> int:
+	var total: int = 0
+	for pile in _available_stock_piles():
+		total += pile.amount
+	return total
+
+
+## Entrance-radius piles this workshop may actually use: skips those owned by
+## another OCCUPIED workshop (see _pile_reserved_by_peer).
+func _available_stock_piles() -> Array:
+	var out: Array = []
 	if wood_pile_manager == null:
-		return 0
-	return wood_pile_manager.wood_in_radius(delivery_point(), ABSORB_RADIUS)
+		return out
+	for pile in wood_pile_manager.piles_in_radius(delivery_point(), ABSORB_RADIUS):
+		if pile.amount > 0 and not _pile_reserved_by_peer(pile):
+			out.append(pile)
+	return out
+
+
+## True while an OCCUPIED other workshop owns this pile — it lies within that
+## workshop's absorb radius and that workshop is at least as near as we are.
+## Such piles are its protected production stock; only an unoccupied owner's
+## wood may be drained by a neighbour (user spec).
+func _pile_reserved_by_peer(pile) -> bool:
+	if unit_manager == null or unit_manager.building_manager == null:
+		return false
+	var flat: Vector2 = Vector2(pile.position.x, pile.position.z)
+	var my_d: float = Vector2(delivery_point().x, delivery_point().z).distance_to(flat)
+	for b in unit_manager.building_manager.buildings:
+		if b == self or not (b is Workshop) or not is_instance_valid(b):
+			continue
+		var ws: Workshop = b as Workshop
+		if not ws.has_occupants():
+			continue
+		var d: float = Vector2(ws.delivery_point().x, ws.delivery_point().z).distance_to(flat)
+		if d <= ABSORB_RADIUS and d <= my_d:
+			return true
+	return false
 
 
 ## True while the workers should fetch more stock wood (counting what they
-## already carry / have claimed on trees).
+## already carry / have claimed on trees). Target = one product's worth.
 func wants_more_stock_wood() -> bool:
 	if not is_usable():
 		return false
@@ -221,7 +278,7 @@ func wants_more_stock_wood() -> bool:
 	for b in occupants:
 		if is_instance_valid(b):
 			incoming += b.carried_wood + b.claimed_tree_yield()
-	return stock_wood() + incoming < STOCK_TARGET
+	return stock_wood() + incoming < stock_target()
 
 
 # --- Production ----------------------------------------------------------------------
@@ -265,9 +322,15 @@ func _tick_active(delta: float) -> void:
 	if inside >= 1 and can_start_production():
 		if wood_pile_manager == null:
 			return
-		var taken: int = wood_pile_manager.take_from_radius(
-			delivery_point(), ABSORB_RADIUS, product_wood())
-		if taken < product_wood():
+		# Drain only OUR (non-reserved) entrance piles, so we never consume a
+		# neighbour workshop's protected stock.
+		var need: int = product_wood()
+		var taken: int = 0
+		for pile in _available_stock_piles():
+			if taken >= need:
+				break
+			taken += wood_pile_manager.take_from_pile(pile, need - taken)
+		if taken < need:
 			# Race lost (someone absorbed the piles): put the rest back.
 			if taken > 0:
 				wood_pile_manager.deposit(delivery_point(), taken)

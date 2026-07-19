@@ -18,6 +18,7 @@ const SIEGE_SCENE: PackedScene = preload("res://scenes/units/siege_engine.tscn")
 const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
 const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
 const FIREWARRIOR_SCENE: PackedScene = preload("res://scenes/units/firewarrior.tscn")
+const PREACHER_SCENE: PackedScene = preload("res://scenes/units/preacher.tscn")
 
 
 func _flat_terrain(h: float = 5.0) -> TerrainData:
@@ -375,6 +376,36 @@ func test_ram_prefers_in_range_target_over_chase() -> void:
 	check(ram.attack_target == near,
 		"the ram swaps the out-of-range order for the enemy already in range")
 	check(not ram._target_ordered, "the swapped target is a normal auto target")
+	_free_world(w)
+
+
+## Regression (Spieltest 4): if the crew is pacified/converted away exactly as
+## a burst ends, active_crew_count() is 0 and the reload must NOT latch to INF —
+## otherwise the re-crewed ram could move but never fire again (user bug).
+func test_ram_fires_again_after_crew_converted() -> void:
+	var w: Dictionary = _make_world()
+	var ram: FireRam = _armed_ram(w)
+	var old_crew = ram.crew[0]
+	var preacher: Unit = w.unit_manager.spawn_unit(
+		PREACHER_SCENE, 1, ram.position + Vector3(0, 0, 6.0))
+	# Force a burst to end on the very tick the sole crew sits down (pacified).
+	ram._flame_time = 0.05
+	old_crew.begin_conversion(preacher, 5.0)
+	check(ram.active_crew_count() == 0, "the pacified crew no longer counts as active")
+	ram.tick(0.1)   # burst ends here with zero active crew
+	check(is_finite(ram._reload), "the reload never latches to INF (root of the bug)")
+	# The old crew is converted away; a fresh brave re-mans the ram.
+	old_crew.leave_crew()
+	_board_crew(w, ram)
+	var enemy: Unit = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, ram.position + Vector3(0, 0, 3.0))
+	ram.order_attack(enemy)
+	var fired: bool = false
+	for i in range(80):
+		enemy.position = ram.position + Vector3(0, 0, 3.0)
+		_tick_world(w)
+		fired = fired or ram._flame_time > 0.0
+	check(fired, "the re-crewed ram can fire again")
 	_free_world(w)
 
 

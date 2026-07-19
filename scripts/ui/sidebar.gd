@@ -804,7 +804,7 @@ func _crew_view(target: Object) -> Dictionary:
 		return {"members": rws.occupants, "cap": rws.worker_slots(),
 			"info": "Arbeiter: %d/%d   Vorrat: %d/%d   Feuerrammen: %d/%d" % [
 				rws.occupants.size(), rws.worker_slots(),
-				rws.stock_wood(), Workshop.STOCK_TARGET,
+				rws.stock_wood(), rws.stock_target(),
 				rws.tribe.owned_fire_ram_count() if rws.tribe != null else 0,
 				rws.tribe.max_fire_rams if rws.tribe != null else 0]}
 	if target is AirshipWharf:
@@ -812,7 +812,7 @@ func _crew_view(target: Object) -> Dictionary:
 		return {"members": aw.occupants, "cap": aw.worker_slots(),
 			"info": "Arbeiter: %d/%d   Vorrat: %d/%d   Luftschiffe: %d/%d" % [
 				aw.occupants.size(), aw.worker_slots(),
-				aw.stock_wood(), Workshop.STOCK_TARGET,
+				aw.stock_wood(), aw.stock_target(),
 				aw.tribe.owned_airship_count() if aw.tribe != null else 0,
 				aw.tribe.max_airships if aw.tribe != null else 0]}
 	if target is Workshop:
@@ -820,7 +820,7 @@ func _crew_view(target: Object) -> Dictionary:
 		return {"members": ws.occupants, "cap": ws.worker_slots(),
 			"info": "Arbeiter: %d/%d   Vorrat: %d/%d   Katapulte: %d/%d" % [
 				ws.occupants.size(), ws.worker_slots(),
-				ws.stock_wood(), Workshop.STOCK_TARGET,
+				ws.stock_wood(), ws.stock_target(),
 				ws.tribe.owned_catapult_count() if ws.tribe != null else 0,
 				ws.tribe.max_catapults if ws.tribe != null else 0]}
 	if target is Watchtower:

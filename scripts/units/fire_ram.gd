@@ -132,7 +132,12 @@ func tick(delta: float) -> void:
 			_flame_check = FLAME_CHECK_INTERVAL
 			_apply_flames()
 		if _flame_time <= 0.0:
-			_reload = flame_cooldown_for_crew(active_crew_count())
+			# Never store an INFINITE reload: if the crew was pacified/converted
+			# away exactly as the burst ended, active_crew_count() is 0 and
+			# flame_cooldown_for_crew would return INF, which maxf() could never
+			# decay — the ram would stay unable to fire even after re-crewing
+			# (user bug). Compute the reload as if at least a firing crew.
+			_reload = flame_cooldown_for_crew(maxi(active_crew_count(), MIN_FIRE_CREW))
 			_show_flame_cone(false)
 	super.tick(delta)
 

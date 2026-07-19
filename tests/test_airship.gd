@@ -547,9 +547,39 @@ func test_range_ring_and_pick_size() -> void:
 	var brave_probe: Brave = Brave.new()
 	check(brave_probe.pick_size_m() == Vector2.ZERO,
 		"foot units keep the default sprite pick size")
+	# Elongated, facing-oriented selection ring + deck-corner pick points.
+	check(ship.selection_ring_oriented(), "the airship ring aligns to its heading")
+	check(ship.selection_ring_extents().y > ship.selection_ring_extents().x,
+		"the ring is longer along the deck than across it")
+	check(ship.pick_world_points().size() >= 4,
+		"the airship exposes deck-corner pick points for corner clicks")
+	check(not brave_probe.selection_ring_oriented(),
+		"foot units keep the plain circular ring")
 	ship.free()
 	ram.free()
 	brave_probe.free()
+
+
+## Regression (Spieltest 4): deck passengers must not be shoved+Y-snapped to the
+## ground by the crowd separation when the ship passes over own ground units
+## (they used to flicker/vanish). rides_airborne() opts them out.
+func test_deck_passenger_survives_separation_over_ground_unit() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
+	var passenger: Unit = _board(w, ship, BRAVE_SCENE)
+	check(passenger.rides_airborne(), "the passenger rides airborne on the deck")
+	# Park an own ground unit exactly under the passenger's deck slot.
+	var ground: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 0,
+		Vector3(passenger.position.x, 0.0, passenger.position.z))
+	var min_y: float = INF
+	for i in range(40):
+		ground.position.x = passenger.position.x
+		ground.position.z = passenger.position.z
+		_tick_world(w)
+		min_y = minf(min_y, passenger.position.y)
+	check(min_y > 5.0 + Airship.FLY_HEIGHT * 0.5,
+		"the deck passenger stays at altitude (never snapped onto the ground unit)")
+	_free_world(w)
 
 
 func test_group_order_fills_free_slots_only() -> void:

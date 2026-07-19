@@ -5162,3 +5162,64 @@ schießen die Setz-Ticks es vorzeitig ab). `test_fire_ram.gd` +2 (Burst
 während der Fahrt, In-Range-Ziel schlägt Ordered-Chase). Suite: 2043/2043
 grün, Headless-Ladecheck ok. Optische Prüfung (Ballon-Feuer, Steig-/
 Sinkflug, Rammen-Verhalten im Gefecht) durch Nutzer ausstehend.
+
+## Spieltest-Fixes 4: Ramme-nach-Bekehrung, Deck-Flackern, Zeppelin-Ring/Pick, Werkstatt-Holz, Crew-Pips (2026-07-19, Nutzerreport)
+
+**1. Feuerramme feuerte nach Bekehrung der Crew nicht mehr** (`fire_ram.gd`):
+Wurde die Crew genau beim Burst-Ende pazifiziert/bekehrt, war `active_crew_count()`
+= 0, und `flame_cooldown_for_crew(0)` schrieb `_reload = INF` — das
+`maxf(_reload - delta, 0)` konnte INF nie abbauen, die neu bemannte Ramme fuhr,
+feuerte aber nie wieder. Fix: Burst-Ende berechnet den Reload mit
+`maxi(active_crew_count(), MIN_FIRE_CREW)` → immer endlich. Regressionstest
+`test_ram_fires_again_after_crew_converted`.
+
+**2. Deck-Passagiere des Luftschiffs flackerten** (`unit_manager.gd`): Die
+flache Crowd-Separation kannte „airborne" nicht und schob Deck-Passagiere
+zur Seite + snappte ihr Y für einen Frame auf die Terrainhöhe (sichtbar über
+eigenen Bodeneinheiten). Fix: `_apply_separation` überspringt
+`rides_airborne()`-Units — als bewegte Unit UND als `other`. Test
+`test_deck_passenger_survives_separation_over_ground_unit`.
+
+**3. Zeppelin-Auswahlring länglich + Ecken der Plattform klickbar**
+(`unit.gd`, `airship.gd`, `selection_ring_renderer.gd`, `selection_manager.gd`):
+- Neue Unit-Virtuals `selection_ring_extents() -> Vector2` (x quer/z längs,
+  Default = uniformer `selection_ring_scale()`) und `selection_ring_oriented()`
+  (Default false). Der Ring-Renderer skaliert jetzt pro Achse und rotiert bei
+  `oriented` zum `facing`. Airship: extents (3.3, 6.0), oriented — rahmt das
+  1.6×3.6-Deck.
+- Neue Virtual `pick_world_points() -> PackedVector3Array` (Default leer). Das
+  Airship liefert 4 Deck-Ecken (bei DECK_Y, facing-orientiert) + Ballonspitze;
+  `_unit_screen_rect` bildet daraus per neuer `_screen_rect_from_points` die
+  Bildschirm-Bounding-Box → Klicks auf die Deck-Ecken treffen bei jedem Heading.
+  Test in `test_range_ring_and_pick_size` erweitert.
+
+**4. Werkstätten klauten sich gegenseitig das Holz** (`workshop.gd`):
+Holzstapel gehören der nächstgelegenen Werkstatt; eine andere Werkstatt darf sie
+nur absaugen, wenn die Eigentümerin UNBESETZT ist (Nutzerregel). Neu:
+`_pile_reserved_by_peer()` (über `unit_manager.building_manager.buildings`),
+`_available_stock_piles()`; `stock_wood()` und der Produktionsstart-Take
+(`take_from_pile` je Pile statt `take_from_radius`) respektieren das. Test
+`test_occupied_workshop_wood_is_protected_from_neighbour`.
+
+**5. Werkstatt bunkert genau eine Belagerungswaffe** (`workshop.gd`,
+`sidebar.gd`): `const STOCK_TARGET = 15` entfernt, neu `stock_target()` =
+`product_wood()` (Katapult 6 / Ramme 4 / Luftschiff 8). Beim Arbeitsbeginn ist
+genug Holz da → sofort los; sonst wird genau eine Produktmenge herangeholt.
+Idle bunkert eine Produktmenge vor dem Tor. Sidebar-Vorratsanzeige nutzt
+`stock_target()`. Test `test_stock_target_is_one_product`.
+
+**6. Besatzungs-Pips bei Hover für alle Gebäude außer Turm** (`building.gd` +
+Gebäudeklassen): Das Crew-Pip-Overlay (bisher nur in `hut.gd`) ist in die
+Basis `Building` gezogen (`_crew_sprite`, `_update_crew_overlay`,
+`_make_crew_texture(filled, cap)`), gespeist von den Virtuals
+`crew_display_capacity()`/`crew_display_filled()` (Default 0 = keine Pips).
+Overrides: Hütte (Bemannung/4), Förster (Arbeiter/4), Werkstatt-Familie
+(Arbeiter/Slots), Trainingsgebäude (Trainee-Bay 0..1). Wachturm, Holzstation,
+Reinkarnationsplatz: kein Override → keine Pips (Turm-Ausschluss ist Vorgabe).
+Test `test_crew_display_capacities`.
+
+**Verifikation:** Neue Datei `tests/test_workshop.gd` (15 Checks) + je 1–3 neue
+Checks in `test_fire_ram`/`test_airship`. Volle Suite **2067/2067 grün** (30
+Dateien), Headless-Ladecheck ok. Optische Prüfung (Ring-Form, Deck-Ecken-Klick,
+Pips über allen Gebäuden, Rammen-Feuer nach Bekehrung, kein Deck-Flackern)
+durch Nutzer ausstehend.

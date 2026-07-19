@@ -306,57 +306,16 @@ func _spawn_brave() -> void:
 	_spawn_counter += 1
 
 
-# --- Crew overlay (world-space pips, phase UI cleanup) --------------------------
+# --- Crew overlay (world-space pips) -------------------------------------------
+# The pip overlay itself lives in Building (all crew buildings share it); the
+# hut just reports its manning to it.
 
-## Second overlay sprite below the production bar: one pip per crew slot
-## (filled = manned), shown while selected/hovered so the player sees the
-## hut's crew without opening the crew tab.
-var _crew_sprite: Sprite3D = null
-var _crew_shown: int = -1
-
-
-func _create_overlay() -> void:
-	super._create_overlay()
-	_crew_sprite = Sprite3D.new()
-	_crew_sprite.name = "CrewPips"
-	_crew_sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	_crew_sprite.shaded = false
-	_crew_sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
-	_crew_sprite.set_draw_flag(SpriteBase3D.FLAG_DISABLE_DEPTH_TEST, true)
-	_crew_sprite.pixel_size = 0.07
-	_crew_sprite.position.y = OVERLAY_Y - 0.6
-	_crew_sprite.visible = false
-	add_child(_crew_sprite)
+func crew_display_capacity() -> int:
+	return CREW_CAPACITY
 
 
-func _update_overlay() -> void:
-	super._update_overlay()
-	if _crew_sprite == null:
-		return
-	if not (selected or hovered) or not is_usable():
-		if _crew_sprite.visible:
-			_crew_sprite.visible = false
-		_crew_shown = -1
-		return
-	_crew_sprite.visible = true
-	var n: int = crew_count()
-	if n == _crew_shown:
-		return
-	_crew_shown = n
-	_crew_sprite.texture = _make_crew_texture(n)
-
-
-## One square pip per crew slot: gold = manned, dark = free.
-static func _make_crew_texture(filled: int) -> ImageTexture:
-	var pip: int = 6
-	var gap: int = 2
-	var w: int = CREW_CAPACITY * pip + (CREW_CAPACITY - 1) * gap
-	var img: Image = Image.create_empty(w, pip, false, Image.FORMAT_RGBA8)
-	for i in CREW_CAPACITY:
-		var color: Color = Color(0.85, 0.68, 0.30) if i < filled \
-			else Color(0.09, 0.06, 0.03, 0.9)
-		img.fill_rect(Rect2i(i * (pip + gap), 0, pip, pip), color)
-	return ImageTexture.create_from_image(img)
+func crew_display_filled() -> int:
+	return crew_count()
 
 
 func asset_kind() -> StringName:
