@@ -38,6 +38,47 @@ assets/
     └── ui/select_unit.ogg, select_building.ogg, click.ogg
 ```
 
+## Beispiele: konkrete Dateibäume
+
+Drei kopierfertige Beispiele — je eine Asset-Art: **Gebäudemodell** (Hütte),
+**Einheiten-Sprites** (Brave), **Zaubereffekt** (Wirbelsturm). Details zu den einzelnen
+Regeln stehen weiter unten in den jeweiligen Abschnitten.
+
+**1. Hütte — 3D-Gebäudemodell**
+
+```
+assets/models/buildings/
+└── hut.glb                     ← Basismodell, Footprint 4×4, Eingang → +Z
+
+assets/textures/buildings/      ← alles optional (Textur-Tausch auf hut.glb)
+├── hut_build1.png … hut_build4.png   ← 4 Baustadien
+└── hut_stage1.png … hut_stage3.png   ← Zerstörung ab 30 / 60 / 90 %
+```
+
+Ohne die Texturen: Bauen = Wachsen aus dem Boden, Schaden = prozedurale Bruchstücke.
+
+**2. Brave — Einheiten-Sprites**
+
+```
+assets/units/brave/
+├── manifest.json               ← Pflicht bei Sheets (frame_width/-height)
+├── idle.png  walk.png  attack.png
+├── carry.png carry_walk.png    ← Brave trägt Holz
+├── dead.png
+└── walk_mask.png               ← optional: Stammesfarben-Maske je Sheet
+```
+
+Einzelne Sheets reichen; fehlende Animationen bleiben Platzhalter.
+
+**3. Wirbelsturm — Zaubereffekt**
+
+```
+assets/audio/sfx/
+└── spell_tornado.ogg           ← Wirk-Sound (einziges austauschbares Asset)
+```
+
+Der Wirbel selbst wird **prozedural** gezeichnet — kein Modell/Sprite nötig.
+
 ## Einheiten-Spritesheets
 
 **Die Einheit bestimmt der Ordner, die Animation der Dateiname:**
