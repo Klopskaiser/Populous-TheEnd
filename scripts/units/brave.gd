@@ -102,6 +102,12 @@ var _loose_return_pos: Vector3 = Vector3.INF
 ## hysteresis — per-tick re-picking made carrying braves spin in place).
 var _loose_deliver_goal: Vector3 = Vector3.INF
 var _loose_deliver_recheck: float = 0.0
+## Building the cached drop target belongs to (wood is stored INTO a depot).
+var _loose_deliver_building: Building = null
+## Depot haul (right-click on a wood depot / pile relay): fixed target depot;
+## `_haul_source` additionally set for the depot->depot pendulum loop.
+var _haul_source: WoodDepot = null
+var _haul_target: WoodDepot = null
 
 
 func _init() -> void:
@@ -170,6 +176,26 @@ func order_pickup(pile: WoodPile) -> void:
 		return
 	_interrupt_tasks()
 	task_pile = pile
+	task = Task.PICKUP
+	_loose_return_pos = Vector3.INF
+	_set_state(State.GATHER)
+
+
+## Haul order (right-click on a wood depot): carry its stock to the nearest
+## OTHER depot in a pendulum loop. Without a second depot (or with an empty
+## source) the brave just walks there — a plain move (user decision).
+func order_depot_haul(depot: WoodDepot) -> void:
+	if not can_take_orders():
+		return
+	if depot == null or not is_instance_valid(depot) or not depot.is_usable():
+		return
+	var target: WoodDepot = _nearest_depot(depot.position, depot)
+	if target == null or depot.stored_wood() <= 0:
+		order_move(depot.center_world())
+		return
+	_interrupt_tasks()
+	_haul_source = depot
+	_haul_target = target
 	task = Task.PICKUP
 	_loose_return_pos = Vector3.INF
 	_set_state(State.GATHER)
@@ -645,16 +671,53 @@ func _tick_job_chop(delta: float) -> void:
 
 
 func _tick_pickup(delta: float) -> void:
+	if _haul_source != null:
+		_tick_haul_pickup(delta)
+		return
 	if task_pile == null or not is_instance_valid(task_pile) or task_pile.amount <= 0:
 		task_pile = null
 		_end_subtask(TASK_RETRY)
 		return
 	if not _seek(task_pile.position, PICKUP_RANGE, delta):
 		return
+	var pile_pos: Vector3 = task_pile.position
 	carried_wood += wood_pile_manager.take_from_pile(task_pile, CARRY_CAPACITY - carried_wood)
 	task_pile = null
+	# Manual pickup of a pile that already lies at a friendly building: relay
+	# the wood to the nearest wood depot instead (skipping depots that already
+	# "own" this spot), if one exists — otherwise deliver as before.
+	if state == State.GATHER and job == null and carried_wood > 0 \
+			and _pile_near_friendly_building(pile_pos):
+		var depot: WoodDepot = _nearest_depot(pile_pos, null, pile_pos)
+		if depot != null:
+			_haul_target = depot
+			_start_loose_deliver()
+			return
 	task = Task.DELIVER if carried_wood > 0 else Task.NONE
 	_reset_seek()
+
+
+## Depot->depot haul: fetch a load from the source depot's rack, then deliver
+## it via the loose-deliver path (fixed `_haul_target`).
+func _tick_haul_pickup(delta: float) -> void:
+	if not _haul_valid() or not is_instance_valid(_haul_source) \
+			or _haul_source.stored_wood() <= 0:
+		_stop_all()
+		return
+	if not _seek(_haul_source.delivery_point(), DELIVER_RANGE, delta, true):
+		return
+	carried_wood += _haul_source.take_stored(CARRY_CAPACITY - carried_wood)
+	if carried_wood <= 0:
+		_stop_all()
+		return
+	_start_loose_deliver()
+
+
+func _haul_valid() -> bool:
+	return _haul_source != null and is_instance_valid(_haul_source) \
+		and _haul_source.is_usable() and _haul_target != null \
+		and is_instance_valid(_haul_target) and _haul_target.is_usable() \
+		and _haul_target.storage_left() > 0
 
 
 func _tick_deliver(delta: float) -> void:
@@ -772,6 +835,7 @@ func _start_loose_deliver() -> void:
 	task = Task.DELIVER
 	_loose_deliver_goal = Vector3.INF
 	_loose_deliver_recheck = 0.0
+	_loose_deliver_building = null
 	_set_working(false)
 	_reset_seek()
 
@@ -789,27 +853,58 @@ func _tick_loose_deliver(delta: float) -> void:
 	_loose_deliver_recheck -= delta
 	if _loose_deliver_goal == Vector3.INF or _loose_deliver_recheck <= 0.0:
 		_loose_deliver_recheck = 1.5
-		var building: Building = _nearest_own_building()
-		if building == null:
-			# No building anywhere: drop the wood on the spot (old behaviour).
-			if wood_pile_manager != null:
-				wood_pile_manager.deposit(position, carried_wood)
-				carried_wood = 0
-			task = Task.CHOP
-			if not _next_loose_tree():
-				_stop_all()
-			return
-		var goal: Vector3 = _loose_drop_target(building)
-		# Switch only when the fresh target is clearly (2 m) closer.
-		if _loose_deliver_goal == Vector3.INF \
-				or _flat_dist(position, goal) + 2.0 < _flat_dist(position, _loose_deliver_goal):
-			_loose_deliver_goal = goal
+		if _haul_target != null and is_instance_valid(_haul_target) \
+				and _haul_target.is_usable() and _haul_target.storage_left() > 0:
+			# Fixed depot target (pile relay / depot haul): no nearest-building
+			# re-pick — the wood goes into exactly this rack.
+			_loose_deliver_goal = _haul_target.delivery_point()
+			_loose_deliver_building = _haul_target
+		else:
+			if _haul_target != null:
+				# Target depot vanished/filled up: drop the fixed target (and
+				# any haul loop) and deliver like normal loose wood.
+				_haul_target = null
+				_haul_source = null
+				_loose_deliver_goal = Vector3.INF
+			var building: Building = _nearest_own_building()
+			if building == null:
+				# No building anywhere: drop the wood on the spot (old behaviour).
+				if wood_pile_manager != null:
+					wood_pile_manager.deposit(position, carried_wood)
+					carried_wood = 0
+				task = Task.CHOP
+				if not _next_loose_tree():
+					_stop_all()
+				return
+			var goal: Vector3 = _loose_drop_target(building)
+			# Switch only when the fresh target is clearly (2 m) closer.
+			if _loose_deliver_goal == Vector3.INF \
+					or _flat_dist(position, goal) + 2.0 < _flat_dist(position, _loose_deliver_goal):
+				_loose_deliver_goal = goal
+				_loose_deliver_building = building
 	if not _seek(_loose_deliver_goal, DELIVER_RANGE, delta, true):
 		return
 	if wood_pile_manager != null:
-		wood_pile_manager.deposit(position, carried_wood)
+		# Deliver INTO a wood depot's rack first; leftovers (rack full) and
+		# non-depot targets drop as a normal ground pile.
+		if _loose_deliver_building is WoodDepot \
+				and is_instance_valid(_loose_deliver_building):
+			carried_wood -= (_loose_deliver_building as WoodDepot).store_wood(carried_wood)
+		if carried_wood > 0:
+			wood_pile_manager.deposit(position, carried_wood)
 		carried_wood = 0
 	_loose_deliver_goal = Vector3.INF
+	_loose_deliver_building = null
+	if _haul_source != null:
+		# Depot->depot pendulum: keep hauling until the source runs dry or the
+		# target fills up, then rest at the target.
+		if _haul_valid() and _haul_source.stored_wood() > 0:
+			task = Task.PICKUP
+			_reset_seek()
+		else:
+			_stop_all()
+		return
+	_haul_target = null
 	task = Task.CHOP
 	if not _next_loose_tree():
 		_stop_all()
@@ -846,6 +941,52 @@ func _nearest_own_building() -> Building:
 		best_dist = d
 		best = building
 	return best
+
+
+## Nearest own, usable wood depot with free storage. `exclude` skips a specific
+## depot (haul source); with `exclude_near` set, depots whose footprint lies
+## within ABSORB_RADIUS of that spot are skipped too (relaying a pile to a
+## depot that already "owns" it would be a no-op walk).
+func _nearest_depot(from: Vector3, exclude: WoodDepot = null,
+		exclude_near: Vector3 = Vector3.INF) -> WoodDepot:
+	if tribe == null:
+		return null
+	var best: WoodDepot = null
+	var best_dist: float = INF
+	var flat: Vector2 = Vector2(from.x, from.z)
+	for building in tribe.buildings:
+		if building == exclude or not is_instance_valid(building):
+			continue
+		if not (building is WoodDepot) or not building.is_usable():
+			continue
+		var depot: WoodDepot = building as WoodDepot
+		if depot.storage_left() <= 0:
+			continue
+		if exclude_near != Vector3.INF and depot.footprint_distance_to(
+				Vector2(exclude_near.x, exclude_near.z)) <= Building.ABSORB_RADIUS:
+			continue
+		var d: float = Vector2(depot.position.x, depot.position.z).distance_squared_to(flat)
+		if d >= best_dist:
+			continue
+		if nav_grid != null and not nav_grid.same_island(position, depot.delivery_point()):
+			continue
+		best_dist = d
+		best = depot
+	return best
+
+
+## Whether `pos` lies at a friendly building (within ABSORB_RADIUS of any own
+## building's footprint) — such wood is already "delivered".
+func _pile_near_friendly_building(pos: Vector3) -> bool:
+	if tribe == null:
+		return false
+	var flat: Vector2 = Vector2(pos.x, pos.z)
+	for building in tribe.buildings:
+		if not is_instance_valid(building):
+			continue
+		if building.footprint_distance_to(flat) <= Building.ABSORB_RADIUS:
+			return true
+	return false
 
 
 ## Next tree near the current chopping spot (after a delivery the brave
@@ -965,6 +1106,9 @@ func _interrupt_tasks() -> void:
 	_plant_target = Vector3.INF
 	hop_visual = false
 	_loose_return_pos = Vector3.INF
+	_loose_deliver_building = null
+	_haul_source = null
+	_haul_target = null
 	_set_working(false)
 	if carried_wood > 0 and wood_pile_manager != null:
 		wood_pile_manager.deposit(position, carried_wood)

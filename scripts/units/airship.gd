@@ -77,6 +77,8 @@ func _init() -> void:
 	# vehicles; overlapping airships are accepted (open tuning).
 	vehicle_separation = 0.0
 	vehicle_ring_scale = 5.0
+	# Passengers stand well inside the 1.6 m wide gondola deck.
+	crew_side_offset = 0.55
 
 
 func unit_kind() -> StringName:
@@ -357,7 +359,6 @@ func explode() -> void:
 	_convert_state.clear()
 	attack_building = null
 	_ordered_unit = null
-	_show_flame(false)
 	_show_smoke(false)
 	if _model != null:
 		_model.visible = false

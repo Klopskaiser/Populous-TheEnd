@@ -60,9 +60,11 @@ func test_passive_move_ignores_enemies() -> void:
 	var w: Dictionary = _make_world()
 	var mover: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 1,
 		w.nav.cell_to_world(Vector2i(60, 60)))
-	# Passive enemy bystander well inside the 8 m aggro radius (a brave at
-	# 4 m: outside ITS 3 m idle radius, so it stays put).
-	w.unit_manager.spawn_unit(BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(64, 60)))
+	# Passive enemy bystander well inside the 8 m aggro radius but 4 m OFF the
+	# march route: it must stay outside ITS OWN 3 m idle radius for the whole
+	# walk (on-route it would idle-aggro the passing mover and the RNG brawl
+	# made this test flaky), so it stays put.
+	w.unit_manager.spawn_unit(BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(64, 64)))
 	mover.order_move(w.nav.cell_to_world(Vector2i(80, 60)), false, false)
 	_run_ticks(w, w.unit_manager.units, 1.2)
 	check(mover.state == Unit.State.MOVE,

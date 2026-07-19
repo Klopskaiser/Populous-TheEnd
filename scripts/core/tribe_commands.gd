@@ -315,6 +315,23 @@ func order_workshop(units: Array[Unit], workshop: Workshop) -> void:
 		order_move(movers, workshop.center_world())
 
 
+## Sends braves to haul a wood depot's stock to the nearest other depot;
+## non-braves just walk there. Without a second depot the braves plain-move.
+func order_depot_haul(units: Array[Unit], depot: WoodDepot) -> void:
+	if depot == null or not is_instance_valid(depot) or not depot.is_usable():
+		return
+	var movers: Array[Unit] = []
+	for unit in units:
+		if unit.state == Unit.State.DEAD:
+			continue
+		if unit is Brave and unit.tribe_id == depot.tribe_id:
+			(unit as Brave).order_depot_haul(depot)
+		else:
+			movers.append(unit)
+	if not movers.is_empty():
+		order_move(movers, depot.center_world())
+
+
 ## Garrisons an own watchtower with the selected combat units / shaman (phase
 ## 7h): each walks to the entrance and enters up to the 2 crew slots; braves and
 ## overflow units are ignored. The tower validates tribe/capacity/usability.

@@ -112,6 +112,8 @@ static func icon(key: StringName) -> ImageTexture:
 			_draw_airship(img)
 		&"watchtower":
 			_draw_watchtower(img)
+		&"wood_depot":
+			_draw_wood_depot(img)
 		&"lightning":
 			_draw_lightning(img)
 		&"swarm":
@@ -255,6 +257,21 @@ static func _draw_watchtower(img: Image) -> void:
 	_rect(img, 11, 3, 2, 2, I_GOLD)
 	_rect(img, 15, 3, 2, 2, I_GOLD)
 	_rect(img, 10, 14, 4, 6, I_DARK)      # doorway
+
+
+static func _draw_wood_depot(img: Image) -> void:
+	# Log rack: a flat base with two corner posts and stacked logs on top
+	# (log colours match the wood-pile sprite).
+	const C_LOG: Color = Color(0.55, 0.36, 0.2)
+	const C_LOG_END: Color = Color(0.35, 0.22, 0.1)
+	_rect(img, 3, 18, 18, 3, I_DARK)          # base
+	_rect(img, 4, 8, 2, 10, I_GOLD)           # left post
+	_rect(img, 18, 8, 2, 10, I_GOLD)          # right post
+	for row in range(3):                      # 3 stacked log rows
+		var y: int = 15 - row * 3
+		_rect(img, 6, y, 12, 3, C_LOG)
+		_rect(img, 6, y, 1, 3, C_LOG_END)
+		_rect(img, 17, y, 1, 3, C_LOG_END)
 
 
 static func _draw_seedling(img: Image) -> void:

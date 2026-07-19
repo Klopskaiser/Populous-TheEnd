@@ -115,6 +115,17 @@ func is_burning() -> bool:
 	return _burn_time > 0.0
 
 
+## Flame size for the shared StatusFxRenderer billboard; scale.y already
+## carries growth stage x burn shrink, so the flame shrinks with the tree.
+func burn_fx_scale() -> float:
+	return maxf(2.2 * scale.y, 0.5)
+
+
+## Flame anchor at the (shrinking) crown centre.
+func burn_fx_height() -> float:
+	return maxf(1.9 * scale.y, 0.3)
+
+
 ## Sets the tree alight (fireball, firestorm, lightning, lava). It stops being
 ## harvestable at once (claimers drop), plays a short burn and is then destroyed
 ## by the TreeManager (no wood). Re-igniting an already burning tree does nothing.

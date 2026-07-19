@@ -51,6 +51,7 @@ const WORKSHOP_SCENE: PackedScene = preload("res://scenes/buildings/workshop.tsc
 const FIRERAM_WORKSHOP_SCENE: PackedScene = preload("res://scenes/buildings/fire_ram_workshop.tscn")
 const AIRSHIP_WHARF_SCENE: PackedScene = preload("res://scenes/buildings/airship_wharf.tscn")
 const WATCHTOWER_SCENE: PackedScene = preload("res://scenes/buildings/watchtower.tscn")
+const WOOD_DEPOT_SCENE: PackedScene = preload("res://scenes/buildings/wood_depot.tscn")
 
 # --- Injected references (setup) --------------------------------------------
 var _tribes: Array[Tribe] = []
@@ -176,6 +177,8 @@ static func default_build_entries() -> Array[Dictionary]:
 			"enabled": true},
 		{"id": &"watchtower", "name": "Wachturm", "scene": WATCHTOWER_SCENE,
 			"icon": &"watchtower", "wood_cost": Watchtower.WOOD_COST, "enabled": true},
+		{"id": &"wood_depot", "name": "Holzstation", "scene": WOOD_DEPOT_SCENE,
+			"icon": &"wood_depot", "wood_cost": WoodDepot.WOOD_COST, "enabled": true},
 	]
 
 
@@ -298,11 +301,6 @@ func _build_ui() -> void:
 	_build_tab_bar(root)
 	_build_header(root)
 	_build_tab_content(root)
-
-	var spacer: Control = Control.new()
-	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	root.add_child(spacer)
-
 	_build_menu_panel(root)
 	_select_tab(0)
 
@@ -480,10 +478,10 @@ func _make_tribe_bar(color: Color) -> ProgressBar:
 
 func _build_tab_content(root: Control) -> void:
 	var content: Control = Control.new()
-	# Tall enough for the building tab's full grid; every tab also scrolls as a
-	# safety net (short windows).
+	# Takes all remaining panel height (min height for short windows); every tab
+	# also scrolls as a safety net.
 	content.custom_minimum_size = Vector2(0, TAB_CONTENT_HEIGHT)
-	content.size_flags_vertical = Control.SIZE_FILL
+	content.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	content.clip_contents = true
 	root.add_child(content)
 	_tab_content = content
@@ -829,6 +827,10 @@ func _crew_view(target: Object) -> Dictionary:
 		var t: Watchtower = target as Watchtower
 		return {"members": t.crew, "cap": Watchtower.CREW_CAPACITY,
 			"info": "Besatzung: %d/%d" % [t.crew.size(), Watchtower.CREW_CAPACITY]}
+	if target is WoodDepot:
+		var d: WoodDepot = target as WoodDepot
+		return {"members": [], "cap": 0,
+			"info": "Lager: %d/%d Holz" % [d.stored_wood(), WoodDepot.CAPACITY]}
 	if target is Airship:
 		var a: Airship = target as Airship
 		return {"members": a.crew, "cap": a.max_crew,

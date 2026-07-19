@@ -37,8 +37,12 @@ const FLAME_CHECK_INTERVAL: float = 0.2
 ## Lava-contact credit per flame second on buildings — see Balance doc (the
 ## 1-s grace window between bursts would void raw contact seconds).
 const FLAME_CONTACT_FACTOR: float = Balance.FIRERAM_FLAME_CONTACT_FACTOR
-## Flame origin: this far in front of the hull centre.
+## Flame origin: this far in front of the hull centre. Gameplay value (flame
+## rectangle start, dead zone vs MIN_RANGE) — kept despite the smaller model.
 const NOZZLE_OFFSET: float = 1.2
+## Placeholder-model shrink factor (footprint 1.2 x 1.8 instead of the shared
+## vehicle chassis 1.4 x 2.2).
+const MODEL_SCALE: float = 0.85
 
 ## Worker references (injected by UnitManager.spawn_unit via unit.set() — a
 ## silent no-op without these declarations; flames must ignite trees/piles).
@@ -65,14 +69,22 @@ func _init() -> void:
 	min_move_crew = MIN_MOVE_CREW
 	min_fire_crew = MIN_FIRE_CREW
 	# 2 crew slots per side on the shorter hull.
-	crew_side_offset = 0.9
-	crew_rank_spacing = 1.0
-	vehicle_ring_scale = 4.0
+	crew_side_offset = 0.75
+	crew_rank_spacing = 0.85
+	vehicle_ring_scale = 3.4
 	vehicle_separation = 3.0
+	# Smaller footprint than the shared vehicle default (1.4 x 2.2).
+	chassis_half_width = 0.6
+	chassis_half_length = 0.9
 
 
 func unit_kind() -> StringName:
 	return &"fireram"
+
+
+## Smaller hull than the shared vehicle pick rect (2.6 x 2.2).
+func pick_size_m() -> Vector2:
+	return Vector2(2.2, 1.8)
 
 
 ## The ram may burn enemy GROUND vehicles (their hulls ignite); airships hover
@@ -384,6 +396,13 @@ func _create_model() -> void:
 		_finish_model(root)
 		return
 
+	# Placeholder body in its own node so the shrink never touches the flame
+	# cone (which must keep showing the real 5 x 2 m flame area).
+	var body: Node3D = Node3D.new()
+	body.name = "Body"
+	body.scale = Vector3.ONE * MODEL_SCALE
+	root.add_child(body)
+
 	# Hull (slightly shorter than the catapult).
 	var frame: MeshInstance3D = MeshInstance3D.new()
 	var frame_box: BoxMesh = BoxMesh.new()
@@ -391,7 +410,7 @@ func _create_model() -> void:
 	frame.mesh = frame_box
 	frame.material_override = _mat(C_WOOD)
 	frame.position.y = 0.5
-	root.add_child(frame)
+	body.add_child(frame)
 
 	# Four wheels.
 	for sx in [-0.55, 0.55]:
@@ -405,7 +424,7 @@ func _create_model() -> void:
 			wheel.material_override = _mat(C_WOOD_DARK)
 			wheel.rotation.z = PI * 0.5
 			wheel.position = Vector3(sx, 0.28, sz)
-			root.add_child(wheel)
+			body.add_child(wheel)
 
 	# Ram beam pointing forward (+z) with a glowing brazier nozzle at the tip.
 	var beam: MeshInstance3D = MeshInstance3D.new()
@@ -414,7 +433,7 @@ func _create_model() -> void:
 	beam.mesh = beam_box
 	beam.material_override = _mat(C_WOOD_DARK)
 	beam.position = Vector3(0.0, 0.85, 0.7)
-	root.add_child(beam)
+	body.add_child(beam)
 	var brazier: MeshInstance3D = MeshInstance3D.new()
 	var pot: SphereMesh = SphereMesh.new()
 	pot.radius = 0.28
@@ -427,7 +446,7 @@ func _create_model() -> void:
 	glow.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	brazier.material_override = glow
 	brazier.position = Vector3(0.0, 0.85, 1.5)
-	root.add_child(brazier)
+	body.add_child(brazier)
 
 	# Owner flag (recoloured on takeover).
 	var pole: MeshInstance3D = MeshInstance3D.new()
@@ -438,13 +457,13 @@ func _create_model() -> void:
 	pole.mesh = pole_cyl
 	pole.material_override = _mat(C_WOOD_DARK)
 	pole.position = Vector3(0.0, 1.1, -0.7)
-	root.add_child(pole)
+	body.add_child(pole)
 	_flag_mesh = MeshInstance3D.new()
 	var flag_box: BoxMesh = BoxMesh.new()
 	flag_box.size = Vector3(0.4, 0.25, 0.03)
 	_flag_mesh.mesh = flag_box
 	_flag_mesh.position = Vector3(0.2, 1.5, -0.7)
-	root.add_child(_flag_mesh)
+	body.add_child(_flag_mesh)
 
 	_finish_model(root)
 

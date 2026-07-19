@@ -807,6 +807,11 @@ func _dispatch_context_command(hit: Dictionary, queue_up: bool = false) -> bool:
 		if building is Hut and building.is_usable() and not building.under_construction \
 				and not _selection_has_brave():
 			return false
+		# A wood depot only takes the haul command from braves and only with
+		# stock to move; otherwise plain move onto the plot.
+		if building is WoodDepot and building.is_usable() and not building.under_construction \
+				and (not _selection_has_brave() or (building as WoodDepot).stored_wood() <= 0):
+			return false
 		if not _building_is_actionable(building):
 			return false
 		if queue_up:
@@ -825,7 +830,8 @@ func _building_is_actionable(building: Building) -> bool:
 	if building.is_usable():
 		return building is ReincarnationSite or building is Forester \
 			or building is Workshop or building is Watchtower \
-			or building is TrainingBuilding or building is Hut
+			or building is TrainingBuilding or building is Hut \
+			or building is WoodDepot
 	return building.health < building.max_health and building.health > 0
 
 
@@ -850,6 +856,9 @@ func _apply_building_command(units: Array[Unit], building: Building) -> void:
 			building.flash_ring()
 		elif building is Hut:
 			_tribe_commands.order_man_hut(units, building as Hut)
+			building.flash_ring()
+		elif building is WoodDepot:
+			_tribe_commands.order_depot_haul(units, building as WoodDepot)
 			building.flash_ring()
 		elif building is TrainingBuilding:
 			_tribe_commands.order_train(building, units)

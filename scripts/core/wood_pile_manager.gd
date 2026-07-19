@@ -110,6 +110,30 @@ func take_from_radius(pos: Vector3, radius: float, want: int) -> int:
 	return taken
 
 
+## Creates a registered pile EXACTLY at pos (no merge, no offset) — the wood
+## depot arranges its stock piles on fixed slots itself.
+func create_pile_at(pos: Vector3, p_clickable: bool = true) -> WoodPile:
+	var pile: WoodPile = PILE_SCENE.instantiate() as WoodPile
+	pile.clickable = p_clickable
+	pile.position = pos
+	if terrain_data != null:
+		pile.position.y = terrain_data.get_height(pos.x, pos.z)
+	add_child(pile)
+	piles.append(pile)
+	return pile
+
+
+## Adds up to `amount` wood into one specific pile; returns how much fit.
+func add_to_pile(pile: WoodPile, amount: int) -> int:
+	if pile == null or not is_instance_valid(pile) or amount <= 0:
+		return 0
+	var put: int = mini(pile.space_left(), amount)
+	if put > 0:
+		pile.set_amount(pile.amount + put)
+		_emit_total()
+	return put
+
+
 ## Takes up to `want` wood from one specific pile.
 func take_from_pile(pile: WoodPile, want: int) -> int:
 	if pile == null or not is_instance_valid(pile) or want <= 0:

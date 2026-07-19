@@ -343,6 +343,7 @@ const WORKSHOP_FOOTPRINT: Vector2i = Vector2i(7, 4)
 const FIRERAM_WORKSHOP_FOOTPRINT: Vector2i = Vector2i(6, 4)
 const AIRSHIP_WHARF_FOOTPRINT: Vector2i = Vector2i(8, 8)
 const WATCHTOWER_FOOTPRINT: Vector2i = Vector2i(2, 2)
+const WOOD_DEPOT_FOOTPRINT: Vector2i = Vector2i(1, 1)
 const REINCARNATION_SITE_FOOTPRINT: Vector2i = Vector2i(3, 3)
 
 # --- Hütte ---
@@ -398,6 +399,12 @@ const WHARF_WORKER_SLOTS: int = 4
 ## Arbeiter-Sekunden pro Luftschiff (4 Arbeiter -> 20 s); 8 Holz x 10.
 const WHARF_WORK_PER_AIRSHIP: float = 80.0
 const WHARF_AIRSHIP_WOOD: int = 8
+
+# --- Holzstation ---
+const WOOD_DEPOT_WOOD_COST: int = 1
+const WOOD_DEPOT_HP: int = 120
+## Storage cap = 4 stock piles x WoodPile.MAX_AMOUNT.
+const WOOD_DEPOT_CAPACITY: int = 20
 
 # --- Wachturm ---
 const WATCHTOWER_WOOD_COST: int = 4

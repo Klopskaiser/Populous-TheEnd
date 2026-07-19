@@ -1341,6 +1341,16 @@ func is_burning() -> bool:
 	return _burn_time > 0.0
 
 
+## Size multiplier for the shared StatusFxRenderer flame (vehicles override).
+func burn_fx_scale() -> float:
+	return 1.0
+
+
+## Flame anchor height; < 0 means "use the renderer's default".
+func burn_fx_height() -> float:
+	return -1.0
+
+
 ## Lava contact. Re-touching while already alight refreshes the burn instead
 ## of stacking it (and costs no second contact hit).
 func ignite(source_pos: Vector3) -> void:

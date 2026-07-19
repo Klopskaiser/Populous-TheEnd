@@ -5016,3 +5016,81 @@ re-registriert, Bay frei, kein Pop-Leak),
 `test_destroy_with_trainee_ejects_visibly` (Zerstörung → sichtbarer
 tödlicher Auswurf, Stamm konsistent). Testwelt hat jetzt einen zweiten
 (Feind-)Stamm.
+
+## Feinschliff-Paket: UI-Layout, Zeppelin-Crew, Feuerramme, Brandeffekt, Holzstation (2026-07-19, Nutzerwünsche)
+
+**1. Sidebar — großes Tab-Menü statt leerer Box** (`sidebar.gd`): Der
+`EXPAND_FILL`-Spacer zwischen Tab-Content und Menü-Button ist entfernt; der
+Tab-Content (Bau/Zauber/Allgemein/Crew) hat jetzt selbst `SIZE_EXPAND_FILL`
+(min. 300 px) und nimmt den gesamten Restplatz ein. Das Baugrid (jetzt 10
+Einträge) wird nicht mehr unten abgeschnitten; der Menü-Button sitzt direkt
+am Panel-Ende.
+
+**2. Zeppelin — Crew mittiger** (`airship.gd`): `crew_side_offset = 0.55`
+(statt geerbt 0,95 — das lag AUSSERHALB der 1,6 m breiten Gondel).
+
+**3. Feuerramme — kleinerer Grundriss** (Nutzer-Entscheid nach Maßvergleich:
+Kollision 1,2 × 1,8 statt 1,4 × 2,2, Rest proportional):
+`CHASSIS_HALF_LENGTH/WIDTH` sind jetzt Instanzvariablen
+`chassis_half_length/width` (crewed_vehicle.gd, Katapult/Luftschiff behalten
+1,4 × 2,2); Feuerramme setzt 0,9/0,6, `pick_size_m()` 2,2 × 1,8 (war
+2,6 × 2,2), Ring-Skalierung 3,4 (war 4,0), Crew-Slots 0,75/0,85. Das
+Platzhalter-Modell steckt in einem eigenen "Body"-Node mit `MODEL_SCALE
+0.85` — der Flammenkegel hängt weiter unskaliert am Modell (zeigt die echte
+5 × 2 m-Fläche). `NOZZLE_OFFSET` bleibt bewusst 1,2 (Gameplay: tote Zone vor
+der Minimalreichweite 1,0).
+
+**4. Einheitlicher 2D-Brandeffekt** (`status_fx_renderer.gd` generalisiert):
+Das Billboard-Flammen-Quad der Einheiten ist jetzt der spielweite
+Feuer-Visual. Neue Virtuals `burn_fx_scale()`/`burn_fx_height()` auf Unit
+(1,0/Default), CrewedVehicle (2,0/1,4 — die alte 3D-Flammen-Sphere samt
+Flacker-Code ist ERSATZLOS raus) und TreeResource (2,2·scale.y/1,9·scale.y —
+Feuer schrumpft mit dem brennenden Baum; Rotfärbung + Schrumpfen bleiben).
+Renderer: `setup(unit_manager, tree_manager)` (Default-Param, Tests
+kompatibel), `billboard_keep_scale`, Per-Instanz-Skalierung im
+Burning-Zweig, `_append_tree_flames()` hängt brennende Bäume an dieselbe
+MultiMesh, Burning-Cap 512 (`MAX_BURNING`). Vehikel liefen schon vorher
+durch den Burning-Loop (nicht sprite-gefiltert) — sie brauchten nur
+Größe/Höhe. Zerstörungsanimationen (Versinken/Debris, Airship-Explosion)
+unverändert.
+
+**5. Neues Gebäude Holzstation (`WoodDepot`)**: 1 Holz, 1×1, 120 HP,
+Kapazität 20 (Balance: `WOOD_DEPOT_*`). Kernidee: Der Bestand sind ECHTE
+`WoodPile`-Objekte auf 4 festen Slots (2×2-Raster, ±0,28 m um die Zelle),
+der Zähler ist immer aus den Piles abgeleitet (`stored_wood()`) — dadurch
+greifen automatisch: Werkstatt-`stock_wood()`/`take_from_radius`,
+Baustellen-/Reparatur-Absorb im 5-m-Radius, Tornado (verstreut Piles) und
+Brandberechnung (`ignite_in_radius`), HUD-Gesamtholz. Nur EINE
+Zerstörungsstufe (`destruction_stage()` → 0 oder 4): voll nutzbar bis
+100 % Schaden, keine Zwischenstufen/Reparaturzustand;
+`_absorbs_repair_wood() = false`. Zerstört → Stock-Piles bleiben liegen und
+werden wieder klickbar (`WoodPile.clickable`/`make_clickable()`, Depot-Piles
+fangen sonst den Rechtsklick vor dem Gebäude ab). `_tick_active` adoptiert
+fremde Piles ≤ 1,2 m (Deposit-Merge-Reste). Neue Manager-API:
+`create_pile_at()` (exakt, ohne Merge/Offset), `add_to_pile()`.
+- **Lieferlogik** (`brave.gd`): (a) Loose-Deliver merkt sich das Zielgebäude
+  (`_loose_deliver_building`) — ist es eine Holzstation, wird per
+  `store_wood()` eingelagert (Rest als normaler Stapel). (b) Rechtsklick auf
+  einen Stapel, der schon an einem eigenen Gebäude liegt
+  (`_pile_near_friendly_building`, footprint-Distanz ≤ 5 m) → Relay zur
+  nächsten Holzstation (Quell-nahe Depots ausgeschlossen), sonst Verhalten
+  wie bisher. (c) Rechtsklick auf eine Holzstation → `order_depot_haul`:
+  Pendelverkehr zur nächsten ANDEREN Station (`_haul_source/_haul_target`,
+  `take_stored`/`store_wood`, 3 pro Trip) bis Quelle leer oder Ziel voll;
+  ohne zweite Station nur Hinlaufen (Nutzer-Entscheid).
+- **UI**: Baumenü-Eintrag + `wood_depot`-Icon (ui_theme), Crew-Tab zeigt
+  "Lager: X/20 Holz", `selection_manager` (actionable nur mit Braves und
+  Bestand > 0, sonst Plain-Move). KI ignoriert den Typ (else-Ketten).
+
+**Tests:** Neu `test_wood_depot.gd` (35 Checks: Kosten/Footprint/eine
+Stufe, Kapazität/store/take, Verbraucher- und Tornado-Sync, Brand,
+Pile-Adoption, Zerstörung hinterlässt klickbare Stapel, Depot-Haul,
+Haul ohne zweite Station = Move, Pickup-Relay). Zwei flaky Tests
+deterministisch gemacht: `test_fire_ram.gd` Minimalreichweiten-Test pinnt
+den Punktblank-Brave (RNG-Schubserei trieb ihn über die 1-m-Grenze, Ramme
+feuerte legitim — auch VOR diesen Änderungen instabil);
+`test_unit_control.gd` Passiv-Move-Zuschauer steht jetzt 4 m NEBEN der
+Route (stand exakt auf ihr → Eigenaggro-Rangelei). Suite: 2029/2029 grün.
+Headless-Ladecheck ok. Optische Prüfung (Sidebar, Feuer-Sprites,
+Depot-Optik) durch Nutzer ausstehend. Hinweis: neues `class_name` →
+nach Pull einmal `--headless --import` (bekannter Cache-Stolperstein).

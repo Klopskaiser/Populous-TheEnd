@@ -26,10 +26,14 @@ const C_LOG_END: Color = Color(0.35, 0.22, 0.1)
 const BURN_TIME: float = 1.5
 
 var amount: int = 0
+## Depot stock piles are not right-click targets (the depot's own click body
+## must win); they become clickable again once the depot is destroyed.
+var clickable: bool = true
 ## Burn countdown (> 0 while alight); the WoodPileManager removes it at the end.
 var _burn_time: float = 0.0
 
 var _sprite: Sprite3D = null
+var _click_body: StaticBody3D = null
 
 
 func space_left() -> int:
@@ -72,7 +76,16 @@ func set_amount(value: int) -> void:
 
 func _ready() -> void:
 	_update_visual()
-	_create_click_body()
+	if clickable:
+		_create_click_body()
+
+
+## Makes a (depot stock) pile right-click targetable again — used when the
+## owning depot is destroyed and the wood keeps lying around as normal piles.
+func make_clickable() -> void:
+	clickable = true
+	if _click_body == null and is_inside_tree():
+		_create_click_body()
 
 
 ## StaticBody3D on layer 3 (value 4, like trees) so right-clicks can target
@@ -90,6 +103,7 @@ func _create_click_body() -> void:
 	shape.position.y = 0.5
 	body.add_child(shape)
 	add_child(body)
+	_click_body = body
 
 
 func _update_visual() -> void:

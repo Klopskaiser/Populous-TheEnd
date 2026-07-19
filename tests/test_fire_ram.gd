@@ -264,6 +264,10 @@ func test_minimum_range_holds_fire_point_blank() -> void:
 		BRAVE_SCENE, 1, ram.position + Vector3(0, 0, 0.5))
 	ram.order_attack(hugger)
 	for i in range(40):
+		# Pin the hugger point-blank: its melee brawl with the ram's crew would
+		# otherwise shove it randomly past the 1 m minimum, where the ram
+		# legitimately opens fire (flaky) — INSIDE the minimum is the contract.
+		hugger.position = ram.position + Vector3(0, 0, 0.5)
 		_tick_world(w)
 	check(not hugger.is_burning(),
 		"a unit inside the 1 m minimum range is never burnt")

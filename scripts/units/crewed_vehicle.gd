@@ -24,10 +24,6 @@ const SINK_SPEED: float = 0.8   # m/s downward while the wreck sinks
 ## Height span under the chassis that bursts it. Deliberately ABOVE what
 ## drivable terrain can present — only real terrain rips trigger.
 const BREAK_HEIGHT_SPAN: float = 3.5
-## Chassis sample half-extents (along facing x sideways).
-const CHASSIS_HALF_LENGTH: float = 1.1
-const CHASSIS_HALF_WIDTH: float = 0.7
-
 const C_WOOD: Color = Color(0.42, 0.29, 0.15)
 const C_WOOD_DARK: Color = Color(0.3, 0.2, 0.1)
 const C_METAL: Color = Color(0.45, 0.45, 0.48)
@@ -43,6 +39,9 @@ var min_fire_crew: int = Balance.SIEGE_MIN_FIRE_CREW
 var crew_side_offset: float = 0.95
 var crew_rank_spacing: float = 0.85
 var vehicle_ring_scale: float = 4.5
+## Chassis sample half-extents (along facing x sideways).
+var chassis_half_length: float = 1.1
+var chassis_half_width: float = 0.7
 
 ## Crew members (untyped entries: may be freed). Includes recruits still
 ## walking over (not yet boarded).
@@ -58,7 +57,6 @@ var _tornado_lift: float = 0.0
 ## Own 3D model parts (in-game only, built in _ready).
 var _model: Node3D = null
 var _flag_mesh: MeshInstance3D = null
-var _flame: MeshInstance3D = null
 
 
 func _init() -> void:
@@ -153,7 +151,6 @@ func ignite(_source_pos: Vector3) -> void:
 	if state == State.DEAD or _vehicle_burn > 0.0:
 		return
 	_vehicle_burn = VEHICLE_BURN_TIME
-	_show_flame(true)
 	_play_sfx(&"siege_burning")
 
 
@@ -165,6 +162,15 @@ func scorch(source_pos: Vector3) -> void:
 
 func is_burning() -> bool:
 	return _vehicle_burn > 0.0
+
+
+## Vehicles burn with a bigger flame than the man-sized default.
+func burn_fx_scale() -> float:
+	return 2.0
+
+
+func burn_fx_height() -> float:
+	return 1.4
 
 
 ## Tornado proximity: the vortex lifts the whole vehicle off the ground (the
@@ -186,7 +192,6 @@ func burst_into_wood() -> void:
 	crew.clear()
 	attack_building = null
 	_vehicle_burn = 0.0
-	_show_flame(false)
 	if _model != null:
 		_model.visible = false
 	health = 0
@@ -219,7 +224,6 @@ func _destroy_vehicle(burst: bool) -> void:
 	attack_building = null
 	_vehicle_burn = 0.0
 	if burst:
-		_show_flame(false)
 		if _model != null:
 			_model.visible = false
 		if path_service != null:
@@ -241,8 +245,8 @@ func _chassis_height_span() -> float:
 	var right: Vector3 = Vector3(-forward.z, 0.0, forward.x)
 	var lo: float = INF
 	var hi: float = -INF
-	for sf in [-CHASSIS_HALF_LENGTH, CHASSIS_HALF_LENGTH]:
-		for sr in [-CHASSIS_HALF_WIDTH, CHASSIS_HALF_WIDTH]:
+	for sf in [-chassis_half_length, chassis_half_length]:
+		for sr in [-chassis_half_width, chassis_half_width]:
 			var p: Vector3 = position + forward * sf + right * sr
 			var h: float = terrain_data.get_height(p.x, p.z)
 			lo = minf(lo, h)
@@ -548,33 +552,8 @@ func _mat(color: Color) -> StandardMaterial3D:
 	return mat
 
 
-## Lazily built flame overlay while the vehicle burns (in-game only).
-func _show_flame(show: bool) -> void:
-	if not is_inside_tree():
-		return
-	if _flame == null:
-		if not show:
-			return
-		_flame = MeshInstance3D.new()
-		_flame.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		var s: SphereMesh = SphereMesh.new()
-		s.radius = 0.6
-		s.height = 1.2
-		_flame.mesh = s
-		var mat: StandardMaterial3D = StandardMaterial3D.new()
-		mat.albedo_color = Color(1.0, 0.5, 0.1, 0.85)
-		mat.emission_enabled = true
-		mat.emission = Color(1.0, 0.4, 0.05)
-		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		_flame.material_override = mat
-		_flame.position.y = 1.2
-		add_child(_flame)
-	_flame.visible = show
-
-
-## Rotates the model with the heading, flickers the burn flame and sinks the
-## destroyed wreck into the ground.
+## Rotates the model with the heading and sinks the destroyed wreck into the
+## ground (the burn flame is the shared StatusFxRenderer billboard).
 func _tick_visual(delta: float) -> void:
 	if not is_inside_tree():
 		return
@@ -586,6 +565,3 @@ func _tick_visual(delta: float) -> void:
 	var heading: Vector3 = _model_heading()
 	if heading.length_squared() > 0.000001:
 		rotation.y = atan2(heading.x, heading.z)
-	if _flame != null and _flame.visible:
-		_flame.scale = Vector3.ONE * (0.85 + 0.3 * absf(sin(
-			float(Time.get_ticks_msec()) * 0.02)))

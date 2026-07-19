@@ -8,6 +8,10 @@ class_name StatusFxRenderer extends Node3D
 ## (INJURED, below 25 % health) is drawn as the classic circling stars by the
 ## StarsRenderer — here it only drives its loop sound.
 ##
+## The BURNING flame is the game-wide fire visual: burning trees join the same
+## MultiMesh (via TreeManager), and units/vehicles size it per object through
+## burn_fx_scale()/burn_fx_height().
+##
 ## Icons are procedural placeholders, replaceable per effect via
 ## assets/textures/effects/<panic|burning|injured>.png — a single image or a
 ## horizontal strip of square frames (frame count = width / height).
@@ -19,13 +23,18 @@ class_name StatusFxRenderer extends Node3D
 ## building) are caught by a frame stamp so no loop lingers.
 
 const MAX_PER_EFFECT: int = 256
+## Flames additionally cover trees and vehicles (forest fires!) — bigger cap.
+const MAX_BURNING: int = 512
 const FRAME_TIME: float = 0.15
+## Index of the FX_BURNING entry in _effects.
+const BURNING_INDEX: int = 1
 
 const FX_PANIC: int = 1
 const FX_BURNING: int = 2
 const FX_INJURED: int = 4
 
 var _unit_manager: UnitManager = null
+var _tree_manager: TreeManager = null
 var _audio: Node = null
 ## Per effect: {bit, loop_name, height, mm (MultiMesh), material, textures}.
 var _effects: Array[Dictionary] = []
@@ -36,8 +45,9 @@ var _frame: int = 0
 var _tick: int = 0
 
 
-func setup(p_unit_manager: UnitManager) -> void:
+func setup(p_unit_manager: UnitManager, p_tree_manager: TreeManager = null) -> void:
 	_unit_manager = p_unit_manager
+	_tree_manager = p_tree_manager
 
 
 func _ready() -> void:
@@ -46,19 +56,22 @@ func _ready() -> void:
 	# unit's own billboard (same world position) cannot hide it while standing.
 	_effects = [
 		_make_effect(FX_PANIC, &"panic", 1.95, Vector2(0.45, 0.6)),
-		_make_effect(FX_BURNING, &"burning", 1.25, Vector2(1.1, 1.3), 0.35),
+		_make_effect(FX_BURNING, &"burning", 1.25, Vector2(1.1, 1.3), 0.35,
+			MAX_BURNING),
 		_make_effect(FX_INJURED, &"injured", 1.55, Vector2(0.8, 0.4)),
 	]
 
 
 func _make_effect(bit: int, fx_name: StringName, height: float, size: Vector2,
-		toward_cam: float = 0.0) -> Dictionary:
+		toward_cam: float = 0.0, cap: int = MAX_PER_EFFECT) -> Dictionary:
 	var textures: Array[Texture2D] = _load_textures(fx_name)
 	var quad: QuadMesh = QuadMesh.new()
 	quad.size = size
 	var material: StandardMaterial3D = StandardMaterial3D.new()
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	material.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	# Honour the per-instance basis scale (per-object flame size).
+	material.billboard_keep_scale = true
 	# Alpha scissor keeps the quads in the opaque pass (no sorting issues).
 	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
 	material.alpha_scissor_threshold = 0.5
@@ -68,7 +81,7 @@ func _make_effect(bit: int, fx_name: StringName, height: float, size: Vector2,
 	var multimesh: MultiMesh = MultiMesh.new()
 	multimesh.transform_format = MultiMesh.TRANSFORM_3D
 	multimesh.mesh = quad
-	multimesh.instance_count = MAX_PER_EFFECT
+	multimesh.instance_count = cap
 	multimesh.visible_instance_count = 0
 	var mmi: MultiMeshInstance3D = MultiMeshInstance3D.new()
 	mmi.name = "Fx_%s" % fx_name
@@ -80,6 +93,7 @@ func _make_effect(bit: int, fx_name: StringName, height: float, size: Vector2,
 		"loop_name": StringName("unit_%s_loop" % fx_name),
 		"height": height,
 		"toward_cam": toward_cam,
+		"cap": cap,
 		"mm": multimesh,
 		"material": material,
 		"textures": textures,
@@ -163,14 +177,44 @@ func _process(delta: float) -> void:
 			visual_mask = FX_BURNING
 		for i in range(_effects.size()):
 			var e: Dictionary = _effects[i]
-			if visual_mask & int(e.bit) and counts[i] < MAX_PER_EFFECT:
+			if visual_mask & int(e.bit) and counts[i] < int(e.cap):
+				var basis: Basis = Basis.IDENTITY
+				var height: float = float(e.height)
+				if int(e.bit) == FX_BURNING:
+					# Per-object flame size (vehicles burn bigger than braves).
+					basis = Basis.IDENTITY.scaled(
+						Vector3.ONE * unit.burn_fx_scale())
+					var h: float = unit.burn_fx_height()
+					if h >= 0.0:
+						height = h
 				(e.mm as MultiMesh).set_instance_transform(counts[i],
-					Transform3D(Basis.IDENTITY, unit.position
-						+ up * float(e.height) + toward * float(e.toward_cam)))
+					Transform3D(basis, unit.position
+						+ up * height + toward * float(e.toward_cam)))
 				counts[i] += 1
+	_append_tree_flames(counts, up, toward)
 	for i in range(_effects.size()):
 		(_effects[i].mm as MultiMesh).visible_instance_count = counts[i]
 	_cleanup_departed()
+
+
+## Burning trees share the units' flame MultiMesh/frames (unified fire visual).
+## Trees keep their own tint/shrink and play no per-object loop sound here.
+func _append_tree_flames(counts: Array[int], up: Vector3, toward: Vector3) -> void:
+	if _tree_manager == null:
+		return
+	var e: Dictionary = _effects[BURNING_INDEX]
+	var mm: MultiMesh = e.mm
+	for tree in _tree_manager.trees:
+		if counts[BURNING_INDEX] >= int(e.cap):
+			return
+		if not is_instance_valid(tree) or not tree.is_burning():
+			continue
+		var basis: Basis = Basis.IDENTITY.scaled(
+			Vector3.ONE * tree.burn_fx_scale())
+		mm.set_instance_transform(counts[BURNING_INDEX],
+			Transform3D(basis, tree.position + up * tree.burn_fx_height()
+				+ toward * float(e.toward_cam)))
+		counts[BURNING_INDEX] += 1
 
 
 ## Units that left the world (unregistered but kept alive, e.g. training or

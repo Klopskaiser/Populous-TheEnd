@@ -215,7 +215,7 @@ func _ready() -> void:
 	var status_fx: StatusFxRenderer = StatusFxRenderer.new()
 	status_fx.name = "StatusFxRenderer"
 	add_child(status_fx)
-	status_fx.setup(_unit_manager)
+	status_fx.setup(_unit_manager, _tree_manager)
 	# Range rings for ranged units, toggled with G (phase 7f).
 	var ranges: RangeRenderer = RangeRenderer.new()
 	ranges.name = "RangeRenderer"
