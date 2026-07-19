@@ -350,6 +350,66 @@ func test_flatten_and_construct_flow() -> void:
 	_free_world(w)
 
 
+## Regression (user bug report, 8x8 wharf near the coast): once the first
+## wood was delivered, _clear_footprint evicted the site's OWN graders every
+## 0.5 s — the central cells of a big plot never finished and construction
+## deadlocked with all workers "waiting". The sweep must (a) only run once
+## the plot is fully graded and (b) never evict the site's own workers.
+func test_footprint_clear_spares_graders_on_big_plot() -> void:
+	var w: Dictionary = _make_world()
+	var td: TerrainData = w.td
+	var bm: BuildingManager = w.building_manager
+
+	# Bumpy but placeable 8x8 plot (the biggest footprint in the game).
+	td.raise_area(Vector2(64.0, 64.0), 3.0, 1.2)
+	w.nav.update_region(Rect2i(56, 56, 16, 16))
+	var wharf: Building = w.commands.place_building(w.tribe,
+		preload("res://scenes/buildings/airship_wharf.tscn"), Vector2i(60, 60))
+	check(wharf != null, "8x8 construction site placed on the bumpy plot")
+	check(wharf.needs_flatten(), "the bumpy plot needs grading")
+
+	# Wood arrives IMMEDIATELY (the old bug only triggered from the first
+	# delivered wood on) and a full worker crew grades.
+	w.wood_pile_manager.deposit(wharf.delivery_point(), wharf.wood_cost + 5)
+	var braves: Array[Brave] = []
+	for i in range(6):
+		var brave: Brave = w.unit_manager.spawn_unit(
+			BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(56 + i, 57))) as Brave
+		brave.order_build(wharf)
+		braves.append(brave)
+
+	var ticks: int = 0
+	while not wharf.foundation_done and ticks < MAX_TICKS:
+		bm.tick(TICK)
+		for brave in braves:
+			if is_instance_valid(brave):
+				brave.tick(TICK)
+		ticks += 1
+	check(wharf.foundation_done,
+		"the whole 8x8 plot gets graded despite early wood (no eviction churn)")
+	check(wharf.wood_delivered >= 1, "wood was already absorbed while grading")
+
+	# After the foundation is done the sweep DOES evict bystanders standing
+	# on the plot (a warrior — braves would be recruited into the job) ...
+	var bystander: Unit = w.unit_manager.spawn_unit(
+		preload("res://scenes/units/warrior.tscn"), 0, wharf.center_world())
+	for i in range(30):
+		bm.tick(TICK)
+		bystander.tick(TICK)
+	check(not wharf.footprint_rect().has_point(
+			w.nav.world_to_cell(bystander.position))
+			or bystander.state == Unit.State.MOVE,
+		"bystanders are still swept off the plot once the building rises")
+	# ... but never the site's own workers.
+	var evicted_worker: bool = false
+	for brave in braves:
+		if is_instance_valid(brave) and brave.job == wharf \
+				and brave.state == Unit.State.MOVE and brave.task == Brave.Task.NONE:
+			evicted_worker = true
+	check(not evicted_worker, "the site's own workers are never evicted")
+	_free_world(w)
+
+
 func test_progress_requires_wood_and_site_stalls() -> void:
 	var w: Dictionary = _make_world()
 	var tribe: Tribe = w.tribe
@@ -759,9 +819,11 @@ func test_hut_production_progress() -> void:
 	_free_world(w)
 
 
-## Phase 7i bugfix: once construction really starts (>=1 wood built in), units
-## standing on the footprint are pushed off so the rising building never buries
-## them.
+## Phase 7i bugfix: once construction really starts (>=1 wood built in AND the
+## plot is fully graded — the building only rises after foundation_done),
+## units standing on the footprint are pushed off so the rising building never
+## buries them. During grading there is NO eviction: the sweep used to evict
+## the site's own graders and deadlocked big plots (8x8 wharf bug report).
 func test_construction_clears_footprint() -> void:
 	var w: Dictionary = _make_world()
 	var site: Hut = w.building_manager.place(
@@ -778,8 +840,15 @@ func test_construction_clears_footprint() -> void:
 	brave.tick(0.1)
 	w.unit_manager.tick(0.1)
 	check(brave.state != Unit.State.MOVE, "no eviction before the first wood")
-	# First wood delivered -> the site clears its footprint.
+	# Wood alone is not enough while the plot is still being graded.
 	site.wood_delivered = 1
+	site.tick(1.0)
+	brave.tick(0.1)
+	w.unit_manager.tick(0.1)
+	check(brave.state != Unit.State.MOVE,
+		"no eviction while the foundation is still being graded")
+	# Foundation done too -> the site clears its footprint.
+	site.foundation_done = true
 	var cleared: bool = false
 	for i in range(int(10.0 / 0.1)):
 		site.tick(0.1)

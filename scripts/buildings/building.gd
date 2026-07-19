@@ -914,7 +914,11 @@ func _tick_construction(delta: float) -> void:
 			wood_stalled = false  # workers may try again (30-s re-check)
 	# From the first delivered wood on, keep the footprint clear of units so the
 	# rising building does not bury (and hide) anyone standing on the plot.
-	if wood_delivered >= 1:
+	# Only AFTER the plot is fully graded: the building starts rising with
+	# add_build_progress (gated on foundation_done), while the GRADERS must
+	# stand on the plot — the sweep used to evict them every 0.5 s, the central
+	# cells of big plots (8x8 wharf) never finished and the site deadlocked.
+	if wood_delivered >= 1 and foundation_done:
 		_clear_timer -= delta
 		if _clear_timer <= 0.0:
 			_clear_timer = CLEAR_INTERVAL
@@ -923,7 +927,10 @@ func _tick_construction(delta: float) -> void:
 
 ## Pushes any unit standing on the footprint to the nearest walkable cell
 ## outside it. Delivering workers wait at the entrance (outside), so they are
-## unaffected; units that cannot take orders (dead/thrown/sitting/crew) are left.
+## unaffected; units that cannot take orders (dead/thrown/sitting/crew) are
+## left. The site's OWN workers are never evicted — the order_move would rip
+## them out of the job entirely (claim + membership) and the recruit/evict
+## churn starved the plot (user bug report, 8x8 wharf).
 func _clear_footprint() -> void:
 	if unit_manager == null or nav_grid == null:
 		return
@@ -932,6 +939,8 @@ func _clear_footprint() -> void:
 	for u in unit_manager.get_units_in_radius(center_world(), reach):
 		if not is_instance_valid(u) or not u.can_take_orders():
 			continue
+		if u.get("job") == self:
+			continue   # own graders/builders stay at their work
 		var cell: Vector2i = nav_grid.world_to_cell(u.position)
 		if not rect.has_point(cell):
 			continue

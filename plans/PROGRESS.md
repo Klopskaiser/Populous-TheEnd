@@ -9,6 +9,41 @@ Verifikationsstand. Auch bei nachträglichen Erweiterungen außerhalb einer Phas
 
 ---
 
+## Bugfix: Bauplatz-Räumung vertrieb die eigenen Begradiger (2026-07-19)
+
+**Symptom (Spielerbericht, 8×8-Luftschiffwerft an der Küste):** nur wenige
+Arbeiter begradigten, der Rest stand daneben; ein Stück in der Plot-Mitte
+wurde nie eben, danach warteten alle ewig und gebaut wurde nie.
+
+**Ursache:** `Building._tick_construction` ließ ab dem ERSTEN gelieferten
+Holz alle 0,5 s `_clear_footprint()` laufen — und die Räumung traf auch die
+**eigenen Begradiger** (sie stehen zwangsläufig auf dem Plot; `order_move`
+reißt sie via `_interrupt_tasks` komplett aus dem Job). Der Räum-Radius
+(`max(footprint)/2 + 1`) trifft die Plot-Mitte immer, die Ränder oft nicht →
+bei großen Plots wurden genau die Mittelzellen nie fertig, `foundation_done`
+blieb false und die Baustelle deadlockte (es gibt keinen Timeout/Fallback
+für nicht abgeschlossene Ebnungszellen). Der Hütten-Auslieferungspunkt auf
+dem Plot verschärfte nur den Churn (mehr Körper im Räum-Radius), war aber
+nicht die Ursache.
+
+**Fix (`scripts/buildings/building.gd`):** Räumung läuft erst ab
+`wood_delivered >= 1 AND foundation_done` (das Gebäude wächst ohnehin erst
+ab `foundation_done`), und `_clear_footprint()` überspringt Einheiten mit
+`job == self` (eigene Begradiger/Bauarbeiter werden nie vertrieben).
+
+**Tests:** neu `test_economy.gd::test_footprint_clear_spares_graders_on_big_plot`
+(8×8-Werft auf unebenem Plot mit sofortigem Holz — reproduzierte den Deadlock
+auf dem alten Stand nachweislich); `test_construction_clears_footprint` an die
+neue Regel angepasst (kein Räumen während der Ebnung, Räumen ab
+foundation_done + Holz). Kompletter Lauf 1951/1951 grün.
+
+**Offen/Notiz:** `test_unit_control::test_passive_move_ignores_enemies` flakte
+heute zweimal NUR im Full-Suite-Kontext (isoliert und auf Datei-Ebene stets
+grün, auch auf dem Vor-Session-Stand): der Krieger marschiert durch den 3-m-
+Wachradius des passiven Braves, dessen zufallsgetaktete Schläge lösen
+gelegentlich die Flucht-Gegenwehr im Prüffenster aus — vorbestehendes Race,
+separat härten.
+
 ## Neue Fahrzeuge: Feuerramme + Luftschiff, neue Werkstätten, Anti-Air (2026-07-19)
 
 **Architektur — `CrewedVehicle`-Basisklasse** (`scripts/units/crewed_vehicle.gd`):
