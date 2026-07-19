@@ -78,6 +78,7 @@ var _spell_ui: Dictionary = {}       # id -> {"button": Button, "pips": Array[Co
 var _follower_labels: Dictionary = {}  # kind -> Label
 var _idle_button: Button = null
 var _max_catapults_label: Label = null   # per-tribe cap stepper (followers tab)
+var _owned_catapults_label: Label = null   # current owned-catapult count below it
 var _pause_menu: Control = null
 ## Crew tab widgets: occupants of the selected mannable object as icon buttons
 ## (click ejects) plus a production pause toggle.
@@ -601,7 +602,9 @@ func _build_followers_tab() -> Control:
 	vb.add_child(_idle_button)
 
 	# Per-tribe catapult cap (independent of any selected/existing workshop):
-	# every workshop of the tribe reads Tribe.max_catapults.
+	# every workshop of the tribe reads Tribe.max_catapults. Two lines so the
+	# stepper buttons never get squeezed out by a long label: the stepper row
+	# on top, the current count below it.
 	var row: HBoxContainer = HBoxContainer.new()
 	row.add_theme_constant_override("separation", 4)
 	vb.add_child(row)
@@ -614,6 +617,7 @@ func _build_followers_tab() -> Control:
 	_max_catapults_label.add_theme_color_override("font_color", UiTheme.TEXT)
 	_max_catapults_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_max_catapults_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_max_catapults_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_max_catapults_label.tooltip_text = \
 		"Katapult-Limit des Stammes: alle Werkstätten stoppen die Fertigung," \
 		+ " sobald so viele eigene Katapulte existieren"
@@ -623,6 +627,12 @@ func _build_followers_tab() -> Control:
 	UiTheme.style_button(plus)
 	plus.pressed.connect(func() -> void: _on_max_catapults_delta(1))
 	row.add_child(plus)
+
+	_owned_catapults_label = Label.new()
+	_owned_catapults_label.add_theme_color_override("font_color", UiTheme.TEXT_DIM)
+	_owned_catapults_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_owned_catapults_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vb.add_child(_owned_catapults_label)
 
 	scroll.add_child(vb)
 	return scroll
@@ -642,8 +652,9 @@ func _refresh_max_catapults_label() -> void:
 	var player: Tribe = _player_tribe()
 	if player == null:
 		return
-	_max_catapults_label.text = "Max. Katapulte: %d  (aktuell: %d)" % [
-		player.max_catapults, player.owned_catapult_count()]
+	_max_catapults_label.text = "Max. Katapulte: %d" % player.max_catapults
+	if _owned_catapults_label != null:
+		_owned_catapults_label.text = "aktuell: %d" % player.owned_catapult_count()
 
 
 # --- Crew tab (occupancy of the selected mannable object) ---------------------
