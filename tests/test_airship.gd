@@ -650,6 +650,47 @@ func test_shot_down_firewarrior_is_thrown_then_dies() -> void:
 	_free_world(w)
 
 
+## Regression (Spieltest 5b): the SAME catapult shot that bursts the hull also
+## sends a shockwave over the just-hurled crew — a thrown passenger must not be
+## deleted in mid-air by that follow-up hit; the death stays deferred to
+## roll-out (user bug: "sterben durch Einschlag/Explosion, bevor sie fallen").
+func test_thrown_passenger_survives_a_followup_hit_midair() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
+	var fw: Unit = _board(w, ship, FIREWARRIOR_SCENE)
+	ship.explode()
+	check(fw.state == Unit.State.THROWN, "the crew is airborne right after the burst")
+	# Simulate the intercept's shockwave landing on the falling firewarrior.
+	fw.take_damage(1000)
+	check(fw.state != Unit.State.DEAD,
+		"the follow-up shockwave does NOT kill it in mid-air")
+	var ticks: int = 0
+	while fw.state != Unit.State.DEAD and ticks < MAX_TICKS:
+		_tick_world(w)
+		ticks += 1
+	check(fw.state == Unit.State.DEAD, "it still dies after tumbling to the ground")
+	_free_world(w)
+
+
+## Regression (Spieltest 5b): a lethal hit on a passenger WHILE it rides the
+## deck (e.g. the first air-intercept shockwave) hurls it off and kills it on
+## the ground, never leaving it dead at altitude.
+func test_lethal_hit_while_riding_throws_off_and_kills_on_ground() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
+	var fw: Unit = _board(w, ship, FIREWARRIOR_SCENE)
+	fw.take_damage(1000)   # far more than a firewarrior's life, while aboard
+	check(fw.state == Unit.State.THROWN,
+		"a lethal hit aboard converts into a fall (thrown off the deck)")
+	check(fw.state != Unit.State.DEAD, "it is not left dead standing at altitude")
+	var ticks: int = 0
+	while fw.state != Unit.State.DEAD and ticks < MAX_TICKS:
+		_tick_world(w)
+		ticks += 1
+	check(fw.state == Unit.State.DEAD, "it dies at roll-out on the ground")
+	_free_world(w)
+
+
 ## Spieltest 5: the hull fire is the shared 2D flame billboard (is_burning +
 ## burn_fx_*), not a 3D sphere — placed high so it shows above the balloon.
 func test_hull_fire_uses_2d_flame() -> void:

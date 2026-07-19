@@ -940,14 +940,17 @@ func take_damage(amount: int, attacker = null) -> void:
 	if attacker != null and is_instance_valid(attacker):
 		last_attacker = attacker
 	if health <= 0:
-		if state == State.ROLL:
-			return   # deferred: _end_roll finishes it
-		# Deck passengers (airship) never die standing at 12 m: the kill is
-		# converted into a fall — they tumble off the deck, roll out below
-		# and die at the END of the roll (user spec; the roll's deferred-
-		# death rule finishes them once the tumble settles).
+		# Already tumbling (thrown through the air or rolling): the damage still
+		# lands but the DEATH is deferred to the end of the tumble. This makes a
+		# falling unit unkillable in mid-air — e.g. the same catapult shot that
+		# bursts an airship then sends a shockwave over the just-hurled deck crew
+		# must not delete them at altitude; they die once they roll out below.
+		if state == State.ROLL or state == State.THROWN:
+			return   # deferred: _end_roll / the landing roll finishes it
+		# Deck passengers (airship): a lethal hit while riding at altitude is
+		# converted into a fall — they leave the deck, tumble off and die at the
+		# END of the roll (user spec), never standing dead at 12 m.
 		if rides_airborne():
-			health = 1
 			leave_crew()
 			var out_angle: float = randf() * TAU
 			throw_airborne(Vector3(cos(out_angle), 0.0, sin(out_angle))

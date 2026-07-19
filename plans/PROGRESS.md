@@ -5262,3 +5262,33 @@ Audioausgabe braucht den Szenenbaum).
 **2078/2078 grün**, Headless-Ladecheck ok. Optische/akustische Prüfung
 (fallende Feuerkrieger, 2D-Flamme überm Ballon, Deck-Wurf-/Cast-Anim,
 Bekehr-Chant) durch Nutzer ausstehend.
+
+## Spieltest-Fix 5b: Zeppelin-Absturz-Tod endgültig (2026-07-19, Nutzerreport)
+
+Der Absturz-Tod (Spieltest 5, Punkt 1) griff nur in `explode()`, aber die
+Deck-Crew starb schon vorher: der **Katapult-Luftabfang** feuert im selben
+Schuss `register_hull_hit()` UND eine `_shockwave()` über der Hülle
+(`siege_shot.gd:114-116`). Beim 2. Treffer warf `explode()` die Passagiere ab
+(THROWN, HP≤0), unmittelbar danach traf die Schockwelle dieselben Passagiere —
+und `take_damage` schob den Tod nur im ROLL-, nicht im THROWN-Zustand auf →
+`_die()` mitten in der Luft. Zusätzlich setzte der `rides_airborne`-Hook
+`health = 1` (Passagier überlebte statt zu sterben).
+
+Fix in `unit.gd::take_damage`:
+- Tod wird jetzt sowohl bei ROLL als auch bei **THROWN** aufgeschoben — der
+  Schaden wird gebucht (HP sinken), aber `_die()` erst am Ende des Ausrollens
+  ausgelöst. Eine fallende Einheit ist damit in der Luft unkillbar; ein
+  Folgetreffer (Schockwelle) tötet sie nicht mehr am Deck/in der Luft.
+- Der `rides_airborne`-Hook lässt die HP bei ≤0 (kein `health = 1` mehr): ein
+  tödlicher Treffer während der Fahrt wirft den Passagier ab und er stirbt am
+  Roll-Ende auf dem Boden — nie stehend in 12 m Höhe.
+
+Damit sterben Einheiten auf dem Zeppelin IMMER durch Sturz + Ausrollen,
+egal ob der Tod aus Deck-Beschuss, Schockwelle oder der Explosion kommt.
+`_land_from_throw` bucht den Fallschaden weiterhin (HP-Abzug vor dem
+Defer-Check), nur der Todeszeitpunkt verschiebt sich ans Roll-Ende — volle
+Suite unverändert grün.
+
+**Tests:** +2 (`test_thrown_passenger_survives_a_followup_hit_midair`,
+`test_lethal_hit_while_riding_throws_off_and_kills_on_ground`); Suite
+**2084/2084 grün**, Ladecheck ok.
