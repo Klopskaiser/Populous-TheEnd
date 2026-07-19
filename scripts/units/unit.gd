@@ -675,6 +675,14 @@ func arrive_eps() -> float:
 	return ARRIVE_EPS
 
 
+## Multiplier applied to the (tight) formation MEMBER/GROUP offsets in a move
+## order (TribeCommands.order_move). Foot units stand in a tight pack (1.0);
+## vehicles override this so several sent to one point get targets OUTSIDE each
+## other's separation bubble instead of shoving each other around at the goal.
+func formation_scale() -> float:
+	return 1.0
+
+
 ## Walks one step along the current path (also used by Brave sub-states that
 ## are not State.MOVE). Returns true when the path is exhausted. Uphill slopes
 ## slow the step down; very steep DOWNHILL stretches can knock the unit into a

@@ -120,6 +120,46 @@ func test_units_never_target_the_vehicle() -> void:
 	_free_world(w)
 
 
+## Several catapults sent to ONE point must settle spread apart, not shove each
+## other around at the goal (their formation targets are scaled outside the
+## vehicle separation bubble — same fix as the airships).
+func test_multiple_catapults_to_one_point_settle_apart() -> void:
+	var w: Dictionary = _make_world()
+	var engines: Array[Unit] = []
+	for i in range(3):
+		var e: SiegeEngine = w.unit_manager.spawn_unit(
+			SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(56 + i * 2, 60))) as SiegeEngine
+		_board_crew(w, e)   # 1 crew: enough to move
+		engines.append(e)
+	var target: Vector3 = w.nav.cell_to_world(Vector2i(74, 60))
+	w.commands.order_move(engines, target)
+	var ticks: int = 0
+	while ticks < MAX_TICKS:
+		_tick_world(w)
+		ticks += 1
+		var moving: bool = false
+		for e in engines:
+			if e.state == Unit.State.MOVE:
+				moving = true
+		if not moving:
+			break
+	for e in engines:
+		check(e.state != Unit.State.MOVE, "every catapult stops (does not shove forever)")
+	# Pairwise gaps reach the separation bubble — no perpetual jostling/stacking.
+	var sep: float = engines[0].vehicle_separation
+	for i in range(engines.size()):
+		for j in range(i + 1, engines.size()):
+			var gap: float = Vector2(engines[i].position.x - engines[j].position.x,
+				engines[i].position.z - engines[j].position.z).length()
+			check(gap > sep * 0.8,
+				"catapults settle apart, not stacked (gap=%.2f, sep=%.2f)" % [gap, sep])
+	var flat_t: Vector2 = Vector2(target.x, target.z)
+	for e in engines:
+		check(Vector2(e.position.x, e.position.z).distance_to(flat_t) < 8.0,
+			"each catapult ends up near the ordered point")
+	_free_world(w)
+
+
 ## Catapult-vs-catapult (ranged) IS allowed: a catapult may aim at an enemy
 ## catapult (its shot's splash then hits the crew).
 func test_catapult_may_target_enemy_catapult() -> void:

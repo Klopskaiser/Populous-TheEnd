@@ -112,15 +112,16 @@ func order_move(units: Array[Unit], target: Vector3, queue_up: bool = false,
 	var group_scale: float = GROUP_SPACING / FORMATION_SPACING
 	for g in range(0, alive.size(), GROUP_SIZE):
 		var group_index: int = g / GROUP_SIZE
-		# Flying vehicles (airships) get a much wider formation so each ship's
-		# target lies OUTSIDE its neighbour's collision bubble — the tight
-		# ground offsets would sit inside it and make the second ship circle.
-		var fscale: float = Balance.AIRSHIP_FORMATION_SCALE if alive[g].flies else 1.0
+		# Vehicles get a much wider formation so each unit's target lies OUTSIDE
+		# its neighbour's separation bubble — the tight ground offsets would sit
+		# inside it and make vehicles shove each other around at the goal
+		# (airships: circle; ground vehicles: jostle). Foot units stay tight.
+		var fscale: float = alive[g].formation_scale()
 		var group_target: Vector3 = target \
 			+ formation_offset(group_index) * group_scale * fscale
 		var batch: Array[Unit] = []
 		for m in range(g, mini(g + GROUP_SIZE, alive.size())):
-			var moff: float = Balance.AIRSHIP_FORMATION_SCALE if alive[m].flies else 1.0
+			var moff: float = alive[m].formation_scale()
 			alive[m].order_move(group_target + MEMBER_OFFSETS[m - g] * moff,
 				queue_up, aggressive)
 			batch.append(alive[m])

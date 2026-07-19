@@ -82,6 +82,14 @@ func renders_as_sprite() -> bool:
 	return false  # own 3D model instead of the sprite MultiMesh
 
 
+## Wide formation spread so several vehicles sent to one point get targets
+## outside each other's (large) separation bubble — otherwise they shove each
+## other around at the goal (their bubble ~3 m dwarfs the ~0.55 m member
+## offsets). The airship keeps its own smaller scale.
+func formation_scale() -> float:
+	return Balance.VEHICLE_FORMATION_SCALE
+
+
 func is_conversion_immune() -> bool:
 	return true   # a device, not a believer
 

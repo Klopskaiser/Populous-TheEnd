@@ -182,6 +182,9 @@ func _target_alive() -> bool:
 ## instances outside the tree): small glowing orange sphere, unshaded.
 func _ready() -> void:
 	var mesh: MeshInstance3D = MeshInstance3D.new()
+	# No real shadow (phase 8 rule): a glowing ball should not cast one, and a
+	# mass battle floods the Sun's shadow map with hundreds of these.
+	mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var sphere: SphereMesh = SphereMesh.new()
 	sphere.radius = 0.16
 	sphere.height = 0.32

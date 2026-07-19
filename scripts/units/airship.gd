@@ -248,6 +248,13 @@ func arrive_eps() -> float:
 	return maxf(super.arrive_eps(), vehicle_separation)
 
 
+## Airships keep their own (smaller) formation spread — their separation bubble
+## (~2 m) is tighter than the ground vehicles' (~3 m), so the ground-vehicle
+## scale would spread flights wider than needed.
+func formation_scale() -> float:
+	return Balance.AIRSHIP_FORMATION_SCALE
+
+
 ## Straight flight: bypasses the async path queue entirely (the PathWorker
 ## computes ground-grid paths) and never fails — only map bounds clamp.
 func _start_path_to(target: Vector3) -> void:

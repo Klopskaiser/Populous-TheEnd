@@ -92,6 +92,8 @@ func _explode() -> void:
 
 func _ready() -> void:
 	var ball: MeshInstance3D = MeshInstance3D.new()
+	# No real shadow (phase 8 rule): a glowing bolt casts none.
+	ball.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var sphere: SphereMesh = SphereMesh.new()
 	sphere.radius = 0.3
 	sphere.height = 0.6

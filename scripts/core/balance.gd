@@ -144,6 +144,11 @@ const AIRSHIP_SEPARATION_SPEED_MULT: float = 4.0
 ## Offsets, sodass die Zielpunkte mehrerer Luftschiffe außerhalb der
 ## Separationsblase (~2 m) liegen und leicht erreichbar sind (0,55 m × 5 ≈ 2,75 m).
 const AIRSHIP_FORMATION_SCALE: float = 5.0
+## Formations-Spreizung für Bodenfahrzeuge (Katapult/Feuerramme): ihre
+## Separationsblase (~3,0–3,2 m) ist größer als beim Luftschiff, daher ein
+## größerer Faktor, damit die Zielpunkte mehrerer Fahrzeuge außerhalb der Blase
+## liegen (0,55 m × 7,5 ≈ 4,0 m > 3,2 m) — sonst drängen sie sich am Ziel.
+const VEHICLE_FORMATION_SCALE: float = 7.5
 ## Reichweiten-Bonus für Fernkampf/Bekehrung/Zauber von Bord (nur im Stand).
 const AIRSHIP_RANGE_BONUS: float = 3.0
 ## Hüllentreffer (Feuerball-Zauber-Bolts + Katapult-Lufttreffer) bis zur Explosion.

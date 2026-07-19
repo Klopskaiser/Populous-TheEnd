@@ -241,6 +241,8 @@ func _slope_at(pos: Vector3) -> float:
 
 func _ready() -> void:
 	var ball: MeshInstance3D = MeshInstance3D.new()
+	# No real shadow (phase 8 rule): a glowing stone casts none.
+	ball.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var sphere: SphereMesh = SphereMesh.new()
 	sphere.radius = 0.45
 	sphere.height = 0.9
@@ -273,6 +275,7 @@ func _tick_trail(delta: float) -> void:
 		return
 	_trail_timer = 0.05
 	var ember: MeshInstance3D = MeshInstance3D.new()
+	ember.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var s: SphereMesh = SphereMesh.new()
 	s.radius = 0.22
 	s.height = 0.44

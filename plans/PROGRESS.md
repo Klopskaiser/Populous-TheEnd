@@ -5464,3 +5464,39 @@ verfolgt (legitime Jagd, kein Stottern).
 Stand, kein MOVE-Toggle, kein Vorwärtsdrift). Suite **2109/2109 grün**, Ladecheck
 ok. Funktionale Prüfung (sauberes Heranfliegen, einmal stoppen) durch Nutzer
 ausstehend.
+
+
+## Spieltest-Fix 11 — Projektil-Schatten aus + Belagerungswaffen-Gedränge am Ziel
+
+Zwei unabhängige, risikoarme Fixes.
+
+**1. Projektil-Schatten (Kampf-FPS).** In der Debugschlacht brachen die FPS beim
+Kampfbeginn ein. Ursache (neben dem bereits behobenen Prediger-Scan): jedes
+Projektil-Visual (`MeshInstance3D`) setzte `cast_shadow` nie → warf echte Schatten,
+als einziges gegen die Phase-8-„keine echten Schatten"-Regel. Bei ~240 Feuerkriegern/
+Seite, `FIRE_COOLDOWN 1,5 s`, Fireball-`MAX_LIFETIME 3 s`, ohne Pooling → grob
+**1000–2000 gleichzeitige schattenwerfende Kugeln** in die eine `Sun`-Schattenkarte
+(`main.tscn`, 2 Splits, 70 m). Fix: `cast_shadow = SHADOW_CASTING_SETTING_OFF` auf
+`fireball.gd`, `siege_shot.gd` (Kugel + Trail-Ember), `fireball_bolt.gd`. Reiner
+Render-Flag-Fix, auch visuell korrekt (leuchtende Kugel wirft keinen Schatten).
+Wirkung **nur im Spiel** messbar (Headless rendert nicht).
+
+**2. Belagerungswaffen-Formationsabstand.** Mehrere auf einen Punkt geschickte
+Katapulte/Feuerrammen drängten sich am Ziel gegenseitig weg (wie zuvor der Zeppelin).
+Ursache: `TribeCommands.order_move` skalierte die engen `MEMBER_OFFSETS` (~0,54 m) nur
+für fliegende Einheiten (`AIRSHIP_FORMATION_SCALE`), für alle anderen ×1,0. Bodenfahr-
+zeuge haben aber eine größere Separationsblase (Katapult 3,2 / Ramme 3,0 m) → Ziele lagen
+tief drin → Dauer-Schieben (anders als beim Zeppelin erreichen sie den Punkt, weil ihre
+Fahrgeschwindigkeit den Push übertrifft, werden dort aber weggeschoben). Fix: neuer
+Virtual `Unit.formation_scale()` (Default 1,0), `CrewedVehicle` →
+`VEHICLE_FORMATION_SCALE = 7,5` (0,54 × 7,5 ≈ 4,0 m > 3,2 m), `Airship` behält 5,0;
+`order_move` nutzt `formation_scale()` statt der `flies`-Bedingung. Kein `arrive_eps`-
+Eingriff für Bodenfahrzeuge (Ecken-Abschneiden auf Mehrpunkt-Wegen vermieden).
+
+**Tests:** +1 (`test_multiple_catapults_to_one_point_settle_apart`: 3 Katapulte auf
+einen Punkt → alle stoppen, paarweise Abstände ≥ ~Separationsblase, nahe am Ziel).
+Suite **2112/2112 grün**, Ladecheck ok. In-Game-Prüfung (FPS beim Kampfbeginn; ruhig
+stehende Katapult-Gruppe) durch Nutzer ausstehend.
+
+Bewusst offen: synchrones Nahkampf-A* in `Unit._approach` (zweitgrößter Kampfbeginn-
+CPU-Kostenpunkt) — separater, headless-messbarer Folgeschritt.
