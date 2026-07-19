@@ -133,6 +133,28 @@ func order_move(units: Array[Unit], target: Vector3, queue_up: bool = false,
 			unit_manager.register_move_group(batch, group_target)
 
 
+## True if AT LEAST ONE of the units cannot reach `target` on foot (different
+## nav island, or the target sits off the walkable grid) — used by the UI to
+## play the blocked-move sound. O(1) per unit via the cached island labels
+## (max one flood-fill per second); only ever called on a command, never per
+## frame, so it costs nothing during play.
+func any_unreachable(units: Array[Unit], target: Vector3) -> bool:
+	if nav_grid == null:
+		return false
+	var ti: int = nav_grid.island_at(
+		nav_grid.nearest_walkable_cell(nav_grid.world_to_cell(target)))
+	if ti < 0:
+		return true
+	for u in units:
+		if not is_instance_valid(u) or u.state == Unit.State.DEAD:
+			continue
+		var ui: int = nav_grid.island_at(
+			nav_grid.nearest_walkable_cell(nav_grid.world_to_cell(u.position)))
+		if ui != ti:
+			return true
+	return false
+
+
 ## Braves fell the tree (and keep chopping nearby ones); non-braves just walk
 ## there. The wood is dropped as piles on the spot.
 ## Braves fetch the wood pile and deliver it to the nearest own building's

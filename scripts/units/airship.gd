@@ -33,12 +33,6 @@ const FLY_HEIGHT: float = Balance.AIRSHIP_FLY_HEIGHT
 const MIN_CLEARANCE: float = Balance.AIRSHIP_MIN_CLEARANCE
 const CRUISE_TERRAIN_CAP: float = Balance.AIRSHIP_CRUISE_TERRAIN_CAP
 const VERTICAL_RATE: float = Balance.AIRSHIP_VERTICAL_RATE
-## Time constant (s) of the lazy ground reference: raw terrain samples are
-## low-passed into _ground_ref over roughly this long, so fast terrain changes
-## under the ship (earthquake/volcano morph, crossing a fresh scarp) don't yank
-## the altitude target from the first frame. The ship then only ever eases
-## toward that lagged ground at VERTICAL_RATE — no instant altitude jumps.
-const GROUND_LAG: float = 1.2
 const RANGE_BONUS: float = Balance.AIRSHIP_RANGE_BONUS
 const HULL_HITS: int = Balance.AIRSHIP_HULL_HITS
 const CRASH_DAMAGE: int = Balance.AIRSHIP_CRASH_DAMAGE
@@ -215,47 +209,34 @@ func burst_into_wood() -> void:
 
 # --- Flight (straight line, no A*) ---------------------------------------------------
 
-## Base movement hook (called without delta after every horizontal step). The
-## vertical axis is governed entirely by the soft, rate-limited _tick_altitude
-## now — enforcing an INSTANT MIN_CLEARANCE floor here caused the altitude
-## spikes when a spell (earthquake/volcano) reshaped the ground under the ship,
-## so this is a no-op. A cheap surface-only emergency clamp in _tick_altitude
-## still keeps the hull from ever rendering buried inside terrain.
+## Base movement hook (called without delta after every horizontal step):
+## only enforces the hard MIN_CLEARANCE floor — never clip into rising
+## ground. The smooth climb/sink toward the cruise altitude runs once per
+## tick in _tick_altitude.
 func _snap_to_ground() -> void:
-	pass
+	if terrain_data != null:
+		position.y = maxf(position.y,
+			maxf(terrain_data.get_height(position.x, position.z),
+				TerrainData.SEA_LEVEL) + MIN_CLEARANCE)
 
 
 ## Soft altitude model (user spec): cruise at FLY_HEIGHT above "normal
 ## ground" — terrain counts toward the cruise target only up to the map's
 ## average height + CRUISE_TERRAIN_CAP, so over high mountains the ship just
 ## follows the terrain at MIN_CLEARANCE instead of towering FLY_HEIGHT above
-## the peaks. The reference ground is LAZY (low-passed over GROUND_LAG) so fast
-## terrain changes under the ship don't yank the target, and the ship only ever
-## climbs/sinks toward it at VERTICAL_RATE — no instant jumps. Nice side effect:
-## a freshly built ship visibly ascends from the wharf gate.
+## the peaks. Climbs/sinks smoothly at VERTICAL_RATE; the MIN_CLEARANCE
+## floor is enforced instantly (never clip into rising ground). Nice side
+## effect: a freshly built ship visibly ascends from the wharf gate.
 func _tick_altitude(delta: float) -> void:
 	if terrain_data == null:
 		return
-	var raw_ground: float = maxf(terrain_data.get_height(position.x, position.z),
+	var ground: float = maxf(terrain_data.get_height(position.x, position.z),
 		TerrainData.SEA_LEVEL)
-	# Lazy ground: ease the reference toward the raw sample (first tick snaps).
-	if _ground_ref == -INF:
-		_ground_ref = raw_ground
-	else:
-		_ground_ref = lerpf(_ground_ref, raw_ground,
-			clampf(delta / GROUND_LAG, 0.0, 1.0))
-	var ref: float = minf(_ground_ref,
+	var ref: float = minf(ground,
 		terrain_data.average_height() + CRUISE_TERRAIN_CAP)
-	var target_y: float = maxf(ref + FLY_HEIGHT, _ground_ref + MIN_CLEARANCE)
-	position.y = move_toward(position.y, target_y, VERTICAL_RATE * delta)
-	# Emergency only: never let the hull sit below the actual surface (no
-	# clearance added here, so a gradual morph never triggers a visible jump).
-	position.y = maxf(position.y, raw_ground)
-
-
-## Lazy, low-passed ground reference driving the altitude target (see
-## GROUND_LAG / _tick_altitude). -INF until the first altitude tick snaps it.
-var _ground_ref: float = -INF
+	var target_y: float = maxf(ref + FLY_HEIGHT, ground + MIN_CLEARANCE)
+	position.y = maxf(move_toward(position.y, target_y, VERTICAL_RATE * delta),
+		ground + MIN_CLEARANCE)
 
 
 ## No slope in the air (also disables the downhill-stumble roll).
@@ -508,6 +489,12 @@ func explode() -> void:
 
 
 # --- Ticking ------------------------------------------------------------------------------
+
+## Empty airships must not burst like a stranded siege engine — they drift home
+## (see _tick_drift), so they opt out of the crewless self-destruct.
+func destroys_when_uncrewed() -> bool:
+	return false
+
 
 func tick(delta: float) -> void:
 	super.tick(delta)

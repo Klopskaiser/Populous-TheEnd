@@ -648,7 +648,13 @@ func _command_move(screen_pos: Vector2, queue_up: bool, aggressive: bool = false
 	var target: Vector3 = hit.position
 	if _tribe_commands != null:
 		_tribe_commands.order_move(selected, target, queue_up, aggressive)
-		_play_move_sound()
+		# Blocked feedback: if the target is unreachable for at least one unit
+		# (own island vs. target island), play the negative cue instead of the
+		# normal move-ack.
+		if _tribe_commands.any_unreachable(selected, target):
+			_play_blocked_sound()
+		else:
+			_play_move_sound()
 		return
 	for i in range(selected.size()):
 		selected[i].order_move(target + TribeCommands.formation_offset(i), queue_up, aggressive)
@@ -670,6 +676,17 @@ func _play_move_sound() -> void:
 	var audio: Node = get_node_or_null("/root/AudioManager")
 	if audio != null:
 		audio.play_ui(&"move_shaman" if _selection_has_shaman() else &"move_unit")
+
+
+## Negative move-ack: at least one selected unit cannot reach the ordered
+## target (blocked / different island). Uses the same UI-sound channel as the
+## normal move ack; the asset can be added later (silent until then).
+func _play_blocked_sound() -> void:
+	if not is_inside_tree():
+		return
+	var audio: Node = get_node_or_null("/root/AudioManager")
+	if audio != null:
+		audio.play_ui(&"move_blocked")
 
 
 ## Enemy (non-player) unit under the cursor, or null. Same sprite-rect pick as

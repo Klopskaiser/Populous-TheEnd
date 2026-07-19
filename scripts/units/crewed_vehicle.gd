@@ -24,6 +24,8 @@ const SINK_SPEED: float = 0.8   # m/s downward while the wreck sinks
 ## Height span under the chassis that bursts it. Deliberately ABOVE what
 ## drivable terrain can present — only real terrain rips trigger.
 const BREAK_HEIGHT_SPAN: float = 3.5
+## Seconds an abandoned (crewless) siege engine survives before it bursts.
+const UNCREWED_LIFETIME: float = 180.0
 const C_WOOD: Color = Color(0.42, 0.29, 0.15)
 const C_WOOD_DARK: Color = Color(0.3, 0.2, 0.1)
 const C_METAL: Color = Color(0.45, 0.45, 0.48)
@@ -48,6 +50,10 @@ var chassis_half_width: float = 0.7
 var crew: Array = []
 
 var _crew_prune_timer: float = 0.0
+## Seconds this vehicle has stood continuously without any crew (recruits still
+## walking over count as crew). At UNCREWED_LIFETIME an abandoned siege engine
+## bursts. Reset the moment anyone is aboard or inbound.
+var _no_crew_time: float = 0.0
 ## Seconds of burn left after a fire-spell/lava hit (0 = not burning).
 var _vehicle_burn: float = 0.0
 ## The destroyed wreck sinks into the ground (burn/water death).
@@ -231,6 +237,13 @@ func drown() -> void:
 
 
 # --- Vehicle destruction --------------------------------------------------------
+
+## Whether this vehicle self-destructs after UNCREWED_LIFETIME without crew.
+## True for ground siege engines (catapult, fire ram); the airship overrides it
+## to false so empty ships keep drifting home instead of bursting.
+func destroys_when_uncrewed() -> bool:
+	return true
+
 
 ## Burn-out and water: the wreck sinks. Terrain rip: it bursts apart
 ## (debris). Either way the crew survives, is released and controllable.
@@ -492,6 +505,16 @@ func tick(delta: float) -> void:
 		# apart (cliff beyond anything drivable) -> the vehicle bursts.
 		if state != State.DEAD and _chassis_height_span() > BREAK_HEIGHT_SPAN:
 			_destroy_vehicle(true)
+		# Abandoned: no crew (and none inbound, crew already pruned above) for
+		# UNCREWED_LIFETIME seconds -> the siege engine bursts. Airships opt out
+		# (empty ones drift home instead, see destroys_when_uncrewed).
+		elif state != State.DEAD and destroys_when_uncrewed():
+			if crew.is_empty():
+				_no_crew_time += 0.5
+				if _no_crew_time >= UNCREWED_LIFETIME:
+					_destroy_vehicle(true)
+			else:
+				_no_crew_time = 0.0
 	# An unmanned (or under-crewed / incapacitated-crew) vehicle rolls to a
 	# stop mid-route.
 	if state == State.MOVE and active_crew_count() < min_move_crew:

@@ -64,6 +64,13 @@ func setup(p_tribe_id: int, at: Vector3, p_unit_manager: UnitManager,
 	unit_manager = p_unit_manager
 	terrain_data = p_terrain_data
 	building_manager = p_building_manager
+	# Spawn on the GROUND under the cast point, never at the target's altitude:
+	# casting on a flying airship passes its high y, which would make the vortex
+	# form up in the air on the hull and only drop later. Snapping to the terrain
+	# here forms it where the ship's shadow is (right under it), so it destroys
+	# the airship from the ground up.
+	if terrain_data != null:
+		position.y = terrain_data.get_height(at.x, at.z)
 
 
 func tick(delta: float) -> void:

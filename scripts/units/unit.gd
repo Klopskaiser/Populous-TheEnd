@@ -840,9 +840,8 @@ func _start_path_to(target: Vector3) -> void:
 		_set_state(State.MOVE)
 		return
 	if not _plan_path_to(target, move_aggressive):
-		# Unreachable: drop the waypoint and stop.
-		if not waypoint_queue.is_empty():
-			waypoint_queue.pop_front()
+		# Unreachable: give up the whole route and stop — no periodic re-search.
+		waypoint_queue.clear()
 		_set_state(State.IDLE)
 		return
 	_set_state(State.MOVE)
@@ -859,8 +858,7 @@ func _resolve_pending_path() -> void:
 	if state != State.MOVE:
 		return  # order was superseded while waiting
 	if not _plan_path_to(target, move_aggressive):
-		if not waypoint_queue.is_empty():
-			waypoint_queue.pop_front()
+		waypoint_queue.clear()
 		_set_state(State.IDLE)
 
 
@@ -897,9 +895,8 @@ func _apply_worker_path(request_id: int, cells: PackedVector2Array) -> void:
 	if state != State.MOVE or nav_grid == null:
 		return  # order superseded while waiting
 	if cells.is_empty():
-		# Unreachable target — same outcome as the synchronous failure branch.
-		if not waypoint_queue.is_empty():
-			waypoint_queue.pop_front()
+		# Unreachable target — give up the whole route (no periodic re-search).
+		waypoint_queue.clear()
 		_set_state(State.IDLE)
 		return
 	var path: PackedVector3Array = PackedVector3Array()

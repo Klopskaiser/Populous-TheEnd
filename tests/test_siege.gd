@@ -120,6 +120,38 @@ func test_units_never_target_the_vehicle() -> void:
 	_free_world(w)
 
 
+## An abandoned (crewless) siege engine bursts after UNCREWED_LIFETIME. Drive
+## the timer close to the threshold, then tick past it (the 0.5 s throttle block
+## does the accumulation and the burst).
+func test_uncrewed_siege_engine_bursts() -> void:
+	var w: Dictionary = _make_world()
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, Vector3(40, 0, 40)) as SiegeEngine
+	engine._no_crew_time = CrewedVehicle.UNCREWED_LIFETIME - 0.4
+	var ticks: int = 0
+	while is_instance_valid(engine) and engine.state != Unit.State.DEAD and ticks < 40:
+		_tick_world(w)
+		ticks += 1
+	check(not is_instance_valid(engine) or engine.state == Unit.State.DEAD,
+		"an abandoned siege engine bursts after UNCREWED_LIFETIME")
+	_free_world(w)
+
+
+## A manned engine never bursts from the uncrewed timer: boarded crew keeps
+## _no_crew_time pinned at zero even when it is driven up artificially.
+func test_crewed_siege_engine_never_bursts_from_timer() -> void:
+	var w: Dictionary = _make_world()
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, Vector3(40, 0, 40)) as SiegeEngine
+	_board_crew(w, engine)
+	engine._no_crew_time = CrewedVehicle.UNCREWED_LIFETIME - 0.2
+	for _i in range(20):
+		_tick_world(w)
+	check(is_instance_valid(engine) and engine.state != Unit.State.DEAD,
+		"a crewed siege engine does not burst (timer stays reset)")
+	_free_world(w)
+
+
 ## Several catapults sent to ONE point must settle spread apart, not shove each
 ## other around at the goal (their formation targets are scaled outside the
 ## vehicle separation bubble — same fix as the airships).
