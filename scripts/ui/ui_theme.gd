@@ -90,15 +90,21 @@ static func icon(key: StringName) -> ImageTexture:
 			_draw_star(img)
 		&"people":
 			_draw_people(img)
-		&"warrior_camp":
+		&"brave":
+			_draw_person(img)
+		&"preacher":
+			_draw_preacher(img)
+		&"crew":
+			_draw_crew(img)
+		&"warrior_camp", &"warrior":
 			_draw_sword(img)
-		&"firewarrior_camp", &"fireball":
+		&"firewarrior_camp", &"fireball", &"firewarrior":
 			_draw_flame(img)
 		&"temple":
 			_draw_temple(img)
 		&"forester":
 			_draw_seedling(img)
-		&"workshop":
+		&"workshop", &"siege":
 			_draw_catapult(img)
 		&"watchtower":
 			_draw_watchtower(img)
@@ -182,6 +188,31 @@ static func _draw_people(img: Image) -> void:
 	_rect(img, 5, 12, 6, 8, I_GOLD)
 	_disc(img, 16, 9, 3, I_LIGHT)
 	_rect(img, 13, 13, 6, 7, I_GOLD)
+
+
+static func _draw_person(img: Image) -> void:
+	# A single figure (brave): head + body.
+	_disc(img, 12, 7, 4, I_LIGHT)
+	_rect(img, 8, 12, 8, 9, I_GOLD)
+	_rect(img, 10, 21, 1, 2, I_DARK)
+	_rect(img, 13, 21, 1, 2, I_DARK)
+
+
+static func _draw_preacher(img: Image) -> void:
+	# Robed figure with a raised staff (converter).
+	_disc(img, 10, 7, 3, I_LIGHT)
+	for i in range(9):                        # widening robe
+		_rect(img, 10 - i / 2, 11 + i, 4 + i, 1, I_GOLD)
+	_rect(img, 17, 3, 2, 17, I_DARK)          # staff
+	_disc(img, 18, 3, 2, I_LIGHT)             # staff head
+
+
+static func _draw_crew(img: Image) -> void:
+	# Figure in a doorway (crew/occupancy tab).
+	_rect(img, 4, 3, 16, 18, I_DARK)          # door frame
+	_rect(img, 6, 5, 12, 16, Color(0.09, 0.06, 0.03))   # opening
+	_disc(img, 12, 10, 3, I_LIGHT)            # head
+	_rect(img, 9, 14, 7, 7, I_GOLD)           # body
 
 
 static func _draw_sword(img: Image) -> void:

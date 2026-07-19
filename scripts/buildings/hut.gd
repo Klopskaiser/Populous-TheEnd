@@ -30,6 +30,11 @@ var _spawn_counter: int = 0
 ## registries (entries may be freed).
 var crew: Array = []
 var _growth_timer: float = 0.0
+## Manual crew override (-1 = follow the tribe's growth mode). Set by manual
+## manning (right-click) and manual ejects (crew tab): the hut then holds that
+## crew size until the player moves the growth slider again
+## (Tribe.set_growth_mode clears all overrides).
+var manual_crew_override: int = -1
 
 
 func _init() -> void:
@@ -75,6 +80,11 @@ func admit_crew(unit) -> bool:
 	if not is_usable() or crew.size() >= CREW_CAPACITY or not _crew_eligible(unit):
 		return false
 	crew.append(unit)
+	# A manually sent brave pins the crew at the new size (override holds until
+	# the growth slider moves); auto-pulled braves leave the override alone.
+	if unit.man_hut_manual:
+		unit.man_hut_manual = false
+		manual_crew_override = crew.size()
 	unit.enter_hut(self)
 	if unit_manager != null:
 		unit_manager.remove_from_world(unit)   # hidden reserve
@@ -82,14 +92,22 @@ func admit_crew(unit) -> bool:
 
 
 ## Ejects the crew member at `index` alive at the hut edge; walks it to the
-## rally point when one is set (used by the sidebar eject button).
-func eject_crew(index: int) -> void:
+## rally point when one is set. `manual` (crew-tab eject) pins the crew at the
+## reduced size so the growth mode does not refill the hut.
+func eject_crew(index: int, manual: bool = false) -> void:
 	_prune_crew()
 	if index < 0 or index >= crew.size():
 		return
 	var u = crew[index]
 	crew.remove_at(index)
+	if manual:
+		manual_crew_override = crew.size()
 	_release_crew_member(u, rally_point if rally_point != Vector3.ZERO else Vector3.INF)
+
+
+## Back to following the tribe's growth mode (called on slider changes).
+func clear_manual_override() -> void:
+	manual_crew_override = -1
 
 
 ## Ejects every crew member. `killed` (ranged stage-1 fire / catapult hit)
@@ -116,6 +134,8 @@ func has_occupants() -> bool:
 
 func destroy() -> void:
 	eject_occupants(false)
+	if _crew_sprite != null:
+		_crew_sprite.visible = false   # like the production bar during the sink
 	super.destroy()
 
 
@@ -156,8 +176,11 @@ func _admit_arrived_crew() -> void:
 
 # --- Growth maintenance --------------------------------------------------------
 
-## Target crew size from the owning tribe's growth mode.
+## Target crew size: the manual override when set, else the owning tribe's
+## growth mode.
 func _crew_target() -> int:
+	if manual_crew_override >= 0:
+		return clampi(manual_crew_override, 0, CREW_CAPACITY)
 	if tribe == null:
 		return 0
 	match tribe.growth_mode:
@@ -226,7 +249,7 @@ func _spawn_rate_factor() -> float:
 ## Progress toward the next brave (drives the bar above the hut); -1 while under
 ## construction/damaged, unmanned, or when the tribe is at its population cap.
 func production_progress() -> float:
-	if not is_usable() or tribe == null or crew.is_empty():
+	if not is_usable() or tribe == null or crew.is_empty() or paused:
 		return -1.0
 	if tribe.population() >= tribe.housing_capacity() or tribe.at_unit_cap():
 		return -1.0
@@ -235,7 +258,7 @@ func production_progress() -> float:
 
 ## Estimated growth this hut contributes, in braves per minute (sidebar readout).
 func growth_per_minute() -> float:
-	if not is_usable() or tribe == null or crew.is_empty():
+	if not is_usable() or tribe == null or crew.is_empty() or paused:
 		return 0.0
 	if tribe.population() >= tribe.housing_capacity() or tribe.at_unit_cap():
 		return 0.0
@@ -253,7 +276,7 @@ func _tick_active(delta: float) -> void:
 	if _growth_timer <= 0.0:
 		_growth_timer = GROWTH_INTERVAL
 		_tick_growth()
-	if crew.is_empty():
+	if crew.is_empty() or paused:
 		spawn_timer = SPAWN_INTERVAL
 		return
 	if tribe.population() >= tribe.housing_capacity() or tribe.at_unit_cap():
@@ -281,6 +304,59 @@ func _spawn_brave() -> void:
 			# Slot cycles through a few groups so the pack stays near the rally.
 			brave.order_move(rally_point + TribeCommands.group_slot_offset(_spawn_counter % 36))
 	_spawn_counter += 1
+
+
+# --- Crew overlay (world-space pips, phase UI cleanup) --------------------------
+
+## Second overlay sprite below the production bar: one pip per crew slot
+## (filled = manned), shown while selected/hovered so the player sees the
+## hut's crew without opening the crew tab.
+var _crew_sprite: Sprite3D = null
+var _crew_shown: int = -1
+
+
+func _create_overlay() -> void:
+	super._create_overlay()
+	_crew_sprite = Sprite3D.new()
+	_crew_sprite.name = "CrewPips"
+	_crew_sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	_crew_sprite.shaded = false
+	_crew_sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	_crew_sprite.set_draw_flag(SpriteBase3D.FLAG_DISABLE_DEPTH_TEST, true)
+	_crew_sprite.pixel_size = 0.07
+	_crew_sprite.position.y = OVERLAY_Y - 0.6
+	_crew_sprite.visible = false
+	add_child(_crew_sprite)
+
+
+func _update_overlay() -> void:
+	super._update_overlay()
+	if _crew_sprite == null:
+		return
+	if not (selected or hovered) or not is_usable():
+		if _crew_sprite.visible:
+			_crew_sprite.visible = false
+		_crew_shown = -1
+		return
+	_crew_sprite.visible = true
+	var n: int = crew_count()
+	if n == _crew_shown:
+		return
+	_crew_shown = n
+	_crew_sprite.texture = _make_crew_texture(n)
+
+
+## One square pip per crew slot: gold = manned, dark = free.
+static func _make_crew_texture(filled: int) -> ImageTexture:
+	var pip: int = 6
+	var gap: int = 2
+	var w: int = CREW_CAPACITY * pip + (CREW_CAPACITY - 1) * gap
+	var img: Image = Image.create_empty(w, pip, false, Image.FORMAT_RGBA8)
+	for i in CREW_CAPACITY:
+		var color: Color = Color(0.85, 0.68, 0.30) if i < filled \
+			else Color(0.09, 0.06, 0.03, 0.9)
+		img.fill_rect(Rect2i(i * (pip + gap), 0, pip, pip), color)
+	return ImageTexture.create_from_image(img)
 
 
 func asset_kind() -> StringName:

@@ -27,6 +27,13 @@ enum GrowthMode { NONE, MINIMAL, MAXIMUM }
 ## default). MAXIMUM = grow like before (huts fill up from nearby idle braves).
 var growth_mode: GrowthMode = GrowthMode.MAXIMUM
 
+## Per-tribe catapult cap: every workshop of the tribe stops producing once
+## owned_catapult_count() reaches it. Player adjusts it in the sidebar
+## (followers tab); AI keeps the default.
+const MAX_CATAPULTS_DEFAULT: int = 3
+const MAX_CATAPULTS_LIMIT: int = 20
+var max_catapults: int = MAX_CATAPULTS_DEFAULT
+
 var id: int = 0
 var color: Color = Color.WHITE
 var mana: float = 0.0
@@ -71,6 +78,29 @@ func housing_capacity() -> int:
 	for building in buildings:
 		total += building.housing_capacity()
 	return total
+
+
+## Catapults counting toward the tribe's cap: every own siege engine, manned
+## OR unmanned (enemy-captured ones leave `units` via convert_to_tribe and
+## stop counting automatically).
+func owned_catapult_count() -> int:
+	var count: int = 0
+	for unit in units:
+		if is_instance_valid(unit) and unit is SiegeEngine \
+				and unit.state != Unit.State.DEAD:
+			count += 1
+	return count
+
+
+## Applies a new growth mode (sidebar slider): manual crew overrides on huts
+## only hold until the player moves the slider again — clear them all so every
+## hut follows the new mode. Direct `growth_mode =` assignment (tests, setup)
+## deliberately skips this.
+func set_growth_mode(mode: GrowthMode) -> void:
+	growth_mode = mode
+	for building in buildings:
+		if building.has_method("clear_manual_override"):
+			building.clear_manual_override()
 
 
 func praying_braves() -> int:

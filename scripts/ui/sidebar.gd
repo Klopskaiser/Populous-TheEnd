@@ -2,27 +2,26 @@ class_name Sidebar extends Control
 
 ## The complete, permanent UI shell in the style of Populous: The Beginning —
 ## a gold/brown panel down the left edge (fixed width, full height). Top to
-## bottom: round minimap, tab bar (buildings / spells / followers), header
-## (shaman portrait, per-tribe population bars, population count, segmented
-## mana bar, wood readout), the active tab's content, and a menu panel with a
-## pause button. All optics are procedural (see UiTheme); the layout is built
-## in code in _ready() and wired to the game via setup().
+## bottom: round minimap, shaman portrait, tab bar (buildings / spells /
+## followers / crew), header (per-tribe population bars, population count,
+## segmented mana bar, wood readout, growth slider), the active tab's content,
+## and a menu panel with a pause button. All optics are procedural (see
+## UiTheme); the layout is built in code in _ready() and wired via setup().
 ##
-## Displays are signal-driven (Events.population_changed / mana_changed /
-## stockpile_changed); the follower counters and minimap overlay are throttled.
-## SelectionManager and BuildMenu ignore mouse events over the panel via the
-## static is_mouse_over_ui() guard (drags that started on the map may still end
-## over the panel).
+## The CREW tab shows the occupants of the single selected mannable object
+## (hut / forester / workshop / watchtower / catapult) as icon buttons (click
+## ejects) plus a production pause toggle; it auto-activates on selection and
+## is greyed out otherwise. Displays are signal-driven (Events.*_changed); the
+## follower counters and minimap overlay are throttled. SelectionManager and
+## BuildMenu ignore mouse events over the panel via is_mouse_over_ui().
 
 const PANEL_WIDTH: float = 260.0
 const MINIMAP_SIZE: float = 236.0
 ## Min height of the tab content area: tall enough for the building tab's full
-## list. While a building/crew panel (forester/workshop/siege/watchtower) is
-## shown below it, the area shrinks to the compact height so the panel's bottom
-## rows (e.g. the workshop's max-catapult stepper) stay on screen at 1080p —
-## the building tab itself scrolls, so nothing becomes unreachable.
+## grid; every tab scrolls as a safety net for short windows.
 const TAB_CONTENT_HEIGHT: float = 300.0
-const TAB_CONTENT_HEIGHT_COMPACT: float = 120.0
+## Index of the auto-activating crew tab.
+const TAB_CREW: int = 3
 const MANA_SEGMENTS: int = 20
 ## Mana value that fills the whole segmented bar (display only).
 const MANA_DISPLAY_CAP: float = 1000.0
@@ -78,28 +77,19 @@ var _tab_content: Control = null
 var _spell_ui: Dictionary = {}       # id -> {"button": Button, "pips": Array[ColorRect]}
 var _follower_labels: Dictionary = {}  # kind -> Label
 var _idle_button: Button = null
+var _max_catapults_label: Label = null   # per-tribe cap stepper (followers tab)
 var _pause_menu: Control = null
-## Forester inmate panel (shown while a forester is selected): 4 slot buttons;
-## clicking an occupied slot sends that worker back out.
-var _forester_panel: PanelContainer = null
-var _forester_slot_buttons: Array[Button] = []
-## Workshop panel (shown while a workshop is selected, 7f): worker slot
-## buttons (eject, forester-style), stock readout, pause toggle and the
-## max-catapult stepper.
-var _workshop_panel: PanelContainer = null
-var _workshop_info: Label = null
-var _workshop_pause: Button = null
-var _workshop_max_label: Label = null
-var _workshop_slot_buttons: Array[Button] = []
-## Siege-crew panel (shown while exactly one catapult is selected, 7f):
-## one button per crew member to send it off the vehicle.
-var _siege_panel: PanelContainer = null
-var _siege_info: Label = null
-var _siege_slot_buttons: Array[Button] = []
-## Watchtower crew panel (shown while a watchtower is selected, 7h): one button
-## per crew slot to eject that occupant (forester-style).
-var _watchtower_panel: PanelContainer = null
-var _watchtower_slot_buttons: Array[Button] = []
+## Crew tab widgets: occupants of the selected mannable object as icon buttons
+## (click ejects) plus a production pause toggle.
+var _crew_title: Label = null
+var _crew_info: Label = null
+var _crew_slot_buttons: Array[Button] = []
+var _crew_pause_button: Button = null
+## Edge detection for the crew tab's auto-switch: last polled target, the tab
+## to return to on deselection, and the currently active tab index.
+var _crew_target_obj: Object = null
+var _crew_return_tab: int = 0
+var _active_tab: int = 0
 ## Shaman portrait (below the minimap, Populous style): full live-animated
 ## figure + health bar; click centres the camera on her and selects ONLY her.
 var _portrait_sprite: AnimatedSprite2D = null
@@ -261,11 +251,7 @@ func setup(p_tribes: Array[Tribe], p_player_id: int, p_unit_manager: UnitManager
 
 
 func _process(delta: float) -> void:
-	_refresh_forester_panel()   # responsive to selection changes (cheap: 4 buttons)
-	_refresh_workshop_panel()
-	_refresh_siege_panel()
-	_refresh_watchtower_panel()
-	_update_tab_content_height()
+	_refresh_crew_tab()   # responsive to selection changes (cheap: a few widgets)
 	_follower_timer -= delta
 	if _follower_timer <= 0.0:
 		_follower_timer = FOLLOWER_INTERVAL
@@ -299,10 +285,6 @@ func _build_ui() -> void:
 	_build_tab_bar(root)
 	_build_header(root)
 	_build_tab_content(root)
-	_build_forester_panel(root)
-	_build_workshop_panel(root)
-	_build_siege_panel(root)
-	_build_watchtower_panel(root)
 
 	var spacer: Control = Control.new()
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -341,8 +323,9 @@ func _build_shaman_portrait(root: Control) -> void:
 
 	# Stage for the animated figure (AnimatedSprite2D is a Node2D, so it lives
 	# inside a plain Control and is re-centred whenever the stage resizes).
+	# 72 px = exactly the sprite height (24 px x scale 3): no dead space below.
 	var stage: Control = Control.new()
-	stage.custom_minimum_size = Vector2(0, 80)
+	stage.custom_minimum_size = Vector2(0, 72)
 	stage.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vb.add_child(stage)
 	_portrait_sprite = AnimatedSprite2D.new()
@@ -367,10 +350,13 @@ func _build_shaman_portrait(root: Control) -> void:
 	_portrait_hp.add_theme_stylebox_override("fill", hp_fill)
 	vb.add_child(_portrait_hp)
 
+	# Hidden while empty (alive shaman) so it does not reserve a blank row
+	# below the health bar; _refresh_portrait toggles it.
 	_portrait_status = Label.new()
 	_portrait_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_portrait_status.add_theme_color_override("font_color", UiTheme.TEXT)
 	_portrait_status.text = ""
+	_portrait_status.visible = false
 	vb.add_child(_portrait_status)
 
 
@@ -382,6 +368,7 @@ func _build_tab_bar(root: Control) -> void:
 		{"icon": &"house", "tip": "Gebäude"},
 		{"icon": &"star", "tip": "Zauber"},
 		{"icon": &"people", "tip": "Gefolgsleute"},
+		{"icon": &"crew", "tip": "Besatzung"},
 	]
 	for i in range(defs.size()):
 		var b: Button = Button.new()
@@ -480,64 +467,65 @@ func _make_tribe_bar(color: Color) -> ProgressBar:
 
 func _build_tab_content(root: Control) -> void:
 	var content: Control = Control.new()
-	# Tall enough for the building tab's full list (7 entries incl. the
-	# watchtower); the tab itself also scrolls as a safety net (short windows).
+	# Tall enough for the building tab's full grid; every tab also scrolls as a
+	# safety net (short windows).
 	content.custom_minimum_size = Vector2(0, TAB_CONTENT_HEIGHT)
 	content.size_flags_vertical = Control.SIZE_FILL
-	content.clip_contents = true   # compact mode must not paint over the panel below
+	content.clip_contents = true
 	root.add_child(content)
 	_tab_content = content
 	_tab_panels.append(_build_building_tab())
 	_tab_panels.append(_build_spell_tab())
 	_tab_panels.append(_build_followers_tab())
+	_tab_panels.append(_build_crew_tab())
 	for p in _tab_panels:
 		p.set_anchors_preset(Control.PRESET_FULL_RECT)
 		content.add_child(p)
 
 
-## Shrinks the tab content while a building/crew panel is visible below it
-## (see TAB_CONTENT_HEIGHT_COMPACT) and restores the full height otherwise.
-func _update_tab_content_height() -> void:
-	if _tab_content == null:
-		return
-	var panel_open: bool = (_forester_panel != null and _forester_panel.visible) \
-		or (_workshop_panel != null and _workshop_panel.visible) \
-		or (_siege_panel != null and _siege_panel.visible) \
-		or (_watchtower_panel != null and _watchtower_panel.visible)
-	var target: float = TAB_CONTENT_HEIGHT_COMPACT if panel_open else TAB_CONTENT_HEIGHT
-	if _tab_content.custom_minimum_size.y != target:
-		_tab_content.custom_minimum_size.y = target
-
-
 func _build_building_tab() -> Control:
-	# A scroll container so the full build list stays reachable even if the tab
-	# area is short (more entries than fit — the watchtower was falling off).
+	# Icon grid like the spell tab: two cells per row, wood cost below the icon,
+	# name/hotkey in the tooltip.
 	var scroll: ScrollContainer = ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	var grid: VBoxContainer = VBoxContainer.new()
+	var grid: GridContainer = GridContainer.new()
+	grid.columns = 2
 	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	grid.add_theme_constant_override("separation", 4)
+	grid.add_theme_constant_override("h_separation", 4)
+	grid.add_theme_constant_override("v_separation", 6)
 	for entry in default_build_entries():
-		var b: Button = Button.new()
-		b.icon = UiTheme.icon(entry["icon"])
-		var label: String = entry["name"]
-		if entry["enabled"]:
-			label += "  (%d Holz)" % int(entry["wood_cost"])
-			if entry.has("hotkey"):
-				label += "  [%s]" % entry["hotkey"]
-		b.text = label
-		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		b.disabled = not entry["enabled"]
-		if not entry["enabled"]:
-			b.tooltip_text = "ab Phase 5"
-		UiTheme.style_button(b)
-		if entry["enabled"]:
-			var scene: PackedScene = entry["scene"]
-			b.pressed.connect(func() -> void: _on_build_pressed(scene))
-		grid.add_child(b)
+		grid.add_child(_make_build_cell(entry))
 	scroll.add_child(grid)
 	return scroll
+
+
+func _make_build_cell(entry: Dictionary) -> Control:
+	var cell: VBoxContainer = VBoxContainer.new()
+	cell.add_theme_constant_override("separation", 2)
+	cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	var b: Button = Button.new()
+	b.icon = UiTheme.icon(entry["icon"])
+	b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var tip: String = entry["name"]
+	if entry.has("hotkey"):
+		tip += "  [%s]" % entry["hotkey"]
+	b.tooltip_text = tip if entry["enabled"] else "%s — ab Phase 5" % entry["name"]
+	b.disabled = not entry["enabled"]
+	UiTheme.style_button(b)
+	if entry["enabled"]:
+		var scene: PackedScene = entry["scene"]
+		b.pressed.connect(func() -> void: _on_build_pressed(scene))
+	cell.add_child(b)
+
+	var cost: Label = Label.new()
+	cost.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	cost.add_theme_color_override("font_color",
+		UiTheme.TEXT if entry["enabled"] else UiTheme.TEXT_DIM)
+	cost.text = "%d Holz" % int(entry["wood_cost"])
+	cell.add_child(cost)
+	return cell
 
 
 func _build_spell_tab() -> Control:
@@ -611,110 +599,60 @@ func _build_followers_tab() -> Control:
 	UiTheme.style_button(_idle_button)
 	_idle_button.pressed.connect(_on_select_idle)
 	vb.add_child(_idle_button)
+
+	# Per-tribe catapult cap (independent of any selected/existing workshop):
+	# every workshop of the tribe reads Tribe.max_catapults.
+	var row: HBoxContainer = HBoxContainer.new()
+	row.add_theme_constant_override("separation", 4)
+	vb.add_child(row)
+	var minus: Button = Button.new()
+	minus.text = "−"
+	UiTheme.style_button(minus)
+	minus.pressed.connect(func() -> void: _on_max_catapults_delta(-1))
+	row.add_child(minus)
+	_max_catapults_label = Label.new()
+	_max_catapults_label.add_theme_color_override("font_color", UiTheme.TEXT)
+	_max_catapults_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_max_catapults_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_max_catapults_label.tooltip_text = \
+		"Katapult-Limit des Stammes: alle Werkstätten stoppen die Fertigung," \
+		+ " sobald so viele eigene Katapulte existieren"
+	row.add_child(_max_catapults_label)
+	var plus: Button = Button.new()
+	plus.text = "+"
+	UiTheme.style_button(plus)
+	plus.pressed.connect(func() -> void: _on_max_catapults_delta(1))
+	row.add_child(plus)
+
 	scroll.add_child(vb)
 	return scroll
 
 
-## Inmate panel for a selected forester: title + four slot buttons. Hidden until
-## a forester is the selected building (polled in _process). Clicking an occupied
-## slot sends that worker back out.
-func _build_forester_panel(root: Control) -> void:
-	_forester_panel = PanelContainer.new()
-	_forester_panel.name = "ForesterPanel"
-	_forester_panel.add_theme_stylebox_override("panel", UiTheme.inset_style())
-	_forester_panel.mouse_filter = Control.MOUSE_FILTER_STOP
-	_forester_panel.visible = false
-	root.add_child(_forester_panel)
-
-	var vb: VBoxContainer = VBoxContainer.new()
-	vb.add_theme_constant_override("separation", 3)
-	_forester_panel.add_child(vb)
-
-	var title: Label = Label.new()
-	title.text = "Försterei — Arbeiter"
-	title.add_theme_color_override("font_color", UiTheme.GOLD_BRIGHT)
-	vb.add_child(title)
-
-	for i in range(Forester.WORKER_SLOTS):
-		var b: Button = Button.new()
-		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		UiTheme.style_button(b)
-		var idx: int = i
-		b.pressed.connect(func() -> void: _on_forester_eject(idx))
-		vb.add_child(b)
-		_forester_slot_buttons.append(b)
-
-
-## Shows/updates the forester inmate panel from the current building selection.
-func _refresh_forester_panel() -> void:
-	if _forester_panel == null:
+func _on_max_catapults_delta(delta: int) -> void:
+	var player: Tribe = _player_tribe()
+	if player == null:
 		return
-	var forester: Forester = null
-	if _selection != null:
-		var b: Building = _selection.selected_building
-		if is_instance_valid(b) and b is Forester:
-			forester = b as Forester
-	if forester == null:
-		if _forester_panel.visible:
-			_forester_panel.visible = false
+	player.max_catapults = clampi(player.max_catapults + delta, 0, Tribe.MAX_CATAPULTS_LIMIT)
+	_refresh_max_catapults_label()
+
+
+func _refresh_max_catapults_label() -> void:
+	if _max_catapults_label == null:
 		return
-	_forester_panel.visible = true
-	for i in range(_forester_slot_buttons.size()):
-		var btn: Button = _forester_slot_buttons[i]
-		var occupied: bool = i < forester.occupants.size() \
-			and is_instance_valid(forester.occupants[i])
-		if occupied:
-			btn.text = "Platz %d: Arbeiter  (rausschicken)" % (i + 1)
-			btn.disabled = false
-		else:
-			btn.text = "Platz %d: frei" % (i + 1)
-			btn.disabled = true
-
-
-func _on_forester_eject(index: int) -> void:
-	if _selection == null:
+	var player: Tribe = _player_tribe()
+	if player == null:
 		return
-	var b: Building = _selection.selected_building
-	if is_instance_valid(b) and b is Forester:
-		(b as Forester).eject_worker(index)
-		_refresh_forester_panel()
+	_max_catapults_label.text = "Max. Katapulte: %d  (aktuell: %d)" % [
+		player.max_catapults, player.owned_catapult_count()]
 
 
-## Watchtower crew panel (7h): one button per crew slot; clicking an occupied
-## slot ejects that unit (same pattern as the forester/workshop). Kind is shown
-## so you can tell who is manning the tower.
-func _build_watchtower_panel(root: Control) -> void:
-	_watchtower_panel = PanelContainer.new()
-	_watchtower_panel.name = "WatchtowerPanel"
-	_watchtower_panel.add_theme_stylebox_override("panel", UiTheme.inset_style())
-	_watchtower_panel.mouse_filter = Control.MOUSE_FILTER_STOP
-	_watchtower_panel.visible = false
-	root.add_child(_watchtower_panel)
+# --- Crew tab (occupancy of the selected mannable object) ---------------------
 
-	var vb: VBoxContainer = VBoxContainer.new()
-	vb.add_theme_constant_override("separation", 3)
-	_watchtower_panel.add_child(vb)
-
-	var title: Label = Label.new()
-	title.text = "Wachturm — Besatzung"
-	title.add_theme_color_override("font_color", UiTheme.GOLD_BRIGHT)
-	vb.add_child(title)
-
-	for i in range(Watchtower.CREW_CAPACITY):
-		var b: Button = Button.new()
-		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		UiTheme.style_button(b)
-		var idx: int = i
-		b.pressed.connect(func() -> void: _on_watchtower_eject(idx))
-		vb.add_child(b)
-		_watchtower_slot_buttons.append(b)
-
-
-## German label for a crew unit kind (shown in the slot buttons).
+## German label for a crew unit kind (shown in the slot tooltips).
 static func _crew_kind_label(kind: StringName) -> String:
 	match kind:
+		&"brave":
+			return "Gefolgsmann"
 		&"warrior":
 			return "Krieger"
 		&"firewarrior":
@@ -726,234 +664,181 @@ static func _crew_kind_label(kind: StringName) -> String:
 	return "Einheit"
 
 
-func _refresh_watchtower_panel() -> void:
-	if _watchtower_panel == null:
-		return
-	var tower: Watchtower = null
-	if _selection != null:
-		var b: Building = _selection.selected_building
-		if is_instance_valid(b) and b is Watchtower:
-			tower = b as Watchtower
-	if tower == null:
-		if _watchtower_panel.visible:
-			_watchtower_panel.visible = false
-		return
-	_watchtower_panel.visible = true
-	for i in range(_watchtower_slot_buttons.size()):
-		var btn: Button = _watchtower_slot_buttons[i]
-		var occupied: bool = i < tower.crew.size() and is_instance_valid(tower.crew[i])
-		if occupied:
-			btn.text = "Platz %d: %s  (rauswerfen)" % [
-				i + 1, _crew_kind_label(tower.crew[i].unit_kind())]
-			btn.disabled = false
-		else:
-			btn.text = "Platz %d: frei" % (i + 1)
-			btn.disabled = true
-
-
-func _on_watchtower_eject(index: int) -> void:
-	if _selection == null:
-		return
-	var b: Building = _selection.selected_building
-	if is_instance_valid(b) and b is Watchtower:
-		(b as Watchtower).eject_crew(index)
-		_refresh_watchtower_panel()
-
-
-## Control panel for a selected workshop (7f): worker/stock/catapult readout,
-## a pause toggle and the max-catapult stepper. Hidden until a workshop is
-## the selected building (polled in _process — cheap, a handful of widgets).
-func _build_workshop_panel(root: Control) -> void:
-	_workshop_panel = PanelContainer.new()
-	_workshop_panel.name = "WorkshopPanel"
-	_workshop_panel.add_theme_stylebox_override("panel", UiTheme.inset_style())
-	_workshop_panel.mouse_filter = Control.MOUSE_FILTER_STOP
-	_workshop_panel.visible = false
-	root.add_child(_workshop_panel)
-
+## Crew tab: title + info line, one icon button per occupant (click ejects)
+## and a production pause toggle for producers.
+func _build_crew_tab() -> Control:
+	var scroll: ScrollContainer = ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	var vb: VBoxContainer = VBoxContainer.new()
-	vb.add_theme_constant_override("separation", 3)
-	_workshop_panel.add_child(vb)
+	vb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vb.add_theme_constant_override("separation", 4)
 
-	var title: Label = Label.new()
-	title.text = "Werkstatt — Arbeiter"
-	title.add_theme_color_override("font_color", UiTheme.GOLD_BRIGHT)
-	vb.add_child(title)
+	_crew_title = Label.new()
+	_crew_title.add_theme_color_override("font_color", UiTheme.GOLD_BRIGHT)
+	vb.add_child(_crew_title)
 
-	# Worker slots (forester pattern): click an occupied slot to eject.
-	for i in range(Workshop.WORKER_SLOTS):
-		var slot: Button = Button.new()
-		slot.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		slot.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		UiTheme.style_button(slot)
-		var idx: int = i
-		slot.pressed.connect(func() -> void: _on_workshop_eject(idx))
-		vb.add_child(slot)
-		_workshop_slot_buttons.append(slot)
+	_crew_info = Label.new()
+	_crew_info.add_theme_color_override("font_color", UiTheme.TEXT)
+	_crew_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vb.add_child(_crew_info)
 
-	_workshop_info = Label.new()
-	_workshop_info.add_theme_color_override("font_color", UiTheme.TEXT)
-	vb.add_child(_workshop_info)
-
-	_workshop_pause = Button.new()
-	_workshop_pause.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	UiTheme.style_button(_workshop_pause)
-	_workshop_pause.pressed.connect(_on_workshop_pause)
-	vb.add_child(_workshop_pause)
-
-	var row: HBoxContainer = HBoxContainer.new()
-	row.add_theme_constant_override("separation", 4)
-	vb.add_child(row)
-	var minus: Button = Button.new()
-	minus.text = "−"
-	UiTheme.style_button(minus)
-	minus.pressed.connect(func() -> void: _on_workshop_max_delta(-1))
-	row.add_child(minus)
-	_workshop_max_label = Label.new()
-	_workshop_max_label.add_theme_color_override("font_color", UiTheme.TEXT)
-	_workshop_max_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_workshop_max_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	row.add_child(_workshop_max_label)
-	var plus: Button = Button.new()
-	plus.text = "+"
-	UiTheme.style_button(plus)
-	plus.pressed.connect(func() -> void: _on_workshop_max_delta(1))
-	row.add_child(plus)
-
-
-## The workshop currently selected by the player, or null.
-func _selected_workshop() -> Workshop:
-	if _selection == null:
-		return null
-	var b: Building = _selection.selected_building
-	if is_instance_valid(b) and b is Workshop and not b.under_construction:
-		return b as Workshop
-	return null
-
-
-func _refresh_workshop_panel() -> void:
-	if _workshop_panel == null:
-		return
-	var ws: Workshop = _selected_workshop()
-	if ws == null:
-		if _workshop_panel.visible:
-			_workshop_panel.visible = false
-		return
-	_workshop_panel.visible = true
-	for i in range(_workshop_slot_buttons.size()):
-		var btn: Button = _workshop_slot_buttons[i]
-		var occupied: bool = i < ws.occupants.size() \
-			and is_instance_valid(ws.occupants[i])
-		if occupied:
-			btn.text = "Platz %d: Arbeiter  (rausschicken)" % (i + 1)
-			btn.disabled = false
-		else:
-			btn.text = "Platz %d: frei" % (i + 1)
-			btn.disabled = true
-	_workshop_info.text = "Vorrat: %d/%d   Bemannte Katapulte: %d" % [
-		ws.stock_wood(), Workshop.STOCK_TARGET, ws.manned_catapult_count()]
-	_workshop_pause.text = "Produktion fortsetzen" if ws.paused else "Produktion pausieren"
-	_workshop_max_label.text = "Max. Katapulte: %d" % ws.max_catapults
-
-
-func _on_workshop_eject(index: int) -> void:
-	var ws: Workshop = _selected_workshop()
-	if ws != null:
-		ws.eject_worker(index)
-		_refresh_workshop_panel()
-
-
-## Crew panel for a selected catapult (7f): the crew is not individually
-## selectable — this is the worker-style interface (like the forester) to
-## send members off the vehicle. Shown while exactly one siege engine is
-## selected.
-func _build_siege_panel(root: Control) -> void:
-	_siege_panel = PanelContainer.new()
-	_siege_panel.name = "SiegePanel"
-	_siege_panel.add_theme_stylebox_override("panel", UiTheme.inset_style())
-	_siege_panel.mouse_filter = Control.MOUSE_FILTER_STOP
-	_siege_panel.visible = false
-	root.add_child(_siege_panel)
-
-	var vb: VBoxContainer = VBoxContainer.new()
-	vb.add_theme_constant_override("separation", 3)
-	_siege_panel.add_child(vb)
-
-	var title: Label = Label.new()
-	title.text = "Belagerungswaffe — Besatzung"
-	title.add_theme_color_override("font_color", UiTheme.GOLD_BRIGHT)
-	vb.add_child(title)
-
-	_siege_info = Label.new()
-	_siege_info.add_theme_color_override("font_color", UiTheme.TEXT)
-	vb.add_child(_siege_info)
-
+	# Slot buttons for the largest crew (the catapult); surplus slots hide.
+	var slot_row: HBoxContainer = HBoxContainer.new()
+	slot_row.add_theme_constant_override("separation", 4)
+	vb.add_child(slot_row)
 	for i in range(SiegeEngine.MAX_CREW):
 		var b: Button = Button.new()
-		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		UiTheme.style_button(b)
 		var idx: int = i
-		b.pressed.connect(func() -> void: _on_siege_eject(idx))
-		vb.add_child(b)
-		_siege_slot_buttons.append(b)
+		b.pressed.connect(func() -> void: _on_crew_eject(idx))
+		slot_row.add_child(b)
+		_crew_slot_buttons.append(b)
+
+	_crew_pause_button = Button.new()
+	_crew_pause_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	UiTheme.style_button(_crew_pause_button)
+	_crew_pause_button.pressed.connect(_on_crew_pause)
+	vb.add_child(_crew_pause_button)
+
+	scroll.add_child(vb)
+	return scroll
 
 
-## The siege engine currently selected (exactly one selected unit), or null.
-func _selected_siege() -> SiegeEngine:
-	if _selection == null or _selection.selected.size() != 1:
+## The single selected mannable object (own building or own catapult), or null.
+func _selected_crew_target() -> Object:
+	if _selection == null:
 		return null
-	var u: Unit = _selection.selected[0]
-	if is_instance_valid(u) and u is SiegeEngine and u.state != Unit.State.DEAD:
-		return u as SiegeEngine
+	var b: Building = _selection.selected_building
+	if is_instance_valid(b) and not b.under_construction and b.health > 0 \
+			and b.tribe_id == _player_id:
+		return b
+	if _selection.selected.size() == 1:
+		var u: Unit = _selection.selected[0]
+		if is_instance_valid(u) and u is SiegeEngine and u.state != Unit.State.DEAD \
+				and u.tribe_id == _player_id:
+			return u
 	return null
 
 
-func _refresh_siege_panel() -> void:
-	if _siege_panel == null:
+## Normalised occupancy view of a crew target: occupants list, slot capacity
+## and info line (bridges the crew/occupants field split across the classes).
+func _crew_view(target: Object) -> Dictionary:
+	if target is Hut:
+		var hut: Hut = target as Hut
+		return {"members": hut.crew, "cap": Hut.CREW_CAPACITY,
+			"info": "Besatzung: %d/%d   Wachstum: +%.1f/min" % [
+				hut.crew_count(), Hut.CREW_CAPACITY, hut.growth_per_minute()]}
+	if target is Forester:
+		var f: Forester = target as Forester
+		return {"members": f.occupants, "cap": Forester.WORKER_SLOTS,
+			"info": "Arbeiter: %d/%d" % [f.occupants.size(), Forester.WORKER_SLOTS]}
+	if target is Workshop:
+		var ws: Workshop = target as Workshop
+		return {"members": ws.occupants, "cap": Workshop.WORKER_SLOTS,
+			"info": "Arbeiter: %d/%d   Vorrat: %d/%d   Katapulte: %d/%d" % [
+				ws.occupants.size(), Workshop.WORKER_SLOTS,
+				ws.stock_wood(), Workshop.STOCK_TARGET,
+				ws.tribe.owned_catapult_count() if ws.tribe != null else 0,
+				ws.tribe.max_catapults if ws.tribe != null else 0]}
+	if target is Watchtower:
+		var t: Watchtower = target as Watchtower
+		return {"members": t.crew, "cap": Watchtower.CREW_CAPACITY,
+			"info": "Besatzung: %d/%d" % [t.crew.size(), Watchtower.CREW_CAPACITY]}
+	if target is SiegeEngine:
+		var e: SiegeEngine = target as SiegeEngine
+		return {"members": e.crew, "cap": SiegeEngine.MAX_CREW,
+			"info": "Besatzung: %d/%d  (min. 1 fahren, 2 feuern)" % [
+				e.boarded_count(), SiegeEngine.MAX_CREW]}
+	if target is TrainingBuilding:
+		var tb: TrainingBuilding = target as TrainingBuilding
+		var queue: int = tb.incoming.size() + (1 if is_instance_valid(tb.trainee) else 0)
+		return {"members": [], "cap": 0, "info": "In Ausbildung: %d" % queue}
+	return {"members": [], "cap": 0, "info": ""}
+
+
+## Whether the target has a production the player can pause (crew tab toggle).
+func _crew_target_pausable(target: Object) -> bool:
+	return target is Hut or target is TrainingBuilding \
+		or target is Forester or target is Workshop
+
+
+## Polled every frame: auto-activates the crew tab when a mannable object
+## becomes the single selection (edge, not level — manual tab clicks while the
+## selection persists are respected), returns to the previous tab when the
+## selection drops, and greys the tab button out while there is no target.
+func _refresh_crew_tab() -> void:
+	if _crew_title == null or _tab_buttons.size() <= TAB_CREW:
 		return
-	var engine: SiegeEngine = _selected_siege()
-	if engine == null:
-		if _siege_panel.visible:
-			_siege_panel.visible = false
+	var target: Object = _selected_crew_target()
+	_tab_buttons[TAB_CREW].disabled = target == null
+	if target != null and _crew_target_obj == null:
+		_crew_return_tab = _active_tab if _active_tab != TAB_CREW else 0
+		_select_tab(TAB_CREW)
+	elif target == null and _crew_target_obj != null and _active_tab == TAB_CREW:
+		_select_tab(_crew_return_tab)
+	_crew_target_obj = target
+	if target == null:
 		return
-	_siege_panel.visible = true
-	_siege_info.text = "Besatzung: %d/%d  (min. 1 fahren, 2 feuern)" % [
-		engine.boarded_count(), SiegeEngine.MAX_CREW]
-	for i in range(_siege_slot_buttons.size()):
-		var btn: Button = _siege_slot_buttons[i]
-		var member = engine.crew[i] if i < engine.crew.size() else null
+	var view: Dictionary = _crew_view(target)
+	_crew_title.text = target.display_name() if target.has_method("display_name") \
+		else "Belagerungswaffe"
+	_crew_info.text = view["info"]
+	_crew_info.visible = view["info"] != ""
+	var members: Array = view["members"]
+	var cap: int = view["cap"]
+	for i in range(_crew_slot_buttons.size()):
+		var btn: Button = _crew_slot_buttons[i]
+		if i >= cap:
+			btn.visible = false
+			continue
+		btn.visible = true
+		var member = members[i] if i < members.size() else null
 		if member != null and is_instance_valid(member):
-			var status: String = "an Bord" if member.siege_boarded else "unterwegs"
-			btn.text = "Platz %d: %s  (aussteigen)" % [i + 1, status]
+			btn.icon = UiTheme.icon(member.unit_kind())
 			btn.disabled = false
+			var label: String = _crew_kind_label(member.unit_kind())
+			if target is SiegeEngine and not member.siege_boarded:
+				label += " (unterwegs)"
+			btn.tooltip_text = "%s — Klick: rauswerfen" % label
 		else:
-			btn.text = "Platz %d: frei" % (i + 1)
+			btn.icon = null
 			btn.disabled = true
+			btn.tooltip_text = "frei"
+	_crew_pause_button.visible = _crew_target_pausable(target)
+	if _crew_pause_button.visible:
+		_crew_pause_button.text = "Produktion fortsetzen" if target.paused \
+			else "Produktion pausieren"
 
 
-func _on_siege_eject(index: int) -> void:
-	var engine: SiegeEngine = _selected_siege()
-	if engine == null or index < 0 or index >= engine.crew.size():
+## Slot click: eject that occupant. The hut eject is MANUAL (pins the crew
+## size so the growth mode does not refill it, see Hut.manual_crew_override).
+func _on_crew_eject(index: int) -> void:
+	var target: Object = _selected_crew_target()
+	if target == null:
 		return
-	var member = engine.crew[index]
-	if member != null and is_instance_valid(member):
-		member.leave_crew()
-	_refresh_siege_panel()
+	if target is Hut:
+		(target as Hut).eject_crew(index, true)
+	elif target is Forester:
+		(target as Forester).eject_worker(index)
+	elif target is Workshop:
+		(target as Workshop).eject_worker(index)
+	elif target is Watchtower:
+		(target as Watchtower).eject_crew(index)
+	elif target is SiegeEngine:
+		var engine: SiegeEngine = target as SiegeEngine
+		if index >= 0 and index < engine.crew.size():
+			var member = engine.crew[index]
+			if member != null and is_instance_valid(member):
+				member.leave_crew()
+	_refresh_crew_tab()
 
 
-func _on_workshop_pause() -> void:
-	var ws: Workshop = _selected_workshop()
-	if ws != null:
-		ws.paused = not ws.paused
-		_refresh_workshop_panel()
-
-
-func _on_workshop_max_delta(delta: int) -> void:
-	var ws: Workshop = _selected_workshop()
-	if ws != null:
-		ws.max_catapults = clampi(ws.max_catapults + delta, 0, Workshop.MAX_CATAPULTS_LIMIT)
-		_refresh_workshop_panel()
+func _on_crew_pause() -> void:
+	var target: Object = _selected_crew_target()
+	if target != null and _crew_target_pausable(target):
+		target.paused = not target.paused
+		_refresh_crew_tab()
 
 
 func _build_menu_panel(root: Control) -> void:
@@ -1060,6 +945,7 @@ func _back_to_main_menu() -> void:
 # --- Tab switching ----------------------------------------------------------
 
 func _select_tab(index: int) -> void:
+	_active_tab = index
 	for i in range(_tab_panels.size()):
 		_tab_panels[i].visible = i == index
 	for i in range(_tab_buttons.size()):
@@ -1100,10 +986,11 @@ func _set_population(population: int, capacity: int) -> void:
 		_pop_label.text = "Bevölkerung: %d/%d" % [population, capacity]
 
 
-## Growth slider moved: apply the mode to the player's tribe and refresh the label.
+## Growth slider moved: apply the mode to the player's tribe (clears all manual
+## hut-crew overrides — the slider is the master switch) and refresh the label.
 func _on_growth_changed(value: float) -> void:
 	if _player_id < _tribes.size():
-		_tribes[_player_id].growth_mode = int(value) as Tribe.GrowthMode
+		_tribes[_player_id].set_growth_mode(int(value) as Tribe.GrowthMode)
 	_update_growth_label()
 
 
@@ -1168,6 +1055,7 @@ func _refresh_followers() -> void:
 		var lbl: Label = _follower_labels.get(kind)
 		if lbl != null:
 			lbl.text = "%s: %d" % [row["name"], counts[kind]]
+	_refresh_max_catapults_label()
 
 
 # --- Spells & shaman portrait (phase 6) ----------------------------------------
@@ -1245,6 +1133,7 @@ func _refresh_portrait() -> void:
 		_set_portrait_anim(StringName("%s_front" % shaman.anim_base_name))
 		_portrait_hp.value = float(shaman.health) / float(maxi(shaman.max_health, 1))
 		_portrait_status.text = ""
+		_portrait_status.visible = false
 		return
 	_set_portrait_anim(&"dead_front")
 	_portrait_hp.value = 0.0
@@ -1258,6 +1147,7 @@ func _refresh_portrait() -> void:
 		_portrait_status.text = "Wiederkehr in %d s" % int(ceil(remaining))
 	else:
 		_portrait_status.text = "Keine Wiederkehr"
+	_portrait_status.visible = true
 
 
 func _set_portrait_anim(anim: StringName) -> void:

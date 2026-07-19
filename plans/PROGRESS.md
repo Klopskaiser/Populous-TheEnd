@@ -9,6 +9,61 @@ Verifikationsstand. Auch bei nachträglichen Erweiterungen außerhalb einer Phas
 
 ---
 
+## UI-Aufräumen: Besatzungs-Tab, Wachstums-Overrides, Katapult-Limit pro Stamm (2026-07-19)
+
+**Mechanik:**
+- **Manuelle Hütten-Besatzung „hält"** (`scripts/buildings/hut.gd`):
+  `manual_crew_override: int = -1` (−1 = folgt Regler) + `clear_manual_override()`;
+  `_crew_target()` bevorzugt den Override. `eject_crew(index, manual := false)` —
+  manueller Rauswurf (Besatzungs-Tab) pinnt die Crew auf den neuen Stand; ebenso
+  manuelles Bemannen: `Unit.order_man_hut(hut, manual := false)` setzt
+  `Unit.man_hut_manual`, `Hut.admit_crew` übernimmt es als Override.
+  `TribeCommands.order_man_hut` (nur Spieler-Rechtsklick) ruft mit `manual = true`.
+  Das Flag wird bei Befehlsabbruch/-wechsel zurückgesetzt (`leave_garrison`,
+  `order_move`, `_begin_attack`, `order_garrison`, `_tick_garrison`-Abbrüche).
+  **Reglerwechsel löscht alle Overrides:** `Tribe.set_growth_mode()` (nur vom
+  Sidebar-Slider gerufen; Direktzuweisung in Tests/Setup räumt bewusst nichts).
+- **Katapult-Limit pro Stamm** (`scripts/core/tribe.gd`): `Tribe.max_catapults`
+  (Default 3, 0–20) + `owned_catapult_count()` — zählt **alle eigenen** Katapulte
+  (bemannt UND unbemannt, nicht DEAD); gegnerische/übernommene fallen durch den
+  Ownerwechsel (`convert_to_tribe` verlässt `tribe.units`) automatisch raus.
+  `Workshop.max_catapults`/`manned_catapult_count()` **entfernt**;
+  `can_start_production()` prüft das Stamm-Limit. KI bleibt beim Default 3.
+- **Generisches `paused`** (`scripts/buildings/building.gd`): Produzenten frieren
+  nur ihren Produktionspfad ein — Hütte (Spawn-Timer; Crew-Aufnahme + Growth
+  laufen weiter), Trainingsgebäude (kein Admit, Timer eingefroren), Förster
+  (kein Pflanzen, kein Mana-Upkeep), Werkstatt (wie bisher).
+- **Crew-Pips an der Hütte** (`hut.gd`): zweites Overlay-Sprite unter der
+  Produktionsleiste (4 Pips, gold = bemannt), sichtbar bei Selektion/Hover.
+
+**UI (`scripts/ui/sidebar.gd`, `scripts/ui/ui_theme.gd`):**
+- **Neuer 4. Tab „Besatzung"** (`TAB_CREW`): zeigt das einzeln selektierte
+  bemannbare Objekt (Hütte/Försterei/Werkstatt/Wachturm/Katapult; Trainingsgebäude
+  nur Info+Pause) — Titel, Info-Zeile, **Insassen als Icon-Buttons (Klick = Rauswurf**,
+  Hütte mit `manual = true`), Pause-Button für Produzenten. Normalisierung
+  `crew` vs. `occupants` in `_crew_view(target)`. **Auto-Umschaltung mit
+  Kanten-Logik** (`_refresh_crew_tab` in `_process`): Selektion null→Ziel öffnet
+  den Tab (merkt Rücksprung-Tab), Ziel→null springt zurück; Zielwechsel und
+  manuelle Tab-Klicks schalten nicht um. Tab-Button ausgegraut ohne Ziel.
+- **Die vier alten Kontextpanels entfernt** (Förster/Werkstatt/Wachturm/Katapult)
+  samt `TAB_CONTENT_HEIGHT_COMPACT`/`_update_tab_content_height`.
+- **Gebäude-Tab als 2-Spalten-Icon-Grid** (`_make_build_cell`, Spiegel der
+  Zauberzellen): Icon-Button + „N Holz"-Label, Name/Hotkey im Tooltip.
+- **Katapult-Stepper im Gefolgsleute-Tab** (werkstattunabhängig):
+  „Max. Katapulte: N (aktuell: M)" auf `Tribe.max_catapults`.
+- **Schamanen-Porträt kompakter:** Bühne 80→72 px (exakt Spritehöhe), das
+  Status-Label ist unsichtbar solange leer (keine Leerzeile unter dem HP-Balken).
+- **Neue prozedurale Icons** (`ui_theme.gd`): `brave` (Figur), `preacher`
+  (Robe+Stab), `crew` (Figur im Türrahmen); `warrior`→Schwert, `firewarrior`→Flamme,
+  `siege`→Katapult als Alias bestehender Painter.
+
+**Verifikation:** **1834 Tests grün** (neu in `test_hut_crew.gd`:
+`test_manual_eject_holds`, `test_manual_man_holds`, `test_slider_change_clears_overrides`,
+`test_paused_hut_produces_nothing`; `test_siege.gd` auf Stamm-Limit/`owned_catapult_count`
+umgestellt inkl. unbemannt-zählt/Gegner-zählt-nicht). `--headless --quit` fehlerfrei;
+Spielszene 40 s headless ohne Skriptfehler. Manueller Spieltest (Tab-Auto-Umschaltung,
+Grid-Optik, Overlay-Pips) steht noch aus.
+
 ## Bugfixes nach 7h (Nutzerfeedback, 2026-07-07)
 
 - **Katapult-Zielregel:** Einheiten konnten über Umwege (Angriffs-Umverteilung

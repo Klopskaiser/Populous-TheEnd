@@ -169,6 +169,10 @@ func _return_to_world(brave: Brave) -> void:
 
 func _tick_active(delta: float) -> void:
 	_prune_occupants()
+	# Paused (crew tab): no planting and no mana upkeep; workers stay housed.
+	if paused:
+		_active_workers = 0
+		return
 	var filled: int = occupants.size()
 	if filled == 0:
 		_active_workers = 0
@@ -265,7 +269,7 @@ func _tree_manager() -> TreeManager:
 
 ## Planting progress bar (only while actually staffed and paying).
 func production_progress() -> float:
-	if not is_usable() or occupants.is_empty() or _active_workers <= 0:
+	if not is_usable() or occupants.is_empty() or _active_workers <= 0 or paused:
 		return -1.0
 	return clampf(_plant_progress / PLANT_WORK_PER_TREE, 0.0, 1.0)
 

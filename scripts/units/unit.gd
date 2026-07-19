@@ -317,6 +317,10 @@ var garrison_housed: bool = false
 ## tower admits it on ITS tick (not here) so the units list is not mutated
 ## mid-iteration (same rationale as the training queue).
 var garrison_reached: bool = false
+## True while this brave walks to a hut on a MANUAL man order (player
+## right-click): the hut then pins its crew size on admission (manual
+## override). Cleared on admission, release, or when the approach is abandoned.
+var man_hut_manual: bool = false
 ## Enemy-building scan support (phase 7g); injected by UnitManager.spawn_unit()
 ## via set() for every unit (the siege engine used it first, 7f).
 var building_manager: BuildingManager = null
@@ -704,6 +708,7 @@ func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = fals
 		return
 	leave_crew()   # an explicit move order pulls the unit off its siege engine
 	garrison_target = null   # a move order abandons a pending garrison approach
+	man_hut_manual = false
 	_end_attack()
 	_clear_building_target()   # a move order also breaks off a building assault
 	move_aggressive = aggressive
@@ -1860,6 +1865,7 @@ func _begin_attack(enemy: Unit) -> void:
 			_set_state(State.ATTACK)
 		return
 	garrison_target = null   # a fresh fight abandons a pending garrison approach
+	man_hut_manual = false
 	route_end_action = Callable()
 	_on_combat_interrupt()
 	_end_attack()
@@ -2093,6 +2099,7 @@ func order_garrison(tower) -> void:
 	_clear_path()
 	garrison_target = tower
 	garrison_reached = false
+	man_hut_manual = false
 	_set_state(State.GARRISON)
 
 
@@ -2106,6 +2113,7 @@ func _tick_garrison(delta: float) -> void:
 			or not t.is_usable() or t.tribe_id != tribe_id:
 		garrison_target = null
 		garrison_reached = false
+		man_hut_manual = false
 		_set_state(State.IDLE)
 		return
 	# Head for the door but count as "arrived" once anywhere at the building
@@ -2121,6 +2129,7 @@ func _tick_garrison(delta: float) -> void:
 	if not t.has_crew_room():
 		garrison_target = null
 		garrison_reached = false
+		man_hut_manual = false
 		_set_state(State.IDLE)
 		return
 	if _has_path():
@@ -2156,6 +2165,7 @@ func leave_garrison() -> void:
 	garrison_target = null
 	garrison_housed = false
 	garrison_reached = false
+	man_hut_manual = false
 	push_immune = false
 	if state == State.GARRISON:
 		_clear_path()
@@ -2165,7 +2175,7 @@ func leave_garrison() -> void:
 ## Orders a BRAVE to man an own hut as production crew (phase 7i): it walks to
 ## the entrance (reusing the garrison approach) and the hut admits it. Rejected
 ## for non-braves, a foreign/unusable/full hut, or while beyond control.
-func order_man_hut(hut) -> void:
+func order_man_hut(hut, manual: bool = false) -> void:
 	if unit_kind() != &"brave" or not can_take_orders():
 		return
 	if hut == null or not is_instance_valid(hut) or hut.health <= 0:
@@ -2180,6 +2190,7 @@ func order_man_hut(hut) -> void:
 	_clear_path()
 	garrison_target = hut
 	garrison_reached = false
+	man_hut_manual = manual
 	_set_state(State.GARRISON)
 
 

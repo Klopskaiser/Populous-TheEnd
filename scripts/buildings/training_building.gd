@@ -70,6 +70,10 @@ func remove_trainee(brave) -> void:
 func _tick_active(delta: float) -> void:
 	_prune_queue()
 	_assign_slots()
+	# Paused (crew tab): the queue keeps forming but nobody new is admitted and
+	# a trainee inside keeps waiting (timer frozen) until production resumes.
+	if paused:
+		return
 	_admit_front()
 	if trainee != null:
 		_train_timer -= delta
@@ -234,7 +238,7 @@ static func _dist_point_seg(p: Vector2, a: Vector2, b: Vector2) -> float:
 ## Progress toward the next graduating unit (drives the bar above the building);
 ## -1 while under construction/damaged or when nobody is inside training.
 func production_progress() -> float:
-	if not is_usable() or trainee == null:
+	if not is_usable() or trainee == null or paused:
 		return -1.0
 	return clampf(1.0 - _train_timer / training_time, 0.0, 1.0)
 

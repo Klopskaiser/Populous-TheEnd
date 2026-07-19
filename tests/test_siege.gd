@@ -274,15 +274,19 @@ func test_workshop_pause_and_max_cap() -> void:
 	check(not ws.can_start_production(), "paused workshop starts nothing")
 	ws.paused = false
 
-	# Cap: one MANNED catapult of the tribe + max 1 -> auto-stop.
+	# Per-tribe cap: EVERY own catapult counts, manned or not.
 	var engine: SiegeEngine = w.unit_manager.spawn_unit(
 		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(80, 80))) as SiegeEngine
+	check(w.tribe.owned_catapult_count() == 1, "an UNMANNED own catapult counts")
 	_board_crew(w, engine)
-	check(ws.manned_catapult_count() == 1, "the boarded catapult counts as manned")
-	ws.max_catapults = 1
+	check(w.tribe.owned_catapult_count() == 1, "boarding does not change the count")
+	w.tribe.max_catapults = 1
 	check(not ws.can_start_production(), "cap reached -> production auto-stops")
-	ws.max_catapults = 2
+	w.tribe.max_catapults = 2
 	check(ws.can_start_production(), "raising the cap resumes production")
+	# An enemy-owned engine never counts toward this tribe's cap.
+	w.unit_manager.spawn_unit(SIEGE_SCENE, 1, w.nav.cell_to_world(Vector2i(90, 90)))
+	check(w.tribe.owned_catapult_count() == 1, "enemy catapults do not count")
 	_free_world(w)
 
 

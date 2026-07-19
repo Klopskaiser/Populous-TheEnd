@@ -146,6 +146,11 @@ var _lava_contact_grace: float = 0.0
 var selected: bool = false
 var hovered: bool = false
 
+## Player-facing production switch (crew tab): producers (hut, training
+## buildings, forester, workshop) freeze their production while paused; crew
+## handling and growth maintenance keep running.
+var paused: bool = false
+
 ## Height of the info overlay (production bar) above the building origin.
 const OVERLAY_Y: float = 4.4
 

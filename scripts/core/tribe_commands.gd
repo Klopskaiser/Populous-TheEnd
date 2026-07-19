@@ -313,6 +313,8 @@ func order_garrison(units: Array[Unit], tower: Watchtower) -> void:
 
 
 ## Braves man a hut as production crew (phase 7i); non-braves just move there.
+## Player-only path (right-click): manual manning pins the hut's crew size
+## until the growth slider moves (Hut.manual_crew_override).
 func order_man_hut(units: Array[Unit], hut: Hut) -> void:
 	if hut == null or not is_instance_valid(hut) or not hut.is_usable():
 		return
@@ -321,7 +323,7 @@ func order_man_hut(units: Array[Unit], hut: Hut) -> void:
 		if unit == null or not is_instance_valid(unit) or unit.state == Unit.State.DEAD:
 			continue
 		if unit is Brave and unit.tribe_id == hut.tribe_id:
-			(unit as Brave).order_man_hut(hut)
+			(unit as Brave).order_man_hut(hut, true)
 		else:
 			movers.append(unit)
 	if not movers.is_empty():

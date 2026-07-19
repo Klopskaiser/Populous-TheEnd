@@ -16,9 +16,10 @@ class_name Workshop extends Building
 ## ~30 s, 1 worker ~90 s). Starting consumes CATAPULT_WOOD from the piles at
 ## the entrance (the wood visibly vanishes — no refund, ever). Production
 ## only starts while: not paused, the exit is clear (no finished catapult
-## waiting at the entrance) and the tribe owns fewer than `max_catapults`
-## MANNED engines. Aborts (building disabled/destroyed, all slots emptied)
-## lose the progress AND the consumed wood.
+## waiting at the entrance) and the tribe owns fewer catapults than its
+## per-tribe cap (Tribe.max_catapults; every own engine counts, manned or
+## not). Aborts (building disabled/destroyed, all slots emptied) lose the
+## progress AND the consumed wood.
 ##
 ## While NOT producing, the workers keep the entrance stock topped up to
 ## STOCK_TARGET; with no reachable wood the fetch stalls for
@@ -47,9 +48,6 @@ const EXIT_CLEAR_RADIUS: float = 3.0
 ## fresh catapult (one shot at spawn; nobody near -> it stays unmanned).
 const AUTO_CREW: int = 2
 const AUTO_CREW_RADIUS: float = 12.0
-## Default cap of MANNED catapults before production auto-stops (UI-adjustable).
-const DEFAULT_MAX_CATAPULTS: int = 3
-const MAX_CATAPULTS_LIMIT: int = 20
 
 const SIEGE_SCENE: PackedScene = preload("res://scenes/units/siege_engine.tscn")
 
@@ -57,10 +55,6 @@ const C_WALL: Color = Color(0.45, 0.33, 0.2)
 const C_ROOF: Color = Color(0.32, 0.22, 0.12)
 const C_METAL: Color = Color(0.5, 0.5, 0.53)
 const C_WOOD_ARM: Color = Color(0.5, 0.36, 0.2)
-
-## Player-facing controls (sidebar panel).
-var paused: bool = false
-var max_catapults: int = DEFAULT_MAX_CATAPULTS
 
 ## Braves holding a worker slot (housed inside, walking in/out or fetching).
 var occupants: Array[Brave] = []
@@ -210,7 +204,7 @@ func wants_more_stock_wood() -> bool:
 ## separately in the tick).
 func can_start_production() -> bool:
 	return is_usable() and not paused and not exit_blocked() \
-		and manned_catapult_count() < max_catapults \
+		and tribe != null and tribe.owned_catapult_count() < tribe.max_catapults \
 		and stock_wood() >= CATAPULT_WOOD
 
 
@@ -332,19 +326,6 @@ func exit_blocked() -> bool:
 		pending_engine = null
 		return false
 	return true
-
-
-## MANNED catapults the tribe currently owns (>= 1 boarded crew) — basis of
-## the max_catapults auto-stop.
-func manned_catapult_count() -> int:
-	if tribe == null:
-		return 0
-	var count: int = 0
-	for u in tribe.units:
-		if is_instance_valid(u) and u is SiegeEngine and u.state != Unit.State.DEAD:
-			if (u as SiegeEngine).boarded_count() >= 1:
-				count += 1
-	return count
 
 
 func production_progress() -> float:
