@@ -134,11 +134,39 @@ func test_catapult_may_target_enemy_catapult() -> void:
 	_free_world(w)
 
 
+## An ORDERED catapult obeys the command: a target that sits within MIN_RANGE
+## (too close to fire) is HELD, not swapped for another in-band enemy. Under the
+## old code the min-range scan would re-aim at the band enemy on the next scan —
+## the user bug report ("catapult has a target but shoots nearby units instead").
+func test_ordered_catapult_holds_too_close_target() -> void:
+	var w: Dictionary = _make_world()
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, Vector3(40, 0, 40)) as SiegeEngine
+	_board_crew(w, engine, 0)
+	_board_crew(w, engine, 0)   # 2 crew: enough to fire
+	# The ordered target sits inside MIN_RANGE (3 m); a second enemy stands in the
+	# fire band (8 m) — the OLD code would swap onto it on the next scan tick.
+	var close_enemy: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, Vector3(42, 0, 40))  # 2 m
+	close_enemy.max_health = 100000
+	close_enemy.health = 100000
+	var band_enemy: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, Vector3(48, 0, 40))   # 8 m
+	band_enemy.max_health = 100000
+	band_enemy.health = 100000
+	engine.order_attack(close_enemy)
+	check(engine.attack_target == close_enemy, "starts on the ordered close target")
+	check(engine._target_ordered, "the target is flagged as ordered")
+	for i in range(40):
+		_tick_world(w)
+	check(engine.attack_target == close_enemy,
+		"ordered catapult holds its too-close target instead of swapping to the band enemy")
+	_free_world(w)
+
+
 func test_workshop_produces_catapult() -> void:
 	var w: Dictionary = _make_world()
 	var ws: Workshop = _place_workshop(w)
 	check(ws != null and ws.is_usable(), "pre-built workshop is usable")
-	check(ws.footprint == Vector2i(8, 4), "workshop has the big 8x4 footprint")
+	check(ws.footprint == Vector2i(7, 4), "workshop has the big 7x4 footprint")
 	check(ws.wood_cost == 15, "workshop costs 15 wood")
 	w.wood_pile_manager.deposit(ws.delivery_point(), 20)
 

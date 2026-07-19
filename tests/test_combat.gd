@@ -370,17 +370,45 @@ func test_firewarrior_prioritises_enemy_priests() -> void:
 	_free_world(w)
 
 
-## A firewarrior already fighting a brave switches to an enemy priest that comes
-## into range (mid-fight priest priority).
-func test_firewarrior_switches_to_priest_midfight() -> void:
+## An AUTO-acquired firewarrior (idle engage, no explicit order) still switches to
+## an enemy priest that comes into range mid-fight — priest priority is preserved
+## for auto targets.
+func test_auto_firewarrior_switches_to_priest_midfight() -> void:
 	var w: Dictionary = _make_world()
 	var fw: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(30, 30))
 	var brave_enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(35, 30))  # 5 m
+	brave_enemy.max_health = 100000   # survive so we test the SWITCH, not a re-target after death
+	brave_enemy.health = 100000
+	# It auto-engages the lone brave first (no priest present yet, so no order).
+	_run(w, [fw], func() -> bool: return fw.attack_target == brave_enemy)
+	check(fw.attack_target == brave_enemy, "auto-engaged the brave")
+	check(not fw._target_ordered, "an auto-acquired target is NOT flagged as ordered")
 	var priest: Unit = _spawn(w, PREACHER_SCENE, 1, Vector2(36, 30))    # 6 m
-	fw.order_attack(brave_enemy)
-	check(fw.attack_target == brave_enemy, "starts on the ordered brave")
 	_run(w, [fw], func() -> bool: return fw.attack_target == priest)
-	check(fw.attack_target == priest, "switches to the priest once it is in range")
+	check(fw.attack_target == priest, "auto firewarrior switches to the priest in range")
+	_free_world(w)
+
+
+## An ORDERED firewarrior obeys the command: it keeps firing at the unit it was
+## told to attack and does NOT auto-switch to an enemy priest that comes into
+## range (explicit orders are sticky for ranged units — user bug report).
+func test_ordered_firewarrior_ignores_priest_priority() -> void:
+	var w: Dictionary = _make_world()
+	var fw: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(30, 30))
+	fw.max_health = 100000
+	fw.health = 100000
+	var brave_enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(35, 30))  # 5 m
+	brave_enemy.max_health = 100000
+	brave_enemy.health = 100000
+	var priest: Unit = _spawn(w, PREACHER_SCENE, 1, Vector2(36, 30))    # 6 m, in aggro
+	priest.max_health = 100000
+	priest.health = 100000
+	fw.order_attack(brave_enemy)
+	check(fw._target_ordered, "the explicit attack order flags the target as ordered")
+	# Run well past the scan cadence; the fw must never flip to the priest.
+	_run(w, [fw], func() -> bool: return fw.attack_target != brave_enemy)
+	check(fw.attack_target == brave_enemy,
+		"ordered firewarrior ignores priest priority and stays on its commanded target")
 	_free_world(w)
 
 

@@ -59,13 +59,15 @@ func _tick_attack(delta: float) -> void:
 	# 2x1000); a 0.25-s reaction window matches every other scan.
 	if _due_to_scan(delta) \
 			and _flat_dist(position, attack_target.position) > MELEE_RANGE:
-		# Self-defence FIRST: an enemy on top of us takes priority.
+		# Self-defence FIRST: an enemy on top of us takes priority (melee
+		# entanglement is acceptable even under an explicit order).
 		var threat: Unit = _melee_threat()
 		if threat != null:
 			_begin_attack(threat)
-		elif attack_target.unit_kind() != &"preacher":
-			# Priest priority: while not brawling, switch to an enemy preacher
-			# in range — killing it stops mass conversions.
+		elif not _target_ordered and attack_target.unit_kind() != &"preacher":
+			# Priest priority: while not brawling AND not on an explicit order,
+			# switch to an enemy preacher in range — killing it stops mass
+			# conversions. An ordered target is honoured and never auto-swapped.
 			var priest: Unit = _nearest_enemy_priest(aggro_radius())
 			if priest != null and priest != attack_target:
 				_begin_attack(priest)

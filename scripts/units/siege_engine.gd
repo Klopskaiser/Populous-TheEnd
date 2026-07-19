@@ -60,14 +60,11 @@ const C_METAL: Color = Color(0.45, 0.45, 0.48)
 ## Crew members (untyped entries: may be freed). Includes recruits still
 ## walking over (not yet boarded).
 var crew: Array = []
-## `attack_building` (the bombardment target) and `building_manager` (the
-## building scan) are inherited from Unit (shared with the phase-7g assault).
-## True while the CURRENT target came from an explicit player/AI order — only
-## then may the slow catapult APPROACH a unit that is out of the fire band.
-## Auto-acquired unit targets are never chased (it is the slowest unit on the
-## field — trundling after a fleeing brave was the "drives in, never shoots"
-## bug). Cleared on every _end_attack.
-var _target_ordered: bool = false
+## `attack_building` (the bombardment target), `building_manager` (the building
+## scan) and `_target_ordered` (explicit-order flag) are inherited from Unit.
+## For the catapult, `_target_ordered` additionally gates the slow APPROACH onto
+## a unit outside the fire band — auto-acquired unit targets are never chased
+## (trundling after a fleeing brave was the "drives in, never shoots" bug).
 
 var _fire_cooldown: float = 0.0
 var _crew_prune_timer: float = 0.0
@@ -386,20 +383,13 @@ func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = fals
 	super.order_move(target, queue_up, aggressive)
 
 
-## Explicit attack order on a unit (right-click, AI): clears a building focus
-## and marks the target as ORDERED, so the catapult will close in on it even
-## out of the fire band (the only case a unit is chased).
+## Explicit attack order on a unit (right-click, AI): clears a building focus;
+## the base marks the target as ORDERED, so the catapult will close in on it
+## even out of the fire band (the only case a unit is chased) and never
+## auto-swaps off it when it creeps too close.
 func order_attack(enemy: Unit) -> void:
 	attack_building = null
 	super.order_attack(enemy)
-	_target_ordered = true
-
-
-## Clearing the attack always drops the "ordered" flag (auto re-targets are
-## never treated as ordered chases).
-func _end_attack() -> void:
-	_target_ordered = false
-	super._end_attack()
 
 
 ## Explicit bombard order on a building (right-click, AI): replaces any pending
@@ -571,7 +561,10 @@ func _bombard_unit(target: Unit, delta: float) -> void:
 		_face_point(target.position)
 		return
 	if dist < MIN_RANGE:
-		if _due_to_scan(delta):
+		# An AUTO target that crept too close is swapped for another in-band
+		# enemy; an ORDERED target is held (the player picked it — obey the
+		# order and just wait for it to clear the minimum instead of re-aiming).
+		if not _target_ordered and _due_to_scan(delta):
 			var alt: Unit = _nearest_enemy_unit(FIRE_RANGE)
 			if alt != null and alt != target:
 				_begin_attack(alt)

@@ -293,6 +293,12 @@ var _path_request_id: int = 0
 ## Enemy this unit is meleeing (null = none). Typed, but every read is guarded
 ## with is_instance_valid — the target may be freed by another attacker.
 var attack_target: Unit = null
+## True while attack_target came from an EXPLICIT player/AI order (order_attack)
+## rather than an auto-acquired scan. Ranged units (firewarrior, catapult) keep
+## firing at an ordered target and do NOT auto-switch to nearby enemies while it
+## stays valid — only melee self-defence still pulls them off. Cleared on
+## _end_attack (any auto re-target goes through it) and on auto _begin_attack.
+var _target_ordered: bool = false
 ## Enemy BUILDING this unit assaults (phase 7g; untyped: may be freed when it
 ## collapses). Lowest-priority target: only pursued when no enemy unit is near.
 ## The siege engine (7f) reuses this field with its own bombardment logic.
@@ -1868,9 +1874,12 @@ func _begin_attack(enemy: Unit) -> void:
 	_set_state(State.ATTACK)
 
 
-## Public order entry used by TribeCommands.order_attack (UI + AI).
+## Public order entry used by TribeCommands.order_attack (UI + AI). Marks the
+## target as ORDERED so ranged units stick to it instead of auto-retargeting.
 func order_attack(enemy: Unit) -> void:
 	_begin_attack(enemy)
+	if attack_target == enemy:
+		_target_ordered = true
 
 
 ## Whether this unit may attack a non-targetable vehicle directly. Only a
@@ -2197,6 +2206,7 @@ func enter_hut(hut) -> void:
 func _end_attack() -> void:
 	_leave_combat_group()
 	attack_target = null
+	_target_ordered = false
 	_in_melee = false
 	_combat_waiting = false
 	_combat_goal = Vector3.INF
