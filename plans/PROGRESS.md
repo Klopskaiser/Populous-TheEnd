@@ -5223,3 +5223,42 @@ Checks in `test_fire_ram`/`test_airship`. Volle Suite **2067/2067 grün** (30
 Dateien), Headless-Ladecheck ok. Optische Prüfung (Ring-Form, Deck-Ecken-Klick,
 Pips über allen Gebäuden, Rammen-Feuer nach Bekehrung, kein Deck-Flackern)
 durch Nutzer ausstehend.
+
+## Spieltest-Fixes 5: Zeppelin-Absturz-Tod, 2D-Brand, Deck-Crew-Anim, Bekehr-Ton (2026-07-19, Nutzerreport)
+
+**1. Abgeschossene Feuerkrieger sterben erst nach dem Ausrollen** (`airship.gd`
+`explode()`): Bisher `take_damage(CRASH_DAMAGE)` in 12 m Höhe → Feuerkrieger
+(60 HP, 30 Schaden reichte nicht) wurden erst am Landeaufprall via fall_damage
+getötet (kein Rollen). Jetzt werden Passagiere ohne Landeschaden vom Deck
+geschleudert (`throw_airborne(out, 0)`) und ihr Absturzschaden direkt auf die HP
+gebucht (`health -= CRASH_DAMAGE * 2`) → deferred death, `_tick_roll` löst den
+Tod am Roll-Ende aus. Sie fallen, rollen aus und sterben dann. Test
+`test_shot_down_firewarrior_is_thrown_then_dies`.
+
+**2. Zeppelin-Brand als 2D-Billboard** (`airship.gd`): Die 3D-Feuerkugel
+(`_hull_fire` MeshInstance3D) ist entfernt; der Hüllenbrand läuft jetzt über den
+spielweiten 2D-Flammen-Renderer (StatusFxRenderer). Neu: `_hull_on_fire`-Flag,
+`is_burning()` overridet auf `_hull_on_fire`, `burn_fx_scale()=3.0`,
+`burn_fx_height()=4.7` (hoch über dem Ballon). `register_hull_hit` setzt das
+Flag, `explode()` löscht es. Test `test_hull_fire_uses_2d_flame`.
+
+**3. Deck-Crew zeigt Angriffsanimation** (`unit.gd`, `airship.gd`): Turm-Crew
+ist gehaust (tickt nicht) → die Turm-gesetzte Anim blieb stehen. Deck-Passagiere
+ticken aber selbst, und ihr `_apply_animation` überschrieb die vom Schiff
+gesetzte Anim jeden Frame mit idle. Neu: Feld `crew_action_anim`, das
+`_anim_base()` im State.CREW bevorzugt; `Airship._set_deck_anim` setzt es (statt
+`anim_base_name` direkt), `leave_crew` räumt es auf. Feuerkrieger zeigen jetzt
+„throw", Prediger „cast" auf dem Deck. Test
+`test_deck_crew_shows_attack_animation`.
+
+**4. Prediger auf Turm/Deck geben Bekehr-Ton** (`watchtower.gd`, `airship.gd`):
+Die stationierten Prediger-Ticks emittierten keinen Chant. Jetzt spielen beide
+den `preach`-Ton wie der Boden-Prediger, gedrosselt über den predigereigenen
+`_preach_sound_timer`/`Preacher.PREACH_SOUND_INTERVAL`. Test
+`test_tower_preacher_chants_while_converting` (headless nur der Pfad, echte
+Audioausgabe braucht den Szenenbaum).
+
+**Verifikation:** +5 neue Tests (4× airship, 1× watchtower); volle Suite
+**2078/2078 grün**, Headless-Ladecheck ok. Optische/akustische Prüfung
+(fallende Feuerkrieger, 2D-Flamme überm Ballon, Deck-Wurf-/Cast-Anim,
+Bekehr-Chant) durch Nutzer ausstehend.

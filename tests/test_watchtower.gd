@@ -264,6 +264,25 @@ func test_tower_preacher_sit_then_eject_breaks_trance() -> void:
 	_free_world(w)
 
 
+## The tower preacher chants while converting (Spieltest 5: it was silent). The
+## audio itself needs the scene tree, so headless we assert the throttled chant
+## PATH ran — the preacher's preach-sound timer is armed once channeling starts.
+func test_tower_preacher_chants_while_converting() -> void:
+	var w: Dictionary = _make_world()
+	var tower: Watchtower = _tower(w, w.tribe0)
+	var preacher: Preacher = w.unit_manager.spawn_unit(
+		PREACHER_SCENE, 0, Vector3(31, 0, 32)) as Preacher
+	tower.admit_crew(preacher)
+	check(preacher._preach_sound_timer == 0.0, "chant timer starts unarmed")
+	var brave: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, Vector3(37, 0, 31))
+	var sat: int = _run(w, [brave],
+		func() -> bool: return brave.state == Unit.State.SIT)
+	check(sat < MAX_TICKS, "the tower preacher engages a target")
+	check(preacher._preach_sound_timer > 0.0,
+		"the chant (sound) path runs while the tower preacher channels")
+	_free_world(w)
+
+
 # --- Range bonus: shaman casts from the tower --------------------------------
 
 func test_shaman_casts_from_tower_with_range_bonus() -> void:

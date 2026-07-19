@@ -632,6 +632,55 @@ func test_explosion_hurls_passengers_down() -> void:
 	_free_world(w)
 
 
+## Regression (Spieltest 5): a shot-down firewarrior is HURLED off the deck and
+## dies only after the tumble — not instantly at altitude (user bug).
+func test_shot_down_firewarrior_is_thrown_then_dies() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
+	var fw: Unit = _board(w, ship, FIREWARRIOR_SCENE)
+	ship.explode()
+	check(fw.state == Unit.State.THROWN or fw.state == Unit.State.ROLL,
+		"the firewarrior is flung off the deck, not killed on the spot")
+	check(fw.state != Unit.State.DEAD, "it is still alive at the moment of the crash")
+	var ticks: int = 0
+	while fw.state != Unit.State.DEAD and ticks < MAX_TICKS:
+		_tick_world(w)
+		ticks += 1
+	check(fw.state == Unit.State.DEAD, "it dies once it has tumbled to a stop")
+	_free_world(w)
+
+
+## Spieltest 5: the hull fire is the shared 2D flame billboard (is_burning +
+## burn_fx_*), not a 3D sphere — placed high so it shows above the balloon.
+func test_hull_fire_uses_2d_flame() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 1, w.nav.cell_to_world(Vector2i(60, 60)))
+	check(not ship.is_burning(), "an intact hull is not burning")
+	ship.register_hull_hit(ship.position)
+	check(ship.state != Unit.State.DEAD, "one hit only damages it")
+	check(ship.is_burning(), "the damaged hull burns (drives the 2D flame billboard)")
+	check(ship.burn_fx_height() > 4.0, "the flame sits high above the balloon")
+	_free_world(w)
+
+
+## Spieltest 5: deck firewarriors/preachers must SHOW their attack animation —
+## their own per-frame _apply_animation used to reset it (they tick, unlike
+## housed tower crew). crew_action_anim carries the ship-driven anim.
+func test_deck_crew_shows_attack_animation() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
+	var fw: Unit = _board(w, ship, FIREWARRIOR_SCENE)
+	var enemy: Unit = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, ship.position + Vector3(6.0, -ship.position.y + 5.0, 0.0))
+	enemy.position.y = 5.0
+	for i in range(20):
+		enemy.position = Vector3(ship.position.x + 6.0, 5.0, ship.position.z)
+		_tick_world(w)
+	check(fw.anim_base_name == &"throw",
+		"the deck firewarrior shows its throw animation while firing")
+	_free_world(w)
+
+
 func test_crash_over_water_drowns_the_crew() -> void:
 	var td: TerrainData = _flat_terrain()
 	for z in range(td.size):

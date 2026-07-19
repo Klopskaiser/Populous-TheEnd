@@ -65,8 +65,9 @@ var _auto_building = null
 ## True while flying an AUTO approach (not a player route): arriving stands
 ## to fight instead of popping the kept waypoint queue.
 var _auto_approach: bool = false
-## Hull-fire overlay after the first hull hit (in-game only).
-var _hull_fire: MeshInstance3D = null
+## True after the first hull hit: the hull burns, drawn as the shared 2D flame
+## billboard (StatusFxRenderer) high above the balloon; cleared on explode.
+var _hull_on_fire: bool = false
 
 
 func _init() -> void:
@@ -150,6 +151,21 @@ func _may_target_vehicle(_enemy: Unit) -> bool:
 ## register_hull_hit (FireballBolt special-cases the airship) instead.
 func ignite(_source_pos: Vector3) -> void:
 	pass
+
+
+## A damaged hull burns until it explodes — shown as the shared 2D flame
+## billboard (StatusFxRenderer), sized big and placed high above the balloon so
+## it reads clearly against the sky (not a 3D blob inside the balloon mesh).
+func is_burning() -> bool:
+	return _hull_on_fire
+
+
+func burn_fx_scale() -> float:
+	return 3.0
+
+
+func burn_fx_height() -> float:
+	return 4.7
 
 
 ## Water below is irrelevant to a flying hull.
@@ -385,7 +401,7 @@ func register_hull_hit(_source_pos: Vector3 = Vector3.ZERO) -> void:
 	if _hull_hits >= HULL_HITS:
 		explode()
 	else:
-		_show_hull_fire(true)
+		_hull_on_fire = true
 
 
 ## The airship bursts apart: every passenger takes CRASH_DAMAGE, is hurled
@@ -402,19 +418,21 @@ func explode() -> void:
 		m.leave_crew()
 		if not boarded:
 			continue
-		m.take_damage(CRASH_DAMAGE)
-		if m.state == State.DEAD:
-			if terrain_data != null:
-				m.position.y = terrain_data.get_height(m.position.x, m.position.z)
-			continue
+		# Hurl the passenger off the deck — it falls ~12 m, rolls and only dies
+		# once the tumble runs out (user bug: they died instantly at altitude).
+		# The crash damage is applied to HP directly (deferred death, resolved by
+		# _tick_roll at roll-out) instead of a lethal fall hit that would kill on
+		# landing before the roll.
 		var angle: float = randf() * TAU
 		var out: Vector3 = Vector3(cos(angle), 0.0, sin(angle))
-		m.throw_airborne(out * randf_range(2.0, 4.0), CRASH_DAMAGE)
+		m.throw_airborne(out * randf_range(2.0, 4.0), 0)
+		if m.state == State.THROWN:
+			m.health -= CRASH_DAMAGE * 2
 	crew.clear()
 	_fire_cd.clear()
 	attack_building = null
 	_ordered_unit = null
-	_show_hull_fire(false)
+	_hull_on_fire = false
 	if _model != null:
 		_model.visible = false
 	if path_service != null:
@@ -624,7 +642,7 @@ func _free_fire_building(reach: float):
 ## visibly sit down and Unit._tick_sit runs the per-target timer — it keeps
 ## ticking while this preacher stays aboard and channeling
 ## (station_channeling; cleared while the ship moves, see _tick_deck_combat).
-func _tick_deck_preacher(pr, _delta: float) -> void:
+func _tick_deck_preacher(pr, delta: float) -> void:
 	var reach: float = Preacher.CONVERT_RANGE + RANGE_BONUS
 	var channeling: bool = false
 	var nearest: Unit = null
@@ -655,6 +673,12 @@ func _tick_deck_preacher(pr, _delta: float) -> void:
 		if nearest != null:
 			pr.facing = _flat_dir(position, nearest.position)
 		_set_deck_anim(pr, &"cast")
+		# Chant sound like a ground preacher (throttled via its own timer) — a
+		# deck preacher was silent while converting (user bug).
+		pr._preach_sound_timer -= delta
+		if pr._preach_sound_timer <= 0.0:
+			pr._preach_sound_timer = Preacher.PREACH_SOUND_INTERVAL
+			pr._emit_combat_hit(&"preach")
 	else:
 		_set_deck_anim(pr, &"idle")
 
@@ -664,12 +688,11 @@ func _flat_dir(from: Vector3, to: Vector3) -> Vector3:
 	return d.normalized() if d.length_squared() > 0.000001 else Vector3(0, 0, 1)
 
 
-## Deck crew does not tick its own combat anim — the ship drives it (the
-## watchtower's approach).
+## Deck crew tick themselves (unlike housed tower crew), so their own
+## _apply_animation would reset the anim each frame — drive the combat anim via
+## crew_action_anim, which _anim_base() honours while riding (State.CREW).
 func _set_deck_anim(u, base: StringName) -> void:
-	if u.anim_base_name != base:
-		u.anim_base_name = base
-		u.anim_start_ms = Time.get_ticks_msec()
+	u.crew_action_anim = base
 
 
 func _nearest_enemy(radius: float) -> Unit:
@@ -836,36 +859,8 @@ func _setup_ground_shadow(root: Node3D) -> void:
 	_ground_shadow = blob
 
 
-## Hull-fire overlay after the first hull hit (lazily built): an emissive
-## fireball sitting ON TOP of the balloon (top ~= local y 4.3) so it stays
-## visible — inside the hull it was swallowed by the balloon mesh and only
-## shimmered through as a dark blot (user feedback). Parented to the model
-## so it rides the hover bob.
-func _show_hull_fire(show: bool) -> void:
-	if not is_inside_tree() or _model == null:
-		return
-	if _hull_fire == null:
-		if not show:
-			return
-		_hull_fire = MeshInstance3D.new()
-		_hull_fire.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		var s: SphereMesh = SphereMesh.new()
-		s.radius = 0.55
-		s.height = 1.1
-		_hull_fire.mesh = s
-		var mat: StandardMaterial3D = StandardMaterial3D.new()
-		mat.albedo_color = Color(1.0, 0.5, 0.1, 0.85)
-		mat.emission_enabled = true
-		mat.emission = Color(1.0, 0.4, 0.05)
-		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		_hull_fire.material_override = mat
-		_hull_fire.position.y = 4.7
-		_model.add_child(_hull_fire)
-	_hull_fire.visible = show
-
-
-## Gentle hover bob + ground shadow follow; the base handles heading/flame.
+## Gentle hover bob + ground shadow follow; the base handles heading. The hull
+## fire is the shared 2D StatusFxRenderer billboard (is_burning + burn_fx_*).
 func _tick_visual(delta: float) -> void:
 	super._tick_visual(delta)
 	if not is_inside_tree():
@@ -876,6 +871,3 @@ func _tick_visual(delta: float) -> void:
 		var ground: float = maxf(terrain_data.get_height(position.x, position.z),
 			TerrainData.SEA_LEVEL)
 		_ground_shadow.global_position = Vector3(position.x, ground + 0.05, position.z)
-	if _hull_fire != null and _hull_fire.visible:
-		_hull_fire.scale = Vector3.ONE * (0.9 + 0.2 * absf(sin(
-			float(Time.get_ticks_msec()) * 0.004)))

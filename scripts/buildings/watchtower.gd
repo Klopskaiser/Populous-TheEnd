@@ -243,7 +243,7 @@ func _tick_crew_firewarrior(fw, delta: float) -> void:
 ## begin_conversion/SIT path (ground-preacher pattern): the targets visibly
 ## sit down and Unit._tick_sit runs the per-target timer — it keeps ticking
 ## while this preacher stays garrisoned and channeling (station_channeling).
-func _tick_crew_preacher(pr, _delta: float) -> void:
+func _tick_crew_preacher(pr, delta: float) -> void:
 	var origin: Vector3 = pr.position
 	var reach: float = Preacher.CONVERT_RANGE + TOWER_RANGE_BONUS
 	var channeling: bool = false
@@ -274,6 +274,12 @@ func _tick_crew_preacher(pr, _delta: float) -> void:
 		if nearest != null:
 			pr.facing = _flat_dir(origin, nearest.position)
 		_set_crew_anim(pr, &"cast")
+		# Chant sound like a ground preacher (throttled via the preacher's own
+		# timer) — a stationed preacher was silent while converting (user bug).
+		pr._preach_sound_timer -= delta
+		if pr._preach_sound_timer <= 0.0:
+			pr._preach_sound_timer = Preacher.PREACH_SOUND_INTERVAL
+			pr._emit_combat_hit(&"preach")
 	else:
 		_set_crew_anim(pr, &"idle")
 

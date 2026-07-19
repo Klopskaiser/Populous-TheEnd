@@ -265,6 +265,11 @@ var selected: bool = false
 ## and the start time for frame timing.
 var anim_base_name: StringName = &"idle"
 var anim_start_ms: int = 0
+## While riding an airship deck (State.CREW) the ship drives the combat anim
+## here: unlike tower crew (housed, no tick), deck passengers tick and their own
+## _apply_animation would reset the anim every frame — _anim_base() honours this
+## instead. Empty = fall back to the plain crew idle/walk.
+var crew_action_anim: StringName = &""
 
 ## Current spatial-hash cell, managed by the UnitManager (stored on the unit
 ## because a Dictionary lookup per unit per tick is measurably slower).
@@ -1726,6 +1731,7 @@ func leave_crew(except = null) -> void:
 	siege_engine = null
 	siege_boarded = false
 	station_channeling = false
+	crew_action_anim = &""
 	if engine != null and engine != except and is_instance_valid(engine):
 		engine.remove_crew(self)
 	if state == State.CREW:
@@ -2860,6 +2866,8 @@ func _anim_base() -> StringName:
 		State.DEAD:
 			return &"dead"
 		State.CREW:
+			if crew_action_anim != &"":
+				return crew_action_anim   # airship deck combat (throw / cast)
 			return &"walk" if _crew_walking else &"idle"
 		State.GARRISON:
 			return &"walk"   # walking to the tower (housed units are not rendered)
