@@ -70,12 +70,15 @@ func _engage_on_sight(delta: float) -> bool:
 
 
 ## True when another OWN preacher is already converting `u` (it sits under him)
-## or walking toward it as its focus. Cheap: only a handful of preachers exist.
+## or walking toward it as its focus. Iterates the tribe's PREACHER list (a
+## handful) instead of all units — an all-units scan cost a three-digit ms share
+## per tick in a mass battle with many preachers (same fix as
+## Firewarrior._nearest_enemy_priest).
 func _claimed_by_peer(u: Unit) -> bool:
 	if tribe == null or u == null:
 		return false
-	for p in tribe.units:
-		if p == self or p.state == State.DEAD or not (p is Preacher):
+	for p in tribe.preachers:
+		if p == null or not is_instance_valid(p) or p == self or p.state == State.DEAD:
 			continue
 		if u.state == State.SIT and u.converting_preacher == p:
 			return true
@@ -179,7 +182,12 @@ func _refresh_conversion() -> void:
 	var d_free: float = INF
 	var nearest_any: Unit = null
 	var d_any: float = INF
-	for u in path_service.get_units_in_radius(position, AGGRO_RADIUS):
+	# Enemies-only, examined-capped candidates (like _pick_convert_focus): an
+	# uncapped get_units_in_radius here materialised HUNDREDS of units (friends
+	# included) per casting preacher per scan in a battle blob — the outer half
+	# of the O(K*n) conversion-scan blowup.
+	for u in path_service.get_enemy_candidates(
+			position, AGGRO_RADIUS, tribe_id, SCAN_MAX_CANDIDATES):
 		if u == self or u.state == State.DEAD or u.tribe_id == tribe_id:
 			continue
 		# Housed/protected units (e.g. a tower's crew reserve) are never a

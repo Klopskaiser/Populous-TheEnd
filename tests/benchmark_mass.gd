@@ -18,6 +18,7 @@ const BATTLE_TICKS: int = 450
 const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
 const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
 const FIREWARRIOR_SCENE: PackedScene = preload("res://scenes/units/firewarrior.tscn")
+const PREACHER_SCENE: PackedScene = preload("res://scenes/units/preacher.tscn")
 
 
 func _initialize() -> void:
@@ -38,6 +39,11 @@ func _initialize() -> void:
 	print("== Schlacht-Szenarien (2 Armeen, Attack-Move) ==")
 	_run_battle(1000, WARRIOR_SCENE, "schlacht krieger 2x1000     ")
 	_run_battle(1000, FIREWARRIOR_SCENE, "schlacht feuerkrieger 2x1000")
+	# Preacher-heavy mix: the conversion scan (_refresh_conversion) — the
+	# extended-debug-battle regression — only fires when convertible enemies AND
+	# preachers meet. Half warriors (convertible fodder), half preachers.
+	_run_battle_mix(1000, [WARRIOR_SCENE, PREACHER_SCENE],
+		"schlacht krieger+prediger 2x1000")
 	quit(0)
 
 
@@ -115,6 +121,43 @@ func _run_battle(per_side: int, scene: PackedScene, label: String) -> void:
 				if not nav.is_cell_walkable(cell):
 					continue
 				if um.spawn_unit(scene, side, nav.cell_to_world(cell)) == null:
+					spawned = per_side   # 1500-per-tribe hard cap
+					break
+				spawned += 1
+		commands.order_move(um.get_units_of_tribe(side),
+			nav.cell_to_world(center + Vector2i(-dir * 20, 0)), false, true)
+	_simulate(label, um, BATTLE_TICKS, BATTLE_TICKS / 3)
+	commands.free()
+	_teardown(w)
+
+
+## Battle with a round-robin unit MIX per side. Used to isolate the preacher
+## cost: a battle whose sides mix warriors with a heavy preacher share drives
+## the conversion scan (_refresh_conversion) that the pure warrior/firewarrior
+## battles never exercise — the regression that dropped the extended debug
+## battle from 60 to 20 fps. Compare its combat-window ms against the pure
+## warrior battle: both should sit in the same order of magnitude.
+func _run_battle_mix(per_side: int, kinds: Array, label: String) -> void:
+	var w: Dictionary = _make_world()
+	var um: UnitManager = w.um
+	var nav: NavGrid = w.nav
+	var commands: TribeCommands = TribeCommands.new()
+	commands.setup(nav, null, um)
+	var center: Vector2i = Vector2i(64, 64)
+	for side in range(2):
+		var dir: int = -1 if side == 0 else 1
+		var anchor: Vector2i = center + Vector2i(dir * 20, 0)
+		var spawned: int = 0
+		for radius in range(0, 40):
+			if spawned >= per_side:
+				break
+			for cell in AIController.ring_cells(anchor, radius):
+				if spawned >= per_side:
+					break
+				if not nav.is_cell_walkable(cell):
+					continue
+				if um.spawn_unit(kinds[spawned % kinds.size()], side,
+						nav.cell_to_world(cell)) == null:
 					spawned = per_side   # 1500-per-tribe hard cap
 					break
 				spawned += 1

@@ -43,6 +43,11 @@ const DECK_Y: float = 0.6
 ## Throttles (seconds): drift condition check, drift anchor re-pick.
 const DRIFT_CHECK_INTERVAL: float = 1.0
 const ANCHOR_REPICK_INTERVAL: float = 5.0
+## Deck-combat target acquisition throttle: the per-crew enemy/building scans
+## ran every frame (the only ungated per-frame combat scan). Re-acquired ~5x/s
+## instead; fire/convert cadence is unaffected (cooldowns advance with the
+## accumulated elapsed time passed to the crew handlers).
+const DECK_SCAN_INTERVAL: float = 0.2
 
 ## Hull hits taken (fireball-spell bolts + catapult air-intercepts).
 var _hull_hits: int = 0
@@ -60,6 +65,10 @@ var _drift_anchor = null
 ## within the deck-boosted firewarrior aggro radius and stands to fight; an
 ## interrupted attack-move resumes its route once nothing is left.
 var _engage_scan: float = 0.0
+## Deck-combat scan throttle + elapsed accumulator (see DECK_SCAN_INTERVAL):
+## the crew handlers get the summed delta so fire/convert cooldowns stay exact.
+var _deck_scan: float = 0.0
+var _deck_elapsed: float = 0.0
 ## Building the deck firewarriors free-fire at (units always take priority).
 var _auto_building = null
 ## True while flying an AUTO approach (not a player route): arriving stands
@@ -591,6 +600,7 @@ func _tick_deck_combat(delta: float) -> void:
 			if is_instance_valid(m) and m.station_channeling:
 				m.station_channeling = false
 				_set_deck_anim(m, &"idle")
+		_deck_elapsed = 0.0
 		return
 	if _ordered_unit != null and (not is_instance_valid(_ordered_unit)
 			or _ordered_unit.state == State.DEAD
@@ -601,14 +611,25 @@ func _tick_deck_combat(delta: float) -> void:
 		attack_building = null
 	if path_service == null:
 		return
+	# Throttle the per-crew target scans (the only ungated per-frame combat
+	# scan). The crew handlers get the accumulated elapsed time so their fire/
+	# convert cooldowns advance exactly as before — only re-acquisition and the
+	# channel refresh run at ~5x/s instead of once per frame.
+	_deck_elapsed += delta
+	_deck_scan -= delta
+	if _deck_scan > 0.0:
+		return
+	_deck_scan = DECK_SCAN_INTERVAL
+	var step: float = _deck_elapsed
+	_deck_elapsed = 0.0
 	for m in crew:
 		if not is_instance_valid(m) or not m.siege_boarded or m.state != State.CREW:
 			continue
 		match m.unit_kind():
 			&"firewarrior":
-				_tick_deck_firewarrior(m, delta)
+				_tick_deck_firewarrior(m, step)
 			&"preacher":
-				_tick_deck_preacher(m, delta)
+				_tick_deck_preacher(m, step)
 			_:
 				pass   # warriors/braves/shaman: passengers only
 

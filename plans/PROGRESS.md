@@ -5350,3 +5350,47 @@ Fix (beide vom Nutzer vorgeschlagenen Wege kombiniert):
 `test_two_airships_move_to_one_point_both_settle`,
 `test_airship_ordered_onto_occupied_spot_settles`). Suite **2103/2103 grün**,
 Ladecheck ok. Funktionale Prüfung (kein Kreisen im Spiel) durch Nutzer ausstehend.
+
+
+## Spieltest-Fix 8 — Prediger-Bekehrungsscan: O(K·n)-Einbruch in der Debugschlacht
+
+**Anlass:** Nach der Debugschlacht-Erweiterung (voll besetzte Fahrzeuge + 100
+Fuß-Verstärkungen pro Seite, Commit `bdc51e8`) brach die FPS auf dem
+Referenzrechner von ~60 auf ~20 ein — **schon vor dem ersten Fahrzeugschuss**.
+Ursache war **nicht** die Einheitenzahl (+~16 %) oder das Fahrzeug-Rendering,
+sondern dass die alte 1600er-Armee **rein Krieger/Feuerkrieger** war (keine
+Prediger), während die neue Verstärkungs-Mischung ~25 **Prediger** pro Seite
+enthält, die beim Anmarsch in `CAST` gehen.
+
+**Wurzel:** `Preacher._refresh_conversion()` (0,25-s-Scan je castendem Prediger)
+lief als **O(K·n)**: ungekappte `get_units_in_radius(position, AGGRO_RADIUS)` (K =
+Hunderte im 8-m-Pulk) und darin je Kandidat `_claimed_by_peer()`, das über **alle
+`tribe.units`** (n ≈ 1000) iterierte. Der Feuerkrieger hatte genau dieses Muster
+schon gelöst (`_nearest_enemy_priest` iteriert `tribe.preachers`) — der Prediger
+war nie migriert.
+
+**Fix (`scripts/units/preacher.gd`):**
+- `_claimed_by_peer()` iteriert jetzt `tribe.preachers` (~25) statt `tribe.units`
+  (~1000) — verhaltensgleich, entfernt die O(n)-Innenschleife. Wirkt auch auf
+  `_pick_convert_focus()`.
+- `_refresh_conversion()` nutzt jetzt `get_enemy_candidates(..., SCAN_MAX_CANDIDATES)`
+  (enemies-only, examined-gekappt) wie `_pick_convert_focus` — kein ungekappter
+  Voll-Pulk-Scan mehr.
+
+**Kampf-Härtung (`scripts/units/airship.gd`):** `_tick_deck_combat()` lief als
+einzige ungedrosselte Per-Frame-Zielsuche (je Deck-Feuerkrieger/Prediger ein
+Radius-Scan pro Frame). Zielakquise jetzt auf `DECK_SCAN_INTERVAL = 0,2 s`
+gedrosselt; Feuer-/Bekehr-Kadenz unverändert (Handler bekommen die akkumulierte
+Elapsed-Zeit `step`, Cooldowns bleiben exakt). MOVE-Channel-Abbruch bleibt
+per-Frame.
+
+**Messung** (`tests/benchmark_mass.gd`, neues Szenario `_run_battle_mix`,
+2×1000 Krieger+Prediger, Kampf-Fenster):
+- **vorher:** Ø 54,8 ms / Fenster **49,6 ms** (Spitze 171 ms) — ~1,8× über der
+  reinen Krieger-Schlacht (27,3 ms).
+- **nachher:** Ø 32,6 ms / Fenster **31,9 ms** — praktisch gleichauf mit der
+  Krieger-Schlacht (29,6 ms). O(K·n)-Einbruch beseitigt. Im echten (dichteren)
+  Gefecht ist der Gewinn größer als im Headless-Benchmark.
+
+**Tests:** Suite **2103/2103 grün**, Ladecheck ok. Referenzrechner-FPS lässt sich
+headless nicht nachstellen; In-Game-FPS-Overlay durch Nutzer ausstehend.
