@@ -282,6 +282,9 @@ var _render_pos: Vector3 = Vector3.INF
 var _render_frame: int = -1
 ## True once the renderer collapsed this unit's blob shadow (corpses).
 var _blob_hidden: bool = false
+## Cached blob-shadow tilt basis (terrain normal), refreshed staggered by the
+## renderer so the per-frame transform pass needs no height sampling.
+var _blob_basis: Basis = Basis.IDENTITY
 
 var _path: PackedVector3Array = PackedVector3Array()
 var _path_index: int = 0

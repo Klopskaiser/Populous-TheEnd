@@ -44,6 +44,9 @@ const FLAME_CONTACT_FACTOR: float = Balance.FIRERAM_FLAME_CONTACT_FACTOR
 ## Flame origin: this far in front of the hull centre. Gameplay value (flame
 ## rectangle start, dead zone vs MIN_RANGE) — kept despite the smaller model.
 const NOZZLE_OFFSET: float = 1.2
+## Flame segments hover this far above the sampled ground (box half-height plus a
+## touch), so the beam licks along the terrain instead of clipping into it.
+const FLAME_LIFT: float = 0.35
 ## Placeholder-model shrink factor (footprint 1.2 x 1.8 instead of the shared
 ## vehicle chassis 1.4 x 2.2).
 const MODEL_SCALE: float = 0.85
@@ -64,6 +67,8 @@ var _flamed_buildings: Dictionary = {}
 var _heading: Vector3 = Vector3(0, 0, 1)
 ## Flame cone visual meshes (in-game only, lazily built).
 var _flame_cone: Node3D = null
+## The 3 flame segments, laid onto the terrain each visual tick.
+var _flame_segs: Array[MeshInstance3D] = []
 
 
 func _init() -> void:
@@ -511,6 +516,9 @@ func _show_flame_cone(show: bool) -> void:
 		for i in range(3):
 			var seg: MeshInstance3D = MeshInstance3D.new()
 			seg.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			# Placed in world space each visual tick (_tick_visual) so the beam
+			# follows the ground; top_level keeps the parent's Y-rotation/scale out.
+			seg.top_level = true
 			var box: BoxMesh = BoxMesh.new()
 			box.size = Vector3(FLAME_WIDTH * (0.5 + 0.25 * float(i)), 0.5,
 				FIRE_RANGE / 3.0)
@@ -522,18 +530,35 @@ func _show_flame_cone(show: bool) -> void:
 			mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 			mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 			seg.material_override = mat
-			seg.position = Vector3(0.0, 0.7,
-				NOZZLE_OFFSET + FIRE_RANGE / 6.0 + FIRE_RANGE / 3.0 * float(i))
 			_flame_cone.add_child(seg)
+			_flame_segs.append(seg)
 		_model.add_child(_flame_cone)
 	_flame_cone.visible = show
 
 
-## Adds the flame-cone flicker on top of the shared vehicle visuals.
+## Lays the flame beam along the terrain in front of the hull (each segment
+## snapped to the ground height and pitched to the slope) plus the width flicker.
 func _tick_visual(delta: float) -> void:
 	super._tick_visual(delta)
 	if not is_inside_tree():
 		return
-	if _flame_cone != null and _flame_cone.visible:
-		var s: float = 0.85 + 0.3 * absf(sin(float(Time.get_ticks_msec()) * 0.02))
-		_flame_cone.scale = Vector3(s, 1.0, 1.0)
+	if _flame_cone == null or not _flame_cone.visible or terrain_data == null:
+		return
+	var s: float = 0.85 + 0.3 * absf(sin(float(Time.get_ticks_msec()) * 0.02))
+	var fwd: Vector3 = Vector3(sin(rotation.y), 0.0, cos(rotation.y))
+	var half: float = FIRE_RANGE / 6.0
+	for i in range(_flame_segs.size()):
+		var d: float = NOZZLE_OFFSET + FIRE_RANGE / 6.0 + FIRE_RANGE / 3.0 * float(i)
+		var cx: float = position.x + fwd.x * d
+		var cz: float = position.z + fwd.z * d
+		var y_back: float = terrain_data.get_height(cx - fwd.x * half, cz - fwd.z * half)
+		var y_front: float = terrain_data.get_height(cx + fwd.x * half, cz + fwd.z * half)
+		var cy: float = 0.5 * (y_back + y_front) + FLAME_LIFT
+		# Pitch the segment along the slope so the segments chain into a beam that
+		# runs down/up the hill instead of stepping through it.
+		var slope_fwd: Vector3 = Vector3(fwd.x, (y_front - y_back) / (2.0 * half),
+			fwd.z).normalized()
+		var right: Vector3 = Vector3.UP.cross(slope_fwd).normalized()
+		var up: Vector3 = slope_fwd.cross(right).normalized()
+		_flame_segs[i].global_transform = Transform3D(
+			Basis(right * s, up, slope_fwd), Vector3(cx, cy, cz))

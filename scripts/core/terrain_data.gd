@@ -79,6 +79,16 @@ func get_height(world_x: float, world_z: float) -> float:
 	return lerpf(top, bottom, tz)
 
 
+## Interpolated surface normal at an arbitrary world position (central diff on
+## get_height). Points up; used to lay blob shadows / flames flat onto slopes.
+func surface_normal(world_x: float, world_z: float, eps: float = 0.5) -> Vector3:
+	var hl: float = get_height(world_x - eps, world_z)
+	var hr: float = get_height(world_x + eps, world_z)
+	var hd: float = get_height(world_x, world_z - eps)
+	var hu: float = get_height(world_x, world_z + eps)
+	return Vector3(hl - hr, 2.0 * eps, hd - hu).normalized()
+
+
 # --- Deformation -------------------------------------------------------------
 
 ## Raises terrain around a world-space center with a smoothstep falloff.

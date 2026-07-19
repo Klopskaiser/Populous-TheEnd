@@ -61,6 +61,8 @@ var _tornado_lift: float = 0.0
 ## Own 3D model parts (in-game only, built in _ready).
 var _model: Node3D = null
 var _flag_mesh: MeshInstance3D = null
+## Hardcoded blob shadow (phase 8), laid onto the terrain each visual tick.
+var _blob_shadow: MeshInstance3D = null
 
 
 func _init() -> void:
@@ -558,6 +560,7 @@ func _finish_model(root: Node3D) -> void:
 	blob.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	blob.position.y = 0.04
 	root.add_child(blob)
+	_blob_shadow = blob
 
 
 func _refresh_flag_color() -> void:
@@ -586,3 +589,11 @@ func _tick_visual(delta: float) -> void:
 	var heading: Vector3 = _model_heading()
 	if heading.length_squared() > 0.000001:
 		rotation.y = atan2(heading.x, heading.z)
+	# Lay the blob shadow flat onto the terrain under the hull centre (global
+	# transform overrides the model's Y-only rotation). The airship drives its
+	# own enlarged shadow and nulls this ref (see _setup_ground_shadow).
+	if _blob_shadow != null and terrain_data != null and state != State.DEAD:
+		var g: float = terrain_data.get_height(position.x, position.z)
+		_blob_shadow.global_transform = Transform3D(
+			UnitRenderer.basis_from_up(terrain_data.surface_normal(position.x, position.z)),
+			Vector3(position.x, g + 0.04, position.z))

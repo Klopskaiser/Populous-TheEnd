@@ -140,6 +140,19 @@ static func make_blob_mesh(size: Vector2, color: Color = BLOB_COLOR) -> PlaneMes
 	return plane
 
 
+## Basis that rotates local +Y onto `up` (the terrain normal), so a flat blob
+## quad lies on the slope. The blob texture is radially symmetric, so the
+## rotation around the normal is arbitrary.
+static func basis_from_up(up: Vector3) -> Basis:
+	var y: Vector3 = up.normalized()
+	var x: Vector3 = Vector3.RIGHT
+	if absf(y.dot(x)) > 0.99:
+		x = Vector3.FORWARD
+	var z: Vector3 = x.cross(y).normalized()
+	x = y.cross(z).normalized()
+	return Basis(x, y, z)
+
+
 func _ready() -> void:
 	var atlas: Dictionary = UnitSpriteLibrary.build_atlas(KINDS)
 	_uvs = atlas.uvs
@@ -272,8 +285,10 @@ func _process(_delta: float) -> void:
 			_multimesh.set_instance_transform(unit._render_index,
 				Transform3D(Basis.IDENTITY, pos))
 			if unit.state != Unit.State.DEAD:
+				# Blob laid flat onto the slope via the cached, staggered-computed
+				# terrain-normal basis (see _update_frame).
 				_blob_multimesh.set_instance_transform(unit._render_index,
-					Transform3D(Basis.IDENTITY, Vector3(
+					Transform3D(unit._blob_basis, Vector3(
 						unit.position.x, unit.position.y + BLOB_Y, unit.position.z)))
 
 
@@ -286,6 +301,15 @@ func _update_frame(unit: Unit, cam_forward: Vector3, cam_right: Vector3,
 		unit._blob_hidden = true   # a lying corpse casts no blob
 		_blob_multimesh.set_instance_transform(unit._render_index,
 			Transform3D(Basis.IDENTITY.scaled(Vector3.ZERO), Vector3.ZERO))
+	# Refresh the cached blob-tilt basis here (staggered over VISUAL_SLICES) so the
+	# per-frame transform pass stays sampling-free. 2-sample forward diff, reusing
+	# the unit's snapped y as the centre height (only 2 get_height calls).
+	elif unit.terrain_data != null:
+		var e: float = 0.5
+		var h0: float = unit.position.y
+		var hx: float = unit.terrain_data.get_height(unit.position.x + e, unit.position.z)
+		var hz: float = unit.terrain_data.get_height(unit.position.x, unit.position.z + e)
+		unit._blob_basis = basis_from_up(Vector3(-(hx - h0), e, -(hz - h0)).normalized())
 	var view: int = Unit.view_index(unit.facing, cam_forward, cam_right)
 	var per_base: Dictionary = _table.get(unit._render_kind, _table[KINDS[0]])
 	var base: StringName = unit.anim_base_name
