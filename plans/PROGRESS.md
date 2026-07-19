@@ -5094,3 +5094,71 @@ Route (stand exakt auf ihr → Eigenaggro-Rangelei). Suite: 2029/2029 grün.
 Headless-Ladecheck ok. Optische Prüfung (Sidebar, Feuer-Sprites,
 Depot-Optik) durch Nutzer ausstehend. Hinweis: neues `class_name` →
 nach Pull einmal `--headless --import` (bekannter Cache-Stolperstein).
+
+## Spieltest-Fixes 3: Turm-/Deck-Bekehrung, Zeppelin-Brand & Flughöhe, Feuerrammen-Zucken (2026-07-19, Nutzerreport)
+
+**1. Prediger auf Wachturm/Luftschiff bekehrt jetzt über den Standard-SIT-Pfad**
+(Nutzerreport: „Bekehrbewegung sichtbar, aber keiner setzt sich hin").
+Ursache war NICHT die Reichweite (alle Checks sind XZ-flach), sondern die
+parallele Bekehr-Implementierung mit eigenem internen Timer, die
+`begin_conversion`/SIT komplett umging — kein sichtbares Hinsetzen, Fortschritt
+bei jedem Reichweiten-/Zielwechsel verworfen, angreifende Fahrzeuge (Feuerramme)
+verloren nie ihre aktive Crew.
+- `unit.gd`: `begin_conversion(preacher, duration, reach := CONVERT_RANGE)` —
+  neues Feld `conversion_reach` auf dem Ziel; `_tick_sit` prüft gegen
+  `conversion_reach * 1.3` (statt hart CONVERT_RANGE) und akzeptiert neben
+  CAST auch stationierte Channeler: neues Unit-Flag `station_channeling`
+  (gültig nur bei State GARRISON/CREW; gelöscht in `enter_garrison`,
+  `leave_garrison`, `leave_crew`).
+- `watchtower.gd`/`airship.gd`: `_tick_crew_preacher`/`_tick_deck_preacher`
+  pazifizieren jetzt ALLE bekehrbaren Feinde in Reichweite (8 m) per
+  `begin_conversion` (inkl. Fight-Inertia wie am Boden); `_convert_state`
+  samt Cleanup und die lokalen `_nearest_convertible` sind ersatzlos raus.
+  Cast-Anim nur solange mind. ein Ziel sitzt/pazifiziert wird. Luftschiff:
+  im MOVE-Zustand wird das Channel-Flag gelöscht (Sitzende stehen auf, wenn
+  das Schiff wegfliegt). Eject/Zerstörung bricht die Trance automatisch.
+- Gameplay-Effekt: Rammen-/Katapult-Crew in 8 m setzt sich sofort sichtbar,
+  das Fahrzeug verliert aktive Besatzung und stoppt. Katapult-Crew auf 15 m
+  (`SIEGE_FIRE_RANGE`) bleibt bewusst außer Bekehrreichweite.
+
+**2. Zeppelin-Brandanzeige über dem Ballon** (`airship.gd`): Die graue
+Rauchkugel nach dem 1. Hüllentreffer saß bei lokal y=3.6 IM Ballon-Ellipsoid
+(y≈2.5–4.3) und wirkte nur als Schatten. Jetzt `_hull_fire` (statt `_smoke`):
+orange-emissive Feuerkugel bei y=4.7 OBEN auf dem Ballon, am `_model`
+verankert (macht den Hover-Bob mit), Flacker-Scaling unverändert.
+
+**3. Weiches Flughöhenmodell** (Nutzer-Entscheid: Steig-/Sinkrate, min. 2 m,
+10 m über „normalem" Gelände ≤ Kartendurchschnitt + 5 m):
+- Balance: `AIRSHIP_FLY_HEIGHT` 12→10, neu `AIRSHIP_MIN_CLEARANCE 2.0`,
+  `AIRSHIP_CRUISE_TERRAIN_CAP 5.0`, `AIRSHIP_VERTICAL_RATE 3.0`.
+- `terrain_data.gd`: `average_height()` — gecachter Mittelwert über
+  `maxf(h, SEA_LEVEL)` (einmalig lazy; Laufzeit-Verformung vernachlässigbar).
+- `airship.gd`: `_tick_altitude(delta)` = `y → maxf(min(ground, avg+cap) +
+  FLY_HEIGHT, ground + 2)` via `move_toward` (VERTICAL_RATE), harter
+  2-m-Boden sofort. WICHTIG: Die parameterlose Basis-Hook
+  `_snap_to_ground()` (wird nach jedem Horizontalschritt gerufen) darf nur
+  noch den 2-m-Boden erzwingen — Signatur MUSS parameterlos bleiben
+  (Parse-Error „signature doesn't match parent" sonst). Nebeneffekt: neue
+  Zeppeline steigen sichtbar vom Werfttor auf statt zu springen.
+
+**4. Feuerrammen-Zucken behoben** (`fire_ram.gd`): Stop-and-Go an der
+5-m-Grenze bei fliehenden (brennenden) Zielen.
+- Feuern in Bewegung: `_burn_point` verlangt keinen Stillstand mehr;
+  Einheitenziele werden bis `FIRE_RANGE * HOLD_RANGE_FRAC` (0.5) verfolgt
+  und dabei beschossen (Flammenrechteck folgt eh dem Heading), erst tiefer
+  in der Reichweite hält die Ramme. Gebäude wie bisher: anfahren, stehen.
+- Nahziel-Priorität: `_burn_unit` wechselt bei Ziel außer Reichweite
+  (throttled Scan) IMMER auf einen Feind, der schon in Reichweite steht —
+  auch bei ORDERED-Zielen (Nutzer-Entscheid). Verfolgt wird nur ohne
+  In-Range-Alternative; AUTO-Ziele neu mit Leash `RAM_AGGRO` (vorher: nie
+  verfolgt), ORDERED unbegrenzt.
+
+**Tests:** `test_watchtower.gd` +1 (SIT unter Turmprediger, Eject bricht
+Trance), `test_airship.gd` SIT-Check im Deck-Prediger-Test, Höhen-Checks auf
+das weiche Modell umgestellt (`_spawn_ship` tickt 80× bis Reiseflughöhe;
+Wasser-Check erst bei x>65, das Absinken 15→12 braucht ~1 s;
+Katapult-Intercept-Test: Schiff VOR der Katapult-Bemannung spawnen, sonst
+schießen die Setz-Ticks es vorzeitig ab). `test_fire_ram.gd` +2 (Burst
+während der Fahrt, In-Range-Ziel schlägt Ordered-Chase). Suite: 2043/2043
+grün, Headless-Ladecheck ok. Optische Prüfung (Ballon-Feuer, Steig-/
+Sinkflug, Rammen-Verhalten im Gefecht) durch Nutzer ausstehend.

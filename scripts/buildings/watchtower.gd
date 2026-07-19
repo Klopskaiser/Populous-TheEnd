@@ -43,8 +43,6 @@ const C_DOOR: Color = Color(0.16, 0.11, 0.06)
 var crew: Array = []
 ## Per-firewarrior fire cooldown (unit -> seconds remaining).
 var _fire_cd: Dictionary = {}
-## Per-preacher conversion channel: preacher -> {"target": Unit, "left": float}.
-var _convert_state: Dictionary = {}
 
 
 func _init() -> void:
@@ -148,9 +146,6 @@ func _prune_crew() -> void:
 		for key in _fire_cd.keys():
 			if not still.has(key):
 				_fire_cd.erase(key)
-		for key in _convert_state.keys():
-			if not still.has(key):
-				_convert_state.erase(key)
 	crew = kept
 
 
@@ -171,7 +166,6 @@ func eject_crew(index: int) -> void:
 	var u = crew[index]
 	crew.remove_at(index)
 	_fire_cd.erase(u)
-	_convert_state.erase(u)
 	if not is_instance_valid(u):
 		return
 	if unit_manager != null:
@@ -196,7 +190,6 @@ func _eject_all(killed: bool, dest: Vector3) -> void:
 			_eject_unit(u, killed)   # killed -> dies at the door, else shoved out
 	crew.clear()
 	_fire_cd.clear()
-	_convert_state.clear()
 
 
 func destroy() -> void:
@@ -246,31 +239,43 @@ func _tick_crew_firewarrior(fw, delta: float) -> void:
 	_fire_cd[fw] = cd
 
 
-func _tick_crew_preacher(pr, delta: float) -> void:
+## Pacifies EVERY convertible enemy within the boosted reach via the standard
+## begin_conversion/SIT path (ground-preacher pattern): the targets visibly
+## sit down and Unit._tick_sit runs the per-target timer — it keeps ticking
+## while this preacher stays garrisoned and channeling (station_channeling).
+func _tick_crew_preacher(pr, _delta: float) -> void:
 	var origin: Vector3 = pr.position
 	var reach: float = Preacher.CONVERT_RANGE + TOWER_RANGE_BONUS
-	var st: Dictionary = _convert_state.get(pr, {})
-	var target = st.get("target")
-	# Keep channeling the current target while it stays convertible and in range.
-	if target == null or not is_instance_valid(target) or target.state == Unit.State.DEAD \
-			or target.tribe_id == tribe_id or target.is_conversion_immune() \
-			or _flat_dist(origin, target.position) > reach:
-		target = _nearest_convertible(origin, reach)
-		if target == null:
-			_convert_state.erase(pr)
-			_set_crew_anim(pr, &"idle")
-			return
-		st = {"target": target,
-			"left": randf_range(Preacher.CONVERT_TIME_MIN, Preacher.CONVERT_TIME_MAX)}
-	pr.facing = _flat_dir(origin, target.position)
-	_set_crew_anim(pr, &"cast")
-	st["left"] = float(st.get("left", 0.0)) - delta
-	if st["left"] <= 0.0:
-		if pr.tribe != null:
-			target.convert_to_tribe(pr.tribe)
-		_convert_state.erase(pr)
-		return
-	_convert_state[pr] = st
+	var channeling: bool = false
+	var nearest: Unit = null
+	var nearest_d: float = INF
+	for u in unit_manager.get_units_in_radius(origin, reach):
+		if u.tribe_id == tribe_id or u.state == Unit.State.DEAD \
+				or u.is_conversion_immune() or not u.is_targetable():
+			continue
+		var d: float = _flat_dist(origin, u.position)
+		if d > reach:
+			continue
+		if u.state == Unit.State.SIT:
+			channeling = channeling or u.converting_preacher == pr
+			continue
+		# Fight inertia like the ground preacher: an already-fighting unit
+		# sometimes keeps brawling for now (retried on the next tick).
+		if u.state == Unit.State.ATTACK and randf() < Preacher.FIGHT_INERTIA_CHANCE:
+			continue
+		if u.begin_conversion(pr, randf_range(
+				Preacher.CONVERT_TIME_MIN, Preacher.CONVERT_TIME_MAX), reach):
+			channeling = true
+			if d < nearest_d:
+				nearest_d = d
+				nearest = u
+	pr.station_channeling = channeling
+	if channeling:
+		if nearest != null:
+			pr.facing = _flat_dir(origin, nearest.position)
+		_set_crew_anim(pr, &"cast")
+	else:
+		_set_crew_anim(pr, &"idle")
 
 
 ## Sets a crew member's animation (they do not tick themselves, so the tower
@@ -293,21 +298,6 @@ func _nearest_enemy(origin: Vector3, radius: float) -> Unit:
 	for u in unit_manager.get_units_in_radius(origin, radius):
 		if u.tribe_id == tribe_id or u.state == Unit.State.DEAD or not u.is_targetable():
 			continue
-		var d: float = _flat_dist(origin, u.position)
-		if d <= best_d:
-			best_d = d
-			best = u
-	return best
-
-
-## Nearest living, convertible enemy within `radius` of `origin`.
-func _nearest_convertible(origin: Vector3, radius: float) -> Unit:
-	var best: Unit = null
-	var best_d: float = radius
-	for u in unit_manager.get_units_in_radius(origin, radius):
-		if u.tribe_id == tribe_id or u.state == Unit.State.DEAD \
-				or u.is_conversion_immune() or not u.is_targetable():
-			continue   # not_targetable covers a protected reserve in another tower
 		var d: float = _flat_dist(origin, u.position)
 		if d <= best_d:
 			best_d = d

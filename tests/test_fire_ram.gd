@@ -331,6 +331,53 @@ func test_one_crew_moves_and_fires() -> void:
 	_free_world(w)
 
 
+## Anti-twitch (Spieltest 3): the ram fires ON THE MOVE — a runner that keeps
+## its distance near the range edge is pursued and burnt without the ram
+## stopping at the 5 m border first.
+func test_ram_fires_while_rolling_after_a_runner() -> void:
+	var w: Dictionary = _make_world()
+	var ram: FireRam = _armed_ram(w)
+	var runner: Unit = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, ram.position + Vector3(0, 0, 4.0))
+	ram.order_attack(runner)
+	var start_z: float = ram.position.z
+	var burst_started: bool = false
+	for i in range(60):
+		# Pin the runner 4 m ahead (inside the band, beyond the hold point) —
+		# a stop-and-go ram would stand still instead of closing in.
+		runner.position = ram.position + Vector3(0, 0, 4.0)
+		_tick_world(w)
+		burst_started = burst_started or ram._flame_time > 0.0
+	check(burst_started, "the burst starts while the chase is still rolling")
+	check(ram.position.z > start_z + 1.0,
+		"the ram kept rolling after the runner while firing")
+	check(runner.is_burning(), "the fleeing runner was scorched on the move")
+	_free_world(w)
+
+
+## Anti-twitch (Spieltest 3): a foe already inside the flame range always
+## takes over — the ram does not chase an ordered runner past an enemy
+## standing right in front of the nozzle.
+func test_ram_prefers_in_range_target_over_chase() -> void:
+	var w: Dictionary = _make_world()
+	var ram: FireRam = _armed_ram(w)
+	var runner: Unit = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, ram.position + Vector3(0, 0, 9.0))
+	var near: Unit = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, ram.position + Vector3(0, 0, 3.0))
+	ram.order_attack(runner)   # ordered chase target beyond FIRE_RANGE
+	for i in range(30):
+		runner.position = ram.position + Vector3(0, 0, 9.0)
+		near.position = ram.position + Vector3(0, 0, 3.0)
+		_tick_world(w)
+		if ram.attack_target == near:
+			break
+	check(ram.attack_target == near,
+		"the ram swaps the out-of-range order for the enemy already in range")
+	check(not ram._target_ordered, "the swapped target is a normal auto target")
+	_free_world(w)
+
+
 # --- Destruction & capture (shared vehicle rules) ---------------------------------------
 
 func test_ram_burns_and_sinks_and_is_capturable() -> void:

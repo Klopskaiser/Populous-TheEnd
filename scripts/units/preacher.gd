@@ -183,7 +183,7 @@ func _refresh_conversion() -> void:
 		if u == self or u.state == State.DEAD or u.tribe_id == tribe_id:
 			continue
 		# Housed/protected units (e.g. a tower's crew reserve) are never a
-		# conversion target — same guard as Watchtower._nearest_convertible.
+		# conversion target — same guard as the tower/deck preacher ticks.
 		if not u.is_targetable():
 			continue
 		var d: float = _flat_dist(position, u.position)

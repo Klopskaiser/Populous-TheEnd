@@ -45,6 +45,22 @@ func set_vertex_height(x: int, z: int, h: float) -> void:
 	heights[z * verts + x] = h
 
 
+## Map-wide mean surface height over maxf(h, SEA_LEVEL) — the airship's
+## cruise reference ("normal ground"). Computed lazily ONCE and cached:
+## runtime deformation (spells) shifts the map-wide mean by a negligible
+## amount, so no recompute on deform.
+var _average_height: float = -INF
+
+
+func average_height() -> float:
+	if _average_height == -INF:
+		var sum: float = 0.0
+		for h in heights:
+			sum += maxf(h, SEA_LEVEL)
+		_average_height = sum / float(maxi(heights.size(), 1))
+	return _average_height
+
+
 ## Bilinearly interpolated height at an arbitrary world position.
 ## Central for Y-snapping of units/buildings (no raycast needed).
 func get_height(world_x: float, world_z: float) -> float:

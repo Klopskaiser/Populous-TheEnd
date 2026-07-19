@@ -125,13 +125,21 @@ const AIRSHIP_MAX_CREW: int = 6
 const AIRSHIP_MIN_MOVE_CREW: int = 1
 ## Horizontaler Abstand zum Bodenschatten, ab dem Zusteigen zählt.
 const AIRSHIP_BOARD_RANGE: float = 1.5
-## Schwebehöhe über Terrain (über Wasser: über Meeresspiegel).
-const AIRSHIP_FLY_HEIGHT: float = 12.0
+## Reiseflughöhe über "normalem Boden" (über Wasser: über Meeresspiegel).
+## Gelände zählt für das Reiseziel nur bis Kartendurchschnitt + CRUISE_CAP;
+## darüber folgt das Schiff dem Terrain mit MIN_CLEARANCE Abstand.
+const AIRSHIP_FLY_HEIGHT: float = 10.0
+## Hartes Minimum über dem Boden direkt unter dem Rumpf (sofort erzwungen).
+const AIRSHIP_MIN_CLEARANCE: float = 2.0
+## Gelände über Kartendurchschnitt + Cap gilt als "hoch" (kein +10-Ziel mehr).
+const AIRSHIP_CRUISE_TERRAIN_CAP: float = 5.0
+## Steig-/Sinkgeschwindigkeit (m/s) Richtung Zielhöhe (weiche Übergänge).
+const AIRSHIP_VERTICAL_RATE: float = 3.0
 ## Reichweiten-Bonus für Fernkampf/Bekehrung/Zauber von Bord (nur im Stand).
 const AIRSHIP_RANGE_BONUS: float = 3.0
 ## Hüllentreffer (Feuerball-Zauber-Bolts + Katapult-Lufttreffer) bis zur Explosion.
 const AIRSHIP_HULL_HITS: int = 2
-## Explosionsschaden an allen Insassen; der anschließende Sturz aus 12 m
+## Explosionsschaden an allen Insassen; der anschließende Sturz aus Flughöhe
 ## nutzt den normalen Wurf-Pfad (Wasser = Ertrinken).
 const AIRSHIP_CRASH_DAMAGE: int = 30
 ## Leere Luftschiffe treiben langsam Richtung erreichbarem Terrain.

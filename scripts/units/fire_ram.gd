@@ -32,6 +32,10 @@ const COOLDOWN_FULL_CREW: float = Balance.FIRERAM_COOLDOWN_FULL_CREW
 const RAM_AGGRO: float = Balance.FIRERAM_AGGRO_RADIUS
 const TURN_RATE: float = Balance.FIRERAM_TURN_RATE
 const AIM_TOLERANCE: float = Balance.FIRERAM_AIM_TOLERANCE
+## Fraction of FIRE_RANGE a unit target is closed to while burning: runners
+## near the range edge are pursued (firing on the move) instead of popping in
+## and out of the band; only this deep inside does the ram actually stop.
+const HOLD_RANGE_FRAC: float = 0.5
 ## Flame area re-check cadence during a burst (LavaSurge rhythm).
 const FLAME_CHECK_INTERVAL: float = 0.2
 ## Lava-contact credit per flame second on buildings — see Balance doc (the
@@ -162,8 +166,9 @@ func _aimed_at(point: Vector3) -> bool:
 
 ## Auto target acquisition (idle + aggressive move): burn whatever is already
 ## inside the flame range (units first), otherwise roll toward the nearest
-## enemy building within aggro — the catapult's proven "fire, don't chase"
-## rule (auto unit targets are never chased; ordered ones are).
+## enemy building within aggro. Once engaged, _burn_unit prefers in-range
+## enemies and only chases (leashed to RAM_AGGRO for auto targets) when the
+## target was practically the only foe around.
 func _auto_acquire(delta: float) -> bool:
 	if active_crew_count() < MIN_FIRE_CREW:
 		return false
@@ -235,15 +240,24 @@ func _retarget_or_idle() -> void:
 	_set_state(State.IDLE)
 
 
-## Unit target: burn it while in the [MIN_RANGE, FIRE_RANGE] band; ORDERED
-## targets are chased (slowly — at 3 m/s the ram pressures but rarely catches
-## runners), auto targets are dropped once they leave the range. A unit that
-## crept behind the nozzle is swapped for another in-band enemy (auto) or
-## held without fire (ordered) — the catapult's minimum-range rule.
+## Unit target: burn it while in the [MIN_RANGE, FIRE_RANGE] band, firing ON
+## THE MOVE (no stop-and-go at the 5 m border — user feedback: the ram used
+## to "twitch" after fleeing scorched units). A nearer enemy already inside
+## the flame range ALWAYS takes over, even over an ordered target; the ram
+## only chases when it was (nearly) the only foe — ordered targets without
+## an in-range alternative, auto targets additionally leashed to RAM_AGGRO.
+## A unit that crept behind the nozzle is swapped for another in-band enemy
+## (auto) or held without fire (ordered) — the catapult's minimum-range rule.
 func _burn_unit(target: Unit, delta: float) -> void:
 	var dist: float = _flat_dist(position, target.position)
 	if dist > FIRE_RANGE:
-		if not _target_ordered:
+		# Prefer whoever is already in range over any chase (user spec).
+		if _due_to_scan(delta):
+			var near: Unit = _nearest_enemy_unit(FIRE_RANGE)
+			if near != null and near != target:
+				_begin_attack(near)
+				return
+		if not _target_ordered and dist > RAM_AGGRO:
 			_end_attack()
 			_retarget_or_idle()
 			return
@@ -265,9 +279,12 @@ func _burn_unit(target: Unit, delta: float) -> void:
 	_burn_point(target.position, delta, false, dist)
 
 
-## Stands (no minimum range) and burns toward a point: turn the hull, then
-## open the burst once aimed and reloaded. `approach` closes the gap for
-## far-away buildings. `dist` = flat distance to the target surface.
+## Burns toward a point: turn the hull, then open the burst once aimed and
+## reloaded — the burst does NOT require standing still (the flame rectangle
+## follows the current hull heading every check anyway, so driving sweeps).
+## `approach` closes the gap for far-away buildings; buildings in range are
+## burnt standing (they do not run). `dist` = flat distance to the target
+## surface.
 func _burn_point(target_pos: Vector3, delta: float, approach: bool,
 		dist: float) -> void:
 	if dist > FIRE_RANGE:
@@ -277,10 +294,15 @@ func _burn_point(target_pos: Vector3, delta: float, approach: bool,
 		_approach(target_pos, delta)
 		_face_point(target_pos)
 		return
-	if _has_path():
-		_clear_path()
+	if not approach and dist > FIRE_RANGE * HOLD_RANGE_FRAC:
+		# Unit target near the range edge: keep rolling after it while firing.
+		_in_melee = false
+		_approach(target_pos, delta)
+	else:
+		if _has_path():
+			_clear_path()
+		_in_melee = true
 	_face_point(target_pos)
-	_in_melee = true
 	attack_anim = &"throw"
 	if active_crew_count() < MIN_FIRE_CREW:
 		return

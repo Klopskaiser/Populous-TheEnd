@@ -381,6 +381,13 @@ var _knockback_remaining: Vector3 = Vector3.ZERO
 var converting_preacher = null
 var conversion_progress: float = 0.0
 var conversion_time: float = 0.0
+## Channel range the pacifying preacher converts at — a tower/deck preacher
+## reaches further than the ground CONVERT_RANGE (set in begin_conversion).
+var conversion_reach: float = 0.0
+## True while THIS unit is a stationed preacher (tower crew / airship deck)
+## channeling a conversion — the station tick drives it, there is no CAST
+## state. Only honoured while the preacher is GARRISON/CREW (_tick_sit).
+var station_channeling: bool = false
 
 # --- Siege crew state (phase 7f) ---------------------------------------------------
 ## The siege engine this unit is manning (untyped: may be freed). Membership
@@ -1577,7 +1584,8 @@ func is_panic_immune() -> bool:
 ## Returns false when this unit cannot be converted. Rolling, airborne and
 ## panicking units finish their tumble first (phase 7f roll hardening —
 ## a preacher must not yank a rolling unit into SIT mid-air).
-func begin_conversion(preacher: Unit, duration: float) -> bool:
+func begin_conversion(preacher: Unit, duration: float,
+		reach: float = Preacher.CONVERT_RANGE) -> bool:
 	if state == State.DEAD or state == State.SIT or is_conversion_immune():
 		return false
 	if garrison_housed:
@@ -1593,6 +1601,7 @@ func begin_conversion(preacher: Unit, duration: float) -> bool:
 	converting_preacher = preacher
 	conversion_time = maxf(duration, 0.1)
 	conversion_progress = 0.0
+	conversion_reach = reach
 	_set_state(State.SIT)
 	return true
 
@@ -1608,8 +1617,13 @@ func _tick_sit(delta: float) -> void:
 	if p.state == State.ATTACK:
 		_stand_up(true)   # trance broken by a duel -> fight the preacher
 		return
-	if p.state != State.CAST \
-			or _flat_dist(position, p.position) > Preacher.CONVERT_RANGE * 1.3:
+	# Channeling either on the ground (CAST) or stationed on a tower platform /
+	# airship deck (the station tick keeps station_channeling alive).
+	var channeling: bool = p.state == State.CAST \
+		or (p.station_channeling
+			and (p.state == State.GARRISON or p.state == State.CREW))
+	if not channeling \
+			or _flat_dist(position, p.position) > conversion_reach * 1.3:
 		_stand_up(false)
 		return
 	conversion_progress += delta
@@ -1690,6 +1704,7 @@ func leave_crew(except = null) -> void:
 	var engine = siege_engine
 	siege_engine = null
 	siege_boarded = false
+	station_channeling = false
 	if engine != null and engine != except and is_instance_valid(engine):
 		engine.remove_crew(self)
 	if state == State.CREW:
@@ -2231,6 +2246,7 @@ func enter_garrison(tower, slot_pos: Vector3) -> void:
 	garrison_housed = true
 	garrison_reached = false
 	push_immune = true
+	station_channeling = false
 	waypoint_queue.clear()
 	_clear_path()
 	_end_attack()
@@ -2251,6 +2267,7 @@ func leave_garrison() -> void:
 	garrison_reached = false
 	man_hut_manual = false
 	push_immune = false
+	station_channeling = false
 	if state == State.GARRISON:
 		_clear_path()
 		_set_state(State.IDLE)

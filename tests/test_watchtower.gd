@@ -236,6 +236,34 @@ func test_preacher_converts_within_range_bonus() -> void:
 	_free_world(w)
 
 
+## The tower preacher channels via the standard begin_conversion/SIT path:
+## the target visibly SITS DOWN first (user bug report: nobody ever sat),
+## and ejecting the preacher mid-channel breaks the trance — the target
+## stands back up unconverted.
+func test_tower_preacher_sit_then_eject_breaks_trance() -> void:
+	var w: Dictionary = _make_world()
+	var tower: Watchtower = _tower(w, w.tribe0)
+	var preacher: Unit = w.unit_manager.spawn_unit(PREACHER_SCENE, 0, Vector3(31, 0, 32))
+	tower.admit_crew(preacher)
+	var brave: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, Vector3(38, 0, 31))
+	var sat: int = _run(w, [brave],
+		func() -> bool: return brave.state == Unit.State.SIT)
+	check(sat < MAX_TICKS, "the target sits down under the tower preacher (SIT)")
+	check(brave.converting_preacher == preacher, "pacified by the tower preacher")
+	check(preacher.station_channeling, "the stationed preacher is channeling")
+	# Eject the preacher mid-channel (only the brave keeps ticking, so the
+	# ejected preacher cannot re-convert from the ground).
+	tower.eject_occupants(false)
+	check(not preacher.station_channeling, "the eject drops the channel flag")
+	for i in range(20):
+		brave.tick(TICK)
+		w.unit_manager.tick(TICK)
+		w.bm.tick(TICK)
+	check(brave.tribe_id == 1, "no conversion happened (channel was broken)")
+	check(brave.state != Unit.State.SIT, "the target stood back up after the eject")
+	_free_world(w)
+
+
 # --- Range bonus: shaman casts from the tower --------------------------------
 
 func test_shaman_casts_from_tower_with_range_bonus() -> void:

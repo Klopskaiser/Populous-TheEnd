@@ -81,7 +81,10 @@ func _tick_world(w: Dictionary) -> void:
 
 func _spawn_ship(w: Dictionary, tribe_id: int, pos: Vector3) -> Airship:
 	var ship: Airship = w.unit_manager.spawn_unit(AIRSHIP_SCENE, tribe_id, pos) as Airship
-	_tick_world(w)   # first tick snaps the hull to hover height
+	# The soft altitude model climbs at VERTICAL_RATE (no instant snap):
+	# tick until the hull has settled at its cruise height.
+	for i in range(80):
+		_tick_world(w)
 	return ship
 
 
@@ -143,7 +146,8 @@ func test_wharf_produces_an_airship() -> void:
 func test_everyone_boards_including_the_shaman() -> void:
 	var w: Dictionary = _make_world()
 	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
-	check(ship.position.y >= 5.0 + Airship.FLY_HEIGHT - 0.1, "hovers at 12 m")
+	check(ship.position.y >= 5.0 + Airship.FLY_HEIGHT - 0.1,
+		"climbed to cruise height (terrain + FLY_HEIGHT)")
 	var shaman: Unit = _board(w, ship, SHAMAN_SCENE)
 	check(shaman.siege_boarded, "the SHAMAN may board an airship")
 	check(shaman.position.y > 5.0 + Airship.FLY_HEIGHT * 0.8,
@@ -195,10 +199,12 @@ func test_flies_straight_across_water() -> void:
 	while ship.state == Unit.State.MOVE and ticks < MAX_TICKS:
 		_tick_world(w)
 		ticks += 1
-		if not over_water_checked and ship.position.x > 61.0 and ship.position.x < 66.0:
+		# Check late in the channel: the soft model needs a moment to SINK from
+		# land cruise height (terrain 5 + 10) to the water level (sea 2 + 10).
+		if not over_water_checked and ship.position.x > 65.0 and ship.position.x < 67.0:
 			over_water_checked = true
 			check(absf(ship.position.y - (TerrainData.SEA_LEVEL + Airship.FLY_HEIGHT)) < 0.5,
-				"over water it hovers at sea level + 12 m")
+				"over water it sinks to sea level + FLY_HEIGHT")
 	check(over_water_checked, "the flight actually crossed the water channel")
 	check(ship.position.x > 75.0, "the airship reached the far side")
 	_free_world(w)
@@ -253,10 +259,13 @@ func test_deck_preacher_converts_with_bonus_reach() -> void:
 	_board(w, ship, PREACHER_SCENE)
 	var victim: Unit = w.unit_manager.spawn_unit(
 		BRAVE_SCENE, 1, w.nav.cell_to_world(Vector2i(67, 60)))
+	var sat: bool = false
 	var ticks: int = 0
 	while victim.tribe_id != 0 and ticks < MAX_TICKS:
 		_tick_world(w)
+		sat = sat or victim.state == Unit.State.SIT
 		ticks += 1
+	check(sat, "the target visibly sits down under the deck preacher (SIT)")
 	check(victim.tribe_id == 0, "the deck preacher converts a target at 7 m (5 + 3)")
 	_free_world(w)
 
@@ -332,6 +341,9 @@ func test_tornado_contact_is_instant_death() -> void:
 
 func test_catapult_intercept_two_hits_no_lava() -> void:
 	var w: Dictionary = _make_world()
+	# Ship first (its spawn ticks the world until it settled at cruise
+	# height) — a crewed catapult would use that time to shoot it down early.
+	var ship: Airship = _spawn_ship(w, 1, w.nav.cell_to_world(Vector2i(68, 60)))
 	var engine: SiegeEngine = w.unit_manager.spawn_unit(
 		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(60, 60))) as SiegeEngine
 	# Full-crew the catapult quickly (2 needed to fire).
@@ -343,7 +355,6 @@ func test_catapult_intercept_two_hits_no_lava() -> void:
 	while engine.boarded_count() < 2 and ticks < MAX_TICKS:
 		_tick_world(w)
 		ticks += 1
-	var ship: Airship = _spawn_ship(w, 1, w.nav.cell_to_world(Vector2i(68, 60)))
 	engine.order_attack(ship)
 	var projectiles_seen: int = 0
 	ticks = 0

@@ -2,8 +2,9 @@ class_name Airship extends CrewedVehicle
 
 ## Luftschiff: a flying crewed vehicle built by the airship wharf.
 ##
-## - Hovers AIRSHIP_FLY_HEIGHT above the terrain (over water: above the sea
-##   level) and flies in a STRAIGHT line — nothing blocks the air, so there is
+## - Cruises AIRSHIP_FLY_HEIGHT above "normal ground" (soft altitude model,
+##   see _snap_to_ground: high terrain is followed at MIN_CLEARANCE instead)
+##   and flies in a STRAIGHT line — nothing blocks the air, so there is
 ##   no A* and no path queue; water is no obstacle.
 ## - Up to 6 passengers of ANY kind including the shaman (accepts_crew_unit);
 ##   they ride VISIBLY on deck slots (crew_rides_on_deck) and stay normal,
@@ -29,6 +30,9 @@ class_name Airship extends CrewedVehicle
 const MAX_CREW: int = Balance.AIRSHIP_MAX_CREW
 const MIN_MOVE_CREW: int = Balance.AIRSHIP_MIN_MOVE_CREW
 const FLY_HEIGHT: float = Balance.AIRSHIP_FLY_HEIGHT
+const MIN_CLEARANCE: float = Balance.AIRSHIP_MIN_CLEARANCE
+const CRUISE_TERRAIN_CAP: float = Balance.AIRSHIP_CRUISE_TERRAIN_CAP
+const VERTICAL_RATE: float = Balance.AIRSHIP_VERTICAL_RATE
 const RANGE_BONUS: float = Balance.AIRSHIP_RANGE_BONUS
 const HULL_HITS: int = Balance.AIRSHIP_HULL_HITS
 const CRASH_DAMAGE: int = Balance.AIRSHIP_CRASH_DAMAGE
@@ -42,10 +46,9 @@ const ANCHOR_REPICK_INTERVAL: float = 5.0
 
 ## Hull hits taken (fireball-spell bolts + catapult air-intercepts).
 var _hull_hits: int = 0
-## Fire cooldown per firewarrior passenger and conversion channel per
-## preacher passenger (watchtower pattern — deck crew has no own combat tick).
+## Fire cooldown per firewarrior passenger (watchtower pattern — deck crew
+## has no own combat tick; preachers channel via begin_conversion/SIT).
 var _fire_cd: Dictionary = {}
-var _convert_state: Dictionary = {}
 ## Explicitly ordered targets (sticky, like _target_ordered elsewhere).
 var _ordered_unit: Unit = null
 ## Drift state: throttle + current anchor (a reincarnation site, any tribe).
@@ -62,8 +65,8 @@ var _auto_building = null
 ## True while flying an AUTO approach (not a player route): arriving stands
 ## to fight instead of popping the kept waypoint queue.
 var _auto_approach: bool = false
-## Smoke overlay after the first hull hit (in-game only).
-var _smoke: MeshInstance3D = null
+## Hull-fire overlay after the first hull hit (in-game only).
+var _hull_fire: MeshInstance3D = null
 
 
 func _init() -> void:
@@ -112,7 +115,7 @@ func _may_target_vehicle(_enemy: Unit) -> bool:
 
 # --- Immunities beyond the base vehicle ---------------------------------------------
 
-## Fire and lava cannot reach the hull 12 m up — fire spells damage it via
+## Fire and lava cannot reach the airborne hull — fire spells damage it via
 ## register_hull_hit (FireballBolt special-cases the airship) instead.
 func ignite(_source_pos: Vector3) -> void:
 	pass
@@ -141,11 +144,34 @@ func burst_into_wood() -> void:
 
 # --- Flight (straight line, no A*) ---------------------------------------------------
 
-## Hover height: terrain below, but never below the sea surface.
+## Base movement hook (called without delta after every horizontal step):
+## only enforces the hard MIN_CLEARANCE floor — never clip into rising
+## ground. The smooth climb/sink toward the cruise altitude runs once per
+## tick in _tick_altitude.
 func _snap_to_ground() -> void:
 	if terrain_data != null:
-		position.y = maxf(terrain_data.get_height(position.x, position.z),
-			TerrainData.SEA_LEVEL) + FLY_HEIGHT
+		position.y = maxf(position.y,
+			maxf(terrain_data.get_height(position.x, position.z),
+				TerrainData.SEA_LEVEL) + MIN_CLEARANCE)
+
+
+## Soft altitude model (user spec): cruise at FLY_HEIGHT above "normal
+## ground" — terrain counts toward the cruise target only up to the map's
+## average height + CRUISE_TERRAIN_CAP, so over high mountains the ship just
+## follows the terrain at MIN_CLEARANCE instead of towering FLY_HEIGHT above
+## the peaks. Climbs/sinks smoothly at VERTICAL_RATE; the MIN_CLEARANCE
+## floor is enforced instantly (never clip into rising ground). Nice side
+## effect: a freshly built ship visibly ascends from the wharf gate.
+func _tick_altitude(delta: float) -> void:
+	if terrain_data == null:
+		return
+	var ground: float = maxf(terrain_data.get_height(position.x, position.z),
+		TerrainData.SEA_LEVEL)
+	var ref: float = minf(ground,
+		terrain_data.average_height() + CRUISE_TERRAIN_CAP)
+	var target_y: float = maxf(ref + FLY_HEIGHT, ground + MIN_CLEARANCE)
+	position.y = maxf(move_toward(position.y, target_y, VERTICAL_RATE * delta),
+		ground + MIN_CLEARANCE)
 
 
 ## No slope in the air (also disables the downhill-stumble roll).
@@ -224,7 +250,6 @@ func drop_member(member, around: Vector3 = Vector3.INF) -> void:
 func remove_crew(unit) -> void:
 	super.remove_crew(unit)
 	_fire_cd.erase(unit)
-	_convert_state.erase(unit)
 	if unit != null and is_instance_valid(unit) and unit.state == State.DEAD \
 			and terrain_data != null:
 		unit.position.y = terrain_data.get_height(unit.position.x, unit.position.z)
@@ -321,7 +346,7 @@ func _best_reach() -> float:
 # --- Hull damage & explosion ------------------------------------------------------------
 
 ## One hull hit (fireball-spell bolt or catapult air-intercept). The first
-## hit shows smoke; HULL_HITS explode the ship.
+## hit sets the hull visibly on fire; HULL_HITS explode the ship.
 func register_hull_hit(_source_pos: Vector3 = Vector3.ZERO) -> void:
 	if state == State.DEAD:
 		return
@@ -329,7 +354,7 @@ func register_hull_hit(_source_pos: Vector3 = Vector3.ZERO) -> void:
 	if _hull_hits >= HULL_HITS:
 		explode()
 	else:
-		_show_smoke(true)
+		_show_hull_fire(true)
 
 
 ## The airship bursts apart: every passenger takes CRASH_DAMAGE, is hurled
@@ -356,10 +381,9 @@ func explode() -> void:
 		m.throw_airborne(out * randf_range(2.0, 4.0), CRASH_DAMAGE)
 	crew.clear()
 	_fire_cd.clear()
-	_convert_state.clear()
 	attack_building = null
 	_ordered_unit = null
-	_show_smoke(false)
+	_show_hull_fire(false)
 	if _model != null:
 		_model.visible = false
 	if path_service != null:
@@ -376,8 +400,8 @@ func tick(delta: float) -> void:
 	super.tick(delta)
 	if state == State.DEAD:
 		return
-	# Hover height follows the (deformable) terrain every tick.
-	_snap_to_ground()
+	# Hover height follows the (deformable) terrain every tick (soft model).
+	_tick_altitude(delta)
 	# Deck crew re-pin: the base crew tick may lag one frame behind a moving
 	# hull — pin boarded passengers to their slots right after the hull moved.
 	for m in crew:
@@ -479,6 +503,13 @@ func _nearest_enemy_building_by_wall(radius: float):
 ## warrior/brave crew idles (nothing it can do from the deck).
 func _tick_deck_combat(delta: float) -> void:
 	if state == State.MOVE:
+		# A moving ship never channels: drop the deck preachers' conversion
+		# channel so their sitting targets stand up instead of sticking to a
+		# ship that is flying away.
+		for m in crew:
+			if is_instance_valid(m) and m.station_channeling:
+				m.station_channeling = false
+				_set_deck_anim(m, &"idle")
 		return
 	if _ordered_unit != null and (not is_instance_valid(_ordered_unit)
 			or _ordered_unit.state == State.DEAD
@@ -557,38 +588,44 @@ func _free_fire_building(reach: float):
 	return _nearest_enemy_building_by_wall(reach)
 
 
-func _tick_deck_preacher(pr, delta: float) -> void:
+## Pacifies EVERY convertible ground enemy within the boosted reach via the
+## standard begin_conversion/SIT path (ground-preacher pattern): targets
+## visibly sit down and Unit._tick_sit runs the per-target timer — it keeps
+## ticking while this preacher stays aboard and channeling
+## (station_channeling; cleared while the ship moves, see _tick_deck_combat).
+func _tick_deck_preacher(pr, _delta: float) -> void:
 	var reach: float = Preacher.CONVERT_RANGE + RANGE_BONUS
-	var st: Dictionary = _convert_state.get(pr, {})
-	var target = st.get("target")
-	if target == null or not is_instance_valid(target) or target.state == State.DEAD \
-			or target.tribe_id == tribe_id or target.is_conversion_immune() \
-			or target.is_airborne() \
-			or _flat_dist(position, target.position) > reach:
-		target = null
-		# An ordered unit is preferred when convertible and in reach.
-		if _ordered_unit != null and _flat_dist(position, _ordered_unit.position) <= reach \
-				and not _ordered_unit.is_conversion_immune() \
-				and not _ordered_unit.is_airborne() \
-				and _ordered_unit.is_targetable():
-			target = _ordered_unit
-		if target == null:
-			target = _nearest_convertible(reach)
-		if target == null:
-			_convert_state.erase(pr)
-			_set_deck_anim(pr, &"idle")
-			return
-		st = {"target": target,
-			"left": randf_range(Preacher.CONVERT_TIME_MIN, Preacher.CONVERT_TIME_MAX)}
-	pr.facing = _flat_dir(position, target.position)
-	_set_deck_anim(pr, &"cast")
-	st["left"] = float(st.get("left", 0.0)) - delta
-	if st["left"] <= 0.0:
-		if pr.tribe != null:
-			target.convert_to_tribe(pr.tribe)
-		_convert_state.erase(pr)
-		return
-	_convert_state[pr] = st
+	var channeling: bool = false
+	var nearest: Unit = null
+	var nearest_d: float = INF
+	for u in path_service.get_units_in_radius(position, reach, SCAN_MAX_CANDIDATES):
+		if u.tribe_id == tribe_id or u.state == State.DEAD \
+				or u.is_conversion_immune() or not u.is_targetable() \
+				or u.is_airborne():
+			continue
+		var d: float = _flat_dist(position, u.position)
+		if d > reach:
+			continue
+		if u.state == State.SIT:
+			channeling = channeling or u.converting_preacher == pr
+			continue
+		# Fight inertia like the ground preacher: an already-fighting unit
+		# sometimes keeps brawling for now (retried on the next tick).
+		if u.state == State.ATTACK and randf() < Preacher.FIGHT_INERTIA_CHANCE:
+			continue
+		if u.begin_conversion(pr, randf_range(
+				Preacher.CONVERT_TIME_MIN, Preacher.CONVERT_TIME_MAX), reach):
+			channeling = true
+			if d < nearest_d:
+				nearest_d = d
+				nearest = u
+	pr.station_channeling = channeling
+	if channeling:
+		if nearest != null:
+			pr.facing = _flat_dir(position, nearest.position)
+		_set_deck_anim(pr, &"cast")
+	else:
+		_set_deck_anim(pr, &"idle")
 
 
 func _flat_dir(from: Vector3, to: Vector3) -> Vector3:
@@ -612,21 +649,6 @@ func _nearest_enemy(radius: float) -> Unit:
 			continue
 		if u.state == State.SIT:
 			continue   # sitting converts keep sitting (a preacher aboard works)
-		var d: float = _flat_dist(position, u.position)
-		if d <= best_d:
-			best_d = d
-			best = u
-	return best
-
-
-func _nearest_convertible(radius: float) -> Unit:
-	var best: Unit = null
-	var best_d: float = radius
-	for u in path_service.get_units_in_radius(position, radius, SCAN_MAX_CANDIDATES):
-		if u.tribe_id == tribe_id or u.state == State.DEAD \
-				or u.is_conversion_immune() or not u.is_targetable() \
-				or u.is_airborne() or u.state == State.SIT:
-			continue
 		var d: float = _flat_dist(position, u.position)
 		if d <= best_d:
 			best_d = d
@@ -667,7 +689,6 @@ func _apply_drift(delta: float) -> void:
 		_drifting = false
 		return
 	position += dir.normalized() * DRIFT_SPEED * delta
-	_snap_to_ground()
 
 
 ## Drift while the shadow is not on walkable ground of the anchor's island.
@@ -784,27 +805,33 @@ func _setup_ground_shadow(root: Node3D) -> void:
 	_ground_shadow = blob
 
 
-## Smoke overlay after the first hull hit (lazily built).
-func _show_smoke(show: bool) -> void:
-	if not is_inside_tree():
+## Hull-fire overlay after the first hull hit (lazily built): an emissive
+## fireball sitting ON TOP of the balloon (top ~= local y 4.3) so it stays
+## visible — inside the hull it was swallowed by the balloon mesh and only
+## shimmered through as a dark blot (user feedback). Parented to the model
+## so it rides the hover bob.
+func _show_hull_fire(show: bool) -> void:
+	if not is_inside_tree() or _model == null:
 		return
-	if _smoke == null:
+	if _hull_fire == null:
 		if not show:
 			return
-		_smoke = MeshInstance3D.new()
-		_smoke.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_hull_fire = MeshInstance3D.new()
+		_hull_fire.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var s: SphereMesh = SphereMesh.new()
-		s.radius = 0.7
-		s.height = 1.4
-		_smoke.mesh = s
+		s.radius = 0.55
+		s.height = 1.1
+		_hull_fire.mesh = s
 		var mat: StandardMaterial3D = StandardMaterial3D.new()
-		mat.albedo_color = Color(0.25, 0.23, 0.22, 0.7)
+		mat.albedo_color = Color(1.0, 0.5, 0.1, 0.85)
+		mat.emission_enabled = true
+		mat.emission = Color(1.0, 0.4, 0.05)
 		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		_smoke.material_override = mat
-		_smoke.position.y = 3.6
-		add_child(_smoke)
-	_smoke.visible = show
+		_hull_fire.material_override = mat
+		_hull_fire.position.y = 4.7
+		_model.add_child(_hull_fire)
+	_hull_fire.visible = show
 
 
 ## Gentle hover bob + ground shadow follow; the base handles heading/flame.
@@ -818,6 +845,6 @@ func _tick_visual(delta: float) -> void:
 		var ground: float = maxf(terrain_data.get_height(position.x, position.z),
 			TerrainData.SEA_LEVEL)
 		_ground_shadow.global_position = Vector3(position.x, ground + 0.05, position.z)
-	if _smoke != null and _smoke.visible:
-		_smoke.scale = Vector3.ONE * (0.9 + 0.2 * absf(sin(
+	if _hull_fire != null and _hull_fire.visible:
+		_hull_fire.scale = Vector3.ONE * (0.9 + 0.2 * absf(sin(
 			float(Time.get_ticks_msec()) * 0.004)))
