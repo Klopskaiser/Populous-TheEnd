@@ -66,6 +66,13 @@ const DEBUG_ARMY_SIZE: int = 800
 const DEBUG_WARRIOR_SHARE: float = 0.7
 ## Army anchor offset from the island centre (cells, along x).
 const DEBUG_ARMY_OFFSET: int = 26
+## Extra reinforcements per side: fully crewed vehicles + foot units, spawned
+## in each army's rear so they march in behind the main line.
+const DEBUG_EXTRA_ARMY: int = 100      # additional foot units per side
+const DEBUG_ZEPPELINS: int = 3
+const DEBUG_CATAPULTS: int = 2
+const DEBUG_FIRERAMS: int = 4
+const DEBUG_REAR_OFFSET: int = 14      # cells behind the army anchor (rear direction)
 
 ## Stress-test match (main-menu "Stresstest", phase 8.2 follow-up): four full
 ## armies (tribe 0 stays player-controllable, the other three are scripted —
@@ -541,13 +548,73 @@ func _setup_debug_battle(nav: NavGrid) -> void:
 	# Each army brings its shaman (behind the lines) with FULL spell charges.
 	_spawn_debug_shaman(0, blue_anchor + Vector2i(-6, 0), nav)
 	_spawn_debug_shaman(1, red_anchor + Vector2i(6, 0), nav)
+	# Reinforcements per side: 3 zeppelins, 2 catapults, 4 fire rams (all fully
+	# crewed) plus 100 extra foot units, spawned in each army's rear.
+	_spawn_debug_reinforcements(0, blue_anchor, Vector2i(-1, 0), nav)
+	_spawn_debug_reinforcements(1, red_anchor, Vector2i(1, 0), nav)
 	# March each army at the enemy anchor (attack-move: combatants engage on
-	# contact); the path queue spreads the A* load.
+	# contact); the path queue spreads the A* load. Boarded crew (State.CREW) is
+	# excluded — order_move() would call leave_crew() and disembark them; the
+	# vehicles themselves march (fully crewed) and carry their crew along.
 	_tribe_commands.order_move(
-		_unit_manager.get_units_of_tribe(0), nav.cell_to_world(red_anchor), false, true)
+		_orderable_units(0), nav.cell_to_world(red_anchor), false, true)
 	_tribe_commands.order_move(
-		_unit_manager.get_units_of_tribe(1), nav.cell_to_world(blue_anchor), false, true)
+		_orderable_units(1), nav.cell_to_world(blue_anchor), false, true)
 	print("Debugschlacht: %d Einheiten gesamt" % _unit_manager.units.size())
+
+
+## All units of a tribe that may receive a march order — excludes boarded crew
+## (State.CREW), which would otherwise be pulled off their vehicles by order_move.
+func _orderable_units(tribe_id: int) -> Array[Unit]:
+	var out: Array[Unit] = []
+	for u in _unit_manager.get_units_of_tribe(tribe_id):
+		if u.state != Unit.State.CREW:
+			out.append(u)
+	return out
+
+
+## Spawns a side's reinforcements in the army's rear (dir points away from the
+## island centre): fully crewed zeppelins/catapults/fire rams plus a mixed foot
+## army. Vehicles get well-spread offsets so their boards don't overlap.
+func _spawn_debug_reinforcements(tribe_id: int, anchor: Vector2i, dir: Vector2i,
+		nav: NavGrid) -> void:
+	var rear: Vector2i = anchor + dir * DEBUG_REAR_OFFSET
+	var plan: Array = []
+	for i in range(DEBUG_ZEPPELINS):
+		plan.append([AIRSHIP_SCENE, Vector2i(0, -18 + i * 6)])
+	for i in range(DEBUG_CATAPULTS):
+		plan.append([SIEGE_SCENE, Vector2i(dir.x * 6, -4 + i * 8)])
+	for i in range(DEBUG_FIRERAMS):
+		plan.append([FIRE_RAM_SCENE, Vector2i(dir.x * 6, 8 + i * 5)])
+	for entry in plan:
+		var cell: Vector2i = _find_walkable_near(rear + entry[1], nav, 0)
+		if cell.x < 0:
+			continue
+		var vehicle: CrewedVehicle = _unit_manager.spawn_unit(
+			entry[0], tribe_id, nav.cell_to_world(cell)) as CrewedVehicle
+		_crew_vehicle_full(vehicle, tribe_id)
+	# 100 extra foot units (brave/warrior/firewarrior/preacher mix).
+	_spawn_debug_extra_army(tribe_id, rear + dir * 4, DEBUG_EXTRA_ARMY, nav)
+
+
+## Fills walkable cells ring by ring around the anchor with a brave/warrior/
+## firewarrior/preacher round robin — the debug-battle reinforcement army.
+func _spawn_debug_extra_army(tribe_id: int, center: Vector2i, count: int,
+		nav: NavGrid) -> void:
+	var kinds: Array = [BRAVE_SCENE, WARRIOR_SCENE, FIREWARRIOR_SCENE, PREACHER_SCENE]
+	var spawned: int = 0
+	for radius in range(0, 40):
+		for cell in _ring_cells(center, radius):
+			if spawned >= count:
+				return
+			if not nav.is_cell_walkable(cell):
+				continue
+			_unit_manager.spawn_unit(kinds[spawned % kinds.size()], tribe_id,
+				nav.cell_to_world(cell))
+			spawned += 1
+	if spawned < count:
+		push_warning("Debugschlacht: nur %d von %d Verstärkungen (Stamm %d)"
+			% [spawned, count, tribe_id])
 
 
 ## Spawns the tribe's shaman for the debug battle and fills every spell to
