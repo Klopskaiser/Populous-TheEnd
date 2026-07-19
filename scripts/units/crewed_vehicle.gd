@@ -52,6 +52,10 @@ var _crew_prune_timer: float = 0.0
 var _vehicle_burn: float = 0.0
 ## The destroyed wreck sinks into the ground (burn/water death).
 var _sinking: bool = false
+## Death sound key, set at the destruction site: "siege_death_burn" when the
+## wreck burns down/sinks, "siege_death_burst" when it bursts apart (tornado /
+## terrain rip). Catapult and fire ram share these (both are CrewedVehicles).
+var _death_sfx: StringName = &"siege_death_burst"
 ## Height the tornado currently lifts the whole vehicle by (0 = grounded).
 var _tornado_lift: float = 0.0
 ## Own 3D model parts (in-game only, built in _ready).
@@ -76,6 +80,12 @@ func _is_ranged() -> bool:
 
 func is_targetable() -> bool:
 	return false  # attackers go for the crew
+
+
+## Vehicles never play the man-sized death cry — they have their own burn/burst
+## cues (set at the destruction site).
+func death_sfx_key() -> StringName:
+	return _death_sfx
 
 
 func renders_as_sprite() -> bool:
@@ -200,6 +210,7 @@ func burst_into_wood() -> void:
 	crew.clear()
 	attack_building = null
 	_vehicle_burn = 0.0
+	_death_sfx = &"siege_death_burst"   # torn apart by the tornado
 	if _model != null:
 		_model.visible = false
 	health = 0
@@ -215,6 +226,7 @@ func drown() -> void:
 			m.leave_crew()
 	crew.clear()
 	_sinking = true
+	_death_sfx = &"siege_death_burn"   # sinks like a burnt-out wreck
 	super.drown()
 
 
@@ -231,6 +243,7 @@ func _destroy_vehicle(burst: bool) -> void:
 	crew.clear()
 	attack_building = null
 	_vehicle_burn = 0.0
+	_death_sfx = &"siege_death_burst" if burst else &"siege_death_burn"
 	if burst:
 		if _model != null:
 			_model.visible = false

@@ -363,7 +363,7 @@ func test_storm_ejects_crew_alive() -> void:
 	_free_world(w)
 
 
-func test_ranged_stage1_hurts_crew_weak_die() -> void:
+func test_ranged_stage1_hurts_crew() -> void:
 	var w: Dictionary = _make_world()
 	var tower: Watchtower = _tower(w, w.tribe1)
 	var warrior: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 1, Vector3(31, 0, 32))
@@ -385,13 +385,16 @@ func test_ranged_stage1_hurts_crew_weak_die() -> void:
 		if fire.state == Unit.State.ROLL:
 			fire.tick(TICK)
 		ticks += 1
-	check(fire.state == Unit.State.DEAD,
-		"the 60-HP firewarrior dies of the eject damage once the tumble ends")
+	# 65-HP firewarrior now SURVIVES the 60-damage eject (hurt); the warrior
+	# (120) survives too — no tower crew is weak enough to die from it anymore.
+	check(fire.state != Unit.State.DEAD
+			and fire.health <= fire.max_health - Building.EJECT_RANGED_DAMAGE,
+		"the firewarrior survives the eject, hurt by one brave life")
 	check(warrior.state != Unit.State.DEAD
 			and warrior.health <= warrior.max_health - Building.EJECT_RANGED_DAMAGE,
 		"the tougher warrior survives the eject, hurt by one brave life")
-	check(w.tribe1.population() == pop_before - 1,
-		"population dropped only by the dead crew member")
+	check(w.tribe1.population() == pop_before,
+		"no crew died — population unchanged")
 	_free_world(w)
 
 

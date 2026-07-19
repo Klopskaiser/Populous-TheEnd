@@ -260,16 +260,17 @@ func _on_building_destroyed(building: Node) -> void:
 		play_sfx(&"building_destroyed", (building as Node3D).global_position)
 
 
-## Death cries: the shaman gets her own sound, everyone else shares one
-## (throttled — a firestorm wiping a squad plays one cry, not twenty).
+## Death cries: each unit names its own key (shaman cry, vehicle burn/burst,
+## airship crash, or the shared man-sized cry). Throttled — a firestorm wiping
+## a squad plays one cry per key, not twenty. Empty key = silent.
 func _on_unit_died(unit: Node) -> void:
 	if not (unit is Node3D):
 		return
-	var kind: StringName = unit.unit_kind() if unit.has_method("unit_kind") else &""
-	if kind == &"shaman":
-		play_sfx(&"shaman_death", (unit as Node3D).position)
-	else:
-		play_sfx(&"unit_death", (unit as Node3D).position, 200)
+	var key: StringName = unit.death_sfx_key() if unit.has_method("death_sfx_key") \
+		else &"unit_death"
+	if key == &"":
+		return
+	play_sfx(key, (unit as Node3D).position, 200)
 
 
 # --- Volume helpers (session-scoped, for the options UI) ------------------------------

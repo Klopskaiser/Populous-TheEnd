@@ -678,6 +678,33 @@ func _enemy_under_cursor(screen_pos: Vector2, camera: Camera3D) -> Unit:
 	return _pick_unit_at(screen_pos, camera, -1)
 
 
+## Nearest enemy DEVICE (crewed vehicle: catapult, fire ram, airship) whose
+## hull rect is under the cursor, or null. Spell targeting reuses this — the
+## generic enemy pick skips vehicles (is_targetable()==false). Airship extends
+## CrewedVehicle, so it is covered too.
+func enemy_device_at(screen_pos: Vector2, camera: Camera3D = null) -> Unit:
+	if _unit_manager == null:
+		return null
+	if camera == null:
+		camera = get_viewport().get_camera_3d()
+	if camera == null:
+		return null
+	var best: Unit = null
+	var best_dist: float = INF
+	for unit in _unit_manager.units:
+		if not (unit is CrewedVehicle) or unit.state == Unit.State.DEAD \
+				or unit.tribe_id == player_tribe_id:
+			continue
+		var sprite: Rect2 = _unit_screen_rect(unit, camera)
+		if sprite.size.y <= 0.0 or not sprite.grow(PICK_MARGIN_PX).has_point(screen_pos):
+			continue
+		var dist: float = sprite.get_center().distance_to(screen_pos)
+		if dist < best_dist:
+			best_dist = dist
+			best = unit
+	return best
+
+
 ## Enemy airship under the cursor (dedicated pass — the generic enemy pick
 ## skips non-targetable vehicles), or null.
 func _enemy_airship_under_cursor(screen_pos: Vector2, camera: Camera3D) -> Unit:

@@ -101,6 +101,12 @@ func unit_kind() -> StringName:
 	return &"airship"
 
 
+## Own crash sound (a single cue — hull fire vs. tornado are indistinguishable
+## at the airship's parameterless explode()).
+func death_sfx_key() -> StringName:
+	return &"airship_death"
+
+
 ## Anyone may board — including the shaman; only vehicles never crew.
 func accepts_crew_unit(unit) -> bool:
 	return not (unit is CrewedVehicle)

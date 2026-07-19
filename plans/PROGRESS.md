@@ -5500,3 +5500,51 @@ stehende Katapult-Gruppe) durch Nutzer ausstehend.
 
 Bewusst offen: synchrones Nahkampf-A* in `Unit._approach` (zweitgrößter Kampfbeginn-
 CPU-Kostenpunkt) — separater, headless-messbarer Folgeschritt.
+
+## Spieltest-Fix 12 — Belagerungs-Crew-Flackern, Katapult-Mehrfachtreffer, Sound-Rework, Geräte-Zielen (2026-07-19, Nutzerwünsche)
+
+**1. Belagerungs-Crew flackert/verschwindet am Hang + Rollanimation.** Besetzte
+Boden-Crew (Katapult/Ramme) waren normale Fußgänger und wurden von
+`UnitManager._apply_separation` von ihren Sitz-Slots geschoben (mit Y-Snap aufs
+Terrain → Flackern/Verschwinden am Hang, Idle↔Walk-Zucken). Die Luftschiff-Deckcrew
+war dafür schon ausgenommen (`rides_airborne()`). Fix: neues Prädikat
+`Unit.is_crew_seated()` (deckt Boden- **und** Deckcrew ab; `rides_airborne()` nutzt es
+intern), Separation nimmt sitzende Crew an beiden Stellen aus. Zusätzlich stolpert
+zusteigende Crew nicht mehr in den Steilhang-Roll (`_advance_path`-Guard
+`siege_engine != null and not siege_boarded`).
+
+**2. Katapult trifft mehrere Zeppeline.** `SiegeShot._check_air_intercept` brach beim
+ersten getroffenen Luftschiff ab. Jetzt werden **alle** feindlichen Hüllen im
+Intercept-Volumen gesammelt und je `register_hull_hit`; eine Schockwelle (zentriert auf
+der ersten Hülle). Balance: `SIEGE_SHOT_AIR_INTERCEPT_RADIUS 2→4` (entscheidet die
+Mehrfachtreffer; Zeppeline ~2 m breit/6 m lang), `SIEGE_SHOT_AIR_SPLASH_FACTOR`
+zurück auf 4. Feuerkrieger-HP `60→65` (Nutzerwunsch).
+
+**3. Sound-Rework.** (a) Pro Einheit läuft nur **eine** Status-Soundloop mit Priorität
+**Brand > Panik > krit. Schaden** — `StatusFxRenderer._priority_loop_mask` reduziert die
+volle (weiterhin additive, für Visuals genutzte) Maske auf ein Bit; `_tracked` hält die
+reduzierte Loop-Maske. (b) Todessounds über neuen Virtual `Unit.death_sfx_key()`:
+`unit_death` (Default), `shaman_death` (Shaman), `airship_death` (Zeppelin),
+`siege_death_burn`/`siege_death_burst` (`CrewedVehicle._death_sfx`, an den
+Zerstörungsstellen gesetzt: sinken=burn, bersten/Tornado=burst). `AudioManager._on_unit_died`
+ruft den Virtual. Geräte spielen **kein** `unit_death` mehr. **Neue Soundanker**
+(Dateien noch abzulegen in `assets/audio/sfx/`): `siege_death_burn`, `siege_death_burst`,
+`airship_death` — fehlen sie, ist der Tod still.
+
+**4. Geräte-Zielen für Zauber.** Blitz/Feuerball/Wirbelsturm können feindliche Geräte
+(Katapult/Ramme/Zeppelin) direkt anvisieren: Linksklick bei bewaffnetem Zauber auf das
+Gerät → roter Bestätigungsring (`flash_target_ring`) → Zauber trifft es.
+`SelectionManager.enemy_device_at` (verallgemeinert `_enemy_airship_under_cursor` auf
+alle feindlichen `CrewedVehicle`), `SpellTargeting` mit `DEVICE_SPELLS` + `_selection`-Ref
+(via `main.gd`). **Live-Zielverfolgung:** `cast_spell`/`Shaman.order_cast` bekommen
+optionales `target_unit`; `_tick_cast` frischt `pending_target` jede Runde aus der
+lebenden Zieleinheit → bewegte Zeppeline werden zuverlässig getroffen. `lightning.gd`
+neuer `_vehicle_at`-Zweig (Boden-Gerät `ignite`, da `take_damage` auf Fahrzeugen No-op).
+Feuerball/Tornado trafen Geräte am Zielpunkt schon vorher.
+
+**Tests:** 3 vorbestehende Failures (aus dem HP-Boost 60→65: Feuerkrieger überlebten
+jetzt Absturz/Auswurf mit 5 HP) — auf Nutzerwunsch „überleben lassen" angepasst
+(`test_airship`: thrown_and_survives; `test_watchtower`: ranged_stage1_hurts_crew ohne
+Todes-Branch). Suite **2119/2119 grün**, Ladecheck ok. In-Game-Prüfung (Crew-Ruhe am
+Hang, Mehrfach-Zeppelin-Treffer, Sound-Loops/Todessounds nach Ablegen der Dateien,
+Geräte-Zielen) durch Nutzer ausstehend.

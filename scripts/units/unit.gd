@@ -476,6 +476,13 @@ func unit_kind() -> StringName:
 	return &"unit"
 
 
+## Sound key played on death (AudioManager._on_unit_died). Subclasses override:
+## the shaman has her own cry, vehicles have burn/burst variants, the airship
+## its own crash. Empty = silent.
+func death_sfx_key() -> StringName:
+	return &"unit_death"
+
+
 ## True for units that seek out enemies on their own while idle (Warrior/
 ## Firewarrior/Preacher). Braves are false: they only retaliate when hit.
 func _is_combatant() -> bool:

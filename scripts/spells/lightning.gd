@@ -45,6 +45,13 @@ func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:
 		_spawn_beam(ship.position, ctx)
 		ship.explode()
 		return true
+	# Enemy ground DEVICE (catapult / fire ram) at the point: direct damage is a
+	# no-op on a vehicle, so the bolt sets it alight (it burns out and sinks).
+	var vehicle: CrewedVehicle = _vehicle_at(tribe, target, ctx)
+	if vehicle != null:
+		_spawn_beam(vehicle.position, ctx)
+		vehicle.ignite(vehicle.position)
+		return true
 	var victim: Unit = _nearest_enemy(tribe, target, ctx)
 	if victim == null:
 		# No unit/building, but the bolt still torched flammables -> a hit.
@@ -90,6 +97,24 @@ func _airship_at(tribe: Tribe, target: Vector3, ctx: SpellContext) -> Airship:
 	var best_d: float = TARGET_RADIUS
 	for u in ctx.unit_manager.get_units_in_radius(target, TARGET_RADIUS):
 		if not (u is Airship) or u.state == Unit.State.DEAD or u.tribe_id == tribe.id:
+			continue
+		var d: float = Vector2(u.position.x - target.x, u.position.z - target.z).length()
+		if d <= best_d:
+			best_d = d
+			best = u
+	return best
+
+
+## Nearest enemy ground device (crewed vehicle that is NOT an airship — those
+## are handled by _airship_at) whose position lies within the strike radius.
+func _vehicle_at(tribe: Tribe, target: Vector3, ctx: SpellContext) -> CrewedVehicle:
+	if ctx.unit_manager == null:
+		return null
+	var best: CrewedVehicle = null
+	var best_d: float = TARGET_RADIUS
+	for u in ctx.unit_manager.get_units_in_radius(target, TARGET_RADIUS):
+		if not (u is CrewedVehicle) or u is Airship or u.state == Unit.State.DEAD \
+				or u.tribe_id == tribe.id:
 			continue
 		var d: float = Vector2(u.position.x - target.x, u.position.z - target.z).length()
 		if d <= best_d:

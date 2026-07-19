@@ -17,10 +17,15 @@ const HOTKEY_SPELLS: Array[StringName] = [
 	&"fireball", &"lightning", &"swarm", &"landbridge", &"tornado",
 	&"earthquake", &"volcano", &"firestorm", &"flatten", &"sink"]
 
+## Damaging spells that may lock onto an enemy DEVICE (catapult, fire ram,
+## airship) under the cursor: the cast then tracks that unit's live position.
+const DEVICE_SPELLS: Array[StringName] = [&"fireball", &"lightning", &"tornado"]
+
 var _tribe_commands: TribeCommands = null
 var _tribe: Tribe = null
 var _world_root: Node3D = null   # parent for the cursor indicator
 var _build_menu: BuildMenu = null
+var _selection: SelectionManager = null   # for picking enemy devices
 
 var _armed_spell: StringName = &""
 var _cursor: Node3D = null
@@ -43,11 +48,13 @@ const C_CURSOR_RING: Color = Color(0.98, 0.85, 0.45, 0.9)
 
 
 func setup(p_tribe_commands: TribeCommands, p_tribe: Tribe,
-		p_world_root: Node3D, p_build_menu: BuildMenu = null) -> void:
+		p_world_root: Node3D, p_build_menu: BuildMenu = null,
+		p_selection: SelectionManager = null) -> void:
 	_tribe_commands = p_tribe_commands
 	_tribe = p_tribe
 	_world_root = p_world_root
 	_build_menu = p_build_menu
+	_selection = p_selection
 
 
 func _ready() -> void:
@@ -258,6 +265,19 @@ func _unhandled_input(event: InputEvent) -> void:
 		if Sidebar.is_mouse_over_ui():
 			return   # clicks over the sidebar never cast/cancel
 		if mb.button_index == MOUSE_BUTTON_LEFT:
+			# Damaging spells may lock onto an enemy device (catapult/ram/airship)
+			# under the cursor: cast at its LIVE position with a red confirm ring,
+			# so the moving device is reliably hit (the shaman walks into range
+			# first). A ground click falls through to the normal terrain cast.
+			if _armed_spell in DEVICE_SPELLS and _selection != null:
+				var dev: Unit = _selection.enemy_device_at(mb.position)
+				if dev != null:
+					if _tribe_commands != null and _tribe_commands.cast_spell(
+							_tribe, _armed_spell, dev.position, dev):
+						dev.flash_target_ring()   # red blink marks the spell target
+						cancel()
+					get_viewport().set_input_as_handled()
+					return
 			var hit: Dictionary = _terrain_hit(mb.position)
 			if not hit.is_empty() and _tribe_commands != null:
 				if _tribe_commands.cast_spell(_tribe, _armed_spell, hit.position):

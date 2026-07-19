@@ -19,6 +19,9 @@ const KILL_BONUS_SHARE: float = Balance.SHAMAN_KILL_BONUS_SHARE
 var pending_spell: Spell = null
 var pending_target: Vector3 = Vector3.ZERO
 var pending_ctx: SpellContext = null
+## Optional locked target (enemy device): while set, pending_target is refreshed
+## to its live position each cast tick so a moving airship/vehicle is still hit.
+var pending_target_unit: Unit = null
 var _cast_timer: float = 0.0
 ## True while standing in range playing the cast wind-up (vs. walking there).
 var _casting: bool = false
@@ -34,6 +37,10 @@ func unit_kind() -> StringName:
 	return &"shaman"
 
 
+func death_sfx_key() -> StringName:
+	return &"shaman_death"
+
+
 func melee_strength() -> float:
 	return SHAMAN_MELEE_STRENGTH
 
@@ -47,9 +54,17 @@ func is_panic_immune() -> bool:
 
 ## Accepts a cast order (from TribeCommands.cast_spell). Interrupts movement
 ## and combat; returns false while the shaman is beyond control (rolling etc.).
-func order_cast(spell: Spell, target: Vector3, ctx: SpellContext) -> bool:
+func order_cast(spell: Spell, target: Vector3, ctx: SpellContext,
+		target_unit: Unit = null) -> bool:
 	if spell == null:
 		return false
+	# Locked device target: aim at its current position (kept fresh below while
+	# walking into range).
+	if target_unit != null and is_instance_valid(target_unit) \
+			and target_unit.state != State.DEAD:
+		target = target_unit.position
+	else:
+		target_unit = null
 	# Stationed in a watchtower (phase 7h): cast straight from the tower with
 	# +3 m range instead of walking there — she never leaves the tower. Out of
 	# range = the cast fails silently (charge kept), she stays put.
@@ -81,6 +96,7 @@ func order_cast(spell: Spell, target: Vector3, ctx: SpellContext) -> bool:
 	_clear_path()
 	pending_spell = spell
 	pending_target = target
+	pending_target_unit = target_unit
 	pending_ctx = ctx
 	_cast_timer = CAST_TIME
 	_casting = false
@@ -98,6 +114,7 @@ func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = fals
 func _cancel_cast() -> void:
 	pending_spell = null
 	pending_ctx = null
+	pending_target_unit = null
 	_casting = false
 
 
@@ -123,6 +140,13 @@ func _tick_cast(delta: float) -> void:
 	if pending_spell == null:
 		_set_state(State.IDLE)
 		return
+	# Track a locked device target's live position (a moving airship/vehicle).
+	if pending_target_unit != null:
+		if is_instance_valid(pending_target_unit) \
+				and pending_target_unit.state != State.DEAD:
+			pending_target = pending_target_unit.position
+		else:
+			pending_target_unit = null
 	if _flat_dist(position, pending_target) > pending_spell.cast_range:
 		_casting = false
 		_cast_timer = CAST_TIME

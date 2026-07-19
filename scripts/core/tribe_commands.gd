@@ -245,7 +245,10 @@ func order_train(building: TrainingBuilding, units: Array[Unit]) -> void:
 ## The charge itself is consumed when the shaman finishes the cast (walking
 ## into range first if needed); a failed effect keeps the charge. UI and AI
 ## both call this.
-func cast_spell(tribe: Tribe, spell_id: StringName, target: Vector3) -> bool:
+## `target_unit` (optional): a locked enemy device — the shaman tracks its live
+## position while walking into range (UI spell-targeting on catapult/airship).
+func cast_spell(tribe: Tribe, spell_id: StringName, target: Vector3,
+		target_unit: Unit = null) -> bool:
 	if tribe == null:
 		return false
 	var spell: Spell = tribe.get_spell(spell_id)
@@ -255,7 +258,7 @@ func cast_spell(tribe: Tribe, spell_id: StringName, target: Vector3) -> bool:
 	if shaman == null or not is_instance_valid(shaman) \
 			or shaman.state == Unit.State.DEAD or not (shaman is Shaman):
 		return false
-	return (shaman as Shaman).order_cast(spell, target, spell_context)
+	return (shaman as Shaman).order_cast(spell, target, spell_context, target_unit)
 
 
 ## Assigns units to a crewed vehicle's crew (right-click on the vehicle, 7f).

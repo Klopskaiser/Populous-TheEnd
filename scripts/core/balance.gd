@@ -93,7 +93,7 @@ const SIEGE_SHOT_RAIDER_DAMAGE: int = 30
 ## Hülle mit Mittelpunkt im Radius bekommt einen Treffer) — die Schiffe sind
 ## ~2 m breit / 6 m lang, daher muss der Radius groß sein für Mehrfachtreffer.
 const SIEGE_SHOT_AIR_INTERCEPT_RADIUS: float = 4.0
-const SIEGE_SHOT_AIR_SPLASH_FACTOR: float = 8.0
+const SIEGE_SHOT_AIR_SPLASH_FACTOR: float = 4.0
 
 # --- Feuerramme ---
 const FIRERAM_SPEED: float = 3.0

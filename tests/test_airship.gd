@@ -858,9 +858,10 @@ func test_explosion_hurls_passengers_down() -> void:
 	_free_world(w)
 
 
-## Regression (Spieltest 5): a shot-down firewarrior is HURLED off the deck and
-## dies only after the tumble — not instantly at altitude (user bug).
-func test_shot_down_firewarrior_is_thrown_then_dies() -> void:
+## Regression (Spieltest 5): a shot-down firewarrior is HURLED off the deck —
+## not killed instantly at altitude (user bug). With 65 HP it now SURVIVES the
+## 60-damage crash (CRASH_DAMAGE*2), rolling out hurt instead of dying.
+func test_shot_down_firewarrior_is_thrown_and_survives() -> void:
 	var w: Dictionary = _make_world()
 	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
 	var fw: Unit = _board(w, ship, FIREWARRIOR_SCENE)
@@ -869,10 +870,13 @@ func test_shot_down_firewarrior_is_thrown_then_dies() -> void:
 		"the firewarrior is flung off the deck, not killed on the spot")
 	check(fw.state != Unit.State.DEAD, "it is still alive at the moment of the crash")
 	var ticks: int = 0
-	while fw.state != Unit.State.DEAD and ticks < MAX_TICKS:
+	while (fw.state == Unit.State.THROWN or fw.state == Unit.State.ROLL) \
+			and ticks < MAX_TICKS:
 		_tick_world(w)
 		ticks += 1
-	check(fw.state == Unit.State.DEAD, "it dies once it has tumbled to a stop")
+	check(fw.state != Unit.State.DEAD,
+		"the 65-HP firewarrior survives the 60-damage crash once tumbled")
+	check(fw.health < fw.max_health, "it took the crash damage")
 	_free_world(w)
 
 

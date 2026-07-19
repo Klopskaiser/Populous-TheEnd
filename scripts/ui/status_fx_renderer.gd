@@ -38,7 +38,8 @@ var _tree_manager: TreeManager = null
 var _audio: Node = null
 ## Per effect: {bit, loop_name, height, mm (MultiMesh), material, textures}.
 var _effects: Array[Dictionary] = []
-## Units currently owning at least one effect: unit -> mask (for cleanup).
+## Units currently owning a status loop: unit -> reduced loop mask (single
+## highest-priority bit; for diffing + cleanup).
 var _tracked: Dictionary = {}
 var _frame_timer: float = 0.0
 var _frame: int = 0
@@ -159,13 +160,19 @@ func _process(delta: float) -> void:
 			if unit.renders_as_sprite() \
 					and unit.health <= int(float(unit.max_health) * Unit.BADLY_HURT_FRAC):
 				mask |= FX_INJURED
-		if mask != unit._status_fx_mask:
-			_sync_loops(unit, unit._status_fx_mask, mask)
-			unit._status_fx_mask = mask
-			if mask == 0:
+		# Visuals use the FULL additive mask; the loop SOUND is reduced to a
+		# single highest-priority state (Brand > Panik > krit. Schaden) — only
+		# ONE loop per unit at a time (user spec). _tracked holds that reduced
+		# loop mask so _cleanup_departed stops the right loop on departure.
+		var loop_mask: int = _priority_loop_mask(mask)
+		var prev_loop: int = int(_tracked.get(unit, 0))
+		if loop_mask != prev_loop:
+			_sync_loops(unit, prev_loop, loop_mask)
+			if loop_mask == 0:
 				_tracked.erase(unit)
 			else:
-				_tracked[unit] = mask
+				_tracked[unit] = loop_mask
+		unit._status_fx_mask = mask
 		if mask == 0:
 			continue
 		unit._status_fx_seen = _tick
@@ -232,6 +239,19 @@ func _cleanup_departed() -> void:
 			_sync_loops(unit, _tracked[unit], 0)
 			unit._status_fx_mask = 0
 		_tracked.erase(unit)
+
+
+## Reduces the full additive status mask to the SINGLE loop that may play
+## (user spec: only one status loop per unit). Priority: Brand (burning) >
+## Panik (panic) > kritischer Schaden (injured). 0 = no loop.
+func _priority_loop_mask(full: int) -> int:
+	if full & FX_BURNING:
+		return FX_BURNING
+	if full & FX_PANIC:
+		return FX_PANIC
+	if full & FX_INJURED:
+		return FX_INJURED
+	return 0
 
 
 func _sync_loops(unit: Unit, old_mask: int, new_mask: int) -> void:
