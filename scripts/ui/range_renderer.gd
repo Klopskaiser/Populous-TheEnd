@@ -88,9 +88,12 @@ func _process(_delta: float) -> void:
 			r += Watchtower.TOWER_RANGE_BONUS
 		TerrainRing.add_band(_im, origin, r, _terrain_data,
 			_color_for(unit.unit_kind()))
-		# Catapults also show a dim inner minimum-range ring.
+		# Catapults and fire rams also show a dim inner minimum-range ring.
 		if unit is SiegeEngine:
 			TerrainRing.add_band(_im, unit.position, SiegeEngine.MIN_RANGE,
+				_terrain_data, C_SIEGE_MIN, 0.15)
+		elif unit is FireRam:
+			TerrainRing.add_band(_im, unit.position, FireRam.MIN_RANGE,
 				_terrain_data, C_SIEGE_MIN, 0.15)
 
 

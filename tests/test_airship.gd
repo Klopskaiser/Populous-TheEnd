@@ -85,11 +85,13 @@ func _spawn_ship(w: Dictionary, tribe_id: int, pos: Vector3) -> Airship:
 	return ship
 
 
-## Spawns a unit next to the ship's shadow and boards it (ticks until aboard).
-func _board(w: Dictionary, ship: Airship, scene: PackedScene, tribe_id: int = 0) -> Unit:
+## Spawns a unit next to the vehicle's (shadow) position and boards it
+## (ticks until aboard). Untyped vehicle: works for airships AND ground
+## vehicles (the incapacitated-crew test boards a catapult).
+func _board(w: Dictionary, vehicle, scene: PackedScene, tribe_id: int = 0) -> Unit:
 	var u: Unit = w.unit_manager.spawn_unit(
-		scene, tribe_id, Vector3(ship.position.x + 1.0, 0.0, ship.position.z))
-	u.order_crew(ship)
+		scene, tribe_id, Vector3(vehicle.position.x + 1.0, 0.0, vehicle.position.z))
+	u.order_crew(vehicle)
 	var ticks: int = 0
 	while not u.siege_boarded and ticks < MAX_TICKS:
 		_tick_world(w)
@@ -398,6 +400,123 @@ func test_lava_never_reaches_the_deck() -> void:
 		_tick_world(w)
 	check(not passenger.is_burning(), "lava under the ship ignites nobody aboard")
 	check(not ship.is_burning(), "the hull cannot be ignited either")
+	_free_world(w)
+
+
+# --- Auto engage (idle / attack-move) ------------------------------------------------------------
+
+func test_idle_ship_with_firewarrior_closes_in_and_fights() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
+	_board(w, ship, FIREWARRIOR_SCENE)
+	# Enemy inside the deck-boosted AGGRO (13 + 3) but outside fire reach
+	# (8 + 3): the idle ship must close in on its own and open fire.
+	var victim: Unit = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, w.nav.cell_to_world(Vector2i(74, 60)))
+	var ticks: int = 0
+	while victim.health == victim.max_health and victim.state != Unit.State.DEAD \
+			and ticks < MAX_TICKS:
+		_tick_world(w)
+		ticks += 1
+	check(victim.health < victim.max_health or victim.state == Unit.State.DEAD,
+		"an idle airship closes to deck reach and its firewarrior fires")
+	check(ship._flat_dist(ship.position, victim.position)
+			<= Firewarrior.FIRE_RANGE + Airship.RANGE_BONUS + 1.0,
+		"the ship stopped once every deck firewarrior could attack")
+	_free_world(w)
+
+
+func test_attack_move_stops_to_fight_and_resumes() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(50, 60)))
+	_board(w, ship, FIREWARRIOR_SCENE)
+	# Weak enemy right beside the flight path; the wave target lies far east.
+	var victim: Unit = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, w.nav.cell_to_world(Vector2i(70, 62)))
+	victim.health = 10
+	ship.order_move(w.nav.cell_to_world(Vector2i(100, 60)), false, true)
+	var ticks: int = 0
+	while victim.state != Unit.State.DEAD and ticks < MAX_TICKS:
+		_tick_world(w)
+		ticks += 1
+	check(victim.state == Unit.State.DEAD,
+		"the attack-moving airship stopped and shot the enemy on the way")
+	ticks = 0
+	while ship.position.x < 95.0 and ticks < MAX_TICKS:
+		_tick_world(w)
+		ticks += 1
+	check(ship.position.x >= 95.0,
+		"after the fight the attack-move resumes its route")
+	_free_world(w)
+
+
+func test_passive_move_never_stops_and_warrior_ship_never_engages() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(50, 60)))
+	_board(w, ship, WARRIOR_SCENE)
+	w.unit_manager.spawn_unit(BRAVE_SCENE, 1, w.nav.cell_to_world(Vector2i(60, 61)))
+	# Warrior-only ship on an ATTACK-move: nothing aboard can act — it flies on.
+	ship.order_move(w.nav.cell_to_world(Vector2i(80, 60)), false, true)
+	var ticks: int = 0
+	while ship.state == Unit.State.MOVE and ticks < MAX_TICKS:
+		_tick_world(w)
+		ticks += 1
+	check(ship.position.x > 75.0,
+		"a warrior-only airship never stops for enemies (nothing it can do)")
+	_free_world(w)
+
+
+func test_deck_firewarrior_autofires_at_buildings() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
+	_board(w, ship, FIREWARRIOR_SCENE)
+	# Enemy hut inside deck reach — no order given at all.
+	var hut: Building = w.building_manager.place(HUT_SCENE, w.tribe1,
+		Vector2i(64, 60), 0, true)
+	var ticks: int = 0
+	while hut.health == hut.max_health and ticks < MAX_TICKS:
+		_tick_world(w)
+		ticks += 1
+	check(hut.health < hut.max_health,
+		"deck firewarriors free-fire at enemy buildings in reach")
+	_free_world(w)
+
+
+# --- Deck deaths & incapacitated crews ------------------------------------------------------------
+
+func test_killed_passenger_falls_and_dies_at_roll_end() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
+	var passenger: Unit = _board(w, ship, BRAVE_SCENE)
+	passenger.take_damage(999)
+	check(passenger.state != Unit.State.DEAD,
+		"the lethal hit does not kill the passenger standing at 12 m")
+	check(passenger.state == Unit.State.THROWN, "it tumbles off the deck instead")
+	var ticks: int = 0
+	while passenger.state != Unit.State.DEAD and ticks < MAX_TICKS:
+		_tick_world(w)
+		ticks += 1
+	check(passenger.state == Unit.State.DEAD,
+		"the passenger rolls out below and dies at the end of the roll")
+	check(ship.state != Unit.State.DEAD, "the ship itself is unharmed")
+	_free_world(w)
+
+
+func test_incapacitated_crew_disables_the_vehicle() -> void:
+	var w: Dictionary = _make_world()
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(60, 60))) as SiegeEngine
+	var crew: Unit = _board(w, engine, BRAVE_SCENE)
+	check(engine.active_crew_count() == 1, "boarded crew serves the vehicle")
+	# Pacified by a preacher (SIT): still boarded, but unable to serve.
+	var preacher: Unit = w.unit_manager.spawn_unit(
+		PREACHER_SCENE, 1, w.nav.cell_to_world(Vector2i(62, 60)))
+	check(crew.begin_conversion(preacher, 60.0), "the crew member is pacified")
+	check(engine.boarded_count() == 1, "it still counts as boarded (no hijack)")
+	check(engine.active_crew_count() == 0, "but it cannot serve while sitting")
+	engine.order_move(w.nav.cell_to_world(Vector2i(70, 60)))
+	check(engine.state != Unit.State.MOVE,
+		"a vehicle with a fully pacified crew cannot move")
 	_free_world(w)
 
 

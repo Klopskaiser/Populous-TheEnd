@@ -19,8 +19,21 @@ const FIREWARRIOR_SCENE: PackedScene = preload("res://scenes/units/firewarrior.t
 const PREACHER_SCENE: PackedScene = preload("res://scenes/units/preacher.tscn")
 const SHAMAN_SCENE: PackedScene = preload("res://scenes/units/shaman.tscn")
 const SIEGE_SCENE: PackedScene = preload("res://scenes/units/siege_engine.tscn")
+const FIRE_RAM_SCENE: PackedScene = preload("res://scenes/units/fire_ram.tscn")
+const AIRSHIP_SCENE: PackedScene = preload("res://scenes/units/airship.tscn")
+const FIRERAM_WORKSHOP_SCENE: PackedScene = preload("res://scenes/buildings/fire_ram_workshop.tscn")
+const AIRSHIP_WHARF_SCENE: PackedScene = preload("res://scenes/buildings/airship_wharf.tscn")
 const START_BRAVES: int = 20
 const TREE_COUNT: int = 60
+
+## Startmission = Debug-Testkammer (user request): blue on the west side with
+## one building of each kind, one vehicle of each kind and this many braves;
+## red on the east side with one building of each kind but THREE fully manned
+## watchtowers, two fully manned vehicles of each kind (firewarrior/preacher
+## crews) and this many warriors/firewarriors/preachers — the red BUILDINGS
+## face the player, everything else sits behind them. No AI: a static range.
+const CHAMBER_BRAVES: int = 100
+const CHAMBER_RED_ARMY: int = 100
 
 ## Phase 8.1 (Stufe A): route unit path requests through the off-main-thread
 ## PathWorker. Set to false for an A/B comparison or as an emergency fallback to
@@ -245,10 +258,7 @@ func _ready() -> void:
 			# Sandbox: four full armies + catapults + spell barrage.
 			camera_anchor = _setup_stress_match(nav)
 		MatchConfig.Mode.START_MISSION:
-			_place_start_site(tribes[GameState.PLAYER_TRIBE], nav)
-			_setup_player_base(tribes[GameState.PLAYER_TRIBE], nav)
-			_spawn_braves_near(GameState.PLAYER_TRIBE, center_cell, START_BRAVES, nav)
-			_setup_sparring(tribes, nav)
+			camera_anchor = _setup_test_chamber(tribes, nav)
 			GameState.start_win_tracking()
 		MatchConfig.Mode.SKIRMISH:
 			camera_anchor = _setup_skirmish(tribes, nav)
@@ -256,14 +266,6 @@ func _ready() -> void:
 
 	# Start the camera over the player's base (skirmish) or the island centre.
 	_camera_rig.global_position = nav.cell_to_world(camera_anchor)
-
-
-## Pre-places the player's reincarnation site (free, fully built) on the first
-## valid footprint near the island centre, plus the blue shaman next to it.
-func _place_start_site(tribe: Tribe, nav: NavGrid) -> void:
-	var center: Vector2i = Vector2i(TerrainData.SIZE / 2 + 6, TerrainData.SIZE / 2)
-	var site: Building = _place_site_near(tribe, center)
-	_spawn_shaman_near(tribe, site, center, nav)
 
 
 ## First valid footprint near `anchor` gets the tribe's reincarnation site.
@@ -386,75 +388,66 @@ func _tree_too_close(cell: Vector2i) -> bool:
 	return false
 
 
-## Pre-places the player's starting base (fully built): two huts and all three
-## training buildings (Kaserne/Feuertempel/Tempel) around the island centre, so
-## training and rally points can be tried right away. Placements are sequential
-## (each marks its footprint nav-solid), so _find_plot avoids overlaps.
-func _setup_player_base(tribe: Tribe, nav: NavGrid) -> void:
+## Debug-Testkammer (Startmission, user request): blue base on the WEST side
+## — one building of each kind, one unmanned vehicle of each kind and
+## CHAMBER_BRAVES braves. Red on the EAST side: one building of each kind but
+## THREE fully manned watchtowers, two fully manned vehicles of each kind
+## (firewarrior/preacher crews) and CHAMBER_RED_ARMY warriors/firewarriors/
+## preachers. The red BUILDINGS face the player base; site, vehicles and army
+## sit behind them. No AIController — a static firing range.
+func _setup_test_chamber(tribes: Array[Tribe], nav: NavGrid) -> Vector2i:
 	var center: Vector2i = Vector2i(TerrainData.SIZE / 2, TerrainData.SIZE / 2)
-	var plan: Array = [
-		[HUT_SCENE, center + Vector2i(-10, -9)],
-		[HUT_SCENE, center + Vector2i(9, -9)],
-		[WARRIOR_CAMP_SCENE, center + Vector2i(-12, 7)],
-		[FIREWARRIOR_CAMP_SCENE, center + Vector2i(0, 12)],
-		[TEMPLE_SCENE, center + Vector2i(12, 7)],
+	var blue_anchor: Vector2i = center + Vector2i(-22, 0)
+	_setup_chamber_blue(tribes[GameState.PLAYER_TRIBE], blue_anchor, nav)
+	if tribes.size() > 1:
+		_setup_chamber_red(tribes[1], center, nav)
+	return blue_anchor
+
+
+func _setup_chamber_blue(tribe: Tribe, anchor: Vector2i, nav: NavGrid) -> void:
+	var site: Building = _place_site_near(tribe, anchor + Vector2i(0, -12))
+	_spawn_shaman_near(tribe, site, anchor + Vector2i(0, -12), nav)
+	_place_chamber_buildings(tribe, [
+		[HUT_SCENE, anchor + Vector2i(-12, -8)],
+		[WARRIOR_CAMP_SCENE, anchor + Vector2i(-13, 3)],
+		[FIREWARRIOR_CAMP_SCENE, anchor + Vector2i(-5, 12)],
+		[TEMPLE_SCENE, anchor + Vector2i(7, 11)],
+		[FORESTER_SCENE, anchor + Vector2i(-17, -3)],
+		[WORKSHOP_SCENE, anchor + Vector2i(5, -12)],
+		[FIRERAM_WORKSHOP_SCENE, anchor + Vector2i(13, -4)],
+		[AIRSHIP_WHARF_SCENE, anchor + Vector2i(15, 6)],
+		[WATCHTOWER_SCENE, anchor + Vector2i(0, -7)],
+	], nav)
+	# One unmanned vehicle of each kind next to the base (crew via right-click).
+	for entry in [[SIEGE_SCENE, Vector2i(2, 2)], [FIRE_RAM_SCENE, Vector2i(5, 4)],
+			[AIRSHIP_SCENE, Vector2i(0, 7)]]:
+		var cell: Vector2i = _find_walkable_near(anchor + entry[1], nav, 0)
+		if cell.x >= 0:
+			_unit_manager.spawn_unit(entry[0], tribe.id, nav.cell_to_world(cell))
+	_spawn_braves_near(tribe.id, anchor + Vector2i(0, 2), CHAMBER_BRAVES, nav)
+
+
+func _setup_chamber_red(red: Tribe, center: Vector2i, nav: NavGrid) -> void:
+	# Buildings CLOSE to the player base (west edge of the red zone)...
+	var banchor: Vector2i = center + Vector2i(12, 0)
+	_place_chamber_buildings(red, [
+		[HUT_SCENE, banchor + Vector2i(2, -12)],
+		[WARRIOR_CAMP_SCENE, banchor + Vector2i(2, 11)],
+		[FIREWARRIOR_CAMP_SCENE, banchor + Vector2i(9, -7)],
+		[TEMPLE_SCENE, banchor + Vector2i(9, 6)],
+		[FORESTER_SCENE, banchor + Vector2i(1, 0)],
+		[WORKSHOP_SCENE, banchor + Vector2i(16, -12)],
+		[FIRERAM_WORKSHOP_SCENE, banchor + Vector2i(16, 0)],
+		[AIRSHIP_WHARF_SCENE, banchor + Vector2i(17, 10)],
+	], nav)
+	# ...three fully manned watchtowers as the front line...
+	var towers: Array = [
+		[Vector2i(-5, -9), [PREACHER_SCENE, PREACHER_SCENE]],
+		[Vector2i(-7, 0), [FIREWARRIOR_SCENE, FIREWARRIOR_SCENE]],
+		[Vector2i(-5, 9), [FIREWARRIOR_SCENE, PREACHER_SCENE]],
 	]
-	for entry in plan:
-		var scene: PackedScene = entry[0]
-		var anchor: Vector2i = entry[1]
-		var probe: Building = scene.instantiate() as Building
-		var fp: Vector2i = probe.footprint
-		probe.free()
-		var c: Vector2i = _find_plot(anchor, fp, nav)
-		if c.x >= 0:
-			_building_manager.place(scene, tribe, c, 0, true)
-	# A starting catapult for the player, UNMANNED (crew it via right-click,
-	# optionally after a waypoint route) — test scenario.
-	var siege_cell: Vector2i = _find_walkable_near(center + Vector2i(4, -4), nav, 0)
-	if siege_cell.x >= 0:
-		_unit_manager.spawn_unit(SIEGE_SCENE, tribe.id, nav.cell_to_world(siege_cell))
-
-
-## Statically pre-places a red sparring tribe (id 1) on the far side of the
-## island: a hut, a warrior camp and a handful of braves/warriors/firewarriors.
-## They do not fight yet (that is phase 5b) — this is the target dummy setup so
-## training and rally points can be tried against real enemy units.
-func _setup_sparring(tribes: Array[Tribe], nav: NavGrid) -> void:
-	if tribes.size() < 2:
-		return
-	var red: Tribe = tribes[1]
-	var anchor: Vector2i = Vector2i(TerrainData.SIZE / 2 + 20, TerrainData.SIZE / 2 + 20)
-	var hut_cell: Vector2i = _find_plot(anchor, Hut.FOOTPRINT, nav)
-	if hut_cell.x >= 0:
-		_building_manager.place(HUT_SCENE, red, hut_cell, 0, true)
-	var camp_cell: Vector2i = _find_plot(anchor + Vector2i(-8, 0), WarriorCamp.FOOTPRINT, nav)
-	if camp_cell.x >= 0:
-		_building_manager.place(WARRIOR_CAMP_SCENE, red, camp_cell, 0, true)
-	# Red reincarnation site + shaman (phase 6): the enemy shaman exists and
-	# respawns just like the player's.
-	var red_site: Building = _place_site_near(red, anchor + Vector2i(8, 8))
-	_spawn_shaman_near(red, red_site, anchor + Vector2i(8, 8), nav)
-	# A small starting force spread around the anchor.
-	_spawn_sparring_units(red, anchor, nav)
-	# Fully-staffed industry buildings so the phase-7g occupant eject can be
-	# tried in-game: two manned foresters and one manned (idle) workshop.
-	_setup_sparring_industry(red, anchor, nav)
-	# Three manned watchtowers (phase 7h test scenario): fire posts to storm /
-	# convert / bombard against.
-	_setup_sparring_towers(red, anchor, nav)
-
-
-## Three enemy watchtowers, each with a full 2-unit crew (phase 7h test setup):
-## tower 1 = two preachers, tower 2 = two firewarriors, tower 3 = one
-## firewarrior + one warrior.
-func _setup_sparring_towers(red: Tribe, anchor: Vector2i, nav: NavGrid) -> void:
-	var plan: Array = [
-		[Vector2i(-4, 14), [PREACHER_SCENE, PREACHER_SCENE]],
-		[Vector2i(4, 14), [FIREWARRIOR_SCENE, FIREWARRIOR_SCENE]],
-		[Vector2i(12, 12), [FIREWARRIOR_SCENE, WARRIOR_SCENE]],
-	]
-	for entry in plan:
-		var cell: Vector2i = _find_plot(anchor + entry[0], Watchtower.FOOTPRINT, nav)
+	for entry in towers:
+		var cell: Vector2i = _find_plot(banchor + entry[0], Watchtower.FOOTPRINT, nav)
 		if cell.x < 0:
 			continue
 		var tower: Watchtower = _building_manager.place(
@@ -466,56 +459,72 @@ func _setup_sparring_towers(red: Tribe, anchor: Vector2i, nav: NavGrid) -> void:
 				crew_scene, red.id, tower.edge_spawn_position())
 			if u != null:
 				tower.admit_crew(u)
+	# ...and everything else BEHIND them (east): site + shaman, two fully
+	# manned vehicles of each kind, then the army.
+	var rear: Vector2i = center + Vector2i(30, 0)
+	var red_site: Building = _place_site_near(red, rear + Vector2i(6, 0))
+	_spawn_shaman_near(red, red_site, rear + Vector2i(6, 0), nav)
+	var vehicles: Array = [
+		[SIEGE_SCENE, Vector2i(0, -8)], [SIEGE_SCENE, Vector2i(0, -4)],
+		[FIRE_RAM_SCENE, Vector2i(0, 4)], [FIRE_RAM_SCENE, Vector2i(0, 8)],
+		[AIRSHIP_SCENE, Vector2i(3, -11)], [AIRSHIP_SCENE, Vector2i(3, 11)],
+	]
+	for entry in vehicles:
+		var cell: Vector2i = _find_walkable_near(rear + entry[1], nav, 0)
+		if cell.x < 0:
+			continue
+		var vehicle: CrewedVehicle = _unit_manager.spawn_unit(
+			entry[0], red.id, nav.cell_to_world(cell)) as CrewedVehicle
+		_crew_vehicle_full(vehicle, red.id)
+	_spawn_chamber_army(red.id, rear + Vector2i(8, 0), CHAMBER_RED_ARMY, nav)
 
 
-## Two fully-staffed foresters and one staffed but idle (paused) workshop for
-## the sparring enemy — targets to test the building-assault occupant eject.
-func _setup_sparring_industry(red: Tribe, anchor: Vector2i, nav: NavGrid) -> void:
-	for off in [Vector2i(-7, -6), Vector2i(7, -6)]:
-		var fcell: Vector2i = _find_plot(anchor + off, Forester.FOOTPRINT, nav)
-		if fcell.x >= 0:
-			var f: Forester = _building_manager.place(
-				FORESTER_SCENE, red, fcell, 0, true) as Forester
-			_staff_building(f, Forester.WORKER_SLOTS, red.id, true)
-	var wcell: Vector2i = _find_plot(anchor + Vector2i(0, 11), Workshop.FOOTPRINT, nav)
-	if wcell.x >= 0:
-		var ws: Workshop = _building_manager.place(
-			WORKSHOP_SCENE, red, wcell, 0, true) as Workshop
-		if ws != null:
-			ws.paused = true   # manned, but produces nothing
-			_staff_building(ws, Workshop.WORKER_SLOTS, red.id, false)
-
-
-## Spawns `slots` braves and houses them inside a forester/workshop right away
-## (skips the walk-in), so the building starts fully staffed.
-func _staff_building(building: Building, slots: int, tribe_id: int, is_forester: bool) -> void:
-	if building == null:
-		return
-	for i in range(slots):
-		var b: Brave = _unit_manager.spawn_unit(
-			BRAVE_SCENE, tribe_id, building.edge_spawn_position()) as Brave
-		if b == null:
-			return
-		if is_forester:
-			b.order_forester(building as Forester)
-			(building as Forester).admit_worker(b)
-		else:
-			b.order_workshop(building as Workshop)
-			(building as Workshop).admit_worker(b)
-
-
-func _spawn_sparring_units(red: Tribe, anchor: Vector2i, nav: NavGrid) -> void:
-	var plan: Array = [
-		[BRAVE_SCENE, 4], [WARRIOR_SCENE, 3], [FIREWARRIOR_SCENE, 2],
-		[PREACHER_SCENE, 2]]   # enemy preachers: conversion + priest duel (5c)
-	var placed: int = 0
+## Places pre-built buildings from a [scene, anchor] plan; _find_plot searches
+## rings around each anchor, so sequential placements avoid overlaps.
+func _place_chamber_buildings(tribe: Tribe, plan: Array, nav: NavGrid) -> void:
 	for entry in plan:
 		var scene: PackedScene = entry[0]
-		for i in range(int(entry[1])):
-			var cell: Vector2i = _find_walkable_near(anchor + Vector2i(6, 0), nav, placed)
-			if cell.x >= 0:
-				_unit_manager.spawn_unit(scene, red.id, nav.cell_to_world(cell))
-			placed += 1
+		var probe: Building = scene.instantiate() as Building
+		var fp: Vector2i = probe.footprint
+		probe.free()
+		var c: Vector2i = _find_plot(entry[1], fp, nav)
+		if c.x >= 0:
+			_building_manager.place(scene, tribe, c, 0, true)
+
+
+## Spawns and INSTANTLY boards a full firewarrior/preacher crew onto a
+## vehicle (test chamber; skips the walk-in).
+func _crew_vehicle_full(vehicle: CrewedVehicle, tribe_id: int) -> void:
+	if vehicle == null:
+		return
+	for i in range(vehicle.max_crew):
+		var scene: PackedScene = FIREWARRIOR_SCENE if i % 2 == 0 else PREACHER_SCENE
+		var u: Unit = _unit_manager.spawn_unit(scene, tribe_id, vehicle.position)
+		if u == null:
+			continue
+		u.order_crew(vehicle)
+		vehicle.on_crew_boarded(u)
+
+
+## Spawns `count` warriors/firewarriors/preachers (round robin) on walkable
+## cells around `center` — the red test-chamber army.
+func _spawn_chamber_army(tribe_id: int, center: Vector2i, count: int, nav: NavGrid) -> void:
+	var kinds: Array = [WARRIOR_SCENE, FIREWARRIOR_SCENE, PREACHER_SCENE]
+	var spawned: int = 0
+	for radius in range(0, GameState.terrain_data.size / 2):
+		for cell in _ring_cells(center, radius):
+			if spawned >= count:
+				return
+			if not nav.is_cell_walkable(cell):
+				continue
+			if (cell.x + cell.y) % 2 != 0:
+				continue  # every other cell, for spacing
+			_unit_manager.spawn_unit(kinds[spawned % kinds.size()], tribe_id,
+				nav.cell_to_world(cell))
+			spawned += 1
+	if spawned < count:
+		push_warning("Testkammer: nur %d von %d Armee-Einheiten gespawnt (Stamm %d)"
+			% [spawned, count, tribe_id])
 
 
 # --- Debug battle (pause menu) ---------------------------------------------------

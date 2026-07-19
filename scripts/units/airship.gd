@@ -52,6 +52,16 @@ var _ordered_unit: Unit = null
 var _drift_check: float = 0.0
 var _anchor_repick: float = 0.0
 var _drift_anchor = null
+## Auto-engage steering (user spec): with firewarriors aboard, an IDLE or
+## attack-moving airship closes to deck fire reach of enemies/buildings
+## within the deck-boosted firewarrior aggro radius and stands to fight; an
+## interrupted attack-move resumes its route once nothing is left.
+var _engage_scan: float = 0.0
+## Building the deck firewarriors free-fire at (units always take priority).
+var _auto_building = null
+## True while flying an AUTO approach (not a player route): arriving stands
+## to fight instead of popping the kept waypoint queue.
+var _auto_approach: bool = false
 ## Smoke overlay after the first hull hit (in-game only).
 var _smoke: MeshInstance3D = null
 
@@ -144,8 +154,20 @@ func _slope_ahead(_move_dir: Vector2) -> float:
 ## Straight flight: bypasses the async path queue entirely (the PathWorker
 ## computes ground-grid paths) and never fails — only map bounds clamp.
 func _start_path_to(target: Vector3) -> void:
+	_auto_approach = false   # a real route replaces any auto approach
 	_plan_path_to(target)
 	_set_state(State.MOVE)
+
+
+## An AUTO approach that reaches its stop point stands to fight — the kept
+## waypoint queue (attack-move target) must NOT be popped; the route resumes
+## via the engage scan once nothing is left to shoot.
+func _on_path_finished() -> void:
+	if _auto_approach:
+		_auto_approach = false
+		_set_state(State.IDLE)
+		return
+	super._on_path_finished()
 
 
 func _plan_path_to(target: Vector3, _allow_partial: bool = false) -> bool:
@@ -214,7 +236,7 @@ func order_attack(enemy: Unit) -> void:
 	if enemy == null or not is_instance_valid(enemy) or enemy.state == State.DEAD \
 			or enemy.tribe_id == tribe_id:
 		return
-	if boarded_count() < MIN_MOVE_CREW:
+	if active_crew_count() < MIN_MOVE_CREW:
 		return
 	attack_building = null
 	_ordered_unit = enemy
@@ -228,7 +250,7 @@ func order_attack_building(building) -> void:
 	if building == null or not is_instance_valid(building) or building.health <= 0 \
 			or building.tribe_id == tribe_id:
 		return
-	if boarded_count() < MIN_MOVE_CREW:
+	if active_crew_count() < MIN_MOVE_CREW:
 		return
 	_ordered_unit = null
 	attack_building = building
@@ -239,7 +261,7 @@ func order_attack_building(building) -> void:
 ## passengers there. Any new order cancels the pending unload (order_move
 ## clears route_end_action).
 func order_unload(point: Vector3) -> void:
-	if boarded_count() < MIN_MOVE_CREW:
+	if active_crew_count() < MIN_MOVE_CREW:
 		return
 	var dest: Vector3 = point
 	if nav_grid != null:
@@ -360,8 +382,94 @@ func tick(delta: float) -> void:
 	for m in crew:
 		if is_instance_valid(m) and m.siege_boarded and m.state == State.CREW:
 			m.position = crew_slot_position(m)
+	_tick_auto_engage(delta)
 	_tick_deck_combat(delta)
 	_tick_drift(delta)
+
+
+## Auto-engage steering: while IDLE or on an attack-move (and only with a
+## firewarrior aboard), close to deck fire reach of the nearest enemy unit —
+## or building — within the deck-boosted firewarrior aggro radius, then stand
+## so the deck crew fights. Passive moves march through; explicit targets and
+## a pending unload steer themselves. Once nothing is left, an interrupted
+## attack-move resumes its kept route.
+func _tick_auto_engage(delta: float) -> void:
+	_engage_scan -= delta
+	if _engage_scan > 0.0:
+		return
+	_engage_scan = 0.5
+	if path_service == null:
+		return
+	if state != State.IDLE \
+			and not (state == State.MOVE and (move_aggressive or _auto_approach)):
+		return
+	if _ordered_unit != null or attack_building != null or route_end_action.is_valid():
+		return
+	if not _has_deck_firewarrior():
+		_auto_building = null
+		return
+	var reach: float = Firewarrior.FIRE_RANGE + RANGE_BONUS
+	var aggro: float = Firewarrior.RANGED_AGGRO + RANGE_BONUS
+	var stop_at: Vector3
+	var dist: float
+	var target: Unit = _nearest_enemy(aggro)
+	if target != null:
+		_auto_building = null
+		stop_at = target.position
+		dist = _flat_dist(position, target.position)
+	else:
+		var b = _nearest_enemy_building_by_wall(aggro)
+		_auto_building = b
+		if b == null:
+			# Nothing around: an interrupted attack-move resumes its route.
+			if state == State.IDLE and move_aggressive \
+					and not waypoint_queue.is_empty():
+				_start_path_to(waypoint_queue[0])
+			return
+		stop_at = b.center_world()
+		dist = b.footprint_distance_to(Vector2(position.x, position.z))
+	if dist <= reach - 0.2:
+		if state == State.MOVE:
+			# In reach: stand and fight (the kept route resumes later).
+			_auto_approach = false
+			_clear_path()
+			_set_state(State.IDLE)
+		return
+	# Beyond reach: close in so EVERY deck firewarrior can attack.
+	if active_crew_count() < MIN_MOVE_CREW:
+		return
+	var dir: Vector3 = Vector3(stop_at.x - position.x, 0.0, stop_at.z - position.z)
+	if dir.length_squared() < 0.01:
+		return
+	_plan_path_to(position + dir.normalized() * (dir.length() - (reach - 1.0)))
+	_auto_approach = true
+	_set_state(State.MOVE)
+
+
+func _has_deck_firewarrior() -> bool:
+	for m in crew:
+		if is_instance_valid(m) and m.siege_boarded and m.state == State.CREW \
+				and m.unit_kind() == &"firewarrior":
+			return true
+	return false
+
+
+## Nearest living enemy building by WALL distance (footprint) — the centre of
+## a big building can lie beyond the reach while its walls are shootable.
+func _nearest_enemy_building_by_wall(radius: float):
+	if building_manager == null:
+		return null
+	var flat: Vector2 = Vector2(position.x, position.z)
+	var best = null
+	var best_d: float = radius
+	for b in building_manager.buildings:
+		if not is_instance_valid(b) or b.tribe_id == tribe_id or b.health <= 0:
+			continue
+		var d: float = b.footprint_distance_to(flat)
+		if d <= best_d:
+			best_d = d
+			best = b
+	return best
 
 
 ## Deck combat (watchtower pattern): only while the ship is STANDING; every
@@ -413,6 +521,19 @@ func _tick_deck_firewarrior(fw, delta: float) -> void:
 	if target == null:
 		target = _nearest_enemy(reach)
 	if target == null:
+		# No unit in reach: free-fire at the nearest enemy BUILDING (lowest
+		# priority, like ground firewarriors — user spec: buildings in reach
+		# are attacked automatically).
+		var b = _free_fire_building(reach)
+		if b != null:
+			fw.facing = _flat_dir(position, b.center_world())
+			_set_deck_anim(fw, &"throw")
+			if cd <= 0.0:
+				cd = Firewarrior.FIRE_COOLDOWN
+				fw.anim_start_ms = Time.get_ticks_msec()
+				fw.fire_at_building_from(fw.position, b)
+			_fire_cd[fw] = cd
+			return
 		_fire_cd[fw] = 0.0
 		_set_deck_anim(fw, &"idle")
 		return
@@ -423,6 +544,16 @@ func _tick_deck_firewarrior(fw, delta: float) -> void:
 		fw.anim_start_ms = Time.get_ticks_msec()
 		fw.fire_from(fw.position, target)
 	_fire_cd[fw] = cd
+
+
+## Auto building target for the deck firewarriors: the engage scan's pick
+## while its walls stay in reach, else a fresh wall-distance scan.
+func _free_fire_building(reach: float):
+	var b = _auto_building
+	if b != null and is_instance_valid(b) and b.health > 0 and b.tribe_id != tribe_id \
+			and b.footprint_distance_to(Vector2(position.x, position.z)) <= reach:
+		return b
+	return _nearest_enemy_building_by_wall(reach)
 
 
 func _tick_deck_preacher(pr, delta: float) -> void:
@@ -581,8 +712,9 @@ func _create_model() -> void:
 		_setup_ground_shadow(root)
 		return
 
-	# Balloon: a stretched ellipsoid, ~6 m long x 2 m wide (viewed at an angle
-	# because it hovers far above the ground units).
+	# Balloon: a stretched ellipsoid, ~6 m long x 2 m wide, riding HIGH above
+	# the gondola so the deck (and the passengers on it) stays freely visible
+	# — passengers used to clip into the balloon (user feedback).
 	var balloon: MeshInstance3D = MeshInstance3D.new()
 	var sphere: SphereMesh = SphereMesh.new()
 	sphere.radius = 1.0
@@ -590,10 +722,10 @@ func _create_model() -> void:
 	balloon.mesh = sphere
 	balloon.material_override = _mat(Color(0.75, 0.68, 0.5))
 	balloon.scale = Vector3(1.0, 0.9, 3.0)
-	balloon.position.y = 1.6
+	balloon.position.y = 3.4
 	root.add_child(balloon)
 
-	# Gondola (deck) hanging under the balloon — the passengers stand on it.
+	# Gondola (deck) hanging far under the balloon — the passengers stand on it.
 	var gondola: MeshInstance3D = MeshInstance3D.new()
 	var box: BoxMesh = BoxMesh.new()
 	box.size = Vector3(1.6, 0.5, 3.6)
@@ -602,26 +734,39 @@ func _create_model() -> void:
 	gondola.position.y = 0.35
 	root.add_child(gondola)
 
-	# Rigging: two posts connecting deck and balloon.
-	for sz in [-1.2, 1.2]:
-		var post: MeshInstance3D = MeshInstance3D.new()
-		var post_box: BoxMesh = BoxMesh.new()
-		post_box.size = Vector3(0.08, 1.2, 0.08)
-		post.mesh = post_box
-		post.material_override = _mat(C_WOOD_DARK)
-		post.position = Vector3(0.0, 1.0, sz)
-		root.add_child(post)
+	# Four ropes tie the balloon to the gondola corners.
+	for sx in [-0.7, 0.7]:
+		for sz in [-1.5, 1.5]:
+			_add_rope(root, Vector3(sx, 0.6, sz),
+				Vector3(sx * 0.6, 2.7, sz * 0.75))
 
-	# Owner flag at the stern (recoloured on takeover).
+	# Owner flag at the stern of the balloon (recoloured on takeover).
 	_flag_mesh = MeshInstance3D.new()
 	var flag_box: BoxMesh = BoxMesh.new()
 	flag_box.size = Vector3(0.5, 0.3, 0.03)
 	_flag_mesh.mesh = flag_box
-	_flag_mesh.position = Vector3(0.0, 1.7, -3.2)
+	_flag_mesh.position = Vector3(0.0, 3.5, -3.3)
 	root.add_child(_flag_mesh)
 
 	_finish_model(root)
 	_setup_ground_shadow(root)
+
+
+## Thin rope segment from `a` to `b` (model-local coordinates).
+func _add_rope(root: Node3D, a: Vector3, b: Vector3) -> void:
+	var rope: MeshInstance3D = MeshInstance3D.new()
+	var cyl: CylinderMesh = CylinderMesh.new()
+	cyl.top_radius = 0.03
+	cyl.bottom_radius = 0.03
+	cyl.height = a.distance_to(b)
+	rope.mesh = cyl
+	rope.material_override = _mat(C_WOOD_DARK)
+	root.add_child(rope)
+	rope.position = (a + b) * 0.5
+	var dir: Vector3 = (b - a).normalized()
+	var axis: Vector3 = Vector3.UP.cross(dir)
+	if axis.length_squared() > 0.000001:
+		rope.rotate(axis.normalized(), Vector3.UP.angle_to(dir))
 
 
 ## The base _finish_model blob sits at the model origin (12 m up) — move it
@@ -656,7 +801,7 @@ func _show_smoke(show: bool) -> void:
 		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		_smoke.material_override = mat
-		_smoke.position.y = 1.8
+		_smoke.position.y = 3.6
 		add_child(_smoke)
 	_smoke.visible = show
 

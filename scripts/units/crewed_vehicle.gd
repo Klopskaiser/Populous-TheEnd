@@ -286,6 +286,20 @@ func crew_count() -> int:
 	return crew.size()
 
 
+## Boarded members currently ABLE to serve: pacified (SIT under a preacher),
+## panicking/burning and tumbling members still count as boarded (ownership,
+## hijack protection) but cannot drive or fire — a vehicle whose whole crew
+## is incapacitated does nothing until they recover (user spec).
+func active_crew_count() -> int:
+	var count: int = 0
+	for m in crew:
+		if is_instance_valid(m) and m.state != State.DEAD and m.siege_boarded \
+				and _flat_dist(m.position, position) <= CREW_LEASH \
+				and (m.state == State.CREW or m.can_take_orders()):
+			count += 1
+	return count
+
+
 ## A recruit reached the vehicle: it boards. First boarder of another tribe
 ## takes the (unmanned) device over; a foreign recruit racing a fresh crew
 ## loses and is turned away.
@@ -364,9 +378,10 @@ func _resummon_crew() -> void:
 
 # --- Orders & ticking ---------------------------------------------------------------
 
-## Moving needs at least min_move_crew boarded crew members.
+## Moving needs at least min_move_crew ACTIVE crew members (pacified or
+## panicking crew cannot drive).
 func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = false) -> void:
-	if boarded_count() < min_move_crew:
+	if active_crew_count() < min_move_crew:
 		return
 	attack_building = null
 	super.order_move(target, queue_up, aggressive)
@@ -452,8 +467,9 @@ func tick(delta: float) -> void:
 		# apart (cliff beyond anything drivable) -> the vehicle bursts.
 		if state != State.DEAD and _chassis_height_span() > BREAK_HEIGHT_SPAN:
 			_destroy_vehicle(true)
-	# An unmanned (or under-crewed) vehicle rolls to a stop mid-route.
-	if state == State.MOVE and boarded_count() < min_move_crew:
+	# An unmanned (or under-crewed / incapacitated-crew) vehicle rolls to a
+	# stop mid-route.
+	if state == State.MOVE and active_crew_count() < min_move_crew:
 		waypoint_queue.clear()
 		_clear_path()
 		_set_state(State.IDLE)

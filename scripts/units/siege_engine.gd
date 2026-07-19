@@ -86,7 +86,7 @@ func order_attack(enemy: Unit) -> void:
 ## a unit: as the slowest thing on the field it would just trundle after a
 ## fleeing target forever without ever firing. Returns true when it engaged.
 func _auto_acquire(delta: float) -> bool:
-	if boarded_count() < MIN_FIRE_CREW:
+	if active_crew_count() < MIN_FIRE_CREW:
 		return false
 	if not _due_to_scan(delta):
 		return false
@@ -114,7 +114,7 @@ func _tick_idle(delta: float) -> void:
 ## Bombardment. A live unit target takes precedence over the building focus;
 ## a dead/gone target falls back to the building, then to re-acquisition.
 func _tick_attack(delta: float) -> void:
-	if boarded_count() < MIN_MOVE_CREW:
+	if active_crew_count() < MIN_MOVE_CREW:
 		attack_building = null
 		_end_attack()
 		_set_state(State.IDLE)
@@ -143,7 +143,7 @@ func _tick_attack(delta: float) -> void:
 ## any range and the catapult would trundle after it instead of sieging).
 func _retarget_or_idle() -> void:
 	_end_attack()
-	if boarded_count() >= MIN_FIRE_CREW:
+	if active_crew_count() >= MIN_FIRE_CREW:
 		var u: Unit = _nearest_enemy_unit(FIRE_RANGE)
 		if u != null:
 			_begin_attack(u)
@@ -211,7 +211,7 @@ func _bombard_point(target_pos: Vector3, delta: float, approach: bool) -> void:
 	attack_anim = &"throw"
 	if dist < MIN_RANGE:
 		return   # arc too flat — holds fire until the target clears the minimum
-	var crew_now: int = boarded_count()
+	var crew_now: int = active_crew_count()
 	if crew_now < MIN_FIRE_CREW:
 		return   # 1 crew can steer but not load and fire
 	_fire_cooldown -= delta

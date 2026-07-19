@@ -22,6 +22,9 @@ const MAX_CREW: int = Balance.FIRERAM_MAX_CREW
 const MIN_MOVE_CREW: int = Balance.FIRERAM_MIN_MOVE_CREW
 const MIN_FIRE_CREW: int = Balance.FIRERAM_MIN_FIRE_CREW
 const FIRE_RANGE: float = Balance.FIRERAM_FIRE_RANGE
+## Units closer than this stand behind the nozzle — the ram holds its fire
+## against them (buildings hugging the hull still burn fine).
+const MIN_RANGE: float = Balance.FIRERAM_MIN_RANGE
 const FLAME_WIDTH: float = Balance.FIRERAM_FLAME_WIDTH
 const FLAME_DURATION: float = Balance.FIRERAM_FLAME_DURATION
 const COOLDOWN_MIN_CREW: float = Balance.FIRERAM_COOLDOWN_MIN_CREW
@@ -113,7 +116,7 @@ func tick(delta: float) -> void:
 			_flame_check = FLAME_CHECK_INTERVAL
 			_apply_flames()
 		if _flame_time <= 0.0:
-			_reload = flame_cooldown_for_crew(boarded_count())
+			_reload = flame_cooldown_for_crew(active_crew_count())
 			_show_flame_cone(false)
 	super.tick(delta)
 
@@ -150,7 +153,7 @@ func _aimed_at(point: Vector3) -> bool:
 ## enemy building within aggro — the catapult's proven "fire, don't chase"
 ## rule (auto unit targets are never chased; ordered ones are).
 func _auto_acquire(delta: float) -> bool:
-	if boarded_count() < MIN_FIRE_CREW:
+	if active_crew_count() < MIN_FIRE_CREW:
 		return false
 	if not _due_to_scan(delta):
 		return false
@@ -176,7 +179,7 @@ func _tick_idle(delta: float) -> void:
 ## Flame combat. A live unit target takes precedence over the building focus;
 ## a dead/gone target falls back to the building, then to re-acquisition.
 func _tick_attack(delta: float) -> void:
-	if boarded_count() < MIN_MOVE_CREW:
+	if active_crew_count() < MIN_MOVE_CREW:
 		attack_building = null
 		_end_attack()
 		_set_state(State.IDLE)
@@ -203,7 +206,7 @@ func _tick_attack(delta: float) -> void:
 ## Re-acquisition after a lost target — same rule as _auto_acquire.
 func _retarget_or_idle() -> void:
 	_end_attack()
-	if boarded_count() >= MIN_FIRE_CREW:
+	if active_crew_count() >= MIN_FIRE_CREW:
 		var u: Unit = _nearest_enemy_unit(FIRE_RANGE)
 		if u != null:
 			_begin_attack(u)
@@ -220,9 +223,11 @@ func _retarget_or_idle() -> void:
 	_set_state(State.IDLE)
 
 
-## Unit target: burn it while in range; ORDERED targets are chased (slowly —
-## at 3 m/s the ram pressures but rarely catches runners), auto targets are
-## dropped once they leave the range.
+## Unit target: burn it while in the [MIN_RANGE, FIRE_RANGE] band; ORDERED
+## targets are chased (slowly — at 3 m/s the ram pressures but rarely catches
+## runners), auto targets are dropped once they leave the range. A unit that
+## crept behind the nozzle is swapped for another in-band enemy (auto) or
+## held without fire (ordered) — the catapult's minimum-range rule.
 func _burn_unit(target: Unit, delta: float) -> void:
 	var dist: float = _flat_dist(position, target.position)
 	if dist > FIRE_RANGE:
@@ -234,6 +239,17 @@ func _burn_unit(target: Unit, delta: float) -> void:
 		_approach(target.position, delta)
 		_face_point(target.position)
 		return
+	if dist < MIN_RANGE:
+		if not _target_ordered and _due_to_scan(delta):
+			var alt: Unit = _nearest_enemy_unit(FIRE_RANGE)
+			if alt != null and alt != target:
+				_begin_attack(alt)
+				return
+		if _has_path():
+			_clear_path()
+		_in_melee = true
+		_face_point(target.position)
+		return   # behind the nozzle — hold fire until it clears the minimum
 	_burn_point(target.position, delta, false, dist)
 
 
@@ -254,7 +270,7 @@ func _burn_point(target_pos: Vector3, delta: float, approach: bool,
 	_face_point(target_pos)
 	_in_melee = true
 	attack_anim = &"throw"
-	if boarded_count() < MIN_FIRE_CREW:
+	if active_crew_count() < MIN_FIRE_CREW:
 		return
 	if _flame_time > 0.0 or _reload > 0.0:
 		return
@@ -292,6 +308,8 @@ func _nearest_enemy_unit(max_range: float) -> Unit:
 		if u.is_airborne():
 			continue   # flames stay on the ground
 		var d: float = _flat_dist(position, u.position)
+		if d < MIN_RANGE or d > max_range:
+			continue   # behind the nozzle — cannot be burnt
 		if d < best_d:
 			best_d = d
 			best = u

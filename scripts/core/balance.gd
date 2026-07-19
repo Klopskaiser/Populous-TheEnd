@@ -98,8 +98,11 @@ const FIRERAM_SPEED: float = 3.0
 const FIRERAM_MAX_CREW: int = 4
 const FIRERAM_MIN_MOVE_CREW: int = 1
 const FIRERAM_MIN_FIRE_CREW: int = 1
-## Flammenstoß nach vorn: Rechteck LÄNGE x BREITE (Zellen), keine Mindestreichweite.
+## Flammenstoß nach vorn: Rechteck LÄNGE x BREITE (Zellen). Einheiten NÄHER
+## als MIN_RANGE stehen hinter der Düse — gegen sie hält die Ramme das Feuer
+## (Gebäude direkt an der Wand brennen weiter, die Flammen reichen hin).
 const FIRERAM_FIRE_RANGE: float = 5.0
+const FIRERAM_MIN_RANGE: float = 1.0
 const FIRERAM_FLAME_WIDTH: float = 2.0
 ## Dauer eines Flammenstoßes; danach Nachladen (1 Crew -> MIN, 4 Crew -> FULL).
 const FIRERAM_FLAME_DURATION: float = 1.0

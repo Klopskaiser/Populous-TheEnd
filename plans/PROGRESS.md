@@ -9,6 +9,53 @@ Verifikationsstand. Auch bei nachträglichen Erweiterungen außerhalb einer Phas
 
 ---
 
+## Fahrzeug-Feinschliff nach Spieltest 2 + Debug-Testkammer (2026-07-19)
+
+Sechs Punkte Nutzerfeedback:
+1. **Luftschiff-Modell:** Ballon deutlich höher (y 3.4 statt 1.6, Passagiere
+   clippen nicht mehr hinein), Gondel frei einsehbar, **vier Seile** verbinden
+   Gondelecken und Ballon (`_add_rope`); Flagge/Rauch mit nach oben.
+2. **Auto-Engage des Luftschiffs** (`_tick_auto_engage`, airship.gd): Im
+   IDLE oder Angriffsmove und mit Feuerkrieger an Bord fliegt das Schiff
+   selbstständig an Feinde **und Gebäude** innerhalb der Deck-Aggro
+   (Feuerkrieger-Aggro 13 + 3) heran — maximal bis auf Deck-Feuerreichweite
+   (8 + 3) — und bleibt stehen; Deck-Feuerkrieger **frei-feuern jetzt auch
+   auf Gebäude** (niedrigste Priorität, `_free_fire_building` nach
+   Wand-Distanz). Ein unterbrochener Angriffsmove setzt seine Route fort,
+   sobald nichts mehr da ist (`_auto_approach`-Flag schützt die Waypoint-
+   Queue). Passive Moves fliegen unverändert durch; reine Nahkämpfer-Schiffe
+   halten nie an.
+3. **Tod an Deck:** tödlicher Schaden an einem Passagier tötet nicht auf
+   12 m Höhe — er wird auf 1 HP gesetzt, kippt vom Deck (`throw_airborne`)
+   und stirbt **am Ende der Ausroll-Phase** (Roll-Schaden + aufgeschobener
+   Roll-Tod). Zusätzlich: Deck-Passagiere sind panik-immun (start_panic-
+   Guard — niemand rennt in 12 m Höhe herum).
+4. **Feuerramme Mindestreichweite 1 m** (`FIRERAM_MIN_RANGE`): Einheiten
+   hinter der Düse werden nicht mehr sinnlos beflammt (Auto-Ziele werden
+   getauscht, befohlene gehalten); Gebäude direkt an der Wand brennen
+   weiter. RangeRenderer zeigt den inneren Ring auch für die Ramme.
+5. **Handlungsunfähige Besatzung** (`CrewedVehicle.active_crew_count()`):
+   Mitglieder in SIT (Bekehrung), Panik/Brennen, Roll/Wurf zählen weiter als
+   Besatzung (Eigentum/Kaper-Schutz), können aber weder fahren noch feuern —
+   alle Fahr-/Feuer-Gates der drei Fahrzeuge nutzen jetzt active statt
+   boarded.
+6. **Startmission = Debug-Testkammer** (main.gd, ersetzt Spieler-Basis +
+   Sparring): Blau (West, Kamera-Start): je 1 Gebäude aller Arten, je 1
+   unbemanntes Fahrzeug aller Arten, 100 Braves, Reinkarnationsplatz +
+   Schamanin. Rot (Ost, KEINE KI — statische Zielübung): je 1 Gebäude aller
+   Arten, aber **3 voll bemannte Wachtürme als Frontlinie zur Spielerbasis
+   hin**; dahinter Reinkarnationsplatz + Schamanin, je **2 voll bemannte
+   Fahrzeuge aller Arten** (Feuerkrieger/Prediger-Crews, sofort an Bord via
+   `_crew_vehicle_full`) und **100 Krieger/Feuerkrieger/Prediger**
+   (Round-Robin). Alte Funktionen `_setup_player_base`/`_setup_sparring*`/
+   `_staff_building`/`_place_start_site` entfernt.
+
+**Verifikation:** neue Tests in test_airship.gd (Auto-Engage idle/attack-move
+inkl. Routen-Resume, Krieger-Schiff hält nie, Gebäude-Freibeschuss, Deck-Tod
+mit Roll-Ende, handlungsunfähige Crew blockiert Fahrzeug) und test_fire_ram.gd
+(Mindestreichweite); kompletter Lauf grün, Ladecheck (baut die Testkammer auf)
+fehlerfrei.
+
 ## Bugfix: Bauplatz-Räumung vertrieb die eigenen Begradiger (2026-07-19)
 
 **Symptom (Spielerbericht, 8×8-Luftschiffwerft an der Küste):** nur wenige

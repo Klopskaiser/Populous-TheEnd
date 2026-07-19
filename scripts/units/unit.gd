@@ -909,6 +909,17 @@ func take_damage(amount: int, attacker = null) -> void:
 	if health <= 0:
 		if state == State.ROLL:
 			return   # deferred: _end_roll finishes it
+		# Deck passengers (airship) never die standing at 12 m: the kill is
+		# converted into a fall — they tumble off the deck, roll out below
+		# and die at the END of the roll (user spec; the roll's deferred-
+		# death rule finishes them once the tumble settles).
+		if rides_airborne():
+			health = 1
+			leave_crew()
+			var out_angle: float = randf() * TAU
+			throw_airborne(Vector3(cos(out_angle), 0.0, sin(out_angle))
+				* randf_range(1.5, 3.0))
+			return
 		health = 0
 		_die()
 		return
@@ -1414,6 +1425,8 @@ func _land_from_throw(ground: float) -> void:
 func start_panic(source_pos: Vector3, duration: float = PANIC_DURATION) -> void:
 	if state == State.DEAD or state == State.THROWN or state == State.ROLL:
 		return
+	if rides_airborne():
+		return   # deck passengers cannot scramble around at 12 m
 	if is_panic_immune():
 		return
 	panic_source = source_pos

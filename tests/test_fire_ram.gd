@@ -188,7 +188,7 @@ func test_flame_rectangle_hits_and_misses() -> void:
 	while not near_front.is_burning() and ticks < MAX_TICKS:
 		_tick_world(w)
 		ticks += 1
-	check(near_front.is_burning(), "enemy at 2.2 m in front burns (no minimum range)")
+	check(near_front.is_burning(), "enemy at 2.2 m in front burns")
 	check(friend.is_burning(), "own unit in the cone burns too (friendly fire)")
 	check(not behind.is_burning(), "the unit BEHIND the ram never burns")
 	check(near_front.health == near_front.max_health
@@ -252,6 +252,22 @@ func test_flames_ignite_trees() -> void:
 		_tick_world(w)
 		ticks += 1
 	check(tree.is_burning(), "a tree in the flame cone catches fire")
+	_free_world(w)
+
+
+func test_minimum_range_holds_fire_point_blank() -> void:
+	var w: Dictionary = _make_world()
+	var ram: FireRam = _armed_ram(w)
+	# An enemy INSIDE the 1 m minimum range stands behind the nozzle — the ram
+	# holds its fire against it instead of wasting bursts.
+	var hugger: Unit = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, ram.position + Vector3(0, 0, 0.5))
+	ram.order_attack(hugger)
+	for i in range(40):
+		_tick_world(w)
+	check(not hugger.is_burning(),
+		"a unit inside the 1 m minimum range is never burnt")
+	check(ram._flame_time <= 0.0, "no burst was started against it")
 	_free_world(w)
 
 
