@@ -667,6 +667,14 @@ func _tick_move(delta: float) -> void:
 		_on_path_finished()
 
 
+## Distance at which a waypoint counts as reached. Ground units need pinpoint
+## arrival; the airship overrides this to ~its separation radius so a ship
+## whose target sits inside another ship's collision bubble still counts as
+## arrived (and goes IDLE) instead of circling forever against it.
+func arrive_eps() -> float:
+	return ARRIVE_EPS
+
+
 ## Walks one step along the current path (also used by Brave sub-states that
 ## are not State.MOVE). Returns true when the path is exhausted. Uphill slopes
 ## slow the step down; very steep DOWNHILL stretches can knock the unit into a
@@ -689,7 +697,7 @@ func _advance_path(delta: float) -> bool:
 	position.x = next.x
 	position.z = next.y
 	_snap_to_ground()
-	if next.distance_to(flat_target) <= ARRIVE_EPS:
+	if next.distance_to(flat_target) <= arrive_eps():
 		_path_index += 1
 	return _path_index >= _path.size()
 

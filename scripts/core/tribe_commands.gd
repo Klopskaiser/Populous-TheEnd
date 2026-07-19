@@ -112,10 +112,17 @@ func order_move(units: Array[Unit], target: Vector3, queue_up: bool = false,
 	var group_scale: float = GROUP_SPACING / FORMATION_SPACING
 	for g in range(0, alive.size(), GROUP_SIZE):
 		var group_index: int = g / GROUP_SIZE
-		var group_target: Vector3 = target + formation_offset(group_index) * group_scale
+		# Flying vehicles (airships) get a much wider formation so each ship's
+		# target lies OUTSIDE its neighbour's collision bubble — the tight
+		# ground offsets would sit inside it and make the second ship circle.
+		var fscale: float = Balance.AIRSHIP_FORMATION_SCALE if alive[g].flies else 1.0
+		var group_target: Vector3 = target \
+			+ formation_offset(group_index) * group_scale * fscale
 		var batch: Array[Unit] = []
 		for m in range(g, mini(g + GROUP_SIZE, alive.size())):
-			alive[m].order_move(group_target + MEMBER_OFFSETS[m - g], queue_up, aggressive)
+			var moff: float = Balance.AIRSHIP_FORMATION_SCALE if alive[m].flies else 1.0
+			alive[m].order_move(group_target + MEMBER_OFFSETS[m - g] * moff,
+				queue_up, aggressive)
 			batch.append(alive[m])
 		# The formation 6-pack IS the idle group: register it right away so
 		# the walkers already count as members (slots reserved, and the idle

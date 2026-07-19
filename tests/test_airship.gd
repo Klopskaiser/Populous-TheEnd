@@ -676,6 +676,70 @@ func test_airship_building_priority_prefers_manned_tower() -> void:
 	_free_world(w)
 
 
+# --- Pathfinding: two ships ordered to one point both settle (no circling) -----
+
+## Arrival tolerance: an airship arrives when within ~its separation radius of
+## the target; ground units keep the pinpoint tolerance.
+func test_arrive_eps_airship_vs_ground() -> void:
+	var ship: Airship = Airship.new()
+	var brave: Brave = Brave.new()
+	check(brave.arrive_eps() == Unit.ARRIVE_EPS, "ground units arrive pinpoint")
+	check(ship.arrive_eps() >= ship.vehicle_separation - 0.001,
+		"an airship arrives within ~one separation radius of the target")
+	check(ship.arrive_eps() > brave.arrive_eps(), "the airship tolerance is wider")
+	ship.free()
+	brave.free()
+
+
+## Two airships right-clicked to the SAME point both reach IDLE (no endless
+## circling) and settle apart, near the target.
+func test_two_airships_move_to_one_point_both_settle() -> void:
+	var w: Dictionary = _make_world()
+	var a: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(56, 60)))
+	var b: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(58, 62)))
+	_board(w, a, BRAVE_SCENE)
+	_board(w, b, BRAVE_SCENE)
+	var target: Vector3 = w.nav.cell_to_world(Vector2i(72, 60))
+	w.commands.order_move([a, b] as Array[Unit], target)
+	var ticks: int = 0
+	while (a.state == Unit.State.MOVE or b.state == Unit.State.MOVE) and ticks < MAX_TICKS:
+		_tick_world(w)
+		ticks += 1
+	check(a.state == Unit.State.IDLE and b.state == Unit.State.IDLE,
+		"both airships stop (neither circles forever) — %d ticks" % ticks)
+	var gap: float = Vector2(a.position.x - b.position.x,
+		a.position.z - b.position.z).length()
+	check(gap > a.vehicle_separation * 0.8,
+		"they settle apart, not stacked (gap=%.2f)" % gap)
+	var flat_t: Vector2 = Vector2(target.x, target.z)
+	check(Vector2(a.position.x, a.position.z).distance_to(flat_t) < 6.0
+		and Vector2(b.position.x, b.position.z).distance_to(flat_t) < 6.0,
+		"both end up near the ordered point")
+	_free_world(w)
+
+
+## A single airship sent onto a spot another ship already occupies settles at
+## the bubble edge (IDLE) instead of circling; the parked ship holds/accepts it.
+func test_airship_ordered_onto_occupied_spot_settles() -> void:
+	var w: Dictionary = _make_world()
+	var parked: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(70, 60)))
+	var mover: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(56, 60)))
+	_board(w, parked, BRAVE_SCENE)
+	_board(w, mover, BRAVE_SCENE)
+	mover.order_move(parked.position)
+	var ticks: int = 0
+	while mover.state == Unit.State.MOVE and ticks < MAX_TICKS:
+		_tick_world(w)
+		ticks += 1
+	check(mover.state == Unit.State.IDLE,
+		"the mover reaches the occupied point and stops (no circling) — %d ticks" % ticks)
+	var gap: float = Vector2(parked.position.x - mover.position.x,
+		parked.position.z - mover.position.z).length()
+	check(gap > parked.vehicle_separation * 0.8,
+		"it settles at the bubble edge, not on top (gap=%.2f)" % gap)
+	_free_world(w)
+
+
 func test_group_order_fills_free_slots_only() -> void:
 	var w: Dictionary = _make_world()
 	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))

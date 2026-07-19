@@ -229,6 +229,16 @@ func _slope_ahead(_move_dir: Vector2) -> float:
 	return 0.0
 
 
+## A ship counts as arrived once within ~one separation radius of its target,
+## so a second ship ordered to (near) the same point stops and goes IDLE at the
+## edge of the first ship's collision bubble instead of endlessly circling to
+## reach the unreachable exact spot (the separation push exceeds the fly speed
+## inside the bubble). Parked (IDLE) ships never re-path, so they accept being
+## nudged and do not reclaim their old spot.
+func arrive_eps() -> float:
+	return maxf(super.arrive_eps(), vehicle_separation)
+
+
 ## Straight flight: bypasses the async path queue entirely (the PathWorker
 ## computes ground-grid paths) and never fails — only map bounds clamp.
 func _start_path_to(target: Vector3) -> void:

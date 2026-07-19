@@ -5323,3 +5323,30 @@ Vorrang, `_nearest_enemy_building_by_wall()` wählt entsprechend.
 `test_airship_building_priority_prefers_manned_tower`, plus Scoring). Suite
 **2095/2095 grün**, Ladecheck ok. Optische Prüfung (Stack-Verhalten,
 Ziel-Fokus) durch Nutzer ausstehend.
+
+## Spieltest-Fix 7: Luftschiff-Wegfindung — zweites Schiff kreiste am geteilten Ziel (2026-07-19, Nutzerreport)
+
+Zwei per Rechtsklick zum selben Punkt geschickte Luftschiffe: eins kam an, das
+andere kreiste endlos. Ursache: die engen Formations-Ziele (0,55 m,
+`MEMBER_OFFSETS`) lagen tief in der 2,0-m-Separationsblase, und der schnelle
+Luftschiff-Push (bis 6,4 m/s) übertraf die Fluggeschwindigkeit (5,0 m/s) — das
+zweite Schiff erreichte die Ankunftstoleranz `ARRIVE_EPS = 0,05 m` nie und blieb
+dauerhaft in `State.MOVE`.
+
+Fix (beide vom Nutzer vorgeschlagenen Wege kombiniert):
+- **Ankunftstoleranz** (`unit.gd`, `airship.gd`): neuer Virtual `arrive_eps()`
+  (Default `ARRIVE_EPS`), von `_advance_path` genutzt; `Airship` überschreibt auf
+  `maxf(ARRIVE_EPS, vehicle_separation)` (~2,0 m). Ein ankommendes Schiff gilt am
+  Rand der Nachbarblase als angekommen → IDLE, hört auf zu pathen. Geparkte
+  (IDLE) Schiffe re-pathen nicht → sie akzeptieren das Wegdrücken und nehmen den
+  alten Punkt nicht neu ein (Nutzer-Option a).
+- **Gespreizte Formations-Ziele** (`balance.gd`, `tribe_commands.gd`): neue
+  Konstante `AIRSHIP_FORMATION_SCALE = 5.0`; `order_move` skaliert Member-/
+  Gruppen-Offsets für fliegende Einheiten (~2,75 m > Separationsblase), sodass
+  jedes Schiff einen eigenen, leicht erreichbaren Zielpunkt bekommt (Option b).
+  Bodeneinheiten (`flies == false`) unverändert.
+
+**Tests:** +3 (`test_arrive_eps_airship_vs_ground`,
+`test_two_airships_move_to_one_point_both_settle`,
+`test_airship_ordered_onto_occupied_spot_settles`). Suite **2103/2103 grün**,
+Ladecheck ok. Funktionale Prüfung (kein Kreisen im Spiel) durch Nutzer ausstehend.
