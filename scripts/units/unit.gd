@@ -510,11 +510,18 @@ func can_crew_siege() -> bool:
 	return unit_kind() != &"shaman" and unit_kind() != &"siege"
 
 
+## True while boarded on ANY vehicle (ground siege/ram side slots or airship
+## deck): the member is glued to its slot by _tick_crew and must be left alone by
+## soft separation — otherwise it gets shoved off-slot and its Y snaps to terrain
+## for a frame (flicker/vanish on slopes, plus an idle<->walk toggle, user bug).
+func is_crew_seated() -> bool:
+	return siege_boarded and siege_engine != null and is_instance_valid(siege_engine)
+
+
 ## True while riding a deck vehicle (airship) at altitude: boarded on a
 ## vehicle whose crew rides ON it instead of walking beside it.
 func rides_airborne() -> bool:
-	return siege_boarded and siege_engine != null \
-		and is_instance_valid(siege_engine) and siege_engine.crew_rides_on_deck()
+	return is_crew_seated() and siege_engine.crew_rides_on_deck()
 
 
 ## In the air right now: thrown/whirled through the sky or riding an airship
@@ -697,7 +704,12 @@ func _advance_path(delta: float) -> bool:
 	if to_target.length_squared() > 0.000001:
 		facing = Vector3(to_target.x, 0.0, to_target.y).normalized()
 	var slope: float = _slope_ahead(to_target)
-	if slope < -STEEP_ROLL_SLOPE and randf() < STEEP_ROLL_CHANCE_PER_SEC * delta:
+	# Crew walking over to board a vehicle must not stumble-roll on the way — the
+	# tumble looks like an animation glitch beside an idle siege engine.
+	var boarding: bool = siege_engine != null and is_instance_valid(siege_engine) \
+		and not siege_boarded
+	if not boarding and slope < -STEEP_ROLL_SLOPE \
+			and randf() < STEEP_ROLL_CHANCE_PER_SEC * delta:
 		# Harmless downhill stumble: orders survive (resumed after the tumble).
 		start_roll(Vector3(to_target.x, 0.0, to_target.y), MINI_ROLL_DURATION, 0.0, true)
 		return false

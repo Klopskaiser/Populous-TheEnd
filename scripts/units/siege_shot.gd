@@ -93,29 +93,37 @@ func tick(delta: float) -> void:
 		_impact()
 
 
-## Enemy airship hull passing close to the stone: the shot bursts in the air
-## — one hull hit plus a shockwave with DOUBLE the ground area centred on the
-## hull (deck crew and units under the ship take it via the flat radius); no
-## lava, no building damage. Returns true when it intercepted.
+## Enemy airship hull(s) passing close to the stone: the shot bursts in the air
+## — EVERY enemy hull the stone brushes past (XZ + height window) takes a hull
+## hit at once, so a tight formation can be cleared with a single shot. Plus a
+## shockwave with DOUBLE the ground area centred on the burst (deck crews and
+## units under the ships take it via the flat radius); no lava, no building
+## damage. Returns true when it intercepted at least one hull.
 func _check_air_intercept() -> bool:
 	if unit_manager == null:
 		return false
+	var hulls: Array = []
 	for u in unit_manager.get_units_in_radius(position, AIR_INTERCEPT_RADIUS):
 		if not (u is Airship) or u.state == Unit.State.DEAD or u.tribe_id == tribe_id:
 			continue
 		if absf(u.position.y - position.y) > AIR_INTERCEPT_HEIGHT:
 			continue
-		done = true
-		_clear_trail()
-		if is_inside_tree():
-			var audio: Node = get_node_or_null("/root/AudioManager")
-			if audio != null:
-				audio.play_sfx(&"siege_impact", u.position)
-		var center: Vector3 = u.position
-		(u as Airship).register_hull_hit(position)
-		_shockwave(center, SHOCK_RADIUS * sqrt(AIR_SPLASH_FACTOR))
-		return true
-	return false
+		hulls.append(u)
+	if hulls.is_empty():
+		return false
+	done = true
+	_clear_trail()
+	# Burst centred on the first hull brushed — the ships are within the small
+	# intercept radius of the stone, so one shockwave covers the whole cluster.
+	var center: Vector3 = (hulls[0] as Airship).position
+	if is_inside_tree():
+		var audio: Node = get_node_or_null("/root/AudioManager")
+		if audio != null:
+			audio.play_sfx(&"siege_impact", center)
+	for h in hulls:
+		(h as Airship).register_hull_hit(position)
+	_shockwave(center, SHOCK_RADIUS * sqrt(AIR_SPLASH_FACTOR))
+	return true
 
 
 func _clear_trail() -> void:

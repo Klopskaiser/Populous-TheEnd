@@ -253,11 +253,11 @@ func _apply_separation(delta: float) -> void:
 		if unit.state == Unit.State.DEAD or unit.state == Unit.State.THROWN \
 				or unit.state == Unit.State.ROLL:
 			continue
-		# Airship deck passengers are pinned to their slots at flight altitude;
-		# the flat separation would shove them and SNAP their Y onto the terrain
-		# for a frame (they flicker/vanish over ground units, user bug). They
-		# neither separate nor push others.
-		if unit.rides_airborne():
+		# Seated crew (airship deck AND ground siege/ram side slots) are pinned to
+		# their slots by _tick_crew; the flat separation would shove them off-slot
+		# and SNAP their Y onto the terrain for a frame (they flicker/vanish on
+		# slopes, user bug). They neither separate nor push others.
+		if unit.is_crew_seated():
 			continue
 		# Vehicles (siege engines) are push_immune against pedestrians but keep
 		# a big spacing among EACH OTHER (their crews clip otherwise, phase
@@ -279,7 +279,7 @@ func _apply_separation(delta: float) -> void:
 					if other == unit or other.state == Unit.State.DEAD \
 							or other.state == Unit.State.THROWN \
 							or other.state == Unit.State.ROLL \
-							or other.rides_airborne():
+							or other.is_crew_seated():
 						continue
 					if veh_r > 0.0 and (other.vehicle_separation <= 0.0
 							or other.flies != unit.flies):
