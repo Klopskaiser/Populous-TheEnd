@@ -39,6 +39,8 @@ static func range_for_kind(kind: StringName) -> float:
 			return Preacher.CONVERT_RANGE
 		&"siege":
 			return SiegeEngine.FIRE_RANGE
+		&"fireram":
+			return FireRam.FIRE_RANGE
 	return 0.0
 
 
@@ -94,6 +96,6 @@ static func _color_for(kind: StringName) -> Color:
 			return C_FIREWARRIOR
 		&"preacher":
 			return C_PREACHER
-		&"siege":
+		&"siege", &"fireram":
 			return C_SIEGE
 	return Color.WHITE

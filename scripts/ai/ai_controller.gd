@@ -14,6 +14,8 @@ const FIREWARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/fire
 const TEMPLE_SCENE: PackedScene = preload("res://scenes/buildings/temple.tscn")
 const FORESTER_SCENE: PackedScene = preload("res://scenes/buildings/forester.tscn")
 const WORKSHOP_SCENE: PackedScene = preload("res://scenes/buildings/workshop.tscn")
+const FIRERAM_WORKSHOP_SCENE: PackedScene = preload("res://scenes/buildings/fire_ram_workshop.tscn")
+const AIRSHIP_WHARF_SCENE: PackedScene = preload("res://scenes/buildings/airship_wharf.tscn")
 const WATCHTOWER_SCENE: PackedScene = preload("res://scenes/buildings/watchtower.tscn")
 
 const TICK_INTERVAL: float = 1.0
@@ -195,6 +197,7 @@ func tick_ai() -> void:
 	_staff_foresters()
 	_staff_workshops()
 	_man_watchtowers()
+	_man_airships()
 	_cast_spells()
 	# An attack on the own village takes priority over everything else.
 	var threat: Dictionary = _detect_threat()
@@ -268,6 +271,8 @@ func _next_building_scene(_snap: Dictionary) -> PackedScene:
 	var huts: int = 0
 	var foresters: int = 0
 	var workshops: int = 0
+	var ram_shops: int = 0
+	var wharfs: int = 0
 	var towers: int = 0
 	var camps: Dictionary = {&"warrior_camp": 0, &"firewarrior_camp": 0, &"temple": 0}
 	for building in tribe.buildings:
@@ -275,6 +280,10 @@ func _next_building_scene(_snap: Dictionary) -> PackedScene:
 			continue
 		if building is Forester:
 			foresters += 1
+		elif building is FireRamWorkshop:
+			ram_shops += 1   # subclasses BEFORE the Workshop check
+		elif building is AirshipWharf:
+			wharfs += 1
 		elif building is Workshop:
 			workshops += 1
 		elif building is Watchtower:
@@ -304,12 +313,17 @@ func _next_building_scene(_snap: Dictionary) -> PackedScene:
 	if camps[&"temple"] < 1:
 		return TEMPLE_SCENE
 	# One workshop right after the temple (7f): catapults are the AI's siege
-	# arm alongside the spells.
+	# arm alongside the spells. The fire-ram workshop follows directly (cheap
+	# pressure vehicle), the expensive wharf after the defensive towers.
 	if workshops < 1:
 		return WORKSHOP_SCENE
+	if ram_shops < 1:
+		return FIRERAM_WORKSHOP_SCENE
 	# Defensive fire posts after the base is complete (7h).
 	if towers < TARGET_WATCHTOWERS:
 		return WATCHTOWER_SCENE
+	if wharfs < 1:
+		return AIRSHIP_WHARF_SCENE
 	# Endless scaling: housing pressure -> hut; otherwise extra camps.
 	if tribe.population() >= int(float(tribe.housing_capacity()) * HOUSING_PRESSURE):
 		return HUT_SCENE
@@ -814,11 +828,16 @@ func _army_units() -> Array[Unit]:
 			continue
 		match unit.unit_kind():
 			&"warrior", &"firewarrior", &"preacher":
+				if unit.state == Unit.State.CREW:
+					continue   # vehicle/deck crew rides along — never pull it off
 				army.append(unit)
-			&"siege":
-				# Manned catapults march with the wave (7f); their building-
-				# first auto-priority does the sieging on arrival.
-				if (unit as SiegeEngine).boarded_count() >= SiegeEngine.MIN_MOVE_CREW:
+			&"siege", &"fireram", &"airship":
+				# Manned vehicles march/fly with the wave (7f): the catapult's
+				# building-first auto-priority does the sieging, the fire ram
+				# burns what it reaches, the airship hovers at the wave target
+				# and its deck crew fires from above.
+				if (unit as CrewedVehicle).boarded_count() \
+						>= (unit as CrewedVehicle).min_move_crew:
 					army.append(unit)
 	return army
 
@@ -1001,9 +1020,10 @@ func _staff_foresters() -> void:
 			i += 1
 
 
-## Keeps up to WORKSHOP_WORKERS idle braves working in each usable workshop
-## (7f; never below the minimum economy crew). The workshop refuses braves
-## once its crew is full. Fresh catapults are auto-manned by the workshop.
+## Keeps idle braves working in each usable production shop up to its own
+## slot count (7f; never below the minimum economy crew) — the Workshop check
+## covers the fire-ram workshop and the airship wharf (subclasses). Fresh
+## vehicles are auto-manned by their shop.
 func _staff_workshops() -> void:
 	var workshops: Array[Workshop] = []
 	for building in tribe.buildings:
@@ -1020,9 +1040,40 @@ func _staff_workshops() -> void:
 	var idle: Array[Unit] = _idle_braves()
 	var i: int = 0
 	for ws in workshops:
-		while i < idle.size() and ws.occupants.size() < WORKSHOP_WORKERS \
+		while i < idle.size() and ws.occupants.size() < ws.worker_slots() \
 				and ws.has_free_slot():
 			commands.order_workshop([idle[i]] as Array[Unit], ws)
+			i += 1
+
+
+## Boards idle firewarriors onto own under-crewed airships (first AI stage:
+## the ship flies with the attack wave and its deck crew fires on arrival —
+## no unload micro). Uses the same mobile-reserve rule as the towers so the
+## ground force is not starved.
+func _man_airships() -> void:
+	var ships: Array = []
+	for unit in tribe.units:
+		if is_instance_valid(unit) and unit is Airship \
+				and unit.state != Unit.State.DEAD \
+				and unit.crew_count() < (unit as Airship).max_crew:
+			ships.append(unit)
+	if ships.is_empty():
+		return
+	var idle_fw: Array[Unit] = []
+	var total_fw: int = 0
+	for unit in tribe.units:
+		if not is_instance_valid(unit) or unit.state == Unit.State.DEAD \
+				or unit.unit_kind() != &"firewarrior":
+			continue
+		total_fw += 1
+		if unit.state == Unit.State.IDLE:
+			idle_fw.append(unit)
+	# Keep a mobile reserve on the ground (same rule as the watchtowers).
+	var budget: int = mini(idle_fw.size(), total_fw - WATCHTOWER_MIN_MOBILE_FW)
+	var i: int = 0
+	for ship in ships:
+		while i < budget and ship.crew_count() < (ship as Airship).max_crew:
+			commands.order_crew([idle_fw[i]] as Array[Unit], ship)
 			i += 1
 
 

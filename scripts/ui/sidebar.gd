@@ -37,6 +37,8 @@ const FOLLOWER_ROWS: Array[Dictionary] = [
 	{"kind": &"firewarrior", "name": "Feuerkrieger", "active": true},
 	{"kind": &"preacher", "name": "Prediger", "active": true},
 	{"kind": &"siege", "name": "Belagerungswaffe", "active": true},
+	{"kind": &"fireram", "name": "Feuerrammen", "active": true},
+	{"kind": &"airship", "name": "Luftschiffe", "active": true},
 	{"kind": &"shaman", "name": "Schamanin", "active": true},
 ]
 
@@ -46,6 +48,8 @@ const FIREWARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/fire
 const TEMPLE_SCENE: PackedScene = preload("res://scenes/buildings/temple.tscn")
 const FORESTER_SCENE: PackedScene = preload("res://scenes/buildings/forester.tscn")
 const WORKSHOP_SCENE: PackedScene = preload("res://scenes/buildings/workshop.tscn")
+const FIRERAM_WORKSHOP_SCENE: PackedScene = preload("res://scenes/buildings/fire_ram_workshop.tscn")
+const AIRSHIP_WHARF_SCENE: PackedScene = preload("res://scenes/buildings/airship_wharf.tscn")
 const WATCHTOWER_SCENE: PackedScene = preload("res://scenes/buildings/watchtower.tscn")
 
 # --- Injected references (setup) --------------------------------------------
@@ -77,8 +81,9 @@ var _tab_content: Control = null
 var _spell_ui: Dictionary = {}       # id -> {"button": Button, "pips": Array[ColorRect]}
 var _follower_labels: Dictionary = {}  # kind -> Label
 var _idle_button: Button = null
-var _max_catapults_label: Label = null   # per-tribe cap stepper (followers tab)
-var _owned_catapults_label: Label = null   # current owned-catapult count below it
+## Per-tribe vehicle-cap steppers (followers tab): one entry per vehicle type
+## with {label, title, get_cap, set_cap, get_owned, limit}.
+var _cap_steppers: Array[Dictionary] = []
 var _pause_menu: Control = null
 ## Crew tab widgets: occupants of the selected mannable object as icon buttons
 ## (click ejects) plus a production pause toggle.
@@ -86,6 +91,7 @@ var _crew_title: Label = null
 var _crew_info: Label = null
 var _crew_slot_buttons: Array[Button] = []
 var _crew_pause_button: Button = null
+var _crew_unload_button: Button = null   # airship "Absetzen an…" (unload arm)
 ## Edge detection for the crew tab's auto-switch: last polled target, the tab
 ## to return to on deselection, and the currently active tab index.
 var _crew_target_obj: Object = null
@@ -162,6 +168,12 @@ static func default_build_entries() -> Array[Dictionary]:
 			"icon": &"forester", "wood_cost": Forester.WOOD_COST, "enabled": true},
 		{"id": &"workshop", "name": "Katapultwerkstatt", "scene": WORKSHOP_SCENE,
 			"icon": &"workshop", "wood_cost": Workshop.WOOD_COST, "enabled": true},
+		{"id": &"fireram_workshop", "name": "Feuerrammenwerkstatt",
+			"scene": FIRERAM_WORKSHOP_SCENE, "icon": &"fireram_workshop",
+			"wood_cost": FireRamWorkshop.RAM_WOOD_COST, "enabled": true},
+		{"id": &"airship_wharf", "name": "Luftschiffwerft", "scene": AIRSHIP_WHARF_SCENE,
+			"icon": &"airship_wharf", "wood_cost": AirshipWharf.WHARF_WOOD_COST,
+			"enabled": true},
 		{"id": &"watchtower", "name": "Wachturm", "scene": WATCHTOWER_SCENE,
 			"icon": &"watchtower", "wood_cost": Watchtower.WOOD_COST, "enabled": true},
 	]
@@ -601,60 +613,87 @@ func _build_followers_tab() -> Control:
 	_idle_button.pressed.connect(_on_select_idle)
 	vb.add_child(_idle_button)
 
-	# Per-tribe catapult cap (independent of any selected/existing workshop):
-	# every workshop of the tribe reads Tribe.max_catapults. Two lines so the
-	# stepper buttons never get squeezed out by a long label: the stepper row
-	# on top, the current count below it.
-	var row: HBoxContainer = HBoxContainer.new()
-	row.add_theme_constant_override("separation", 4)
-	vb.add_child(row)
-	var minus: Button = Button.new()
-	minus.text = "−"
-	UiTheme.style_button(minus)
-	minus.pressed.connect(func() -> void: _on_max_catapults_delta(-1))
-	row.add_child(minus)
-	_max_catapults_label = Label.new()
-	_max_catapults_label.add_theme_color_override("font_color", UiTheme.TEXT)
-	_max_catapults_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_max_catapults_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_max_catapults_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	_max_catapults_label.tooltip_text = \
-		"Katapult-Limit des Stammes: alle Werkstätten stoppen die Fertigung," \
-		+ " sobald so viele eigene Katapulte existieren"
-	row.add_child(_max_catapults_label)
-	var plus: Button = Button.new()
-	plus.text = "+"
-	UiTheme.style_button(plus)
-	plus.pressed.connect(func() -> void: _on_max_catapults_delta(1))
-	row.add_child(plus)
-
-	_owned_catapults_label = Label.new()
-	_owned_catapults_label.add_theme_color_override("font_color", UiTheme.TEXT_DIM)
-	_owned_catapults_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_owned_catapults_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	vb.add_child(_owned_catapults_label)
+	# Per-tribe vehicle caps (independent of any selected building): every
+	# production shop of the tribe reads its Tribe.max_* value. Label shows
+	# "Max. <Typ>: cap (owned)" in one line — three steppers must fit the tab.
+	_add_cap_stepper(vb, "Katapulte",
+		"Katapult-Limit des Stammes: alle Katapultwerkstätten stoppen die"
+		+ " Fertigung, sobald so viele eigene Katapulte existieren",
+		Tribe.MAX_CATAPULTS_LIMIT,
+		func(t: Tribe) -> int: return t.max_catapults,
+		func(t: Tribe, v: int) -> void: t.max_catapults = v,
+		func(t: Tribe) -> int: return t.owned_catapult_count())
+	_add_cap_stepper(vb, "Feuerrammen",
+		"Feuerrammen-Limit des Stammes: alle Feuerrammenwerkstätten stoppen"
+		+ " die Fertigung, sobald so viele eigene Feuerrammen existieren",
+		Tribe.MAX_FIRE_RAMS_LIMIT,
+		func(t: Tribe) -> int: return t.max_fire_rams,
+		func(t: Tribe, v: int) -> void: t.max_fire_rams = v,
+		func(t: Tribe) -> int: return t.owned_fire_ram_count())
+	_add_cap_stepper(vb, "Luftschiffe",
+		"Luftschiff-Limit des Stammes: alle Luftschiffwerften stoppen die"
+		+ " Fertigung, sobald so viele eigene Luftschiffe existieren",
+		Tribe.MAX_AIRSHIPS_LIMIT,
+		func(t: Tribe) -> int: return t.max_airships,
+		func(t: Tribe, v: int) -> void: t.max_airships = v,
+		func(t: Tribe) -> int: return t.owned_airship_count())
 
 	scroll.add_child(vb)
 	return scroll
 
 
-func _on_max_catapults_delta(delta: int) -> void:
+## Builds one vehicle-cap stepper row (−  label  +) and registers it for the
+## periodic refresh. The label carries cap AND owned count in one line so the
+## followers tab holds three steppers without overflowing.
+func _add_cap_stepper(vb: VBoxContainer, title: String, tooltip: String,
+		limit: int, get_cap: Callable, set_cap: Callable, get_owned: Callable) -> void:
+	var row: HBoxContainer = HBoxContainer.new()
+	row.add_theme_constant_override("separation", 4)
+	vb.add_child(row)
+	var entry: Dictionary = {"title": title, "limit": limit, "get_cap": get_cap,
+		"set_cap": set_cap, "get_owned": get_owned}
+	var minus: Button = Button.new()
+	minus.text = "−"
+	UiTheme.style_button(minus)
+	minus.pressed.connect(func() -> void: _on_cap_delta(entry, -1))
+	row.add_child(minus)
+	var label: Label = Label.new()
+	label.add_theme_color_override("font_color", UiTheme.TEXT)
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	label.tooltip_text = tooltip
+	row.add_child(label)
+	var plus: Button = Button.new()
+	plus.text = "+"
+	UiTheme.style_button(plus)
+	plus.pressed.connect(func() -> void: _on_cap_delta(entry, 1))
+	row.add_child(plus)
+	entry["label"] = label
+	_cap_steppers.append(entry)
+
+
+func _on_cap_delta(entry: Dictionary, delta: int) -> void:
 	var player: Tribe = _player_tribe()
 	if player == null:
 		return
-	player.max_catapults = clampi(player.max_catapults + delta, 0, Tribe.MAX_CATAPULTS_LIMIT)
-	_refresh_max_catapults_label()
+	var cap: int = int((entry["get_cap"] as Callable).call(player))
+	(entry["set_cap"] as Callable).call(player,
+		clampi(cap + delta, 0, int(entry["limit"])))
+	_refresh_cap_steppers()
 
 
-func _refresh_max_catapults_label() -> void:
-	if _max_catapults_label == null:
-		return
+func _refresh_cap_steppers() -> void:
 	var player: Tribe = _player_tribe()
 	if player == null:
 		return
-	_max_catapults_label.text = "Max. Katapulte: %d" % player.max_catapults
-	if _owned_catapults_label != null:
-		_owned_catapults_label.text = "aktuell: %d" % player.owned_catapult_count()
+	for entry in _cap_steppers:
+		var label: Label = entry["label"]
+		if label == null or not is_instance_valid(label):
+			continue
+		label.text = "Max. %s: %d (%d)" % [entry["title"],
+			int((entry["get_cap"] as Callable).call(player)),
+			int((entry["get_owned"] as Callable).call(player))]
 
 
 # --- Crew tab (occupancy of the selected mannable object) ---------------------
@@ -712,8 +751,25 @@ func _build_crew_tab() -> Control:
 	_crew_pause_button.pressed.connect(_on_crew_pause)
 	vb.add_child(_crew_pause_button)
 
+	# Airship only: arms the unload mode — the next right-click on terrain
+	# sends the ship there and drops ALL passengers (SelectionManager).
+	_crew_unload_button = Button.new()
+	_crew_unload_button.text = "Absetzen an…"
+	_crew_unload_button.tooltip_text = "Rechtsklick auf einen Zielpunkt:" \
+		+ " das Luftschiff fliegt hin und setzt die gesamte Besatzung ab"
+	_crew_unload_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	UiTheme.style_button(_crew_unload_button)
+	_crew_unload_button.pressed.connect(_on_crew_unload)
+	vb.add_child(_crew_unload_button)
+
 	scroll.add_child(vb)
 	return scroll
+
+
+func _on_crew_unload() -> void:
+	var target: Object = _selected_crew_target()
+	if target is Airship and _selection != null:
+		_selection.arm_unload(target as Airship)
 
 
 ## The single selected mannable object (own building or own catapult), or null.
@@ -744,11 +800,28 @@ func _crew_view(target: Object) -> Dictionary:
 		var f: Forester = target as Forester
 		return {"members": f.occupants, "cap": Forester.WORKER_SLOTS,
 			"info": "Arbeiter: %d/%d" % [f.occupants.size(), Forester.WORKER_SLOTS]}
+	# Subclasses BEFORE the Workshop branch (`is Workshop` matches them too).
+	if target is FireRamWorkshop:
+		var rws: FireRamWorkshop = target as FireRamWorkshop
+		return {"members": rws.occupants, "cap": rws.worker_slots(),
+			"info": "Arbeiter: %d/%d   Vorrat: %d/%d   Feuerrammen: %d/%d" % [
+				rws.occupants.size(), rws.worker_slots(),
+				rws.stock_wood(), Workshop.STOCK_TARGET,
+				rws.tribe.owned_fire_ram_count() if rws.tribe != null else 0,
+				rws.tribe.max_fire_rams if rws.tribe != null else 0]}
+	if target is AirshipWharf:
+		var aw: AirshipWharf = target as AirshipWharf
+		return {"members": aw.occupants, "cap": aw.worker_slots(),
+			"info": "Arbeiter: %d/%d   Vorrat: %d/%d   Luftschiffe: %d/%d" % [
+				aw.occupants.size(), aw.worker_slots(),
+				aw.stock_wood(), Workshop.STOCK_TARGET,
+				aw.tribe.owned_airship_count() if aw.tribe != null else 0,
+				aw.tribe.max_airships if aw.tribe != null else 0]}
 	if target is Workshop:
 		var ws: Workshop = target as Workshop
-		return {"members": ws.occupants, "cap": Workshop.WORKER_SLOTS,
+		return {"members": ws.occupants, "cap": ws.worker_slots(),
 			"info": "Arbeiter: %d/%d   Vorrat: %d/%d   Katapulte: %d/%d" % [
-				ws.occupants.size(), Workshop.WORKER_SLOTS,
+				ws.occupants.size(), ws.worker_slots(),
 				ws.stock_wood(), Workshop.STOCK_TARGET,
 				ws.tribe.owned_catapult_count() if ws.tribe != null else 0,
 				ws.tribe.max_catapults if ws.tribe != null else 0]}
@@ -756,6 +829,11 @@ func _crew_view(target: Object) -> Dictionary:
 		var t: Watchtower = target as Watchtower
 		return {"members": t.crew, "cap": Watchtower.CREW_CAPACITY,
 			"info": "Besatzung: %d/%d" % [t.crew.size(), Watchtower.CREW_CAPACITY]}
+	if target is Airship:
+		var a: Airship = target as Airship
+		return {"members": a.crew, "cap": a.max_crew,
+			"info": "Passagiere: %d/%d  (Kampf nur im Stand, +3 Reichweite)" % [
+				a.boarded_count(), a.max_crew]}
 	if target is CrewedVehicle:
 		var e: CrewedVehicle = target as CrewedVehicle
 		return {"members": e.crew, "cap": e.max_crew,
@@ -830,6 +908,9 @@ func _refresh_crew_tab() -> void:
 	if _crew_pause_button.visible:
 		_crew_pause_button.text = "Produktion fortsetzen" if target.paused \
 			else "Produktion pausieren"
+	if _crew_unload_button != null:
+		_crew_unload_button.visible = target is Airship \
+			and (target as Airship).boarded_count() > 0
 
 
 ## Slot click: eject that occupant. The hut eject is MANUAL (pins the crew
@@ -846,6 +927,14 @@ func _on_crew_eject(index: int) -> void:
 		(target as Workshop).eject_worker(index)
 	elif target is Watchtower:
 		(target as Watchtower).eject_crew(index)
+	elif target is Airship:
+		# Airship eject: the passenger is DROPPED to the ground below (a plain
+		# leave_crew would strand it standing mid-air).
+		var ship: Airship = target as Airship
+		if index >= 0 and index < ship.crew.size():
+			var passenger = ship.crew[index]
+			if passenger != null and is_instance_valid(passenger):
+				ship.drop_member(passenger)
 	elif target is CrewedVehicle:
 		var engine: CrewedVehicle = target as CrewedVehicle
 		if index >= 0 and index < engine.crew.size():
@@ -1076,7 +1165,7 @@ func _refresh_followers() -> void:
 		var lbl: Label = _follower_labels.get(kind)
 		if lbl != null:
 			lbl.text = "%s: %d" % [row["name"], counts[kind]]
-	_refresh_max_catapults_label()
+	_refresh_cap_steppers()
 
 
 # --- Spells & shaman portrait (phase 6) ----------------------------------------

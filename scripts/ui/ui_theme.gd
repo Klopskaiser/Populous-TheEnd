@@ -106,6 +106,10 @@ static func icon(key: StringName) -> ImageTexture:
 			_draw_seedling(img)
 		&"workshop", &"siege":
 			_draw_catapult(img)
+		&"fireram_workshop", &"fireram":
+			_draw_fire_ram(img)
+		&"airship_wharf", &"airship":
+			_draw_airship(img)
 		&"watchtower":
 			_draw_watchtower(img)
 		&"lightning":
@@ -275,6 +279,31 @@ static func _draw_catapult(img: Image) -> void:
 		img.set_pixel(9 + i, 14 - i, I_LIGHT)
 	_disc(img, 17, 5, 2, I_GOLD)              # basket
 	_disc(img, 20, 3, 1, Color(0.9, 0.35, 0.1))   # stone flying off
+
+
+static func _draw_fire_ram(img: Image) -> void:
+	# Fire ram: base frame with wheels like the catapult, but a straight ram
+	# beam ending in a glowing brazier that spits a flame tongue forward.
+	const C_FIRE: Color = Color(0.95, 0.45, 0.1)
+	const C_FIRE_HOT: Color = Color(1.0, 0.8, 0.25)
+	_rect(img, 3, 15, 12, 3, I_DARK)          # base frame
+	_disc(img, 5, 19, 2, I_GOLD)              # wheels
+	_disc(img, 13, 19, 2, I_GOLD)
+	_rect(img, 6, 11, 10, 2, I_LIGHT)         # ram beam pointing right
+	_disc(img, 17, 12, 2, C_FIRE)             # brazier
+	_disc(img, 20, 12, 1, C_FIRE_HOT)         # flame tongue
+	_disc(img, 22, 11, 1, C_FIRE)
+
+
+static func _draw_airship(img: Image) -> void:
+	# Airship: a wide balloon with a small gondola hanging beneath it.
+	_disc(img, 12, 8, 6, I_LIGHT)             # balloon
+	_rect(img, 5, 7, 15, 3, I_LIGHT)          # stretched middle
+	_rect(img, 9, 15, 7, 3, I_DARK)           # gondola
+	img.set_pixel(9, 13, I_GOLD)              # rigging
+	img.set_pixel(9, 14, I_GOLD)
+	img.set_pixel(15, 13, I_GOLD)
+	img.set_pixel(15, 14, I_GOLD)
 
 
 static func _draw_lightning(img: Image) -> void:

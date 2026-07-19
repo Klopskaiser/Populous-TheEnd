@@ -461,13 +461,23 @@ func test_endless_building_scaling() -> void:
 	# And the workshop (phase 7f): it follows right after the temple.
 	w.building_manager.place(preload("res://scenes/buildings/workshop.tscn"),
 		tribe, Vector2i(64, 50), 0, true)
-	# The workshop is followed by the two defensive watchtowers (phase 7h) —
-	# the full base includes them before the endless scaling kicks in.
+	# The catapult workshop is followed by the fire-ram workshop (cheap
+	# pressure vehicle), then the two defensive watchtowers (phase 7h) and the
+	# expensive airship wharf — the full base includes all of them before the
+	# endless scaling kicks in.
+	check(ai._next_building_scene({}) == AIController.FIRERAM_WORKSHOP_SCENE,
+		"after the workshop the AI builds a fire-ram workshop")
+	w.building_manager.place(preload("res://scenes/buildings/fire_ram_workshop.tscn"),
+		tribe, Vector2i(72, 50), 0, true)
 	check(ai._next_building_scene({}) == AIController.WATCHTOWER_SCENE,
-		"after the workshop the AI builds a watchtower")
+		"after the fire-ram workshop the AI builds a watchtower")
 	for i in range(AIController.TARGET_WATCHTOWERS):
 		w.building_manager.place(preload("res://scenes/buildings/watchtower.tscn"),
 			tribe, Vector2i(40 + 4 * i, 64), 0, true)
+	check(ai._next_building_scene({}) == AIController.AIRSHIP_WHARF_SCENE,
+		"after the towers the AI builds the airship wharf")
+	w.building_manager.place(preload("res://scenes/buildings/airship_wharf.tscn"),
+		tribe, Vector2i(72, 60), 0, true)
 	check(ai._next_building_scene({}) == null,
 		"full base without housing pressure: nothing to build")
 

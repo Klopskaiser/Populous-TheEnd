@@ -57,6 +57,11 @@ var _hovered_building: Building = null
 ## Static (like drag_active) so the sidebar's Esc guard can check it.
 static var attack_arm_active: bool = false
 
+## Airship-unload armed (crew tab "Absetzen an…"): the NEXT right-click on
+## terrain sends the airship there and drops all passengers. Esc clears it.
+static var unload_arm_active: bool = false
+var _unload_airship: Airship = null
+
 var _unit_manager: UnitManager = null
 var _tribe_commands: TribeCommands = null
 var _build_menu: BuildMenu = null
@@ -141,6 +146,9 @@ func _unhandled_input(event: InputEvent) -> void:
 					_box_select(_drag_rect(mb.position))
 			queue_redraw()
 		elif mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
+			if unload_arm_active:
+				_fire_unload(mb.position)
+				return
 			_prune_selected_buildings()
 			if not selected_buildings.is_empty():
 				# Right-click sets the rally/delivery point for ALL buildings
@@ -179,13 +187,58 @@ func _unhandled_input(event: InputEvent) -> void:
 		_select_all_of_type(func(b: Building) -> bool: return b is Temple)
 	elif event.is_action_pressed("select_all_firewarrior_camps"):
 		_select_all_of_type(func(b: Building) -> bool: return b is FirewarriorCamp)
-	elif event.is_action_pressed("ui_cancel") and attack_arm_active:
+	elif event.is_action_pressed("ui_cancel") and (attack_arm_active or unload_arm_active):
 		attack_arm_active = false
+		unload_arm_active = false
+		_unload_airship = null
 		queue_redraw()
 		get_viewport().set_input_as_handled()
 
 
+## Arms the airship unload mode (crew tab "Absetzen an…" button): the next
+## right-click on terrain sends the ship there and drops all passengers.
+func arm_unload(ship: Airship) -> void:
+	if ship == null or not is_instance_valid(ship):
+		return
+	_unload_airship = ship
+	unload_arm_active = true
+	queue_redraw()
+
+
+## Executes the armed unload: terrain point under the cursor -> order_unload.
+func _fire_unload(screen_pos: Vector2) -> void:
+	unload_arm_active = false
+	queue_redraw()
+	var ship: Airship = _unload_airship
+	_unload_airship = null
+	if ship == null or not is_instance_valid(ship) or ship.state == Unit.State.DEAD:
+		return
+	var camera: Camera3D = get_viewport().get_camera_3d()
+	if camera == null:
+		return
+	var from: Vector3 = camera.project_ray_origin(screen_pos)
+	var dir: Vector3 = camera.project_ray_normal(screen_pos)
+	var space: PhysicsDirectSpaceState3D = camera.get_world_3d().direct_space_state
+	var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(
+		from, from + dir * RAY_LENGTH)
+	query.collision_mask = TERRAIN_MASK
+	var hit: Dictionary = space.intersect_ray(query)
+	if hit.is_empty():
+		return
+	ship.order_unload(hit.position)
+	ship.flash_ring()
+
+
 func _draw() -> void:
+	# Armed airship unload: gold drop marker + label at the cursor.
+	if unload_arm_active:
+		var mouse: Vector2 = get_global_mouse_position()
+		var gold: Color = Color(1.0, 0.85, 0.3, 0.9)
+		draw_arc(mouse + Vector2(14, -14), 8.0, 0.0, TAU, 20, gold, 2.0)
+		draw_line(mouse + Vector2(14, -22), mouse + Vector2(14, -10), gold, 2.0)
+		draw_string(get_theme_default_font(), mouse + Vector2(26, -10),
+			"Absetzen", HORIZONTAL_ALIGNMENT_LEFT, -1,
+			get_theme_default_font_size(), gold)
 	# Armed attack-move: red crosshair marker + label at the cursor.
 	if attack_arm_active:
 		var mouse: Vector2 = get_global_mouse_position()
@@ -532,6 +585,14 @@ func _command_move(screen_pos: Vector2, queue_up: bool, aggressive: bool = false
 		_tribe_commands.order_attack(selected, enemy)
 		enemy.flash_target_ring()   # red blink marks the attack target
 		return
+	# Enemy AIRSHIP under the cursor: the generic enemy pick skips
+	# non-targetable vehicles, so run a dedicated pass — catapults aim at the
+	# hull, ranged units are redirected onto its crew (TribeCommands).
+	var ship: Unit = _enemy_airship_under_cursor(screen_pos, camera)
+	if ship != null and _tribe_commands != null:
+		_tribe_commands.order_attack(selected, ship)
+		(ship as Airship).flash_ring()
+		return
 	var from: Vector3 = camera.project_ray_origin(screen_pos)
 	var dir: Vector3 = camera.project_ray_normal(screen_pos)
 	var space: PhysicsDirectSpaceState3D = camera.get_world_3d().direct_space_state
@@ -585,16 +646,31 @@ func _enemy_under_cursor(screen_pos: Vector2, camera: Camera3D) -> Unit:
 	return _pick_unit_at(screen_pos, camera, -1)
 
 
-## Crew assignment (7f): a siege engine under the cursor that the player may
-## man — his own, or an UNMANNED one of any tribe (battlefield takeover).
-## Returns true when the order was issued (only crew-capable units join).
+## Enemy airship under the cursor (dedicated pass — the generic enemy pick
+## skips non-targetable vehicles), or null.
+func _enemy_airship_under_cursor(screen_pos: Vector2, camera: Camera3D) -> Unit:
+	var best: Unit = null
+	var best_dist: float = INF
+	for unit in _unit_manager.units:
+		if not (unit is Airship) or unit.state == Unit.State.DEAD \
+				or unit.tribe_id == player_tribe_id:
+			continue
+		var sprite: Rect2 = _unit_screen_rect(unit, camera)
+		if sprite.size.y <= 0.0 or not sprite.grow(PICK_MARGIN_PX).has_point(screen_pos):
+			continue
+		var dist: float = sprite.get_center().distance_to(screen_pos)
+		if dist < best_dist:
+			best_dist = dist
+			best = unit
+	return best
+
+
+## Crew assignment (7f): a crewable vehicle under the cursor that the player
+## may man — his own, or an UNMANNED one of any tribe (battlefield takeover).
+## Returns true when the order was issued. WHO may crew is the VEHICLE's call
+## (accepts_crew_unit): ground vehicles refuse the shaman, the airship takes
+## everyone — so the vehicle is picked first, then the selection is filtered.
 func _try_crew_assignment(screen_pos: Vector2, camera: Camera3D, queue_up: bool = false) -> bool:
-	var crewable: Array[Unit] = []
-	for u in selected:
-		if u.can_crew_siege():
-			crewable.append(u)
-	if crewable.is_empty():
-		return false
 	var engine: Unit = null
 	var best_dist: float = INF
 	for unit in _unit_manager.units:
@@ -611,6 +687,12 @@ func _try_crew_assignment(screen_pos: Vector2, camera: Camera3D, queue_up: bool 
 			best_dist = dist
 			engine = unit
 	if engine == null:
+		return false
+	var crewable: Array[Unit] = []
+	for u in selected:
+		if (engine as CrewedVehicle).accepts_crew_unit(u):
+			crewable.append(u)
+	if crewable.is_empty():
 		return false
 	if queue_up:
 		# Walk the waypoint route first, then board (Shift+right-click).
