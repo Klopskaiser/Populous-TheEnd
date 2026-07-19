@@ -106,7 +106,7 @@ const KICK_CHANCE: float = 0.2
 const SHOVE_CHANCE: float = 0.15
 ## Selbstheilung: Verzögerung nach dem letzten Kampf und HP/s danach.
 const REGEN_DELAY: float = 8.0
-const REGEN_RATE: float = 2.0
+const REGEN_RATE: float = 5.0
 
 # =============================================================================
 # LEICHEN
@@ -145,7 +145,7 @@ const STEEP_ROLL_CHANCE_PER_SEC: float = 0.5
 const LAVA_CONTACT_DAMAGE: int = 20
 const BURN_DURATION: float = 4.0
 ## Gesamtschaden über die Brenndauer.
-const BURN_TOTAL_DAMAGE: int = 80
+const BURN_TOTAL_DAMAGE: int = 60
 ## Gebäude in Lavakontakt: 1 Zerstörungsstufe je VOLLE Kontaktsekunden …
 const LAVA_BUILDING_STAGE_TIME: float = 5.0
 ## … wobei der Kontaktzähler resettet, wenn so lange keine Lava anliegt.
@@ -285,8 +285,8 @@ const HUT_FOOTPRINT: Vector2i = Vector2i(4, 4)
 const WARRIOR_CAMP_FOOTPRINT: Vector2i = Vector2i(5, 5)
 const TEMPLE_FOOTPRINT: Vector2i = Vector2i(6, 6)
 const FIREWARRIOR_CAMP_FOOTPRINT: Vector2i = Vector2i(8, 8)
-const FORESTER_FOOTPRINT: Vector2i = Vector2i(5, 2)
-const WORKSHOP_FOOTPRINT: Vector2i = Vector2i(8, 4)
+const FORESTER_FOOTPRINT: Vector2i = Vector2i(2, 4)
+const WORKSHOP_FOOTPRINT: Vector2i = Vector2i(7, 4)
 const WATCHTOWER_FOOTPRINT: Vector2i = Vector2i(2, 2)
 const REINCARNATION_SITE_FOOTPRINT: Vector2i = Vector2i(3, 3)
 
@@ -319,7 +319,7 @@ const FORESTER_HP: int = 250
 ## Mana/s je aktivem Arbeiter im Gebäude.
 const FORESTER_MANA_PER_WORKER: float = 1.5
 ## Arbeiter-Sekunden pro gepflanztem Baum (4 Arbeiter -> 15 s).
-const FORESTER_PLANT_WORK_PER_TREE: float = 60.0
+const FORESTER_PLANT_WORK_PER_TREE: float = 50.0
 
 # --- Werkstatt ---
 const WORKSHOP_WOOD_COST: int = 15
