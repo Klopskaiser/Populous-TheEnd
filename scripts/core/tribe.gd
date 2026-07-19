@@ -34,6 +34,15 @@ const MAX_CATAPULTS_DEFAULT: int = 3
 const MAX_CATAPULTS_LIMIT: int = 20
 var max_catapults: int = MAX_CATAPULTS_DEFAULT
 
+## Analoge Pro-Stamm-Limits für die weiteren Fahrzeugtypen (eigene Stepper).
+const MAX_FIRE_RAMS_DEFAULT: int = 3
+const MAX_FIRE_RAMS_LIMIT: int = 20
+var max_fire_rams: int = MAX_FIRE_RAMS_DEFAULT
+
+const MAX_AIRSHIPS_DEFAULT: int = 2
+const MAX_AIRSHIPS_LIMIT: int = 10
+var max_airships: int = MAX_AIRSHIPS_DEFAULT
+
 var id: int = 0
 var color: Color = Color.WHITE
 var mana: float = 0.0
@@ -87,6 +96,27 @@ func owned_catapult_count() -> int:
 	var count: int = 0
 	for unit in units:
 		if is_instance_valid(unit) and unit is SiegeEngine \
+				and unit.state != Unit.State.DEAD:
+			count += 1
+	return count
+
+
+## Feuerrammen des Stamms (Zählung wie owned_catapult_count; über unit_kind,
+## damit tribe.gd nicht von den Fahrzeugklassen abhängt).
+func owned_fire_ram_count() -> int:
+	var count: int = 0
+	for unit in units:
+		if is_instance_valid(unit) and unit.unit_kind() == &"fireram" \
+				and unit.state != Unit.State.DEAD:
+			count += 1
+	return count
+
+
+## Luftschiffe des Stamms (Zählung wie owned_catapult_count).
+func owned_airship_count() -> int:
+	var count: int = 0
+	for unit in units:
+		if is_instance_valid(unit) and unit.unit_kind() == &"airship" \
 				and unit.state != Unit.State.DEAD:
 			count += 1
 	return count

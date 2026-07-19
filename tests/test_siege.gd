@@ -167,7 +167,7 @@ func test_workshop_produces_catapult() -> void:
 	var ws: Workshop = _place_workshop(w)
 	check(ws != null and ws.is_usable(), "pre-built workshop is usable")
 	check(ws.footprint == Vector2i(7, 4), "workshop has the big 7x4 footprint")
-	check(ws.wood_cost == 15, "workshop costs 15 wood")
+	check(ws.wood_cost == 13, "workshop costs 13 wood")
 	w.wood_pile_manager.deposit(ws.delivery_point(), 20)
 
 	var brave: Brave = _house_worker(w, ws)

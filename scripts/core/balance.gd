@@ -87,6 +87,56 @@ const SIEGE_SHOT_BUILDING_STAGES: int = 1
 ## Schaden pro Treffer an feindlichen Raidern im EIGENEN Gebäude (sie werden
 ## dabei rausgeworfen, nicht getötet — 1/2 Brave-Leben).
 const SIEGE_SHOT_RAIDER_DAMAGE: int = 30
+## Luftschuss (Ziel Luftschiff): Abfangradius um die Kugel und Flächenfaktor
+## des Schockschadens (doppelte FLÄCHE -> Radius x sqrt(2)); keine Lava.
+const SIEGE_SHOT_AIR_INTERCEPT_RADIUS: float = 2.0
+const SIEGE_SHOT_AIR_SPLASH_FACTOR: float = 2.0
+
+# --- Feuerramme ---
+const FIRERAM_SPEED: float = 3.0
+## Crew: ab 1 fährt UND feuert sie (Cooldown skaliert bis zur vollen Crew).
+const FIRERAM_MAX_CREW: int = 4
+const FIRERAM_MIN_MOVE_CREW: int = 1
+const FIRERAM_MIN_FIRE_CREW: int = 1
+## Flammenstoß nach vorn: Rechteck LÄNGE x BREITE (Zellen), keine Mindestreichweite.
+const FIRERAM_FIRE_RANGE: float = 5.0
+const FIRERAM_FLAME_WIDTH: float = 2.0
+## Dauer eines Flammenstoßes; danach Nachladen (1 Crew -> MIN, 4 Crew -> FULL).
+const FIRERAM_FLAME_DURATION: float = 1.0
+const FIRERAM_COOLDOWN_MIN_CREW: float = 3.0
+const FIRERAM_COOLDOWN_FULL_CREW: float = 1.5
+const FIRERAM_AGGRO_RADIUS: float = 12.0
+## Echte Dreh-Rate des Rumpfs (rad/s); Stoß startet erst bei Ausrichtung
+## innerhalb der Toleranz (rad) zum Ziel.
+const FIRERAM_TURN_RATE: float = 1.6
+const FIRERAM_AIM_TOLERANCE: float = 0.26
+## Lava-Kontakt-Gutschrift pro Flammensekunde an Gebäuden. MUSS zusammen mit
+## FLAME_DURATION >= LAVA_BUILDING_STAGE_TIME ergeben, sonst verfällt der
+## Kontakt im Grace-Fenster (1 s) zwischen zwei Stößen und Gebäude nehmen
+## nie eine Stufe: 1 s Flamme x 5.0 = 5 s Kontakt = genau 1 Zerstörungsstufe.
+const FIRERAM_FLAME_CONTACT_FACTOR: float = 5.0
+
+# --- Luftschiff ---
+const AIRSHIP_SPEED: float = 5.0
+const AIRSHIP_MAX_CREW: int = 6
+const AIRSHIP_MIN_MOVE_CREW: int = 1
+## Horizontaler Abstand zum Bodenschatten, ab dem Zusteigen zählt.
+const AIRSHIP_BOARD_RANGE: float = 1.5
+## Schwebehöhe über Terrain (über Wasser: über Meeresspiegel).
+const AIRSHIP_FLY_HEIGHT: float = 12.0
+## Reichweiten-Bonus für Fernkampf/Bekehrung/Zauber von Bord (nur im Stand).
+const AIRSHIP_RANGE_BONUS: float = 3.0
+## Hüllentreffer (Feuerball-Zauber-Bolts + Katapult-Lufttreffer) bis zur Explosion.
+const AIRSHIP_HULL_HITS: int = 2
+## Explosionsschaden an allen Insassen; der anschließende Sturz aus 12 m
+## nutzt den normalen Wurf-Pfad (Wasser = Ertrinken).
+const AIRSHIP_CRASH_DAMAGE: int = 30
+## Leere Luftschiffe treiben langsam Richtung erreichbarem Terrain.
+const AIRSHIP_DRIFT_SPEED: float = 0.5
+## Maximaler Abstand zum Absetzpunkt beim "Absetzen an..."-Befehl.
+const AIRSHIP_UNLOAD_RANGE: float = 2.0
+## Feuerkrieger-Schadensfaktor gegen Ziele in der Luft (Deck-Crew, Geschleuderte).
+const FIREWARRIOR_AIRBORNE_MULT: int = 2
 
 # =============================================================================
 # NAHKAMPF ALLGEMEIN (alle Einheiten)
@@ -287,6 +337,8 @@ const TEMPLE_FOOTPRINT: Vector2i = Vector2i(6, 6)
 const FIREWARRIOR_CAMP_FOOTPRINT: Vector2i = Vector2i(8, 8)
 const FORESTER_FOOTPRINT: Vector2i = Vector2i(2, 4)
 const WORKSHOP_FOOTPRINT: Vector2i = Vector2i(7, 4)
+const FIRERAM_WORKSHOP_FOOTPRINT: Vector2i = Vector2i(6, 4)
+const AIRSHIP_WHARF_FOOTPRINT: Vector2i = Vector2i(8, 8)
 const WATCHTOWER_FOOTPRINT: Vector2i = Vector2i(2, 2)
 const REINCARNATION_SITE_FOOTPRINT: Vector2i = Vector2i(3, 3)
 
@@ -321,12 +373,28 @@ const FORESTER_MANA_PER_WORKER: float = 1.5
 ## Arbeiter-Sekunden pro gepflanztem Baum (4 Arbeiter -> 15 s).
 const FORESTER_PLANT_WORK_PER_TREE: float = 50.0
 
-# --- Werkstatt ---
-const WORKSHOP_WOOD_COST: int = 15
+# --- Katapultwerkstatt ---
+const WORKSHOP_WOOD_COST: int = 13
 const WORKSHOP_HP: int = 350
-## Arbeiter-Sekunden pro Katapult (3 Arbeiter -> 30 s).
+## Arbeiter-Sekunden pro Katapult (3 Arbeiter -> 20 s).
+## Regel: Produktionsaufwand = Holzkosten des Fahrzeugs x 10 Arbeiter-Sekunden.
 const WORKSHOP_WORK_PER_CATAPULT: float = 60.0
-const WORKSHOP_CATAPULT_WOOD: int = 5
+const WORKSHOP_CATAPULT_WOOD: int = 6
+
+# --- Feuerrammenwerkstatt ---
+const FIRERAM_WORKSHOP_WOOD_COST: int = 11
+const FIRERAM_WORKSHOP_HP: int = 350
+## Arbeiter-Sekunden pro Feuerramme (3 Arbeiter -> ~13 s); 4 Holz x 10.
+const FIRERAM_WORK_PER_RAM: float = 40.0
+const FIRERAM_WOOD: int = 4
+
+# --- Luftschiffwerft ---
+const AIRSHIP_WHARF_WOOD_COST: int = 20
+const AIRSHIP_WHARF_HP: int = 500
+const WHARF_WORKER_SLOTS: int = 4
+## Arbeiter-Sekunden pro Luftschiff (4 Arbeiter -> 20 s); 8 Holz x 10.
+const WHARF_WORK_PER_AIRSHIP: float = 80.0
+const WHARF_AIRSHIP_WOOD: int = 8
 
 # --- Wachturm ---
 const WATCHTOWER_WOOD_COST: int = 4
