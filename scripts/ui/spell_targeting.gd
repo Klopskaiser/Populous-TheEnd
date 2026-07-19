@@ -200,6 +200,12 @@ func _process(_delta: float) -> void:
 				and is_instance_valid(shaman.garrison_target):
 			origin = shaman.garrison_target.center_world()
 			radius += Watchtower.TOWER_RANGE_BONUS
+		elif shaman.rides_airborne() and shaman.siege_engine != null \
+				and is_instance_valid(shaman.siege_engine):
+			# Casting from an airship deck adds +3 m, centred on the hull — mirror
+			# the reach that Shaman.order_cast actually allows from the deck.
+			origin = shaman.siege_engine.position
+			radius += Balance.AIRSHIP_RANGE_BONUS
 		var rim: ImmediateMesh = _range_mesh.mesh as ImmediateMesh
 		rim.clear_surfaces()
 		TerrainRing.add_band(rim, origin, radius, td, C_RANGE_RING)

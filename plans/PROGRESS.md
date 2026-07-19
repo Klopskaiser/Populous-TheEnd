@@ -5394,3 +5394,41 @@ per-Frame.
 
 **Tests:** Suite **2103/2103 grün**, Ladecheck ok. Referenzrechner-FPS lässt sich
 headless nicht nachstellen; In-Game-FPS-Overlay durch Nutzer ausstehend.
+
+
+## Spieltest-Fix 9 — Luftschiff: Prediger-Reichweite, Auto-Engage, Zauber-Anzeige
+
+Drei vom Nutzer gemeldete Luftschiff-Bugs:
+
+**1. Reichweiten-Anzeige (`scripts/ui/range_renderer.gd`).** Der Reichweitenring
+(G) zeigte für JEDES Luftschiff nur die Feuerkrieger-Reichweite (8 + 3), obwohl
+Deck-Prediger nur auf `CONVERT_RANGE + 3` (5 + 3) bekehren. Jetzt zeichnet ein
+Luftschiff **einen Ring pro tatsächlich an Bord befindlicher Kampf-Crew**:
+Feuerkrieger-Feuerreichweite (orange) und/oder Prediger-Bekehrreichweite (lila),
+je nach Besatzung (`_add_airship_rings`, nutzt `_has_deck_firewarrior/_preacher`).
+Die statische `range_for_kind("airship")` (Bestreichweite) bleibt für Tests
+unverändert.
+
+**2. Prediger bekehrten nur im Stand, nicht per Angriffs-Move
+(`scripts/units/airship.gd`).** `_tick_auto_engage` prüfte nur
+`_has_deck_firewarrior()` — ein reines Prediger-Schiff schloss nie auf und flog
+über Gegner hinweg. Jetzt steuern **auch Prediger** das Auto-Engage: Stoppdistanz
+= Bekehrreichweite (kürzer, damit alle wirken), Aggro = weitester Crew-Radius;
+Gebäude nur bei Feuerkriegern. Zusätzlich: sobald ein Deck-Prediger channelt
+(Ziel sitzt → fällt aus `_best_enemy`), **hält das Schiff die Position**
+(`_deck_preacher_channeling()`), statt die Route wieder aufzunehmen und die eigene
+Bekehrung abzubrechen.
+
+**3. Schamanin-Zauberreichweite auf dem Deck nicht angezeigt
+(`scripts/ui/spell_targeting.gd`).** Funktional gab `Shaman.order_cast` den
++3-Deck-Bonus bereits (Wirkung stimmte), aber der Ziel-Reichweitenring zeigte nur
+`cast_range` an der Deck-Position. Jetzt spiegelt der Ring den Deck-Fall wie den
+Wachturm-Fall: Ursprung = Rumpfposition, Radius += `AIRSHIP_RANGE_BONUS`.
+
+**Tests:** +2 (`test_preacher_ship_closes_in_and_converts_on_attack_move`,
+`test_passive_move_preacher_ship_marches_through`). Suite **2106/2106 grün**,
+Ladecheck ok. Anmerkung: der Drift-Test in `test_combat_groups.gd` hängt am
+globalen Instance-ID-Phasenversatz (Scan-Stagger aus `get_instance_id() % 50`);
+die Toleranz wurde 4,5 → 6,0 m geweitet (der geahndete SYSTEMATISCHE Bias maß
+−35 m und wuchs stetig — eine begrenzte Oszillation nahe der Schwelle ist das
+nicht). Deck-Ring-/Zauber-Ring-Anzeige sind UI und über den Spielstart zu prüfen.

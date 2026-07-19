@@ -478,6 +478,44 @@ func test_passive_move_never_stops_and_warrior_ship_never_engages() -> void:
 	_free_world(w)
 
 
+func test_preacher_ship_closes_in_and_converts_on_attack_move() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(50, 60)))
+	_board(w, ship, PREACHER_SCENE)
+	check(ship._has_deck_preacher(), "the ship reports its deck preacher")
+	# Enemy inside the deck-boosted preacher AGGRO (8 + 3) but outside convert
+	# reach (5 + 3): a preacher-only ship on attack-move must close in on its
+	# own and convert it (the bug: only firewarriors drove the auto-engage, so
+	# a preacher ship flew straight past without ever converting).
+	var victim: Unit = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, w.nav.cell_to_world(Vector2i(60, 60)))
+	ship.order_move(w.nav.cell_to_world(Vector2i(100, 60)), false, true)
+	var ticks: int = 0
+	while victim.tribe_id != 0 and ticks < MAX_TICKS:
+		_tick_world(w)
+		ticks += 1
+	check(victim.tribe_id == 0,
+		"the attack-moving preacher ship closed in and converted the enemy")
+	_free_world(w)
+
+
+func test_passive_move_preacher_ship_marches_through() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(50, 60)))
+	_board(w, ship, PREACHER_SCENE)
+	w.unit_manager.spawn_unit(BRAVE_SCENE, 1, w.nav.cell_to_world(Vector2i(60, 60)))
+	# PASSIVE move (not aggressive): the ship flies on past the enemy without
+	# stopping to convert — only an attack-move auto-engages.
+	ship.order_move(w.nav.cell_to_world(Vector2i(80, 60)), false, false)
+	var ticks: int = 0
+	while ship.state == Unit.State.MOVE and ticks < MAX_TICKS:
+		_tick_world(w)
+		ticks += 1
+	check(ship.position.x > 75.0,
+		"a passive-move preacher ship never stops for enemies")
+	_free_world(w)
+
+
 func test_deck_firewarrior_autofires_at_buildings() -> void:
 	var w: Dictionary = _make_world()
 	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))

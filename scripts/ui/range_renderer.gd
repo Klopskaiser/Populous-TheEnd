@@ -76,6 +76,13 @@ func _process(_delta: float) -> void:
 			continue
 		if unit.siege_engine != null:
 			continue   # siege crew: no range of its own
+		if unit is Airship:
+			# Deck combat has TWO different reaches — firewarriors fire farther
+			# (8+3) than preachers convert (5+3). Draw a ring per crew kind that
+			# is actually aboard so the display matches what the ship can do
+			# (the single "best reach" ring misled: preachers convert less far).
+			_add_airship_rings(unit as Airship)
+			continue
 		var r: float = range_for_kind(unit.unit_kind())
 		if r <= 0.0:
 			continue
@@ -95,6 +102,22 @@ func _process(_delta: float) -> void:
 		elif unit is FireRam:
 			TerrainRing.add_band(_im, unit.position, FireRam.MIN_RANGE,
 				_terrain_data, C_SIEGE_MIN, 0.15)
+
+
+## Draws the airship's actual deck-combat rings, one per crew kind aboard,
+## centred on the hull: firewarrior fire reach (orange) and/or preacher convert
+## reach (purple), each with the +AIRSHIP_RANGE_BONUS deck bonus. Nothing is
+## drawn for a ship carrying no combat crew (passengers only / shaman — her
+## spell reach is shown by the spell targeting ring instead).
+func _add_airship_rings(ship: Airship) -> void:
+	if ship._has_deck_firewarrior():
+		TerrainRing.add_band(_im, ship.position,
+			Firewarrior.FIRE_RANGE + Balance.AIRSHIP_RANGE_BONUS,
+			_terrain_data, C_FIREWARRIOR)
+	if ship._has_deck_preacher():
+		TerrainRing.add_band(_im, ship.position,
+			Preacher.CONVERT_RANGE + Balance.AIRSHIP_RANGE_BONUS,
+			_terrain_data, C_PREACHER)
 
 
 static func _color_for(kind: StringName) -> Color:

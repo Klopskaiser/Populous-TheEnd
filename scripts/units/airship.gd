@@ -483,12 +483,12 @@ func tick(delta: float) -> void:
 	_tick_drift(delta)
 
 
-## Auto-engage steering: while IDLE or on an attack-move (and only with a
-## firewarrior aboard), close to deck fire reach of the nearest enemy unit —
-## or building — within the deck-boosted firewarrior aggro radius, then stand
-## so the deck crew fights. Passive moves march through; explicit targets and
-## a pending unload steer themselves. Once nothing is left, an interrupted
-## attack-move resumes its kept route.
+## Auto-engage steering: while IDLE or on an attack-move (with a firewarrior OR
+## a preacher aboard), close to deck combat reach of the nearest enemy unit —
+## or building — within the deck-boosted aggro radius, then stand so the deck
+## crew fights. Passive moves march through; explicit targets and a pending
+## unload steer themselves. Once nothing is left, an interrupted attack-move
+## resumes its kept route.
 func _tick_auto_engage(delta: float) -> void:
 	_engage_scan -= delta
 	if _engage_scan > 0.0:
@@ -501,11 +501,22 @@ func _tick_auto_engage(delta: float) -> void:
 		return
 	if _ordered_unit != null or attack_building != null or route_end_action.is_valid():
 		return
-	if not _has_deck_firewarrior():
+	var has_fw: bool = _has_deck_firewarrior()
+	var has_pr: bool = _has_deck_preacher()
+	if not has_fw and not has_pr:
 		_auto_building = null
 		return
-	var reach: float = Firewarrior.FIRE_RANGE + RANGE_BONUS
-	var aggro: float = Firewarrior.RANGED_AGGRO + RANGE_BONUS
+	# Stop distance: close enough that the SHORTEST-reach active crew can act —
+	# preachers (convert 5 + 3) must get nearer than firewarriors (fire 8 + 3),
+	# so a preacher-carrying ship closes in and its firewarriors still fire from
+	# farther out on the way. Detection uses the WIDEST crew aggro radius.
+	var reach: float = (Preacher.CONVERT_RANGE if has_pr else Firewarrior.FIRE_RANGE) \
+		+ RANGE_BONUS
+	var aggro: float = RANGE_BONUS
+	if has_fw:
+		aggro = maxf(aggro, Firewarrior.RANGED_AGGRO + RANGE_BONUS)
+	if has_pr:
+		aggro = maxf(aggro, Unit.AGGRO_RADIUS + RANGE_BONUS)
 	var stop_at: Vector3
 	var dist: float
 	var target: Unit = _best_enemy(aggro)
@@ -514,7 +525,14 @@ func _tick_auto_engage(delta: float) -> void:
 		stop_at = target.position
 		dist = _flat_dist(position, target.position)
 	else:
-		var b = _nearest_enemy_building_by_wall(aggro)
+		# A deck preacher mid-conversion drops its target out of _best_enemy (it
+		# now SITs), so hold position until the channel finishes — otherwise the
+		# ship would fly off and break its own conversion (attack-move bug).
+		if has_pr and _deck_preacher_channeling():
+			return
+		# Only firewarriors can attack buildings — a preacher-only ship that
+		# found no unit target just resumes its route.
+		var b = _nearest_enemy_building_by_wall(aggro) if has_fw else null
 		_auto_building = b
 		if b == null:
 			# Nothing around: an interrupted attack-move resumes its route.
@@ -531,7 +549,7 @@ func _tick_auto_engage(delta: float) -> void:
 			_clear_path()
 			_set_state(State.IDLE)
 		return
-	# Beyond reach: close in so EVERY deck firewarrior can attack.
+	# Beyond reach: close in so the deck crew can act.
 	if active_crew_count() < MIN_MOVE_CREW:
 		return
 	var dir: Vector3 = Vector3(stop_at.x - position.x, 0.0, stop_at.z - position.z)
@@ -543,9 +561,30 @@ func _tick_auto_engage(delta: float) -> void:
 
 
 func _has_deck_firewarrior() -> bool:
+	return _has_deck_crew_of_kind(&"firewarrior")
+
+
+func _has_deck_preacher() -> bool:
+	return _has_deck_crew_of_kind(&"preacher")
+
+
+## True when a boarded, deck-riding crew member of `kind` is aboard (used for
+## auto-engage steering and the range display).
+func _has_deck_crew_of_kind(kind: StringName) -> bool:
 	for m in crew:
 		if is_instance_valid(m) and m.siege_boarded and m.state == State.CREW \
-				and m.unit_kind() == &"firewarrior":
+				and m.unit_kind() == kind:
+			return true
+	return false
+
+
+## True while a boarded deck preacher is actively channeling a conversion (its
+## sitting target dropped out of _best_enemy) — the ship holds instead of
+## resuming its attack-move route mid-conversion.
+func _deck_preacher_channeling() -> bool:
+	for m in crew:
+		if is_instance_valid(m) and m.siege_boarded and m.state == State.CREW \
+				and m.unit_kind() == &"preacher" and m.station_channeling:
 			return true
 	return false
 
