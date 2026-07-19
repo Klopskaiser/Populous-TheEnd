@@ -9,6 +9,146 @@ Verifikationsstand. Auch bei nachträglichen Erweiterungen außerhalb einer Phas
 
 ---
 
+## Neue Fahrzeuge: Feuerramme + Luftschiff, neue Werkstätten, Anti-Air (2026-07-19)
+
+**Architektur — `CrewedVehicle`-Basisklasse** (`scripts/units/crewed_vehicle.gd`):
+Die generische Fahrzeuglogik wurde aus `SiegeEngine` extrahiert (Crew/Kapern/
+Leash/Prune, Brennen→Versinken, Tornado-Burst, Ertrinken, Terrain-Rip,
+Vehicle-Pathing, Flagge/Modell-Plumbing, `flash_ring`). Divergente Werte sind
+**Instanzvariablen** (`board_range`, `max_crew`, `min_move_crew`, `min_fire_crew`,
+`crew_side_offset`, `crew_rank_spacing`, `vehicle_ring_scale`), gesetzt im
+jeweiligen `_init()` — GDScript kann Parent-Konstanten nicht überschreiben.
+Neue Basis-Virtuals: `accepts_crew_unit(u)` (wer bemannen darf — Fahrzeug
+entscheidet, nicht die Einheit), `crew_rides_on_deck()` (Deck-Pin statt
+Boden-Glide), `crew_defends_melee_only()` (Ablenkungs-Immunität),
+`_model_heading()` (Rumpf-Drehung). Typ-Checks migriert auf `is CrewedVehicle`
+(fireball_bolt, tornado_vortex, selection_manager, tribe_commands, sidebar);
+katapultspezifisch blieben `Tribe.owned_catapult_count()` und der
+Min-Range-Ring im RangeRenderer. `SiegeEngine` behält alle öffentlichen
+Konstanten — `test_siege.gd` lief als Regressionsnetz unverändert grün.
+
+**Workshop parametrisiert** (`scripts/buildings/workshop.gd`): virtuelle
+Produkt-Getter `product_scene() / product_wood() / work_per_product() /
+worker_slots() / product_cap_reached()`; Dispatch nutzt `e.min_move_crew`.
+`display_name()` → **„Katapultwerkstatt"**, neue Kosten **13 Holz** (war 15),
+Katapult **6 Holz** (war 5). Regel: **Produktionsaufwand = Holzkosten ×
+10 Arbeiter-Sekunden** (Katapult 60, Feuerramme 40, Luftschiff 80).
+`FireRamWorkshop` und `AirshipWharf` erben die komplette Produktions-
+maschinerie (Slots, Vorrat, Auto-Crew, Rally-Dispatch, Exit-Blockade).
+**Achtung Typ-Check-Reihenfolge:** `is Workshop` matcht die Subklassen —
+Sidebar-`_crew_view` und KI-Gebäudezählung prüfen die Subklassen ZUERST.
+
+**Feuerramme** (`scripts/units/fire_ram.gd`, Werkstatt 11 Holz / 6×4 / 3
+Arbeiter, Fahrzeug 4 Holz, Crew 1–4, min. 1 fährt UND feuert, 3 m/s):
+- **Flammenstoß nach vorn:** Rechteck 5×2 Felder ab Rumpfnase, 1 s Flamme,
+  Nachladen 3 s (1 Crew) → 1,5 s (4 Crew), KEINE Mindestreichweite.
+  Flächen-Check alle 0,2 s im Heading-Frame; Friendly Fire wie Lava.
+- **Echte Drehrate** (`_heading`, 1,6 rad/s): der Stoß startet erst bei
+  Ausrichtung ≤ ~15°; WÄHREND des Stoßes darf weitergedreht werden
+  (Flammen-Schwenken); `_tick_visual` liest `_model_heading()`.
+- **`Unit.scorch()`**: Brand + Panik wie Lava, aber OHNE den einmaligen
+  Kontaktschaden; `CrewedVehicle.scorch()` → `ignite()` (Holzfahrzeuge
+  fangen richtig Feuer). Gebäude: `add_lava_contact(0.2 ×
+  FIRERAM_FLAME_CONTACT_FACTOR 5.0)` → **genau 1 Zerstörungsstufe pro vollem
+  Stoß** — der Faktor MUSS ≥ LAVA_BUILDING_STAGE_TIME/FLAME_DURATION bleiben,
+  sonst verfällt der Kontakt im 1-s-Grace-Fenster zwischen zwei Stößen
+  (durch Test gepinnt). Bäume/Holzhaufen zünden entlang der Mittellinie.
+- **Crew ablenkungsimmun** (`crew_defends_melee_only` + Gate in
+  `Unit._maybe_retaliate`): Beschuss zieht die Crew nie vom Fahrzeug, nur
+  direkter Nahkampf (≤ FLEE_MELEE_RANGE) wird erwidert. Katapult-Crew
+  unverändert (wehrt sich weiter gegen alles).
+- Auto-Aggro wie Katapult („feuern, nicht jagen"): Einheiten bereits in der
+  5-m-Zone zuerst, sonst Anrollen aufs nächste Feindgebäude in 12 m;
+  explizite Befehle haftend via `_target_ordered`.
+- **Wichtig:** `var tree_manager` / `var wood_pile_manager` MÜSSEN auf der
+  Klasse deklariert sein — `unit.set(...)` in `UnitManager.spawn_unit` ist
+  sonst ein stilles No-op und Bäume brennen nie.
+
+**Luftschiff** (`scripts/units/airship.gd`, Werft 20 Holz / 8×8 / 4 Arbeiter,
+Schiff 8 Holz, 6 Plätze, 5 m/s):
+- **Fliegt in Luftlinie** — kein A*, nie die async Path-Queue
+  (`_start_path_to` überschrieben), Ziel nur auf Kartengrenzen geklemmt;
+  `_snap_to_ground()` = `max(Terrainhöhe, SEA_LEVEL) + 12` (jeden Tick, folgt
+  Verformung), `_slope_ahead() = 0`. Wasser ist kein Hindernis.
+- **Jede Einheit darf einsteigen, auch die Schamanin** (`accepts_crew_unit`;
+  `Unit.order_crew` fragt jetzt das FAHRZEUG statt `can_crew_siege()`).
+  Einstieg ≤ 1,5 m flach zum Bodenschatten (`board_range` ist jetzt
+  Instanzvariable). Passagiere reiten SICHTBAR auf Deck-Slots
+  (`crew_rides_on_deck`, Deck-Zweig in `Unit._tick_crew`, kein Ground-Snap)
+  und bleiben einzeln beschießbare Einheiten. Kapern leerer Schiffe wie beim
+  Katapult.
+- **Deck-Kampf nur im Stand** (Wachturm-Muster mit per-Member-Cooldowns):
+  Feuerkrieger `fire_from` mit 8+3, für Gebäude neues
+  `Firewarrior.fire_at_building_from`; Prediger konvertieren mit 5+3;
+  Krieger/Braves/Schamanin idlen (reines Krieger-Schiff hat nie ein Ziel).
+  Schamanin castet vom Deck mit `cast_range + 3`, nur im Stand
+  (`Shaman.order_cast`-Zweig analog Wachturm).
+- **„Absetzen an…"** (`order_unload` + Unload-Arm in SelectionManager mit
+  Gold-Cursor, Button im Besatzungs-Tab): anfliegen, alle Passagiere per
+  `drop_member` auf begehbare Ringzellen fallen lassen (kontrollierter Fall
+  = 0 Schaden). **Drift:** leere Schiffe treiben mit 0,5 m/s zur Insel des
+  nächsten Reinkarnationsplatzes (beliebiger Stamm), bis der Schatten auf
+  begehbarem Boden derselben Insel liegt (`nav_grid.same_island`).
+- **Hülle/Abschuss:** `register_hull_hit()` — 2 Treffer (Feuerball-/
+  Feuerregen-Bolts und Katapult-Abfangschüsse zählen GEMEINSAM) → `explode()`:
+  alle Insassen 30 Schaden + Wurf = Sturz aus 12 m (nochmals 30 Sturzschaden;
+  Brave stirbt exakt, Krieger überlebt verletzt; Wasserlandung ertrinkt).
+  Blitz (`lightning.gd`-Zweig VOR dem Boden-Opfer) und Tornado
+  (`_affect_airships`, + 2 Holz-Debris) töten sofort. `ignite()`/`drown()`/
+  Terrain-Rip sind No-ops (fliegt).
+- **Katapult vs. Luftschiff:** `_may_target_vehicle` erweitert; `SiegeShot`
+  prüft pro Tick einen 3D-Abfang (XZ 2 m + |Δy| < 2) → Hüllentreffer +
+  Schockwelle mit **doppelter Fläche** (Radius × √2) zentriert am Rumpf,
+  KEINE Lava/kein Gebäudeschaden; als `air_shot` markierte Fehlschüsse
+  verpuffen in der Luft (keine Phantom-Lava am Boden).
+- **Luftziel-Regeln** (`Unit.rides_airborne()/is_airborne()`): Nahkampf kann
+  Luftziele nie angreifen (`_begin_attack`/`_scan_for_enemy`), Prediger nie
+  bekehren (`begin_conversion`), Lava überspringt sie; Feuerkrieger-Bälle
+  machen **doppelten Schaden** gegen Luftziele (auch tornado-geschleuderte).
+  Deck-Passagiere sind gegen `throw_airborne`/`start_roll`/`displace`
+  geschützt (zentrale Guards) — nur `explode()` wirft sie ab.
+  `TribeCommands.order_attack` aufs Schiff: Katapulte zielen auf die Hülle,
+  Fernkämpfer werden auf die Deck-Crew umgeleitet, Nahkämpfer gehen leer aus.
+
+**UI:** Baumenü-Einträge Feuerrammenwerkstatt/Luftschiffwerft; Gefolgsleute-
+Tab mit Zeilen „Feuerrammen"/„Luftschiffe" und **drei Cap-Steppern** über
+generisches `_add_cap_stepper` (einzeilig „Max. X: cap (aktuell)");
+Besatzungs-Tab mit Zweigen für beide neuen Werkstätten und dem Luftschiff
+(„Passagiere", Eject = `drop_member`, „Absetzen an…"-Button); Crew-Zuweisung
+im SelectionManager wählt erst das Fahrzeug und filtert dann per
+`accepts_crew_unit`; eigener Pick-Pass für feindliche Luftschiffe;
+RangeRenderer-Reichweite 5 für die Ramme; prozedurale Icons
+`fireram(_workshop)`/`airship(_wharf)` in `ui_theme.gd`.
+
+**Caps** (`scripts/core/tribe.gd`): `max_fire_rams` (Default 3, 0–20),
+`max_airships` (Default 2, 0–10), Zählung über `unit_kind()` (keine
+Klassenabhängigkeit in tribe.gd).
+
+**KI:** Baureihenfolge Feuerrammenwerkstatt direkt nach der Katapult-
+werkstatt, Luftschiffwerft nach den Wachtürmen; `_staff_workshops` nutzt
+`worker_slots()` der Instanz; `_man_airships` bemannt Schiffe mit idle
+Feuerkriegern (mobile Reserve wie Wachturm); bemannte Rammen/Luftschiffe
+fliegen in Angriffswellen mit (`_army_units`), Fahrzeug-/Deck-Crew wird nie
+von Wellenbefehlen abgezogen (CREW-Skip). **Bewusste erste Ausbaustufe:**
+kein Absetz-Micro, das Schiff schwebt am Wellenziel und die Crew feuert.
+
+**Erkenntnisse/Stolpersteine:**
+- Nach neuen `class_name`-Skripten hängt/failt der Test-Runner ohne
+  vorheriges `--headless --import` (globaler Klassen-Cache).
+- Zwei bekannte zufallssensible Tests flakten je einmal und liefen isoliert
+  und im Wiederholungslauf grün: `test_unit_control` (passive-move) und
+  `test_combat_groups` (Zentroid-Drift-Statistik).
+- `SpellContext` ist RefCounted — in Tests nicht `free()`en.
+
+**Verifikation:** Kompletter Testlauf grün inkl. neuer Suiten
+`tests/test_fire_ram.gd` (Produktion/Caps/scorch/Flammenrechteck/Grace-
+Fenster-Regression/Baum/Ablenkungs-Immunität inkl. Katapult-Behavior-Freeze/
+Cooldown/Zerstörung+Kapern) und `tests/test_airship.gd` (Werft/Boarding inkl.
+Schamanin/Kapern/Flug über Wasser/Deck-Kampf/Deck-Cast/Anti-Air/Luftziel-
+Regeln/Explosion/Absetzen/Drift); `test_ai.gd` an die neue Baureihenfolge
+angepasst. `--headless --quit` fehlerfrei. Manueller Spieltest (Optik der
+Modelle, Flammen-Schwenk, Unload-Cursor, KI-Langzeitspiel) steht noch aus.
+
 ## UI-Aufräumen: Besatzungs-Tab, Wachstums-Overrides, Katapult-Limit pro Stamm (2026-07-19)
 
 **Mechanik:**
