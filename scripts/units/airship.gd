@@ -339,6 +339,16 @@ func order_attack(enemy: Unit) -> void:
 	_fly_into_reach(enemy.position)
 
 
+## The airship never auto-fights as a Unit: all engagement runs through
+## _tick_auto_engage (fly into deck reach + stand) and the deck crew. The base
+## idle/attack-move auto-scan would ALSO call _begin_attack (a melee-approach
+## driver) and fight _tick_auto_engage for control every tick — that conflict
+## made the hull judder on approach (the attack-move stutter). Suppress it here,
+## exactly as the fire ram / siege engine replace it with their own acquire.
+func _engage_on_sight(_delta: float) -> bool:
+	return false
+
+
 ## Explicit attack on a building: only firewarrior passengers can lob at it
 ## (no melee from the air); own buildings are never a target (the airship has
 ## no anti-raider shot).
@@ -517,6 +527,15 @@ func _tick_auto_engage(delta: float) -> void:
 		aggro = maxf(aggro, Firewarrior.RANGED_AGGRO + RANGE_BONUS)
 	if has_pr:
 		aggro = maxf(aggro, Unit.AGGRO_RADIUS + RANGE_BONUS)
+	# Already standing: hold as long as the deck crew can fight from here — any
+	# enemy within the ship-centred reach, or a preacher mid-conversion. Do NOT
+	# inch toward the nearest/highest-priority unit whenever it drifts a few cm
+	# past the stop line; that micro-positioning (targets churn, separation
+	# nudges) was the attack-move STUTTER, and buys nothing since every crew
+	# member fires/converts on the ship-centred reach anyway.
+	if state == State.IDLE and (_best_enemy(reach) != null \
+			or (has_pr and _deck_preacher_channeling())):
+		return
 	var stop_at: Vector3
 	var dist: float
 	var target: Unit = _best_enemy(aggro)

@@ -5432,3 +5432,35 @@ globalen Instance-ID-Phasenversatz (Scan-Stagger aus `get_instance_id() % 50`);
 die Toleranz wurde 4,5 → 6,0 m geweitet (der geahndete SYSTEMATISCHE Bias maß
 −35 m und wuchs stetig — eine begrenzte Oszillation nahe der Schwelle ist das
 nicht). Deck-Ring-/Zauber-Ring-Anzeige sind UI und über den Spielstart zu prüfen.
+
+
+## Spieltest-Fix 10 — Luftschiff-Stottern beim Angriffs-Move (Halte-Hysterese)
+
+Der Zeppelin zappelte beim Heranfliegen an Gegner: knapp in Reichweite → anhalten
+→ Ministück vor → anhalten usw. **Zwei zusammenwirkende Ursachen** in
+`scripts/units/airship.gd`:
+
+1. **Kein Suppress der Basis-Kampf-KI.** Das Luftschiff überschrieb `_engage_on_sight`
+   **nicht** (anders als Feuerramme/Katapult). `super.tick()` lief also
+   `Unit._tick_idle`/`_tick_move` → `_engage_on_sight` → `_begin_attack` (ein
+   Nahkampf-Anrück-Treiber) und kämpfte JEDEN Tick mit `_tick_auto_engage` um die
+   Steuerung. Fix: `Airship._engage_on_sight()` gibt jetzt `false` zurück —
+   sämtliche Steuerung läuft über `_tick_auto_engage` (+ `_ordered_unit`) und die
+   Deck-Crew. Explizite Angriffsbefehle (`order_attack`) nutzen ohnehin
+   `_ordered_unit`/`_fly_into_reach`, unberührt.
+2. **Mikro-Positionierung in `_tick_auto_engage`.** Es rückte im Stand zum
+   jeweils nächsten Gegner nach, sobald dessen Distanz die Stopplinie
+   (`reach - 0.2`) um Zentimeter überschritt — bei ständigem Zielwechsel im Pulk =
+   Dauer-Hüpfen. Fix: **Halte-Hysterese** — solange IDLE und **irgendein** Gegner in
+   der schiffszentrierten `reach` ist (oder ein Deck-Prediger channelt), hält das
+   Schiff; erst bei leerer Reichweiten-Blase rückt es zum nächsten Cluster nach.
+
+Kein Per-Crew-Reichweiten-Hack nötig (Balance-neutral): Deck-Crew feuert/bekehrt
+bereits schiffszentriert, die reach ist also ohnehin geteilt. Ein von einem
+Deck-Feuerkrieger zurückgeschleuderter Einzelgegner wird weiterhin korrekt
+verfolgt (legitime Jagd, kein Stottern).
+
+**Tests:** +1 (`test_idle_ship_holds_position_no_stutter`: Prediger-Schiff hält im
+Stand, kein MOVE-Toggle, kein Vorwärtsdrift). Suite **2109/2109 grün**, Ladecheck
+ok. Funktionale Prüfung (sauberes Heranfliegen, einmal stoppen) durch Nutzer
+ausstehend.

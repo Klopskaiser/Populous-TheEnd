@@ -478,6 +478,36 @@ func test_passive_move_never_stops_and_warrior_ship_never_engages() -> void:
 	_free_world(w)
 
 
+func test_idle_ship_holds_position_no_stutter() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
+	_board(w, ship, PREACHER_SCENE)
+	# Convertible enemy well inside the deck convert reach (5 + 3): the standing
+	# ship must HOLD and convert it — never inch forward or toggle into MOVE
+	# (the attack-move stutter, caused by re-closing on a target that drifts a
+	# few cm past the stop line). A preacher target sits still (no knockback), so
+	# any hull movement here is the stutter itself. Deliberately NOT a firewarrior
+	# ship: its fireballs knock the lone target out of reach, which is a genuine
+	# (correct) chase, not the bug under test.
+	var victim: Unit = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, Vector3(ship.position.x + 4.0, 0.0, ship.position.z))
+	var start_x: float = ship.position.x
+	var moved: float = 0.0
+	var move_ticks: int = 0
+	var engaged: bool = false
+	for i in range(200):
+		_tick_world(w)
+		moved = maxf(moved, absf(ship.position.x - start_x))
+		if ship.state == Unit.State.MOVE:
+			move_ticks += 1
+		engaged = engaged or victim.state == Unit.State.SIT or victim.tribe_id == 0
+	check(move_ticks == 0,
+		"the standing ship never re-enters MOVE while an enemy stays in reach (no stutter)")
+	check(moved < 0.6, "the ship holds position instead of inching forward (drift %.2f m)" % moved)
+	check(engaged, "the deck preacher engages the in-reach enemy from a standstill")
+	_free_world(w)
+
+
 func test_preacher_ship_closes_in_and_converts_on_attack_move() -> void:
 	var w: Dictionary = _make_world()
 	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(50, 60)))
