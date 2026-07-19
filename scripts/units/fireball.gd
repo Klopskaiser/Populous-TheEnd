@@ -132,7 +132,12 @@ func _impact() -> void:
 	if not _target_alive() or position.distance_to(
 			target.position + Vector3(0.0, TARGET_HEIGHT, 0.0)) > HIT_RANGE * 2.0:
 		return
-	target.take_damage(Unit.FIREBALL_DAMAGE, shooter)
+	# Targets in the air (airship deck crew, whirled units) take DOUBLE damage
+	# — fire feeds on the wind (user spec).
+	var dmg: int = Unit.FIREBALL_DAMAGE
+	if target.is_airborne():
+		dmg *= Balance.FIREWARRIOR_AIRBORNE_MULT
+	target.take_damage(dmg, shooter)
 	# Impact sound via the Events bus (absent in headless tests).
 	if is_inside_tree():
 		var events: Node = get_node_or_null("/root/Events")

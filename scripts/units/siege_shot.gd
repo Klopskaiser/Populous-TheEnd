@@ -26,6 +26,12 @@ const SPEED: float = 12.0
 const ARC_HEIGHT: float = 6.0          # high mortar arc
 const SHOCK_RADIUS: float = Balance.SIEGE_SHOT_SHOCK_RADIUS
 const SHOCK_DAMAGE: int = Balance.SIEGE_SHOT_SHOCK_DAMAGE
+## Air intercept (vs airships): the stone hits when it passes this close to a
+## hull (XZ + height window); the air burst has DOUBLE the ground area
+## (radius x sqrt(factor)) and produces NO lava and no building damage.
+const AIR_INTERCEPT_RADIUS: float = Balance.SIEGE_SHOT_AIR_INTERCEPT_RADIUS
+const AIR_INTERCEPT_HEIGHT: float = 2.0
+const AIR_SPLASH_FACTOR: float = Balance.SIEGE_SHOT_AIR_SPLASH_FACTOR
 ## Slope thresholds (rise per metre) for the roll chance bands.
 const SLOPE_MILD: float = 0.2
 const SLOPE_STEEP: float = 0.6
@@ -40,6 +46,9 @@ const LAVA_RADIUS: float = 0.8
 var done: bool = false
 var tribe_id: int = 0
 var target_pos: Vector3 = Vector3.ZERO
+## True when the shot was AIMED at an airship: a miss fizzles in the air
+## (no phantom lava on the ground far below the dodged hull).
+var air_shot: bool = false
 var shooter = null   # untyped: the engine may sink mid-flight
 var unit_manager: UnitManager = null
 var terrain_data: TerrainData = null
@@ -73,18 +82,53 @@ func tick(delta: float) -> void:
 	var t: float = clampf(_travelled / _total, 0.0, 1.0)
 	position = _start.lerp(target_pos, t)
 	position.y += sin(t * PI) * ARC_HEIGHT
+	if _check_air_intercept():
+		return
 	_tick_trail(delta)
 	if t >= 1.0:
+		if air_shot:
+			done = true   # the hull dodged — the stone fizzles in the air
+			_clear_trail()
+			return
 		_impact()
+
+
+## Enemy airship hull passing close to the stone: the shot bursts in the air
+## — one hull hit plus a shockwave with DOUBLE the ground area centred on the
+## hull (deck crew and units under the ship take it via the flat radius); no
+## lava, no building damage. Returns true when it intercepted.
+func _check_air_intercept() -> bool:
+	if unit_manager == null:
+		return false
+	for u in unit_manager.get_units_in_radius(position, AIR_INTERCEPT_RADIUS):
+		if not (u is Airship) or u.state == Unit.State.DEAD or u.tribe_id == tribe_id:
+			continue
+		if absf(u.position.y - position.y) > AIR_INTERCEPT_HEIGHT:
+			continue
+		done = true
+		_clear_trail()
+		if is_inside_tree():
+			var audio: Node = get_node_or_null("/root/AudioManager")
+			if audio != null:
+				audio.play_sfx(&"siege_impact", u.position)
+		var center: Vector3 = u.position
+		(u as Airship).register_hull_hit(position)
+		_shockwave(center, SHOCK_RADIUS * sqrt(AIR_SPLASH_FACTOR))
+		return true
+	return false
+
+
+func _clear_trail() -> void:
+	for ember in _trail:
+		if is_instance_valid(ember):
+			ember.queue_free()
+	_trail.clear()
 
 
 func _impact() -> void:
 	done = true
 	# The shot node is freed right after `done` — take the tail with it.
-	for ember in _trail:
-		if is_instance_valid(ember):
-			ember.queue_free()
-	_trail.clear()
+	_clear_trail()
 	if is_inside_tree():
 		var audio: Node = get_node_or_null("/root/AudioManager")
 		if audio != null:
@@ -109,7 +153,7 @@ func _impact() -> void:
 		_spawn_lava(false)   # the shot already did the building damage
 	else:
 		_spawn_lava(true)
-	_shockwave()
+	_shockwave(target_pos, SHOCK_RADIUS)
 
 
 ## Building whose (slightly grown) footprint contains the impact cell — the
@@ -150,8 +194,9 @@ func _spawn_lava(wreck_buildings: bool) -> void:
 
 ## 1/4 brave life to every unit in the radius (friendly fire — positioning is
 ## tactical); enemies are knocked over with a slope-dependent roll chance.
-func _shockwave() -> void:
-	for u in unit_manager.get_units_in_radius(target_pos, SHOCK_RADIUS):
+## The air intercept passes the hull position and a widened radius.
+func _shockwave(center: Vector3, radius: float) -> void:
+	for u in unit_manager.get_units_in_radius(center, radius):
 		if u.state == Unit.State.DEAD or u == shooter:
 			continue
 		var attacker = shooter if (shooter != null and is_instance_valid(shooter)) else null
@@ -160,8 +205,8 @@ func _shockwave() -> void:
 			continue
 		if u.tribe_id == tribe_id:
 			continue   # allies take the hit but are not bowled over
-		var away: Vector3 = Vector3(u.position.x - target_pos.x, 0.0,
-			u.position.z - target_pos.z)
+		var away: Vector3 = Vector3(u.position.x - center.x, 0.0,
+			u.position.z - center.z)
 		if away.length_squared() < 0.000001:
 			away = Vector3(1, 0, 0).rotated(Vector3.UP, randf() * TAU)
 		var slope: float = _slope_at(u.position)

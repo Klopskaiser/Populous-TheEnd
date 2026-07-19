@@ -952,8 +952,8 @@ func corpse_sink_depth() -> float:
 ## Small instant displacement along dir (played out via the knockback system);
 ## used by fireball knockback and melee shoves.
 func displace(dir: Vector3, dist: float) -> void:
-	if state == State.DEAD:
-		return
+	if state == State.DEAD or rides_airborne():
+		return   # deck passengers are carried by the airship, never shoved
 	var flat: Vector3 = Vector3(dir.x, 0.0, dir.z)
 	if flat.length_squared() < 0.000001:
 		return
@@ -1057,8 +1057,8 @@ func fall_off_cliff(horizontal_dir: Vector3, drop: float) -> void:
 ## gets back up (phase 8.2 — see _resume_after_stumble).
 func start_roll(dir: Vector3, duration: float = MINI_ROLL_DURATION,
 		initial_speed: float = 0.0, stumble: bool = false) -> void:
-	if state == State.DEAD:
-		return
+	if state == State.DEAD or rides_airborne():
+		return   # nobody tumbles across an airship deck
 	var flat: Vector3 = Vector3(dir.x, 0.0, dir.z)
 	if flat.length_squared() > 0.000001:
 		roll_dir = flat.normalized()
@@ -1230,8 +1230,8 @@ func _resume_after_stumble(prev: int) -> void:
 ## horizontal speed (momentum roll) until it decays; landing or rolling into
 ## water kills instantly. Another throw mid-flight stacks onto the velocity.
 func throw_airborne(velocity: Vector3, fall_damage: int = 0) -> void:
-	if state == State.DEAD:
-		return
+	if state == State.DEAD or rides_airborne():
+		return   # deck passengers stay aboard (the ship's explode() drops them)
 	if state == State.THROWN:
 		_throw_velocity += velocity
 		_throw_fall_damage = maxi(_throw_fall_damage, fall_damage)
@@ -1672,7 +1672,7 @@ func _tick_crew(delta: float) -> void:
 		return
 	# Not yet aboard: walk over to board — at the crew member's own speed.
 	if not siege_boarded:
-		if _flat_dist(position, engine.position) <= engine.BOARD_RANGE:
+		if _flat_dist(position, engine.position) <= engine.board_range:
 			engine.on_crew_boarded(self)
 			if siege_engine != engine:
 				return   # boarding was refused (enemy took it meanwhile)

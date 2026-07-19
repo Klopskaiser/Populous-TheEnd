@@ -336,22 +336,52 @@ func order_man_hut(units: Array[Unit], hut: Hut) -> void:
 func order_attack(units: Array[Unit], enemy: Unit) -> void:
 	if enemy == null or not is_instance_valid(enemy) or enemy.state == Unit.State.DEAD:
 		return
-	if not enemy.is_targetable():
-		return   # siege engines cannot be attacked directly — only their crew
+	# Vehicles are not targetable directly — only their crew. Exception: an
+	# AIRSHIP may be ordered as a target (catapults intercept its hull); each
+	# unit's _begin_attack/_may_target_vehicle filters who actually engages.
+	if not enemy.is_targetable() and not (enemy is Airship):
+		return
 	for unit in units:
 		if unit == null or not is_instance_valid(unit) or unit.state == Unit.State.DEAD:
 			continue
 		if unit.tribe_id == enemy.tribe_id:
 			continue   # never attack own tribe
 		var target: Unit = enemy
+		# Airship target: only units that may aim at the hull (catapults) keep
+		# it; everyone else is redirected onto the ship's boarded crew — the
+		# firewarrior shoots the passengers out one by one (user spec).
+		if enemy is Airship and not unit._may_target_vehicle(enemy):
+			var member: Unit = _nearest_airship_crew(enemy as Airship, unit)
+			if member == null:
+				continue   # nothing a non-catapult can do against an empty hull
+			target = member
 		# Ranged units (firewarriors) all fire at the ordered target — the
 		# 3-attacker melee cap and its redistribution only apply to brawlers.
-		if not unit._is_ranged() \
+		elif not unit._is_ranged() \
 				and enemy.active_melee_attacker_count() >= Unit.MAX_MELEE_ATTACKERS:
 			var alt: Unit = _nearest_free_enemy_near(enemy, unit)
 			if alt != null:
 				target = alt
 		unit.order_attack(target)
+
+
+## Nearest boarded crew member of `ship` that `unit` may attack (ranged only —
+## deck passengers are airborne and out of melee reach).
+func _nearest_airship_crew(ship: Airship, unit: Unit) -> Unit:
+	if not unit._is_ranged():
+		return null
+	var best: Unit = null
+	var best_d: float = INF
+	for m in ship.crew:
+		if m == null or not is_instance_valid(m) or m.state == Unit.State.DEAD \
+				or not m.siege_boarded or not m.is_targetable():
+			continue
+		var d: float = Vector2(unit.position.x - m.position.x,
+			unit.position.z - m.position.z).length()
+		if d < best_d:
+			best_d = d
+			best = m
+	return best
 
 
 ## Nearest enemy (other than `avoid`) of `unit` that still has a free melee slot,

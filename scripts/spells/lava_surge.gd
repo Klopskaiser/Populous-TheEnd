@@ -80,8 +80,8 @@ func _ignite_covered_units() -> void:
 	if unit_manager == null:
 		return
 	for u in unit_manager.get_units_in_radius(position, _radius):
-		if u.state == Unit.State.DEAD or u.state == Unit.State.THROWN:
-			continue   # airborne units pass over the lava
+		if u.state == Unit.State.DEAD or u.is_airborne():
+			continue   # airborne units (thrown, airship deck) pass over the lava
 		u.ignite(position)
 	# Lava also sets trees and wood piles alight (phase 7d) — like the lava flow.
 	if unit_manager.tree_manager != null:

@@ -86,6 +86,7 @@ func tick(delta: float) -> void:
 		_shred_trees_and_scatter_piles()
 	_tick_riders(delta)
 	_affect_siege_engines(delta)
+	_affect_airships()
 
 
 ## `_drift` is a unit DIRECTION; the actual speed ramps with age: 1 s parked
@@ -206,7 +207,7 @@ func _affect_siege_engines(delta: float) -> void:
 		return
 	var near_now: Dictionary = {}
 	for u in unit_manager.get_units_in_radius(position, SIEGE_NEAR_RADIUS):
-		if not (u is CrewedVehicle) or u.state == Unit.State.DEAD:
+		if not (u is CrewedVehicle) or u is Airship or u.state == Unit.State.DEAD:
 			continue
 		near_now[u] = true
 		var t: float = float(_siege_timers.get(u, 0.0)) + delta
@@ -222,6 +223,21 @@ func _affect_siege_engines(delta: float) -> void:
 			if is_instance_valid(engine):
 				(engine as CrewedVehicle).set_tornado_lift(0.0)
 			_siege_timers.erase(engine)
+
+
+## Airship contact (shadow within the funnel): no lift phase — the vortex
+## tears the ship apart INSTANTLY (user spec); the explosion hurls the
+## passengers down and two wood chunks scatter like any whirled-up wood.
+func _affect_airships() -> void:
+	if unit_manager == null:
+		return
+	for u in unit_manager.get_units_in_radius(position, SIEGE_NEAR_RADIUS):
+		if not (u is Airship) or u.state == Unit.State.DEAD:
+			continue
+		var at: Vector3 = Vector3(u.position.x, position.y, u.position.z)
+		(u as Airship).explode()
+		for i in range(SIEGE_WOOD_CHUNKS):
+			_spawn_debris(at, 1)
 
 
 ## Bursts a lifted vehicle: it releases its crew and is destroyed, and two

@@ -15,10 +15,7 @@ class_name CrewedVehicle extends Unit
 ##
 ## GDScript cannot override parent constants, so everything that DIFFERS per
 ## vehicle is an instance var assigned in each subclass _init(); everything
-## shared stays a const here (unit.gd reads `engine.BOARD_RANGE` dynamically).
-
-## A crew member counts as boarded/serving within this range of the vehicle.
-const BOARD_RANGE: float = Balance.SIEGE_BOARD_RANGE
+## shared stays a const here.
 ## Boarded members straying farther than this (self-defence chases) are lost.
 const CREW_LEASH: float = Balance.SIEGE_CREW_LEASH
 ## Burn time after a fire-spell/lava hit, then the wreck sinks.
@@ -36,6 +33,9 @@ const C_WOOD_DARK: Color = Color(0.3, 0.2, 0.1)
 const C_METAL: Color = Color(0.45, 0.45, 0.48)
 
 ## Per-vehicle knobs (constants cannot be overridden — see class doc).
+## A crew member counts as boarded/serving within this range of the vehicle
+## (the airship: flat distance to its ground shadow).
+var board_range: float = Balance.SIEGE_BOARD_RANGE
 var max_crew: int = Balance.SIEGE_MAX_CREW
 var min_move_crew: int = Balance.SIEGE_MIN_MOVE_CREW
 var min_fire_crew: int = Balance.SIEGE_MIN_FIRE_CREW

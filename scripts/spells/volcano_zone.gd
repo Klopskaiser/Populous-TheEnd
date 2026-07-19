@@ -88,8 +88,8 @@ func _ignite_covered_units() -> void:
 	if unit_manager == null:
 		return
 	for u in unit_manager.get_units_in_radius(position, LAVA_REACH):
-		if u.state == Unit.State.DEAD or u.state == Unit.State.THROWN:
-			continue
+		if u.state == Unit.State.DEAD or u.is_airborne():
+			continue   # airborne units (thrown, airship deck) pass over the lava
 		u.ignite(position)
 
 

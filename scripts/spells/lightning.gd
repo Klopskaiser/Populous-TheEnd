@@ -37,6 +37,14 @@ func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:
 		building.apply_destruction_stages(BUILDING_STAGES)
 		_spawn_beam(building.center_world(), ctx)
 		return true
+	# Enemy AIRSHIP over the strike point: the bolt kills it instantly (user
+	# spec) — it takes priority over a ground victim under its shadow. The
+	# radius query is flat, so the shadow position matches.
+	var ship: Airship = _airship_at(tribe, target, ctx)
+	if ship != null:
+		_spawn_beam(ship.position, ctx)
+		ship.explode()
+		return true
 	var victim: Unit = _nearest_enemy(tribe, target, ctx)
 	if victim == null:
 		# No unit/building, but the bolt still torched flammables -> a hit.
@@ -72,6 +80,22 @@ func _building_at(tribe: Tribe, target: Vector3, ctx: SpellContext) -> Building:
 		if b.footprint_rect().grow(1).has_point(cell):
 			return b
 	return null
+
+
+## Nearest enemy airship whose shadow lies within the strike radius.
+func _airship_at(tribe: Tribe, target: Vector3, ctx: SpellContext) -> Airship:
+	if ctx.unit_manager == null:
+		return null
+	var best: Airship = null
+	var best_d: float = TARGET_RADIUS
+	for u in ctx.unit_manager.get_units_in_radius(target, TARGET_RADIUS):
+		if not (u is Airship) or u.state == Unit.State.DEAD or u.tribe_id == tribe.id:
+			continue
+		var d: float = Vector2(u.position.x - target.x, u.position.z - target.z).length()
+		if d <= best_d:
+			best_d = d
+			best = u
+	return best
 
 
 func _nearest_enemy(tribe: Tribe, target: Vector3, ctx: SpellContext) -> Unit:

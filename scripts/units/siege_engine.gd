@@ -239,6 +239,9 @@ func _launch_shot(target_pos: Vector3) -> void:
 	var shot: SiegeShot = SiegeShot.new()
 	shot.setup(tribe_id, position, target_pos, self, path_service,
 		terrain_data, building_manager)
+	# Aimed at an airship hull: a miss fizzles in the air instead of dropping
+	# phantom lava on the ground far below the dodged ship.
+	shot.air_shot = attack_target is Airship
 	path_service.register_projectile(shot)
 	# Dedicated launch sound when the file exists; otherwise the shared
 	# synthesised "throw" whoosh (pre-asset behaviour).

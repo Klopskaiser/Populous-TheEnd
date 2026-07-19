@@ -210,3 +210,16 @@ func _throw_fireball_at_building(building) -> void:
 	ball.terrain_data = terrain_data
 	path_service.register_projectile(ball)
 	_emit_combat_hit(&"throw")
+
+
+## Building shot from a fixed origin (airship deck): the sibling of fire_from
+## for building targets — the ball leaves the deck slot, not the (pinned)
+## ground position.
+func fire_at_building_from(origin: Vector3, building) -> void:
+	if path_service == null or building == null or not is_instance_valid(building):
+		return
+	var ball: Fireball = Fireball.new()
+	ball.setup_building(self, building, origin)
+	ball.terrain_data = terrain_data
+	path_service.register_projectile(ball)
+	_emit_combat_hit(&"throw")

@@ -61,6 +61,19 @@ func order_cast(spell: Spell, target: Vector3, ctx: SpellContext) -> bool:
 			_emit_spell_cast(spell, target)
 			return true
 		return false
+	# Riding an airship deck: cast straight from the deck with +3 m range —
+	# but only while the ship is STANDING (like all deck combat). Out of range
+	# or mid-flight = the cast fails silently (charge kept).
+	if rides_airborne():
+		var ship = siege_engine
+		if ship.state == State.MOVE:
+			return false
+		if _flat_dist(ship.position, target) > spell.cast_range + Balance.AIRSHIP_RANGE_BONUS:
+			return false
+		if spell.cast(tribe, target, ctx):
+			_emit_spell_cast(spell, target)
+			return true
+		return false
 	if not can_take_orders():
 		return false
 	_end_attack()
