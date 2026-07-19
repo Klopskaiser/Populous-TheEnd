@@ -1020,9 +1020,6 @@ func _setup_ground_shadow(root: Node3D) -> void:
 		return
 	blob.mesh = UnitRenderer.make_blob_mesh(Vector2(2.4, 6.0))
 	_ground_shadow = blob
-	# The airship drives this shadow itself (hull is 12 m up, SEA_LEVEL clamp):
-	# clear the base ref so CrewedVehicle._tick_visual doesn't fight over it.
-	_blob_shadow = null
 
 
 ## Gentle hover bob + ground shadow follow; the base handles heading. The hull
@@ -1036,7 +1033,4 @@ func _tick_visual(delta: float) -> void:
 	if _ground_shadow != null and terrain_data != null:
 		var ground: float = maxf(terrain_data.get_height(position.x, position.z),
 			TerrainData.SEA_LEVEL)
-		# Lay the shadow flat onto the slope (tilt to the terrain normal).
-		_ground_shadow.global_transform = Transform3D(
-			UnitRenderer.basis_from_up(terrain_data.surface_normal(position.x, position.z)),
-			Vector3(position.x, ground + 0.05, position.z))
+		_ground_shadow.global_position = Vector3(position.x, ground + 0.05, position.z)
