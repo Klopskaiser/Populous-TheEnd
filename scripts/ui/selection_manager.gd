@@ -309,22 +309,30 @@ func _box_select(rect: Rect2) -> void:
 	_last_box_select_ms = Time.get_ticks_msec()
 
 
-## Screen rect the unit's billboard sprite covers (feet->head projected,
-## sprite aspect for the width, clamped to a minimum clickable size).
+## Screen rect the unit's clickable body covers (feet->head projected,
+## width from the unit's pick size, clamped to a minimum clickable size).
 ## Zero-height rect when the unit is behind the camera.
 ## The head offset runs along the CAMERA up axis, not world up: the sprite is a
 ## camera-facing billboard drawn screen-aligned at full height (UnitRenderer),
 ## so a world-vertical offset would foreshorten under the tilted camera and
 ## shrink the pick rect down to the feet — the whole body must be clickable.
+## Vehicles override Unit.pick_size_m() with their hull dimensions so the
+## whole 3D model is clickable (user feedback: the high-hovering airship was
+## fiddly to hit with the sprite-sized rect).
 func _unit_screen_rect(unit: Unit, camera: Camera3D) -> Rect2:
+	var size_m: Vector2 = unit.pick_size_m()
+	if size_m.y <= 0.0:
+		size_m = Vector2(SPRITE_HEIGHT_M * SPRITE_ASPECT, SPRITE_HEIGHT_M)
 	var feet: Vector3 = unit.global_position
-	var head: Vector3 = feet + camera.global_transform.basis.y * SPRITE_HEIGHT_M
+	var head: Vector3 = feet + camera.global_transform.basis.y * size_m.y
 	if camera.is_position_behind(feet) or camera.is_position_behind(head):
 		return Rect2()
 	var p_feet: Vector2 = camera.unproject_position(feet)
 	var p_head: Vector2 = camera.unproject_position(head)
-	var height: float = maxf(absf(p_feet.y - p_head.y), MIN_PICK_SIZE_PX)
-	var half_w: float = maxf(height * SPRITE_ASPECT, MIN_PICK_SIZE_PX) * 0.5
+	var height_px: float = absf(p_feet.y - p_head.y)
+	var px_per_m: float = height_px / size_m.y
+	var height: float = maxf(height_px, MIN_PICK_SIZE_PX)
+	var half_w: float = maxf(px_per_m * size_m.x, MIN_PICK_SIZE_PX) * 0.5
 	var cx: float = (p_feet.x + p_head.x) * 0.5
 	var top: float = minf(p_feet.y, p_head.y)
 	return Rect2(cx - half_w, top, half_w * 2.0, height)

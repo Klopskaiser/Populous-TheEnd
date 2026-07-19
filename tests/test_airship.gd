@@ -401,6 +401,53 @@ func test_lava_never_reaches_the_deck() -> void:
 	_free_world(w)
 
 
+# --- UI helpers (range ring, pick size, group boarding) -----------------------------------------
+
+func test_range_ring_and_pick_size() -> void:
+	check_near(RangeRenderer.range_for_kind(&"airship"),
+		Firewarrior.FIRE_RANGE + Balance.AIRSHIP_RANGE_BONUS,
+		"the airship shows its deck fire reach (8 + 3)")
+	check(RangeRenderer._color_for(&"airship") != Color.WHITE,
+		"the airship ring has its own colour")
+	var ship: Airship = Airship.new()
+	check(ship.pick_size_m().x >= 6.0 and ship.pick_size_m().y >= 3.0,
+		"the airship's pick rect covers the whole balloon")
+	var ram: FireRam = FireRam.new()
+	check(ram.pick_size_m().y > 1.44, "ground vehicles get a hull-sized pick rect")
+	var brave_probe: Brave = Brave.new()
+	check(brave_probe.pick_size_m() == Vector2.ZERO,
+		"foot units keep the default sprite pick size")
+	ship.free()
+	ram.free()
+	brave_probe.free()
+
+
+func test_group_order_fills_free_slots_only() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
+	# Group like the reported case: the vehicle itself plus MORE people than
+	# free slots — order_crew must fill up the crew and leave the rest alone.
+	var group: Array[Unit] = [ship]
+	for i in range(8):
+		group.append(w.unit_manager.spawn_unit(BRAVE_SCENE, 0,
+			Vector3(ship.position.x + 2.0 + float(i), 0.0, ship.position.z)))
+	w.commands.order_crew(group, ship)
+	var recruits: int = 0
+	for u in group:
+		if u != ship and u.siege_engine == ship:
+			recruits += 1
+	check(recruits == Airship.MAX_CREW,
+		"exactly max_crew units are sent aboard (vehicle itself never crews)")
+	check(ship.crew_count() == Airship.MAX_CREW, "the crew list is filled up")
+	# The two surplus braves were not interrupted.
+	var untouched: int = 0
+	for u in group:
+		if u != ship and u.siege_engine == null:
+			untouched += 1
+	check(untouched == 2, "surplus units keep doing what they did")
+	_free_world(w)
+
+
 # --- Explosion, unload, drift ------------------------------------------------------------------
 
 func test_explosion_hurls_passengers_down() -> void:

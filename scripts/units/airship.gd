@@ -82,6 +82,12 @@ func crew_rides_on_deck() -> bool:
 	return true
 
 
+## The whole balloon + gondola is clickable (user feedback: the default
+## sprite-sized pick rect made the high-hovering ship fiddly to select).
+func pick_size_m() -> Vector2:
+	return Vector2(6.0, 3.5)
+
+
 ## The airship itself never attacks — its CREW does (deck combat tick), so
 ## the base auto-aggro state machine stays off.
 func _is_combatant() -> bool:

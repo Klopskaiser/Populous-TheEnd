@@ -253,14 +253,31 @@ func cast_spell(tribe: Tribe, spell_id: StringName, target: Vector3) -> bool:
 ## Assigns units to a crewed vehicle's crew (right-click on the vehicle, 7f).
 ## The vehicle validates who may crew it (accepts_crew_unit) and
 ## tribe/capacity (unmanned vehicles accept any tribe — takeover on boarding).
+## Only as many units as there are FREE slots are sent (nearest first) — the
+## rest of the group keeps doing what it did instead of being interrupted for
+## a boarding the vehicle would refuse anyway.
 func order_crew(units: Array[Unit], engine: Unit) -> void:
 	if engine == null or not is_instance_valid(engine) \
 			or engine.state == Unit.State.DEAD or not (engine is CrewedVehicle):
 		return
+	var vehicle: CrewedVehicle = engine as CrewedVehicle
+	var free: int = vehicle.max_crew - vehicle.crew_count()
+	var candidates: Array[Unit] = []
 	for unit in units:
 		if unit == null or not is_instance_valid(unit) or unit.state == Unit.State.DEAD:
 			continue
+		if unit.siege_engine == engine:
+			continue   # already (walking to be) crew of this vehicle
+		candidates.append(unit)
+	candidates.sort_custom(func(a: Unit, b: Unit) -> bool:
+		return a.position.distance_squared_to(engine.position) \
+			< b.position.distance_squared_to(engine.position))
+	for unit in candidates:
+		if free <= 0:
+			break
 		unit.order_crew(engine)
+		if unit.siege_engine == engine:
+			free -= 1
 
 
 ## Assault order on an enemy building (7f siege bombardment + 7g melee storm /

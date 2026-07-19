@@ -313,6 +313,12 @@ var garrison_target = null
 ## True once this unit is HOUSED inside the tower (removed from the world). It
 ## then accepts no orders — the only way out is ejection (eject / storm / damage).
 var garrison_housed: bool = false
+## Maintained by UnitManager.register/unregister: false while the unit lives
+## INSIDE a building (trainee, forester/workshop worker, raider, tower crew).
+## Stale attack_target references onto such a unit must drop it (it would be
+## struck invisibly at its old spot and could be yanked out of the building's
+## bookkeeping without ever being re-registered — the "vanished trainee" bug).
+var in_world: bool = true
 ## True while this unit stands at the tower entrance waiting to be admitted. The
 ## tower admits it on ITS tick (not here) so the units list is not mutated
 ## mid-iteration (same rationale as the training queue).
@@ -464,11 +470,12 @@ func _is_ranged() -> bool:
 
 
 ## False for units that can never be attacked directly (the siege engine:
-## attackers hit its crew instead) or that are currently a protected reserve
-## (tower crew, phase 7h — safe from fireballs/melee/conversion until ejected).
+## attackers hit its crew instead), that are currently a protected reserve
+## (tower crew, phase 7h — safe from fireballs/melee/conversion until ejected)
+## or that left the live world into a building (in_world = false).
 ## Filtered in every enemy scan/order.
 func is_targetable() -> bool:
-	return not garrison_housed
+	return in_world and not garrison_housed
 
 
 ## Drawn via the central sprite MultiMesh (UnitRenderer). The siege engine
@@ -502,6 +509,14 @@ func is_airborne() -> bool:
 ## a big ring that visually encloses the vehicle AND its crew.
 func selection_ring_scale() -> float:
 	return 1.0
+
+
+## World-space clickable size (width x height, metres) for the screen-space
+## pick rect (SelectionManager). ZERO means "the default billboard sprite
+## size"; vehicles override this with their hull dimensions so their whole
+## 3D model is clickable.
+func pick_size_m() -> Vector2:
+	return Vector2.ZERO
 
 
 ## Blinks a short-lived red ring at this unit's feet (2x on/off) — feedback
@@ -1209,7 +1224,7 @@ func _resume_after_stumble(prev: int) -> void:
 			else:
 				_set_state(State.IDLE)
 		State.ATTACK:
-			if (_target_valid(attack_target) and attack_target.tribe_id != tribe_id) \
+			if (_unit_target_attackable(attack_target) and attack_target.tribe_id != tribe_id) \
 					or _building_target_valid():
 				_set_state(State.ATTACK)
 			else:
@@ -1743,8 +1758,9 @@ func _engage_on_sight(delta: float) -> bool:
 ## second row keeps its throttled look for a fight with room.
 func _tick_attack(delta: float) -> void:
 	# A converted target became friendly mid-fight -> drop it (or fall back to a
-	# building assault, phase 7g).
-	if not _target_valid(attack_target) or attack_target.tribe_id == tribe_id:
+	# building assault, phase 7g). Same for a target that left the live world
+	# (admitted into a building) or became a protected reserve.
+	if not _unit_target_attackable(attack_target) or attack_target.tribe_id == tribe_id:
 		_tick_no_unit_target(delta)
 		return
 	if _breaks_off_vs_sitting(attack_target):
@@ -2694,6 +2710,15 @@ func _flat_dist(a: Vector3, b: Vector3) -> float:
 ## Untyped param (freed-safe): true while the target is a live, non-dead unit.
 func _target_valid(target) -> bool:
 	return target != null and is_instance_valid(target) and target.state != State.DEAD
+
+
+## _target_valid PLUS targetable: an ongoing attack must also drop a target
+## that left the live world (building occupant) or turned into a protected
+## reserve — otherwise the attacker keeps striking an invisible unit at its old
+## position. Vehicles stay attackable for the units allowed to target them.
+func _unit_target_attackable(target) -> bool:
+	return _target_valid(target) \
+		and (target.is_targetable() or _may_target_vehicle(target))
 
 
 ## True at most every TARGET_SEARCH_INTERVAL (staggered per unit) — scans are

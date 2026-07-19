@@ -13,6 +13,7 @@ const C_FIREWARRIOR: Color = Color(1.0, 0.55, 0.15, 0.8)
 const C_PREACHER: Color = Color(0.65, 0.45, 1.0, 0.8)
 const C_SIEGE: Color = Color(1.0, 0.30, 0.20, 0.85)
 const C_SIEGE_MIN: Color = Color(1.0, 0.30, 0.20, 0.4)
+const C_AIRSHIP: Color = Color(0.95, 0.85, 0.35, 0.8)
 
 var _unit_manager: UnitManager = null
 var _player_id: int = 0
@@ -41,6 +42,9 @@ static func range_for_kind(kind: StringName) -> float:
 			return SiegeEngine.FIRE_RANGE
 		&"fireram":
 			return FireRam.FIRE_RANGE
+		&"airship":
+			# The deck's best combat reach (firewarriors: 8 + 3 deck bonus).
+			return Firewarrior.FIRE_RANGE + Balance.AIRSHIP_RANGE_BONUS
 	return 0.0
 
 
@@ -98,4 +102,6 @@ static func _color_for(kind: StringName) -> Color:
 			return C_PREACHER
 		&"siege", &"fireram":
 			return C_SIEGE
+		&"airship":
+			return C_AIRSHIP
 	return Color.WHITE

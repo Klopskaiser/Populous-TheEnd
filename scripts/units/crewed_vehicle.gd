@@ -120,6 +120,12 @@ func selection_ring_scale() -> float:
 	return vehicle_ring_scale
 
 
+## The whole hull is clickable, not just a sprite-sized sliver (the ground
+## vehicles' 3D models are ~2 m tall and ~2 m long).
+func pick_size_m() -> Vector2:
+	return Vector2(2.6, 2.2)
+
+
 ## The device takes no damage — attacks hit the crew. Only its specific
 ## destruction paths (fire, tornado, water, terrain rip) kill it.
 func take_damage(_amount: int, _attacker = null) -> void:
