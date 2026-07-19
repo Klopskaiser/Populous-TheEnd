@@ -4919,3 +4919,53 @@ Braves müssen während des Wirtschafts-Churns sofort reagieren).
 **Manuelle Prüfung durch Nutzer ausstehend:** Langzeittest Seenland-Skirmish
 mit 3 KIs (10+ min, FPS-Anzeige; Erdbeben/Terrain-Verformung; Truppbefehle
 müssen jederzeit sofort greifen — Phase-8-Klasse).
+
+## Bugfix — Verschwundene Trainees bei Kampf am Trainingsgebäude (2026-07-19, Nutzerreport)
+
+**Symptom:** Wird an einem Trainingsgebäude gekämpft, während Braves in der
+Schlange stehen, kommt nach dem Einlassen des ersten Braves niemand mehr aus
+dem Gebäude — die eintretenden Braves verschwinden spurlos.
+
+**Ursache (Kette):** Ein angegriffener Schlangen-Brave bleibt im Zustand
+`TRAIN` und wird mitten im Kampf eingelassen (`_admit_front` prüfte nur
+`train_reached_slot`). `remove_from_world` löst zwar seine Kampfgruppe auf,
+aber die `attack_target`-Referenz des Angreifers überlebt; `_tick_attack`
+band sich per `_found_group_on` sofort neu an den unsichtbaren Trainee, der
+unverändert an seiner alten Slot-Position vor der Tür steht, und schlug
+weiter zu. Ein Schubs-Roll (`start_roll` → `_on_combat_interrupt` →
+`_interrupt_tasks` → `remove_trainee`) oder der Tod im Gebäude meldete den
+Trainee dann ab, **ohne ihn je wieder zu registrieren** → unsichtbarer,
+nie getickter Waisen-Brave (inkl. Populations-Leak, da `died`/
+`corpse_expired` beim `unregister` abgeklemmt waren). Bay frei → nächster
+Brave rein → gleiche Schleife.
+
+**Fix:**
+1. **`in_world`-Flag** (`unit.gd`, gepflegt in
+   `UnitManager.register/unregister`): `is_targetable()` ist jetzt
+   `in_world and not garrison_housed` — deckt ALLE Gebäude-Insassen ab
+   (Trainee, Förster-/Werkstatt-Arbeiter, Raider, Turmbesatzung). Neuer
+   Helper `Unit._unit_target_attackable()` (= `_target_valid` + targetbar
+   bzw. `_may_target_vehicle`) ersetzt `_target_valid` in den laufenden
+   Angriffs-Ticks (`unit.gd` `_tick_attack` + `_resume_after_stumble`,
+   `firewarrior.gd`, `siege_engine.gd`, `fire_ram.gd`): Stale-Referenzen
+   auf Einheiten außerhalb der Welt werden fallengelassen statt unsichtbar
+   verprügelt.
+2. **Sicherheitsnetz `remove_trainee`** (`training_building.gd`): Wird der
+   Insasse aus dem Trainings-Slot gerissen (Kampf-Interrupt, Tod), wird er
+   an der Gebäudekante re-registriert statt zu verwaisen; bei Tod im
+   Gebäude wird die verpasste Stammes-Austragung nachgeholt.
+3. **Zerstörung wirft sichtbar aus** (`training_building.gd`): `destroy()`
+   nutzt jetzt `eject_occupants(true)` (tödlicher Purzler, normale Leichen-/
+   Populations-Buchhaltung) statt den Trainee still per `queue_free` zu
+   löschen.
+4. **Einlass-Sperre im Kampf** (`_admit_front`): Der Front-Brave wird nicht
+   eingelassen, solange eine lebende Kampfgruppe ihn als Verteidiger führt
+   (`is_alive()` räumt beendete Kämpfe selbst auf — keine Dauerblockade).
+
+**Tests (test_training.gd, +3):** `test_stale_attacker_drops_admitted_trainee`
+(Angreifer lässt eingelassenen Trainee fallen, Training graduiert),
+`test_interrupted_trainee_returns_to_world` (Interrupt auf Insassen →
+re-registriert, Bay frei, kein Pop-Leak),
+`test_destroy_with_trainee_ejects_visibly` (Zerstörung → sichtbarer
+tödlicher Auswurf, Stamm konsistent). Testwelt hat jetzt einen zweiten
+(Feind-)Stamm.

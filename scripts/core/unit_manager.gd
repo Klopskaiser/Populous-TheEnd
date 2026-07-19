@@ -593,6 +593,7 @@ func register(unit: Unit) -> void:
 	if unit in units:
 		return
 	units.append(unit)
+	unit.in_world = true
 	unit.died.connect(_on_unit_died)
 	unit.corpse_expired.connect(_on_corpse_expired)
 	unit.converted.connect(_on_unit_converted)
@@ -603,6 +604,7 @@ func register(unit: Unit) -> void:
 
 func unregister(unit: Unit) -> void:
 	units.erase(unit)
+	unit.in_world = false
 	# Leaving the world ends the unit's fight: its own group dissolves (the
 	# attackers retarget) and any attacker/waiter seat is released (phase 8.2).
 	unit._dissolve_own_group()

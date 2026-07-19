@@ -48,7 +48,7 @@ func aggro_radius() -> float:
 ## itself), fire as a reserve when the target's melee slots are full, fire at
 ## medium range, close in beyond FIRE_RANGE.
 func _tick_attack(delta: float) -> void:
-	if not _target_valid(attack_target) or attack_target.tribe_id == tribe_id:
+	if not _unit_target_attackable(attack_target) or attack_target.tribe_id == tribe_id:
 		_tick_no_unit_target(delta)   # falls back to a building assault (7g)
 		return
 	if _breaks_off_vs_sitting(attack_target):

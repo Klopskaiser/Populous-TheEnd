@@ -11,6 +11,7 @@ const WARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/warrior_
 const TEMPLE_SCENE: PackedScene = preload("res://scenes/buildings/temple.tscn")
 const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
 const HUT_SCENE: PackedScene = preload("res://scenes/buildings/hut.tscn")
+const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
 
 
 func _flat_terrain(h: float = 5.0) -> TerrainData:
@@ -24,12 +25,13 @@ func _make_world() -> Dictionary:
 	var td: TerrainData = _flat_terrain()
 	var nav: NavGrid = NavGrid.new(td)
 	var tribe: Tribe = Tribe.new(0)
+	var enemy_tribe: Tribe = Tribe.new(1)
 	var tm: TreeManager = TreeManager.new()
 	tm.setup(td, nav)
 	var wpm: WoodPileManager = WoodPileManager.new()
 	wpm.setup(td)
 	var um: UnitManager = UnitManager.new()
-	um.setup(td, nav, [tribe] as Array[Tribe], tm, wpm)
+	um.setup(td, nav, [tribe, enemy_tribe] as Array[Tribe], tm, wpm)
 	var bm: BuildingManager = BuildingManager.new()
 	bm.setup(td, nav, um, wpm)
 	var tc: TribeCommands = TribeCommands.new()
@@ -224,6 +226,90 @@ func test_hut_rally_on_camp_trains_brave() -> void:
 	# And it actually becomes a warrior.
 	var used: int = _run(w, camp, func() -> bool: return _warriors(w).size() >= 1)
 	check(used < MAX_TICKS, "the rally-trained brave graduates into a warrior")
+	_free_world(w)
+
+
+# --- Combat interaction (vanished-trainee bug) -------------------------------------
+
+## Runs the queue until the front brave has been admitted into the building.
+func _admit_trainee(w: Dictionary, camp: WarriorCamp, brave: Brave) -> void:
+	w.commands.order_train(camp, [brave] as Array[Unit])
+	var used: int = _run(w, camp, func() -> bool: return camp.trainee == brave)
+	check(used < MAX_TICKS, "the brave was admitted into the building")
+
+
+## Regression: an enemy whose attack_target still points at a brave that was
+## admitted into the building must DROP that target instead of striking the
+## invisible trainee at its old queue slot (which used to knock the trainee out
+## of the training slot as an unregistered orphan — nobody ever came out).
+func test_stale_attacker_drops_admitted_trainee() -> void:
+	var w: Dictionary = _make_world()
+	var camp: WarriorCamp = w.building_manager.place(
+		WARRIOR_CAMP_SCENE, w.tribe, Vector2i(30, 30), 0, true) as WarriorCamp
+	camp.rally_point = w.nav.cell_to_world(Vector2i(40, 30))
+	var brave: Brave = _spawn_brave(w, Vector2i(30, 38))
+	_admit_trainee(w, camp, brave)
+	check(not brave.in_world, "the trainee left the live world")
+
+	# Stale combat reference, as left behind by a fight at the door: the enemy
+	# still holds the admitted brave as attack_target and stands right next to
+	# the old queue slot (in melee range of the invisible unit).
+	var enemy: Warrior = w.unit_manager.spawn_unit(
+		WARRIOR_SCENE, 1, brave.position + Vector3(0.5, 0.0, 0.0)) as Warrior
+	enemy.attack_target = brave
+	enemy._set_state(Unit.State.ATTACK)
+	for i in range(20):
+		enemy.tick(TICK)
+	check(enemy.attack_target != brave, "the enemy dropped the admitted trainee")
+	check(brave.health == brave.max_health, "the invisible trainee took no hits")
+	check(camp.trainee == brave, "the trainee kept its training slot")
+
+	# Out of the way (corpse), then training finishes normally.
+	enemy.take_damage(99999)
+	var used: int = _run(w, camp, func() -> bool: return _warriors(w).size() >= 1)
+	check(used < MAX_TICKS, "the trainee still graduates into a warrior")
+	_free_world(w)
+
+
+## Safety net: whatever yanks the INSIDE trainee out of the training slot (here
+## a combat-interrupt roll) must put it back into the live world instead of
+## leaving an invisible, never-ticked orphan.
+func test_interrupted_trainee_returns_to_world() -> void:
+	var w: Dictionary = _make_world()
+	var camp: WarriorCamp = w.building_manager.place(
+		WARRIOR_CAMP_SCENE, w.tribe, Vector2i(30, 30), 0, true) as WarriorCamp
+	var brave: Brave = _spawn_brave(w, Vector2i(30, 38))
+	_admit_trainee(w, camp, brave)
+
+	brave.start_roll(Vector3(1, 0, 0), 0.3)   # combat interrupt on the trainee
+	check(camp.trainee == null, "the training bay is free again")
+	check(brave in w.unit_manager.units, "the brave is back in the live world")
+	check(brave.in_world, "in_world flag restored")
+	check(w.tribe.population() == 1, "no population leak")
+
+	var used: int = _run(w, camp, func() -> bool: return brave.state == Unit.State.IDLE)
+	check(used < MAX_TICKS, "the ejected brave recovers to IDLE")
+	_free_world(w)
+
+
+## A training building destroyed with a trainee inside throws it out visibly
+## (lethal tumble -> registered corpse) instead of deleting it silently.
+func test_destroy_with_trainee_ejects_visibly() -> void:
+	var w: Dictionary = _make_world()
+	var camp: WarriorCamp = w.building_manager.place(
+		WARRIOR_CAMP_SCENE, w.tribe, Vector2i(30, 30), 0, true) as WarriorCamp
+	var brave: Brave = _spawn_brave(w, Vector2i(30, 38))
+	_admit_trainee(w, camp, brave)
+
+	camp.take_damage(camp.health)   # lethal blow -> destroy()
+	check(camp.health <= 0, "the camp is destroyed")
+	check(is_instance_valid(brave), "the trainee was not silently freed")
+	check(brave in w.unit_manager.units, "the trainee was thrown back into the world")
+
+	var used: int = _run(w, camp, func() -> bool:
+		return not is_instance_valid(brave) or brave.state == Unit.State.DEAD)
+	check(used < MAX_TICKS, "the ejected trainee dies visibly from the lethal tumble")
+	check(w.tribe.population() == 0, "the tribe dropped the dead trainee")
 	_free_world(w)
 
 

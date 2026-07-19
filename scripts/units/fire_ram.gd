@@ -181,7 +181,7 @@ func _tick_attack(delta: float) -> void:
 		_end_attack()
 		_set_state(State.IDLE)
 		return
-	if _target_valid(attack_target) and attack_target.tribe_id != tribe_id:
+	if _unit_target_attackable(attack_target) and attack_target.tribe_id != tribe_id:
 		_burn_unit(attack_target, delta)
 		return
 	if attack_target != null:

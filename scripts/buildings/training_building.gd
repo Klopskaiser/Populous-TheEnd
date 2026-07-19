@@ -63,6 +63,17 @@ func remove_trainee(brave) -> void:
 	incoming.erase(brave)
 	if brave == trainee:
 		trainee = null
+		# Safety net: whatever yanked the INSIDE brave out of the training slot
+		# (combat interrupt, death) must put it back into the live world at the
+		# door — otherwise it stays an invisible, never-ticked orphan (the
+		# "vanished trainee" bug). register() is idempotent.
+		if is_instance_valid(brave) and unit_manager != null and not brave.in_world:
+			brave.position = edge_spawn_position()
+			unit_manager.register(brave)
+			if brave.state == Unit.State.DEAD and brave.tribe != null:
+				# It died while unregistered: died.emit fired with the manager's
+				# handler disconnected, so the tribe never dropped it.
+				brave.tribe.remove_unit(brave)
 
 
 # --- Tick -----------------------------------------------------------------------
@@ -109,6 +120,12 @@ func _admit_front() -> void:
 		return
 	var front: Brave = incoming[0]
 	if not front.train_reached_slot:
+		return
+	# A brave that enemies are actively brawling with stays outside: admitting
+	# it would leave the attackers' attack_target pointing INTO the building.
+	# is_alive() self-prunes, so a finished fight never blocks admission.
+	var fight = front.combat_group
+	if fight != null and fight.defender == front and fight.is_alive():
 		return
 	incoming.pop_front()
 	trainee = front
@@ -264,15 +281,9 @@ func eject_occupants(killed: bool) -> void:
 	incoming.clear()
 
 
-## Frees the trainee and releases the queued braves when destroyed.
+## Destroyed with a trainee inside: never delete it silently — throw it out
+## with the lethal tumble (visible death, normal tribe/corpse bookkeeping) and
+## release the queued braves.
 func destroy() -> void:
-	if is_instance_valid(trainee):
-		if trainee.tribe != null:
-			trainee.tribe.remove_unit(trainee)
-		trainee.queue_free()
-	trainee = null
-	for brave in incoming:
-		if is_instance_valid(brave):
-			brave.cancel_training()
-	incoming.clear()
+	eject_occupants(true)
 	super.destroy()
