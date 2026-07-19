@@ -5292,3 +5292,34 @@ Suite unverändert grün.
 **Tests:** +2 (`test_thrown_passenger_survives_a_followup_hit_midair`,
 `test_lethal_hit_while_riding_throws_off_and_kills_on_ground`); Suite
 **2084/2084 grün**, Ladecheck ok.
+
+## Spieltest-Fixes 6: Luftschiff-Separation + Angriffs-Zielpriorität (2026-07-19, Nutzerreport)
+
+**1. Luftschiffe stacken weniger** (`unit.gd`, `airship.gd`, `unit_manager.gd`,
+`balance.gd`): Bisher `vehicle_separation = 0` → volle Überlappung. Neu: kleine
+Kollisionsdistanz `AIRSHIP_SEPARATION = 2.0` (< Bodenfahrzeuge ~3,0) und ein
+schneller Push über `separation_speed_mult = AIRSHIP_SEPARATION_SPEED_MULT = 4.0`.
+Damit Luftschiffe nur GEGENEINANDER separieren (nie gegen Bodeneinheiten/-fahrzeuge,
+über die sie fliegen), gibt es das neue Unit-Feld `flies` (Airship = true); die
+Separations-Paarung verlangt gleiche Ebene (`other.flies == unit.flies`).
+Zusätzlich in `_apply_separation`: Flieger werden beim Push NICHT auf Terrainhöhe
+gesnappt und dürfen über nicht-begehbare Zellen/Wasser geschoben werden (ihre
+Y-Höhe steuert weiter `_snap_to_ground`). Push-Cap ist jetzt pro Einheit
+(`max_step * separation_speed_mult`).
+
+**2. Angriffs-Zielpriorität** (`airship.gd`): Beim Angriff bevorzugen Luftschiffe
+jetzt die Bedrohungen, die sie vom Himmel holen. Neu `_enemy_priority()`:
+Feuerkrieger (2) > Katapult-Besatzung (1) > Rest (0); `_best_enemy()` wählt nach
+Priorität, dann Distanz (ersetzt `_nearest_enemy` in Auto-Engage-Steuerung und
+Deck-Feuerkrieger-Feuer). Feuerkrieger auf gegnerischen Decks sind normale
+(zielbare) Einheiten und damit abgedeckt; Feuerkrieger auf Türmen sind als Crew
+nicht direkt zielbar (geschützte Reserve) → werden über die Gebäudepriorität
+erfasst: `_building_priority()` gibt einem Wachturm mit Feuerkrieger-Besatzung
+Vorrang, `_nearest_enemy_building_by_wall()` wählt entsprechend.
+
+**Tests:** +6 (`test_airships_do_not_fully_overlap`,
+`test_airship_not_pushed_by_ground_vehicle`, `test_airship_target_priority_scoring`,
+`test_airship_prefers_firewarrior_over_nearer_brave`,
+`test_airship_building_priority_prefers_manned_tower`, plus Scoring). Suite
+**2095/2095 grün**, Ladecheck ok. Optische Prüfung (Stack-Verhalten,
+Ziel-Fokus) durch Nutzer ausstehend.

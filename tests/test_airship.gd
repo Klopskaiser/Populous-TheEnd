@@ -16,6 +16,7 @@ const WHARF_SCENE: PackedScene = preload("res://scenes/buildings/airship_wharf.t
 const HUT_SCENE: PackedScene = preload("res://scenes/buildings/hut.tscn")
 const REINC_SCENE: PackedScene = preload("res://scenes/buildings/reincarnation_site.tscn")
 const AIRSHIP_SCENE: PackedScene = preload("res://scenes/units/airship.tscn")
+const WATCHTOWER_SCENE: PackedScene = preload("res://scenes/buildings/watchtower.tscn")
 const SIEGE_SCENE: PackedScene = preload("res://scenes/units/siege_engine.tscn")
 const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
 const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
@@ -579,6 +580,99 @@ func test_deck_passenger_survives_separation_over_ground_unit() -> void:
 		min_y = minf(min_y, passenger.position.y)
 	check(min_y > 5.0 + Airship.FLY_HEIGHT * 0.5,
 		"the deck passenger stays at altitude (never snapped onto the ground unit)")
+	_free_world(w)
+
+
+# --- Separation: airships don't fully overlap, ignore ground layer -------------
+
+## Two airships spawned on the same spot shove apart to a small gap (no 100 %
+## overlap) and stay at altitude while doing it.
+func test_airships_do_not_fully_overlap() -> void:
+	var w: Dictionary = _make_world()
+	var a: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
+	var b: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
+	# Force a full overlap, then let the separation shove them apart.
+	b.position.x = a.position.x
+	b.position.z = a.position.z
+	for i in range(40):
+		_tick_world(w)
+	var gap: float = Vector2(a.position.x - b.position.x,
+		a.position.z - b.position.z).length()
+	check(gap > 1.0, "the two airships pushed apart (no full overlap), gap=%.2f" % gap)
+	check(a.position.y > 5.0 + Airship.FLY_HEIGHT * 0.5
+		and b.position.y > 5.0 + Airship.FLY_HEIGHT * 0.5,
+		"both stayed at altitude while separating (no ground snap)")
+	_free_world(w)
+
+
+## An airship is NOT pushed by the ground vehicle it flies over (different
+## separation layer).
+func test_airship_not_pushed_by_ground_vehicle() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
+	_board(w, ship, BRAVE_SCENE)   # crew aboard -> no idle drift to muddy the test
+	# A friendly catapult parked directly under the hull.
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, Vector3(ship.position.x, 0.0, ship.position.z)) as SiegeEngine
+	var sx: float = ship.position.x
+	var sz: float = ship.position.z
+	for i in range(30):
+		engine.position.x = ship.position.x
+		engine.position.z = ship.position.z
+		_tick_world(w)
+	var moved: float = Vector2(ship.position.x - sx, ship.position.z - sz).length()
+	check(moved < 0.2, "the airship is not shoved by the ground vehicle below it")
+	_free_world(w)
+
+
+# --- Attack target priority: firewarriors & catapults first -------------------
+
+func test_airship_target_priority_scoring() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
+	var fw: Unit = w.unit_manager.spawn_unit(FIREWARRIOR_SCENE, 1, Vector3(40, 5, 40))
+	var brave: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, Vector3(42, 5, 40))
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 1, Vector3(44, 5, 40)) as SiegeEngine
+	var crew: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, Vector3(45, 5, 40))
+	crew.order_crew(engine)
+	check(ship._enemy_priority(fw) == 2, "enemy firewarriors rank highest")
+	check(ship._enemy_priority(crew) == 1, "catapult crew ranks above plain units")
+	check(ship._enemy_priority(brave) == 0, "a plain brave has no priority")
+	_free_world(w)
+
+
+## The deck scan picks the enemy firewarrior even when a brave is closer.
+func test_airship_prefers_firewarrior_over_nearer_brave() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
+	var brave: Unit = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, Vector3(ship.position.x + 3.0, 5.0, ship.position.z))
+	var fw: Unit = w.unit_manager.spawn_unit(
+		FIREWARRIOR_SCENE, 1, Vector3(ship.position.x + 7.0, 5.0, ship.position.z))
+	_tick_world(w)   # populate the spatial hash
+	brave.position = Vector3(ship.position.x + 3.0, 5.0, ship.position.z)
+	fw.position = Vector3(ship.position.x + 7.0, 5.0, ship.position.z)
+	check(ship._best_enemy(30.0) == fw,
+		"the airship targets the farther firewarrior over the nearer brave")
+	_free_world(w)
+
+
+## A watchtower manned by a firewarrior outranks a plain building as a target.
+func test_airship_building_priority_prefers_manned_tower() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
+	var hut = w.building_manager.place(HUT_SCENE, w.tribe1, Vector2i(58, 58), 0, true)
+	var tower: Watchtower = w.building_manager.place(
+		WATCHTOWER_SCENE, w.tribe1, Vector2i(66, 66), 0, true) as Watchtower
+	check(hut != null and tower != null, "both enemy buildings placed")
+	check(ship._building_priority(tower) == 0, "an empty tower has no bonus")
+	var fw: Unit = w.unit_manager.spawn_unit(
+		FIREWARRIOR_SCENE, 1, tower.edge_spawn_position())
+	tower.admit_crew(fw)
+	check(ship._building_priority(tower) == 1, "a firewarrior-manned tower is prioritised")
+	check(ship._nearest_enemy_building_by_wall(60.0) == tower,
+		"the airship picks the manned tower over the nearer hut")
 	_free_world(w)
 
 

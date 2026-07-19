@@ -77,9 +77,12 @@ func _init() -> void:
 	max_crew = MAX_CREW
 	min_move_crew = MIN_MOVE_CREW
 	min_fire_crew = MIN_MOVE_CREW
-	# No separation at all: the airship must never be pushed against ground
-	# vehicles; overlapping airships are accepted (open tuning).
-	vehicle_separation = 0.0
+	# A SMALL collision footprint so airships cannot fully overlap, but they
+	# only separate against OTHER airships (never the ground units/vehicles they
+	# fly over) and shove clear of each other fast (flies + speed mult).
+	vehicle_separation = Balance.AIRSHIP_SEPARATION
+	flies = true
+	separation_speed_mult = Balance.AIRSHIP_SEPARATION_SPEED_MULT
 	vehicle_ring_scale = 5.0
 	# Passengers stand well inside the 1.6 m wide gondola deck.
 	crew_side_offset = 0.55
@@ -486,7 +489,7 @@ func _tick_auto_engage(delta: float) -> void:
 	var aggro: float = Firewarrior.RANGED_AGGRO + RANGE_BONUS
 	var stop_at: Vector3
 	var dist: float
-	var target: Unit = _nearest_enemy(aggro)
+	var target: Unit = _best_enemy(aggro)
 	if target != null:
 		_auto_building = null
 		stop_at = target.position
@@ -530,20 +533,39 @@ func _has_deck_firewarrior() -> bool:
 
 ## Nearest living enemy building by WALL distance (footprint) — the centre of
 ## a big building can lie beyond the reach while its walls are shootable.
+## Nearest enemy building by wall distance — but a WATCHTOWER manned by a
+## firewarrior wins over plain buildings (user spec: prioritise tower
+## firewarriors, which can't be shot as units while garrisoned). Ties by wall
+## distance within each priority tier.
 func _nearest_enemy_building_by_wall(radius: float):
 	if building_manager == null:
 		return null
 	var flat: Vector2 = Vector2(position.x, position.z)
 	var best = null
-	var best_d: float = radius
+	var best_pri: int = -1
+	var best_d: float = INF
 	for b in building_manager.buildings:
 		if not is_instance_valid(b) or b.tribe_id == tribe_id or b.health <= 0:
 			continue
 		var d: float = b.footprint_distance_to(flat)
-		if d <= best_d:
+		if d > radius:
+			continue
+		var pri: int = _building_priority(b)
+		if pri > best_pri or (pri == best_pri and d < best_d):
+			best_pri = pri
 			best_d = d
 			best = b
 	return best
+
+
+## 1 for a watchtower with a firewarrior aboard (a tower gunner shooting the
+## airship), 0 otherwise.
+func _building_priority(b) -> int:
+	if b is Watchtower:
+		for m in (b as Watchtower).crew:
+			if is_instance_valid(m) and m.unit_kind() == &"firewarrior":
+				return 1
+	return 0
 
 
 ## Deck combat (watchtower pattern): only while the ship is STANDING; every
@@ -600,7 +622,7 @@ func _tick_deck_firewarrior(fw, delta: float) -> void:
 		_fire_cd[fw] = cd
 		return
 	if target == null:
-		target = _nearest_enemy(reach)
+		target = _best_enemy(reach)
 	if target == null:
 		# No unit in reach: free-fire at the nearest enemy BUILDING (lowest
 		# priority, like ground firewarriors — user spec: buildings in reach
@@ -695,19 +717,39 @@ func _set_deck_anim(u, base: StringName) -> void:
 	u.crew_action_anim = base
 
 
-func _nearest_enemy(radius: float) -> Unit:
+## Attack-target scan (user spec): the airship prioritises the threats that can
+## shoot it down — enemy FIREWARRIORS first (ground OR riding an enemy deck),
+## then CATAPULT crew — over anything else; ties break on distance. Enemy
+## firewarriors garrisoned on a tower are unreachable as units (protected
+## reserve) — they are prioritised through the building scan instead.
+func _best_enemy(radius: float) -> Unit:
 	var best: Unit = null
-	var best_d: float = radius
+	var best_pri: int = -1
+	var best_d: float = INF
 	for u in path_service.get_units_in_radius(position, radius, SCAN_MAX_CANDIDATES):
 		if u.tribe_id == tribe_id or u.state == State.DEAD or not u.is_targetable():
 			continue
 		if u.state == State.SIT:
 			continue   # sitting converts keep sitting (a preacher aboard works)
 		var d: float = _flat_dist(position, u.position)
-		if d <= best_d:
+		if d > radius:
+			continue
+		var pri: int = _enemy_priority(u)
+		if pri > best_pri or (pri == best_pri and d < best_d):
+			best_pri = pri
 			best_d = d
 			best = u
 	return best
+
+
+## Target priority: enemy firewarriors (2) > catapult crew (1) > the rest (0).
+func _enemy_priority(u: Unit) -> int:
+	if u.unit_kind() == &"firewarrior":
+		return 2
+	var eng = u.siege_engine
+	if eng != null and is_instance_valid(eng) and eng is SiegeEngine:
+		return 1
+	return 0
 
 
 ## Empty airships drift slowly toward the nearest reincarnation site's island

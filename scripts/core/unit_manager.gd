@@ -281,8 +281,11 @@ func _apply_separation(delta: float) -> void:
 							or other.state == Unit.State.ROLL \
 							or other.rides_airborne():
 						continue
-					if veh_r > 0.0 and other.vehicle_separation <= 0.0:
-						continue   # vehicles are spaced only against vehicles
+					if veh_r > 0.0 and (other.vehicle_separation <= 0.0
+							or other.flies != unit.flies):
+						continue   # vehicles separate only vs same-layer vehicles
+						# (airships vs airships, ground vs ground — an airship is
+						# never pushed by the ground vehicles it flies over)
 					checks -= 1
 					var away: Vector2 = Vector2(pos.x - other.position.x, pos.z - other.position.z)
 					var dist: float = away.length()
@@ -317,16 +320,22 @@ func _apply_separation(delta: float) -> void:
 			unit.overlap_ticks = 0
 		if push == Vector2.ZERO:
 			continue
-		if push.length() > max_step:
-			push = push.normalized() * max_step
+		# Airships shove clear much faster than ground units drift apart.
+		var step_cap: float = max_step * unit.separation_speed_mult
+		if push.length() > step_cap:
+			push = push.normalized() * step_cap
 		var nx: float = pos.x + push.x
 		var nz: float = pos.z + push.y
-		if nav_grid != null and not nav_grid.is_cell_walkable(
+		# Flyers may be pushed over water/blocked ground (they fly); ground units
+		# must not be shoved into an unwalkable cell.
+		if not unit.flies and nav_grid != null and not nav_grid.is_cell_walkable(
 				nav_grid.world_to_cell(Vector3(nx, 0.0, nz))):
 			continue
 		unit.position.x = nx
 		unit.position.z = nz
-		if terrain_data != null:
+		# Ground units snap to the terrain; a flyer keeps its own altitude
+		# (its _snap_to_ground runs each tick) — never drop it to the ground.
+		if terrain_data != null and not unit.flies:
 			unit.position.y = terrain_data.get_height(nx, nz)
 	_separation_phase = (_separation_phase + 1) % slices
 

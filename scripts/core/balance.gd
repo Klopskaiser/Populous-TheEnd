@@ -135,6 +135,11 @@ const AIRSHIP_MIN_CLEARANCE: float = 2.0
 const AIRSHIP_CRUISE_TERRAIN_CAP: float = 5.0
 ## Steig-/Sinkgeschwindigkeit (m/s) Richtung Zielhöhe (weiche Übergänge).
 const AIRSHIP_VERTICAL_RATE: float = 3.0
+## Kleine Kollisions-/Separationsdistanz zwischen Luftschiffen (kein 100%-Stack;
+## kleiner als Bodenfahrzeuge ~3,0). Luftschiffe separieren nur gegeneinander.
+const AIRSHIP_SEPARATION: float = 2.0
+## Push-Tempo-Faktor: Luftschiffe schieben sich viel schneller frei als Bodeneinheiten.
+const AIRSHIP_SEPARATION_SPEED_MULT: float = 4.0
 ## Reichweiten-Bonus für Fernkampf/Bekehrung/Zauber von Bord (nur im Stand).
 const AIRSHIP_RANGE_BONUS: float = 3.0
 ## Hüllentreffer (Feuerball-Zauber-Bolts + Katapult-Lufttreffer) bis zur Explosion.

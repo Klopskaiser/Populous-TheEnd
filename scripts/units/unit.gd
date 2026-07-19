@@ -412,6 +412,13 @@ var push_immune: bool = false
 ## OTHER vehicles — sized so two devices incl. their side/rank crew slots
 ## never overlap (phase 8.2). Pedestrians keep the normal tiny radius.
 var vehicle_separation: float = 0.0
+## Separation LAYER: flying vehicles (airship) only separate against other
+## flyers, never against ground units/vehicles they pass over (and their Y is
+## left to their own altitude logic, not snapped to the terrain).
+var flies: bool = false
+## Per-unit multiplier on the separation push speed — airships shove clear of
+## each other far faster than ground units drift apart.
+var separation_speed_mult: float = 1.0
 ## Counted in Tribe.population() (false for devices like the siege engine).
 var counts_population: bool = true
 
