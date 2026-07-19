@@ -30,7 +30,7 @@ const WARRIOR_MELEE_STRENGTH: float = 3.0
 const WARRIOR_SHOVE_CHANCE: float = 0.04
 
 # --- Feuerkrieger ---
-const FIREWARRIOR_HP: int = 60
+const FIREWARRIOR_HP: int = 65
 const FIREWARRIOR_SPEED: float = 4.0
 const FIREWARRIOR_FIRE_RANGE: float = 8.0
 const FIREWARRIOR_FIRE_COOLDOWN: float = 1.5
@@ -90,7 +90,7 @@ const SIEGE_SHOT_RAIDER_DAMAGE: int = 30
 ## Luftschuss (Ziel Luftschiff): Abfangradius um die Kugel und Flächenfaktor
 ## des Schockschadens (doppelte FLÄCHE -> Radius x sqrt(2)); keine Lava.
 const SIEGE_SHOT_AIR_INTERCEPT_RADIUS: float = 2.0
-const SIEGE_SHOT_AIR_SPLASH_FACTOR: float = 2.0
+const SIEGE_SHOT_AIR_SPLASH_FACTOR: float = 4.0
 
 # --- Feuerramme ---
 const FIRERAM_SPEED: float = 3.0
