@@ -36,7 +36,7 @@ const FOOTPRINT: Vector2i = Balance.WORKSHOP_FOOTPRINT
 const MAX_HEALTH: int = Balance.WORKSHOP_HP
 ## Worker slots (housed inside; production needs >= 1).
 const WORKER_SLOTS: int = 3
-## Worker-seconds per catapult: 3 workers -> 30 s build time.
+## Worker-seconds per catapult: 3 workers -> 20 s build time.
 const WORK_PER_CATAPULT: float = Balance.WORKSHOP_WORK_PER_CATAPULT
 ## Wood consumed per catapult (taken from the entrance piles at start).
 const CATAPULT_WOOD: int = Balance.WORKSHOP_CATAPULT_WOOD
@@ -77,18 +77,44 @@ func _init() -> void:
 
 
 func display_name() -> String:
-	return "Werkstatt"
+	return "Katapultwerkstatt"
 
 
 func housing_capacity() -> int:
 	return 0
 
 
+# --- Product hooks (overridden by the fire-ram workshop / airship wharf) -------------
+# GDScript cannot override constants, so the production loop reads these
+# virtual getters; the defaults preserve the catapult workshop exactly.
+
+func product_scene() -> PackedScene:
+	return SIEGE_SCENE
+
+
+func product_wood() -> int:
+	return CATAPULT_WOOD
+
+
+func work_per_product() -> float:
+	return WORK_PER_CATAPULT
+
+
+func worker_slots() -> int:
+	return WORKER_SLOTS
+
+
+## True once the tribe owns as many vehicles of this workshop's kind as its
+## per-tribe cap allows (production pauses until one is lost).
+func product_cap_reached() -> bool:
+	return tribe == null or tribe.owned_catapult_count() >= tribe.max_catapults
+
+
 # --- Worker slots (forester pattern, no mana upkeep) --------------------------------
 
 func has_free_slot() -> bool:
 	_prune_occupants()
-	return is_usable() and occupants.size() < WORKER_SLOTS
+	return is_usable() and occupants.size() < worker_slots()
 
 
 ## Housed crew are storm occupants (thrown out when the storm begins).
@@ -100,7 +126,7 @@ func has_occupants() -> bool:
 ## Reserves a slot for a brave heading here (called from Brave.order_workshop).
 func reserve_slot(brave: Brave) -> bool:
 	_prune_occupants()
-	if not is_usable() or occupants.size() >= WORKER_SLOTS:
+	if not is_usable() or occupants.size() >= worker_slots():
 		return false
 	if not (brave in occupants):
 		occupants.append(brave)
@@ -204,8 +230,8 @@ func wants_more_stock_wood() -> bool:
 ## separately in the tick).
 func can_start_production() -> bool:
 	return is_usable() and not paused and not exit_blocked() \
-		and tribe != null and tribe.owned_catapult_count() < tribe.max_catapults \
-		and stock_wood() >= CATAPULT_WOOD
+		and not product_cap_reached() \
+		and stock_wood() >= product_wood()
 
 
 func _tick_active(delta: float) -> void:
@@ -223,14 +249,14 @@ func _tick_active(delta: float) -> void:
 		work_done = 0.0
 	var inside: int = inside_count()
 	if production_active:
-		# Housed workers hammer worker-seconds into the current catapult.
+		# Housed workers hammer worker-seconds into the current vehicle.
 		if inside > 0:
 			work_done += float(inside) * delta
-			if work_done >= WORK_PER_CATAPULT:
+			if work_done >= work_per_product():
 				_finish_catapult()
 		return
 	# Not producing: top the entrance stock up first (spec: fetch all the
-	# wood BEFORE starting to work), then start the next catapult.
+	# wood BEFORE starting to work), then start the next vehicle.
 	if wants_more_stock_wood() and not wood_stalled:
 		for b in occupants:
 			if is_instance_valid(b) and b.workshop_inside:
@@ -240,8 +266,8 @@ func _tick_active(delta: float) -> void:
 		if wood_pile_manager == null:
 			return
 		var taken: int = wood_pile_manager.take_from_radius(
-			delivery_point(), ABSORB_RADIUS, CATAPULT_WOOD)
-		if taken < CATAPULT_WOOD:
+			delivery_point(), ABSORB_RADIUS, product_wood())
+		if taken < product_wood():
 			# Race lost (someone absorbed the piles): put the rest back.
 			if taken > 0:
 				wood_pile_manager.deposit(delivery_point(), taken)
@@ -250,7 +276,7 @@ func _tick_active(delta: float) -> void:
 		work_done = 0.0
 
 
-## Rolls the finished catapult out of the entrance and auto-mans it with up
+## Rolls the finished vehicle out of the entrance and auto-mans it with up
 ## to AUTO_CREW idle braves nearby (one shot — see class doc).
 func _finish_catapult() -> void:
 	production_active = false
@@ -258,7 +284,7 @@ func _finish_catapult() -> void:
 	if unit_manager == null:
 		return
 	var engine: Unit = unit_manager.spawn_unit(
-		SIEGE_SCENE, tribe_id, edge_spawn_position())
+		product_scene(), tribe_id, edge_spawn_position())
 	if engine == null:
 		return
 	pending_engine = engine
@@ -287,7 +313,7 @@ func _maybe_dispatch_engine() -> void:
 		return
 	if _engine_dispatched:
 		return
-	if e.boarded_count() >= SiegeEngine.MIN_MOVE_CREW:
+	if e.boarded_count() >= e.min_move_crew:
 		e.order_move(_dispatch_point())
 		_engine_dispatched = true
 
@@ -331,7 +357,7 @@ func exit_blocked() -> bool:
 func production_progress() -> float:
 	if not is_usable() or not production_active:
 		return -1.0
-	return clampf(work_done / WORK_PER_CATAPULT, 0.0, 1.0)
+	return clampf(work_done / work_per_product(), 0.0, 1.0)
 
 
 # --- Disable / destruction -----------------------------------------------------------
@@ -400,8 +426,9 @@ func _create_visuals() -> void:
 	super._create_visuals()
 	if _has_custom_model:
 		return
-	var w: float = float(FOOTPRINT.x)
-	var d: float = float(FOOTPRINT.y)
+	# Instance footprint, not the const — subclasses author other dimensions.
+	var w: float = float(footprint.x)
+	var d: float = float(footprint.y)
 
 	var walls: MeshInstance3D = MeshInstance3D.new()
 	var body: BoxMesh = BoxMesh.new()

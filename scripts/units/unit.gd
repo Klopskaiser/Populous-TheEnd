@@ -477,10 +477,25 @@ func renders_as_sprite() -> bool:
 	return true
 
 
-## Whether this unit may man a siege engine (everyone except the shaman and
-## the engines themselves, phase 7f).
+## Whether this unit may man a GROUND vehicle (everyone except the shaman and
+## the vehicles themselves, phase 7f). The airship asks via its own
+## accepts_crew_unit override instead (it also takes the shaman).
 func can_crew_siege() -> bool:
 	return unit_kind() != &"shaman" and unit_kind() != &"siege"
+
+
+## True while riding a deck vehicle (airship) at altitude: boarded on a
+## vehicle whose crew rides ON it instead of walking beside it.
+func rides_airborne() -> bool:
+	return siege_boarded and siege_engine != null \
+		and is_instance_valid(siege_engine) and siege_engine.crew_rides_on_deck()
+
+
+## In the air right now: thrown/whirled through the sky or riding an airship
+## deck. Melee can never engage such targets, preachers cannot convert them,
+## and firewarrior fireballs deal double damage against them.
+func is_airborne() -> bool:
+	return state == State.THROWN or rides_airborne()
 
 
 ## Scale of the selection ring (SelectionRingRenderer). The siege engine uses
@@ -1315,6 +1330,19 @@ func ignite(source_pos: Vector3) -> void:
 	start_panic(source_pos, BURN_DURATION)
 
 
+## Flame contact (fire ram): burn + panic exactly like lava, but WITHOUT the
+## one-time contact hit — the ram's damage is the burn alone. Re-scorching
+## refreshes the burn (no stacking). CrewedVehicle overrides this with a real
+## ignite (wooden vehicles catch fire properly).
+func scorch(source_pos: Vector3) -> void:
+	if state == State.DEAD:
+		return
+	if not is_burning():
+		_play_sfx(&"unit_burning", 200)
+	_burn_time = BURN_DURATION
+	start_panic(source_pos, BURN_DURATION)
+
+
 func _tick_burning(delta: float) -> void:
 	if _burn_time <= 0.0 or state == State.DEAD:
 		return
@@ -1518,6 +1546,8 @@ func begin_conversion(preacher: Unit, duration: float) -> bool:
 		return false   # tower crew are a protected reserve (phase 7h)
 	if state == State.ROLL or state == State.THROWN or state == State.PANIC:
 		return false
+	if rides_airborne():
+		return false   # airship passengers are out of a preacher's reach
 	_on_combat_interrupt()
 	_end_attack()
 	waypoint_queue.clear()
@@ -1590,13 +1620,16 @@ func convert_to_tribe(new_tribe: Tribe) -> void:
 
 # --- Siege crew (phase 7f) ---------------------------------------------------------
 
-## Assigns this unit to a siege engine's crew (right-click on the engine, the
-## workshop's auto-manning or the AI). The engine validates tribe/capacity;
-## refused assignments are silently ignored. Shamans never crew.
+## Assigns this unit to a vehicle's crew (right-click on the vehicle, the
+## workshop's auto-manning or the AI). The VEHICLE decides who may crew it
+## (accepts_crew_unit — ground vehicles refuse the shaman, the airship takes
+## everyone) and validates tribe/capacity; refused assignments are ignored.
 func order_crew(engine) -> void:
-	if not can_take_orders() or not can_crew_siege():
+	if not can_take_orders():
 		return
 	if engine == null or not is_instance_valid(engine) or engine.state == State.DEAD:
+		return
+	if not engine.accepts_crew_unit(self):
 		return
 	if siege_engine == engine and state == State.CREW:
 		return
@@ -1647,6 +1680,14 @@ func _tick_crew(delta: float) -> void:
 			_crew_walking = true
 			_approach(engine.position, delta)
 			return
+	# Deck vehicle (airship): ride pinned to the deck slot at altitude — no
+	# ground glide, no Y snap (the vehicle carries the passenger).
+	if engine.crew_rides_on_deck():
+		position = engine.crew_slot_position(self)
+		if engine.facing.length_squared() > 0.000001:
+			facing = engine.facing
+		_crew_walking = false
+		return
 	# Boarded: keep the side slot, gliding at the engine's speed.
 	var slot: Vector3 = engine.crew_slot_position(self)
 	var flat: Vector2 = Vector2(position.x, position.z)
@@ -1857,8 +1898,12 @@ func _begin_attack(enemy: Unit) -> void:
 	# Never lock onto a non-targetable unit (a siege engine / a garrisoned tower
 	# crew): attackers go for the crew instead, so a stray scan must not leave
 	# them swinging at the vehicle for no damage. The only exception is a
-	# catapult bombarding another catapult (_may_target_vehicle).
+	# catapult bombarding another vehicle (_may_target_vehicle).
 	if not enemy.is_targetable() and not _may_target_vehicle(enemy):
+		return
+	# Airborne targets (airship deck crew, whirled units) are out of reach for
+	# melee — only ranged attacks can touch them.
+	if enemy.is_airborne() and not _is_ranged():
 		return
 	if attack_target == enemy:
 		if state != State.ATTACK:
@@ -2291,9 +2336,18 @@ func _maybe_retaliate(attacker) -> void:
 		return   # friendly fire (e.g. a rescue fireball) is not retaliated
 	if attack_target != null and is_instance_valid(attack_target):
 		return
+	if rides_airborne():
+		return   # deck passengers never leave the airship; it returns fire itself
 	if state == State.IDLE or state == State.CREW:
 		# Siege crew defends itself, leaving its post if necessary — it stays
 		# crew (leash rule) and returns to the engine after the fight.
+		# Fire-ram crew is immune to ranged distraction (user spec): it only
+		# defends against direct melee pressure.
+		if state == State.CREW and siege_engine != null \
+				and is_instance_valid(siege_engine) \
+				and siege_engine.crew_defends_melee_only() \
+				and _flat_dist(position, attacker.position) > FLEE_MELEE_RANGE:
+			return
 		_begin_attack(attacker)
 		return
 	if state != State.MOVE:
@@ -2332,6 +2386,8 @@ func _scan_for_enemy(radius: float, max_examined: int = 0) -> Unit:
 			continue
 		if u.state == State.SIT:
 			continue   # sitting converts are no threat (and shall keep sitting)
+		if not ranged and u.is_airborne():
+			continue   # melee cannot reach airship deck crew / whirled units
 		if check_unreach \
 				and int(_unreach_targets.get(u.get_instance_id(), 0)) > now:
 			continue   # recently proven unreachable (up on a cliff, phase 8.2)

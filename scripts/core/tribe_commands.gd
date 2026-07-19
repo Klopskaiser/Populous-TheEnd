@@ -250,12 +250,12 @@ func cast_spell(tribe: Tribe, spell_id: StringName, target: Vector3) -> bool:
 	return (shaman as Shaman).order_cast(spell, target, spell_context)
 
 
-## Assigns units to a siege engine's crew (right-click on the engine, 7f).
-## Everyone except the shaman may man it; the engine validates tribe/capacity
-## (unmanned engines accept any tribe — takeover on boarding).
+## Assigns units to a crewed vehicle's crew (right-click on the vehicle, 7f).
+## The vehicle validates who may crew it (accepts_crew_unit) and
+## tribe/capacity (unmanned vehicles accept any tribe — takeover on boarding).
 func order_crew(units: Array[Unit], engine: Unit) -> void:
 	if engine == null or not is_instance_valid(engine) \
-			or engine.state == Unit.State.DEAD or not (engine is SiegeEngine):
+			or engine.state == Unit.State.DEAD or not (engine is CrewedVehicle):
 		return
 	for unit in units:
 		if unit == null or not is_instance_valid(unit) or unit.state == Unit.State.DEAD:
@@ -276,7 +276,7 @@ func order_attack_building(units: Array[Unit], building: Building) -> void:
 		if unit == null or not is_instance_valid(unit) or unit.state == Unit.State.DEAD:
 			continue
 		if unit.tribe_id == building.tribe_id \
-				and not (unit is SiegeEngine and building.has_raiders()):
+				and not (unit is CrewedVehicle and building.has_raiders()):
 			continue
 		unit.order_attack_building(building)
 

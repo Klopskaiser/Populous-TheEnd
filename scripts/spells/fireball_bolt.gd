@@ -63,7 +63,7 @@ func _explode() -> void:
 	for u in unit_manager.get_units_in_radius(target_pos, SPLASH_RADIUS):
 		if u.state == Unit.State.DEAD or u.tribe_id == tribe_id:
 			continue
-		if u is SiegeEngine:
+		if u is CrewedVehicle:
 			# Fire spells set the wooden vehicle alight (7f): it burns and
 			# then sinks; the crew takes the splash on its own.
 			u.ignite(target_pos)

@@ -259,9 +259,13 @@ func _box_select(rect: Rect2) -> void:
 ## Screen rect the unit's billboard sprite covers (feet->head projected,
 ## sprite aspect for the width, clamped to a minimum clickable size).
 ## Zero-height rect when the unit is behind the camera.
+## The head offset runs along the CAMERA up axis, not world up: the sprite is a
+## camera-facing billboard drawn screen-aligned at full height (UnitRenderer),
+## so a world-vertical offset would foreshorten under the tilted camera and
+## shrink the pick rect down to the feet — the whole body must be clickable.
 func _unit_screen_rect(unit: Unit, camera: Camera3D) -> Rect2:
 	var feet: Vector3 = unit.global_position
-	var head: Vector3 = feet + Vector3(0.0, SPRITE_HEIGHT_M, 0.0)
+	var head: Vector3 = feet + camera.global_transform.basis.y * SPRITE_HEIGHT_M
 	if camera.is_position_behind(feet) or camera.is_position_behind(head):
 		return Rect2()
 	var p_feet: Vector2 = camera.unproject_position(feet)
@@ -594,11 +598,11 @@ func _try_crew_assignment(screen_pos: Vector2, camera: Camera3D, queue_up: bool 
 	var engine: Unit = null
 	var best_dist: float = INF
 	for unit in _unit_manager.units:
-		if unit.state == Unit.State.DEAD or not (unit is SiegeEngine):
+		if unit.state == Unit.State.DEAD or not (unit is CrewedVehicle):
 			continue
 		if unit.tribe_id != player_tribe_id \
-				and (unit as SiegeEngine).boarded_count() > 0:
-			continue   # a manned enemy engine cannot be taken
+				and (unit as CrewedVehicle).boarded_count() > 0:
+			continue   # a manned enemy vehicle cannot be taken
 		var sprite: Rect2 = _unit_screen_rect(unit, camera)
 		if sprite.size.y <= 0.0 or not sprite.grow(PICK_MARGIN_PX).has_point(screen_pos):
 			continue
@@ -617,8 +621,8 @@ func _try_crew_assignment(screen_pos: Vector2, camera: Camera3D, queue_up: bool 
 			unit.route_end_action = (func(target: Unit) -> void: target.order_crew(eng)).bind(unit)
 	else:
 		_tribe_commands.order_crew(crewable, engine)
-	if engine is SiegeEngine:
-		(engine as SiegeEngine).flash_ring()
+	if engine is CrewedVehicle:
+		(engine as CrewedVehicle).flash_ring()
 	return true
 
 
@@ -656,7 +660,7 @@ func _dispatch_own_raided_building(building: Building) -> bool:
 	var engines: Array[Unit] = []
 	var rest: Array[Unit] = []
 	for u in selected:
-		if u is SiegeEngine:
+		if u is CrewedVehicle:
 			engines.append(u)
 		else:
 			rest.append(u)

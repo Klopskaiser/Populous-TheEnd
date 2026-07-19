@@ -1,28 +1,22 @@
-class_name SiegeEngine extends Unit
+class_name SiegeEngine extends CrewedVehicle
 
 ## Belagerungswaffe (Katapult, phase 7f): a crewed VEHICLE, not a believer.
 ##
 ## - Built by the workshop, manned by braves/combat units (never the shaman).
-##   Ownership follows the crew: whoever boards an UNMANNED engine takes it
-##   over (convert_to_tribe). Crew members walk on side slots (3 per side).
-## - No own hit points and never targetable: attackers, spells and fire go
-##   for the CREW instead. Only water kills the device (drown).
+##   Ownership follows the crew (see CrewedVehicle). Crew members walk on side
+##   slots (3 per side).
 ## - Movement needs >= 1 boarded crew; firing needs >= 2 (rate scales up to
 ##   6 crew). Slowest unit (0.75x brave); wide 1x2 m body -> vehicle paths
 ##   (NavGrid 2x2 clearance).
 ## - Attack: SiegeShot in a high arc, 15 m range, 3 m minimum. Auto-aggro
-##   prioritises enemy BUILDINGS over units (the siege specialist), inverse
-##   to every other unit.
-## - Rendered as its OWN 3D model (renders_as_sprite false): wooden frame,
-##   wheels, throwing arm; the crew stays normal sprites around it.
+##   FIRES at units already in the band, otherwise creeps toward the nearest
+##   enemy BUILDING (the siege specialist).
+## - Rendered as its OWN 3D model: wooden frame, wheels, throwing arm; the
+##   crew stays normal sprites around it.
 
 const MAX_CREW: int = Balance.SIEGE_MAX_CREW
 const MIN_MOVE_CREW: int = Balance.SIEGE_MIN_MOVE_CREW
 const MIN_FIRE_CREW: int = Balance.SIEGE_MIN_FIRE_CREW
-## A crew member counts as boarded/serving within this range of the engine.
-const BOARD_RANGE: float = Balance.SIEGE_BOARD_RANGE
-## Boarded members straying farther than this (self-defence chases) are lost.
-const CREW_LEASH: float = Balance.SIEGE_CREW_LEASH
 ## Fire range band: beyond FIRE_RANGE it advances, below MIN_RANGE the arc is
 ## too flat — it holds fire.
 const FIRE_RANGE: float = Balance.SIEGE_FIRE_RANGE
@@ -32,34 +26,10 @@ const COOLDOWN_MIN_CREW: float = Balance.SIEGE_COOLDOWN_MIN_CREW
 const COOLDOWN_FULL_CREW: float = Balance.SIEGE_COOLDOWN_FULL_CREW
 ## Slowest unit in the game (user-tuned).
 const SIEGE_SPEED: float = Balance.SIEGE_SPEED
-## Crew slot layout: 3 per long side, this far out/apart.
-const CREW_SIDE_OFFSET: float = 0.95
-const CREW_RANK_SPACING: float = 0.85
 ## Auto-aggro scan radius (UNITS first, then buildings — user feedback);
 ## comfortably above the fire range so approaching enemies are engaged early.
 const SIEGE_AGGRO: float = Balance.SIEGE_AGGRO_RADIUS
 
-## How the device can be destroyed (user feedback): fire SPELLS or lava set
-## it alight — it burns this long, then sinks into the ground; terrain
-## morphing that leaves this height span under the chassis bursts it apart.
-## The crew survives both, is released and controllable again.
-const VEHICLE_BURN_TIME: float = Balance.SIEGE_VEHICLE_BURN_TIME
-const SINK_SPEED: float = 0.8   # m/s downward while the wreck sinks
-## Height span under the chassis that bursts it. Deliberately ABOVE what
-## drivable terrain can present (walkable cells allow 1.5 m/cell → ~3 m over
-## the vehicle) — only real terrain rips (quake/flatten/sink cliffs) trigger.
-const BREAK_HEIGHT_SPAN: float = 3.5
-## Chassis sample half-extents (along facing x sideways).
-const CHASSIS_HALF_LENGTH: float = 1.1
-const CHASSIS_HALF_WIDTH: float = 0.7
-
-const C_WOOD: Color = Color(0.42, 0.29, 0.15)
-const C_WOOD_DARK: Color = Color(0.3, 0.2, 0.1)
-const C_METAL: Color = Color(0.45, 0.45, 0.48)
-
-## Crew members (untyped entries: may be freed). Includes recruits still
-## walking over (not yet boarded).
-var crew: Array = []
 ## `attack_building` (the bombardment target), `building_manager` (the building
 ## scan) and `_target_ordered` (explicit-order flag) are inherited from Unit.
 ## For the catapult, `_target_ordered` additionally gates the slow APPROACH onto
@@ -67,321 +37,38 @@ var crew: Array = []
 ## (trundling after a fleeing brave was the "drives in, never shoots" bug).
 
 var _fire_cooldown: float = 0.0
-var _crew_prune_timer: float = 0.0
-## Seconds of burn left after a fire-spell/lava hit (0 = not burning).
-var _vehicle_burn: float = 0.0
-## The destroyed wreck sinks into the ground (burn/water death).
-var _sinking: bool = false
-## Height the tornado currently lifts the whole vehicle by (0 = grounded).
-var _tornado_lift: float = 0.0
-## Own 3D model parts (in-game only, built in _ready).
-var _model: Node3D = null
 var _arm: Node3D = null
-var _flag_mesh: MeshInstance3D = null
-var _flame: MeshInstance3D = null
 var _arm_anim: float = 1.0
 
 
 func _init() -> void:
-	max_health = 1
-	health = 1
+	super()
 	speed = SIEGE_SPEED
-	push_immune = true       # pedestrians do not shove the vehicle around
+	max_crew = MAX_CREW
+	min_move_crew = MIN_MOVE_CREW
+	min_fire_crew = MIN_FIRE_CREW
 	# Vehicle-vs-vehicle spacing (phase 8.2): body ~1x2 m plus the crew slots
 	# (side offset 0.95, rank spacing 0.85) — engines parked/marching together
 	# used to overlap visually and their crews clipped into each other.
 	vehicle_separation = 3.2
-	counts_population = false  # a device, not a believer (no mana, no housing)
 
 
 func unit_kind() -> StringName:
 	return &"siege"
 
 
-func _is_combatant() -> bool:
-	return true
-
-
-func _is_ranged() -> bool:
-	return true   # never takes melee slots; order_attack skips redistribution
-
-
-func is_targetable() -> bool:
-	return false  # attackers go for the crew
-
-
-## Catapult-vs-catapult (ranged): a catapult MAY aim at another catapult — its
-## shot's splash then hits the enemy crew. Every other unit still targets the
-## crew, never the vehicle.
+## Catapult-vs-vehicle (ranged): a catapult MAY aim at another crewed vehicle
+## (including airships) — its shot's splash then hits the enemy crew. Every
+## other unit still targets the crew, never the vehicle.
 func _may_target_vehicle(enemy: Unit) -> bool:
-	return enemy is SiegeEngine
-
-
-func renders_as_sprite() -> bool:
-	return false  # own 3D model instead of the sprite MultiMesh
-
-
-func is_conversion_immune() -> bool:
-	return true   # a device, not a believer
-
-
-func is_panic_immune() -> bool:
-	return true
+	return enemy is CrewedVehicle
 
 
 func aggro_radius() -> float:
 	return SIEGE_AGGRO
 
 
-func can_crew_siege() -> bool:
-	return false
-
-
-## Big ring enclosing the vehicle and its side crew (selecting a crew member
-## selects the whole catapult — the ring mirrors that).
-func selection_ring_scale() -> float:
-	return 4.5
-
-
-## The device takes no damage — attacks hit the crew (spec: catapults cannot
-## be attacked directly). Only water destroys it (drown bypasses this).
-func take_damage(_amount: int, _attacker = null) -> void:
-	pass
-
-
-## Too heavy for tornado throws, fireball knockback and rolls.
-func throw_airborne(_velocity: Vector3, _fall_damage: int = 0) -> void:
-	pass
-
-
-func start_roll(_dir: Vector3, _duration: float = MINI_ROLL_DURATION,
-		_initial_speed: float = 0.0, _stumble: bool = false) -> void:
-	pass
-
-
-func displace(_dir: Vector3, _dist: float) -> void:
-	pass
-
-
-## Fire spells and lava DO destroy the device (user feedback): it catches
-## fire, burns for a moment and then sinks into the ground. The crew is
-## released alive at the wreck (it takes the area damage on its own).
-func ignite(_source_pos: Vector3) -> void:
-	if state == State.DEAD or _vehicle_burn > 0.0:
-		return
-	_vehicle_burn = VEHICLE_BURN_TIME
-	_show_flame(true)
-	_play_sfx(&"siege_burning")
-
-
-func is_burning() -> bool:
-	return _vehicle_burn > 0.0
-
-
-## Tornado proximity: the vortex lifts the whole vehicle off the ground (the
-## crew is sucked up separately as normal units). Set each tornado tick.
-func set_tornado_lift(h: float) -> void:
-	_tornado_lift = maxf(h, 0.0)
-
-
-## The tornado tore the catapult apart (phase 7f, user request): it releases
-## its crew and is destroyed leaving NOTHING itself — the vortex spawns the
-## two wood chunks that scatter like any whirled-up wood.
-func burst_into_wood() -> void:
-	if state == State.DEAD:
-		return
-	_tornado_lift = 0.0
-	for m in crew.duplicate():
-		if is_instance_valid(m):
-			m.leave_crew()
-	crew.clear()
-	attack_building = null
-	_vehicle_burn = 0.0
-	_show_flame(false)
-	if _model != null:
-		_model.visible = false
-	health = 0
-	_die()
-
-
-## Flooded ground (terrain spells): the wreck goes under — crew released.
-func drown() -> void:
-	if state == State.DEAD:
-		return
-	for m in crew.duplicate():
-		if is_instance_valid(m):
-			m.leave_crew()
-	crew.clear()
-	_sinking = true
-	super.drown()
-
-
-# --- Vehicle destruction (phase 7f, user feedback) -----------------------------------
-
-## Burn-out and water: the wreck sinks. Terrain rip: it bursts apart
-## (debris). Either way the crew survives, is released and controllable.
-func _destroy_vehicle(burst: bool) -> void:
-	if state == State.DEAD:
-		return
-	for m in crew.duplicate():
-		if is_instance_valid(m):
-			m.leave_crew()
-	crew.clear()
-	attack_building = null
-	_vehicle_burn = 0.0
-	if burst:
-		_show_flame(false)
-		if _model != null:
-			_model.visible = false
-		if path_service != null:
-			var debris: BuildingDebris = BuildingDebris.new()
-			debris.setup(position, 1.5, terrain_data)
-			path_service.register_projectile(debris)
-	else:
-		_sinking = true
-	health = 0
-	_die()
-
-
-## Height span under the chassis (4 corner samples along the facing).
-func _chassis_height_span() -> float:
-	if terrain_data == null:
-		return 0.0
-	var forward: Vector3 = facing.normalized() if facing.length_squared() > 0.0 \
-		else Vector3(0, 0, 1)
-	var right: Vector3 = Vector3(-forward.z, 0.0, forward.x)
-	var lo: float = INF
-	var hi: float = -INF
-	for sf in [-CHASSIS_HALF_LENGTH, CHASSIS_HALF_LENGTH]:
-		for sr in [-CHASSIS_HALF_WIDTH, CHASSIS_HALF_WIDTH]:
-			var p: Vector3 = position + forward * sf + right * sr
-			var h: float = terrain_data.get_height(p.x, p.z)
-			lo = minf(lo, h)
-			hi = maxf(hi, h)
-	return hi - lo
-
-
-# --- Crew management --------------------------------------------------------------
-
-## Registers a unit as (incoming) crew. Refused when full or when a foreign
-## unit tries to join a MANNED enemy engine; an unmanned engine accepts any
-## tribe (the takeover completes when the recruit boards).
-func add_crew(unit) -> bool:
-	_prune_crew()
-	if unit in crew:
-		return true
-	if crew.size() >= MAX_CREW:
-		return false
-	if unit.tribe_id != tribe_id and boarded_count() > 0:
-		return false   # manned engines cannot be hijacked while served
-	crew.append(unit)
-	return true
-
-
-func remove_crew(unit) -> void:
-	crew.erase(unit)
-
-
-## Crew members currently serving the engine (boarded and within the leash).
-func boarded_count() -> int:
-	var count: int = 0
-	for m in crew:
-		if is_instance_valid(m) and m.state != State.DEAD and m.siege_boarded \
-				and _flat_dist(m.position, position) <= CREW_LEASH:
-			count += 1
-	return count
-
-
-func crew_count() -> int:
-	_prune_crew()
-	return crew.size()
-
-
-## A recruit reached the engine: it boards. First boarder of another tribe
-## takes the (unmanned) device over; a foreign recruit racing a fresh crew
-## loses and is turned away.
-func on_crew_boarded(unit) -> void:
-	if not (unit in crew):
-		return
-	if unit.tribe_id != tribe_id:
-		if boarded_count() > 0:
-			crew.erase(unit)
-			unit.leave_crew()
-			return
-		_switch_owner(unit.tribe)
-	unit.siege_boarded = true
-
-
-## Ownership follows the crew (spec: engines can change hands when the crew
-## dies/flees and a new one takes over).
-func _switch_owner(new_tribe: Tribe) -> void:
-	if new_tribe == null or new_tribe == tribe:
-		return
-	attack_building = null
-	convert_to_tribe(new_tribe)
-	_refresh_flag_color()
-
-
-## Side slot for a crew member: 3 per long side, moving with the vehicle.
-## The slot index is the member's position in the crew list (stable enough —
-## the list only compacts when members leave).
-func crew_slot_position(unit) -> Vector3:
-	var index: int = maxi(crew.find(unit), 0)
-	var side: float = -1.0 if index % 2 == 0 else 1.0
-	var rank: float = float(index / 2) - 1.0
-	var forward: Vector3 = facing.normalized() if facing.length_squared() > 0.0 \
-		else Vector3(0, 0, 1)
-	var right: Vector3 = Vector3(-forward.z, 0.0, forward.x)
-	var slot: Vector3 = position + right * side * CREW_SIDE_OFFSET \
-		+ forward * rank * CREW_RANK_SPACING
-	if terrain_data != null:
-		slot.y = terrain_data.get_height(slot.x, slot.z)
-	return slot
-
-
-## Drops freed/dead members, deserters (new orders cleared siege_engine),
-## foreign members after an ownership switch and boarded members beyond the
-## leash. Recruits still walking over are kept regardless of distance.
-## Detached members are released AFTER the list swap — leave_crew mutates
-## `crew` via remove_crew, which must not run mid-iteration.
-func _prune_crew() -> void:
-	var kept: Array = []
-	var dropped: Array = []
-	for m in crew:
-		if not is_instance_valid(m) or m.state == State.DEAD or m.siege_engine != self:
-			continue
-		if m.tribe_id != tribe_id and m.siege_boarded:
-			dropped.append(m)   # converted away / engine changed hands
-			continue
-		# NOTE: foreign members that have NOT boarded yet are legitimate
-		# takeover recruits walking over (an unmanned engine accepts any
-		# tribe) — on_crew_boarded settles who wins on arrival.
-		if m.siege_boarded and _flat_dist(m.position, position) > CREW_LEASH:
-			dropped.append(m)
-			continue
-		kept.append(m)
-	crew = kept
-	for m in dropped:
-		m.leave_crew()
-
-
-## Re-summons boarded members that finished a self-defence fight (state fell
-## back to IDLE): they return to their slots.
-func _resummon_crew() -> void:
-	for m in crew:
-		if is_instance_valid(m) and m.state == State.IDLE and m.siege_engine == self:
-			m._set_state(State.CREW)
-
-
 # --- Orders & ticking ---------------------------------------------------------------
-
-## Moving needs at least one boarded crew member.
-func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = false) -> void:
-	if boarded_count() < MIN_MOVE_CREW:
-		return
-	attack_building = null
-	super.order_move(target, queue_up, aggressive)
-
 
 ## Explicit attack order on a unit (right-click, AI): clears a building focus;
 ## the base marks the target as ORDERED, so the catapult will close in on it
@@ -390,78 +77,6 @@ func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = fals
 func order_attack(enemy: Unit) -> void:
 	attack_building = null
 	super.order_attack(enemy)
-
-
-## Explicit bombard order on a building (right-click, AI): replaces any pending
-## route. Enemy buildings always; the OWN building only while enemy raiders
-## demolish it from the inside (anti-raider bombardment, phase 7f).
-func order_attack_building(building) -> void:
-	if building == null or not is_instance_valid(building) or building.health <= 0:
-		return
-	if building.tribe_id == tribe_id and not building.has_raiders():
-		return
-	_set_building_target(building, false)
-
-
-## Bombardment focus stays valid for a live enemy building — or the OWN
-## building while enemy raiders are still demolishing it (once they are gone
-## or thrown out for good, the focus is dropped).
-func _building_target_valid() -> bool:
-	if attack_building == null or not is_instance_valid(attack_building) \
-			or attack_building.health <= 0:
-		return false
-	if attack_building.tribe_id != tribe_id:
-		return true
-	return attack_building.has_raiders()
-
-
-## Focuses a building for bombardment. `keep_route` preserves the pending
-## (attack-)move waypoint so the catapult carries on to its destination after
-## the building falls; explicit orders clear it.
-func _set_building_target(building, keep_route: bool) -> void:
-	_end_attack()
-	if not keep_route:
-		waypoint_queue.clear()
-	_clear_path()
-	attack_building = building
-	_set_state(State.ATTACK)
-
-
-## Vehicle body: paths on the eroded vehicle grid (narrow gaps are closed).
-## `_allow_partial` is ignored — vehicle paths stay all-or-nothing.
-func _plan_path_to(target: Vector3, _allow_partial: bool = false) -> bool:
-	if nav_grid != null:
-		var path: PackedVector3Array = nav_grid.find_vehicle_path(position, target)
-		if path.is_empty():
-			return false
-		_path = path
-		_path_index = 0
-		return true
-	return super._plan_path_to(target)
-
-
-func tick(delta: float) -> void:
-	# Burning wreck-to-be: count the fire down, then sink.
-	if _vehicle_burn > 0.0 and state != State.DEAD:
-		_vehicle_burn -= delta
-		if _vehicle_burn <= 0.0:
-			_destroy_vehicle(false)
-	_crew_prune_timer -= delta
-	if _crew_prune_timer <= 0.0:
-		_crew_prune_timer = 0.5
-		_prune_crew()
-		_resummon_crew()
-		# Terrain integrity: a spell ripped the ground under the chassis
-		# apart (cliff beyond anything drivable) -> the vehicle bursts.
-		if state != State.DEAD and _chassis_height_span() > BREAK_HEIGHT_SPAN:
-			_destroy_vehicle(true)
-	# An unmanned (or under-crewed) vehicle rolls to a stop mid-route.
-	if state == State.MOVE and boarded_count() < MIN_MOVE_CREW:
-		waypoint_queue.clear()
-		_clear_path()
-		_set_state(State.IDLE)
-	super.tick(delta)
-	_tick_visual(delta)
 
 
 ## Auto target acquisition (idle + aggressive move — NO explicit order). The
@@ -649,9 +264,9 @@ func _nearest_enemy_unit(max_range: float) -> Unit:
 		# NOTE (phase 7i): unlike foot units, the catapult MAY bombard units that
 		# are being converted (State.SIT) — its splash does not care about the
 		# trance. So no SIT skip here.
-		# Skip other non-targetable units, but an enemy CATAPULT is fair game
-		# (its crew takes the shot's splash) — catapult-vs-catapult.
-		if not u.is_targetable() and not (u is SiegeEngine):
+		# Skip other non-targetable units, but an enemy VEHICLE is fair game
+		# (its crew takes the shot's splash) — catapult-vs-catapult/ram/airship.
+		if not u.is_targetable() and not (u is CrewedVehicle):
 			continue
 		var d: float = _flat_dist(position, u.position)
 		if d < MIN_RANGE or d > max_range:
@@ -662,56 +277,7 @@ func _nearest_enemy_unit(max_range: float) -> Unit:
 	return best
 
 
-## Nearest living enemy building within `radius`; null without a manager
-## (bare tests) or when none is in range.
-func _scan_enemy_building(radius: float):
-	if building_manager == null:
-		return null
-	var best = null
-	var best_d: float = radius
-	for b in building_manager.buildings:
-		if not is_instance_valid(b) or b.tribe_id == tribe_id or b.health <= 0:
-			continue
-		var d: float = _flat_dist(b.center_world(), position)
-		if d <= best_d:
-			best_d = d
-			best = b
-	return best
-
-
 # --- Visuals (own 3D model, in-game only) -------------------------------------------
-
-func _ready() -> void:
-	_create_model()
-	_refresh_flag_color()
-
-
-## Blinks a temporary gold ring twice — feedback for a crew order. The unit
-## selection rings are drawn centrally (MultiMesh, selected units only), so
-## the vehicle spawns its own short-lived ring mesh.
-func flash_ring() -> void:
-	if not is_inside_tree():
-		return
-	var ring: MeshInstance3D = MeshInstance3D.new()
-	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	var torus: TorusMesh = TorusMesh.new()
-	torus.inner_radius = 0.26 * selection_ring_scale()
-	torus.outer_radius = 0.34 * selection_ring_scale()
-	ring.mesh = torus
-	var mat: StandardMaterial3D = StandardMaterial3D.new()
-	mat.albedo_color = Color(1.0, 0.95, 0.3)
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	ring.material_override = mat
-	ring.position.y = 0.1
-	add_child(ring)
-	var tween: Tween = create_tween()
-	for i in range(2):
-		tween.tween_callback(func() -> void: ring.visible = true)
-		tween.tween_interval(0.16)
-		tween.tween_callback(func() -> void: ring.visible = false)
-		tween.tween_interval(0.12)
-	tween.tween_callback(ring.queue_free)
-
 
 func _create_model() -> void:
 	var root: Node3D = Node3D.new()
@@ -804,73 +370,10 @@ func _create_model() -> void:
 	_finish_model(root)
 
 
-## Phase 8 shadow rework: units cast no real shadows — the model gets a
-## hardcoded blob quad instead (like the sprite units' blob MultiMesh).
-func _finish_model(root: Node3D) -> void:
-	for m in root.find_children("*", "MeshInstance3D", true, false):
-		(m as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	var blob: MeshInstance3D = MeshInstance3D.new()
-	blob.name = "BlobShadow"
-	blob.mesh = UnitRenderer.make_blob_mesh(Vector2(1.6, 2.4))
-	blob.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	blob.position.y = 0.04
-	root.add_child(blob)
-
-
-func _refresh_flag_color() -> void:
-	if _flag_mesh == null:
-		return
-	_flag_mesh.material_override = _mat(TRIBE_COLORS[tribe_id % TRIBE_COLORS.size()])
-
-
-func _mat(color: Color) -> StandardMaterial3D:
-	var mat: StandardMaterial3D = StandardMaterial3D.new()
-	mat.albedo_color = color
-	mat.roughness = 1.0
-	return mat
-
-
-## Lazily built flame overlay while the vehicle burns (in-game only).
-func _show_flame(show: bool) -> void:
-	if not is_inside_tree():
-		return
-	if _flame == null:
-		if not show:
-			return
-		_flame = MeshInstance3D.new()
-		_flame.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		var s: SphereMesh = SphereMesh.new()
-		s.radius = 0.6
-		s.height = 1.2
-		_flame.mesh = s
-		var mat: StandardMaterial3D = StandardMaterial3D.new()
-		mat.albedo_color = Color(1.0, 0.5, 0.1, 0.85)
-		mat.emission_enabled = true
-		mat.emission = Color(1.0, 0.4, 0.05)
-		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		_flame.material_override = mat
-		_flame.position.y = 1.2
-		add_child(_flame)
-	_flame.visible = show
-
-
-## Rotates the model with the facing, plays the throwing-arm snap, flickers
-## the burn flame and sinks the destroyed wreck into the ground.
+## Adds the throwing-arm snap on top of the shared vehicle visuals.
 func _tick_visual(delta: float) -> void:
-	if not is_inside_tree():
-		return
-	if _sinking and state == State.DEAD:
-		position.y -= SINK_SPEED * delta
-	elif _tornado_lift > 0.0 and terrain_data != null:
-		# Whirled up by the tornado: hover above the ground until it bursts.
-		position.y = terrain_data.get_height(position.x, position.z) + _tornado_lift
-	if facing.length_squared() > 0.000001:
-		rotation.y = atan2(facing.x, facing.z)
-	if _flame != null and _flame.visible:
-		_flame.scale = Vector3.ONE * (0.85 + 0.3 * absf(sin(
-			float(Time.get_ticks_msec()) * 0.02)))
-	if _arm == null:
+	super._tick_visual(delta)
+	if not is_inside_tree() or _arm == null:
 		return
 	if _arm_anim < 1.0:
 		_arm_anim = minf(_arm_anim + delta * 3.0, 1.0)

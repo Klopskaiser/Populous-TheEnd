@@ -196,37 +196,38 @@ func _tick_riders(delta: float) -> void:
 	_riders = kept
 
 
-## Lifts catapults lingering in the near radius and, after SIEGE_BURST_TIME,
-## bursts them into wood chunks. Engines that drift out settle back down and
-## lose their timer (the 2 s must be continuous). Runs every tick with the
-## real delta so the timing is exact.
+## Lifts ground vehicles lingering in the near radius and, after
+## SIEGE_BURST_TIME, bursts them into wood chunks. Vehicles that drift out
+## settle back down and lose their timer (the 2 s must be continuous). Runs
+## every tick with the real delta so the timing is exact. Airships are NOT
+## lifted — tornado contact kills them instantly (see _affect_airships).
 func _affect_siege_engines(delta: float) -> void:
 	if unit_manager == null:
 		return
 	var near_now: Dictionary = {}
 	for u in unit_manager.get_units_in_radius(position, SIEGE_NEAR_RADIUS):
-		if not (u is SiegeEngine) or u.state == Unit.State.DEAD:
+		if not (u is CrewedVehicle) or u.state == Unit.State.DEAD:
 			continue
 		near_now[u] = true
 		var t: float = float(_siege_timers.get(u, 0.0)) + delta
 		_siege_timers[u] = t
 		var lift: float = clampf(t / SIEGE_BURST_TIME, 0.0, 1.0) * SIEGE_LIFT_HEIGHT
-		(u as SiegeEngine).set_tornado_lift(lift)
+		(u as CrewedVehicle).set_tornado_lift(lift)
 		if t >= SIEGE_BURST_TIME:
-			_burst_siege(u as SiegeEngine)
+			_burst_siege(u as CrewedVehicle)
 			_siege_timers.erase(u)
-	# Engines that left the radius drop back down and reset their timer.
+	# Vehicles that left the radius drop back down and reset their timer.
 	for engine in _siege_timers.keys():
 		if not near_now.has(engine):
 			if is_instance_valid(engine):
-				(engine as SiegeEngine).set_tornado_lift(0.0)
+				(engine as CrewedVehicle).set_tornado_lift(0.0)
 			_siege_timers.erase(engine)
 
 
-## Bursts a lifted catapult: it releases its crew and is destroyed, and two
+## Bursts a lifted vehicle: it releases its crew and is destroyed, and two
 ## 1-wood chunks are whirled up from its spot (they fling/settle like any
 ## tornado wood debris).
-func _burst_siege(engine: SiegeEngine) -> void:
+func _burst_siege(engine: CrewedVehicle) -> void:
 	if not is_instance_valid(engine):
 		return
 	var at: Vector3 = engine.position
