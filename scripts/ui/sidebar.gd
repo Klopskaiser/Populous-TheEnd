@@ -160,7 +160,7 @@ static func default_build_entries() -> Array[Dictionary]:
 			"icon": &"temple", "wood_cost": Temple.WOOD_COST, "enabled": true},
 		{"id": &"forester", "name": "Försterei", "scene": FORESTER_SCENE,
 			"icon": &"forester", "wood_cost": Forester.WOOD_COST, "enabled": true},
-		{"id": &"workshop", "name": "Werkstatt", "scene": WORKSHOP_SCENE,
+		{"id": &"workshop", "name": "Katapultwerkstatt", "scene": WORKSHOP_SCENE,
 			"icon": &"workshop", "wood_cost": Workshop.WOOD_COST, "enabled": true},
 		{"id": &"watchtower", "name": "Wachturm", "scene": WATCHTOWER_SCENE,
 			"icon": &"watchtower", "wood_cost": Watchtower.WOOD_COST, "enabled": true},
@@ -726,7 +726,7 @@ func _selected_crew_target() -> Object:
 		return b
 	if _selection.selected.size() == 1:
 		var u: Unit = _selection.selected[0]
-		if is_instance_valid(u) and u is SiegeEngine and u.state != Unit.State.DEAD \
+		if is_instance_valid(u) and u is CrewedVehicle and u.state != Unit.State.DEAD \
 				and u.tribe_id == _player_id:
 			return u
 	return null
@@ -756,16 +756,26 @@ func _crew_view(target: Object) -> Dictionary:
 		var t: Watchtower = target as Watchtower
 		return {"members": t.crew, "cap": Watchtower.CREW_CAPACITY,
 			"info": "Besatzung: %d/%d" % [t.crew.size(), Watchtower.CREW_CAPACITY]}
-	if target is SiegeEngine:
-		var e: SiegeEngine = target as SiegeEngine
-		return {"members": e.crew, "cap": SiegeEngine.MAX_CREW,
-			"info": "Besatzung: %d/%d  (min. 1 fahren, 2 feuern)" % [
-				e.boarded_count(), SiegeEngine.MAX_CREW]}
+	if target is CrewedVehicle:
+		var e: CrewedVehicle = target as CrewedVehicle
+		return {"members": e.crew, "cap": e.max_crew,
+			"info": "Besatzung: %d/%d  %s" % [
+				e.boarded_count(), e.max_crew, _vehicle_crew_hint(e)]}
 	if target is TrainingBuilding:
 		var tb: TrainingBuilding = target as TrainingBuilding
 		var queue: int = tb.incoming.size() + (1 if is_instance_valid(tb.trainee) else 0)
 		return {"members": [], "cap": 0, "info": "In Ausbildung: %d" % queue}
 	return {"members": [], "cap": 0, "info": ""}
+
+
+## Short crew-rule hint per vehicle type for the crew tab's info line.
+func _vehicle_crew_hint(e: CrewedVehicle) -> String:
+	match e.unit_kind():
+		&"siege":
+			return "(min. 1 fahren, 2 feuern)"
+		&"fireram":
+			return "(min. 1 fahren & feuern)"
+	return ""
 
 
 ## Whether the target has a production the player can pause (crew tab toggle).
@@ -809,7 +819,7 @@ func _refresh_crew_tab() -> void:
 			btn.icon = UiTheme.icon(member.unit_kind())
 			btn.disabled = false
 			var label: String = _crew_kind_label(member.unit_kind())
-			if target is SiegeEngine and not member.siege_boarded:
+			if target is CrewedVehicle and not member.siege_boarded:
 				label += " (unterwegs)"
 			btn.tooltip_text = "%s — Klick: rauswerfen" % label
 		else:
@@ -836,8 +846,8 @@ func _on_crew_eject(index: int) -> void:
 		(target as Workshop).eject_worker(index)
 	elif target is Watchtower:
 		(target as Watchtower).eject_crew(index)
-	elif target is SiegeEngine:
-		var engine: SiegeEngine = target as SiegeEngine
+	elif target is CrewedVehicle:
+		var engine: CrewedVehicle = target as CrewedVehicle
 		if index >= 0 and index < engine.crew.size():
 			var member = engine.crew[index]
 			if member != null and is_instance_valid(member):
