@@ -593,7 +593,15 @@ func _tick_auto_engage(delta: float) -> void:
 	var dir: Vector3 = Vector3(stop_at.x - position.x, 0.0, stop_at.z - position.z)
 	if dir.length_squared() < 0.01:
 		return
-	_plan_path_to(position + dir.normalized() * (dir.length() - (reach - 1.0)))
+	# Aim the stop point deeper than the desired rest gap by arrive_eps(): a ship
+	# counts as "arrived" (-> IDLE) once within arrive_eps (~one separation radius,
+	# 2 m) of its path end. Aiming only reach-1.0 from the enemy therefore parked
+	# the ship arrive_eps SHORT of that — still ~1 m OUTSIDE reach — so it never
+	# entered firing range, re-planned another sub-arrive_eps hop every _engage_scan
+	# and stepped forward in tiny choppy stutters. Subtracting arrive_eps makes the
+	# ship actually fly INTO reach (the in-flight dist<=reach-0.2 check then halts it).
+	var rest_gap: float = reach - 1.0 - arrive_eps()
+	_plan_path_to(position + dir.normalized() * (dir.length() - rest_gap))
 	_auto_approach = true
 	_set_state(State.MOVE)
 

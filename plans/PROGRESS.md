@@ -9,6 +9,34 @@ Verifikationsstand. Auch bei nachträglichen Erweiterungen außerhalb einer Phas
 
 ---
 
+## Bugfix: Luftschiff-Auto-Anflug stottert kurz vor Reichweite (2026-07-20)
+
+**Symptom (Spieltest):** Luftschiff mit Feuerkriegern im Idle/Angriffsmove; Gegner steht
+**knapp außer Deck-Feuerreichweite** (muss sich nicht bewegen). Statt in EINER Bewegung in
+Reichweite zu fliegen, holt das Schiff **stufenartig** auf — fährt abgehackt in sehr kurzen
+Intervallen, stoppt wieder, braucht erstaunlich lange für die kurze Distanz und feuert nicht.
+
+**Ursache (im Code verifiziert):** `Airship.arrive_eps()` = `max(0.05, AIRSHIP_SEPARATION)`
+= **2,0 m** ([airship.gd:253](scripts/units/airship.gd)) — ein Schiff gilt als „angekommen"
+(→ IDLE), sobald es ~einen Separationsradius vor dem Pfadende ist. Der Auto-Anflug
+(`_tick_auto_engage`) plante den Stopp-Punkt aber nur **`reach - 1.0`** vom Gegner
+([airship.gd:596](scripts/units/airship.gd)). Ist der Gegner knapp außer Reichweite, ist der
+geplante Hop **kürzer als `arrive_eps`** → das Schiff „kommt an" und geht IDLE, während es
+noch ~`arrive_eps` vor dem Ziel steht, also **~1 m außerhalb `reach`**. Alle 0,5 s
+(`_engage_scan`) plant es einen neuen Mini-Hop → winzige, abgehackte Schritte, die nie ganz
+in Reichweite kommen (bzw. quälend langsam). Der bestehende Test tolerierte `reach + 1,0` und
+verdeckte das.
+
+**Fix** (`airship.gd` `_tick_auto_engage`): den Stopp-Punkt um `arrive_eps()` tiefer legen
+(`rest_gap = reach - 1.0 - arrive_eps()`), sodass das Schiff nach dem `arrive_eps`-kurzen
+Anhalten **innerhalb** `reach` ruht und in EINEM Anflug in Feuerreichweite kommt (der
+In-Flight-Stopp `dist <= reach-0.2` hält es dann sauber an).
+
+**Verifikation:** ganze Suite grün (**2190 passed, 0 failed**), Ladecheck fehlerfrei. Neuer
+Regressionstest `test_airship.gd` (`test_idle_ship_approach_endpoint_reaches_fire_range`):
+Gegner knapp außer Reichweite → geplanter Anflug-Endpunkt + `arrive_eps` liegt innerhalb
+`reach - 0.2`. **Manueller In-Game-Repro steht aus.**
+
 ## Bugfix: Fahrzeug-Wegfindung — Feuerramme-Zucken am Hügel (2026-07-20)
 
 **Symptom (Spieltest):** Feuerramme im Attack-Move über einen flachen Hügel bleibt am

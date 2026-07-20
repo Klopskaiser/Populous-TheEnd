@@ -438,6 +438,32 @@ func test_idle_ship_with_firewarrior_closes_in_and_fights() -> void:
 	_free_world(w)
 
 
+## An enemy JUST out of reach (gap < arrive_eps) used to make the ship stutter:
+## it aimed its approach only reach-1.0 from the enemy, but "arrives" (-> IDLE)
+## arrive_eps (~2 m) short of that — still ~1 m OUTSIDE reach — then re-planned a
+## tiny hop every _engage_scan. The approach endpoint must be deep enough that,
+## after stopping arrive_eps short, the ship rests INSIDE fire reach.
+func test_idle_ship_approach_endpoint_reaches_fire_range() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
+	_board(w, ship, FIREWARRIOR_SCENE)
+	var reach: float = Firewarrior.FIRE_RANGE + Airship.RANGE_BONUS
+	# Enemy just barely outside reach — the gap is smaller than arrive_eps.
+	var enemy: Unit = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, Vector3(ship.position.x + reach + 0.6, 5.0, ship.position.z))
+	ship._engage_scan = 0.0
+	ship._tick_auto_engage(0.1)
+	check(ship.state == Unit.State.MOVE, "the idle ship starts an approach")
+	var p: PackedVector3Array = ship._path
+	check(p.size() > 0, "an approach path was planned")
+	if p.size() > 0:
+		var endpoint_gap: float = ship._flat_dist(p[p.size() - 1], enemy.position)
+		# Resting position = endpoint + arrive_eps short: it must land within reach.
+		check(endpoint_gap + ship.arrive_eps() <= reach - 0.2,
+			"the approach endpoint lands the ship inside fire reach (no arrive_eps stutter)")
+	_free_world(w)
+
+
 func test_attack_move_stops_to_fight_and_resumes() -> void:
 	var w: Dictionary = _make_world()
 	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(50, 60)))
