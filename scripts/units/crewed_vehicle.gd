@@ -69,8 +69,9 @@ var _sinking: bool = false
 ## wreck burns down/sinks, "siege_death_burst" when it bursts apart (tornado /
 ## terrain rip). Catapult and fire ram share these (both are CrewedVehicles).
 var _death_sfx: StringName = &"siege_death_burst"
-## Height the tornado currently lifts the whole vehicle by (0 = grounded).
-var _tornado_lift: float = 0.0
+## While true the tornado has captured the vehicle and drives its full position
+## every tick (rides along + rises); the vehicle skips its own tick meanwhile.
+var _tornado_captured: bool = false
 ## Own 3D model parts (in-game only, built in _ready).
 var _model: Node3D = null
 var _flag_mesh: MeshInstance3D = null
@@ -204,10 +205,11 @@ func burn_fx_height() -> float:
 	return 1.4
 
 
-## Tornado proximity: the vortex lifts the whole vehicle off the ground (the
-## crew is sucked up separately as normal units). Set each tornado tick.
-func set_tornado_lift(h: float) -> void:
-	_tornado_lift = maxf(h, 0.0)
+## The tornado has caught the vehicle: from now the vortex drives its full
+## position each tick (rides along the funnel and rises) and the vehicle skips
+## its own tick, so nothing yanks it back to the ground.
+func tornado_capture() -> void:
+	_tornado_captured = true
 
 
 ## The tornado tore the vehicle apart: it releases its crew and is destroyed
@@ -216,7 +218,7 @@ func set_tornado_lift(h: float) -> void:
 func burst_into_wood() -> void:
 	if state == State.DEAD:
 		return
-	_tornado_lift = 0.0
+	_tornado_captured = false
 	for m in crew.duplicate():
 		if is_instance_valid(m):
 			m.leave_crew()
@@ -524,6 +526,11 @@ func _start_path_to(target: Vector3) -> void:
 
 
 func tick(delta: float) -> void:
+	# Captured by a tornado: the vortex fully drives the position (rides along +
+	# rises) and ends it with a burst/mid-air explosion, so the vehicle has no
+	# world tick of its own — like stationed tower crew (see Unit.tick).
+	if _tornado_captured:
+		return
 	# Burning wreck-to-be: count the fire down, then sink.
 	if _vehicle_burn > 0.0 and state != State.DEAD:
 		_vehicle_burn -= delta
@@ -684,9 +691,6 @@ func _tick_visual(delta: float) -> void:
 		return
 	if _sinking and state == State.DEAD:
 		position.y -= SINK_SPEED * delta
-	elif _tornado_lift > 0.0 and terrain_data != null:
-		# Whirled up by the tornado: hover above the ground until it bursts.
-		position.y = terrain_data.get_height(position.x, position.z) + _tornado_lift
 	var heading: Vector3 = _model_heading()
 	if heading.length_squared() > 0.000001:
 		rotation.y = atan2(heading.x, heading.z)

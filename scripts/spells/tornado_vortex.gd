@@ -32,14 +32,17 @@ const FLING_UP: float = 3.5
 const FALL_DAMAGE: int = Balance.TORNADO_FALL_DAMAGE   # applied on landing
 
 # --- Siege engines (phase 7f) ------------------------------------------------------
-## A catapult too heavy to whirl up like a unit is instead LIFTED in place
-## while the vortex lingers within SIEGE_NEAR_RADIUS; after SIEGE_BURST_TIME
-## continuous seconds it bursts into SIEGE_WOOD_CHUNKS wood chunks (1 wood
-## each) that then scatter like any whirled-up wood. Its crew is sucked up
-## separately as normal units. Leaving the radius resets the timer.
-const SIEGE_NEAR_RADIUS: float = 2.0
-const SIEGE_BURST_TIME: float = 2.0
-const SIEGE_LIFT_HEIGHT: float = 4.0
+## A catapult/fire ram too heavy to whirl up like a unit gets a survival window:
+## once it has stood SIEGE_GRACE_TIME continuous seconds inside the influence
+## radius the vortex CAPTURES it — from then on it rides along with the drifting
+## funnel and rises over SIEGE_RISE_TIME up to the tip, where it bursts into
+## SIEGE_WOOD_CHUNKS wood chunks (1 wood each). If the vortex ends before it
+## reaches the tip it explodes in mid-air (chunks flung from the current height).
+## Leaving the radius BEFORE capture only resets the grace timer (it never left
+## the ground, so it cannot drop onto a building). Its crew is sucked up
+## separately as normal units.
+const SIEGE_GRACE_TIME: float = 1.0
+const SIEGE_RISE_TIME: float = 2.0
 const SIEGE_WOOD_CHUNKS: int = 2
 
 var done: bool = false
@@ -56,8 +59,11 @@ var _stage_timer: float = 0.0
 var _pickup_timer: float = 0.0
 ## Rider entries: {unit, time: float, angle: float}.
 var _riders: Array = []
-## Per siege engine: seconds it has been continuously within SIEGE_NEAR_RADIUS.
+## Per not-yet-captured siege engine: seconds continuously within the influence
+## radius (the grace timer). Reset when it leaves before SIEGE_GRACE_TIME.
 var _siege_timers: Dictionary = {}
+## Captured siege engines riding the funnel: {unit, rise: float, angle: float}.
+var _siege_riders: Array = []
 
 
 func setup(p_tribe_id: int, at: Vector3, p_unit_manager: UnitManager,
@@ -162,13 +168,14 @@ func _shred_trees_and_scatter_piles() -> void:
 
 
 ## Launches one flying wood chunk from `at` carrying `wood` (0 = a sapling that
-## vanishes on landing).
-func _spawn_debris(at: Vector3, wood: int) -> void:
+## vanishes on landing). With `fling_now` the chunk is flung straight from `at`
+## instead of spiralling up the funnel first (mid-air siege explosion).
+func _spawn_debris(at: Vector3, wood: int, fling_now: bool = false) -> void:
 	if unit_manager == null:
 		return
 	var debris: TornadoDebris = TornadoDebris.new()
 	debris.setup(at, wood, terrain_data, unit_manager.wood_pile_manager, self,
-		randf() * TAU, top_height, radius * 0.9)
+		randf() * TAU, top_height, radius * 0.9, fling_now)
 	unit_manager.register_projectile(debris)
 
 
@@ -214,32 +221,73 @@ func _tick_riders(delta: float) -> void:
 	_riders = kept
 
 
-## Lifts ground vehicles lingering in the near radius and, after
-## SIEGE_BURST_TIME, bursts them into wood chunks. Vehicles that drift out
-## settle back down and lose their timer (the 2 s must be continuous). Runs
-## every tick with the real delta so the timing is exact. Airships are NOT
-## lifted — tornado contact kills them instantly (see _affect_airships).
+## Ground vehicles get a grace window before being torn up: a vehicle that has
+## stood SIEGE_GRACE_TIME continuous seconds inside the influence radius is
+## CAPTURED and starts riding the funnel (see _tick_siege_riders); one that
+## drifts out before that only loses its grace timer — it never left the ground,
+## so it cannot drop onto a building. Runs every tick with the real delta so the
+## timing is exact. Airships are NOT lifted — contact kills them instantly.
 func _affect_siege_engines(delta: float) -> void:
 	if unit_manager == null:
 		return
+	_tick_siege_riders(delta)
 	var near_now: Dictionary = {}
-	for u in unit_manager.get_units_in_radius(position, SIEGE_NEAR_RADIUS):
+	for u in unit_manager.get_units_in_radius(position, radius):
 		if not (u is CrewedVehicle) or u is Airship or u.state == Unit.State.DEAD:
 			continue
+		if _is_siege_rider(u):
+			continue   # already captured and rising
 		near_now[u] = true
 		var t: float = float(_siege_timers.get(u, 0.0)) + delta
 		_siege_timers[u] = t
-		var lift: float = clampf(t / SIEGE_BURST_TIME, 0.0, 1.0) * SIEGE_LIFT_HEIGHT
-		(u as CrewedVehicle).set_tornado_lift(lift)
-		if t >= SIEGE_BURST_TIME:
-			_burst_siege(u as CrewedVehicle)
+		if t >= SIEGE_GRACE_TIME:
+			_capture_siege(u as CrewedVehicle)
 			_siege_timers.erase(u)
-	# Vehicles that left the radius drop back down and reset their timer.
+	# Vehicles that left the radius before capture reset their grace timer.
 	for engine in _siege_timers.keys():
 		if not near_now.has(engine):
-			if is_instance_valid(engine):
-				(engine as CrewedVehicle).set_tornado_lift(0.0)
 			_siege_timers.erase(engine)
+
+
+func _is_siege_rider(u) -> bool:
+	for r in _siege_riders:
+		if r.unit == u:
+			return true
+	return false
+
+
+## Captures a vehicle into the funnel: from now the vortex drives its position.
+func _capture_siege(engine: CrewedVehicle) -> void:
+	if not is_instance_valid(engine):
+		return
+	engine.tornado_capture()
+	_siege_riders.append({"unit": engine, "rise": 0.0, "angle": randf() * TAU})
+
+
+## Captured vehicles spiral around the (drifting) funnel centre and rise to the
+## tip over SIEGE_RISE_TIME, then burst. Mirrors _tick_riders but for vehicles,
+## which cannot use the normal THROWN rider path.
+func _tick_siege_riders(delta: float) -> void:
+	if _siege_riders.is_empty():
+		return
+	var kept: Array = []
+	for r in _siege_riders:
+		var u = r.unit
+		if u == null or not is_instance_valid(u) or u.state == Unit.State.DEAD:
+			continue
+		r.rise += delta
+		r.angle += SPIN_SPEED * delta
+		var f: float = clampf(r.rise / SIEGE_RISE_TIME, 0.0, 1.0)
+		var spiral_r: float = lerpf(radius * 0.6, 0.4, f)   # narrows to the tip
+		u.position = Vector3(
+			position.x + cos(r.angle) * spiral_r,
+			position.y + f * top_height,
+			position.z + sin(r.angle) * spiral_r)
+		if r.rise >= SIEGE_RISE_TIME:
+			_burst_siege(u as CrewedVehicle)   # reached the tip
+		else:
+			kept.append(r)
+	_siege_riders = kept
 
 
 ## Airship contact (shadow within the funnel): no lift phase — the vortex
@@ -248,7 +296,7 @@ func _affect_siege_engines(delta: float) -> void:
 func _affect_airships() -> void:
 	if unit_manager == null:
 		return
-	for u in unit_manager.get_units_in_radius(position, SIEGE_NEAR_RADIUS):
+	for u in unit_manager.get_units_in_radius(position, radius):
 		if not (u is Airship) or u.state == Unit.State.DEAD:
 			continue
 		var at: Vector3 = Vector3(u.position.x, position.y, u.position.z)
@@ -257,8 +305,8 @@ func _affect_airships() -> void:
 			_spawn_debris(at, 1)
 
 
-## Bursts a lifted vehicle: it releases its crew and is destroyed, and two
-## 1-wood chunks are whirled up from its spot (they fling/settle like any
+## Bursts a captured vehicle at the tip: it releases its crew and is destroyed,
+## and two 1-wood chunks are whirled up from its spot (they fling/settle like any
 ## tornado wood debris).
 func _burst_siege(engine: CrewedVehicle) -> void:
 	if not is_instance_valid(engine):
@@ -267,6 +315,18 @@ func _burst_siege(engine: CrewedVehicle) -> void:
 	engine.burst_into_wood()
 	for i in range(SIEGE_WOOD_CHUNKS):
 		_spawn_debris(at, 1)
+
+
+## Explodes a captured vehicle in MID-AIR: the vortex ended before it reached the
+## tip, so the two wood chunks are flung straight from its current height instead
+## of spiralling up first.
+func _explode_siege_in_air(engine: CrewedVehicle) -> void:
+	if not is_instance_valid(engine):
+		return
+	var at: Vector3 = engine.position
+	engine.burst_into_wood()
+	for i in range(SIEGE_WOOD_CHUNKS):
+		_spawn_debris(at, 1, true)
 
 
 func _fling(u: Unit, angle: float) -> void:
@@ -281,6 +341,12 @@ func _release_all_riders() -> void:
 				and u.throw_carrier == self:
 			_fling(u, r.angle)
 	_riders.clear()
+	# Captured siege engines that never reached the tip explode where they are.
+	for r in _siege_riders:
+		var e = r.unit
+		if e != null and is_instance_valid(e) and e.state != Unit.State.DEAD:
+			_explode_siege_in_air(e as CrewedVehicle)
+	_siege_riders.clear()
 
 
 func _ready() -> void:

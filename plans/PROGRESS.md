@@ -3205,21 +3205,34 @@ erneut ausstehend.
 
 **Erweiterung 4 nach Nutzerwunsch (2026-07-07) — Tornado wirkt aufs Katapult:**
 Bisher saugte der Tornado nur die **Crew** ein (normale Einheiten); das
-Katapult selbst war wurf-immun. Neu (`tornado_vortex.gd` +
-`siege_engine.gd`): Ist der Tornado ≥ **2 s durchgehend** innerhalb
-`SIEGE_NEAR_RADIUS` (**2 m**) eines Katapults, wird das Gerät währenddessen
-sichtbar **angehoben** (`SiegeEngine.set_tornado_lift`, hover bis 4 m) und
-**zerplatzt** dann: `SiegeEngine.burst_into_wood()` gibt die Crew frei und
-zerstört das Gerät (ohne eigenes Trümmer-Mesh), der Vortex spawnt **zwei
-1-Holz-Trümmer** (`TornadoDebris`), die wie jedes hochgewirbelte Holz
-weggeschleudert werden und als 1-Holz-Stapel liegen bleiben. Verlässt der
-Tornado den 2-m-Radius vor Ablauf, wird der Timer zurückgesetzt und das
-Katapult sinkt wieder ab (die 2 s müssen durchgehend sein). Umgesetzt in
-`TornadoVortex._affect_siege_engines`/`_burst_siege` (pro Tick mit echtem
-delta). Tests: `test_tornado_lifts_and_bursts_catapult` (Lift < 2 s, Burst ≥ 2 s,
-zwei 1-Holz-Chunks → 2 Holz am Boden), `test_tornado_near_reset_spares_catapult`
-(unterbrochene Nähe akkumuliert nicht). **1235 Tests, 0 Fehler**, Ladecheck
-fehlerfrei. Manuelle Prüfung ausstehend.
+Katapult selbst war wurf-immun. Neu (`tornado_vortex.gd` + `crewed_vehicle.gd`):
+Belagerungsfahrzeuge (Katapult/Feuerramme, kein Luftschiff) werden vom Wirbel
+mitgerissen statt auf der Stelle gehoben.
+
+**Überarbeitung (Nutzertest 2026-07-20) — Mitreißen statt Lift-in-place:** Das
+alte „auf der Stelle heben, bei Verlassen des Radius wieder absetzen"-Modell
+ließ ein Katapult bei wegdriftendem Wirbel auf seiner x/z-Stelle zurückfallen —
+auch **auf eine Hütte**. Neues Modell: Steht ein Fahrzeug `SIEGE_GRACE_TIME`
+(**1 s**) durchgehend im Einflussradius (`radius`, = Pickup-Radius), wird es
+**erfasst** (`CrewedVehicle.tornado_capture()`); ab dann steuert der Vortex die
+komplette Position — es **wandert mit dem Wirbel mit und steigt** über
+`SIEGE_RISE_TIME` (**2 s**) zur Spitze und **zerplatzt** dort
+(`burst_into_wood()` + zwei 1-Holz-`TornadoDebris`, spiralen/settlen wie gehabt).
+Endet der Wirbel vorher (Grace-Fenster aber schon überschritten), **explodiert**
+das Fahrzeug auf aktueller Höhe (`_explode_siege_in_air` →
+`TornadoDebris.setup(..., fling_now=true)`: Chunks werden direkt von der Höhe
+weggeschleudert). Vor der Erfassung bleibt das Fahrzeug am **Boden**; Verlassen
+des Radius setzt nur den Grace-Timer zurück (kein Absturz). Gilt automatisch für
+den Supertornado (gleiche `TornadoVortex`-Klasse). Umgesetzt in
+`_affect_siege_engines`/`_tick_siege_riders`/`_capture_siege`/`_burst_siege`/
+`_explode_siege_in_air` und `_release_all_riders`; die alten
+`set_tornado_lift`/`_tornado_lift`-Pfade (auch der No-op-Override in
+`airship.gd`) entfielen. Tests: `test_tornado_lifts_and_bursts_catapult`
+(Capture nach 1 s, Burst an der Spitze, zwei 1-Holz-Chunks → 2 Holz am Boden),
+`test_tornado_near_reset_spares_catapult` (unterbrochene Nähe < 1 s → keine
+Erfassung), `test_tornado_end_explodes_captured_catapult_in_air` (Wirbel endet
+vor der Spitze → Mid-Air-Explosion, zwei geschleuderte Chunks). **2195 Tests,
+0 Fehler**, Ladecheck fehlerfrei. Manuelle Prüfung ausstehend.
 
 **Bugfix (Nutzertest 2026-07-07) — Phantom-Routenmarker an fertigen Arbeitern:**
 Wählte man Arbeiter nach getaner Arbeit aus, zeigten sich manchmal

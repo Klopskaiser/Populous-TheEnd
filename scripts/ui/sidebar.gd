@@ -17,9 +17,13 @@ class_name Sidebar extends Control
 
 const PANEL_WIDTH: float = 260.0
 const MINIMAP_SIZE: float = 236.0
-## Min height of the tab content area: tall enough for the building tab's full
-## grid; every tab scrolls as a safety net for short windows.
-const TAB_CONTENT_HEIGHT: float = 300.0
+## Min height of the tab content area. Kept low so the whole sidebar column fits
+## into a 1080p (windowed) client area — with the tall fixed elements above
+## (minimap, portrait, header) a large floor here pushes the lower rows and the
+## menu button off-screen. Every tab is a ScrollContainer, so a small floor only
+## means more scrolling on tiny windows; the area still expands (SIZE_EXPAND_FILL)
+## to the full remaining height on taller windows.
+const TAB_CONTENT_HEIGHT: float = 160.0
 ## Index of the auto-activating crew tab.
 const TAB_CREW: int = 3
 const MANA_SEGMENTS: int = 20
@@ -544,9 +548,8 @@ func _make_build_cell(entry: Dictionary) -> Control:
 
 
 func _build_spell_tab() -> Control:
-	# Scrolls like the building tab: the tab area shrinks while a building/crew
-	# panel is open (see _update_tab_content_height), so all rows must stay
-	# reachable at the compact height too.
+	# Scrolls like the building tab so all rows stay reachable when the tab
+	# content area is compact (short windows / 1080p).
 	var scroll: ScrollContainer = ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	var grid: GridContainer = GridContainer.new()
@@ -592,8 +595,8 @@ func _make_spell_cell(entry: Dictionary) -> Control:
 
 
 func _build_followers_tab() -> Control:
-	# Scrolls for the same reason as the spell tab (compact tab height while a
-	# building/crew panel is open).
+	# Scrolls for the same reason as the spell tab (compact tab content height on
+	# short windows / 1080p).
 	var scroll: ScrollContainer = ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	var vb: VBoxContainer = VBoxContainer.new()
@@ -661,9 +664,10 @@ func _on_auto_recrew_toggled(pressed: bool) -> void:
 		player.auto_recrew_vehicles = pressed
 
 
-## Builds one vehicle-cap stepper row (−  label  +) and registers it for the
-## periodic refresh. The label carries cap AND owned count in one line so the
-## followers tab holds three steppers without overflowing.
+## Builds one vehicle-cap stepper row [Titel  −  Zahl  +] and registers it for
+## the periodic refresh. The title label absorbs the free width and ellipsizes,
+## so the −/Zahl/+ group stays inside the panel; the number label has a fixed
+## width for two digits, so the "+" button stays visible up to a cap of 99.
 func _add_cap_stepper(vb: VBoxContainer, title: String, tooltip: String,
 		limit: int, get_cap: Callable, set_cap: Callable, get_owned: Callable) -> void:
 	var row: HBoxContainer = HBoxContainer.new()
@@ -671,24 +675,31 @@ func _add_cap_stepper(vb: VBoxContainer, title: String, tooltip: String,
 	vb.add_child(row)
 	var entry: Dictionary = {"title": title, "limit": limit, "get_cap": get_cap,
 		"set_cap": set_cap, "get_owned": get_owned}
+	var title_label: Label = Label.new()
+	title_label.add_theme_color_override("font_color", UiTheme.TEXT)
+	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title_label.clip_text = true   # may shrink below its text width -> ellipsis
+	title_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	title_label.tooltip_text = tooltip
+	row.add_child(title_label)
 	var minus: Button = Button.new()
 	minus.text = "−"
 	UiTheme.style_button(minus)
 	minus.pressed.connect(func() -> void: _on_cap_delta(entry, -1))
 	row.add_child(minus)
-	var label: Label = Label.new()
-	label.add_theme_color_override("font_color", UiTheme.TEXT)
-	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	label.tooltip_text = tooltip
-	row.add_child(label)
+	var count_label: Label = Label.new()
+	count_label.add_theme_color_override("font_color", UiTheme.TEXT)
+	count_label.custom_minimum_size = Vector2(26, 0)   # room for two digits
+	count_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	count_label.tooltip_text = tooltip
+	row.add_child(count_label)
 	var plus: Button = Button.new()
 	plus.text = "+"
 	UiTheme.style_button(plus)
 	plus.pressed.connect(func() -> void: _on_cap_delta(entry, 1))
 	row.add_child(plus)
-	entry["label"] = label
+	entry["title_label"] = title_label
+	entry["count_label"] = count_label
 	_cap_steppers.append(entry)
 
 
@@ -707,12 +718,13 @@ func _refresh_cap_steppers() -> void:
 	if player == null:
 		return
 	for entry in _cap_steppers:
-		var label: Label = entry["label"]
-		if label == null or not is_instance_valid(label):
+		var title_label: Label = entry["title_label"]
+		var count_label: Label = entry["count_label"]
+		if title_label == null or not is_instance_valid(title_label):
 			continue
-		label.text = "Max. %s: %d (%d)" % [entry["title"],
-			int((entry["get_cap"] as Callable).call(player)),
+		title_label.text = "Max. %s (%d)" % [entry["title"],
 			int((entry["get_owned"] as Callable).call(player))]
+		count_label.text = "%d" % int((entry["get_cap"] as Callable).call(player))
 
 
 # --- Crew tab (occupancy of the selected mannable object) ---------------------

@@ -1122,13 +1122,13 @@ func test_tornado_lifts_and_bursts_catapult() -> void:
 	_board_crew(w, engine)
 	var vortex: TornadoVortex = TornadoVortex.new()
 	vortex.setup(0, engine.position, w.unit_manager, w.td, w.building_manager)
-	# Under 2 s near: lifted but intact.
+	# After the 1 s grace window the catapult is captured (rising) but intact.
 	vortex._affect_siege_engines(1.0)
-	check(engine.state != Unit.State.DEAD, "under 2 s the catapult is only lifted")
-	check(engine._tornado_lift > 0.0, "the tornado lifts the catapult while near")
-	# Cross the 2 s threshold: it bursts into two 1-wood chunks.
-	vortex._affect_siege_engines(1.5)
-	check(engine.state == Unit.State.DEAD, "after 2 s near the catapult bursts")
+	check(engine.state != Unit.State.DEAD, "after the grace window the catapult only rises")
+	check(engine._tornado_captured, "the tornado captures the catapult")
+	# Rising to the tip (SIEGE_RISE_TIME) bursts it into two 1-wood chunks.
+	vortex._affect_siege_engines(TornadoVortex.SIEGE_RISE_TIME)
+	check(engine.state == Unit.State.DEAD, "at the tip the catapult bursts")
 	var chunks: int = 0
 	for p in w.unit_manager.projectiles:
 		if p is TornadoDebris and p.wood == 1:
@@ -1145,8 +1145,9 @@ func test_tornado_lifts_and_bursts_catapult() -> void:
 	_free_world(w)
 
 
-## Drifting out of the near radius before 2 s resets the timer (the vehicle
-## settles back down, no burst).
+## Drifting out of the influence radius before the 1 s grace window resets the
+## timer: the catapult is never captured and never leaves the ground, so it
+## survives and cannot drop onto a building.
 func test_tornado_near_reset_spares_catapult() -> void:
 	var w: Dictionary = _make_world()
 	var engine: SiegeEngine = w.unit_manager.spawn_unit(
@@ -1154,16 +1155,43 @@ func test_tornado_near_reset_spares_catapult() -> void:
 	_board_crew(w, engine)
 	var vortex: TornadoVortex = TornadoVortex.new()
 	vortex.setup(0, engine.position, w.unit_manager, w.td, w.building_manager)
-	vortex._affect_siege_engines(1.5)   # 1.5 s near
-	check(engine.state != Unit.State.DEAD, "not yet burst")
+	vortex._affect_siege_engines(0.5)   # 0.5 s near, under the grace window
+	check(engine.state != Unit.State.DEAD, "not yet captured")
+	check(not engine._tornado_captured, "under the grace window it is not captured")
 	# Tornado drifts away, then comes back briefly — the timer restarts.
 	vortex.position += Vector3(20.0, 0.0, 0.0)
 	vortex._affect_siege_engines(0.2)
-	check(engine._tornado_lift == 0.0, "out of range: the catapult settles back down")
 	vortex.position = engine.position
-	vortex._affect_siege_engines(1.5)   # only 1.5 s again -> still alive
+	vortex._affect_siege_engines(0.5)   # only 0.5 s again -> still alive
 	check(engine.state != Unit.State.DEAD,
-		"a broken-off approach does not accumulate — no burst under 2 s continuous")
+		"a broken-off approach does not accumulate — no capture under 1 s continuous")
+	check(not engine._tornado_captured, "still not captured")
+	vortex.free()
+	_free_world(w)
+
+
+## A captured catapult that has not reached the tip when the vortex ends explodes
+## in mid-air: it dies and flings two 1-wood chunks from its current height.
+func test_tornado_end_explodes_captured_catapult_in_air() -> void:
+	var w: Dictionary = _make_world()
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(60, 60))) as SiegeEngine
+	_board_crew(w, engine)
+	var ground_y: float = engine.position.y
+	var vortex: TornadoVortex = TornadoVortex.new()
+	vortex.setup(0, engine.position, w.unit_manager, w.td, w.building_manager)
+	vortex._affect_siege_engines(1.0)                       # capture
+	vortex._affect_siege_engines(0.5)                       # part-way up, still alive
+	check(engine.state != Unit.State.DEAD, "still rising, not yet at the tip")
+	check(engine.position.y > ground_y, "the captured catapult is airborne")
+	# Vortex ends before the catapult reaches the tip -> mid-air explosion.
+	vortex._release_all_riders()
+	check(engine.state == Unit.State.DEAD, "the ending vortex explodes it in mid-air")
+	var chunks: int = 0
+	for p in w.unit_manager.projectiles:
+		if p is TornadoDebris and p.wood == 1:
+			chunks += 1
+	check(chunks == 2, "the mid-air explosion flings two 1-wood chunks")
 	vortex.free()
 	_free_world(w)
 

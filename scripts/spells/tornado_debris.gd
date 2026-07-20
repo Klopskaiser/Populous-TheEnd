@@ -45,7 +45,8 @@ var _center_xz: Vector3 = Vector3.ZERO
 
 func setup(at: Vector3, p_wood: int, p_terrain_data: TerrainData,
 		p_wood_pile_manager: WoodPileManager, p_vortex: Node3D, p_angle: float,
-		p_top_height: float = 6.0, p_spiral_r0: float = 2.0) -> void:
+		p_top_height: float = 6.0, p_spiral_r0: float = 2.0,
+		p_fling_now: bool = false) -> void:
 	position = at
 	wood = p_wood
 	vanish = p_wood <= 0
@@ -56,6 +57,14 @@ func setup(at: Vector3, p_wood: int, p_terrain_data: TerrainData,
 	top_height = p_top_height
 	spiral_r0 = p_spiral_r0
 	_center_xz = Vector3(at.x, 0.0, at.z)
+	# Fling immediately from the current (high) spot instead of spiralling up the
+	# funnel first — used when a captured siege engine explodes in mid-air because
+	# the vortex ended before it reached the tip.
+	if p_fling_now:
+		var out: Vector3 = Vector3(cos(_angle), 0.0, sin(_angle))
+		_vel = out * FLING_SPEED + Vector3.UP * FLING_UP
+		_phase = Phase.FLING
+		_t = 0.0
 
 
 func tick(delta: float) -> void:

@@ -196,12 +196,6 @@ func _chassis_height_span() -> float:
 	return 0.0
 
 
-## The tornado does not lift the airship — contact explodes it instead
-## (TornadoVortex._affect_airships).
-func set_tornado_lift(_h: float) -> void:
-	pass
-
-
 ## Tornado contact: the airship explodes (no wood-burst limbo state).
 func burst_into_wood() -> void:
 	explode()
