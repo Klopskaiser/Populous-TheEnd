@@ -135,7 +135,9 @@ func _ignite_touching_units() -> void:
 		for u in unit_manager.get_units_in_radius(seg.pos, CONTACT_RADIUS):
 			if u.state == Unit.State.DEAD or u.is_airborne():
 				continue   # airborne units (thrown, airship deck) pass over the lava
-			u.ignite(seg.pos)
+			# This flow is the fire source: a fire ram takes ONE life from the
+			# flow no matter how long it stands in it (per-source throttle).
+			u.ignite(seg.pos, self)
 		# Lava also sets trees and wood piles alight (phase 7d).
 		if tm != null:
 			tm.ignite_in_radius(seg.pos, CONTACT_RADIUS)

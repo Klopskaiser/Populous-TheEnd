@@ -171,7 +171,7 @@ func displace(_dir: Vector3, _dist: float) -> void:
 ## Fire spells and lava DO destroy the device: it catches fire, burns for a
 ## moment and then sinks into the ground. The crew is released alive at the
 ## wreck (it takes the area damage on its own).
-func ignite(_source_pos: Vector3) -> void:
+func ignite(_source_pos: Vector3, _source = null) -> void:
 	if state == State.DEAD or _vehicle_burn > 0.0:
 		return
 	_vehicle_burn = VEHICLE_BURN_TIME
@@ -180,8 +180,8 @@ func ignite(_source_pos: Vector3) -> void:
 
 ## Flame contact (fire ram): the wooden vehicle catches fire properly — same
 ## as a fire-spell hit (units get the no-contact-damage burn instead).
-func scorch(source_pos: Vector3) -> void:
-	ignite(source_pos)
+func scorch(source_pos: Vector3, source = null) -> void:
+	ignite(source_pos, source)
 
 
 func is_burning() -> bool:

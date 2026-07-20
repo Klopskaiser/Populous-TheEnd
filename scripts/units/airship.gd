@@ -167,7 +167,7 @@ func _may_target_vehicle(_enemy: Unit) -> bool:
 
 ## Fire and lava cannot reach the airborne hull — fire spells damage it via
 ## register_hull_hit (FireballBolt special-cases the airship) instead.
-func ignite(_source_pos: Vector3) -> void:
+func ignite(_source_pos: Vector3, _source = null) -> void:
 	pass
 
 

@@ -82,7 +82,10 @@ func _ignite_covered_units() -> void:
 	for u in unit_manager.get_units_in_radius(position, _radius):
 		if u.state == Unit.State.DEAD or u.is_airborne():
 			continue   # airborne units (thrown, airship deck) pass over the lava
-		u.ignite(position)
+		# Pass this surge as the fire source: a fire ram in the lava takes ONE
+		# life from a given puddle no matter how long it stands there; a fresh
+		# surge (new catapult shot) is a new source and costs another life.
+		u.ignite(position, self)
 	# Lava also sets trees and wood piles alight (phase 7d) — like the lava flow.
 	if unit_manager.tree_manager != null:
 		unit_manager.tree_manager.ignite_in_radius(position, _radius)

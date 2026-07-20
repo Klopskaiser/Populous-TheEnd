@@ -228,6 +228,36 @@ func test_flame_rectangle_hits_and_misses() -> void:
 	_free_world(w)
 
 
+## The flame cone fans out 2 -> 3 wide: a unit at a side offset that is OUTSIDE
+## the cone near the nozzle is INSIDE it near the far end.
+func test_flame_cone_widens_toward_the_far_end() -> void:
+	var w: Dictionary = _make_world()
+	var ram: FireRam = _armed_ram(w)   # heading +z
+	var p: Vector3 = ram.position
+	# Target straight ahead, close enough that the ram stops and fires (no roll).
+	var target_pos: Vector3 = p + Vector3(0, 0, 2.0)
+	var target: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, target_pos)
+	# Same side offset (1.3 m) at two ranges: near the nozzle (narrow, ~1.07 m
+	# half-width) it is outside; near the far end (wide, ~1.45 m) it is inside.
+	var near_pos: Vector3 = p + Vector3(1.3, 0, 1.9)
+	var far_pos: Vector3 = p + Vector3(1.3, 0, 5.7)
+	var near_side: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, near_pos)
+	var far_side: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, far_pos)
+	ram.order_attack(target)
+	var ticks: int = 0
+	while not far_side.is_burning() and ticks < MAX_TICKS:
+		target.position = target_pos
+		near_side.position = near_pos
+		far_side.position = far_pos
+		_tick_world(w)
+		ticks += 1
+	check(far_side.is_burning(),
+		"a unit at side 1.3 m near the far end is caught (cone widened to 3)")
+	check(not near_side.is_burning(),
+		"the same side offset near the nozzle is NOT caught (cone still 2 wide)")
+	_free_world(w)
+
+
 func test_flames_ignite_enemy_ground_vehicles() -> void:
 	var w: Dictionary = _make_world()
 	var ram: FireRam = _armed_ram(w)
@@ -505,14 +535,78 @@ func test_ram_burns_and_sinks_and_is_capturable() -> void:
 	var raider: Brave = _board_crew(w, ram, 1)
 	check(ram.tribe_id == 1, "boarding an unmanned ram takes it over")
 	check(raider.siege_boarded, "the raider serves the captured ram")
-	# Fire destroys it: ignite -> burns -> sinks; the crew survives.
+	# Fire resistance: the ram has FIRE_LIVES lives. Anonymous (null-source)
+	# ignites each count as one hit; only the FIRE_LIVES-th burns it down.
 	ram.ignite(ram.position)
 	check(ram.is_burning(), "fire sets the wooden ram alight")
-	var ticks: int = 0
-	while ram.state != Unit.State.DEAD and ticks < MAX_TICKS:
-		_tick_world(w)
-		ticks += 1
-	check(ram.state == Unit.State.DEAD, "the burnt ram is destroyed")
+	check(ram.state != Unit.State.DEAD, "one fire hit does not destroy the ram (3 lives)")
+	for _i in range(FireRam.FIRE_LIVES - 2):
+		ram.ignite(ram.position)
+	check(ram.state != Unit.State.DEAD, "still alive one hit short of lethal")
+	ram.ignite(ram.position)   # the lethal hit
+	check(ram.state == Unit.State.DEAD, "the FIRE_LIVES-th fire hit burns it down")
 	check(raider.state != Unit.State.DEAD, "the crew survives and is released")
 	check(raider.siege_engine == null, "crew membership was cleared")
+	_free_world(w)
+
+
+func test_ram_throttles_repeated_hits_from_one_source() -> void:
+	var w: Dictionary = _make_world()
+	var ram: FireRam = _spawn_ram(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
+	_board_crew(w, ram)
+	# One source (identified by instance) can only cost ONE life however often it
+	# touches the ram — until it counts as a fresh attack.
+	var src: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, ram.position + Vector3(4, 0, 0))
+	for _i in range(5):
+		ram.ignite(ram.position, src)
+	check(ram._fire_hits == 1, "repeated contact from the same source is one hit")
+	# A different source adds a second hit.
+	var src2: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, ram.position + Vector3(5, 0, 0))
+	ram.ignite(ram.position, src2)
+	check(ram._fire_hits == 2, "a different source costs another life")
+	check(ram.state != Unit.State.DEAD, "two hits are not lethal (3 lives)")
+	_free_world(w)
+
+
+func test_ram_fire_source_counts_once_per_burst() -> void:
+	var w: Dictionary = _make_world()
+	var target: FireRam = _spawn_ram(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
+	_board_crew(w, target)
+	# An attacking ram is keyed per burst: repeated contact within one burst is
+	# one hit, a new burst (bumped _burst_seq) is a fresh hit.
+	var attacker: FireRam = _spawn_ram(w, 1, w.nav.cell_to_world(Vector2i(70, 70)))
+	target.ignite(target.position, attacker)
+	target.ignite(target.position, attacker)
+	check(target._fire_hits == 1, "same burst from one ram is a single hit")
+	attacker._burst_seq += 1   # next flame burst
+	target.ignite(target.position, attacker)
+	check(target._fire_hits == 2, "a fresh burst from the same ram hits again")
+	_free_world(w)
+
+
+func test_ram_regenerates_a_life_while_crewed() -> void:
+	var w: Dictionary = _make_world()
+	var ram: FireRam = _spawn_ram(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
+	_board_crew(w, ram)
+	ram.ignite(ram.position)
+	ram.ignite(ram.position, w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, ram.position + Vector3(4, 0, 0)))
+	check(ram._fire_hits == 2, "took two fire hits")
+	# Crewed: heals one life after LIFE_REGEN_TIME (even without combat pause).
+	var elapsed: float = 0.0
+	while ram._fire_hits > 1 and elapsed < FireRam.LIFE_REGEN_TIME + 5.0:
+		_tick_world(w)
+		elapsed += TICK
+	check(ram._fire_hits == 1, "a crewed ram regenerated one life after ~30 s")
+	_free_world(w)
+
+
+func test_ram_does_not_regenerate_without_crew() -> void:
+	var w: Dictionary = _make_world()
+	var ram: FireRam = _spawn_ram(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
+	ram.ignite(ram.position)   # unmanned
+	check(ram._fire_hits == 1, "took a fire hit")
+	for _i in range(int((FireRam.LIFE_REGEN_TIME + 5.0) / TICK)):
+		_tick_world(w)
+	check(ram._fire_hits == 1, "an uncrewed ram does not heal")
 	_free_world(w)

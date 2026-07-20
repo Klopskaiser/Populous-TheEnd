@@ -9,6 +9,45 @@ Verifikationsstand. Auch bei nachträglichen Erweiterungen außerhalb einer Phas
 
 ---
 
+## Feuerramme: breiterer Flammenkegel + Feuerfestigkeit (3 Leben) (2026-07-20)
+
+Zwei Erweiterungen der Feuerramme.
+
+**1. Flammenkegel fächert 2 → 3 auf.** Bisher ein gleichmäßiges 2×5-Rechteck.
+Neu `Balance.FIRERAM_FLAME_END_WIDTH = 3.0` (Anfang bleibt `FLAME_WIDTH = 2.0`).
+In `fire_ram.gd`: Helfer `_flame_half_width(along)` interpoliert die Halbbreite
+linear über die Länge; genutzt in `_apply_flames` für Einheiten, Gebäude- und
+Baum/Stapel-Samples. Broad-Phase nutzt die Endbreite. Visual (`_show_flame_cone`):
+Segmentbreiten `lerpf(FLAME_WIDTH, FLAME_END_WIDTH, i/2)` → 2,0/2,5/3,0.
+
+**2. Feuerfestigkeit / 3 Leben (nur Feuerramme).** Statt Sofort-Tod bei einem
+Feuertreffer hält die Ramme `Balance.FIRERAM_FIRE_LIVES = 3` Feuertreffer aus.
+- **Pro Quelle/Attacke max. 1 Schaden.** Alle Feuerquellen laufen über
+  `ignite`/`scorch`; diese bekamen einen **optionalen `source`-Parameter**
+  (`Unit`/`CrewedVehicle`/`Airship`, verhaltensneutral). Die Ramme überschreibt
+  `ignite` → `_apply_fire_hit(source)` mit Attacke-Key:
+  Quellen mit `fire_attack_key()` (die Feuerramme) liefern einen **pro Feuerstoß**
+  wechselnden Key (`_burst_seq` wird beim Burst-Start hochgezählt) → jeder Stoß
+  zählt einmal; **wiederholte Kontakte anderer Quellen** (Lava-Instanz) teilen
+  `str(get_instance_id())` → **1 Treffer pro Pfütze**, neue Pfütze = neuer
+  Treffer. **Einmalige Quellen** (Feuerball-Bolt, Blitz) reichen `null` (kein
+  Dedup, ein Treffer pro Auslösung). Wiederholte Quellen (`lava_surge`,
+  `lava_flow`, Rammen-`_apply_flames`) übergeben `self`.
+- **Flammengröße = Schaden:** `is_burning()` = `_fire_hits > 0`,
+  `burn_fx_scale()` 1 → 1,3 / 2 → 1,8 / ≥3 → 2,8 (StatusFxRenderer skaliert das
+  geteilte Feuer-Billboard, kein Renderer-Umbau).
+- **Regen:** `_tick_fire_regen` heilt bei `active_crew_count() > 0` alle 30 s
+  (`FIRERAM_LIFE_REGEN_TIME`) 1 Leben — auch im Kampf; bei vollständiger Heilung
+  werden die Attacke-Keys geleert. Unbemannt keine Heilung.
+- **Physische Zerstörung unverändert sofort tödlich** (Wasser/`drown`,
+  Terrainriss, Tornado, Uncrewed-Timeout gehen nicht über `ignite`). Katapult &
+  Luftschiff unverändert (Ein-Treffer-Brand bzw. eigenes `HULL_HITS = 2`).
+
+**Verifikation:** volle Suite `run_tests.gd` **2148 passed / 0 failed**, Ladecheck
+fehlerfrei. Neue Tests in `test_fire_ram.gd`: Kegel-Auffächerung, 3-Leben-Tod +
+Kaperung, Ein-Treffer-pro-Quelle, Ein-Treffer-pro-Burst, Regen bemannt/unbemannt.
+Manueller Spieltest steht aus.
+
 ## Bugfix Werkstatt-Reparatur + Feuerramme-Zielwahl/Rückzug + Chop-Loop (2026-07-20)
 
 Ein Bug und drei Wünsche aus dem Spieltest der Debug-Testkammer.

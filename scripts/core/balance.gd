@@ -110,7 +110,10 @@ const FIRERAM_MIN_FIRE_CREW: int = 1
 ## (Gebäude direkt an der Wand brennen weiter, die Flammen reichen hin).
 const FIRERAM_FIRE_RANGE: float = 5.0
 const FIRERAM_MIN_RANGE: float = 1.0
+## Flammenrechteck: Breite an der Düse (Anfang) und am Reichweitenende. Der
+## Kegel fächert linear von FLAME_WIDTH auf FLAME_END_WIDTH auf.
 const FIRERAM_FLAME_WIDTH: float = 2.0
+const FIRERAM_FLAME_END_WIDTH: float = 3.0
 ## Dauer eines Flammenstoßes; danach Nachladen (1 Crew -> MIN, 4 Crew -> FULL).
 const FIRERAM_FLAME_DURATION: float = 1.1
 const FIRERAM_COOLDOWN_MIN_CREW: float = 3.0
@@ -126,6 +129,11 @@ const FIRERAM_AIM_TOLERANCE: float = 0.33
 ## nie eine Stufe: 1,1 s Flamme x 5.0 = 5,5 s Kontakt >= 5 s = 1 Zerstörungsstufe
 ## je Stoß (der Überschuss verfällt im Grace, eine 2. Stufe bräuchte >= 2 s Flamme).
 const FIRERAM_FLAME_CONTACT_FACTOR: float = 5.0
+## Feuerfestigkeit: die Ramme hält so viele FEUER-Treffer aus (pro Quelle/Attacke
+## max. 1), bevor sie abbrennt; bemannt regeneriert sie 1 Treffer je REGEN_TIME.
+## Physische Zerstörung (Wasser, Terrainriss, Tornado) bleibt sofort tödlich.
+const FIRERAM_FIRE_LIVES: int = 3
+const FIRERAM_LIFE_REGEN_TIME: float = 30.0
 
 # --- Luftschiff ---
 const AIRSHIP_SPEED: float = 5.0

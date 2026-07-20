@@ -25,7 +25,10 @@ const FIRE_RANGE: float = Balance.FIRERAM_FIRE_RANGE
 ## Units closer than this stand behind the nozzle — the ram holds its fire
 ## against them (buildings hugging the hull still burn fine).
 const MIN_RANGE: float = Balance.FIRERAM_MIN_RANGE
+## Flame rectangle widths: FLAME_WIDTH at the nozzle, FLAME_END_WIDTH at the far
+## end of the range — the cone fans out linearly from 2 to 3 wide.
 const FLAME_WIDTH: float = Balance.FIRERAM_FLAME_WIDTH
+const FLAME_END_WIDTH: float = Balance.FIRERAM_FLAME_END_WIDTH
 const FLAME_DURATION: float = Balance.FIRERAM_FLAME_DURATION
 const COOLDOWN_MIN_CREW: float = Balance.FIRERAM_COOLDOWN_MIN_CREW
 const COOLDOWN_FULL_CREW: float = Balance.FIRERAM_COOLDOWN_FULL_CREW
@@ -57,6 +60,11 @@ const FLAME_LIFT: float = 0.35
 ## Placeholder-model shrink factor (footprint 1.2 x 1.8 instead of the shared
 ## vehicle chassis 1.4 x 2.2).
 const MODEL_SCALE: float = 0.85
+## Fire resistance: the ram survives FIRE_LIVES fire hits (max 1 per source per
+## attack) instead of dying on the first; a crewed ram heals 1 hit every
+## LIFE_REGEN_TIME. Physical destruction (water/terrain/tornado) bypasses this.
+const FIRE_LIVES: int = Balance.FIRERAM_FIRE_LIVES
+const LIFE_REGEN_TIME: float = Balance.FIRERAM_LIFE_REGEN_TIME
 
 ## Worker references (injected by UnitManager.spawn_unit via unit.set() — a
 ## silent no-op without these declarations; flames must ignite trees/piles).
@@ -69,6 +77,17 @@ var _reload: float = 0.0
 var _flame_check: float = 0.0
 ## Buildings already credited during the current check tick.
 var _flamed_buildings: Dictionary = {}
+## Fire-resistance state (see _apply_fire_hit): accumulated FIRE damage
+## (0 = unhurt, FIRE_LIVES = burnt down).
+var _fire_hits: int = 0
+## Bumped at the START of each own flame burst so one sustained burst counts as
+## ONE hit on a target while separate bursts each count (see fire_attack_key).
+var _burst_seq: int = 0
+## Attack keys already counted toward _fire_hits (per-source/-attack throttle);
+## cleared once the ram fully regenerates.
+var _seen_attacks: Dictionary = {}
+## Fractional accumulator for the crewed 1-life-per-LIFE_REGEN_TIME regen.
+var _life_regen_frac: float = 0.0
 ## Hull heading, slewed toward `facing` at TURN_RATE (real turn inertia —
 ## `facing` itself snaps instantly everywhere in the codebase).
 var _heading: Vector3 = Vector3(0, 0, 1)
@@ -151,7 +170,88 @@ func tick(delta: float) -> void:
 			# (user bug). Compute the reload as if at least a firing crew.
 			_reload = flame_cooldown_for_crew(maxi(active_crew_count(), MIN_FIRE_CREW))
 			_show_flame_cone(false)
+	_tick_fire_regen(delta)
 	super.tick(delta)
+
+
+## Crewed rams heal 1 fire life every LIFE_REGEN_TIME — even mid-combat (no
+## out-of-combat delay, unlike Unit._tick_regen). An uncrewed ram does not heal.
+func _tick_fire_regen(delta: float) -> void:
+	if _fire_hits > 0 and state != State.DEAD and active_crew_count() > 0:
+		_life_regen_frac += delta
+		if _life_regen_frac >= LIFE_REGEN_TIME:
+			_life_regen_frac -= LIFE_REGEN_TIME
+			_fire_hits -= 1
+			if _fire_hits <= 0:
+				_seen_attacks.clear()
+	else:
+		_life_regen_frac = 0.0
+
+
+# --- Fire resistance (3 lives) --------------------------------------------------------
+
+## Fire resistance: instead of the one-hit burn-and-sink of a plain vehicle, the
+## ram funnels every fire contact (ram flames, lava, fireball, lightning — they
+## all route through ignite/scorch) into the lives model. Physical destruction
+## (water/terrain/tornado) does NOT call ignite, so it still kills instantly.
+func ignite(_source_pos: Vector3, source = null) -> void:
+	_apply_fire_hit(source)
+
+
+## Adds at most one fire hit PER SOURCE PER ATTACK. The attack key is stable
+## within one attack but differs between attacks (an enemy ram's key changes per
+## burst; a lava puddle / bolt keeps its instance id), so sustained contact from
+## one source costs one life while a fresh source/burst costs another. At
+## FIRE_LIVES the ram burns down (sinks; the crew survives and is released).
+func _apply_fire_hit(source) -> void:
+	if state == State.DEAD:
+		return
+	var key: String = _attack_key_for(source)
+	if key != "":
+		if _seen_attacks.has(key):
+			return
+		_seen_attacks[key] = true
+	_fire_hits += 1
+	if _fire_hits == 1:
+		_play_sfx(&"siege_burning")
+	if _fire_hits >= FIRE_LIVES:
+		_death_sfx = &"siege_death_burn"
+		_destroy_vehicle(false)
+
+
+## Throttle key for a fire source. A source exposing fire_attack_key() (the fire
+## ram) picks its own per-burst key; any other object throttles by instance
+## (one life per lava puddle / bolt). A null source is an anonymous one-shot
+## (fireball bolt, lightning) that always counts once.
+func _attack_key_for(source) -> String:
+	if source == null:
+		return ""
+	if source.has_method("fire_attack_key"):
+		return source.fire_attack_key()
+	if source is Object:
+		return str(source.get_instance_id())
+	return ""
+
+
+## Key this ram stamps on the fire it deals: unique per burst so each of its
+## flame bursts counts once on a target (the 0.2 s re-checks within a burst share
+## the key and do not stack).
+func fire_attack_key() -> String:
+	return "%d:%d" % [get_instance_id(), _burst_seq]
+
+
+## Burning while it carries any fire damage (drives the shared flame billboard).
+func is_burning() -> bool:
+	return _fire_hits > 0
+
+
+## Flame size shows the accumulated damage: 1 = small, 2 = medium, 3 = big (the
+## lethal hit, shown as it sinks).
+func burn_fx_scale() -> float:
+	match _fire_hits:
+		1: return 1.3
+		2: return 1.8
+		_: return 2.8
 
 
 ## Rotates the hull toward `facing` at the fixed turn rate.
@@ -345,6 +445,7 @@ func _burn_point(target_pos: Vector3, delta: float, approach: bool,
 		return   # the hull is still turning toward the target
 	_flame_time = FLAME_DURATION
 	_flame_check = 0.0   # first area check right away
+	_burst_seq += 1      # new burst -> new fire_attack_key (one hit per burst)
 	_show_flame_cone(true)
 	# Dedicated attack whoosh — was wrongly reusing "siege_burning" (reserved
 	# for the vehicle CATCHING fire via ignite(), see CrewedVehicle) for every
@@ -438,12 +539,12 @@ func _apply_flames() -> void:
 		else Vector3(0, 0, 1)
 	var right: Vector3 = Vector3(-forward.z, 0.0, forward.x)
 	var origin: Vector3 = position + forward * NOZZLE_OFFSET
-	var half_width: float = FLAME_WIDTH * 0.5
-	# Units: broad-phase radius around the rectangle centre, narrow-phase in
-	# the heading frame. Friendly fire on purpose (flames know no friends).
+	# Units: broad-phase radius around the rectangle centre, narrow-phase in the
+	# heading frame with a half-width that widens toward the far end (2 -> 3).
+	# Friendly fire on purpose (flames know no friends).
 	if path_service != null:
 		var centre: Vector3 = origin + forward * (FIRE_RANGE * 0.5)
-		var broad: float = FIRE_RANGE * 0.5 + half_width + 0.5
+		var broad: float = FIRE_RANGE * 0.5 + FLAME_END_WIDTH * 0.5 + 0.5
 		for u in path_service.get_units_in_radius(centre, broad):
 			if u == self or u.state == State.DEAD:
 				continue
@@ -452,30 +553,41 @@ func _apply_flames() -> void:
 			var rel: Vector3 = u.position - origin
 			var along: float = rel.x * forward.x + rel.z * forward.z
 			var side: float = rel.x * right.x + rel.z * right.z
-			if along < 0.0 or along > FIRE_RANGE or absf(side) > half_width:
+			if along < 0.0 or along > FIRE_RANGE or absf(side) > _flame_half_width(along):
 				continue
-			u.scorch(origin)
+			u.scorch(origin, self)
 	# Buildings: sample the rectangle's centreline; one lava-contact credit
 	# per building per check (FLAME_CONTACT_FACTOR beats the grace window).
 	_flamed_buildings.clear()
 	if building_manager != null:
 		for i in range(int(FIRE_RANGE)):
-			var sample: Vector3 = origin + forward * (0.5 + float(i))
+			var d: float = 0.5 + float(i)
+			var sample: Vector3 = origin + forward * d
 			var flat: Vector2 = Vector2(sample.x, sample.z)
+			var hw: float = _flame_half_width(d)
 			for b in building_manager.buildings:
 				if not is_instance_valid(b) or b.health <= 0 \
 						or _flamed_buildings.has(b):
 					continue
-				if b.footprint_distance_to(flat) <= half_width:
+				if b.footprint_distance_to(flat) <= hw:
 					_flamed_buildings[b] = true
 					b.add_lava_contact(FLAME_CHECK_INTERVAL * FLAME_CONTACT_FACTOR)
 	# Trees and wood piles along the centreline (samples overlap enough).
 	for i in [0, 2, 4]:
-		var sample: Vector3 = origin + forward * (0.5 + float(i))
+		var d: float = 0.5 + float(i)
+		var sample: Vector3 = origin + forward * d
+		var radius: float = _flame_half_width(d) + 0.2
 		if tree_manager != null:
-			tree_manager.ignite_in_radius(sample, half_width + 0.2)
+			tree_manager.ignite_in_radius(sample, radius)
 		if wood_pile_manager != null:
-			wood_pile_manager.ignite_in_radius(sample, half_width + 0.2)
+			wood_pile_manager.ignite_in_radius(sample, radius)
+
+
+## Flame half-width at `along` metres in front of the nozzle: fans out linearly
+## from FLAME_WIDTH (nozzle) to FLAME_END_WIDTH (range end).
+func _flame_half_width(along: float) -> float:
+	return lerpf(FLAME_WIDTH * 0.5, FLAME_END_WIDTH * 0.5,
+		clampf(along / FIRE_RANGE, 0.0, 1.0))
 
 
 # --- Visuals (own 3D model, in-game only) -------------------------------------------
@@ -587,8 +699,10 @@ func _show_flame_cone(show: bool) -> void:
 			# follows the ground; top_level keeps the parent's Y-rotation/scale out.
 			seg.top_level = true
 			var box: BoxMesh = BoxMesh.new()
-			box.size = Vector3(FLAME_WIDTH * (0.5 + 0.25 * float(i)), 0.5,
-				FIRE_RANGE / 3.0)
+			# Segment widths fan out 2 -> 3 across the beam (matches the collision
+			# taper in _flame_half_width): 2.0 / 2.5 / 3.0.
+			box.size = Vector3(lerpf(FLAME_WIDTH, FLAME_END_WIDTH, float(i) / 2.0),
+				0.5, FIRE_RANGE / 3.0)
 			seg.mesh = box
 			var mat: StandardMaterial3D = StandardMaterial3D.new()
 			mat.albedo_color = colors[i]

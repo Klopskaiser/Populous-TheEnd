@@ -1434,7 +1434,10 @@ func burn_fx_height() -> float:
 
 ## Lava contact. Re-touching while already alight refreshes the burn instead
 ## of stacking it (and costs no second contact hit).
-func ignite(source_pos: Vector3) -> void:
+## `source` (optional, untyped): the object dealing the fire — subclasses that
+## throttle fire per source (the fire ram's lives model) read its identity; the
+## base ignores it.
+func ignite(source_pos: Vector3, _source = null) -> void:
 	if state == State.DEAD:
 		return
 	var fresh: bool = not is_burning()
@@ -1451,7 +1454,7 @@ func ignite(source_pos: Vector3) -> void:
 ## one-time contact hit — the ram's damage is the burn alone. Re-scorching
 ## refreshes the burn (no stacking). CrewedVehicle overrides this with a real
 ## ignite (wooden vehicles catch fire properly).
-func scorch(source_pos: Vector3) -> void:
+func scorch(source_pos: Vector3, _source = null) -> void:
 	if state == State.DEAD:
 		return
 	if not is_burning():
