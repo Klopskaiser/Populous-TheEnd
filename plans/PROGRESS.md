@@ -9,6 +9,53 @@ Verifikationsstand. Auch bei nachträglichen Erweiterungen außerhalb einer Phas
 
 ---
 
+## Bugfix: Fahrzeug-Wegfindung — Feuerramme-Zucken am Hügel (2026-07-20)
+
+**Symptom (Spieltest):** Feuerramme im Attack-Move über einen flachen Hügel bleibt am
+Hang hängen und **zuckt vor und zurück**; die Besatzung glitcht in den Rumpf und wieder
+an die Seite. Die Ramme **schoss nie und war nie im Kampf — sie scheiterte am Weg dorthin.**
+
+**Ursache (im Code verifiziert):** Fahrzeug-MOVE-Befehle wurden im echten Spiel auf dem
+**Fußgänger-Gitter** geplant, der Kampf-Anmarsch aber auf dem **Fahrzeug-Gitter** — beide
+widersprachen sich am Hügelkamm.
+- `nav_grid` hat ein Fußgänger-Gitter (`_astar`) und ein strengeres Fahrzeug-Gitter
+  (`_vehicle_astar`, braucht begehbaren **2×2-Block**). Ein schmaler, für Fußgänger
+  begehbarer Grat ist fürs Fahrzeug gesperrt.
+- `order_move` → `_start_path_to` reicht im echten Spiel (`USE_PATH_WORKER=true`, >1 Core)
+  an den off-thread **PathWorker** weiter, der mit `nav.solid_snapshot()` = **Fußgänger**-
+  Gitter geseedet ist (kein Fahrzeug-Snapshot). `CrewedVehicle` überschrieb nur das
+  synchrone `_plan_path_to` (→ `find_vehicle_path`), **nicht** die async-Pfad-Methoden
+  `_submit_path_request`/`_apply_worker_path`. → Fahrzeug-MOVE lief aufs Fußgänger-Gitter
+  und schickte die Ramme auf den Grat, den der Kampf-Anmarsch (`_approach` →
+  `find_vehicle_path`) dann verweigerte → Oszillation MOVE↔ATTACK (air-line-Zielwahl,
+  Drop bei `dist > RAM_AGGRO`), ohne je in Feuerdistanz zu kommen.
+- **Warum die Tests es nicht sahen:** headless läuft mit `path_worker == null` → der
+  synchrone Fallback ist fahrzeug-korrekt. Der Bug existiert nur mit aktivem Worker.
+
+**Fix:**
+- **Primär** (`scripts/units/crewed_vehicle.gd`, neuer `_start_path_to`-Override): Ground-
+  Fahrzeuge planen MOVE **synchron** über `_plan_path_to` (→ `find_vehicle_path`) und
+  umgehen den async Fußgänger-Worker (Muster wie `airship.gd:266`); unerreichbar →
+  Route leeren, IDLE. MOVE **und** ATTACK nutzen jetzt dasselbe Gitter; die Ramme fährt
+  gar nicht erst auf einen fahrzeug-gesperrten Grat.
+- **Kosmetik** (`crew_slot_position`): Crew-Slots am **sichtbaren** Rumpf (`_model_heading()`)
+  statt am roh springenden `facing` ausrichten. Basis/Katapult geben `facing` zurück →
+  unverändert; die Feuerramme (`_model_heading()` = geslewtes `_heading`) → Crew folgt dem
+  Rumpf statt durch ihn zu glitchen. Luftschiff hat eigenes `crew_slot_position` → unberührt.
+- **Nicht umgesetzt (bewusst zurückgestellt):** pfadverifizierte Zielwahl + Chase-Hysterese
+  in `fire_ram.gd` (Sekundär-Härtung für den Rest-Fall „Fahrzeug nur mit Riesenumweg
+  erreichbar"). Der Primärfix behebt das gemeldete Zucken; die Sekundär-Härtung ändert
+  Chase-Balance und sollte erst mit manuellem Repro validiert werden.
+
+**Verifikation:** Ganze Suite headless grün (`run_tests.gd`: **2156 passed, 0 failed**),
+Ladecheck fehlerfrei. Neuer Regressionstest `test_path_worker.gd`
+(`test_vehicle_move_uses_vehicle_grid_not_async_worker`, 8 Checks): Fahrzeug-MOVE plant
+synchron auf dem Fahrzeug-Gitter (kein `_pending_target`), findet keinen Weg durch eine
+1-Zellen-Lücke (nur Fußgänger) → IDLE, mit 2-Zellen-Korridor → MOVE; ein Fußgänger im
+selben World nutzt weiter den async Worker. **Manueller In-Game-Repro (Bergpass/Plateau,
+Ramme über flachen Grat auf stillstehenden Krieger) steht noch aus** — nur mit aktivem
+Worker (`& $GODOT --path …`, nicht headless) reproduzierbar.
+
 ## Feuerramme: breiterer Flammenkegel + Feuerfestigkeit (3 Leben) (2026-07-20)
 
 Zwei Erweiterungen der Feuerramme.

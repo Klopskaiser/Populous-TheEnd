@@ -370,7 +370,13 @@ func crew_slot_position(unit) -> Vector3:
 	var index: int = maxi(crew.find(unit), 0)
 	var side: float = -1.0 if index % 2 == 0 else 1.0
 	var rank: float = float(index / 2) - 1.0
-	var forward: Vector3 = facing.normalized() if facing.length_squared() > 0.0 \
+	# Anchor the slots to the VISIBLE hull heading (_model_heading), not the raw
+	# `facing`. The fire ram slews its hull toward the target at a real turn rate
+	# while `facing` snaps instantly — computing slots from `facing` swung the
+	# crew through the hull and back whenever the aim jumped. The base and the
+	# catapult return `facing` here, so their behaviour is unchanged.
+	var heading: Vector3 = _model_heading()
+	var forward: Vector3 = heading.normalized() if heading.length_squared() > 0.0 \
 		else Vector3(0, 0, 1)
 	var right: Vector3 = Vector3(-forward.z, 0.0, forward.x)
 	var slot: Vector3 = position + right * side * crew_side_offset \
@@ -488,6 +494,23 @@ func _plan_path_to(target: Vector3, _allow_partial: bool = false) -> bool:
 		_path_index = 0
 		return true
 	return super._plan_path_to(target)
+
+
+## MOVE orders plan SYNCHRONOUSLY on the vehicle grid, bypassing the async
+## PathWorker. The worker is seeded with the PEDESTRIAN solidity snapshot
+## (NavGrid.solid_snapshot) and knows nothing about the eroded vehicle grid — so
+## routing a MOVE through it hands the vehicle a pedestrian route onto a narrow
+## ridge that its own combat approach (_approach -> find_vehicle_path) then
+## refuses to hold. That grid mismatch made the fire ram judder forward/back on
+## hills, never reaching firing range. Vehicles are few, so a per-order sync A*
+## is cheap (the airship overrides this the same way). Unreachable target ->
+## drop the whole route and stop, exactly like Unit._start_path_to's sync branch.
+func _start_path_to(target: Vector3) -> void:
+	if not _plan_path_to(target, move_aggressive):
+		waypoint_queue.clear()
+		_set_state(State.IDLE)
+		return
+	_set_state(State.MOVE)
 
 
 func tick(delta: float) -> void:

@@ -10,6 +10,7 @@ extends TestBase
 ## scene tree, so UnitManager._exit_tree never fires automatically.
 
 const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
+const SIEGE_SCENE: PackedScene = preload("res://scenes/units/siege_engine.tscn")
 
 
 func _flat_terrain(h: float = 5.0) -> TerrainData:
@@ -146,6 +147,49 @@ func test_unreachable_target_goes_idle() -> void:
 	_pump(w)
 	check(brave._pending_target == Vector3.INF, "unreachable: pending target consumed")
 	check(brave.state == Unit.State.IDLE, "unreachable: unit falls back to IDLE (as synchronous)")
+	_shutdown(w)
+
+
+## Regression (fire-ram hill judder): a CrewedVehicle MUST plan MOVE orders on
+## the VEHICLE grid, NOT via the async PathWorker. The worker is seeded with the
+## PEDESTRIAN solidity snapshot and knows nothing about the eroded vehicle grid —
+## deferring to it handed the vehicle a pedestrian route onto a ridge its own
+## combat approach (find_vehicle_path) then refused, making the ram oscillate.
+## The fix overrides CrewedVehicle._start_path_to to plan synchronously.
+func test_vehicle_move_uses_vehicle_grid_not_async_worker() -> void:
+	var w: Dictionary = _make_world(_flat_terrain())
+	var um: UnitManager = w.um
+	# Wall with a 1-cell gap: passable for pedestrians, closed to vehicles.
+	var wall_x: int = 64
+	for z in range(0, TerrainData.SIZE):
+		if z == 60:
+			continue
+		w.nav.fill_solid_region(Rect2i(Vector2i(wall_x, z), Vector2i(1, 1)), true)
+	var target: Vector3 = w.nav.cell_to_world(Vector2i(80, 60))
+	var veh: Unit = um.spawn_unit(SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(50, 60)))
+	check(veh is CrewedVehicle, "spawned a crewed vehicle")
+	veh._start_path_to(target)
+	# Planned synchronously: never parked on the async (pedestrian) worker.
+	check(veh._pending_target == Vector3.INF,
+		"vehicle MOVE plans synchronously, does not defer to the pedestrian worker")
+	# The 1-cell gap is closed to vehicles -> no route -> stop, NOT a pedestrian
+	# path threaded through the gap.
+	check(veh.get_remaining_path().is_empty(),
+		"vehicle gets no path through the pedestrian-only 1-cell gap")
+	check(veh.state == Unit.State.IDLE,
+		"unreachable-by-vehicle target -> IDLE (route dropped)")
+	# Widen the gap to 2 cells: the vehicle grid now has a route.
+	w.nav.fill_solid_region(Rect2i(Vector2i(wall_x, 61), Vector2i(1, 1)), false)
+	veh._start_path_to(target)
+	check(veh._pending_target == Vector3.INF, "widened: still synchronous")
+	check(not veh.get_remaining_path().is_empty(),
+		"widened 2-cell corridor -> a vehicle path exists")
+	check(veh.state == Unit.State.MOVE, "widened: vehicle is in MOVE with a path")
+	# Contrast: a pedestrian in the SAME world still uses the async worker.
+	var brave: Unit = um.spawn_unit(BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(50, 60)))
+	brave._start_path_to(target)
+	check(brave._pending_target != Vector3.INF,
+		"pedestrian MOVE still defers to the async worker")
 	_shutdown(w)
 
 
