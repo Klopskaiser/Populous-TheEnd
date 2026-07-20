@@ -134,7 +134,8 @@ func raise_area(center: Vector2, radius: float, amount: float) -> Rect2i:
 ## "rect": Rect2i} WITHOUT touching the heightmap — raise_line applies it
 ## instantly, the Landbridge morph interpolates toward it over time.
 func line_raise_targets(from: Vector2, to: Vector2, half_width: float,
-		height_from: float, height_to: float, edge: float = 1.5) -> Dictionary:
+		height_from: float, height_to: float, edge: float = 1.5,
+		forward_only: bool = false) -> Dictionary:
 	var axis: Vector2 = to - from
 	var len2: float = axis.length_squared()
 	var reach: float = half_width + edge
@@ -153,9 +154,12 @@ func line_raise_targets(from: Vector2, to: Vector2, half_width: float,
 	for vz in range(min_vz, max_vz + 1):
 		for vx in range(min_vx, max_vx + 1):
 			var p: Vector2 = Vector2(float(vx) * CELL_SIZE, float(vz) * CELL_SIZE)
-			var t: float = 0.0
+			var s: float = 0.0
 			if len2 > 0.000001:
-				t = clampf((p - from).dot(axis) / len2, 0.0, 1.0)
+				s = (p - from).dot(axis) / len2
+			if forward_only and s < 0.0:
+				continue   # nur Gelände VOR dem Startpunkt planieren (keine Kappe hinter der Schamanin)
+			var t: float = clampf(s, 0.0, 1.0)
 			var d: float = p.distance_to(from + axis * t)
 			if d > reach:
 				continue
@@ -190,9 +194,10 @@ func line_raise_targets(from: Vector2, to: Vector2, half_width: float,
 ## Applies a corridor raise instantly (see line_raise_targets). Returns the
 ## affected cell rect (like raise_area).
 func raise_line(from: Vector2, to: Vector2, half_width: float,
-		height_from: float, height_to: float, edge: float = 1.5) -> Rect2i:
+		height_from: float, height_to: float, edge: float = 1.5,
+		forward_only: bool = false) -> Rect2i:
 	var plan: Dictionary = line_raise_targets(from, to, half_width,
-		height_from, height_to, edge)
+		height_from, height_to, edge, forward_only)
 	var indices: PackedInt32Array = plan.indices
 	var targets: PackedFloat32Array = plan.targets
 	for i in range(indices.size()):

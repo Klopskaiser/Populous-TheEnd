@@ -39,7 +39,7 @@ func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:
 	# Water start/target snaps onto coast level; land keeps its height (ramp).
 	var h_from: float = maxf(td.get_height(from.x, from.y), deck)
 	var h_to: float = maxf(td.get_height(to.x, to.y), deck)
-	var plan: Dictionary = td.line_raise_targets(from, to, HALF_WIDTH, h_from, h_to, EDGE)
+	var plan: Dictionary = td.line_raise_targets(from, to, HALF_WIDTH, h_from, h_to, EDGE, true)
 	if (plan.indices as PackedInt32Array).is_empty():
 		return false
 	var morph: TerrainMorph = TerrainMorph.new()
