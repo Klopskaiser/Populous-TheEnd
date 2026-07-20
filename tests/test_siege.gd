@@ -1210,6 +1210,29 @@ func test_vehicle_paths_need_wide_corridors() -> void:
 	_free_world(w)
 
 
+## A vehicle path must not begin with the vehicle's OWN cell centre: driving
+## off-centre, heading to that centre first is a backward/sideways dart, and a
+## combat approach re-plans it on every tick against a moving target -> jitter
+## instead of pursuit (fire-ram-vs-panicking-unit wobble).
+func test_vehicle_path_skips_redundant_own_cell_waypoint() -> void:
+	var w: Dictionary = _make_world()
+	var um: UnitManager = w.unit_manager
+	var cell: Vector2i = Vector2i(60, 60)
+	var base: Vector3 = w.nav.cell_to_world(cell)
+	# Spawn the vehicle noticeably off-centre inside its cell.
+	var veh: Unit = um.spawn_unit(SIEGE_SCENE, 0, base + Vector3(0.35, 0.0, 0.0))
+	check(veh is CrewedVehicle, "spawned a crewed vehicle")
+	check(w.nav.world_to_cell(veh.position) == cell, "vehicle is inside cell (60,60)")
+	check(veh._plan_path_to(w.nav.cell_to_world(Vector2i(70, 60))),
+		"vehicle path to a far cell planned")
+	var p: PackedVector3Array = veh._path   # plan does not enter MOVE; read directly
+	check(p.size() > 0, "non-empty vehicle path")
+	if p.size() > 0:
+		check(w.nav.world_to_cell(p[0]) != cell,
+			"path skips the redundant own-cell first waypoint (no backward dart)")
+	_free_world(w)
+
+
 # --- Roll hardening (§9): rolls abort attacks, casts and conversions ----------------
 
 func test_roll_aborts_attack() -> void:

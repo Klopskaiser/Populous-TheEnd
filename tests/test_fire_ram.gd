@@ -589,8 +589,13 @@ func test_ram_regenerates_a_life_while_crewed() -> void:
 	var ram: FireRam = _spawn_ram(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
 	_board_crew(w, ram)
 	ram.ignite(ram.position)
+	# Ignite source spawned OUTSIDE the ram's aggro radius: the source only needs
+	# to be a valid enemy for the hit's attribution key, and this test isolates
+	# the time-based regen. If it sat in aggro the (correctly pursuing) ram would
+	# engage it, its crew would leave for direct-melee retaliation and
+	# active_crew_count() -> 0 would stall regen — unrelated to what we assert.
 	ram.ignite(ram.position, w.unit_manager.spawn_unit(
-		BRAVE_SCENE, 1, ram.position + Vector3(4, 0, 0)))
+		BRAVE_SCENE, 1, ram.position + Vector3(40, 0, 0)))
 	check(ram._fire_hits == 2, "took two fire hits")
 	# Crewed: heals one life after LIFE_REGEN_TIME (even without combat pause).
 	var elapsed: float = 0.0

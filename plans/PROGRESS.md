@@ -52,9 +52,31 @@ Ladecheck fehlerfrei. Neuer Regressionstest `test_path_worker.gd`
 (`test_vehicle_move_uses_vehicle_grid_not_async_worker`, 8 Checks): Fahrzeug-MOVE plant
 synchron auf dem Fahrzeug-Gitter (kein `_pending_target`), findet keinen Weg durch eine
 1-Zellen-Lücke (nur Fußgänger) → IDLE, mit 2-Zellen-Korridor → MOVE; ein Fußgänger im
-selben World nutzt weiter den async Worker. **Manueller In-Game-Repro (Bergpass/Plateau,
-Ramme über flachen Grat auf stillstehenden Krieger) steht noch aus** — nur mit aktivem
-Worker (`& $GODOT --path …`, nicht headless) reproduzierbar.
+selben World nutzt weiter den async Worker.
+
+**Nachtrag: Kampf-Zittern gegen bewegliches Ziel (Panik) behoben.** Nach dem
+Wegfindungs-Fix zitterte die Ramme weiterhin **im Kampf**, wenn das Ziel außer Reichweite
+war und paniken/laufen — statt zu verfolgen wackelte sie hin und her; sobald das Ziel
+stehenblieb, ging sie wieder darauf zu. Ursache: `find_vehicle_path` liefert als **ersten**
+Wegpunkt die **eigene Zellmitte**. Da das Fahrzeug fahrend immer außermittig in seiner
+Zelle steht, ist der Weg dorthin ein kleiner Rückwärts-/Seitwärts-Ruck vor der eigentlichen
+nächsten Zelle. Der Kampf-Anmarsch (`_approach`) plant gegen ein bewegliches Ziel bei jeder
+>1-m-Drift neu → dieser Ruck wiederholte sich pro Re-Plan → Zittern auf der Stelle;
+stillstehendes Ziel = keine Re-Plans = sauberes Anfahren.
+- **Fix** (`crewed_vehicle.gd` `_plan_path_to`): den redundanten eigenen-Zell-Wegpunkt
+  verwerfen (nur wenn `world_to_cell(path[0]) == world_to_cell(position)`), Bewegung zielt
+  sofort auf die nächste echte Zelle. Regressionstest `test_siege.gd`
+  (`test_vehicle_path_skips_redundant_own_cell_waypoint`).
+- **Nebenwirkung im Test korrigiert:** `test_ram_regenerates_a_life_while_crewed` setzte die
+  Zündquelle 4 m neben die Ramme; die (jetzt korrekt verfolgende) Ramme engagierte sie, die
+  Crew verließ das Fahrzeug für Nahkampf-Retaliation (`crew_defends_melee_only`) →
+  `active_crew_count()==0` stoppte die Regeneration. Quelle jetzt außerhalb der Aggro
+  (40 m), Test isoliert wieder reine Zeit-Regeneration.
+
+**Verifikation Nachtrag:** ganze Suite grün (**2167 passed, 0 failed**), Ladecheck
+fehlerfrei. **Manueller In-Game-Repro (Bergpass/Plateau, Ramme über flachen Grat auf
+stillstehenden Krieger sowie Ramme gegen panisch fliehendes Ziel) steht noch aus** — nur mit
+aktivem Worker (`& $GODOT --path …`, nicht headless) vollständig reproduzierbar.
 
 ## Feuerramme: breiterer Flammenkegel + Feuerfestigkeit (3 Leben) (2026-07-20)
 
