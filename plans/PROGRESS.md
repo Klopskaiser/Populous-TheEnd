@@ -5827,3 +5827,36 @@ bereits eingeteilte Besatzungen suchen nicht.
 neuer Tests in `test_siege.gd` (Backfill eigenes Fahrzeug, Toggle aus, Brave-Ausschluss,
 Nahkampf-Ausschluss, Übernahme verlassenes Feind-Fahrzeug, kein Sniping bei bemanntem
 Fremd-Fahrzeug). Funktionaler In-Game-Test durch Nutzer ausstehend.
+
+### Perf-Pass Schlacht-FPS (2026-07-20, Nutzerwunsch „+50 %, Debugschlacht ≥ 30 FPS")
+
+**Baseline (Zielmaschine, `benchmark_mass` headless, Budget ~33 ms/Tick, Kampf-Fenster):**
+krieger 2×1000 24,6 ms | feuerkrieger 2×1000 29,1 ms | krieger+prediger 2×1000 30,0 ms;
+units-Phase 17–22 ms = Löwenanteil, sep 5–8 ms, hash 1,5–3,5 ms. Diagnose: der Engpass ist
+die **CPU-units-Phase** (Per-Tick-Arbeit über ~2000 Node3D-Objekte, ~10 µs/Einheit), nicht
+Rendering/Terrain.
+
+**VERWORFEN — Chase-A* auf den Pfad-Worker auslagern (nicht wiederholen):** `_approach` löst
+die Verfolgungs-A* synchron im Hauptthread (in der units-Phase abgerechnet). Auslagern auf den
+`PathWorker` getestet (A/B im Benchmark, Battle mit Worker). Ergebnis **negativ**: `dbg_plan_us`
+fiel auf 0 (A* nachweislich vom Hauptthread runter), aber die units-Phase **stieg** um ~1 ms und
+das fw-Fenster von 29 auf 32–33 ms. Ursache: die Chase-A* ist nur ~1,5 ms/Tick (~7 % der Phase);
+Async führt Pfad-Verspätung ein → veraltete Pfade → langsamere Konvergenz → Einheiten länger im
+teuren Verfolgungs-Zustand (mehr sep/hash/proj). Vollständig zurückgesetzt. **Lehre:** Chase-A*
+ist NICHT der Hebel; die units-Phase ist strukturell (GDScript-Objekt-Tick-Overhead) → echter
+Sprung erst mit Stufe C (data-oriented / Packed-Arrays).
+
+**UMGESETZT — Leichen-Early-out (`unit.gd`):** Tote Einheiten (`State.DEAD`) laufen in `tick()`
+nur noch `_tick_dead` (Verwesungstimer); die vier Totlast-Aufrufe pro Leiche pro Tick
+(`_tick_knockback/_regen/_burning` — alle schon no-op bei DEAD — und `_apply_animation`)
+entfallen. Die „dead"-Pose wird einmalig in `_die()` per `_apply_animation(true)` gesetzt, damit
+der Per-Tick-Anim-Aufruf für Leichen wegfallen kann. Sicher (kein Balance-Effekt), skaliert mit
+Sterberate/Schlachtdauer. **Messung:** combat 2000/4000 units −24/−25 % (10,1→7,7 / 21,5→16,0);
+Schlacht-Fenster krieger 24,6→23,0, feuerkrieger 29,1→27,0; krieger+prediger ~unverändert
+(dort sterben weniger). Suite **2183/2183 grün**, Ladecheck sauber.
+
+**Offen / empfohlen:** In-Game-FPS-Test Debugschlacht (maßgeblich, headless misst kein
+Rendering). Für den vollen +50 %: entweder weitere gezielte Micro-Opts (Spike-Amortisierung
+bei Massentod, Separation-Drossel für gebundene Kämpfer — je ~0,5–1 ms, teils balance-sensitiv)
+oder der strukturelle Umbau **Stufe C (SoA)** — der dokumentierte einzige zuverlässige Weg zum
+50-%-Ziel.

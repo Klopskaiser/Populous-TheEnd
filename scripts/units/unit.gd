@@ -640,6 +640,12 @@ func tick(delta: float) -> void:
 	# facing, animation, fire/convert): they have no world tick of their own.
 	if garrison_housed:
 		return
+	# Corpses only decay (knockback/regen/burning already no-op when DEAD, and the
+	# pose was locked in _die): skip the four dead-weight calls per corpse per
+	# tick — a mass battle carries hundreds of them (phase 8 perf).
+	if state == State.DEAD:
+		_tick_dead(delta)
+		return
 	_tick_knockback(delta)
 	_tick_regen(delta)
 	_tick_burning(delta)
@@ -1045,6 +1051,9 @@ func _die() -> void:
 	_clear_path()
 	_corpse_timer = 0.0
 	_set_state(State.DEAD)
+	# Lock in the "dead" pose here, once, so the per-tick corpse path can skip
+	# _apply_animation entirely (see tick()) — a corpse never changes animation.
+	_apply_animation(true)
 	died.emit(self)
 
 
