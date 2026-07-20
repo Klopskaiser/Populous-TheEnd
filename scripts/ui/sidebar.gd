@@ -644,8 +644,13 @@ func _build_followers_tab() -> Control:
 		func(t: Tribe) -> int: return t.owned_airship_count())
 
 	# Per-tribe toggle: military units auto-crew nearby ground vehicles (default on).
+	# Its long label must NOT dictate the width — wrap it (and let it shrink), or
+	# its minimum width forces the whole followers column past the panel edge.
 	_auto_recrew_check = CheckButton.new()
 	_auto_recrew_check.text = "Fahrzeuge automatisch bemannen"
+	_auto_recrew_check.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_auto_recrew_check.clip_text = true
+	_auto_recrew_check.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_auto_recrew_check.tooltip_text = "Eigene Militäreinheiten (Krieger, Feuerkrieger," \
 		+ " Prediger) besetzen nahe Bodenfahrzeuge (max. 3 m) automatisch nach oder" \
 		+ " übernehmen neutrale — auch im Kampf, außer im Nahkampf. Schamanin und" \
@@ -722,9 +727,11 @@ func _refresh_cap_steppers() -> void:
 		var count_label: Label = entry["count_label"]
 		if title_label == null or not is_instance_valid(title_label):
 			continue
-		title_label.text = "Max. %s (%d)" % [entry["title"],
-			int((entry["get_owned"] as Callable).call(player))]
-		count_label.text = "%d" % int((entry["get_cap"] as Callable).call(player))
+		var owned: int = int((entry["get_owned"] as Callable).call(player))
+		var cap: int = int((entry["get_cap"] as Callable).call(player))
+		# "Name: Besitz/Limit"; the editable limit also shows between the buttons.
+		title_label.text = "%s: %d/%d" % [entry["title"], owned, cap]
+		count_label.text = "%d" % cap
 
 
 # --- Crew tab (occupancy of the selected mannable object) ---------------------
