@@ -21,6 +21,11 @@ const FIGHT_INERTIA_CHANCE: float = 0.4
 ## Seconds between chant sounds while standing and channeling.
 const PREACH_SOUND_INTERVAL: float = 2.0
 
+## Melee attack-kind chances (see Unit._roll_attack_kind): shoves much more
+## often than the default, kicks less often (the rest falls back to punch).
+const PREACHER_SHOVE_CHANCE: float = Balance.PREACHER_SHOVE_CHANCE
+const PREACHER_KICK_CHANCE: float = Balance.PREACHER_KICK_CHANCE
+
 ## Enemy this preacher walks toward to convert (untyped: may be freed).
 var _convert_target = null
 var _preach_sound_timer: float = 0.0
@@ -38,6 +43,14 @@ func unit_kind() -> StringName:
 
 func _is_combatant() -> bool:
 	return true
+
+
+func _shove_chance() -> float:
+	return PREACHER_SHOVE_CHANCE
+
+
+func _kick_chance() -> float:
+	return PREACHER_KICK_CHANCE
 
 
 func _tick_state(delta: float) -> void:

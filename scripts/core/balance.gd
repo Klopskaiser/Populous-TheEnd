@@ -47,6 +47,10 @@ const PREACHER_CONVERT_RANGE: float = 5.0
 ## Bekehrdauer: pro Ziel zufällig aus [MIN, MAX] gewürfelt.
 const PREACHER_CONVERT_TIME_MIN: float = 4.0
 const PREACHER_CONVERT_TIME_MAX: float = 9.0
+## Nahkampf-Attackenchancen (Rest = Punch): schubst viel häufiger als der
+## Standard, kickt seltener.
+const PREACHER_SHOVE_CHANCE: float = 0.5
+const PREACHER_KICK_CHANCE: float = 0.1
 
 # --- Schamanin ---
 const SHAMAN_HP: int = 240              # 4 x Brave

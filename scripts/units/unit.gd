@@ -621,6 +621,12 @@ func _shove_chance() -> float:
 	return SHOVE_CHANCE
 
 
+## Probability that a strike is a kick (see _roll_attack_kind). Per-unit
+## override point, same pattern as _shove_chance(); the remainder is a punch.
+func _kick_chance() -> float:
+	return KICK_CHANCE
+
+
 ## Hook called when combat overrides the current activity — Brave uses it to
 ## release its worker claims before it starts fighting.
 func _on_combat_interrupt() -> void:
@@ -1983,12 +1989,14 @@ static func kind_to_anim(kind: StringName) -> StringName:
 
 
 ## Picks punch / kick / shove for this strike. Shoves are rare (rarer still for
-## the warrior); kicks are uncommon; most strikes are punches.
+## the warrior); kicks are uncommon; most strikes are punches. Both
+## probabilities are per-unit overridable (_shove_chance / _kick_chance); the
+## remainder always falls back to a punch.
 func _roll_attack_kind() -> StringName:
 	var r: float = randf()
 	if r < _shove_chance():
 		return &"shove"
-	if r < _shove_chance() + KICK_CHANCE:
+	if r < _shove_chance() + _kick_chance():
 		return &"kick"
 	return &"punch"
 
