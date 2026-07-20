@@ -192,12 +192,12 @@ func _refresh_conversion() -> void:
 	# (I just pacified it, or it already sits under me). A unit already sitting
 	# under a PEER does NOT count — otherwise a second preacher pins itself
 	# channeling next to a crowd another preacher is already converting instead
-	# of fanning out to a free target (user report: several priests uselessly
-	# converting the same person). `saw_in_range` still notes any in-range
-	# convertible so a preacher with no free target elsewhere keeps standing
-	# instead of idle-flipping.
+	# of fanning out (user report: several priests uselessly converting the same
+	# person). With nobody of my own in range I walk to a free target, or — if
+	# there is none — go idle rather than stand channeling over a peer's victim
+	# (an idle preacher never re-grabs a SIT target, _scan_for_enemy skips them,
+	# so this cannot oscillate).
 	var responsible: bool = false
-	var saw_in_range: bool = false
 	# Approach focus for when nobody is MINE in range: prefer a target no peer
 	# preacher has claimed (spread out), else the nearest one (phase 7i).
 	var nearest_free: Unit = null
@@ -226,7 +226,6 @@ func _refresh_conversion() -> void:
 				return
 			continue
 		if d <= CONVERT_RANGE:
-			saw_in_range = true
 			if u.state == State.SIT:
 				# Already sitting: only one under MY spell keeps me here. A unit
 				# sitting under a peer is not my job — don't get pinned on it.
@@ -258,14 +257,10 @@ func _refresh_conversion() -> void:
 	if nearest != null:
 		_convert_target = nearest
 		return
-	if saw_in_range:
-		# Everyone in range is a peer's already; nothing free to walk to — keep
-		# standing calmly rather than flip to IDLE and re-engage next scan.
-		_convert_target = null
-		return
 	_convert_target = null
-	# Nothing left to convert: resume a building assault if one is pending
-	# (cleared the entrance defenders), otherwise go idle.
+	# Nothing of my own to convert (everyone in range is a peer's already, and
+	# nothing free is near): resume a building assault if one is pending, else go
+	# idle — do NOT stand channeling over another preacher's victim.
 	if _building_target_valid():
 		_set_state(State.ATTACK)
 	else:

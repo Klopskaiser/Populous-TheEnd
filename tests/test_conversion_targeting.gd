@@ -103,3 +103,22 @@ func test_second_preacher_does_not_pin_on_peers_victim() -> void:
 	check(shared.converting_preacher == pa,
 		"the shared victim stays bound to A only (no second converter)")
 	_free_world(w)
+
+
+func test_second_preacher_goes_idle_without_free_target() -> void:
+	# Same clash but with NO free target elsewhere: the second preacher must not
+	# stand channeling over A's victim either — it goes idle (an idle preacher
+	# never re-grabs a SIT unit, so this does not oscillate).
+	var w: Dictionary = _make_world()
+	var pa: Preacher = w.um.spawn_unit(PREACHER_SCENE, 0, Vector3(50, 5, 50)) as Preacher
+	var pb: Preacher = w.um.spawn_unit(PREACHER_SCENE, 0, Vector3(51, 5, 50)) as Preacher
+	var shared: Unit = w.um.spawn_unit(BRAVE_SCENE, 1, Vector3(52, 5, 50))
+	pa._set_state(Unit.State.CAST)
+	pb._set_state(Unit.State.CAST)
+	pa._refresh_conversion()
+	check(shared.converting_preacher == pa, "victim converts under preacher A")
+	pb._refresh_conversion()
+	check(pb.state == Unit.State.IDLE,
+		"the second preacher goes idle instead of channeling over A's victim")
+	check(shared.converting_preacher == pa, "victim stays bound to A only")
+	_free_world(w)
