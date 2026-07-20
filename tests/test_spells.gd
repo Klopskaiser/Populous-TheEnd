@@ -282,13 +282,13 @@ func _free_world_with_buildings(w: Dictionary) -> void:
 
 func test_default_set_charge_counts() -> void:
 	var spells: Array[Spell] = Spell.create_default_set()
-	check(spells.size() == 10, "ten spells in the default set (phase 6 + 7c)")
+	check(spells.size() == 11, "eleven spells in the default set (phase 6 + 7c + supertornado)")
 	# 7c charge counts are binding: volcano 1, firestorm/earthquake 2,
-	# flatten/sink 3 (see plans/07c_new_spells.md).
+	# flatten/sink 3 (see plans/07c_new_spells.md). Supertornado: 1 charge.
 	var expected: Dictionary = {
 		&"fireball": 4, &"lightning": 4, &"swarm": 4, &"landbridge": 4,
 		&"tornado": 3, &"earthquake": 2, &"volcano": 1, &"firestorm": 2,
-		&"flatten": 3, &"sink": 3}
+		&"flatten": 3, &"sink": 3, &"supertornado": 1}
 	for spell in spells:
 		check(expected.has(spell.id), "known spell id: %s" % spell.id)
 		check(spell.max_charges == expected.get(spell.id, -1),

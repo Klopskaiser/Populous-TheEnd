@@ -56,4 +56,5 @@ static func create_default_set() -> Array[Spell]:
 		FirestormSpell.new(),
 		FlattenSpell.new(),
 		SinkSpell.new(),
+		SupertornadoSpell.new(),
 	]

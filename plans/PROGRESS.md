@@ -5700,3 +5700,38 @@ jetzt Absturz/Auswurf mit 5 HP) — auf Nutzerwunsch „überleben lassen" angep
 Todes-Branch). Suite **2119/2119 grün**, Ladecheck ok. In-Game-Prüfung (Crew-Ruhe am
 Hang, Mehrfach-Zeppelin-Treffer, Sound-Loops/Todessounds nach Ablegen der Dateien,
 Geräte-Zielen) durch Nutzer ausstehend.
+
+## Erweiterung — Supertornado (Zauber 11) + Tornadohöhe 8 m (umgesetzt)
+
+Neuer 11. Zauber **Supertornado** (`scripts/spells/supertornado.gd`, `SupertornadoSpell`):
+beschwört einen **großen** `TornadoVortex` (Radius 4,4 = doppelt so breit, 12 m hoch,
+16 s Lebensdauer) am Zielpunkt und dazu **zwei normale** Tornados im Abstand
+`SUPERTORNADO_SATELLITE_DIST 6` an zufälligen Winkeln (Position auf Kartengrenzen
+geclamped). Kosten `SPELL_SUPERTORNADO_CHARGE_COST 200`, `MAX_CHARGES 1`, `CAST_RANGE 10`.
+
+**Tornado konfigurierbar gemacht:** In `tornado_vortex.gd` wurden `RADIUS`/`TOP_HEIGHT`/
+`LIFETIME` von `const` zu Instanz-`var` (`radius`/`top_height`/`lifetime`); `setup()` hat
+drei optionale Trailing-Parameter (`p_radius`, `p_top_height`, `p_lifetime`). **Default
+`top_height` = 8.0** → normaler Tornado und die Satelliten sind jetzt **8 m hoch** (vorher
+6 m); `tornado.gd` (5-Arg-`setup`) unverändert. Ring-Mesh in `_ready()` skaliert mit
+`radius`/`top_height`. **Sturzschaden bleibt gekappt 30**, **Rolldauer bleibt
+impulsgetrieben/ungedeckelt** — an `unit.gd`/`balance.gd`-Rollwerten **nichts** geändert.
+
+**Registrierung (Standardstellen):** `Spell.create_default_set()` (+`SupertornadoSpell.new()`),
+`Sidebar.default_spell_entries()` (11. Zelle, Icon `supertornado`→`_draw_tornado`,
+Hotkey „ß"), `SpellTargeting.HOTKEY_SPELLS`+`DEVICE_SPELLS` (+`supertornado`),
+`project.godot` (`cast_spell_11`, physischer Keycode 45 = „ß/-"), `input_settings.gd`
+(Label), `ui_theme.gd` (`match`-Case, Icon vorerst wie Tornado). KI castet ihn (noch)
+nicht.
+
+**Debris an Trichtergröße gekoppelt:** `TornadoDebris` (gewirbeltes Holz) hatte feste
+`TOP_HEIGHT 6.0`/`SPIRAL_R0 2.0` — jetzt Instanz-`var top_height`/`spiral_r0`, per
+`setup()`-Optionalparametern vom Vortex gesetzt (`top_height`, `radius * 0.9`; Werte werden
+kopiert, da der Vortex mitten im Flug freigegeben werden kann). Holz wirbelt damit bis zur
+tatsächlichen Trichterhöhe (normal 8 m, super 12 m) im passenden Radius. Alte 6-Arg-Aufrufe
+(Tests) bleiben über die Defaults gültig.
+
+**Verifikation:** `--headless --import` + `--headless --quit` **fehlerfrei**; volle
+Testsuite **2162/2162 grün** (Spell-/UI-Zählungen 10→11 in `test_spells.gd`/
+`test_ui_logic.gd` angepasst). Funktionaler In-Game-Test (11. Zelle sichtbar, Hotkey ß,
+großer Trichter + zwei kleine, Holzwirbel auf voller Höhe) durch Nutzer ausstehend.

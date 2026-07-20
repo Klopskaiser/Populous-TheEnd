@@ -15,11 +15,12 @@ const TERRAIN_MASK: int = 1   # the indicator snaps to terrain only
 ## and 0); matches Sidebar.default_spell_entries().
 const HOTKEY_SPELLS: Array[StringName] = [
 	&"fireball", &"lightning", &"swarm", &"landbridge", &"tornado",
-	&"earthquake", &"volcano", &"firestorm", &"flatten", &"sink"]
+	&"earthquake", &"volcano", &"firestorm", &"flatten", &"sink",
+	&"supertornado"]
 
 ## Damaging spells that may lock onto an enemy DEVICE (catapult, fire ram,
 ## airship) under the cursor: the cast then tracks that unit's live position.
-const DEVICE_SPELLS: Array[StringName] = [&"fireball", &"lightning", &"tornado"]
+const DEVICE_SPELLS: Array[StringName] = [&"fireball", &"lightning", &"tornado", &"supertornado"]
 
 var _tribe_commands: TribeCommands = null
 var _tribe: Tribe = null

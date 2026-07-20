@@ -205,6 +205,8 @@ static func default_spell_entries() -> Array[Dictionary]:
 			"max_charges": 3, "hotkey": "9"},
 		{"id": &"sink", "name": "Absinken", "icon": &"sink",
 			"max_charges": 3, "hotkey": "0"},
+		{"id": &"supertornado", "name": "Supertornado", "icon": &"supertornado",
+			"max_charges": 1, "hotkey": "ß"},
 	]
 
 

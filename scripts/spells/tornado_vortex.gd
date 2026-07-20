@@ -1,6 +1,6 @@
 class_name TornadoVortex extends Node3D
 
-## The tornado entity: lives for LIFETIME seconds and drifts randomly. The
+## The tornado entity: lives for `lifetime` seconds and drifts randomly. The
 ## twister is TRIBE-BLIND (like all terrain violence): buildings under the
 ## vortex — own ones included — take +1 destruction stage every
 ## STAGE_INTERVAL, and ANY unit in its path is whirled up to the tip
@@ -10,8 +10,12 @@ class_name TornadoVortex extends Node3D
 ## instantly (all of that is the normal THROWN/ROLL handling). Ticked via
 ## the UnitManager projectile list; on expiry any remaining riders are flung.
 
-const LIFETIME: float = Balance.TORNADO_LIFETIME
-const RADIUS: float = Balance.TORNADO_RADIUS   # pickup / building-hit radius
+## Size/lifetime are per-instance so a variant (Supertornado) can be bigger:
+## a plain tornado keeps the defaults, the Supertornado's main funnel is set
+## larger via setup(). Defaults = the normal tornado.
+var lifetime: float = Balance.TORNADO_LIFETIME
+var radius: float = Balance.TORNADO_RADIUS   # pickup / building-hit radius
+var top_height: float = 8.0                  # riders spiral up to the tip
 ## Movement profile: parks on the cast point first, then crawls off and
 ## accelerates over ACCEL_TIME up to MAX_SPEED.
 const IDLE_TIME: float = 1.0
@@ -20,7 +24,6 @@ const MIN_SPEED: float = 0.4
 const MAX_SPEED: float = 2.0
 const REDIRECT_INTERVAL: float = 1.0
 const STAGE_INTERVAL: float = Balance.TORNADO_STAGE_INTERVAL   # +1 stage per interval over a building
-const TOP_HEIGHT: float = 6.0        # riders spiral up to the tip
 const LIFT_TIME: float = 0.9         # seconds to reach the tip
 const CARRY_TIME: float = 0.6        # dragged along at the tip before release
 const SPIN_SPEED: float = 7.0        # rider angular speed (rad/s)
@@ -45,7 +48,7 @@ var unit_manager: UnitManager = null
 var terrain_data: TerrainData = null
 var building_manager: BuildingManager = null
 
-var _life: float = LIFETIME
+var _life: float = Balance.TORNADO_LIFETIME
 var _drift: Vector3 = Vector3.ZERO
 var _redirect: float = 0.0
 ## First building hit fires on contact, then every STAGE_INTERVAL.
@@ -58,12 +61,18 @@ var _siege_timers: Dictionary = {}
 
 
 func setup(p_tribe_id: int, at: Vector3, p_unit_manager: UnitManager,
-		p_terrain_data: TerrainData, p_building_manager: BuildingManager) -> void:
+		p_terrain_data: TerrainData, p_building_manager: BuildingManager,
+		p_radius: float = Balance.TORNADO_RADIUS, p_top_height: float = 8.0,
+		p_lifetime: float = Balance.TORNADO_LIFETIME) -> void:
 	tribe_id = p_tribe_id
 	position = at
 	unit_manager = p_unit_manager
 	terrain_data = p_terrain_data
 	building_manager = p_building_manager
+	radius = p_radius
+	top_height = p_top_height
+	lifetime = p_lifetime
+	_life = lifetime
 	# Spawn on the GROUND under the cast point, never at the target's altitude:
 	# casting on a flying airship passes its high y, which would make the vortex
 	# form up in the air on the hull and only drop later. Snapping to the terrain
@@ -99,7 +108,7 @@ func tick(delta: float) -> void:
 ## `_drift` is a unit DIRECTION; the actual speed ramps with age: 1 s parked
 ## on the cast point, then crawling off and accelerating toward MAX_SPEED.
 func _tick_drift(delta: float) -> void:
-	var age: float = LIFETIME - _life
+	var age: float = lifetime - _life
 	if age < IDLE_TIME:
 		return
 	_redirect -= delta
@@ -142,10 +151,10 @@ func _shred_trees_and_scatter_piles() -> void:
 	var tm: TreeManager = unit_manager.tree_manager
 	var wpm: WoodPileManager = unit_manager.wood_pile_manager
 	if tm != null:
-		for d in tm.uproot_in_radius(position, RADIUS):
+		for d in tm.uproot_in_radius(position, radius):
 			_spawn_debris(d["position"], d["wood"])
 	if wpm != null:
-		for pile in wpm.piles_in_radius(position, RADIUS):
+		for pile in wpm.piles_in_radius(position, radius):
 			var amount: int = pile.amount
 			var at: Vector3 = pile.position
 			wpm.remove_pile(pile)
@@ -158,7 +167,8 @@ func _spawn_debris(at: Vector3, wood: int) -> void:
 	if unit_manager == null:
 		return
 	var debris: TornadoDebris = TornadoDebris.new()
-	debris.setup(at, wood, terrain_data, unit_manager.wood_pile_manager, self, randf() * TAU)
+	debris.setup(at, wood, terrain_data, unit_manager.wood_pile_manager, self,
+		randf() * TAU, top_height, radius * 0.9)
 	unit_manager.register_projectile(debris)
 
 
@@ -168,7 +178,7 @@ func _spawn_debris(at: Vector3, wood: int) -> void:
 func _pick_up_units() -> void:
 	if unit_manager == null:
 		return
-	for u in unit_manager.get_units_in_radius(position, RADIUS):
+	for u in unit_manager.get_units_in_radius(position, radius):
 		if u.state == Unit.State.DEAD or u.state == Unit.State.THROWN:
 			continue
 		u.throw_airborne(Vector3.ZERO, FALL_DAMAGE)
@@ -191,10 +201,10 @@ func _tick_riders(delta: float) -> void:
 		r.time += delta
 		r.angle += SPIN_SPEED * delta
 		var lift: float = clampf(r.time / LIFT_TIME, 0.0, 1.0)
-		var spiral_r: float = lerpf(RADIUS * 0.8, 0.5, lift)   # narrows to the tip
+		var spiral_r: float = lerpf(radius * 0.8, 0.5, lift)   # narrows to the tip
 		u.position = Vector3(
 			position.x + cos(r.angle) * spiral_r,
-			position.y + lift * TOP_HEIGHT,
+			position.y + lift * top_height,
 			position.z + sin(r.angle) * spiral_r)
 		u.facing = Vector3(cos(r.angle + PI * 0.5), 0.0, sin(r.angle + PI * 0.5))
 		if r.time >= LIFT_TIME + CARRY_TIME:
@@ -284,10 +294,10 @@ func _ready() -> void:
 		var ring: MeshInstance3D = MeshInstance3D.new()
 		var torus: TorusMesh = TorusMesh.new()
 		var t: float = float(i) / float(count - 1)
-		var r: float = lerpf(0.35, 2.2, t)
-		torus.inner_radius = r - 0.22
+		var r: float = lerpf(radius * 0.16, radius, t)
+		torus.inner_radius = r - 0.22 * (radius / 2.2)
 		torus.outer_radius = r
 		ring.mesh = torus
 		ring.material_override = mat
-		ring.position.y = lerpf(0.3, TOP_HEIGHT, t)
+		ring.position.y = lerpf(0.3, top_height, t)
 		add_child(ring)

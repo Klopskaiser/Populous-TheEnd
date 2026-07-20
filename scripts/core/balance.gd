@@ -266,6 +266,10 @@ const SPELL_TORNADO_CHARGE_COST: float = 110.0
 const SPELL_TORNADO_MAX_CHARGES: int = 3
 const SPELL_TORNADO_CAST_RANGE: float = 10.0
 
+const SPELL_SUPERTORNADO_CHARGE_COST: float = 200.0   # teurer als Tornado, ~Vulkan
+const SPELL_SUPERTORNADO_MAX_CHARGES: int = 1
+const SPELL_SUPERTORNADO_CAST_RANGE: float = 10.0
+
 const SPELL_EARTHQUAKE_CHARGE_COST: float = 130.0
 const SPELL_EARTHQUAKE_MAX_CHARGES: int = 2
 const SPELL_EARTHQUAKE_CAST_RANGE: float = 10.0
@@ -313,6 +317,13 @@ const TORNADO_RADIUS: float = 2.2
 ## Alle X Sekunden +1 Zerstörungsstufe am überstrichenen Gebäude.
 const TORNADO_STAGE_INTERVAL: float = 2.0
 const TORNADO_FALL_DAMAGE: int = 30        # 1/2 Brave-Leben
+
+# --- Supertornado (großer Haupt-Trichter; Satelliten = normaler Tornado) ---
+const SUPERTORNADO_RADIUS: float = 4.4                 # doppelt so breit (2 x 2.2)
+const SUPERTORNADO_TOP_HEIGHT: float = 12.0            # 12 m hoch
+const SUPERTORNADO_LIFETIME: float = 16.0              # 16 s
+const SUPERTORNADO_SATELLITE_COUNT: int = 2
+const SUPERTORNADO_SATELLITE_DIST: float = 6.0         # Spawn-Abstand der kleinen
 
 # --- Feuerregen ---
 const FIRESTORM_BOLT_COUNT: int = 12

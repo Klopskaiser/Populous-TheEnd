@@ -120,7 +120,7 @@ static func icon(key: StringName) -> ImageTexture:
 			_draw_swarm(img)
 		&"landbridge":
 			_draw_landbridge(img)
-		&"tornado":
+		&"tornado", &"supertornado":
 			_draw_tornado(img)
 		&"earthquake":
 			_draw_earthquake(img)

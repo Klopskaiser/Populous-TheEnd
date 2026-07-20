@@ -10,9 +10,7 @@ class_name TornadoDebris extends Node3D
 
 const LIFT_TIME: float = 0.9        # seconds to spiral up to the tip
 const CARRY_TIME: float = 0.5       # dragged along the tip before release
-const TOP_HEIGHT: float = 6.0
 const SPIN_SPEED: float = 7.0       # angular speed while carried (rad/s)
-const SPIRAL_R0: float = 2.0        # starting spiral radius, narrows to the tip
 const FLING_SPEED: float = 11.0     # horizontal release speed
 const FLING_UP: float = 3.5
 const GRAVITY: float = 18.0
@@ -31,6 +29,11 @@ var terrain_data: TerrainData = null
 var wood_pile_manager: WoodPileManager = null
 ## The vortex it rides while airborne (may be freed — then it flings from here).
 var vortex: Node3D = null
+## Funnel tip height and starting spiral radius — set from the spawning vortex
+## so debris matches its size (bigger Supertornado = taller/wider whirl). The
+## vortex may be freed mid-flight, so these are captured, not read back.
+var top_height: float = 6.0
+var spiral_r0: float = 2.0
 
 var _phase: Phase = Phase.LIFT
 var _t: float = 0.0
@@ -41,7 +44,8 @@ var _center_xz: Vector3 = Vector3.ZERO
 
 
 func setup(at: Vector3, p_wood: int, p_terrain_data: TerrainData,
-		p_wood_pile_manager: WoodPileManager, p_vortex: Node3D, p_angle: float) -> void:
+		p_wood_pile_manager: WoodPileManager, p_vortex: Node3D, p_angle: float,
+		p_top_height: float = 6.0, p_spiral_r0: float = 2.0) -> void:
 	position = at
 	wood = p_wood
 	vanish = p_wood <= 0
@@ -49,6 +53,8 @@ func setup(at: Vector3, p_wood: int, p_terrain_data: TerrainData,
 	wood_pile_manager = p_wood_pile_manager
 	vortex = p_vortex
 	_angle = p_angle
+	top_height = p_top_height
+	spiral_r0 = p_spiral_r0
 	_center_xz = Vector3(at.x, 0.0, at.z)
 
 
@@ -82,11 +88,11 @@ func _ride(delta: float, lift: float) -> void:
 	if vortex != null and is_instance_valid(vortex):
 		_center_xz = Vector3(vortex.position.x, 0.0, vortex.position.z)
 	_angle += SPIN_SPEED * delta
-	var r: float = lerpf(SPIRAL_R0, 0.5, lift)
+	var r: float = lerpf(spiral_r0, 0.5, lift)
 	var base_y: float = _ground(_center_xz)
 	position = Vector3(
 		_center_xz.x + cos(_angle) * r,
-		base_y + lift * TOP_HEIGHT,
+		base_y + lift * top_height,
 		_center_xz.z + sin(_angle) * r)
 
 
