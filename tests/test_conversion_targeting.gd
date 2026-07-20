@@ -77,3 +77,29 @@ func test_preachers_spread_to_different_targets() -> void:
 	# So B picks the OTHER enemy instead of piling onto e1.
 	check(pb._pick_convert_focus() == e2, "preacher B fans out to the unclaimed target")
 	_free_world(w)
+
+
+func test_second_preacher_does_not_pin_on_peers_victim() -> void:
+	# User report: several preachers channel on the SAME victim, which is
+	# pointless — one converting preacher is enough. Fix: a preacher whose only
+	# in-range convertible already sits under a PEER must walk to a free target
+	# instead of standing pinned next to it (the old any_in_range bug).
+	var w: Dictionary = _make_world()
+	var pa: Preacher = w.um.spawn_unit(PREACHER_SCENE, 0, Vector3(50, 5, 50)) as Preacher
+	var pb: Preacher = w.um.spawn_unit(PREACHER_SCENE, 0, Vector3(51, 5, 50)) as Preacher
+	# Shared victim within CONVERT_RANGE (5 m) of BOTH preachers.
+	var shared: Unit = w.um.spawn_unit(BRAVE_SCENE, 1, Vector3(52, 5, 50))
+	# A free convertible 7 m from B: inside AGGRO_RADIUS (8 m), outside convert range.
+	var free_target: Unit = w.um.spawn_unit(BRAVE_SCENE, 1, Vector3(51, 5, 57))
+	# A channels first and pacifies the shared victim (it sits under A).
+	pa._refresh_conversion()
+	check(shared.state == Unit.State.SIT, "shared victim sits down under a preacher")
+	check(shared.converting_preacher == pa, "shared victim is converted by preacher A")
+	# B refreshes: its only in-range convertible sits under A, so B fans out to
+	# the free target instead of double-teaming A's victim.
+	pb._refresh_conversion()
+	check(pb._convert_target == free_target,
+		"preacher B walks to the free target instead of pinning on A's victim")
+	check(shared.converting_preacher == pa,
+		"the shared victim stays bound to A only (no second converter)")
+	_free_world(w)

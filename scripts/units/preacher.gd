@@ -188,8 +188,17 @@ func _refresh_conversion() -> void:
 	if path_service == null:
 		_set_state(State.IDLE)
 		return
-	var any_in_range: bool = false
-	# Approach focus for when nobody is in range: prefer a target no peer
+	# "Responsible" = at least one in-range convertible that is MINE to handle
+	# (I just pacified it, or it already sits under me). A unit already sitting
+	# under a PEER does NOT count — otherwise a second preacher pins itself
+	# channeling next to a crowd another preacher is already converting instead
+	# of fanning out to a free target (user report: several priests uselessly
+	# converting the same person). `saw_in_range` still notes any in-range
+	# convertible so a preacher with no free target elsewhere keeps standing
+	# instead of idle-flipping.
+	var responsible: bool = false
+	var saw_in_range: bool = false
+	# Approach focus for when nobody is MINE in range: prefer a target no peer
 	# preacher has claimed (spread out), else the nearest one (phase 7i).
 	var nearest_free: Unit = null
 	var d_free: float = INF
@@ -217,14 +226,22 @@ func _refresh_conversion() -> void:
 				return
 			continue
 		if d <= CONVERT_RANGE:
-			any_in_range = true
-			if u.state != State.SIT:
-				# Fight inertia: an already-fighting unit sometimes keeps
-				# brawling for now (retried on the next scan).
-				if u.state == State.ATTACK and randf() < FIGHT_INERTIA_CHANCE:
-					continue
-				u.begin_conversion(self,
-					randf_range(CONVERT_TIME_MIN, CONVERT_TIME_MAX))
+			saw_in_range = true
+			if u.state == State.SIT:
+				# Already sitting: only one under MY spell keeps me here. A unit
+				# sitting under a peer is not my job — don't get pinned on it.
+				if u.converting_preacher == self:
+					responsible = true
+				continue
+			# Fight inertia: an already-fighting unit sometimes keeps brawling
+			# for now (retried on the next scan).
+			if u.state == State.ATTACK and randf() < FIGHT_INERTIA_CHANCE:
+				continue
+			# In range and free: pacify it (in-range beats a peer merely walking
+			# toward it, so we don't defer to _claimed_by_peer here).
+			if u.begin_conversion(self,
+					randf_range(CONVERT_TIME_MIN, CONVERT_TIME_MAX)):
+				responsible = true
 		elif u.state != State.SIT:
 			if d < d_any:
 				d_any = d
@@ -232,12 +249,19 @@ func _refresh_conversion() -> void:
 			if not _claimed_by_peer(u) and d < d_free:
 				d_free = d
 				nearest_free = u
-	if any_in_range:
-		_convert_target = null   # stand and channel
+	if responsible:
+		_convert_target = null   # stand and channel over my own target(s)
 		return
+	# Not tied to anyone in range: walk to a target of my own — prefer an
+	# unclaimed one so preachers fan out (user report: no double-teaming).
 	var nearest: Unit = nearest_free if nearest_free != null else nearest_any
 	if nearest != null:
 		_convert_target = nearest
+		return
+	if saw_in_range:
+		# Everyone in range is a peer's already; nothing free to walk to — keep
+		# standing calmly rather than flip to IDLE and re-engage next scan.
+		_convert_target = null
 		return
 	_convert_target = null
 	# Nothing left to convert: resume a building assault if one is pending
