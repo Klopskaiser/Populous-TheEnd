@@ -133,11 +133,12 @@ func order_attack(enemy: Unit) -> void:
 		return
 	if enemy != null and is_instance_valid(enemy) and enemy.state != State.DEAD \
 			and enemy.tribe_id != tribe_id and not enemy.is_conversion_immune():
-		_end_attack()
+		_end_attack()   # clears _target_ordered — re-set it below (sticky order)
 		_convert_target = enemy
+		_target_ordered = true   # march to THIS one; the auto-scan must not drop it
 		_set_state(State.CAST)
 		return
-	super.order_attack(enemy)
+	super.order_attack(enemy)   # priest/shaman (conversion-immune) -> melee duel
 
 
 ## While assaulting a building, clear the entrance by CONVERTING convertible
@@ -161,6 +162,31 @@ func _engage_assault_foe(foe: Unit) -> void:
 ## CAST: channel on everything convertible in range; walk toward the focus
 ## target while nobody is in range; duel enemy preachers that come close.
 func _tick_convert(delta: float) -> void:
+	# Explicit order (right-click / AI / TribeCommands): march to the ordered
+	# target and pacify it, regardless of the local auto-scan. Without this the
+	# _refresh_conversion pass below discards a target outside AGGRO_RADIUS and
+	# the preacher just stands there (user report). Priest/shaman orders never
+	# reach here — they go to melee via super.order_attack.
+	if _target_ordered:
+		var ot = _convert_target
+		if ot == null or not is_instance_valid(ot) or ot.state == State.DEAD \
+				or ot.tribe_id == tribe_id or ot.is_conversion_immune() \
+				or not ot.is_targetable():
+			_target_ordered = false   # order void -> fall through to auto behaviour
+		elif _flat_dist(position, ot.position) > CONVERT_RANGE * 0.85:
+			if not _approach(ot.position, delta):
+				_target_ordered = false   # unreachable (cliff) -> drop the order
+				_convert_target = null
+				_set_state(State.IDLE)
+				return
+			_face_point(ot.position)
+			return   # still closing in — skip the auto-rescan that would drop it
+		else:
+			# Arrived: pacify the ordered target, then hand off to normal channeling.
+			if ot.state != State.SIT:
+				ot.begin_conversion(self,
+					randf_range(CONVERT_TIME_MIN, CONVERT_TIME_MAX))
+			_target_ordered = false
 	if _due_to_scan(delta):
 		_refresh_conversion()
 		if state != State.CAST:

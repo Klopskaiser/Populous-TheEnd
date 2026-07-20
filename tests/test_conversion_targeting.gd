@@ -122,3 +122,40 @@ func test_second_preacher_goes_idle_without_free_target() -> void:
 		"the second preacher goes idle instead of channeling over A's victim")
 	check(shared.converting_preacher == pa, "victim stays bound to A only")
 	_free_world(w)
+
+
+func test_ordered_preacher_walks_to_convert_far_enemy() -> void:
+	# Right-click on a convertible enemy beyond scan range: the preacher must
+	# march over and preach, not stand still (user report). The sticky order flag
+	# keeps the auto-rescan from dropping the far target.
+	var w: Dictionary = _make_world()
+	var pa: Preacher = w.um.spawn_unit(PREACHER_SCENE, 0, Vector3(50, 5, 50)) as Preacher
+	var enemy: Unit = w.um.spawn_unit(BRAVE_SCENE, 1, Vector3(64, 5, 50))  # 14 m: beyond AGGRO (8)
+	pa.order_attack(enemy)
+	check(pa.state == Unit.State.CAST, "preacher enters CAST on the order")
+	check(pa._convert_target == enemy, "the ordered enemy is the convert target")
+	pa.tick(1.0 / 30.0)
+	check(pa.state == Unit.State.CAST and pa._convert_target == enemy,
+		"the far ordered target is NOT dropped after the first tick")
+	var sat: bool = false
+	for _i in range(900):
+		pa.tick(1.0 / 30.0)
+		if enemy.state == Unit.State.SIT:
+			sat = true
+			break
+	check(sat, "the preacher reaches the far enemy and pacifies it")
+	check(enemy.converting_preacher == pa, "the ordered enemy is converted by this preacher")
+	_free_world(w)
+
+
+func test_ordered_preacher_melees_priest() -> void:
+	# Ordering a preacher onto a conversion-immune target (enemy priest/shaman)
+	# is a melee duel, not a conversion.
+	var w: Dictionary = _make_world()
+	var pa: Preacher = w.um.spawn_unit(PREACHER_SCENE, 0, Vector3(50, 5, 50)) as Preacher
+	var foe: Preacher = w.um.spawn_unit(PREACHER_SCENE, 1, Vector3(56, 5, 50)) as Preacher
+	check(foe.is_conversion_immune(), "an enemy preacher is conversion-immune")
+	pa.order_attack(foe)
+	check(pa.attack_target == foe, "the preacher melees the enemy priest")
+	check(pa.state == Unit.State.ATTACK, "priest duel uses the ATTACK state, not CAST")
+	_free_world(w)
