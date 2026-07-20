@@ -21,6 +21,10 @@ var _terrain_data: TerrainData = null
 ## Toggled by the G key (toggle_ranges action).
 var enabled: bool = false
 var _im: ImmediateMesh = null
+## Whether the shared per-frame batch surface (see _draw_ring) is currently
+## open — lazily opened on the first ring so a frame with nothing to draw
+## still ends up with 0 surfaces (matches TerrainRing.add_band's contract).
+var _batch_open: bool = false
 
 
 func setup(p_unit_manager: UnitManager, p_player_id: int,
@@ -71,6 +75,7 @@ func _process(_delta: float) -> void:
 	if not enabled or _unit_manager == null or _im == null:
 		return
 	_im.clear_surfaces()
+	_batch_open = false
 	for unit in _unit_manager.units:
 		if unit.tribe_id != _player_id or unit.state == Unit.State.DEAD:
 			continue
@@ -93,15 +98,14 @@ func _process(_delta: float) -> void:
 				and is_instance_valid(unit.garrison_target):
 			origin = unit.garrison_target.center_world()
 			r += Watchtower.TOWER_RANGE_BONUS
-		TerrainRing.add_band(_im, origin, r, _terrain_data,
-			_color_for(unit.unit_kind()))
+		_draw_ring(origin, r, _color_for(unit.unit_kind()))
 		# Catapults and fire rams also show a dim inner minimum-range ring.
 		if unit is SiegeEngine:
-			TerrainRing.add_band(_im, unit.position, SiegeEngine.MIN_RANGE,
-				_terrain_data, C_SIEGE_MIN, 0.15)
+			_draw_ring(unit.position, SiegeEngine.MIN_RANGE, C_SIEGE_MIN, 0.15)
 		elif unit is FireRam:
-			TerrainRing.add_band(_im, unit.position, FireRam.MIN_RANGE,
-				_terrain_data, C_SIEGE_MIN, 0.15)
+			_draw_ring(unit.position, FireRam.MIN_RANGE, C_SIEGE_MIN, 0.15)
+	if _batch_open:
+		_im.surface_end()
 
 
 ## Draws the airship's actual deck-combat rings, one per crew kind aboard,
@@ -111,13 +115,28 @@ func _process(_delta: float) -> void:
 ## spell reach is shown by the spell targeting ring instead).
 func _add_airship_rings(ship: Airship) -> void:
 	if ship._has_deck_firewarrior():
-		TerrainRing.add_band(_im, ship.position,
-			Firewarrior.FIRE_RANGE + Balance.AIRSHIP_RANGE_BONUS,
-			_terrain_data, C_FIREWARRIOR)
+		_draw_ring(ship.position, Firewarrior.FIRE_RANGE + Balance.AIRSHIP_RANGE_BONUS,
+			C_FIREWARRIOR)
 	if ship._has_deck_preacher():
-		TerrainRing.add_band(_im, ship.position,
-			Preacher.CONVERT_RANGE + Balance.AIRSHIP_RANGE_BONUS,
-			_terrain_data, C_PREACHER)
+		_draw_ring(ship.position, Preacher.CONVERT_RANGE + Balance.AIRSHIP_RANGE_BONUS,
+			C_PREACHER)
+
+
+## Appends one ring into the shared per-frame batch surface (opened lazily on
+## the first ring, see _process): ALL rings this frame share ONE mesh surface
+## via TerrainRing.add_band_triangles instead of one surface per ring — with a
+## big army (hundreds of ranged units, some drawing two rings) the old
+## one-surface-per-ring approach blew past Godot's per-mesh surface cap and
+## spammed "mesh->surface_count == MAX_MESH_SURFACES" (user bug). No-op for a
+## non-positive radius, so an all-melee army still ends up with 0 surfaces.
+func _draw_ring(origin: Vector3, r: float, color: Color,
+		thickness: float = TerrainRing.THICKNESS) -> void:
+	if r <= 0.0:
+		return
+	if not _batch_open:
+		_im.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+		_batch_open = true
+	TerrainRing.add_band_triangles(_im, origin, r, _terrain_data, color, thickness)
 
 
 static func _color_for(kind: StringName) -> Color:

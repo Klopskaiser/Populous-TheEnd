@@ -932,6 +932,23 @@ func test_terrain_ring_builds_surface() -> void:
 	check(im.get_surface_count() == 0, "a zero-radius ring draws nothing")
 
 
+## Regression (user bug): RangeRenderer used to open one mesh SURFACE per ring
+## via add_band — with a big army (hundreds of firewarriors/preachers/siege
+## units, some drawing two rings) that blew past Godot's per-mesh surface cap
+## and spammed "mesh->surface_count == MAX_MESH_SURFACES". add_band_triangles
+## batches any number of rings into ONE already-open surface instead.
+func test_terrain_ring_batches_many_rings_into_one_surface() -> void:
+	var td: TerrainData = _flat_terrain()
+	var im: ImmediateMesh = ImmediateMesh.new()
+	im.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in range(400):   # comfortably above any real per-mesh surface cap
+		TerrainRing.add_band_triangles(im, Vector3(60.0 + float(i), 5.0, 60.0),
+			8.0, td, Color(1, 0, 0, 1))
+	im.surface_end()
+	check(im.get_surface_count() == 1,
+		"400 batched rings still add exactly one mesh surface")
+
+
 # --- Attack-move resumes after combat (all units) ----------------------------------
 
 ## Deterministic (no combat RNG): attack-move, engage a target, the target
