@@ -27,6 +27,13 @@ enum GrowthMode { NONE, MINIMAL, MAXIMUM }
 ## default). MAXIMUM = grow like before (huts fill up from nearby idle braves).
 var growth_mode: GrowthMode = GrowthMode.MAXIMUM
 
+## Military units (warrior/firewarrior/preacher) auto-crew nearby GROUND vehicles
+## whose crew is short, and take over neutral (unmanned) ones — see
+## CrewedVehicle._tick_auto_recrew. Default on; the AI keeps the default (player
+## and AI share the same Tribe struct, so no AI code reads this). Airships are
+## excluded; the shaman and braves are never pulled in.
+var auto_recrew_vehicles: bool = true
+
 ## Per-tribe catapult cap: every workshop of the tribe stops producing once
 ## owned_catapult_count() reaches it. Player adjusts it in the sidebar
 ## (followers tab); AI keeps the default.

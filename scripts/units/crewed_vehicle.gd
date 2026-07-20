@@ -26,6 +26,11 @@ const SINK_SPEED: float = 0.8   # m/s downward while the wreck sinks
 const BREAK_HEIGHT_SPAN: float = 3.5
 ## Seconds an abandoned (crewless) siege engine survives before it bursts.
 const UNCREWED_LIFETIME: float = 180.0
+## Auto-recrew (per-tribe toggle): a short-crewed / neutral GROUND vehicle pulls
+## nearby military units in to man it. Coarse-grained scan (user spec: 1-2 s) over
+## a small radius — cheap because vehicles are few (see _tick_auto_recrew).
+const RECREW_SCAN_INTERVAL: float = 1.0
+const RECREW_SCAN_RADIUS: float = 3.0
 const C_WOOD: Color = Color(0.42, 0.29, 0.15)
 const C_WOOD_DARK: Color = Color(0.3, 0.2, 0.1)
 const C_METAL: Color = Color(0.45, 0.45, 0.48)
@@ -50,6 +55,8 @@ var chassis_half_width: float = 0.7
 var crew: Array = []
 
 var _crew_prune_timer: float = 0.0
+## Throttle for the auto-recrew scan (staggered per instance in _tick_auto_recrew).
+var _recrew_timer: float = 0.0
 ## Seconds this vehicle has stood continuously without any crew (recruits still
 ## walking over count as crew). At UNCREWED_LIFETIME an abandoned siege engine
 ## bursts. Reset the moment anyone is aboard or inbound.
@@ -547,8 +554,56 @@ func tick(delta: float) -> void:
 		waypoint_queue.clear()
 		_clear_path()
 		_set_state(State.IDLE)
+	_tick_auto_recrew(delta)
 	super.tick(delta)
 	_tick_visual(delta)
+
+
+## Auto-recrew (per-tribe toggle auto_recrew_vehicles, default on — covers the AI
+## too): a short-crewed or neutral GROUND vehicle pulls nearby MILITARY units in to
+## man it. Vehicle-driven (few vehicles scan a small radius) instead of unit-driven
+## (many units scanning) — geometrically identical for a small radius but far
+## cheaper. Airships opt out (they ride on deck and have their own AI manning).
+## Skips entirely once full, so only under-crewed vehicles ever scan.
+func _tick_auto_recrew(delta: float) -> void:
+	if crew_rides_on_deck():
+		return   # airships (zeppelins) are excluded — user spec
+	if state == State.DEAD or _vehicle_burn > 0.0 or _sinking:
+		return
+	if path_service == null or crew_count() >= max_crew:
+		return
+	_recrew_timer -= delta
+	if _recrew_timer > 0.0:
+		return
+	# Coarse throttle with a per-instance jitter so many vehicles don't scan the
+	# same frame (mirrors Unit._due_to_scan).
+	_recrew_timer = RECREW_SCAN_INTERVAL + float(get_instance_id() % 50) * 0.01
+	for u in path_service.get_units_in_radius(position, RECREW_SCAN_RADIUS):
+		var members: int = crew_count()   # prunes once; also gates the takeover below
+		if members >= max_crew:
+			break
+		if not is_instance_valid(u) or u.state == State.DEAD:
+			continue
+		# Military only: _is_combatant() excludes braves AND the shaman; the
+		# vehicle's accepts_crew_unit rejects the shaman/chassis as well.
+		if not u._is_combatant() or not accepts_crew_unit(u):
+			continue
+		if u.siege_engine != null:
+			continue   # already crew / walking to a vehicle — crews never search
+		if u._in_melee:
+			continue   # engaged in melee — must not be pulled off
+		if u.state != State.IDLE and u.state != State.ATTACK:
+			continue   # idle or (ranged) combat only; explicit MOVE orders stand
+		if not u.can_take_orders():
+			continue
+		if u.tribe == null or not u.tribe.auto_recrew_vehicles:
+			continue   # the CANDIDATE's tribe governs (own backfill + neutral takeover)
+		# Own vehicles are backfilled at any crew level; a FOREIGN unit only claims a
+		# genuinely abandoned vehicle (no boarded OR inbound crew) — it never snipes
+		# one the owner is actively manning (recruits still walking over count).
+		if u.tribe_id != tribe_id and members > 0:
+			continue
+		u.order_crew(self)   # add_crew/on_crew_boarded enforce the hijack rules
 
 
 # --- Visuals (own 3D model, in-game only) -------------------------------------------

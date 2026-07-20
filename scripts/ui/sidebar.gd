@@ -85,6 +85,8 @@ var _idle_button: Button = null
 ## Per-tribe vehicle-cap steppers (followers tab): one entry per vehicle type
 ## with {label, title, get_cap, set_cap, get_owned, limit}.
 var _cap_steppers: Array[Dictionary] = []
+## Per-tribe toggle (followers tab): military units auto-crew nearby ground vehicles.
+var _auto_recrew_check: CheckButton = null
 var _pause_menu: Control = null
 ## Crew tab widgets: occupants of the selected mannable object as icon buttons
 ## (click ejects) plus a production pause toggle.
@@ -638,8 +640,25 @@ func _build_followers_tab() -> Control:
 		func(t: Tribe, v: int) -> void: t.max_airships = v,
 		func(t: Tribe) -> int: return t.owned_airship_count())
 
+	# Per-tribe toggle: military units auto-crew nearby ground vehicles (default on).
+	_auto_recrew_check = CheckButton.new()
+	_auto_recrew_check.text = "Fahrzeuge automatisch bemannen"
+	_auto_recrew_check.tooltip_text = "Eigene Militäreinheiten (Krieger, Feuerkrieger," \
+		+ " Prediger) besetzen nahe Bodenfahrzeuge (max. 3 m) automatisch nach oder" \
+		+ " übernehmen neutrale — auch im Kampf, außer im Nahkampf. Schamanin und" \
+		+ " Braves sind ausgenommen; Luftschiffe ebenfalls."
+	UiTheme.style_button(_auto_recrew_check)
+	_auto_recrew_check.toggled.connect(_on_auto_recrew_toggled)
+	vb.add_child(_auto_recrew_check)
+
 	scroll.add_child(vb)
 	return scroll
+
+
+func _on_auto_recrew_toggled(pressed: bool) -> void:
+	var player: Tribe = _player_tribe()
+	if player != null:
+		player.auto_recrew_vehicles = pressed
 
 
 ## Builds one vehicle-cap stepper row (−  label  +) and registers it for the
@@ -1170,6 +1189,9 @@ func _refresh_followers() -> void:
 		if lbl != null:
 			lbl.text = "%s: %d" % [row["name"], counts[kind]]
 	_refresh_cap_steppers()
+	var player: Tribe = _player_tribe()
+	if _auto_recrew_check != null and player != null:
+		_auto_recrew_check.set_pressed_no_signal(player.auto_recrew_vehicles)
 
 
 # --- Spells & shaman portrait (phase 6) ----------------------------------------

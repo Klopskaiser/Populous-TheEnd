@@ -5792,3 +5792,38 @@ tatsächlichen Trichterhöhe (normal 8 m, super 12 m) im passenden Radius. Alte 
 Testsuite **2162/2162 grün** (Spell-/UI-Zählungen 10→11 in `test_spells.gd`/
 `test_ui_logic.gd` angepasst). Funktionaler In-Game-Test (11. Zelle sichtbar, Hotkey ß,
 großer Trichter + zwei kleine, Holzwirbel auf voller Höhe) durch Nutzer ausstehend.
+
+---
+
+## Erweiterung: Automatisches Nachbesetzen von Fahrzeugen (per-Stamm-Toggle)
+
+**Ziel:** Militäreinheiten (Krieger/Feuerkrieger/Prediger) bemannen nahe
+**Bodenfahrzeuge** (Katapult/Feuerramme, **keine Luftschiffe**) automatisch nach, wenn
+Crew fehlt, bzw. übernehmen **verlassene** (crewlose) Fahrzeuge. Reichweite **3 m**, gilt
+**auch im Kampf**, solange die Einheit **nicht im Nahkampf** ist. Per-Stamm-**Toggle**,
+Default **an** — gilt damit automatisch auch für die KI. Schamanin und Braves ausgenommen;
+bereits eingeteilte Besatzungen suchen nicht.
+
+**Umsetzung (fahrzeug-getrieben, aus Performance-Gründen):**
+- `tribe.gd`: neues Feld `var auto_recrew_vehicles: bool = true` (Vorbild `max_catapults`;
+  KI erbt Default, kein KI-Code nötig).
+- `crewed_vehicle.gd`: `_tick_auto_recrew(delta)` aus `tick()`. Consts
+  `RECREW_SCAN_INTERVAL = 1.0`, `RECREW_SCAN_RADIUS = 3.0`, Feld `_recrew_timer` (per-Instanz-
+  Jitter via `get_instance_id() % 50`). Läuft nur bei freiem Platz (`crew_count() < max_crew`),
+  Luftschiffe via `crew_rides_on_deck()`-Guard ausgeschlossen. Kandidatenfilter:
+  `_is_combatant()` + `accepts_crew_unit()` (schließt Brave/Schamanin/Chassis aus),
+  `siege_engine == null`, `not _in_melee`, `state IDLE|ATTACK` (kein MOVE), `can_take_orders()`,
+  `u.tribe.auto_recrew_vehicles`. **Übernahme-Semantik:** eigene Fahrzeuge werden bei jedem
+  freien Platz nachbesetzt; ein **fremdes** Fahrzeug wird nur übernommen, wenn es **komplett
+  crewlos** ist (`crew_count() == 0`) — kein Sniping, während der Eigner es gerade bemannt.
+  Zuweisung über `order_crew(self)`; `add_crew`/`on_crew_boarded` erzwingen die Hijack-Regeln.
+- `sidebar.gd`: `CheckButton` „Fahrzeuge automatisch bemannen" im Followers-Tab, gebunden an
+  den Spieler-Stamm (`_on_auto_recrew_toggled`, Sync in `_refresh_followers`).
+
+**Bewusst unverändert:** Workshop-Bemannung frischer Fahrzeuge mit Braves; `ai_controller.gd`
+(neues Verhalten greift für die KI über den Tribe-Default); Luftschiff-KI-Manning.
+
+**Verifikation:** `--headless --quit` fehlerfrei; volle Suite **2183/2183 grün** inkl. 6
+neuer Tests in `test_siege.gd` (Backfill eigenes Fahrzeug, Toggle aus, Brave-Ausschluss,
+Nahkampf-Ausschluss, Übernahme verlassenes Feind-Fahrzeug, kein Sniping bei bemanntem
+Fremd-Fahrzeug). Funktionaler In-Game-Test durch Nutzer ausstehend.

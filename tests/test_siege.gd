@@ -1379,3 +1379,86 @@ func test_damaged_workshop_keeps_stock() -> void:
 		_tick_world(w)
 	check(ws.stock_wood() == stock0, "the damaged workshop leaves its stock lying")
 	_free_world(w)
+
+
+# --- Auto-recrew: military units man nearby ground vehicles (per-tribe toggle) ----
+
+## An idle warrior next to an own under-crewed catapult is auto-assigned as crew.
+func test_auto_recrew_backfills_own_vehicle() -> void:
+	var w: Dictionary = _make_world()
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(60, 60))) as SiegeEngine
+	var warrior: Warrior = w.unit_manager.spawn_unit(
+		WARRIOR_SCENE, 0, engine.position + Vector3(2.0, 0.0, 0.0)) as Warrior
+	check(warrior.siege_engine == null, "warrior starts unassigned")
+	engine._tick_auto_recrew(engine.RECREW_SCAN_INTERVAL + 1.0)
+	check(warrior.siege_engine == engine, "the warrior is auto-assigned to the vehicle")
+	_free_world(w)
+
+
+## The per-tribe toggle gates it: with auto_recrew_vehicles off, nobody is pulled in.
+func test_auto_recrew_toggle_off() -> void:
+	var w: Dictionary = _make_world()
+	w.tribe.auto_recrew_vehicles = false
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(60, 60))) as SiegeEngine
+	var warrior: Warrior = w.unit_manager.spawn_unit(
+		WARRIOR_SCENE, 0, engine.position + Vector3(2.0, 0.0, 0.0)) as Warrior
+	engine._tick_auto_recrew(engine.RECREW_SCAN_INTERVAL + 1.0)
+	check(warrior.siege_engine == null, "toggle off: no auto-crewing")
+	_free_world(w)
+
+
+## Braves are never pulled in by the new behaviour (military units only; the
+## shaman is rejected by accepts_crew_unit — see test_shaman_cannot_crew).
+func test_auto_recrew_excludes_braves() -> void:
+	var w: Dictionary = _make_world()
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(60, 60))) as SiegeEngine
+	var brave: Brave = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 0, engine.position + Vector3(2.0, 0.0, 0.0)) as Brave
+	engine._tick_auto_recrew(engine.RECREW_SCAN_INTERVAL + 1.0)
+	check(brave.siege_engine == null, "braves are not auto-pulled as vehicle crew")
+	_free_world(w)
+
+
+## A unit in melee is not pulled off the fight (spec: only while NOT in melee).
+func test_auto_recrew_skips_melee() -> void:
+	var w: Dictionary = _make_world()
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(60, 60))) as SiegeEngine
+	var warrior: Warrior = w.unit_manager.spawn_unit(
+		WARRIOR_SCENE, 0, engine.position + Vector3(2.0, 0.0, 0.0)) as Warrior
+	warrior._in_melee = true
+	engine._tick_auto_recrew(engine.RECREW_SCAN_INTERVAL + 1.0)
+	check(warrior.siege_engine == null, "a unit in melee is not auto-crewed")
+	_free_world(w)
+
+
+## A foreign unit claims a genuinely ABANDONED (crewless) enemy vehicle...
+func test_auto_recrew_claims_abandoned_enemy_vehicle() -> void:
+	var w: Dictionary = _make_world()
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 1, w.nav.cell_to_world(Vector2i(60, 60))) as SiegeEngine
+	var warrior: Warrior = w.unit_manager.spawn_unit(
+		WARRIOR_SCENE, 0, engine.position + Vector3(2.0, 0.0, 0.0)) as Warrior
+	engine._tick_auto_recrew(engine.RECREW_SCAN_INTERVAL + 1.0)
+	check(warrior.siege_engine == engine, "an abandoned enemy vehicle is claimed")
+	_free_world(w)
+
+
+## ...but NOT one the owner is already manning (inbound crew present).
+func test_auto_recrew_skips_owner_manned_vehicle() -> void:
+	var w: Dictionary = _make_world()
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 1, w.nav.cell_to_world(Vector2i(60, 60))) as SiegeEngine
+	# An owner brave is walking over to man it (inbound crew, not yet boarded).
+	var owner: Brave = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, engine.position + Vector3(1.0, 0.0, 0.0)) as Brave
+	owner.order_crew(engine)
+	var warrior: Warrior = w.unit_manager.spawn_unit(
+		WARRIOR_SCENE, 0, engine.position + Vector3(2.0, 0.0, 0.0)) as Warrior
+	engine._tick_auto_recrew(engine.RECREW_SCAN_INTERVAL + 1.0)
+	check(warrior.siege_engine == null,
+		"a foreign unit does not snipe a vehicle the owner is manning")
+	_free_world(w)
