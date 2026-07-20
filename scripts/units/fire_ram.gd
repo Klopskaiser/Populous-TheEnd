@@ -374,9 +374,21 @@ func _retarget_or_idle() -> void:
 ## (auto) or held without fire (ordered) — the catapult's minimum-range rule.
 func _burn_unit(target: Unit, delta: float) -> void:
 	var dist: float = _flat_dist(position, target.position)
+	var due: bool = _due_to_scan(delta)
+	# Spread the fire (user spec): a single scorch already lands the full, usually
+	# lethal burn, so an AUTO ram must NOT keep burning/chasing an already-lit
+	# target while a FRESH (unlit) enemy is still around — it hands off to the
+	# nearest fresh foe in aggro instead. _nearest_enemy_unit prefers fresh over
+	# burning, so a non-burning result means a fresh target genuinely exists.
+	# Ordered targets stick (explicit user command).
+	if due and not _target_ordered and target.is_burning():
+		var alt: Unit = _nearest_enemy_unit(RAM_AGGRO)
+		if alt != null and alt != target and not alt.is_burning():
+			_begin_attack(alt)
+			return
 	if dist > FIRE_RANGE:
 		# Prefer whoever is already in range over any chase (user spec).
-		if _due_to_scan(delta):
+		if due:
 			var near: Unit = _nearest_enemy_unit(FIRE_RANGE)
 			if near != null and near != target:
 				_begin_attack(near)

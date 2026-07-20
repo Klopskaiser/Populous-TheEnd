@@ -470,6 +470,33 @@ func test_ram_swaps_too_close_ordered_target_for_band_enemy() -> void:
 	_free_world(w)
 
 
+## Target priority (user request): a single scorch is already lethal, so an AUTO
+## ram must NOT keep chasing an already-BURNING target while a FRESH (unlit) enemy
+## is available — it spreads the fire instead of aggressively pursuing the one it
+## already lit.
+func test_ram_hands_off_a_burning_target_for_a_fresh_one() -> void:
+	var w: Dictionary = _make_world()
+	var ram: FireRam = _armed_ram(w)
+	# The current AUTO target is already burning and sits beyond fire range (the
+	# ram would otherwise chase it up to RAM_AGGRO).
+	var burning: Unit = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, ram.position + Vector3(0, 0, 7.0))
+	burning.scorch(burning.position)
+	check(burning.is_burning(), "the current target is burning")
+	# A fresh (unlit) enemy comfortably within aggro.
+	var fresh: Unit = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, ram.position + Vector3(0, 0, 4.0))
+	ram._begin_attack(burning)   # auto target (not ordered)
+	check(ram.attack_target == burning and not ram._target_ordered,
+		"auto-engaged the burning target")
+	ram._target_search_timer = 0.0   # force a scan on the next _burn_unit
+	ram._burn_unit(burning, TICK)
+	check(ram.attack_target == fresh,
+		"the ram hands the burning target off to the fresh enemy")
+	check(not fresh.is_burning(), "the handed-off target is still fresh")
+	_free_world(w)
+
+
 ## Retreat (user request): with a threat inside the minimum range and NO other
 ## target to shoot, the ram drives backwards to reopen the firing distance and
 ## opens fire again the instant the minimum range is clear.

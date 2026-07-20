@@ -78,6 +78,20 @@ fehlerfrei. **Manueller In-Game-Repro (Bergpass/Plateau, Ramme über flachen Gra
 stillstehenden Krieger sowie Ramme gegen panisch fliehendes Ziel) steht noch aus** — nur mit
 aktivem Worker (`& $GODOT --path …`, nicht headless) vollständig reproduzierbar.
 
+**Nachtrag 2: „brennende Ziele nicht verfolgen" griff nicht.** Die Ramme fackelte ein Ziel
+an und verfolgte es danach aggressiv, obwohl frische (nicht brennende) Ziele verfügbar waren.
+Ursache: Die Zwei-Tier-Priorität (frisch vor brennend) steckte nur in `_nearest_enemy_unit`;
+war ein Ziel erst mal `attack_target`, hielt `_burn_unit` daran fest und tauschte nur gegen
+Feinde **innerhalb FIRE_RANGE (5 m)** — ein bereits angezündetes, fliehendes Ziel wurde bis
+`RAM_AGGRO (12 m)` verfolgt, frische Ziele im 5–12-m-Band ignoriert.
+- **Fix** (`fire_ram.gd` `_burn_unit`): `_due_to_scan` einmal pro Tick auswerten; ist das
+  **Auto**-Ziel bereits am Brennen und existiert ein **frisches** Ziel in `RAM_AGGRO`
+  (`_nearest_enemy_unit` liefert frisch vor brennend), sofort auf das frische umschwenken
+  (`_begin_attack`). Ein Scorch ist ohnehin voll/meist tödlich → Weiterbrennen/-jagen
+  verschwendet den Stoß. **Befohlene** Ziele (`_target_ordered`) haften weiter.
+- Regressionstest `test_fire_ram.gd` (`test_ram_hands_off_a_burning_target_for_a_fresh_one`).
+- Verifikation: ganze Suite grün (**2171 passed, 0 failed**).
+
 ## Feuerramme: breiterer Flammenkegel + Feuerfestigkeit (3 Leben) (2026-07-20)
 
 Zwei Erweiterungen der Feuerramme.
