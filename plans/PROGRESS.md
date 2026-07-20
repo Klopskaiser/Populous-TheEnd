@@ -92,6 +92,27 @@ Feinde **innerhalb FIRE_RANGE (5 m)** — ein bereits angezündetes, fliehendes 
 - Regressionstest `test_fire_ram.gd` (`test_ram_hands_off_a_burning_target_for_a_fresh_one`).
 - Verifikation: ganze Suite grün (**2171 passed, 0 failed**).
 
+**Nachtrag 3: Gleiches Verfolgungs-Zittern bei Feuerkrieger/Prediger (Fußgänger).** Das
+Ramme-Kampf-Zittern (Nachtrag 1) trat auch beim Feuerkrieger auf: gegnerischer Feuerkrieger
+verfolgt ein bewegliches Ziel (fahrendes Luftschiff) knapp außer Reichweite → zuckte vor/
+zurück statt zu folgen, holte erst bei stillstehendem Ziel auf. Gleiche Ursache (eigene
+Zellmitte als erster Wegpunkt + Re-Plan pro Tick gegen bewegliches Ziel), aber über die
+**Basis** `Unit._plan_path_to`/`find_path` — der Ramme-Fix saß nur in
+`CrewedVehicle._plan_path_to`. Betrifft alle Fußgänger-Kampf-Anmärsche (Feuerkrieger,
+Prediger).
+- **Fix** (`unit.gd`): gemeinsamer Helper `_trim_own_cell_waypoint(path)` verwirft den
+  redundanten eigenen-Zell-Wegpunkt; genutzt von `Unit._plan_path_to` **und**
+  `CrewedVehicle._plan_path_to` (Inline-Dedup dort ersetzt, kein Verhaltenswechsel).
+- Regressionstest `test_combat.gd` (`test_combat_path_skips_redundant_own_cell_waypoint`,
+  Fußgänger außermittig → Pfad überspringt eigene Zelle).
+- **Testanpassung:** `test_fireball_applies_knockback` maß die Netto-Position nach EINEM
+  vollen Tick und verließ sich darauf, dass der (fehlerhafte) erste Anmarschschritt vom
+  Schützen weg zeigte. Da der Feuerkrieger-Getroffene (Brave, 4 m/s) jetzt korrekt zum
+  Schützen zurückläuft (> 0,35 m Rückstoß), prüft der Test den Rückstoß nun isoliert
+  (`_knockback_remaining.x > 0` + `_tick_knockback`), statt der AI-vermischten Netto-Position.
+- Verifikation: ganze Suite grün (**2176 passed, 0 failed**), Ladecheck fehlerfrei.
+  **Manueller In-Game-Repro (Feuerkrieger gegen fahrendes Luftschiff) steht aus.**
+
 ## Feuerramme: breiterer Flammenkegel + Feuerfestigkeit (3 Leben) (2026-07-20)
 
 Zwei Erweiterungen der Feuerramme.

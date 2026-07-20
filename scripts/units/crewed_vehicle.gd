@@ -490,18 +490,10 @@ func _plan_path_to(target: Vector3, _allow_partial: bool = false) -> bool:
 		var path: PackedVector3Array = nav_grid.find_vehicle_path(position, target)
 		if path.is_empty():
 			return false
-		# find_vehicle_path starts at the CURRENT cell's centre. While driving the
-		# vehicle sits off-centre in that cell, so heading to that centre first is a
-		# tiny backward/sideways dart before the real next cell. A combat approach
-		# against a MOVING target (e.g. a panicking unit) re-plans constantly (every
-		# time the target drifts > 1 m), so that dart repeats on every re-plan and
-		# the vehicle jitters in place instead of pursuing — it only closes in once
-		# the target stops and the re-planning ceases. Drop the redundant own-cell
-		# waypoint so movement heads straight at the next real cell.
-		if path.size() >= 2 and nav_grid.world_to_cell(path[0]) \
-				== nav_grid.world_to_cell(position):
-			path.remove_at(0)
-		_path = path
+		# Drop the redundant own-cell first waypoint (see Unit._trim_own_cell_waypoint):
+		# without it a combat approach against a moving target darts to the current
+		# cell centre on every re-plan and the vehicle jitters instead of pursuing.
+		_path = _trim_own_cell_waypoint(path)
 		_path_index = 0
 		return true
 	return super._plan_path_to(target)

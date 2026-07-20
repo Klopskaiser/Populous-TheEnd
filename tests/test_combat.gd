@@ -52,6 +52,31 @@ func _run(w: Dictionary, units: Array, done: Callable) -> int:
 	return MAX_TICKS
 
 
+# --- Combat approach pathing -------------------------------------------------------
+
+## A combat-approach path must not begin with the unit's OWN cell centre: moving
+## off-centre, heading there first is a backward/sideways dart, and _approach
+## re-plans it every tick against a moving target -> jitter instead of pursuit
+## (firewarrior-vs-moving-airship / preacher wobble; the pedestrian sibling of the
+## fire-ram fix).
+func test_combat_path_skips_redundant_own_cell_waypoint() -> void:
+	var w: Dictionary = _make_world()
+	var cell: Vector2i = Vector2i(30, 30)
+	var base: Vector3 = w.nav.cell_to_world(cell)
+	# Spawn a ranged unit noticeably off-centre inside its cell.
+	var fw: Unit = w.unit_manager.spawn_unit(
+		FIREWARRIOR_SCENE, 0, base + Vector3(0.35, 0.0, 0.0))
+	check(w.nav.world_to_cell(fw.position) == cell, "unit is inside cell (30,30)")
+	check(fw._plan_path_to(w.nav.cell_to_world(Vector2i(40, 30))),
+		"combat path to a far cell planned")
+	var p: PackedVector3Array = fw._path
+	check(p.size() > 0, "non-empty path")
+	if p.size() > 0:
+		check(w.nav.world_to_cell(p[0]) != cell,
+			"path skips the redundant own-cell first waypoint (no backward dart)")
+	_free_world(w)
+
+
 # --- Damage & death ----------------------------------------------------------------
 
 func test_damage_reduces_hp_and_kills() -> void:
@@ -680,11 +705,16 @@ func test_fireball_applies_knockback() -> void:
 		ball.tick(TICK)
 		ticks += 1
 	check(ball.done, "fireball impacted")
-	# One tick: the knockback (10 m/s) plays out fully, before the retaliation
-	# walk toward the shooter can outweigh the 0.7 m shove.
-	enemy.tick(TICK)
-	check(enemy.position.x > 30.2, "the target was knocked back away from the shooter")
+	# The impact charges knockback AWAY from the shooter (+x, shooter sits at x=26).
+	# Assert the knockback in ISOLATION: a full unit tick would also run the enemy's
+	# retaliation walk toward the shooter (brave speed 4 m/s > the 0.35 m shove),
+	# which would mask the shove — that is expected AI, not a knockback failure.
+	check(enemy._knockback_remaining.x > 0.0,
+		"the impact shoves the target away from the shooter (+x)")
 	check(enemy.knockback_accum > 0.0, "the hit charged the knockback accumulator")
+	var x0: float = enemy.position.x
+	enemy._tick_knockback(TICK)
+	check(enemy.position.x > x0, "the knockback displaces the target away from the shooter")
 	ball.free()
 	_free_world(w)
 

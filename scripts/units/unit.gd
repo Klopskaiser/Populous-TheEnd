@@ -939,9 +939,24 @@ func _plan_path_to(target: Vector3, allow_partial: bool = false) -> bool:
 	if path.is_empty():
 		dbg_plan_fails += 1
 		return false
-	_path = path
+	_path = _trim_own_cell_waypoint(path)
 	_path_index = 0
 	return true
+
+
+## Drops the redundant leading waypoint that find_path/find_vehicle_path place at
+## the unit's OWN cell centre. Moving off-centre inside that cell, heading to the
+## centre first is a backward/sideways dart before the real next cell — harmless
+## for a one-shot move, but a combat approach re-plans on every tick against a
+## MOVING target, so the dart repeats each re-plan and the unit jitters in place
+## instead of pursuing (fire-ram / firewarrior / preacher wobble). The dropped
+## point is the cell the unit already stands in, so the next real waypoint is
+## always a walkable neighbour — safe to skip.
+func _trim_own_cell_waypoint(path: PackedVector3Array) -> PackedVector3Array:
+	if nav_grid != null and path.size() >= 2 \
+			and nav_grid.world_to_cell(path[0]) == nav_grid.world_to_cell(position):
+		path.remove_at(0)
+	return path
 
 
 ## Directly injects a path (used by tests and by order handling).
