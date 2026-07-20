@@ -315,7 +315,7 @@ func test_catapult_crew_still_retaliates_vs_ranged() -> void:
 func test_flame_cooldown_scales_with_crew() -> void:
 	check(is_inf(FireRam.flame_cooldown_for_crew(0)), "0 crew cannot fire")
 	check_near(FireRam.flame_cooldown_for_crew(1), 3.0, "1 crew reloads slowly")
-	check_near(FireRam.flame_cooldown_for_crew(4), 1.5, "full crew reloads fastest")
+	check_near(FireRam.flame_cooldown_for_crew(4), 1.4, "full crew reloads fastest")
 	check(FireRam.flame_cooldown_for_crew(2) < 3.0, "more crew -> faster")
 
 

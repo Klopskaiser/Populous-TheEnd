@@ -122,8 +122,8 @@ Sidebar-`_crew_view` und KI-Gebäudezählung prüfen die Subklassen ZUERST.
 
 **Feuerramme** (`scripts/units/fire_ram.gd`, Werkstatt 11 Holz / 6×4 / 3
 Arbeiter, Fahrzeug 4 Holz, Crew 1–4, min. 1 fährt UND feuert, 3 m/s):
-- **Flammenstoß nach vorn:** Rechteck 5×2 Felder ab Rumpfnase, 1 s Flamme,
-  Nachladen 3 s (1 Crew) → 1,5 s (4 Crew), KEINE Mindestreichweite.
+- **Flammenstoß nach vorn:** Rechteck 5×2 Felder ab Rumpfnase, 1,1 s Flamme,
+  Nachladen 3 s (1 Crew) → 1,4 s (4 Crew), KEINE Mindestreichweite.
   Flächen-Check alle 0,2 s im Heading-Frame; Friendly Fire wie Lava.
 - **Echte Drehrate** (`_heading`, 1,6 rad/s): der Stoß startet erst bei
   Ausrichtung ≤ ~15°; WÄHREND des Stoßes darf weitergedreht werden

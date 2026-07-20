@@ -108,18 +108,19 @@ const FIRERAM_FIRE_RANGE: float = 5.0
 const FIRERAM_MIN_RANGE: float = 1.0
 const FIRERAM_FLAME_WIDTH: float = 2.0
 ## Dauer eines Flammenstoßes; danach Nachladen (1 Crew -> MIN, 4 Crew -> FULL).
-const FIRERAM_FLAME_DURATION: float = 1.0
+const FIRERAM_FLAME_DURATION: float = 1.1
 const FIRERAM_COOLDOWN_MIN_CREW: float = 3.0
-const FIRERAM_COOLDOWN_FULL_CREW: float = 1.5
+const FIRERAM_COOLDOWN_FULL_CREW: float = 1.4
 const FIRERAM_AGGRO_RADIUS: float = 12.0
 ## Echte Dreh-Rate des Rumpfs (rad/s); Stoß startet erst bei Ausrichtung
 ## innerhalb der Toleranz (rad) zum Ziel.
 const FIRERAM_TURN_RATE: float = 1.6
-const FIRERAM_AIM_TOLERANCE: float = 0.26
+const FIRERAM_AIM_TOLERANCE: float = 0.33
 ## Lava-Kontakt-Gutschrift pro Flammensekunde an Gebäuden. MUSS zusammen mit
 ## FLAME_DURATION >= LAVA_BUILDING_STAGE_TIME ergeben, sonst verfällt der
 ## Kontakt im Grace-Fenster (1 s) zwischen zwei Stößen und Gebäude nehmen
-## nie eine Stufe: 1 s Flamme x 5.0 = 5 s Kontakt = genau 1 Zerstörungsstufe.
+## nie eine Stufe: 1,1 s Flamme x 5.0 = 5,5 s Kontakt >= 5 s = 1 Zerstörungsstufe
+## je Stoß (der Überschuss verfällt im Grace, eine 2. Stufe bräuchte >= 2 s Flamme).
 const FIRERAM_FLAME_CONTACT_FACTOR: float = 5.0
 
 # --- Luftschiff ---

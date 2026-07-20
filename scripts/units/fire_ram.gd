@@ -184,9 +184,13 @@ func _auto_acquire(delta: float) -> bool:
 		return false
 	if not _due_to_scan(delta):
 		return false
-	var u: Unit = _nearest_enemy_unit(FIRE_RANGE)
+	# Units before buildings across the WHOLE aggro radius (not just flame
+	# range): a nearer enemy unit must win over a farther building — the ram
+	# rolls toward it and burns once inside FIRE_RANGE. Auto target, so the
+	# chase stays leashed to RAM_AGGRO in _burn_unit.
+	var u: Unit = _nearest_enemy_unit(RAM_AGGRO)
 	if u != null:
-		_begin_attack(u)   # auto: _target_ordered stays false (no chase)
+		_begin_attack(u)   # auto: _target_ordered stays false (leashed chase)
 		return true
 	var b = _scan_enemy_building(RAM_AGGRO)
 	if b != null:
@@ -218,7 +222,9 @@ func _tick_attack(delta: float) -> void:
 		_end_attack()
 	if _building_target_valid():
 		if _due_to_scan(delta):
-			var u: Unit = _nearest_enemy_unit(FIRE_RANGE)
+			# Divert from the building to any enemy unit within aggro (units
+			# before buildings), preferring fresh over already-burning ones.
+			var u: Unit = _nearest_enemy_unit(RAM_AGGRO)
 			if u != null:
 				_begin_attack(u)
 				return
@@ -234,7 +240,8 @@ func _tick_attack(delta: float) -> void:
 func _retarget_or_idle() -> void:
 	_end_attack()
 	if active_crew_count() >= MIN_FIRE_CREW:
-		var u: Unit = _nearest_enemy_unit(FIRE_RANGE)
+		# Units before buildings across the aggro radius (fresh before burning).
+		var u: Unit = _nearest_enemy_unit(RAM_AGGRO)
 		if u != null:
 			_begin_attack(u)
 			return
@@ -327,7 +334,7 @@ func _burn_point(target_pos: Vector3, delta: float, approach: bool,
 
 
 ## Seconds of reload after a burst for a boarded crew of `count`
-## (1 -> 3 s, 4 (full) -> 1.5 s, linear; below 1 there is no burst at all).
+## (1 -> 3 s, 4 (full) -> 1.4 s, linear; below 1 there is no burst at all).
 static func flame_cooldown_for_crew(count: int) -> float:
 	if count < MIN_FIRE_CREW:
 		return INF
@@ -336,14 +343,20 @@ static func flame_cooldown_for_crew(count: int) -> float:
 	return lerpf(COOLDOWN_MIN_CREW, COOLDOWN_FULL_CREW, t)
 
 
-## Nearest enemy unit inside the flame range that the ram may burn (its
-## splash-like flames do not care about conversion trances — like the
-## catapult, no SIT skip).
+## Nearest enemy unit inside `max_range` that the ram may burn (its splash-like
+## flames do not care about conversion trances — like the catapult, no SIT
+## skip). Two-tier preference: a unit that is NOT already burning wins over any
+## burning one, and only within a tier does distance decide. A single scorch
+## already lands the full 4-s / 60-HP burn (lethal to soft units), so re-aiming
+## at an already-lit enemy wastes the burst — spread the fire to fresh targets
+## and fall back to burning ones only when nothing fresh is in range.
 func _nearest_enemy_unit(max_range: float) -> Unit:
 	if path_service == null:
 		return null
-	var best: Unit = null
-	var best_d: float = max_range
+	var best_fresh: Unit = null
+	var best_fresh_d: float = max_range
+	var best_burn: Unit = null
+	var best_burn_d: float = max_range
 	for u in path_service.get_units_in_radius(position, max_range, SCAN_MAX_CANDIDATES):
 		if u == self or u.state == State.DEAD or u.tribe_id == tribe_id:
 			continue
@@ -354,10 +367,14 @@ func _nearest_enemy_unit(max_range: float) -> Unit:
 		var d: float = _flat_dist(position, u.position)
 		if d < MIN_RANGE or d > max_range:
 			continue   # behind the nozzle — cannot be burnt
-		if d < best_d:
-			best_d = d
-			best = u
-	return best
+		if u.is_burning():
+			if d < best_burn_d:
+				best_burn_d = d
+				best_burn = u
+		elif d < best_fresh_d:
+			best_fresh_d = d
+			best_fresh = u
+	return best_fresh if best_fresh != null else best_burn
 
 
 # --- Flame area -----------------------------------------------------------------------
