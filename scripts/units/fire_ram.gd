@@ -44,6 +44,13 @@ const FLAME_CONTACT_FACTOR: float = Balance.FIRERAM_FLAME_CONTACT_FACTOR
 ## Flame origin: this far in front of the hull centre. Gameplay value (flame
 ## rectangle start, dead zone vs MIN_RANGE) — kept despite the smaller model.
 const NOZZLE_OFFSET: float = 1.2
+## True minimum firing distance: the flame rectangle only starts at NOZZLE_OFFSET,
+## so a unit closer than that sits in the dead zone behind the nozzle and cannot
+## be hit even though it is past the (display) MIN_RANGE. Targeting and the
+## retreat use THIS as the near edge so the ram backs up far enough to actually
+## land flames again. (>= MIN_RANGE by construction; MIN_RANGE still drives the
+## RangeRenderer inner ring and balance.)
+const FLAME_MIN_RANGE: float = maxf(NOZZLE_OFFSET, Balance.FIRERAM_MIN_RANGE)
 ## Flame segments hover this far above the sampled ground (box half-height plus a
 ## touch), so the beam licks along the terrain instead of clipping into it.
 const FLAME_LIFT: float = 0.35
@@ -282,17 +289,26 @@ func _burn_unit(target: Unit, delta: float) -> void:
 		_approach(target.position, delta)
 		_face_point(target.position)
 		return
-	if dist < MIN_RANGE:
-		if not _target_ordered and _due_to_scan(delta):
-			var alt: Unit = _nearest_enemy_unit(FIRE_RANGE)
-			if alt != null and alt != target:
-				_begin_attack(alt)
-				return
+	if dist < FLAME_MIN_RANGE:
+		# A target inside the nozzle dead zone cannot be hit. Prefer ANY
+		# shootable enemy in the firing band over holding fire — even over an
+		# ordered target (it is unhittable from here anyway). _nearest_enemy_unit
+		# only returns units in [FLAME_MIN_RANGE, FIRE_RANGE], i.e. exactly the
+		# "shootable" set. Unthrottled: this branch only runs in the rare
+		# behind-the-nozzle state.
+		var alt: Unit = _nearest_enemy_unit(FIRE_RANGE)
+		if alt != null and alt != target:
+			_begin_attack(alt)
+			return
+		# Nobody else to shoot: back away from the threat to reopen the firing
+		# distance, staying aimed at it so we fire the instant it clears the dead
+		# zone (dist >= FLAME_MIN_RANGE falls through to _burn_point below).
 		if _has_path():
 			_clear_path()
-		_in_melee = true
+		_in_melee = false
 		_face_point(target.position)
-		return   # behind the nozzle — hold fire until it clears the minimum
+		_reverse_from(target.position, delta)
+		return
 	_burn_point(target.position, delta, false, dist)
 
 
@@ -344,6 +360,29 @@ func _burn_point(target_pos: Vector3, delta: float, approach: bool,
 	_emit_combat_hit(&"throw")
 
 
+## Backs the hull straight away from `threat_pos` by one step, WITHOUT touching
+## `facing` (the caller keeps the hull aimed at the threat via _face_point, so
+## the ram fires the instant the threat clears the minimum range). Refuses to
+## move without a driving crew, and never reverses onto a cell it cannot occupy
+## (water/cliff/narrow ledge) — a cornered ram just holds and keeps aiming.
+func _reverse_from(threat_pos: Vector3, delta: float) -> void:
+	if active_crew_count() < MIN_MOVE_CREW:
+		return
+	var away: Vector2 = Vector2(position.x - threat_pos.x, position.z - threat_pos.z)
+	if away.length_squared() < 0.000001:
+		return
+	away = away.normalized()
+	var step: float = _slope_speed(_slope_ahead(away)) * delta
+	var nx: float = position.x + away.x * step
+	var nz: float = position.z + away.y * step
+	if nav_grid != null and not nav_grid.is_cell_vehicle_walkable(
+			nav_grid.world_to_cell(Vector3(nx, 0.0, nz))):
+		return
+	position.x = nx
+	position.z = nz
+	_snap_to_ground()
+
+
 ## Seconds of reload after a burst for a boarded crew of `count`
 ## (1 -> 3 s, 4 (full) -> 1.4 s, linear; below 1 there is no burst at all).
 static func flame_cooldown_for_crew(count: int) -> float:
@@ -376,8 +415,8 @@ func _nearest_enemy_unit(max_range: float) -> Unit:
 		if u.is_airborne():
 			continue   # flames stay on the ground
 		var d: float = _flat_dist(position, u.position)
-		if d < MIN_RANGE or d > max_range:
-			continue   # behind the nozzle — cannot be burnt
+		if d < FLAME_MIN_RANGE or d > max_range:
+			continue   # inside the nozzle dead zone — cannot be burnt
 		if u.is_burning():
 			if d < best_burn_d:
 				best_burn_d = d

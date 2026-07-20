@@ -9,6 +9,72 @@ Verifikationsstand. Auch bei nachträglichen Erweiterungen außerhalb einer Phas
 
 ---
 
+## Bugfix Werkstatt-Reparatur + Feuerramme-Zielwahl/Rückzug + Chop-Loop (2026-07-20)
+
+Ein Bug und drei Wünsche aus dem Spieltest der Debug-Testkammer.
+
+**1. Werkstatt-Reparatur-Deadlock (Kern-Bug).** Eine leicht beschädigte
+(Stufe-1-)Werkstatt, die noch ihren Produktions-Eingangsstapel hält, war per
+Rechtsklick nicht reparierbar — der Brave tat nichts. Ursache: Der Eingangsstapel
+zählt in `Building.wood_incoming()`, darum ist `wants_more_repair_wood()` false
+(kein Holen); die Werkstatt bucht den Stapel via `_absorbs_repair_wood()` nur
+`not workers.is_empty()` und zeitverzögert (`ABSORB_INTERVAL 0.5 s`), aber
+`Brave._choose_repair_task()` lief sofort (retry=0), sah `repair_wood == 0` und
+rief `_stop_all()` → `job.leave()` → `workers` leer → Buchung stoppt →
+Endlos-Deadlock (Join→Stall→Leave je Tick).
+- **Fix** (`scripts/units/brave.gd`, `_choose_repair_task`): Wenn Reparaturholz
+  geschuldet ist, aber Holz in Reichweite liegt (`job.wood_incoming() > 0`),
+  statt `_stop_all()` nun `_end_subtask(TASK_RETRY)` — der Arbeiter **bleibt am
+  Job** (in `workers`), `_absorbs_repair_wood()` bleibt true, der Stapel wird
+  binnen ≤0,5 s in `repair_wood` gebucht, nächster Re-Choose hämmert. Nur ohne
+  jegliches erreichbares Holz weiter `mark_wood_stalled()` + `_stop_all()`.
+  Kein Endlos-Warten (`wood_incoming`/Absorb teilen `delivery_point()`+`ABSORB_RADIUS`).
+- **Hinweis „plötzlich leer":** Nachbesetzen ging → Werkstatt war da unbeschädigt
+  (Stufe 0), also kein Schaden-Auswurf. Das Entleeren kam vom Rausschicken aller
+  Arbeiter zum Holzholen (`_tick_active`), die im Testkammer-Kampfgebiet getötet
+  wurden. Bewusst **nicht** geändert (erwartetes Warzone-Verhalten).
+
+**2. Holzfäll-Sound als Dauerschleife** (`scripts/units/brave.gd`): Neuer
+`_update_chop_loop()`, aus `_set_working()` getrieben (das einzige Working-Toggle);
+startet/stoppt `AudioManager.start_loop/stop_loop(&"wood_chop_loop", self)`, gegated
+auf `task == Task.CHOP`. Neues Flag `_chop_loop_on`. Der **eigene Key**
+`wood_chop_loop` bevorzugt `wood_chop_loop.ogg` und fällt sonst auf Wiederholung
+von `wood_chop.ogg` zurück — getrennt vom Ernte-Treffer-Einzelsound `wood_chop`
+in `TreeManager.harvest_tree()` (unverändert), damit beide unterschiedlich klingen
+können.
+
+**3. Feuerramme + Katapult: beschießbares Ziel priorisieren.** Im
+„zu-nah"-Zweig wurde der Tausch auf ein triffbares Bandziel nur `if not
+_target_ordered` versucht — ein befohlenes zu-nahes (unbeschießbares) Ziel
+blockierte dauerhaft das Feuer. Jetzt wird **immer** getauscht (auch befohlen),
+ungedrosselt.
+- `scripts/units/siege_engine.gd` (`_bombard_unit`): Tausch immer; ohne
+  Alternative hält es wie bisher (Katapult weicht nicht zurück).
+- `scripts/units/fire_ram.gd` (`_burn_unit`).
+
+**4. Feuerramme: Rückzug bei blockierter Mindestreichweite** (`fire_ram.gd`).
+Steht ein Bedroher im Nahbereich und gibt es **kein** anderes Ziel, fährt die
+Ramme rückwärts (neuer `_reverse_from`: bewegt `position` entgegen der
+Bedrohung, ohne `facing` zu ändern → Rumpf bleibt ausgerichtet), respektiert
+`MIN_MOVE_CREW` und `is_cell_vehicle_walkable` (kein Reinfahren ins Wasser/an
+Klippen). Sobald die Distanz frei ist, feuert sie sofort weiter.
+- **Wichtige Erkenntnis / echter Fix nebenbei:** Die Flammen beginnen erst bei
+  `NOZZLE_OFFSET (1,2 m)`, die (Anzeige-)`MIN_RANGE` ist aber 1,0 m → ein Ziel
+  bei 1,0–1,2 m galt als „in Reichweite", wurde aber von den Flammen verfehlt
+  (Totzone). Die Ramme parkte sonst genau dort und feuerte ins Leere. Neuer
+  `const FLAME_MIN_RANGE = maxf(NOZZLE_OFFSET, MIN_RANGE)` ist jetzt die echte
+  Mindest-Feuerdistanz für `_burn_unit` **und** `_nearest_enemy_unit` (triffbare
+  Menge = flammbare Menge); der Rückzug fährt bis dort zurück und trifft dann
+  wirklich. `MIN_RANGE` bleibt für RangeRenderer/Balance.
+
+**Verifikation:** Ganze Suite headless grün (`run_tests.gd`: **2135 passed, 0
+failed**), Ladecheck (baut die Testkammer) fehlerfrei. Neue/angepasste Tests:
+`test_fire_ram.gd` (`test_damaged_workshop_repairs_with_entrance_stock`,
+`test_ram_swaps_too_close_ordered_target_for_band_enemy`,
+`test_ram_reverses_from_point_blank_then_fires`); `test_siege.gd`
+(`test_ordered_catapult_holds_too_close_target` → `_swaps_too_close_for_band_enemy`,
+neue Zielprioritäts-Erwartung). Manueller Spieltest steht aus.
+
 ## Fahrzeug-Feinschliff nach Spieltest 2 + Debug-Testkammer (2026-07-19)
 
 Sechs Punkte Nutzerfeedback:

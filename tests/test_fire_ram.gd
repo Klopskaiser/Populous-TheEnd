@@ -148,6 +148,36 @@ func test_caps_are_independent_per_vehicle_type() -> void:
 	_free_world(w)
 
 
+## Regression (user bug): a lightly damaged workshop that STILL holds its
+## production stock at the entrance could not be repaired — the repair worker
+## detached before the workshop banked that stock into the repair buffer, so it
+## deadlocked (right-click "did nothing"). The worker must now stay and repair.
+func test_damaged_workshop_repairs_with_entrance_stock() -> void:
+	var w: Dictionary = _make_world()
+	var ws: FireRamWorkshop = w.building_manager.place(
+		RAM_WORKSHOP_SCENE, w.tribe, Vector2i(60, 60), 0, true) as FireRamWorkshop
+	check(ws.is_usable(), "pre-built workshop is usable")
+	# The production stock sits at the entrance (>= the floored repair cost).
+	w.wood_pile_manager.deposit(ws.delivery_point(), FireRamWorkshop.RAM_WOOD)
+	# Stage-1 damage (30% HP): unusable, ~floor(0.30 * 11) = 3 wood to repair.
+	ws.apply_destruction_stages(1)
+	check(not ws.is_usable() and ws.destruction_stage() >= 1,
+		"stage-1 damage makes it unusable")
+	var hp_before: int = ws.health
+	var brave: Brave = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 0, ws.entrance_world() + Vector3(1.5, 0.0, 1.5)) as Brave
+	brave.order_repair(ws)
+	check(brave.job == ws, "the brave took the repair job")
+	var ticks: int = 0
+	while ws.health < ws.max_health and ticks < MAX_TICKS:
+		_tick_world(w)
+		ticks += 1
+	check(ws.health > hp_before, "the damaged workshop is actually repaired (no deadlock)")
+	check(ws.health == ws.max_health, "repair completes back to full HP")
+	check(ws.is_usable(), "the repaired workshop is usable again")
+	_free_world(w)
+
+
 # --- Scorch (burn without contact damage) -------------------------------------------
 
 func test_scorch_burns_without_contact_damage() -> void:
@@ -376,6 +406,63 @@ func test_ram_prefers_in_range_target_over_chase() -> void:
 	check(ram.attack_target == near,
 		"the ram swaps the out-of-range order for the enemy already in range")
 	check(not ram._target_ordered, "the swapped target is a normal auto target")
+	_free_world(w)
+
+
+## Target priority (user request): an ordered target that has crept INSIDE the
+## minimum range (unhittable) is swapped for any shootable enemy in the flame
+## band — the ram must not sit and hold fire while a reachable foe stands there.
+func test_ram_swaps_too_close_ordered_target_for_band_enemy() -> void:
+	var w: Dictionary = _make_world()
+	var ram: FireRam = _armed_ram(w)
+	# Ordered target hugging the nozzle (inside 1 m), a second enemy in the band.
+	var close_enemy: Unit = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, ram.position + Vector3(0, 0, 0.6))
+	close_enemy.max_health = 100000
+	close_enemy.health = 100000
+	var band_enemy: Unit = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, ram.position + Vector3(0, 0, 3.0))
+	var band_pos: Vector3 = band_enemy.position
+	ram.order_attack(close_enemy)
+	check(ram._target_ordered, "starts on the ordered close target")
+	var swapped: bool = false
+	for i in range(60):
+		close_enemy.position = ram.position + Vector3(0, 0, 0.6)   # pin inside min
+		band_enemy.position = band_pos
+		_tick_world(w)
+		if ram.attack_target == band_enemy:
+			swapped = true
+		if band_enemy.is_burning():
+			break
+	check(swapped, "the ram swaps the too-close ordered target for the band enemy")
+	check(not ram._target_ordered, "the swapped-in band enemy is a normal auto target")
+	check(band_enemy.is_burning(), "the shootable band enemy is actually burnt")
+	_free_world(w)
+
+
+## Retreat (user request): with a threat inside the minimum range and NO other
+## target to shoot, the ram drives backwards to reopen the firing distance and
+## opens fire again the instant the minimum range is clear.
+func test_ram_reverses_from_point_blank_then_fires() -> void:
+	var w: Dictionary = _make_world()
+	var ram: FireRam = _armed_ram(w)
+	# A single enemy hugging the nozzle (inside 1 m), pinned in the WORLD so the
+	# ram genuinely opens the gap by reversing (not by the enemy moving).
+	var foe_pos: Vector3 = ram.position + Vector3(0, 0, 0.7)
+	var foe: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, foe_pos)
+	foe.max_health = 100000
+	foe.health = 100000
+	var start_z: float = ram.position.z
+	ram.order_attack(foe)
+	for i in range(80):
+		foe.position = foe_pos
+		_tick_world(w)
+		if foe.is_burning():
+			break
+	check(ram.position.z < start_z - 0.1,
+		"the ram reversed away from the point-blank threat")
+	check(foe.is_burning(),
+		"once the minimum range cleared, the ram opened fire again")
 	_free_world(w)
 
 

@@ -95,6 +95,9 @@ var _retry_timer: float = 0.0
 ## _on_seek_failed); reset by any successfully completed sub-task.
 var _seek_fail_streak: int = 0
 var _working: bool = false
+## Whether the continuous wood-chop sound loop is currently running for us
+## (paired with AudioManager.start_loop/stop_loop, see _update_chop_loop).
+var _chop_loop_on: bool = false
 var _seek_goal: Vector3 = Vector3.INF
 ## Where the loose-chopping brave was working, to return after a delivery.
 var _loose_return_pos: Vector3 = Vector3.INF
@@ -526,6 +529,16 @@ func _choose_repair_task() -> void:
 	if job.repair_wood > 0 or job.repair_wood_missing() == 0:
 		task = Task.REPAIR
 		_reset_seek()
+		return
+	# Repair wood is owed but none is banked yet. If usable wood already lies in
+	# reach (a workshop banks its protected entrance stock into the repair buffer
+	# only WHILE a worker is attached, and that absorb is throttled), stay on the
+	# job and re-check — quitting here would detach the worker and stop the
+	# absorption, deadlocking a lightly damaged workshop that still holds stock.
+	# wood_incoming() and the absorb source share delivery_point()/ABSORB_RADIUS,
+	# so counted wood is always bankable (no endless wait).
+	if job.wood_incoming() > 0:
+		_end_subtask(TASK_RETRY)
 		return
 	job.mark_wood_stalled()
 	_stop_all()
@@ -1211,6 +1224,29 @@ func _set_working(working: bool) -> void:
 		return
 	_working = working
 	_update_animation()
+	_update_chop_loop()
+
+
+## Continuous wood-chop sound: a positional loop that follows the brave while it
+## actively hacks a tree (any chop sub-task). Uses its OWN key `wood_chop_loop`
+## (falls back to repeating wood_chop.ogg until a dedicated loop asset exists),
+## kept separate from the per-harvest one-shot `wood_chop` played on each felled
+## piece — so the ongoing work and the actual hit can sound different.
+func _update_chop_loop() -> void:
+	var chopping: bool = _working and task == Task.CHOP
+	if chopping == _chop_loop_on:
+		return
+	_chop_loop_on = chopping
+	if not _audio_checked:
+		_audio_checked = true
+		if is_inside_tree():
+			_audio_node = get_node_or_null("/root/AudioManager")
+	if _audio_node == null:
+		return
+	if chopping:
+		_audio_node.start_loop(&"wood_chop_loop", self)
+	else:
+		_audio_node.stop_loop(&"wood_chop_loop", self)
 
 
 func _face_toward(target_pos: Vector3) -> void:

@@ -176,14 +176,17 @@ func _bombard_unit(target: Unit, delta: float) -> void:
 		_face_point(target.position)
 		return
 	if dist < MIN_RANGE:
-		# An AUTO target that crept too close is swapped for another in-band
-		# enemy; an ORDERED target is held (the player picked it — obey the
-		# order and just wait for it to clear the minimum instead of re-aiming).
-		if not _target_ordered and _due_to_scan(delta):
-			var alt: Unit = _nearest_enemy_unit(FIRE_RANGE)
-			if alt != null and alt != target:
-				_begin_attack(alt)
-				return
+		# A target that crept too close cannot be hit. Prefer ANY shootable
+		# enemy in the firing band over holding fire — even over an ordered
+		# target (it is unhittable from here anyway). _nearest_enemy_unit only
+		# returns units in [MIN_RANGE, FIRE_RANGE], i.e. the shootable set.
+		# Unthrottled: this branch only runs in the rare too-close state. The
+		# catapult never reverses (unlike the fire ram); with no alternative it
+		# holds and waits for the target to clear the minimum.
+		var alt: Unit = _nearest_enemy_unit(FIRE_RANGE)
+		if alt != null and alt != target:
+			_begin_attack(alt)
+			return
 		if _has_path():
 			_clear_path()
 		_in_melee = true

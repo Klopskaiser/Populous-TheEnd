@@ -206,18 +206,18 @@ func test_catapult_may_target_enemy_catapult() -> void:
 	_free_world(w)
 
 
-## An ORDERED catapult obeys the command: a target that sits within MIN_RANGE
-## (too close to fire) is HELD, not swapped for another in-band enemy. Under the
-## old code the min-range scan would re-aim at the band enemy on the next scan —
-## the user bug report ("catapult has a target but shoots nearby units instead").
-func test_ordered_catapult_holds_too_close_target() -> void:
+## Target priority (user request): a catapult whose target has crept inside
+## MIN_RANGE (too close to hit) swaps to ANY shootable enemy in the fire band —
+## even an ORDERED target, which is unhittable from there anyway. Previously an
+## ordered too-close target was held, blocking fire on a reachable enemy.
+func test_ordered_catapult_swaps_too_close_for_band_enemy() -> void:
 	var w: Dictionary = _make_world()
 	var engine: SiegeEngine = w.unit_manager.spawn_unit(
 		SIEGE_SCENE, 0, Vector3(40, 0, 40)) as SiegeEngine
 	_board_crew(w, engine, 0)
 	_board_crew(w, engine, 0)   # 2 crew: enough to fire
 	# The ordered target sits inside MIN_RANGE (3 m); a second enemy stands in the
-	# fire band (8 m) — the OLD code would swap onto it on the next scan tick.
+	# fire band (8 m) — the too-close order must yield to the shootable one.
 	var close_enemy: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, Vector3(42, 0, 40))  # 2 m
 	close_enemy.max_health = 100000
 	close_enemy.health = 100000
@@ -227,10 +227,19 @@ func test_ordered_catapult_holds_too_close_target() -> void:
 	engine.order_attack(close_enemy)
 	check(engine.attack_target == close_enemy, "starts on the ordered close target")
 	check(engine._target_ordered, "the target is flagged as ordered")
+	var swapped: bool = false
 	for i in range(40):
+		# Pin both: the crew brawl would otherwise shove the close enemy out of
+		# MIN_RANGE and muddy the swap contract.
+		close_enemy.position = Vector3(42, 0, 40)
+		band_enemy.position = Vector3(48, 0, 40)
 		_tick_world(w)
-	check(engine.attack_target == close_enemy,
-		"ordered catapult holds its too-close target instead of swapping to the band enemy")
+		if engine.attack_target == band_enemy:
+			swapped = true
+			break
+	check(swapped,
+		"ordered catapult swaps its too-close target for the shootable band enemy")
+	check(not engine._target_ordered, "the swapped-in band enemy is a normal auto target")
 	_free_world(w)
 
 
