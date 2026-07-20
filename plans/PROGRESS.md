@@ -9,6 +9,21 @@ Verifikationsstand. Auch bei nachträglichen Erweiterungen außerhalb einer Phas
 
 ---
 
+## Feinschliff: Feuerramme-Stand-off auf 4 m (2026-07-20)
+
+**Wunsch (Spieltest):** Die Ramme fuhr sehr nah an Gegner heran, obwohl locker in
+Reichweite. Ursache: `_burn_point` schloss ein Einheitenziel bis
+`FIRE_RANGE * HOLD_RANGE_FRAC` = 5 × **0,5** = **2,5 m** auf, bevor sie stand.
+- **Fix** (`fire_ram.gd`): `HOLD_RANGE_FRAC` 0,5 → **0,8** → Stand-off **4 m** (5 × 0,8).
+  Die Ramme feuert jetzt aus 4 m statt bis auf 2,5 m heranzufahren; Ziele im Band 4–5 m
+  werden weiterhin fahrend verfolgt (kein Stop-and-go an der 5-m-Kante).
+- Tests `test_fire_ram.gd`: neuer `test_ram_holds_at_standoff_range` (hält ~4 m);
+  `test_ram_fires_while_rolling_after_a_runner` — Läufer-Pin 4,0 → 4,5 m (ins neue Roll-Band).
+- Verifikation: ganze Suite grün (**2209 passed, 0 failed**). *Hinweis:* einige Tests sind
+  nicht-deterministisch (Check-Anzahl schwankt laufweise, z. B. `conversion_targeting`
+  7↔22, `siege` 223↔235); dabei trat einmal ein sporadischer `test_combat`-Flake auf,
+  der beim Re-Run verschwand — unabhängig von dieser Änderung (kein Fahrzeugbezug).
+
 ## Bugfix: Luftschiff-Auto-Anflug stottert kurz vor Reichweite (2026-07-20)
 
 **Symptom (Spieltest):** Luftschiff mit Feuerkriegern im Idle/Angriffsmove; Gegner steht

@@ -399,14 +399,14 @@ func test_ram_fires_while_rolling_after_a_runner() -> void:
 	var w: Dictionary = _make_world()
 	var ram: FireRam = _armed_ram(w)
 	var runner: Unit = w.unit_manager.spawn_unit(
-		BRAVE_SCENE, 1, ram.position + Vector3(0, 0, 4.0))
+		BRAVE_SCENE, 1, ram.position + Vector3(0, 0, 4.5))
 	ram.order_attack(runner)
 	var start_z: float = ram.position.z
 	var burst_started: bool = false
 	for i in range(60):
-		# Pin the runner 4 m ahead (inside the band, beyond the hold point) —
+		# Pin the runner 4.5 m ahead (inside the band, beyond the 4 m hold point) —
 		# a stop-and-go ram would stand still instead of closing in.
-		runner.position = ram.position + Vector3(0, 0, 4.0)
+		runner.position = ram.position + Vector3(0, 0, 4.5)
 		_tick_world(w)
 		burst_started = burst_started or ram._flame_time > 0.0
 	check(burst_started, "the burst starts while the chase is still rolling")
@@ -494,6 +494,29 @@ func test_ram_hands_off_a_burning_target_for_a_fresh_one() -> void:
 	check(ram.attack_target == fresh,
 		"the ram hands the burning target off to the fresh enemy")
 	check(not fresh.is_burning(), "the handed-off target is still fresh")
+	_free_world(w)
+
+
+## Stand-off (user request): the ram fires from comfortably within range
+## (~FIRE_RANGE * HOLD_RANGE_FRAC = 4 m) instead of nosing right up to the enemy.
+func test_ram_holds_at_standoff_range() -> void:
+	var w: Dictionary = _make_world()
+	var ram: FireRam = _armed_ram(w)   # cell (60,60), heading +z
+	# A stationary enemy just outside fire range, pinned in the world.
+	var foe_pos: Vector3 = ram.position + Vector3(0, 0, 6.0)
+	var foe: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, foe_pos)
+	foe.max_health = 100000
+	foe.health = 100000
+	ram.order_attack(foe)
+	for _i in range(200):
+		foe.position = foe_pos
+		_tick_world(w)
+	var dist: float = ram._flat_dist(ram.position, foe.position)
+	var standoff: float = FireRam.FIRE_RANGE * FireRam.HOLD_RANGE_FRAC
+	check(dist <= standoff + 0.4, "the ram closed to about the stand-off range (%.1f m)" % dist)
+	check(dist >= standoff - 0.7,
+		"the ram did NOT nose right up to the enemy (%.1f m, stand-off %.1f)" % [dist, standoff])
+	check(foe.is_burning(), "the ram burned the foe from stand-off range")
 	_free_world(w)
 
 

@@ -38,7 +38,9 @@ const AIM_TOLERANCE: float = Balance.FIRERAM_AIM_TOLERANCE
 ## Fraction of FIRE_RANGE a unit target is closed to while burning: runners
 ## near the range edge are pursued (firing on the move) instead of popping in
 ## and out of the band; only this deep inside does the ram actually stop.
-const HOLD_RANGE_FRAC: float = 0.5
+## 0.8 * 5 m = a 4 m stand-off — the ram fires from comfortably within range
+## instead of nosing right up to the enemy (user request).
+const HOLD_RANGE_FRAC: float = 0.8
 ## Flame area re-check cadence during a burst (LavaSurge rhythm).
 const FLAME_CHECK_INTERVAL: float = 0.2
 ## Lava-contact credit per flame second on buildings — see Balance doc (the
