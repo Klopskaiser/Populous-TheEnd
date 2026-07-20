@@ -257,13 +257,17 @@ sobald ein Platz frei wird; Fallback = stumm):
 | `unit_burning_loop.ogg` | … die Einheit/das Katapult brennt |
 | `unit_injured_loop.ogg` | … die Einheit unter 25 % Leben ist |
 
-**Katapult** — `audio/sfx/` (Fallback siehe Tabelle):
+**Fahrzeuge** (Katapult, Feuerramme, Luftschiff) — `audio/sfx/` (Fallback siehe Tabelle):
 
 | Datei | Wird gespielt bei |
 |---|---|
-| `siege_fire.ogg` | Katapult schießt (ohne Datei ertönt das bisherige synthetische Wurfgeräusch) |
+| `siege_fire.ogg` | Katapult schießt (Fallback = synthetisches Wurfgeräusch) |
+| `fireram_burst.ogg` | Feuerramme feuert einen Flammenstoß (Fallback = synthetisches Wurfgeräusch) |
 | `siege_impact.ogg` | Katapult-Kugel schlägt ein (Fallback = stumm) |
-| `siege_burning.ogg` | Katapult fängt Feuer (Fallback = stumm) |
+| `siege_burning.ogg` | Katapult **oder** Feuerramme fängt durch eine externe Quelle Feuer (Zauber/Lava) — nicht der Angriff der Feuerramme selbst, siehe `fireram_burst.ogg` (Fallback = stumm) |
+| `siege_death_burn.ogg` | Katapult/Feuerramme brennt aus und versinkt (Fallback = stumm) |
+| `siege_death_burst.ogg` | Katapult/Feuerramme wird zerfetzt (Tornado, Terrainriss) (Fallback = stumm) |
+| `airship_death.ogg` | Luftschiff explodiert (Fallback = stumm) |
 
 **Gebäude & Ereignisse** — `audio/sfx/` (Fallback = stumm):
 

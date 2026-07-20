@@ -330,7 +330,18 @@ func _burn_point(target_pos: Vector3, delta: float, approach: bool,
 	_flame_time = FLAME_DURATION
 	_flame_check = 0.0   # first area check right away
 	_show_flame_cone(true)
-	_play_sfx(&"siege_burning")
+	# Dedicated attack whoosh — was wrongly reusing "siege_burning" (reserved
+	# for the vehicle CATCHING fire via ignite(), see CrewedVehicle) for every
+	# burst, so any siege_burning.ogg asset would fire on every attack too.
+	# Mirrors the catapult's siege_fire pattern: a custom asset takes over,
+	# otherwise the shared synthesised "throw" whoosh (Firewarrior's launch
+	# sound) plays instead of staying silent.
+	if is_inside_tree():
+		var audio: Node = get_node_or_null("/root/AudioManager")
+		if audio != null and audio.has_sfx(&"fireram_burst"):
+			audio.play_sfx(&"fireram_burst", position)
+			return
+	_emit_combat_hit(&"throw")
 
 
 ## Seconds of reload after a burst for a boarded crew of `count`
