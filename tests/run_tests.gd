@@ -10,6 +10,16 @@ extends SceneTree
 
 const TESTS_DIR: String = "res://tests"
 
+## Fixed RNG seed. The global generator is reset to this value before EACH test
+## file runs, so every run produces the identical randf()/randi()/randf_range()
+## sequence. Without it, tests that let a simulation play out (RNG-driven combat,
+## conversion, shove rolls) took a different path each run — the check count per
+## file drifted and combat/conversion tests flaked (a unit that died in an
+## unseeded brawl made a later line abort the method, dropping its checks).
+## Per-file (not once globally) so each file is reproducible on its own,
+## independent of what ran before it.
+const TEST_SEED: int = 0x50D07  # arbitrary fixed value ("Godot"-ish)
+
 func _initialize() -> void:
 	var total_passed: int = 0
 	var total_failed: int = 0
@@ -27,6 +37,7 @@ func _initialize() -> void:
 		var instance: Object = script.new()
 		var file_passed: int = 0
 		var file_failed: int = 0
+		seed(TEST_SEED)   # deterministic RNG per file (see TEST_SEED)
 		for method in instance.get_method_list():
 			var name: String = method.name
 			if not name.begins_with("test_"):

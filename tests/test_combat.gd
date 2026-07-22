@@ -726,7 +726,11 @@ func test_fireball_applies_knockback() -> void:
 func test_conversion_converts_enemy() -> void:
 	var w: Dictionary = _make_world()
 	var preacher: Unit = _spawn(w, PREACHER_SCENE, 0, Vector2(30, 30))
-	var enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(33, 30))  # in convert range
+	# 4 m: inside the 5 m convert range but OUTSIDE the brave's 3 m idle-guard,
+	# so the victim never aggros the preacher. At 3 m the brave sat right on its
+	# own guard boundary, retaliated, and the ensuing brawl raced the conversion
+	# (RNG fight-inertia / durations decided whether it converted or died first).
+	var enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(34, 30))  # in convert range
 	var pair: Array = [preacher, enemy]
 
 	_run(w, pair, func() -> bool: return enemy.state == Unit.State.SIT)
@@ -768,12 +772,15 @@ func test_conversion_immune_targets() -> void:
 func test_priest_duel_breaks_trance() -> void:
 	var w: Dictionary = _make_world()
 	var preacher: Unit = _spawn(w, PREACHER_SCENE, 0, Vector2(30, 30))
-	var enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(32, 30))
+	# 4 m: convertible, but clear of the brave's 3 m idle-guard (see
+	# test_conversion_converts_enemy) so it sits without a boundary brawl.
+	var enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(34, 30))
 	var units: Array = [preacher, enemy]
 	_run(w, units, func() -> bool: return enemy.state == Unit.State.SIT)
 	check(enemy.state == Unit.State.SIT, "the brave sits before the duel")
 
-	# An enemy preacher walks into range: duel instead of channeling.
+	# An enemy preacher walks into range (still within the preacher's 5 m convert
+	# range): duel instead of channeling.
 	var rival: Unit = _spawn(w, PREACHER_SCENE, 1, Vector2(33, 30))
 	units.append(rival)
 	_run(w, units, func() -> bool:
@@ -826,7 +833,9 @@ func test_attackers_break_off_vs_sitting_target() -> void:
 func test_sitting_unit_refuses_orders() -> void:
 	var w: Dictionary = _make_world()
 	var preacher: Unit = _spawn(w, PREACHER_SCENE, 0, Vector2(30, 30))
-	var enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(33, 30))
+	# 4 m: convertible, clear of the brave's 3 m idle-guard (see
+	# test_conversion_converts_enemy) so the victim sits without a brawl race.
+	var enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(34, 30))
 	var other: Unit = _spawn(w, BRAVE_SCENE, 0, Vector2(40, 30))
 	var pair: Array = [preacher, enemy]
 	_run(w, pair, func() -> bool: return enemy.state == Unit.State.SIT)
@@ -854,7 +863,9 @@ func test_sitting_unit_refuses_orders() -> void:
 func test_fireball_resets_conversion() -> void:
 	var w: Dictionary = _make_world()
 	var preacher: Unit = _spawn(w, PREACHER_SCENE, 0, Vector2(30, 30))
-	var enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(33, 30))
+	# 4 m: convertible, clear of the brave's 3 m idle-guard (see
+	# test_conversion_converts_enemy) so the victim sits without a brawl race.
+	var enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(34, 30))
 	enemy.max_health = 1000
 	enemy.health = 1000
 	var pair: Array = [preacher, enemy]
