@@ -65,6 +65,9 @@ var _no_crew_time: float = 0.0
 var _vehicle_burn: float = 0.0
 ## The destroyed wreck sinks into the ground (burn/water death).
 var _sinking: bool = false
+## Vehicle-grid cells this vehicle currently blocks while parked unmanned (so
+## other vehicles path around it). Empty while manned/moving/destroyed.
+var _nav_blocked_cells: Array[Vector2i] = []
 ## Death sound key, set at the destruction site: "siege_death_burn" when the
 ## wreck burns down/sinks, "siege_death_burst" when it bursts apart (tornado /
 ## terrain rip). Catapult and fire ram share these (both are CrewedVehicles).
@@ -223,6 +226,7 @@ func burst_into_wood() -> void:
 		if is_instance_valid(m):
 			m.leave_crew()
 	crew.clear()
+	_unblock_nav()
 	attack_building = null
 	_vehicle_burn = 0.0
 	_death_sfx = &"siege_death_burst"   # torn apart by the tornado
@@ -244,6 +248,7 @@ func drown() -> void:
 		if is_instance_valid(m):
 			m.leave_crew()
 	crew.clear()
+	_unblock_nav()
 	_sinking = true
 	_death_sfx = &"siege_death_burn"   # sinks like a burnt-out wreck
 	super.drown()
@@ -267,6 +272,7 @@ func _destroy_vehicle(burst: bool) -> void:
 		if is_instance_valid(m):
 			m.leave_crew()
 	crew.clear()
+	_unblock_nav()
 	attack_building = null
 	_vehicle_burn = 0.0
 	_death_sfx = &"siege_death_burst" if burst else &"siege_death_burn"
@@ -288,6 +294,47 @@ func _spawn_burst_debris() -> void:
 	var debris: BuildingDebris = BuildingDebris.new()
 	debris.setup(position, 1.5, terrain_data)
 	path_service.register_projectile(debris)
+
+
+## Grid cells the chassis covers (corners + centre along the facing), for the
+## parked-vehicle nav obstacle.
+func _footprint_cells() -> Array[Vector2i]:
+	var cells: Array[Vector2i] = []
+	if nav_grid == null:
+		return cells
+	var forward: Vector3 = facing.normalized() if facing.length_squared() > 0.0 \
+		else Vector3(0, 0, 1)
+	var right: Vector3 = Vector3(-forward.z, 0.0, forward.x)
+	for sf in [-chassis_half_length, 0.0, chassis_half_length]:
+		for sr in [-chassis_half_width, 0.0, chassis_half_width]:
+			var p: Vector3 = position + forward * sf + right * sr
+			var c: Vector2i = nav_grid.world_to_cell(p)
+			if not cells.has(c):
+				cells.append(c)
+	return cells
+
+
+## Parks/unparks this vehicle as a nav obstacle: a stationary UNMANNED vehicle
+## blocks its footprint on the vehicle grid so other vehicles route around it
+## (user report: vehicles shove past parked hulks forever). Cleared the moment
+## it is crewed, moves or is destroyed. Cheap: only toggles on a state change.
+func _refresh_nav_block() -> void:
+	if nav_grid == null or crew_rides_on_deck() or flies:
+		return   # airships fly over ground vehicles — they never block the grid
+	var want: bool = state != State.DEAD and not _sinking and boarded_count() == 0
+	if want == (not _nav_blocked_cells.is_empty()):
+		return   # already in the desired state (unmanned vehicles do not move)
+	if want:
+		_nav_blocked_cells = _footprint_cells()
+		nav_grid.set_vehicle_obstacle(_nav_blocked_cells, true)
+	else:
+		_unblock_nav()
+
+
+func _unblock_nav() -> void:
+	if nav_grid != null and not _nav_blocked_cells.is_empty():
+		nav_grid.set_vehicle_obstacle(_nav_blocked_cells, false)
+	_nav_blocked_cells = []
 
 
 ## Height span under the chassis (4 corner samples along the facing).
@@ -371,6 +418,7 @@ func on_crew_boarded(unit) -> void:
 			return
 		_switch_owner(unit.tribe)
 	unit.siege_boarded = true
+	_unblock_nav()   # now manned — stop being a nav obstacle for other vehicles
 
 
 ## Ownership follows the crew (spec: vehicles can change hands when the crew
@@ -380,6 +428,13 @@ func _switch_owner(new_tribe: Tribe) -> void:
 		return
 	attack_building = null
 	convert_to_tribe(new_tribe)
+	# A taken-over vehicle starts fresh: never resume the previous owner's move
+	# route or target (user report: a hijacked/recrewed vehicle drove off with no
+	# order). convert_to_tribe ends the attack + goes IDLE, but the pending route
+	# survives it — clear it here.
+	waypoint_queue.clear()
+	_clear_path()
+	_set_state(State.IDLE)
 	_refresh_flag_color()
 
 
@@ -566,12 +621,27 @@ func tick(delta: float) -> void:
 					_destroy_vehicle(true)
 			else:
 				_no_crew_time = 0.0
-	# An unmanned (or under-crewed / incapacitated-crew) vehicle rolls to a
-	# stop mid-route.
-	if state == State.MOVE and active_crew_count() < min_move_crew:
+	# Truly unmanned (nobody aboard — not merely incapacitated): drop EVERY
+	# pending order so a later takeover / auto-recrew starts idle and never drives
+	# off on the previous owner's route or target (user report). Gated on
+	# boarded_count (not active), so a boarded-but-pacified/panicking crew keeps
+	# its target to resume on recovery.
+	if state != State.DEAD and not _sinking and boarded_count() == 0:
+		if state == State.MOVE or state == State.ATTACK or _has_path() \
+				or not waypoint_queue.is_empty() or attack_building != null:
+			waypoint_queue.clear()
+			_clear_path()
+			attack_building = null
+			_end_attack()
+			if state != State.IDLE:
+				_set_state(State.IDLE)
+	# An under-crewed / incapacitated-crew (but still boarded) vehicle rolls to a
+	# stop mid-route; it keeps its target and resumes once the crew recovers.
+	elif state == State.MOVE and active_crew_count() < min_move_crew:
 		waypoint_queue.clear()
 		_clear_path()
 		_set_state(State.IDLE)
+	_refresh_nav_block()   # park/unpark as a nav obstacle for other vehicles
 	_tick_auto_recrew(delta)
 	super.tick(delta)
 	_tick_visual(delta)

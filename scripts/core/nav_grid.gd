@@ -26,6 +26,11 @@ var _building_cells: Dictionary[Vector2i, bool] = {}  # cells blocked by buildin
 ## and narrow ledges stay closed to vehicles. Derived from the unit grid on
 ## every update.
 var _vehicle_astar: AStarGrid2D = AStarGrid2D.new()
+## Cells occupied by PARKED (unmanned, stationary) vehicles — refcounted so
+## overlapping footprints stack. Only the vehicle grid honours these, so OTHER
+## vehicles path around a parked hulk instead of shoving through it (user
+## report); pedestrians and the pedestrian-only PathWorker are unaffected.
+var _vehicle_obstacles: Dictionary[Vector2i, int] = {}
 
 
 func _init(p_terrain: TerrainData) -> void:
@@ -260,7 +265,8 @@ func _refresh_vehicle_region(rect: Rect2i) -> void:
 	for z in range(r.position.y, r.position.y + r.size.y):
 		for x in range(r.position.x, r.position.x + r.size.x):
 			var cell: Vector2i = Vector2i(x, z)
-			_vehicle_astar.set_point_solid(cell, not _vehicle_passable(cell))
+			_vehicle_astar.set_point_solid(cell,
+				not _vehicle_passable(cell) or _vehicle_obstacles.has(cell))
 
 
 func _vehicle_passable(cell: Vector2i) -> bool:
@@ -326,6 +332,27 @@ func _nearest_vehicle_cell(cell: Vector2i) -> Vector2i:
 		if best.x >= 0:
 			return best
 	return Vector2i(-1, -1)
+
+
+## Blocks/unblocks a parked vehicle's footprint cells on the VEHICLE grid only
+## (refcounted). A stationary unmanned vehicle registers its cells so other
+## vehicles route around it; it clears them when crewed/moving/destroyed. The
+## unit grid and PathWorker are untouched — pedestrians ignore parked vehicles.
+func set_vehicle_obstacle(cells: Array[Vector2i], solid: bool) -> void:
+	for cell in cells:
+		if not terrain.in_bounds(cell):
+			continue
+		if solid:
+			_vehicle_obstacles[cell] = int(_vehicle_obstacles.get(cell, 0)) + 1
+			_vehicle_astar.set_point_solid(cell, true)
+		else:
+			var n: int = int(_vehicle_obstacles.get(cell, 0)) - 1
+			if n > 0:
+				_vehicle_obstacles[cell] = n
+				continue
+			_vehicle_obstacles.erase(cell)
+			# Restore the cell's natural vehicle passability (terrain/erosion).
+			_vehicle_astar.set_point_solid(cell, not _vehicle_passable(cell))
 
 
 ## Blocks/unblocks cells for a building footprint (persists across

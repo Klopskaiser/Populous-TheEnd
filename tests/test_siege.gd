@@ -1495,3 +1495,41 @@ func test_auto_recrew_skips_owner_manned_vehicle() -> void:
 	check(warrior.siege_engine == null,
 		"a foreign unit does not snipe a vehicle the owner is manning")
 	_free_world(w)
+
+
+## Unmanned vehicles drop EVERY order (user report): a hijacked / re-crewed
+## vehicle must never drive off on the previous owner's route.
+func test_unmanned_vehicle_clears_orders() -> void:
+	var w: Dictionary = _make_world()
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(60, 60))) as SiegeEngine
+	var crew: Brave = _board_crew(w, engine, 0)
+	engine.order_move(w.nav.cell_to_world(Vector2i(80, 60)))
+	check(engine.state == Unit.State.MOVE, "the crewed catapult starts its move")
+	# Crew dies (or is converted away): the vehicle becomes unmanned.
+	crew.take_damage(9999)
+	_tick_world(w)
+	check(engine.boarded_count() == 0, "the catapult is now unmanned")
+	check(engine.state == Unit.State.IDLE, "an unmanned vehicle drops out of MOVE")
+	check(engine.waypoint_queue.is_empty(),
+		"an unmanned vehicle clears its route (no driving off unordered)")
+	_free_world(w)
+
+
+## A parked (unmanned, stationary) vehicle blocks its footprint on the VEHICLE
+## grid so other vehicles path around it instead of shoving past (user report);
+## crewing it lifts the block again.
+func test_parked_vehicle_blocks_vehicle_grid() -> void:
+	var w: Dictionary = _make_world()
+	var cell: Vector2i = Vector2i(60, 60)
+	check(w.nav.is_cell_vehicle_walkable(cell),
+		"the cell is vehicle-passable on flat ground")
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(cell)) as SiegeEngine
+	_tick_world(w)   # the unmanned catapult parks itself as a nav obstacle
+	check(not w.nav.is_cell_vehicle_walkable(cell),
+		"a parked unmanned vehicle blocks its cell so others route around it")
+	_board_crew(w, engine, 0)
+	check(w.nav.is_cell_vehicle_walkable(cell),
+		"a crewed vehicle no longer blocks the vehicle grid")
+	_free_world(w)
