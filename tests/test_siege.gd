@@ -1571,3 +1571,22 @@ func test_route_keeps_separation_distance_to_parked_vehicle() -> void:
 			break
 	check(arrived, "the catapult reaches its destination without wrestling the hulk")
 	_free_world(w)
+
+
+## Vehicles never join the idle 6-packs: two parked rams next to idle braves
+## used to dock onto a formation slot after the regroup delay and drive off
+## on their own (user report: idle rams creeping toward each other).
+func test_vehicles_never_join_idle_groups() -> void:
+	var w: Dictionary = _make_world()
+	var ram: FireRam = w.unit_manager.spawn_unit(
+		FIRE_RAM_SCENE, 0, w.nav.cell_to_world(Vector2i(60, 60))) as FireRam
+	for i in range(3):
+		w.unit_manager.spawn_unit(BRAVE_SCENE, 0,
+			w.nav.cell_to_world(Vector2i(61 + i, 62)))
+	var start: Vector3 = ram.position
+	for t in range(int(UnitManager.IDLE_REGROUP_DELAY * 30.0) + 300):
+		_tick_world(w)
+	check(ram.idle_group == null, "the parked ram never joins an idle 6-pack")
+	check(Vector2(ram.position.x - start.x, ram.position.z - start.z).length() < 0.5,
+		"the parked ram stays put (no formation-slot drive-off)")
+	_free_world(w)

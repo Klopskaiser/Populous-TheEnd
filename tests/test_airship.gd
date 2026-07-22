@@ -945,6 +945,10 @@ func test_lethal_hit_while_riding_throws_off_and_kills_on_ground() -> void:
 	check(fw.state == Unit.State.THROWN,
 		"a lethal hit aboard converts into a fall (thrown off the deck)")
 	check(fw.state != Unit.State.DEAD, "it is not left dead standing at altitude")
+	# The landing roll scales with the drop like a cliff fall (user spec: a
+	# visible crash-tumble across the ground, not the 0.4 s mini roll).
+	check(fw._throw_roll_duration >= 0.95,
+		"the landing roll is drop-scaled (%.2f s)" % fw._throw_roll_duration)
 	var ticks: int = 0
 	while fw.state != Unit.State.DEAD and ticks < MAX_TICKS:
 		_tick_world(w)

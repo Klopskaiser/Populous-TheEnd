@@ -235,6 +235,10 @@ var idle_seconds: float = 0.0
 ## freed-safety). Membership is STICKY — members never hop between groups;
 ## the manager's prune drops them when they leave/are ordered away.
 var idle_group: RefCounted = null
+## False for vehicles (set in CrewedVehicle._init): they never join the idle
+## 6-packs — a parked ram must not drive off to a formation slot (user report:
+## idle rams creeping toward each other). A FIELD like idle_aggro (hot path).
+var joins_idle_groups: bool = true
 ## Auto-attack radius while idling for NON-combatants (0 = fully passive).
 ## A FIELD, not a virtual getter — this sits in the per-unit per-tick hot
 ## path, and one extra virtual call costs ~5 ms/tick with 4000 units. The
@@ -1070,12 +1074,20 @@ func take_damage(amount: int, attacker = null) -> void:
 			return   # deferred: _end_roll / the landing roll finishes it
 		# Deck passengers (airship): a lethal hit while riding at altitude is
 		# converted into a fall — they leave the deck, tumble off and die at the
-		# END of the roll (user spec), never standing dead at 12 m.
+		# END of the roll (user spec), never standing dead at 12 m. The landing
+		# roll scales with the drop like a cliff fall (min ~1 s): with the ship
+		# hovering low the plain mini roll read as "spawns dead on the ground"
+		# instead of a visible crash-tumble (user report).
 		if rides_airborne():
+			var drop: float = position.y
+			if terrain_data != null:
+				drop -= terrain_data.get_height(position.x, position.z)
+			_throw_roll_duration = clampf(maxf(drop, 3.0) * CLIFF_ROLL_PER_M,
+				MINI_ROLL_DURATION, CLIFF_ROLL_MAX_DURATION)
 			leave_crew()
 			var out_angle: float = randf() * TAU
 			throw_airborne(Vector3(cos(out_angle), 0.0, sin(out_angle))
-				* randf_range(1.5, 3.0))
+				* randf_range(1.5, 3.0) + Vector3.UP * 2.0)
 			return
 		health = 0
 		_die()

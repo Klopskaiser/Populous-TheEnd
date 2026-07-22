@@ -87,6 +87,7 @@ func _init() -> void:
 	health = 1
 	push_immune = true       # pedestrians do not shove the vehicle around
 	counts_population = false  # a device, not a believer (no mana, no housing)
+	joins_idle_groups = false  # vehicles never dock onto idle 6-packs
 
 
 func _is_combatant() -> bool:

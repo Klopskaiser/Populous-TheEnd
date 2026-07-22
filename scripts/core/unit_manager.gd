@@ -600,8 +600,8 @@ func _apply_idle_regroup(delta: float) -> void:
 	for i in range(per_tick):
 		_regroup_index = (_regroup_index + 1) % units.size()
 		var unit: Unit = units[_regroup_index]
-		if unit.state != Unit.State.IDLE:
-			continue
+		if unit.state != Unit.State.IDLE or not unit.joins_idle_groups:
+			continue   # vehicles never regroup (a parked ram must not drive off)
 		# idle_seconds advances here (one visit per SPREAD interval on average).
 		unit.idle_seconds += delta * float(IDLE_REGROUP_SPREAD_TICKS)
 		# Village guard (braves): engage enemies inside the small idle radius.
@@ -646,7 +646,7 @@ func _join_or_found_group(unit: Unit) -> void:
 			if open_group == null and not group.is_full() \
 					and group.anchor.distance_to(unit.position) <= IDLE_GROUP_LEAVE_RADIUS:
 				open_group = group
-		elif other.state == Unit.State.IDLE:
+		elif other.state == Unit.State.IDLE and other.joins_idle_groups:
 			if other.position.distance_to(unit.position) <= IDLE_GROUP_SETTLED_RADIUS:
 				settled.append(other)   # already standing in formation
 			if other.idle_seconds >= IDLE_REGROUP_DELAY:
@@ -676,6 +676,8 @@ func _join_or_found_group(unit: Unit) -> void:
 ## without (adopting a cluster that already stands in formation, or a
 ## formation move order that walks the unit itself) it just registers.
 func join_idle_group(unit: Unit, group: IdleGroup, walk: bool = true) -> void:
+	if not unit.joins_idle_groups:
+		return   # vehicles: no 6-pack membership (all entry points gate here)
 	if unit.idle_group != null and unit.idle_group != group \
 			and unit.idle_group is IdleGroup:
 		(unit.idle_group as IdleGroup).members.erase(unit)
