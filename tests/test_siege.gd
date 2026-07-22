@@ -14,6 +14,7 @@ const WARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/warrior_
 const FORESTER_SCENE: PackedScene = preload("res://scenes/buildings/forester.tscn")
 const HUT_SCENE: PackedScene = preload("res://scenes/buildings/hut.tscn")
 const SIEGE_SCENE: PackedScene = preload("res://scenes/units/siege_engine.tscn")
+const FIRE_RAM_SCENE: PackedScene = preload("res://scenes/units/fire_ram.tscn")
 const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
 const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
 
@@ -1537,4 +1538,36 @@ func test_parked_vehicle_blocks_vehicle_grid() -> void:
 	_board_crew(w, engine, 0)
 	check(w.nav.is_cell_vehicle_walkable(cell),
 		"a crewed vehicle no longer blocks the vehicle grid")
+	_free_world(w)
+
+
+## The parked block covers the SEPARATION DISC, not just the chassis: a manned
+## catapult routed past a parked fire ram must plan its waypoints outside the
+## separation bubble — the old chassis-only 3x3 block let the route graze the
+## hulk at ~1.5 m, the separation fought the path every tick and the catapult
+## wrestled at the ram instead of driving around (user report, start base).
+func test_route_keeps_separation_distance_to_parked_vehicle() -> void:
+	var w: Dictionary = _make_world()
+	var ram: FireRam = w.unit_manager.spawn_unit(
+		FIRE_RAM_SCENE, 0, w.nav.cell_to_world(Vector2i(64, 64))) as FireRam
+	_tick_world(w)   # the unmanned ram parks its separation disc
+	var cat: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(61, 62))) as SiegeEngine
+	_board_crew(w, cat, 0)
+	cat.order_move(w.nav.cell_to_world(Vector2i(76, 70)))   # beyond the ram
+	check(cat._path.size() > 0, "the move order plans a route around the hulk")
+	var min_wp: float = INF
+	for i in range(cat._path.size()):
+		min_wp = minf(min_wp, Vector2(cat._path[i].x - ram.position.x,
+			cat._path[i].z - ram.position.z).length())
+	check(min_wp >= cat.vehicle_separation - 0.4,
+		"every waypoint stays outside the separation bubble (min %.2f m)" % min_wp)
+	var arrived: bool = false
+	for t in range(450):
+		_tick_world(w)
+		if Vector2(cat.position.x - w.nav.cell_to_world(Vector2i(76, 70)).x,
+				cat.position.z - w.nav.cell_to_world(Vector2i(76, 70)).z).length() < 2.0:
+			arrived = true
+			break
+	check(arrived, "the catapult reaches its destination without wrestling the hulk")
 	_free_world(w)

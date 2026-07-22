@@ -68,6 +68,8 @@ var _sinking: bool = false
 ## Vehicle-grid cells this vehicle currently blocks while parked unmanned (so
 ## other vehicles path around it). Empty while manned/moving/destroyed.
 var _nav_blocked_cells: Array[Vector2i] = []
+## Position the current nav block was registered at (re-parked when displaced).
+var _nav_block_anchor: Vector3 = Vector3.INF
 ## Death sound key, set at the destruction site: "siege_death_burn" when the
 ## wreck burns down/sinks, "siege_death_burst" when it bursts apart (tornado /
 ## terrain rip). Catapult and fire ram share these (both are CrewedVehicles).
@@ -296,39 +298,54 @@ func _spawn_burst_debris() -> void:
 	path_service.register_projectile(debris)
 
 
-## Grid cells the chassis covers (corners + centre along the facing), for the
-## parked-vehicle nav obstacle.
-func _footprint_cells() -> Array[Vector2i]:
+## Grid cells the parked-vehicle nav obstacle covers: a DISC of the vehicle's
+## separation radius around its centre — NOT just the chassis. Vehicle paths
+## must keep waypoints outside the separation bubble (another vehicle's centre
+## can physically never come closer than ITS vehicle_separation to ours): the
+## old chassis-only 3x3 block let A* route ~1.5 m past a parked hulk, which the
+## separation then fought off every tick — the mover wrestled at the hulk for
+## a long time instead of driving around (user report: catapult stuck at the
+## parked fire ram in the start base).
+func _obstacle_cells() -> Array[Vector2i]:
 	var cells: Array[Vector2i] = []
 	if nav_grid == null:
 		return cells
-	var forward: Vector3 = facing.normalized() if facing.length_squared() > 0.0 \
-		else Vector3(0, 0, 1)
-	var right: Vector3 = Vector3(-forward.z, 0.0, forward.x)
-	for sf in [-chassis_half_length, 0.0, chassis_half_length]:
-		for sr in [-chassis_half_width, 0.0, chassis_half_width]:
-			var p: Vector3 = position + forward * sf + right * sr
-			var c: Vector2i = nav_grid.world_to_cell(p)
-			if not cells.has(c):
+	var r: float = vehicle_separation + 0.2   # + margin: routes graze the rim
+	var cr: int = int(ceil(r))
+	var center: Vector2i = nav_grid.world_to_cell(position)
+	var r2: float = r * r
+	for dz in range(-cr, cr + 1):
+		for dx in range(-cr, cr + 1):
+			var c: Vector2i = center + Vector2i(dx, dz)
+			var wc: Vector3 = nav_grid.cell_to_world(c)
+			var ddx: float = wc.x - position.x
+			var ddz: float = wc.z - position.z
+			if ddx * ddx + ddz * ddz <= r2:
 				cells.append(c)
 	return cells
 
 
 ## Parks/unparks this vehicle as a nav obstacle: a stationary UNMANNED vehicle
-## blocks its footprint on the vehicle grid so other vehicles route around it
-## (user report: vehicles shove past parked hulks forever). Cleared the moment
-## it is crewed, moves or is destroyed. Cheap: only toggles on a state change.
+## blocks its separation disc on the vehicle grid so other vehicles route
+## around it (user report: vehicles shove past parked hulks forever). Cleared
+## the moment it is crewed or destroyed. Cheap: toggles on a state change; the
+## anchor check re-parks the block only if something displaced the hulk
+## (terrain morph, scripted throw) by more than a cell.
 func _refresh_nav_block() -> void:
 	if nav_grid == null or crew_rides_on_deck() or flies:
 		return   # airships fly over ground vehicles — they never block the grid
 	var want: bool = state != State.DEAD and not _sinking and boarded_count() == 0
-	if want == (not _nav_blocked_cells.is_empty()):
-		return   # already in the desired state (unmanned vehicles do not move)
+	var blocked: bool = not _nav_blocked_cells.is_empty()
+	if want and blocked \
+			and position.distance_squared_to(_nav_block_anchor) < 2.25:
+		return   # already parked here
+	if not want and not blocked:
+		return
+	_unblock_nav()
 	if want:
-		_nav_blocked_cells = _footprint_cells()
+		_nav_blocked_cells = _obstacle_cells()
 		nav_grid.set_vehicle_obstacle(_nav_blocked_cells, true)
-	else:
-		_unblock_nav()
+		_nav_block_anchor = position
 
 
 func _unblock_nav() -> void:
