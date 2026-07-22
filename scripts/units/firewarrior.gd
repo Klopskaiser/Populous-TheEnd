@@ -115,27 +115,14 @@ func _scan_for_enemy(radius: float, max_examined: int = 0) -> Unit:
 
 
 ## Nearest living enemy preacher within `radius`; null when none is in range.
-## Iterates the enemy tribes' preacher LISTS (a handful of units, phase 8.2)
-## instead of an uncapped radius query over the whole battle — with 2x1000
-## firewarriors that query alone cost a three-digit ms share per tick.
+## Grid-masked SoA query (Stufe C1 follow-up): the old per-tribe preacher-LIST
+## loop examined every enemy preacher OBJECT per scan — in the 4-army stress
+## test (300 enemy preachers, 1200 firewarriors) that alone cost >30 ms/Tick,
+## already while the armies idled.
 func _nearest_enemy_priest(radius: float) -> Unit:
 	if path_service == null:
 		return null
-	var best: Unit = null
-	var best_d: float = radius
-	for t in path_service.tribes:
-		if t == null or t.id == tribe_id:
-			continue
-		for u in t.preachers:
-			if u == null or not is_instance_valid(u) or u.state == Unit.State.DEAD:
-				continue
-			if not u.is_targetable():
-				continue
-			var d: float = _flat_dist(position, u.position)
-			if d <= best_d:
-				best_d = d
-				best = u
-	return best
+	return path_service.get_nearest_enemy_preacher(position, radius, tribe_id)
 
 
 ## Nearest living enemy within melee range (the immediate threat to defend

@@ -317,6 +317,8 @@ func _compute_soa_flags() -> int:
 		f |= UnitManager.FLAG_CREW_SEATED
 	if is_targetable():
 		f |= UnitManager.FLAG_TARGETABLE
+	if unit_kind() == &"preacher":
+		f |= UnitManager.FLAG_PREACHER
 	return f
 
 ## Render slot bookkeeping, managed by the UnitRenderer.

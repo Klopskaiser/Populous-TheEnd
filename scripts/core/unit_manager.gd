@@ -130,6 +130,9 @@ const FLAG_FLIES: int = 1
 const FLAG_PUSH_IMMUNE: int = 2
 const FLAG_CREW_SEATED: int = 4
 const FLAG_TARGETABLE: int = 8
+## Static per kind (set at register): drives the per-cell preacher bits that
+## make the firewarriors' priest-hunting scan grid-maskable.
+const FLAG_PREACHER: int = 16
 
 var soa_pos: PackedVector3Array = PackedVector3Array()
 var soa_state: PackedInt32Array = PackedInt32Array()
@@ -147,6 +150,17 @@ var _cell_count: PackedInt32Array = PackedInt32Array()   # scratch (doubles as f
 var _cell_start: PackedInt32Array = PackedInt32Array()   # size _grid_cells + 1
 var _cell_units: PackedInt32Array = PackedInt32Array()   # unit indices, bucket-sorted
 var _unit_cell: PackedInt32Array = PackedInt32Array()    # scratch: cell id per unit
+## Per cell, over the LIVE, TARGETABLE units in it: bits 0-7 = tribes present
+## (1 << tribe_id), bits 8-15 = tribes with a PREACHER present — the enemy-scan
+## prefilters. A cell whose mask holds no foreign bit is skipped wholesale by
+## get_enemy_candidates / get_nearest_enemy_preacher: deep inside the own army
+## a scan then costs ~a handful of mask checks instead of examining hundreds
+## of friends (measured 42-47 ms units-phase in the 4-army stress test).
+var _cell_tribes: PackedInt32Array = PackedInt32Array()
+## OR over all cell masks (same bit layout) — the global early-out: a query
+## whose mask finds nothing here returns immediately (e.g. the priest query
+## in a battle without preachers, or scans after a tribe was wiped out).
+var _grid_tribes_all: int = 0
 ## Units registered since the last grid build (queries scan these linearly).
 var _grid_extra: PackedInt32Array = PackedInt32Array()
 ## units.size() at the last grid build (grid entries >= this are stale).
@@ -167,6 +181,7 @@ func setup(p_terrain_data: TerrainData, p_nav_grid: NavGrid,
 	_grid_cells = _grid_w * _grid_w
 	_cell_count.resize(_grid_cells)
 	_cell_start.resize(_grid_cells + 1)
+	_cell_tribes.resize(_grid_cells)
 
 
 ## In-game driver: ticks all units centrally (no per-unit _physics_process —
@@ -213,20 +228,39 @@ func _rebuild_grid() -> void:
 	if _cell_start.size() != _grid_cells + 1:   # setup() not called (bare tests)
 		_cell_count.resize(_grid_cells)
 		_cell_start.resize(_grid_cells + 1)
+		_cell_tribes.resize(_grid_cells)
 	if _unit_cell.size() < n:
 		_unit_cell.resize(n)
 		_cell_units.resize(n)
 	_cell_count.fill(0)
+	_cell_tribes.fill(0)
 	var pos: PackedVector3Array = soa_pos
+	var sstate: PackedInt32Array = soa_state
+	var stribe: PackedInt32Array = soa_tribe
+	var sflags: PackedInt32Array = soa_flags
+	var st_dead: int = Unit.State.DEAD
 	var inv: float = 1.0 / HASH_CELL_SIZE
 	var w: int = _grid_w
 	var top: int = w - 1
+	var all_bits: int = 0
 	for i in range(n):
 		var p: Vector3 = pos[i]
 		var c: int = clampi(int(p.z * inv), 0, top) * w \
 			+ clampi(int(p.x * inv), 0, top)
 		_unit_cell[i] = c
 		_cell_count[c] += 1
+		# Scan-prefilter bits: only live, targetable units make a cell
+		# "interesting" for enemy scans (corpses/reserves are never targets);
+		# preachers additionally set their tribe's priest bit (bits 8-15).
+		var fl: int = sflags[i]
+		if sstate[i] != st_dead and (fl & FLAG_TARGETABLE) != 0:
+			var tb: int = stribe[i] & 7
+			var bit: int = 1 << tb
+			if fl & FLAG_PREACHER:
+				bit |= 1 << (tb + 8)
+			_cell_tribes[c] = _cell_tribes[c] | bit
+			all_bits |= bit
+	_grid_tribes_all = all_bits
 	var acc: int = 0
 	for c in range(_grid_cells):
 		_cell_start[c] = acc
@@ -739,6 +773,11 @@ func register(unit: Unit) -> void:
 	soa_overlap.append(0)
 	unit._bind_soa(self)
 	_grid_extra.append(unit._idx)   # visible to queries before the next build
+	# A mass spawn (stress test: 4000 registers before the first tick) would
+	# otherwise leave EVERY unit in the linear extra list — each enemy scan
+	# then walked it wholesale (~0.6 ms per scan, one 600+ ms spawn tick).
+	if _grid_extra.size() > 64:
+		_rebuild_grid()
 	unit.died.connect(_on_unit_died)
 	unit.corpse_expired.connect(_on_corpse_expired)
 	unit.converted.connect(_on_unit_converted)
@@ -930,6 +969,11 @@ func get_enemy_candidates(pos: Vector3, radius: float, enemy_of: int,
 	var center: Vector2i = hash_key(pos)
 	var cell_r: int = int(ceil(radius / HASH_CELL_SIZE))
 	var w: int = _grid_w
+	# Prefilter: a cell whose tribe mask (low byte) holds no bit besides the
+	# scanner's own is skipped without touching its units (see _cell_tribes).
+	var enemy_mask: int = 0xFF & ~(1 << (enemy_of & 7))
+	if (_grid_tribes_all & enemy_mask) == 0 and _grid_extra.is_empty():
+		return result   # no live targetable enemy anywhere (endgame)
 	var examined: int = 0
 	for r in range(0, cell_r + 1):
 		var z0: int = center.y - r
@@ -943,7 +987,7 @@ func get_enemy_candidates(pos: Vector3, radius: float, enemy_of: int,
 			var kx: int = center.x - r
 			var x1: int = center.x + r
 			while kx <= x1:
-				if kx >= 0 and kx < w:
+				if kx >= 0 and kx < w and (_cell_tribes[row + kx] & enemy_mask) != 0:
 					var c: int = row + kx
 					for k in range(_cell_start[c], _cell_start[c + 1]):
 						var i: int = _cell_units[k]
@@ -984,6 +1028,69 @@ func get_enemy_candidates(pos: Vector3, radius: float, enemy_of: int,
 			if result.size() >= max_count:
 				return result
 	return result
+
+
+## Nearest living, targetable enemy PREACHER within `radius` around `pos`
+## (firewarrior priest-hunting, phase 8.2). Grid-masked via the per-cell
+## priest bits: with no enemy preacher nearby the query is ~a handful of mask
+## checks — the old per-tribe list loop cost ~0.25 ms per scan in the 4-army
+## stress test (300 preacher objects examined per call).
+func get_nearest_enemy_preacher(pos: Vector3, radius: float, enemy_of: int) -> Unit:
+	var n: int = units.size()
+	var grid_n: int = mini(_grid_built, n)
+	var pos_arr: PackedVector3Array = soa_pos
+	var sstate: PackedInt32Array = soa_state
+	var stribe: PackedInt32Array = soa_tribe
+	var sflags: PackedInt32Array = soa_flags
+	var st_dead: int = Unit.State.DEAD
+	var want: int = FLAG_PREACHER | FLAG_TARGETABLE
+	var priest_mask: int = (0xFF & ~(1 << (enemy_of & 7))) << 8
+	if (_grid_tribes_all & priest_mask) == 0 and _grid_extra.is_empty():
+		return null   # no enemy preacher anywhere (e.g. pure-warrior battles)
+	var best: Unit = null
+	var best_d2: float = radius * radius
+	var inv_cell: float = 1.0 / HASH_CELL_SIZE
+	var grid_top: int = _grid_w - 1
+	var kx0: int = clampi(int((pos.x - radius) * inv_cell), 0, grid_top)
+	var kx1: int = clampi(int((pos.x + radius) * inv_cell), 0, grid_top)
+	var kz0: int = clampi(int((pos.z - radius) * inv_cell), 0, grid_top)
+	var kz1: int = clampi(int((pos.z + radius) * inv_cell), 0, grid_top)
+	for kz in range(kz0, kz1 + 1):
+		var row: int = kz * _grid_w
+		for kx in range(kx0, kx1 + 1):
+			var c: int = row + kx
+			if (_cell_tribes[c] & priest_mask) == 0:
+				continue
+			for k in range(_cell_start[c], _cell_start[c + 1]):
+				var i: int = _cell_units[k]
+				if i >= grid_n:
+					continue   # stale slot (unregistered since the grid build)
+				if (sflags[i] & want) != want or stribe[i] == enemy_of \
+						or sstate[i] == st_dead:
+					continue
+				var pi: Vector3 = pos_arr[i]
+				var dx: float = pi.x - pos.x
+				var dz: float = pi.z - pos.z
+				var d2: float = dx * dx + dz * dz
+				if d2 <= best_d2:
+					best_d2 = d2
+					best = units[i]
+	# Units registered since the last grid build (bounded: register rebuilds
+	# the grid once the extra list exceeds its threshold).
+	for e in _grid_extra:
+		if e < _grid_built or e >= n:
+			continue
+		if (sflags[e] & want) != want or stribe[e] == enemy_of \
+				or sstate[e] == st_dead:
+			continue
+		var pe: Vector3 = pos_arr[e]
+		var dx: float = pe.x - pos.x
+		var dz: float = pe.z - pos.z
+		var d2: float = dx * dx + dz * dz
+		if d2 <= best_d2:
+			best_d2 = d2
+			best = units[e]
+	return best
 
 
 func get_units_of_tribe(tribe_id: int) -> Array[Unit]:

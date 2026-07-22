@@ -6013,3 +6013,44 @@ Doppelschreib-Risikostellen (Stacking, Konversion, Turm-/Fahrzeug-Crew, Geworfen
 
 **C2 (Kampf-Kernels data-oriented):** nicht begonnen — Go/No-Go-Tor laut Plan erst nach
 dem In-Game-Test; das Array-Fundament dafür steht. Getaggt als **0.9.5**.
+
+### Stresstest-Vorrunde nach 0.9.5 — Scan-Masken + Mess-Harness (2026-07-22)
+
+**Anlass:** Nutzer-Ziel „Stresstest ≥ 30 FPS" (Ist ~10 FPS; Debugschlacht nach C1
+~50 FPS bestätigt). Neues headless-Replikat **`tests/benchmark_stress.gd`**
+(4 Armeen × ~1025 gemischt + Katapult-Crews + Schamaninnen-Zaubersalve,
+Blockprofil je 5 s) plus Profiler **`diag_stress_idle.gd`** / **`diag_stress_battle.gd`**
+(µs/Einheit nach Typ × State).
+
+**Diagnose:** Peak-Tick ~50–58 ms (t300–449, ~2600–3500 lebend) → in-game
+2-Step-Catch-up ≈ 100 ms/Frame = 10 FPS. Zerlegung: warrior/ATTACK 20,6 ms,
+firewarrior/ATTACK 9,4 ms, MOVE ~6 ms, Manager ~9 ms. Idle-Grundkosten
+~5 µs/Einheit (reiner GDScript-Dispatch).
+
+**UMGESETZT (unit_manager.gd, firewarrior.gd):**
+1. **Zellen-Stammesmasken** im CSR-Grid (`_cell_tribes`: Bits 0–7 Stämme,
+   8–15 Prediger-je-Stamm, beim Build mitakkumuliert; global `_grid_tribes_all`
+   als Early-out): `get_enemy_candidates` überspringt Zellen ohne Feindbit —
+   tief in der eigenen Armee kostet ein Scan Zellchecks statt bis zu 300
+   Einheiten-Prüfungen. Idle-/Anmarsch-Phase −19 %.
+2. **`get_nearest_enemy_preacher`** (grid-maskiert) ersetzt den Feuerkrieger-
+   Loop über die Prediger-LISTEN aller Feindstämme (`_nearest_enemy_priest`):
+   der kostete bei 300 Feind-Predigern ~0,25 ms pro Scan → >30 ms/Tick im
+   Stresstest, bereits im Leerlauf (in der prediger-losen Debugschlacht nie
+   sichtbar). Early-out über das globale Prediger-Präsenzbit.
+3. **Schwellwert-Rebuild** (`register`: `_grid_extra` > 64 → `_rebuild_grid`):
+   Massen-Spawn ließ sonst jeden Scan die lineare Extra-Liste (4000 Einträge)
+   voll durchlaufen — Spawn-Tick 640 → 318 ms (Rest: einmalige First-Tick-
+   Kosten ~40–80 µs/Instanz, nur beim Match-Start).
+
+**GEMESSEN & VERWORFEN:** Erst-Scan-Stagger über `_init` — GDScript 4 ruft das
+Basis-`_init` NICHT auf, wenn die Subklasse ein eigenes definiert (headless
+verifiziert, `scratchpad/init_chain_test`); Verlegung nach `register()` bricht
+Tests, die einen Scan im ersten Tick erwarten (test_combat_groups). Nutzen nach
+Fix 3 marginal → verworfen.
+
+**Stand:** Suite 2223/2223 grün, Peak-Block unverändert ~58 ms — der Rest ist
+der ATTACK/MOVE-Objekt-Tick-Bulk (36 ms). **Der Weg zu 30 FPS ist Stufe C2**
+(Kampf-Kernels über die C1-Arrays): Detailplan **[08e_perf_combat_kernels_stufe_c2.md](08e_perf_combat_kernels_stufe_c2.md)**
+mit Messdaten, Swap-Remove-Referenzproblem und Etappen C2.1–C2.5 erstellt;
+Umsetzung offen (Nutzer-Entscheid).
