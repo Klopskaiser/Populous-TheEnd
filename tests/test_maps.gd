@@ -111,6 +111,7 @@ func test_panic_hop_stops_before_cliff() -> void:
 	u.terrain_data = td
 	u.nav_grid = nav
 	u.position = Vector3(64.0, 5.0, 64.0)
+	u._sync_soa_pos()
 	var reach: Vector3 = u._walkable_reach(Vector2(1.0, 0.0), 8.0)   # march toward the cliff
 	check(reach.x > 64.0, "the unit still flees outward on walkable ground")
 	check(reach.x < 68.0, "the flee hop stops before the cliff edge")

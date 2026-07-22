@@ -121,6 +121,7 @@ func eject_occupants(killed: bool) -> void:
 		if unit_manager != null:
 			unit_manager.register(u)
 		u.position = edge_spawn_position()
+		u._sync_soa_pos()
 		u.leave_garrison()
 		_eject_unit(u, killed)
 	crew.clear()
@@ -147,6 +148,7 @@ func _release_crew_member(u, dest: Vector3) -> void:
 	if unit_manager != null:
 		unit_manager.register(u)
 	u.position = edge_spawn_position()
+	u._sync_soa_pos()
 	u.leave_garrison()
 	if dest != Vector3.INF:
 		u.order_move(dest)

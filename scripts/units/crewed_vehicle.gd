@@ -418,6 +418,7 @@ func on_crew_boarded(unit) -> void:
 			return
 		_switch_owner(unit.tribe)
 	unit.siege_boarded = true
+	unit._sync_soa_flags()   # seated: excluded from the separation kernel
 	_unblock_nav()   # now manned — stop being a nav obstacle for other vehicles
 
 

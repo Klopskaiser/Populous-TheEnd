@@ -271,9 +271,53 @@ var anim_start_ms: int = 0
 ## instead. Empty = fall back to the plain crew idle/walk.
 var crew_action_anim: StringName = &""
 
-## Current spatial-hash cell, managed by the UnitManager (stored on the unit
-## because a Dictionary lookup per unit per tick is measurably slower).
-var _hash_cell: Vector2i = Vector2i(2147483647, 2147483647)
+## SoA slot in the UnitManager registry (Stufe C1, plans/08d): index into the
+## manager's `units` array and every soa_* array; -1 while unregistered. The
+## packed-array refs below share the manager's storage (packed arrays are
+## by-reference in Godot 4), so the hot position/state writers mirror their
+## values without a manager call. The arrays are AUTHORITATIVE for the
+## manager's hot loops — every position writer MUST double-write (a missed
+## site produces ghost targets at stale positions).
+var _idx: int = -1
+var _soa_pos: PackedVector3Array
+var _soa_state: PackedInt32Array
+var _soa_flags: PackedInt32Array
+
+
+## Called by UnitManager.register after the SoA slots were appended.
+func _bind_soa(manager: UnitManager) -> void:
+	_soa_pos = manager.soa_pos
+	_soa_state = manager.soa_state
+	_soa_flags = manager.soa_flags
+
+
+## Mirrors position into the manager's SoA arrays. Every writer that sets the
+## position of a REGISTERED unit and does not end in _snap_to_ground must call
+## this (see plans/08d C1 writer audit).
+func _sync_soa_pos() -> void:
+	var i: int = _idx
+	if i >= 0:
+		_soa_pos[i] = position
+
+
+## Event-mirrored separation/scan flags (garrison, crew boarding, conversion
+## immunity via targetable). Call after any input of _compute_soa_flags changed.
+func _sync_soa_flags() -> void:
+	if _idx >= 0:
+		_soa_flags[_idx] = _compute_soa_flags()
+
+
+func _compute_soa_flags() -> int:
+	var f: int = 0
+	if flies:
+		f |= UnitManager.FLAG_FLIES
+	if push_immune:
+		f |= UnitManager.FLAG_PUSH_IMMUNE
+	if is_crew_seated():
+		f |= UnitManager.FLAG_CREW_SEATED
+	if is_targetable():
+		f |= UnitManager.FLAG_TARGETABLE
+	return f
 
 ## Render slot bookkeeping, managed by the UnitRenderer.
 var _render_index: int = -1
@@ -733,8 +777,7 @@ func _advance_path(delta: float) -> bool:
 		start_roll(Vector3(to_target.x, 0.0, to_target.y), MINI_ROLL_DURATION, 0.0, true)
 		return false
 	var next: Vector2 = flat_pos.move_toward(flat_target, _slope_speed(slope) * delta)
-	position.x = next.x
-	position.z = next.y
+	position = Vector3(next.x, position.y, next.y)   # one set (hot path)
 	_snap_to_ground()
 	if next.distance_to(flat_target) <= arrive_eps():
 		_path_index += 1
@@ -772,8 +815,18 @@ func _clear_path() -> void:
 
 
 func _snap_to_ground() -> void:
+	# One property get + one set (component writes cost a get/set roundtrip
+	# each) — this is the hottest per-mover call.
+	var p: Vector3 = position
 	if terrain_data != null:
-		position.y = terrain_data.get_height(position.x, position.z)
+		p.y = terrain_data.get_height(p.x, p.z)
+		position = p
+	# SoA double-write, inlined (hot path: every mover, every tick). Covers all
+	# movement writers that end here (_advance_path, _step_toward, knockback,
+	# roll, throw landing, crew glide).
+	var i: int = _idx
+	if i >= 0:
+		_soa_pos[i] = p
 
 
 func _on_path_finished() -> void:
@@ -1398,6 +1451,7 @@ func _tick_thrown(delta: float) -> void:
 		throw_carrier = null   # carrier vanished mid-air: fall from here
 	_throw_velocity.y -= THROW_GRAVITY * delta
 	position += _throw_velocity * delta
+	_sync_soa_pos()   # THROWN never snaps to ground — mirror here
 	var flat: Vector3 = Vector3(_throw_velocity.x, 0.0, _throw_velocity.z)
 	if flat.length_squared() > 0.000001:
 		facing = flat.normalized()
@@ -1409,6 +1463,7 @@ func _tick_thrown(delta: float) -> void:
 	if position.y > ground:
 		return   # still falling
 	position.y = ground
+	_sync_soa_pos()
 	_land_from_throw(ground)
 
 
@@ -1794,6 +1849,7 @@ func order_crew(engine) -> void:
 	leave_crew(engine)   # drop a previous engine's slot (keep the new one)
 	siege_engine = engine
 	siege_boarded = false
+	_sync_soa_flags()
 	waypoint_queue.clear()
 	_clear_path()
 	_set_state(State.CREW)
@@ -1805,6 +1861,7 @@ func leave_crew(except = null) -> void:
 	var engine = siege_engine
 	siege_engine = null
 	siege_boarded = false
+	_sync_soa_flags()   # no longer seated: separation applies again
 	station_channeling = false
 	crew_action_anim = &""
 	if engine != null and engine != except and is_instance_valid(engine):
@@ -1839,6 +1896,7 @@ func _tick_crew(delta: float) -> void:
 	# ground glide, no Y snap (the vehicle carries the passenger).
 	if engine.crew_rides_on_deck():
 		position = engine.crew_slot_position(self)
+		_sync_soa_pos()   # pinned at deck height, no ground snap
 		if engine.facing.length_squared() > 0.000001:
 			facing = engine.facing
 		_crew_walking = false
@@ -2358,6 +2416,8 @@ func enter_garrison(tower, slot_pos: Vector3) -> void:
 	_dissolve_own_group()   # a protected reserve is no fight target (phase 8.2)
 	selected = false
 	position = slot_pos
+	_sync_soa_pos()
+	_sync_soa_flags()   # non-targetable + push-immune reserve
 	anim_base_name = &"idle"
 	anim_start_ms = Time.get_ticks_msec()
 	_set_state(State.GARRISON)
@@ -2372,6 +2432,7 @@ func leave_garrison() -> void:
 	man_hut_manual = false
 	push_immune = false
 	station_channeling = false
+	_sync_soa_flags()   # targetable/pushable again
 	if state == State.GARRISON:
 		_clear_path()
 		_set_state(State.IDLE)
@@ -2407,6 +2468,7 @@ func enter_hut(hut) -> void:
 	garrison_housed = true
 	garrison_reached = false
 	push_immune = true
+	_sync_soa_flags()
 	waypoint_queue.clear()
 	_clear_path()
 	_end_attack()
@@ -2836,8 +2898,7 @@ func _step_toward(point: Vector3, delta: float) -> void:
 	if nav_grid != null and not nav_grid.is_cell_walkable(
 			nav_grid.world_to_cell(Vector3(next.x, 0.0, next.y))):
 		return
-	position.x = next.x
-	position.z = next.y
+	position = Vector3(next.x, position.y, next.y)   # one set (hot path)
 	_snap_to_ground()
 
 
@@ -2881,6 +2942,8 @@ func _set_state(new_state: State) -> void:
 	if new_state == state:
 		return
 	state = new_state
+	if _idx >= 0:
+		_soa_state[_idx] = new_state   # SoA mirror (sole state writer)
 	idle_seconds = 0.0
 	state_changed.emit(self, new_state)
 	_update_animation()

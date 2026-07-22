@@ -213,6 +213,7 @@ func _tick_riders(delta: float) -> void:
 			position.x + cos(r.angle) * spiral_r,
 			position.y + lift * top_height,
 			position.z + sin(r.angle) * spiral_r)
+		u._sync_soa_pos()
 		u.facing = Vector3(cos(r.angle + PI * 0.5), 0.0, sin(r.angle + PI * 0.5))
 		if r.time >= LIFT_TIME + CARRY_TIME:
 			_fling(u, r.angle)
@@ -283,6 +284,7 @@ func _tick_siege_riders(delta: float) -> void:
 			position.x + cos(r.angle) * spiral_r,
 			position.y + f * top_height,
 			position.z + sin(r.angle) * spiral_r)
+		u._sync_soa_pos()
 		if r.rise >= SIEGE_RISE_TIME:
 			_burst_siege(u as CrewedVehicle)   # reached the tip
 		else:

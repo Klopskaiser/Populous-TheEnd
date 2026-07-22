@@ -232,7 +232,9 @@ func test_ordered_catapult_swaps_too_close_for_band_enemy() -> void:
 		# Pin both: the crew brawl would otherwise shove the close enemy out of
 		# MIN_RANGE and muddy the swap contract.
 		close_enemy.position = Vector3(42, 0, 40)
+		close_enemy._sync_soa_pos()
 		band_enemy.position = Vector3(48, 0, 40)
+		band_enemy._sync_soa_pos()
 		_tick_world(w)
 		if engine.attack_target == band_enemy:
 			swapped = true
@@ -384,6 +386,7 @@ func test_workshop_exit_blockade_and_abort() -> void:
 	check(ws.exit_blocked(), "the fresh catapult blocks the entrance")
 	check(not ws.can_start_production(), "no next production while blocked")
 	engines[0].position += Vector3(10.0, 0.0, 10.0)
+	engines[0]._sync_soa_pos()
 	check(not ws.exit_blocked(), "moving the catapult off clears the exit")
 	check(ws.can_start_production(), "production may start again")
 
@@ -769,9 +772,11 @@ func test_roll_chance_by_slope() -> void:
 ## crew left behind).
 func _teleport_engine(engine: SiegeEngine, pos: Vector3) -> void:
 	engine.position = pos
+	engine._sync_soa_pos()
 	for m in engine.crew:
 		if is_instance_valid(m):
 			m.position = pos + Vector3(1.0, 0.0, 0.0)
+			m._sync_soa_pos()
 
 
 func test_engine_range_band_and_priorities() -> void:

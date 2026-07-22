@@ -247,8 +247,11 @@ func test_flame_cone_widens_toward_the_far_end() -> void:
 	var ticks: int = 0
 	while not far_side.is_burning() and ticks < MAX_TICKS:
 		target.position = target_pos
+		target._sync_soa_pos()
 		near_side.position = near_pos
+		near_side._sync_soa_pos()
 		far_side.position = far_pos
+		far_side._sync_soa_pos()
 		_tick_world(w)
 		ticks += 1
 	check(far_side.is_burning(),
@@ -329,6 +332,7 @@ func test_minimum_range_holds_fire_point_blank() -> void:
 		# otherwise shove it randomly past the 1 m minimum, where the ram
 		# legitimately opens fire (flaky) — INSIDE the minimum is the contract.
 		hugger.position = ram.position + Vector3(0, 0, 0.5)
+		hugger._sync_soa_pos()
 		_tick_world(w)
 	check(not hugger.is_burning(),
 		"a unit inside the 1 m minimum range is never burnt")
@@ -407,6 +411,7 @@ func test_ram_fires_while_rolling_after_a_runner() -> void:
 		# Pin the runner 4.5 m ahead (inside the band, beyond the 4 m hold point) —
 		# a stop-and-go ram would stand still instead of closing in.
 		runner.position = ram.position + Vector3(0, 0, 4.5)
+		runner._sync_soa_pos()
 		_tick_world(w)
 		burst_started = burst_started or ram._flame_time > 0.0
 	check(burst_started, "the burst starts while the chase is still rolling")
@@ -429,7 +434,9 @@ func test_ram_prefers_in_range_target_over_chase() -> void:
 	ram.order_attack(runner)   # ordered chase target beyond FIRE_RANGE
 	for i in range(30):
 		runner.position = ram.position + Vector3(0, 0, 9.0)
+		runner._sync_soa_pos()
 		near.position = ram.position + Vector3(0, 0, 3.0)
+		near._sync_soa_pos()
 		_tick_world(w)
 		if ram.attack_target == near:
 			break
@@ -458,7 +465,9 @@ func test_ram_swaps_too_close_ordered_target_for_band_enemy() -> void:
 	var swapped: bool = false
 	for i in range(60):
 		close_enemy.position = ram.position + Vector3(0, 0, 0.6)   # pin inside min
+		close_enemy._sync_soa_pos()
 		band_enemy.position = band_pos
+		band_enemy._sync_soa_pos()
 		_tick_world(w)
 		if ram.attack_target == band_enemy:
 			swapped = true
@@ -510,6 +519,7 @@ func test_ram_holds_at_standoff_range() -> void:
 	ram.order_attack(foe)
 	for _i in range(200):
 		foe.position = foe_pos
+		foe._sync_soa_pos()
 		_tick_world(w)
 	var dist: float = ram._flat_dist(ram.position, foe.position)
 	var standoff: float = FireRam.FIRE_RANGE * FireRam.HOLD_RANGE_FRAC
@@ -536,6 +546,7 @@ func test_ram_reverses_from_point_blank_then_fires() -> void:
 	ram.order_attack(foe)
 	for i in range(80):
 		foe.position = foe_pos
+		foe._sync_soa_pos()
 		_tick_world(w)
 		if foe.is_burning():
 			break
@@ -570,6 +581,7 @@ func test_ram_fires_again_after_crew_converted() -> void:
 	var fired: bool = false
 	for i in range(80):
 		enemy.position = ram.position + Vector3(0, 0, 3.0)
+		enemy._sync_soa_pos()
 		_tick_world(w)
 		fired = fired or ram._flame_time > 0.0
 	check(fired, "the re-crewed ram can fire again")

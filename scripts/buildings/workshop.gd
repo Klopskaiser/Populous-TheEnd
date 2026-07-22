@@ -213,6 +213,7 @@ func _return_to_world(brave: Brave) -> void:
 		return
 	unit_manager.register(brave)
 	brave.position = edge_spawn_position()
+	brave._sync_soa_pos()
 	brave.workshop_inside = false
 
 

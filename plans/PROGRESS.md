@@ -5939,3 +5939,77 @@ Rendering). Für den vollen +50 %: entweder weitere gezielte Micro-Opts (Spike-A
 bei Massentod, Separation-Drossel für gebundene Kämpfer — je ~0,5–1 ms, teils balance-sensitiv)
 oder der strukturelle Umbau **Stufe C (SoA)** — der dokumentierte einzige zuverlässige Weg zum
 50-%-Ziel.
+
+### Phase 8.d Stufe C1 — SoA-Array-Fundament + CSR-Grid-Kernels (2026-07-22)
+
+**Plan [08d_perf_soa_stufe_c.md](08d_perf_soa_stufe_c.md), Etappe C1 vollständig umgesetzt.**
+Die Einheiten-Hotdaten liegen jetzt in autoritativen Packed-Arrays; die heißen
+Manager-Schleifen (Grid, Separation, Feind-Scans) laufen als flache Array-Kernels ohne
+Objekt-Zugriffe.
+
+**Architektur (`unit_manager.gd` + `unit.gd`):**
+- **SoA-Arrays** parallel zu `units` (Index = `Unit._idx`; append bei `register`,
+  **Swap-Remove** bei `unregister`, Muster `unit_renderer.gd`): `soa_pos`
+  (**ein** `PackedVector3Array` — bewusst NICHT drei Float-Arrays, s. Messung),
+  `soa_state`, `soa_tribe`, `soa_flags` (Bits FLIES/PUSH_IMMUNE/CREW_SEATED/TARGETABLE),
+  `soa_veh_sep`, `soa_sep_mult`, `soa_overlap`.
+- **Doppelschreiben statt Spiegeln:** Packed-Arrays sind in Godot 4 by-reference
+  (headless verifiziert, inkl. Resize-Sichtbarkeit) → Units cachen `_soa_pos`/`_soa_state`/
+  `_soa_flags` via `_bind_soa()` und schreiben direkt. Zentrale Hooks: `_snap_to_ground`
+  (deckt _advance_path/_step_toward/Knockback/Roll/Wurf-Landung/Crew-Glide ab, inline),
+  `_tick_thrown`, `_tick_crew` (Deck), `enter_garrison`, `_set_state` (einziger
+  state-Schreiber). Externe Writer-Sites mit `_sync_soa_pos()`: `watchtower.gd`
+  (Slot-Pin + Ejects), `airship.gd` (`_snap_to_ground`-Override!, `_tick_altitude`,
+  Deck-Re-Pin, drop_member, Leichen-Snap), `hut/forester/workshop` (Release ans
+  Gebäude-Edge), `tornado_vortex.gd` (Rider), `terrain_morph.gd`. Flags spiegeln an den
+  Event-Stellen (`enter/leave_garrison`, `enter_hut`, `order_crew`/`leave_crew`,
+  `on_crew_boarded`); `tribe_id` im `converted`-Handler des Managers. **Kein Per-Tick-
+  Spiegeln** (Stufe-B-Lehre).
+- **Dictionary-Hash ersetzt durch CSR-Bucket-Grid:** Counting-Sort über `soa_pos`
+  (Zellen 4 m, Kantenlänge aus `terrain_data.size`), einmal pro `tick()` neu gebaut
+  (`_rebuild_grid`; Back-Fill nutzt `_cell_count` als Cursor — keine Allokationen).
+  Seit dem Build registrierte Einheiten stehen in `_grid_extra` (linear mitgescannt);
+  nach Swap-Remove veraltete Grid-Einträge filtert der Live-Index-Guard (`i >= grid_n`).
+  `unit._hash_cell`, `_update_hash_cell`, `_move_hash_cell` entfallen.
+- **Kernels:** `_apply_separation` (Slices/Checks-Budgets unverändert, Semantik 1:1 —
+  Objekt-Fetch nur bei echtem Push, Overlap-Escape, Voll-Überlappung),
+  `get_enemy_candidates` (Ring-Reihenfolge + examined-Budget unverändert),
+  `get_units_in_radius`.
+
+**Messung (A/B auf derselben Maschine, gleiche Session — die Plan-Baseline stammt von
+anderem Lastzustand):**
+
+| Szenario | HEAD | Stufe C1 | Δ |
+|---|---|---|---|
+| schlacht krieger 2×1000 (Kampf-Fenster) | 27,3 ms | **20,1 ms** | **−26 %** |
+| schlacht feuerkrieger 2×1000 | 32,2 ms | **23,2 ms** | **−28 %** |
+| schlacht krieger+prediger 2×1000 | 35,2 ms | **26,6 ms** | **−24 %** |
+| schlimmster Tick (Schlachten) | 43–65 ms | 33–42 ms | ✓ |
+| move/combat 2000–4000 Ø | 17,7–37,5 ms | 14,4–26,5 ms | −18…−29 % |
+
+Phasen: hash 1,8–2,0 → **0,32–0,40 ms**; sep 6,2–9,2 → **2,4–4,8 ms**; units-Phase sinkt
+in den Schlachten zusätzlich (Scan-Kernels), z. B. krieger 18,9 → 16,5 ms. Damit ist das
+C1-Ziel („Kampf-Fenster < ~22 ms relativ zur 24,6er-Baseline") relativ übertroffen —
+**ohne** den hochriskanten C2-Kampf-Kernel-Umbau.
+
+**Stolpersteine/Erkenntnisse:**
+1. **Drei `PackedFloat32Array`-Writes pro Mover waren zu teuer** (~1,3 µs/Mover/Tick,
+   +2,7 ms in move 2000): Konsolidierung auf **ein** `PackedVector3Array` (1 Indexed-Write)
+   machte das Doppelschreiben ~gratis und die Kernel-Reads schneller. Erst damit kippte
+   die Bilanz klar ins Plus.
+2. Property-Komponenten-Writes (`position.x = …`) kosten je einen Get/Set-Roundtrip —
+   heiße Schreiber (`_advance_path`, `_step_toward`, `_snap_to_ground`) auf einen
+   einzelnen `position = Vector3(...)`-Set umgestellt.
+3. Packed-Arrays by-reference gilt auch über Objektgrenzen und Resizes hinweg
+   (Godot 4.7, mit Scratch-Skript verifiziert) — Grundlage des ganzen Ansatzes.
+4. ~50 Test-Schreibstellen (`unit.position = …` nach Spawn) brauchten `_sync_soa_pos()`
+   (mechanisch per Skript eingefügt); `benchmark_mass`/`benchmark_units` rufen jetzt
+   `um._rebuild_grid()` statt der `_update_hash_cell`-Schleife.
+
+**Verifikation:** Suite **2223/2223 grün** (3 Läufe, inkl. RNG-lastigem `test_combat`),
+Ladecheck `--headless --quit` sauber, `benchmark_mass` wie oben. **Offen:** In-Game-
+FPS-Test Debugschlacht (maßgeblich; headless misst kein Rendering) + Sichtprüfung der
+Doppelschreib-Risikostellen (Stacking, Konversion, Turm-/Fahrzeug-Crew, Geworfene).
+
+**C2 (Kampf-Kernels data-oriented):** nicht begonnen — Go/No-Go-Tor laut Plan erst nach
+dem In-Game-Test; das Array-Fundament dafür steht. Getaggt als **0.9.5**.

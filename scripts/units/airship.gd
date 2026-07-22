@@ -212,6 +212,7 @@ func _snap_to_ground() -> void:
 		position.y = maxf(position.y,
 			maxf(terrain_data.get_height(position.x, position.z),
 				TerrainData.SEA_LEVEL) + MIN_CLEARANCE)
+	_sync_soa_pos()   # SoA double-write (the base override is bypassed here)
 
 
 ## Soft altitude model (user spec): cruise at FLY_HEIGHT above "normal
@@ -231,6 +232,7 @@ func _tick_altitude(delta: float) -> void:
 	var target_y: float = maxf(ref + FLY_HEIGHT, ground + MIN_CLEARANCE)
 	position.y = maxf(move_toward(position.y, target_y, VERTICAL_RATE * delta),
 		ground + MIN_CLEARANCE)
+	_sync_soa_pos()
 
 
 ## No slope in the air (also disables the downhill-stumble roll).
@@ -319,6 +321,7 @@ func drop_member(member, around: Vector3 = Vector3.INF) -> void:
 			member.position.x = ground.x
 			member.position.z = ground.z
 	member.position.y = position.y + DECK_Y
+	member._sync_soa_pos()
 	member.throw_airborne(Vector3.ZERO, 0)
 
 
@@ -329,6 +332,7 @@ func remove_crew(unit) -> void:
 	if unit != null and is_instance_valid(unit) and unit.state == State.DEAD \
 			and terrain_data != null:
 		unit.position.y = terrain_data.get_height(unit.position.x, unit.position.z)
+		unit._sync_soa_pos()
 
 
 # --- Orders ------------------------------------------------------------------------------
@@ -501,6 +505,7 @@ func tick(delta: float) -> void:
 	for m in crew:
 		if is_instance_valid(m) and m.siege_boarded and m.state == State.CREW:
 			m.position = crew_slot_position(m)
+			m._sync_soa_pos()
 	_tick_auto_engage(delta)
 	_tick_deck_combat(delta)
 	_tick_drift(delta)

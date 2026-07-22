@@ -222,6 +222,7 @@ func test_deck_firewarrior_fires_with_bonus_reach_only_standing() -> void:
 	var victim: Unit = w.unit_manager.spawn_unit(
 		BRAVE_SCENE, 1, ship.position + Vector3(10.0, -ship.position.y + 5.0, 0.0))
 	victim.position.y = 5.0
+	victim._sync_soa_pos()
 	var ticks: int = 0
 	while victim.health == victim.max_health and victim.state != Unit.State.DEAD \
 			and ticks < MAX_TICKS:
@@ -670,6 +671,7 @@ func test_deck_passenger_survives_separation_over_ground_unit() -> void:
 	for i in range(40):
 		ground.position.x = passenger.position.x
 		ground.position.z = passenger.position.z
+		ground._sync_soa_pos()
 		_tick_world(w)
 		min_y = minf(min_y, passenger.position.y)
 	check(min_y > 5.0 + Airship.FLY_HEIGHT * 0.5,
@@ -688,6 +690,7 @@ func test_airships_do_not_fully_overlap() -> void:
 	# Force a full overlap, then let the separation shove them apart.
 	b.position.x = a.position.x
 	b.position.z = a.position.z
+	b._sync_soa_pos()
 	for i in range(40):
 		_tick_world(w)
 	var gap: float = Vector2(a.position.x - b.position.x,
@@ -713,6 +716,7 @@ func test_airship_not_pushed_by_ground_vehicle() -> void:
 	for i in range(30):
 		engine.position.x = ship.position.x
 		engine.position.z = ship.position.z
+		engine._sync_soa_pos()
 		_tick_world(w)
 	var moved: float = Vector2(ship.position.x - sx, ship.position.z - sz).length()
 	check(moved < 0.2, "the airship is not shoved by the ground vehicle below it")
@@ -746,7 +750,9 @@ func test_airship_prefers_firewarrior_over_nearer_brave() -> void:
 		FIREWARRIOR_SCENE, 1, Vector3(ship.position.x + 7.0, 5.0, ship.position.z))
 	_tick_world(w)   # populate the spatial hash
 	brave.position = Vector3(ship.position.x + 3.0, 5.0, ship.position.z)
+	brave._sync_soa_pos()
 	fw.position = Vector3(ship.position.x + 7.0, 5.0, ship.position.z)
+	fw._sync_soa_pos()
 	check(ship._best_enemy(30.0) == fw,
 		"the airship targets the farther firewarrior over the nearer brave")
 	_free_world(w)
@@ -970,8 +976,10 @@ func test_deck_crew_shows_attack_animation() -> void:
 	var enemy: Unit = w.unit_manager.spawn_unit(
 		BRAVE_SCENE, 1, ship.position + Vector3(6.0, -ship.position.y + 5.0, 0.0))
 	enemy.position.y = 5.0
+	enemy._sync_soa_pos()
 	for i in range(20):
 		enemy.position = Vector3(ship.position.x + 6.0, 5.0, ship.position.z)
+		enemy._sync_soa_pos()
 		_tick_world(w)
 	check(fw.anim_base_name == &"throw",
 		"the deck firewarrior shows its throw animation while firing")

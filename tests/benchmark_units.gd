@@ -62,8 +62,7 @@ func _initialize() -> void:
 			unit.tick(TICK)
 		var t1: int = Time.get_ticks_usec()
 		move_us += t1 - tick_start
-		for unit in um.units:
-			um._update_hash_cell(unit)
+		um._rebuild_grid()   # Stufe C1: CSR grid from the SoA arrays
 		var t2: int = Time.get_ticks_usec()
 		hash_us += t2 - t1
 		um._drain_path_queue()

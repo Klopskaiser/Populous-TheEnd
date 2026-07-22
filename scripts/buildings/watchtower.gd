@@ -171,6 +171,7 @@ func eject_crew(index: int) -> void:
 	if unit_manager != null:
 		unit_manager.register(u)   # idempotent — crew stayed registered
 	u.position = edge_spawn_position()
+	u._sync_soa_pos()
 	u.leave_garrison()
 	if rally_point != Vector3.ZERO:
 		u.order_move(rally_point)
@@ -183,6 +184,7 @@ func _eject_all(killed: bool, dest: Vector3) -> void:
 		if unit_manager != null:
 			unit_manager.register(u)
 		u.position = edge_spawn_position()
+		u._sync_soa_pos()
 		u.leave_garrison()
 		if dest != Vector3.INF and not killed:
 			u.order_move(dest)
@@ -212,6 +214,7 @@ func _tick_active(delta: float) -> void:
 	for i in range(crew.size()):
 		var u = crew[i]
 		u.position = crew_slot_position(i)   # pin visibly to the platform slot
+		u._sync_soa_pos()
 		match u.unit_kind():
 			&"firewarrior":
 				_tick_crew_firewarrior(u, delta)

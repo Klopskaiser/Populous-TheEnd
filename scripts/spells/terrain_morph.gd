@@ -74,6 +74,7 @@ func _snap_props() -> void:
 				continue
 			if grown.has_point(_world_cell(u.position)):
 				u.position.y = td.get_height(u.position.x, u.position.z)
+				u._sync_soa_pos()
 	if ctx.tree_manager != null:
 		for tree in ctx.tree_manager.trees:
 			if not is_instance_valid(tree):

@@ -188,8 +188,7 @@ func _simulate(label: String, um: UnitManager, ticks: int, window_from: int = 0)
 			if is_instance_valid(unit):
 				unit.tick(TICK)
 		var t1: int = Time.get_ticks_usec()
-		for unit in um.units:
-			um._update_hash_cell(unit)
+		um._rebuild_grid()   # Stufe C1: CSR grid from the SoA arrays
 		var t2: int = Time.get_ticks_usec()
 		um._drain_path_queue()
 		var t3: int = Time.get_ticks_usec()

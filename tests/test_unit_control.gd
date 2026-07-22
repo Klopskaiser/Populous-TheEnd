@@ -263,11 +263,13 @@ func test_idle_group_prune() -> void:
 		members.append(brave)
 	# One member gets ordered far away -> dropped on the next prune.
 	members[2].position = group.anchor + Vector3(20, 0, 0)
+	members[2]._sync_soa_pos()
 	w.unit_manager._prune_idle_group(group)
 	check(members[2].idle_group == null, "a member ordered far away is dropped")
 	check(group.members.size() == 2, "the group keeps the two remaining members")
 	# Shrinking to one dissolves the group entirely.
 	members[1].position = group.anchor + Vector3(20, 0, 0)
+	members[1]._sync_soa_pos()
 	w.unit_manager._prune_idle_group(group)
 	check(members[0].idle_group == null and group.members.is_empty(),
 		"a one-member group dissolves")

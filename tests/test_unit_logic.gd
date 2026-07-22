@@ -34,6 +34,7 @@ func test_unit_follows_path_to_target() -> void:
 	var td: TerrainData = _flat_terrain()
 	var unit: Unit = _make_unit(td)
 	unit.position = Vector3(10.0, 0.0, 10.0)
+	unit._sync_soa_pos()
 	unit.set_path(PackedVector3Array([Vector3(15.0, 0.0, 10.0), Vector3(15.0, 0.0, 18.0)]))
 	check(unit.state == Unit.State.MOVE, "unit is MOVE after set_path")
 	_tick_until_idle(unit)
@@ -50,6 +51,7 @@ func test_y_snapping_follows_terrain() -> void:
 	td.raise_area(Vector2(20.0, 20.0), 8.0, 4.0)
 	var unit: Unit = _make_unit(td)
 	unit.position = Vector3(12.0, 0.0, 20.0)
+	unit._sync_soa_pos()
 	unit.set_path(PackedVector3Array([Vector3(20.0, 0.0, 20.0)]))
 	var snapped_ok: bool = true
 	for i in range(200):
@@ -100,6 +102,7 @@ func test_waypoint_queue_in_order() -> void:
 	var td: TerrainData = _flat_terrain()
 	var unit: Unit = _make_unit(td)
 	unit.position = Vector3(10.0, 0.0, 10.0)
+	unit._sync_soa_pos()
 	var wp1: Vector3 = Vector3(14.0, 0.0, 10.0)
 	var wp2: Vector3 = Vector3(14.0, 0.0, 14.0)
 	var wp3: Vector3 = Vector3(10.0, 0.0, 14.0)
@@ -131,6 +134,7 @@ func test_patrol_repeats_route() -> void:
 	var td: TerrainData = _flat_terrain()
 	var unit: Unit = _make_unit(td)
 	unit.position = Vector3(10.0, 0.0, 10.0)
+	unit._sync_soa_pos()
 	var wp1: Vector3 = Vector3(13.0, 0.0, 10.0)
 	var wp2: Vector3 = Vector3(13.0, 0.0, 13.0)
 	var wp3: Vector3 = Vector3(10.0, 0.0, 13.0)
@@ -230,6 +234,7 @@ func test_facing_follows_movement() -> void:
 	var td: TerrainData = _flat_terrain()
 	var unit: Unit = _make_unit(td)
 	unit.position = Vector3(10.0, 0.0, 10.0)
+	unit._sync_soa_pos()
 	unit.set_path(PackedVector3Array([Vector3(14.0, 0.0, 10.0)]))
 	unit.tick(TICK)
 	check(unit.facing.distance_to(Vector3(1, 0, 0)) < 0.001,
@@ -244,6 +249,7 @@ func test_remaining_path_shrinks() -> void:
 	var td: TerrainData = _flat_terrain()
 	var unit: Unit = _make_unit(td)
 	unit.position = Vector3(10.0, 0.0, 10.0)
+	unit._sync_soa_pos()
 	unit.set_path(PackedVector3Array([Vector3(12.0, 0.0, 10.0), Vector3(14.0, 0.0, 10.0)]))
 	check(unit.get_remaining_path().size() == 2, "remaining path starts with 2 points")
 	for i in range(100):
@@ -264,12 +270,16 @@ func test_spatial_hash_radius_query() -> void:
 
 	var inside_a: Unit = _make_unit(td)
 	inside_a.position = Vector3(50.0, 5.0, 50.0)
+	inside_a._sync_soa_pos()
 	var inside_b: Unit = _make_unit(td)
 	inside_b.position = Vector3(53.0, 5.0, 52.0)
+	inside_b._sync_soa_pos()
 	var outside_near: Unit = _make_unit(td)
 	outside_near.position = Vector3(56.0, 5.0, 50.0)   # 6 m away
+	outside_near._sync_soa_pos()
 	var outside_far: Unit = _make_unit(td)
 	outside_far.position = Vector3(90.0, 5.0, 90.0)
+	outside_far._sync_soa_pos()
 	for unit: Unit in [inside_a, inside_b, outside_near, outside_far]:
 		manager.register(unit)
 	manager.tick(TICK)
@@ -283,6 +293,7 @@ func test_spatial_hash_radius_query() -> void:
 
 	# Moving a unit updates its hash cell on the next tick.
 	inside_b.position = Vector3(90.0, 5.0, 90.0)
+	inside_b._sync_soa_pos()
 	manager.tick(TICK)
 	found = manager.get_units_in_radius(Vector3(50.0, 5.0, 50.0), 5.0)
 	check(found.size() == 1, "moved unit left the radius after hash update")
@@ -301,6 +312,7 @@ func test_move_orders_form_groups_of_six() -> void:
 	for i in range(12):
 		var unit: Unit = _make_unit(td)
 		unit.position = Vector3(30.0 + float(i), 5.0, 30.0)
+		unit._sync_soa_pos()
 		units.append(unit)
 
 	var target: Vector3 = Vector3(80.0, 5.0, 80.0)
@@ -351,6 +363,7 @@ func test_path_queue_spreads_path_requests() -> void:
 		unit.nav_grid = nav
 		unit.path_service = manager
 		unit.position = Vector3(30.0 + float(i % 10) * 1.5, 5.0, 30.0 + float(i / 10) * 1.5)
+		unit._sync_soa_pos()
 		manager.register(unit)
 		units.append(unit)
 
@@ -398,7 +411,9 @@ func test_separation_pushes_overlapping_units_apart() -> void:
 	var a: Unit = _make_unit(td)
 	var b: Unit = _make_unit(td)
 	a.position = Vector3(50.0, 5.0, 50.0)
+	a._sync_soa_pos()
 	b.position = Vector3(50.0, 5.0, 50.0)   # full overlap
+	b._sync_soa_pos()
 	manager.register(a)
 	manager.register(b)
 

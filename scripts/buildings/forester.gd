@@ -172,6 +172,7 @@ func _return_to_world(brave: Brave) -> void:
 	unit_manager.register(brave)
 	var pos: Vector3 = edge_spawn_position()
 	brave.position = pos
+	brave._sync_soa_pos()
 	brave.forester_inside = false
 
 

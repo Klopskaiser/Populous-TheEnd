@@ -472,6 +472,7 @@ func test_uphill_slows_movement() -> void:
 	var climber: Unit = BRAVE_SCENE.instantiate() as Unit
 	climber.terrain_data = td
 	climber.position = Vector3(30, td.get_height(30, 30), 30)
+	climber._sync_soa_pos()
 	climber.set_path(PackedVector3Array([Vector3(38, 0, 30)]))
 	for i in range(10):
 		climber.tick(TICK)
@@ -933,8 +934,10 @@ func test_fireball_blocked_by_cliff_face() -> void:
 	var w: Dictionary = _make_cliff_world()
 	var shooter: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(36, 30))
 	shooter.position.y = 5.0
+	shooter._sync_soa_pos()
 	var target: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(44, 30))
 	target.position.y = 15.0
+	target._sync_soa_pos()
 	var hp_before: int = target.health
 	var ball: Fireball = Fireball.new()
 	ball.setup(shooter, target, shooter.position + Vector3(0.0, 1.1, 0.0))
@@ -955,8 +958,10 @@ func test_fireball_still_hits_on_flat_ground() -> void:
 	var w: Dictionary = _make_world()
 	var shooter: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(30, 30))
 	shooter.position.y = 5.0
+	shooter._sync_soa_pos()
 	var target: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(35, 30))
 	target.position.y = 5.0
+	target._sync_soa_pos()
 	var hp_before: int = target.health
 	var ball: Fireball = Fireball.new()
 	ball.setup(shooter, target, shooter.position + Vector3(0.0, 1.1, 0.0))
@@ -977,12 +982,14 @@ func test_trapped_attacker_throttles_failing_paths() -> void:
 	var w: Dictionary = _make_cliff_world()
 	var warrior: Unit = _spawn(w, WARRIOR_SCENE, 0, Vector2(38, 30))
 	warrior.position.y = 5.0
+	warrior._sync_soa_pos()
 	# 12 enemies on the plateau, inside the warrior's 8 m aggro radius but
 	# unreachable — more than the OLD cache cap of 8 (which cleared wholesale
 	# and thrashed forever).
 	for i in range(12):
 		var e: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(42.0 + float(i % 3), 27.0 + float(i / 3) * 2.0))
 		e.position.y = 15.0
+		e._sync_soa_pos()
 	Unit.dbg_plan_calls = 0
 	Unit.dbg_plan_fails = 0
 	for i in range(50):   # 5 simulated seconds

@@ -1,10 +1,21 @@
 class_name UnitManager extends Node
 
-## Registry and spatial hash for all units (child of Main).
+## Registry and spatial grid for all units (child of Main).
 ##
-## The spatial hash (cell size ~4 m) enables cheap radius queries for target
-## search and separation — never per-frame O(n^2) distance loops. The hash is
-## refreshed in tick() (called from _physics_process; tests call it manually).
+## Stufe C1 (data-oriented, plans/08d): the hot per-unit data lives in parallel
+## packed arrays (soa_*), indexed by Unit._idx (= the unit's slot in `units`;
+## append on register, swap-remove on unregister). The arrays are AUTHORITATIVE
+## for every hot loop here (grid build, separation, enemy scans) — position
+## writers double-write (array + Node3D.position, see Unit._snap_to_ground and
+## the external writer sites), event-driven flags mirror at their set sites.
+## There is deliberately NO per-tick object->array mirror (measured O(n) killer,
+## see PROGRESS "Stufe B").
+##
+## The spatial grid (cell size ~4 m, CSR layout: counting sort over soa_pos,
+## rebuilt once per tick) enables cheap radius queries for target search and
+## separation — never per-frame O(n^2) distance loops. Units registered since
+## the last build sit in _grid_extra (scanned linearly by queries); stale grid
+## entries after a swap-remove are filtered by the live index/position checks.
 ##
 ## Soft separation: units closer than SEPARATION_RADIUS push each other apart
 ## (each unit moves away from its neighbours, so pairs separate symmetrically).
@@ -102,16 +113,44 @@ var building_manager: BuildingManager = null
 ## → the synchronous, frame-budgeted queue below (tests, headless, A/B fallback).
 var path_worker: PathWorker = null
 
+## Registry, aligned with the soa_* arrays: units[i]._idx == i.
 var units: Array[Unit] = []
 ## Live projectiles (Fireball), ticked here after the units.
 var projectiles: Array = []
 ## Registered combat groups (phase 8.2); pruned in _apply_combat_groups.
 var combat_groups: Array = []
-var _hash: Dictionary[Vector2i, Array] = {}   # hash cell -> Array of Unit
 var _path_requests: Array[Unit] = []
 var _path_head: int = 0
 var _separation_phase: int = 0
 var _regroup_index: int = 0
+
+# --- SoA hot data (Stufe C1) --------------------------------------------------
+## Bit flags in soa_flags (event-mirrored via Unit._sync_soa_flags).
+const FLAG_FLIES: int = 1
+const FLAG_PUSH_IMMUNE: int = 2
+const FLAG_CREW_SEATED: int = 4
+const FLAG_TARGETABLE: int = 8
+
+var soa_pos: PackedVector3Array = PackedVector3Array()
+var soa_state: PackedInt32Array = PackedInt32Array()
+var soa_tribe: PackedInt32Array = PackedInt32Array()
+var soa_flags: PackedInt32Array = PackedInt32Array()
+var soa_veh_sep: PackedFloat32Array = PackedFloat32Array()
+var soa_sep_mult: PackedFloat32Array = PackedFloat32Array()
+## Separation passes spent tightly stacked (only the separation touches this).
+var soa_overlap: PackedInt32Array = PackedInt32Array()
+
+# --- Spatial grid (CSR buckets, rebuilt once per tick) -------------------------
+var _grid_w: int = 64                 # cells per axis (from terrain size)
+var _grid_cells: int = 64 * 64
+var _cell_count: PackedInt32Array = PackedInt32Array()   # scratch (doubles as fill cursor)
+var _cell_start: PackedInt32Array = PackedInt32Array()   # size _grid_cells + 1
+var _cell_units: PackedInt32Array = PackedInt32Array()   # unit indices, bucket-sorted
+var _unit_cell: PackedInt32Array = PackedInt32Array()    # scratch: cell id per unit
+## Units registered since the last grid build (queries scan these linearly).
+var _grid_extra: PackedInt32Array = PackedInt32Array()
+## units.size() at the last grid build (grid entries >= this are stale).
+var _grid_built: int = 0
 
 
 func setup(p_terrain_data: TerrainData, p_nav_grid: NavGrid,
@@ -122,6 +161,12 @@ func setup(p_terrain_data: TerrainData, p_nav_grid: NavGrid,
 	tribes = p_tribes
 	tree_manager = p_tree_manager
 	wood_pile_manager = p_wood_pile_manager
+	if terrain_data != null:
+		_grid_w = maxi(1, int(ceil(
+			float(terrain_data.size) * TerrainData.CELL_SIZE / HASH_CELL_SIZE)))
+	_grid_cells = _grid_w * _grid_w
+	_cell_count.resize(_grid_cells)
+	_cell_start.resize(_grid_cells + 1)
 
 
 ## In-game driver: ticks all units centrally (no per-unit _physics_process —
@@ -148,18 +193,51 @@ func _physics_process(delta: float) -> void:
 
 
 func tick(delta: float) -> void:
-	# Hash refresh, inlined (a function call per unit per tick adds up).
-	for unit in units:
-		var new_cell: Vector2i = Vector2i(
-			int(floor(unit.position.x / HASH_CELL_SIZE)),
-			int(floor(unit.position.z / HASH_CELL_SIZE)))
-		if new_cell != unit._hash_cell:
-			_move_hash_cell(unit, new_cell)
+	_rebuild_grid()
 	_drain_path_queue()
 	_apply_separation(delta)
 	_apply_combat_groups(delta)
 	_apply_idle_regroup(delta)
 	_tick_projectiles(delta)
+
+
+## Rebuilds the CSR bucket grid from the authoritative position arrays
+## (counting sort: count per cell, prefix sums, back-fill). Out-of-bounds
+## positions clamp into the edge cells. Queries between builds see units
+## registered afterwards via _grid_extra; swap-removed slots are filtered by
+## the callers' live index/position checks.
+func _rebuild_grid() -> void:
+	var n: int = units.size()
+	_grid_built = n
+	_grid_extra.clear()
+	if _cell_start.size() != _grid_cells + 1:   # setup() not called (bare tests)
+		_cell_count.resize(_grid_cells)
+		_cell_start.resize(_grid_cells + 1)
+	if _unit_cell.size() < n:
+		_unit_cell.resize(n)
+		_cell_units.resize(n)
+	_cell_count.fill(0)
+	var pos: PackedVector3Array = soa_pos
+	var inv: float = 1.0 / HASH_CELL_SIZE
+	var w: int = _grid_w
+	var top: int = w - 1
+	for i in range(n):
+		var p: Vector3 = pos[i]
+		var c: int = clampi(int(p.z * inv), 0, top) * w \
+			+ clampi(int(p.x * inv), 0, top)
+		_unit_cell[i] = c
+		_cell_count[c] += 1
+	var acc: int = 0
+	for c in range(_grid_cells):
+		_cell_start[c] = acc
+		acc += _cell_count[c]
+	_cell_start[_grid_cells] = acc
+	# Back-fill from the bucket ends, reusing _cell_count as the cursor.
+	for i in range(n):
+		var c: int = _unit_cell[i]
+		var slot: int = _cell_count[c] - 1
+		_cell_count[c] = slot
+		_cell_units[_cell_start[c] + slot] = i
 
 
 # --- Projectiles -------------------------------------------------------------------
@@ -244,60 +322,93 @@ func _drain_path_queue_async() -> void:
 func _apply_separation(delta: float) -> void:
 	if units.is_empty():
 		return
-	var slices: int = maxi(1, int(ceil(float(units.size()) / float(SEPARATION_UNITS_PER_TICK))))
+	# Flat SoA kernel (Stufe C1): everything hot reads/writes the packed arrays;
+	# the Unit object is only fetched for the rare cases (actual push, escape,
+	# full overlap). Grid entries can be one tick stale after a swap-remove —
+	# the live index guard + array positions keep the pass safe.
+	var n: int = units.size()
+	var pos: PackedVector3Array = soa_pos
+	var sstate: PackedInt32Array = soa_state
+	var sflags: PackedInt32Array = soa_flags
+	var sveh: PackedFloat32Array = soa_veh_sep
+	var cell_units: PackedInt32Array = _cell_units
+	var cell_start: PackedInt32Array = _cell_start
+	var st_dead: int = Unit.State.DEAD
+	var st_thrown: int = Unit.State.THROWN
+	var st_roll: int = Unit.State.ROLL
+	var grid_top: int = _grid_w - 1
+	var grid_n: int = mini(_grid_built, n)
+	var inv_cell: float = 1.0 / HASH_CELL_SIZE
+	var slices: int = maxi(1, int(ceil(float(n) / float(SEPARATION_UNITS_PER_TICK))))
 	if _separation_phase >= slices:
 		_separation_phase = 0
 	var max_step: float = SEPARATION_SPEED * delta * float(slices)
-	for index in range(_separation_phase, units.size(), slices):
-		var unit: Unit = units[index]
-		if unit.state == Unit.State.DEAD or unit.state == Unit.State.THROWN \
-				or unit.state == Unit.State.ROLL:
+	for index in range(_separation_phase, n, slices):
+		var st: int = sstate[index]
+		if st == st_dead or st == st_thrown or st == st_roll:
 			continue
+		var fl: int = sflags[index]
 		# Seated crew (airship deck AND ground siege/ram side slots) are pinned to
 		# their slots by _tick_crew; the flat separation would shove them off-slot
 		# and SNAP their Y onto the terrain for a frame (they flicker/vanish on
 		# slopes, user bug). They neither separate nor push others.
-		if unit.is_crew_seated():
+		if fl & FLAG_CREW_SEATED:
 			continue
 		# Vehicles (siege engines) are push_immune against pedestrians but keep
 		# a big spacing among EACH OTHER (their crews clip otherwise, phase
 		# 8.2); other push_immune units (tower/hut reserves) skip entirely.
-		var veh_r: float = unit.vehicle_separation
-		if unit.push_immune and veh_r <= 0.0:
+		var veh_r: float = sveh[index]
+		if (fl & FLAG_PUSH_IMMUNE) != 0 and veh_r <= 0.0:
 			continue
 		var radius: float = SEPARATION_RADIUS if veh_r <= 0.0 else veh_r
-		var push: Vector2 = Vector2.ZERO
-		var pos: Vector3 = unit.position
+		var own: Vector3 = pos[index]
+		var pos_x: float = own.x
+		var pos_z: float = own.z
+		var push_x: float = 0.0
+		var push_z: float = 0.0
 		var checks: int = SEPARATION_MAX_CHECKS
 		var tight: bool = false
-		var min_key: Vector2i = hash_key(pos - Vector3(radius, 0.0, radius))
-		var max_key: Vector2i = hash_key(pos + Vector3(radius, 0.0, radius))
-		for kz in range(min_key.y, max_key.y + 1):
-			for kx in range(min_key.x, max_key.x + 1):
-				var bucket: Array = _hash.get(Vector2i(kx, kz), [])
-				for other: Unit in bucket:
-					if other == unit or other.state == Unit.State.DEAD \
-							or other.state == Unit.State.THROWN \
-							or other.state == Unit.State.ROLL \
-							or other.is_crew_seated():
+		var kx0: int = clampi(int((pos_x - radius) * inv_cell), 0, grid_top)
+		var kx1: int = clampi(int((pos_x + radius) * inv_cell), 0, grid_top)
+		var kz0: int = clampi(int((pos_z - radius) * inv_cell), 0, grid_top)
+		var kz1: int = clampi(int((pos_z + radius) * inv_cell), 0, grid_top)
+		for kz in range(kz0, kz1 + 1):
+			var row: int = kz * _grid_w
+			for kx in range(kx0, kx1 + 1):
+				var c: int = row + kx
+				for k in range(cell_start[c], cell_start[c + 1]):
+					var j: int = cell_units[k]
+					if j == index or j >= grid_n:
 						continue
-					if veh_r > 0.0 and (other.vehicle_separation <= 0.0
-							or other.flies != unit.flies):
+					var stj: int = sstate[j]
+					if stj == st_dead or stj == st_thrown or stj == st_roll:
+						continue
+					var flj: int = sflags[j]
+					if flj & FLAG_CREW_SEATED:
+						continue
+					if veh_r > 0.0 and (sveh[j] <= 0.0
+							or ((flj ^ fl) & FLAG_FLIES) != 0):
 						continue   # vehicles separate only vs same-layer vehicles
 						# (airships vs airships, ground vs ground — an airship is
 						# never pushed by the ground vehicles it flies over)
 					checks -= 1
-					var away: Vector2 = Vector2(pos.x - other.position.x, pos.z - other.position.z)
-					var dist: float = away.length()
+					var pj: Vector3 = pos[j]
+					var away_x: float = pos_x - pj.x
+					var away_z: float = pos_z - pj.z
+					var dist: float = sqrt(away_x * away_x + away_z * away_z)
 					if dist < radius:
 						if dist < radius * OVERLAP_TIGHT_FACTOR:
 							tight = true   # visibly stacked (sprite flicker)
 						if dist < 0.001:
 							# Full overlap: deterministic per-unit direction.
-							var angle: float = float(unit.get_instance_id() % 628) * 0.01
-							away = Vector2(cos(angle), sin(angle))
+							var angle: float = float(
+								units[index].get_instance_id() % 628) * 0.01
+							away_x = cos(angle)
+							away_z = sin(angle)
 							dist = 0.001
-						push += away / dist * (radius - dist)
+						var f: float = (radius - dist) / dist
+						push_x += away_x * f
+						push_z += away_z * f
 					if checks <= 0:
 						break
 				if checks <= 0:
@@ -308,35 +419,41 @@ func _apply_separation(delta: float) -> void:
 		# several passes (walled in) -> walk it to a free nearby cell.
 		# Pedestrians only — a vehicle resolves via the push alone.
 		if tight and veh_r <= 0.0:
-			unit.overlap_ticks += 1
-			if unit.overlap_ticks >= OVERLAP_ESCAPE_PASSES \
-					and unit.state == Unit.State.IDLE:
-				unit.overlap_ticks = 0
-				var free_cell: Vector2i = find_free_cell_near(pos)
+			var ticks: int = soa_overlap[index] + 1
+			soa_overlap[index] = ticks
+			if ticks >= OVERLAP_ESCAPE_PASSES and st == Unit.State.IDLE:
+				soa_overlap[index] = 0
+				var free_cell: Vector2i = find_free_cell_near(own)
 				if free_cell.x >= 0 and nav_grid != null:
-					unit.order_move(nav_grid.cell_to_world(free_cell))
+					units[index].order_move(nav_grid.cell_to_world(free_cell))
 				continue
-		else:
-			unit.overlap_ticks = 0
-		if push == Vector2.ZERO:
+		elif soa_overlap[index] != 0:
+			soa_overlap[index] = 0
+		if push_x == 0.0 and push_z == 0.0:
 			continue
 		# Airships shove clear much faster than ground units drift apart.
-		var step_cap: float = max_step * unit.separation_speed_mult
-		if push.length() > step_cap:
-			push = push.normalized() * step_cap
-		var nx: float = pos.x + push.x
-		var nz: float = pos.z + push.y
+		var step_cap: float = max_step * soa_sep_mult[index]
+		var push_len: float = sqrt(push_x * push_x + push_z * push_z)
+		if push_len > step_cap:
+			var scale: float = step_cap / push_len
+			push_x *= scale
+			push_z *= scale
+		var nx: float = pos_x + push_x
+		var nz: float = pos_z + push_z
 		# Flyers may be pushed over water/blocked ground (they fly); ground units
 		# must not be shoved into an unwalkable cell.
-		if not unit.flies and nav_grid != null and not nav_grid.is_cell_walkable(
+		var is_flyer: bool = (fl & FLAG_FLIES) != 0
+		if not is_flyer and nav_grid != null and not nav_grid.is_cell_walkable(
 				nav_grid.world_to_cell(Vector3(nx, 0.0, nz))):
 			continue
-		unit.position.x = nx
-		unit.position.z = nz
 		# Ground units snap to the terrain; a flyer keeps its own altitude
 		# (its _snap_to_ground runs each tick) — never drop it to the ground.
-		if terrain_data != null and not unit.flies:
-			unit.position.y = terrain_data.get_height(nx, nz)
+		var ny: float = own.y
+		if terrain_data != null and not is_flyer:
+			ny = terrain_data.get_height(nx, nz)
+		var moved: Vector3 = Vector3(nx, ny, nz)
+		pos[index] = moved
+		units[index].position = moved
 	_separation_phase = (_separation_phase + 1) % slices
 
 
@@ -606,20 +723,57 @@ func find_free_cell_near(pos: Vector3) -> Vector2i:
 # --- Registry -------------------------------------------------------------------
 
 func register(unit: Unit) -> void:
-	if unit in units:
+	if unit._idx >= 0:
 		return
+	unit._idx = units.size()
 	units.append(unit)
 	unit.in_world = true
+	# SoA slots (Stufe C1): captured from the unit's current fields; position
+	# writers double-write from here on, flags mirror at their event sites.
+	soa_pos.append(unit.position)
+	soa_state.append(unit.state)
+	soa_tribe.append(unit.tribe_id)
+	soa_flags.append(unit._compute_soa_flags())
+	soa_veh_sep.append(unit.vehicle_separation)
+	soa_sep_mult.append(unit.separation_speed_mult)
+	soa_overlap.append(0)
+	unit._bind_soa(self)
+	_grid_extra.append(unit._idx)   # visible to queries before the next build
 	unit.died.connect(_on_unit_died)
 	unit.corpse_expired.connect(_on_corpse_expired)
 	unit.converted.connect(_on_unit_converted)
-	_update_hash_cell(unit)
 	if unit_renderer != null and unit.renders_as_sprite():
 		unit_renderer.register_unit(unit)   # siege engines draw their own model
 
 
+## Swap-remove (same pattern as UnitRenderer.unregister_unit): the last slot's
+## unit moves into the freed slot across `units` and every soa_* array. Stale
+## grid entries pointing at the old last slot are dropped by the queries' index
+## guard until the next rebuild.
 func unregister(unit: Unit) -> void:
-	units.erase(unit)
+	var index: int = unit._idx
+	if index >= 0:
+		var last: int = units.size() - 1
+		var moved: Unit = units[last]
+		units[index] = moved
+		units.remove_at(last)
+		soa_pos[index] = soa_pos[last]
+		soa_state[index] = soa_state[last]
+		soa_tribe[index] = soa_tribe[last]
+		soa_flags[index] = soa_flags[last]
+		soa_veh_sep[index] = soa_veh_sep[last]
+		soa_sep_mult[index] = soa_sep_mult[last]
+		soa_overlap[index] = soa_overlap[last]
+		soa_pos.resize(last)
+		soa_state.resize(last)
+		soa_tribe.resize(last)
+		soa_flags.resize(last)
+		soa_veh_sep.resize(last)
+		soa_sep_mult.resize(last)
+		soa_overlap.resize(last)
+		if moved != unit:
+			moved._idx = index
+		unit._idx = -1
 	unit.in_world = false
 	# Leaving the world ends the unit's fight: its own group dissolves (the
 	# attackers retarget) and any attacker/waiter seat is released (phase 8.2).
@@ -631,9 +785,6 @@ func unregister(unit: Unit) -> void:
 		unit.corpse_expired.disconnect(_on_corpse_expired)
 	if unit.converted.is_connected(_on_unit_converted):
 		unit.converted.disconnect(_on_unit_converted)
-	if _hash.has(unit._hash_cell):
-		_hash[unit._hash_cell].erase(unit)
-	unit._hash_cell = Vector2i(2147483647, 2147483647)
 	if unit_renderer != null:
 		unit_renderer.unregister_unit(unit)
 
@@ -665,8 +816,11 @@ func _on_corpse_expired(unit: Unit) -> void:
 	unit.queue_free()
 
 
-## Preacher conversion switched the unit's tribe: refresh its rendered colour.
+## Preacher conversion switched the unit's tribe: mirror the SoA slot and
+## refresh its rendered colour.
 func _on_unit_converted(unit: Unit) -> void:
+	if unit._idx >= 0:
+		soa_tribe[unit._idx] = unit.tribe_id
 	if unit_renderer != null:
 		unit_renderer.update_unit_color(unit)
 
@@ -698,27 +852,14 @@ func spawn_unit(scene: PackedScene, tribe_id: int, pos: Vector3) -> Unit:
 	return unit
 
 
-# --- Spatial hash ----------------------------------------------------------------
+# --- Spatial grid ----------------------------------------------------------------
 
+## Cell key on the (unclamped) infinite grid — still used by the combat-group
+## anchor hash (its own small dictionary, not the unit grid).
 func hash_key(pos: Vector3) -> Vector2i:
 	return Vector2i(
 		int(floor(pos.x / HASH_CELL_SIZE)),
 		int(floor(pos.z / HASH_CELL_SIZE)))
-
-
-func _update_hash_cell(unit: Unit) -> void:
-	var new_cell: Vector2i = hash_key(unit.position)
-	if new_cell != unit._hash_cell:
-		_move_hash_cell(unit, new_cell)
-
-
-func _move_hash_cell(unit: Unit, new_cell: Vector2i) -> void:
-	if _hash.has(unit._hash_cell):
-		_hash[unit._hash_cell].erase(unit)
-	if not _hash.has(new_cell):
-		_hash[new_cell] = []
-	_hash[new_cell].append(unit)
-	unit._hash_cell = new_cell
 
 
 ## All units within radius (XZ distance) around pos. `max_count` > 0 caps the
@@ -726,18 +867,42 @@ func _move_hash_cell(unit: Unit, new_cell: Vector2i) -> void:
 ## a thousands-entry array PER CALLER and dominates the tick.
 func get_units_in_radius(pos: Vector3, radius: float, max_count: int = 0) -> Array[Unit]:
 	var result: Array[Unit] = []
-	var min_key: Vector2i = hash_key(pos - Vector3(radius, 0.0, radius))
-	var max_key: Vector2i = hash_key(pos + Vector3(radius, 0.0, radius))
-	var flat_pos: Vector2 = Vector2(pos.x, pos.z)
-	for kz in range(min_key.y, max_key.y + 1):
-		for kx in range(min_key.x, max_key.x + 1):
-			var bucket: Array = _hash.get(Vector2i(kx, kz), [])
-			for unit: Unit in bucket:
-				var flat: Vector2 = Vector2(unit.position.x, unit.position.z)
-				if flat.distance_to(flat_pos) <= radius:
-					result.append(unit)
+	var n: int = units.size()
+	var grid_n: int = mini(_grid_built, n)
+	var pos_arr: PackedVector3Array = soa_pos
+	var r2: float = radius * radius
+	var inv_cell: float = 1.0 / HASH_CELL_SIZE
+	var grid_top: int = _grid_w - 1
+	var kx0: int = clampi(int((pos.x - radius) * inv_cell), 0, grid_top)
+	var kx1: int = clampi(int((pos.x + radius) * inv_cell), 0, grid_top)
+	var kz0: int = clampi(int((pos.z - radius) * inv_cell), 0, grid_top)
+	var kz1: int = clampi(int((pos.z + radius) * inv_cell), 0, grid_top)
+	for kz in range(kz0, kz1 + 1):
+		var row: int = kz * _grid_w
+		for kx in range(kx0, kx1 + 1):
+			var c: int = row + kx
+			for k in range(_cell_start[c], _cell_start[c + 1]):
+				var i: int = _cell_units[k]
+				if i >= grid_n:
+					continue   # stale slot (unregistered since the grid build)
+				var pi: Vector3 = pos_arr[i]
+				var dx: float = pi.x - pos.x
+				var dz: float = pi.z - pos.z
+				if dx * dx + dz * dz <= r2:
+					result.append(units[i])
 					if max_count > 0 and result.size() >= max_count:
 						return result
+	# Units registered since the last grid build.
+	for e in _grid_extra:
+		if e < _grid_built or e >= n:
+			continue
+		var pe: Vector3 = pos_arr[e]
+		var dx: float = pe.x - pos.x
+		var dz: float = pe.z - pos.z
+		if dx * dx + dz * dz <= r2:
+			result.append(units[e])
+			if max_count > 0 and result.size() >= max_count:
+				return result
 	return result
 
 
@@ -754,36 +919,70 @@ func get_units_in_radius(pos: Vector3, radius: float, max_count: int = 0) -> Arr
 func get_enemy_candidates(pos: Vector3, radius: float, enemy_of: int,
 		max_count: int, max_examined: int = SCAN_MAX_EXAMINED) -> Array[Unit]:
 	var result: Array[Unit] = []
+	var n: int = units.size()
+	var grid_n: int = mini(_grid_built, n)
+	var pos_arr: PackedVector3Array = soa_pos
+	var sstate: PackedInt32Array = soa_state
+	var stribe: PackedInt32Array = soa_tribe
+	var sflags: PackedInt32Array = soa_flags
+	var st_dead: int = Unit.State.DEAD
+	var r2: float = radius * radius
 	var center: Vector2i = hash_key(pos)
 	var cell_r: int = int(ceil(radius / HASH_CELL_SIZE))
-	var flat_pos: Vector2 = Vector2(pos.x, pos.z)
+	var w: int = _grid_w
 	var examined: int = 0
 	for r in range(0, cell_r + 1):
 		var z0: int = center.y - r
 		var z1: int = center.y + r
 		for kz in range(z0, z1 + 1):
+			if kz < 0 or kz >= w:
+				continue
 			# Inner rows of the ring only contribute their left/right edge cells.
 			var edge_row: bool = kz == z0 or kz == z1
+			var row: int = kz * w
 			var kx: int = center.x - r
 			var x1: int = center.x + r
 			while kx <= x1:
-				var bucket: Array = _hash.get(Vector2i(kx, kz), [])
-				for unit: Unit in bucket:
-					examined += 1
-					if examined > max_examined:
-						return result   # budget spent (possibly mid-bucket)
-					if unit.tribe_id == enemy_of or unit.state == Unit.State.DEAD \
-							or not unit.is_targetable():
-						continue
-					if Vector2(unit.position.x, unit.position.z).distance_to(flat_pos) \
-							<= radius:
-						result.append(unit)
-						if result.size() >= max_count:
-							return result
+				if kx >= 0 and kx < w:
+					var c: int = row + kx
+					for k in range(_cell_start[c], _cell_start[c + 1]):
+						var i: int = _cell_units[k]
+						if i >= grid_n:
+							continue   # stale slot (unregistered since the build)
+						examined += 1
+						if examined > max_examined:
+							return result   # budget spent (possibly mid-bucket)
+						if stribe[i] == enemy_of or sstate[i] == st_dead \
+								or (sflags[i] & FLAG_TARGETABLE) == 0:
+							continue
+						var pi: Vector3 = pos_arr[i]
+						var dx: float = pi.x - pos.x
+						var dz: float = pi.z - pos.z
+						if dx * dx + dz * dz <= r2:
+							result.append(units[i])
+							if result.size() >= max_count:
+								return result
 				if edge_row or r == 0:
 					kx += 1
 				else:
 					kx = x1 if kx < x1 else x1 + 1
+	# Units registered since the last grid build (same filters/budget).
+	for e in _grid_extra:
+		if e < _grid_built or e >= n:
+			continue
+		examined += 1
+		if examined > max_examined:
+			return result
+		if stribe[e] == enemy_of or sstate[e] == st_dead \
+				or (sflags[e] & FLAG_TARGETABLE) == 0:
+			continue
+		var pe: Vector3 = pos_arr[e]
+		var dx: float = pe.x - pos.x
+		var dz: float = pe.z - pos.z
+		if dx * dx + dz * dz <= r2:
+			result.append(units[e])
+			if result.size() >= max_count:
+				return result
 	return result
 
 
