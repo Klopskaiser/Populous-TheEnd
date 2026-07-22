@@ -228,6 +228,10 @@ func burst_into_wood() -> void:
 	_death_sfx = &"siege_death_burst"   # torn apart by the tornado
 	if _model != null:
 		_model.visible = false
+	# Visibly burst apart at the tornado tip (was silently hiding the model —
+	# user report: lifted vehicles never "burst", no effect). Same debris burst
+	# as the terrain-rip death; the tornado additionally scatters its wood chunks.
+	_spawn_burst_debris()
 	health = 0
 	_die()
 
@@ -269,14 +273,21 @@ func _destroy_vehicle(burst: bool) -> void:
 	if burst:
 		if _model != null:
 			_model.visible = false
-		if path_service != null:
-			var debris: BuildingDebris = BuildingDebris.new()
-			debris.setup(position, 1.5, terrain_data)
-			path_service.register_projectile(debris)
+		_spawn_burst_debris()
 	else:
 		_sinking = true
 	health = 0
 	_die()
+
+
+## Debris burst effect at the current position (a vehicle bursting apart). Shared
+## by the terrain-rip death and the tornado-tip burst.
+func _spawn_burst_debris() -> void:
+	if path_service == null:
+		return
+	var debris: BuildingDebris = BuildingDebris.new()
+	debris.setup(position, 1.5, terrain_data)
+	path_service.register_projectile(debris)
 
 
 ## Height span under the chassis (4 corner samples along the facing).

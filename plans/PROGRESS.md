@@ -9,6 +9,16 @@ Verifikationsstand. Auch bei nachträglichen Erweiterungen außerhalb einer Phas
 
 ---
 
+## Bugfix: Tornado-Fahrzeugtod ohne Berst-Effekt (2026-07-20)
+
+**Symptom:** Vom Tornado hochgehobene Rammen/Katapulte „zerplatzten" nicht sichtbar — der
+grafische Effekt fehlte. **Ursache** (`crewed_vehicle.gd` `burst_into_wood`): Der Tornado-Tod
+versteckte nur das Modell und überließ dem Vortex 2 spiralnde Holz-Chunks; anders als der
+Terrain-Riss-Tod (`_destroy_vehicle(true)`), der einen `BuildingDebris`-Berst spawnt.
+**Fix:** gemeinsamer Helper `_spawn_burst_debris()`, den **beide** Todespfade nutzen — das
+Fahrzeug zerplatzt jetzt sichtbar am Tornado-Zipfel. Test `test_siege.gd`
+(`test_tornado_lifts_and_bursts_catapult`: prüft zusätzlich einen `BuildingDebris`-Berst).
+
 ## Bugfix: Luftschiff-Auswahlring-Oval dreht nicht mit (2026-07-20)
 
 **Symptom:** Der ovale Auswahlring des Luftschiffs blieb welt-achsenausgerichtet und drehte

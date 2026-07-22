@@ -1134,6 +1134,11 @@ func test_tornado_lifts_and_bursts_catapult() -> void:
 		if p is TornadoDebris and p.wood == 1:
 			chunks += 1
 	check(chunks == 2, "the burst leaves two 1-wood chunks flying")
+	var bursts: int = 0
+	for p in w.unit_manager.projectiles:
+		if p is BuildingDebris:
+			bursts += 1
+	check(bursts >= 1, "the tornado burst also spawns a visible debris effect")
 	# They fling and settle into 2 wood total.
 	var t: int = 0
 	while not w.unit_manager.projectiles.is_empty() and t < 400:
