@@ -258,15 +258,14 @@ func _refresh_conversion() -> void:
 				if u.converting_preacher == self:
 					responsible = true
 				continue
-			# Fight inertia: an already-fighting unit sometimes keeps brawling
-			# for now (retried on the next scan).
+			# In range and NOT a peer's victim: this one is mine to work on, so I
+			# stay and channel (responsible) even if fight-inertia holds the actual
+			# pacify for a scan — leaving now would let it hit me and drag me into
+			# a melee it never gets converted from (regression fix).
+			responsible = true
 			if u.state == State.ATTACK and randf() < FIGHT_INERTIA_CHANCE:
 				continue
-			# In range and free: pacify it (in-range beats a peer merely walking
-			# toward it, so we don't defer to _claimed_by_peer here).
-			if u.begin_conversion(self,
-					randf_range(CONVERT_TIME_MIN, CONVERT_TIME_MAX)):
-				responsible = true
+			u.begin_conversion(self, randf_range(CONVERT_TIME_MIN, CONVERT_TIME_MAX))
 		elif u.state != State.SIT:
 			if d < d_any:
 				d_any = d
