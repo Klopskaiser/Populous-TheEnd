@@ -188,3 +188,29 @@ func test_selection_tolerates_freed_unit() -> void:
 	sm.free()
 	live.free()
 	live2.free()
+
+
+# --- Selection ring basis (oval must rotate with the platform) ----------------
+
+## The airship's oval selection ring must keep its LONG axis along `facing` at
+## any heading. Basis.scaled() (world-axis scaling) pinned the ellipse to the
+## world axes so it never turned with the deck; ring_basis uses scaled_local.
+func test_selection_ring_oval_follows_facing() -> void:
+	var ext: Vector2 = Vector2(3.3, 6.0)
+	# Diagonal facing: a world-axis-scaled ellipse (the bug) would misalign here.
+	var facing: Vector3 = Vector3(1, 0, 1).normalized()
+	var b: Basis = SelectionRingRenderer.ring_basis(facing, true, ext)
+	var long_axis: Vector3 = b * Vector3(0, 0, 1)   # local +Z = oval long axis
+	check(absf(long_axis.length() - 6.0) < 0.01, "long axis carries the long extent (~6 m)")
+	check(long_axis.normalized().dot(facing) > 0.999, "the oval long axis follows facing")
+	var short_axis: Vector3 = b * Vector3(1, 0, 0)  # local +X = oval short axis
+	check(absf(short_axis.length() - 3.3) < 0.01, "short axis carries the short extent (~3.3 m)")
+	check(absf(short_axis.normalized().dot(facing)) < 0.001, "short axis is perpendicular to facing")
+
+
+## A circle (equal extents, not oriented) is unaffected by facing.
+func test_selection_ring_circle_is_uniform() -> void:
+	var b: Basis = SelectionRingRenderer.ring_basis(
+		Vector3(1, 0, 1).normalized(), false, Vector2(4.5, 4.5))
+	check(absf((b * Vector3(0, 0, 1)).length() - 4.5) < 0.01, "circle keeps its radius on Z")
+	check(absf((b * Vector3(1, 0, 0)).length() - 4.5) < 0.01, "circle keeps its radius on X")

@@ -54,12 +54,20 @@ func _process(_delta: float) -> void:
 		# Per-unit ring size via the instance scale (siege engine: one big
 		# ring around vehicle + crew, phase 7f). Non-circular rings (airship
 		# deck) scale per axis and rotate to the unit's facing.
-		var ext: Vector2 = unit.selection_ring_extents()
-		var basis: Basis = Basis.IDENTITY
-		if unit.selection_ring_oriented() and unit.facing.length_squared() > 0.000001:
-			basis = Basis(Vector3.UP, atan2(unit.facing.x, unit.facing.z))
-		basis = basis.scaled(Vector3(ext.x, 1.0, ext.y))
-		_multimesh.set_instance_transform(count, Transform3D(
-			basis, unit.position + Vector3(0.0, RING_HEIGHT, 0.0)))
+		var basis: Basis = ring_basis(
+			unit.facing, unit.selection_ring_oriented(), unit.selection_ring_extents())
 		count += 1
 	_multimesh.visible_instance_count = count
+
+
+## Ring transform basis: a per-axis scaled (oval) ring aligned to `facing` when
+## `oriented`, else a plain scaled circle. Scaling must be applied in the ROTATED
+## LOCAL frame (scaled_local = self * from_scale) so the oval's long axis follows
+## `facing`. Basis.scaled() pre-multiplies (world-axis scaling), which pins the
+## ellipse to the world axes — the oval then never turns with the platform (bug).
+## For a circle (ext.x == ext.y) both are identical.
+static func ring_basis(facing: Vector3, oriented: bool, ext: Vector2) -> Basis:
+	var basis: Basis = Basis.IDENTITY
+	if oriented and facing.length_squared() > 0.000001:
+		basis = Basis(Vector3.UP, atan2(facing.x, facing.z))
+	return basis.scaled_local(Vector3(ext.x, 1.0, ext.y))

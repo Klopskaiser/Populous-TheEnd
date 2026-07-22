@@ -9,6 +9,19 @@ Verifikationsstand. Auch bei nachträglichen Erweiterungen außerhalb einer Phas
 
 ---
 
+## Bugfix: Luftschiff-Auswahlring-Oval dreht nicht mit (2026-07-20)
+
+**Symptom:** Der ovale Auswahlring des Luftschiffs blieb welt-achsenausgerichtet und drehte
+nicht mit der Plattform mit → verrutscht bei gedrehtem Deck.
+**Ursache** (`selection_ring_renderer.gd`): Der Ring-Basis wurde per `Basis.scaled()`
+skaliert — das **prä**-multipliziert die Skalierung (Welt-Achsen), sodass ein rotierter Kreis
+zu einer welt-achsenausgerichteten Ellipse wird (Langachse immer entlang Welt-Z, unabhängig
+von `facing`).
+**Fix:** neue statische `ring_basis(facing, oriented, ext)` nutzt `scaled_local()`
+(**post**-multipliziert → Skalierung im rotierten lokalen Frame), sodass die Langachse
+`facing` folgt. Für Kreise (gleiche Extents) unverändert. Tests `test_ui_logic.gd`
+(`test_selection_ring_oval_follows_facing`, `..._circle_is_uniform`).
+
 ## Feinschliff: Feuerramme-Stand-off auf 4 m (2026-07-20)
 
 **Wunsch (Spieltest):** Die Ramme fuhr sehr nah an Gegner heran, obwohl locker in
