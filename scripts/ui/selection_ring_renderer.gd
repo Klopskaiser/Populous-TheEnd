@@ -56,6 +56,8 @@ func _process(_delta: float) -> void:
 		# deck) scale per axis and rotate to the unit's facing.
 		var basis: Basis = ring_basis(
 			unit.facing, unit.selection_ring_oriented(), unit.selection_ring_extents())
+		_multimesh.set_instance_transform(count, Transform3D(
+			basis, unit.position + Vector3(0.0, RING_HEIGHT, 0.0)))
 		count += 1
 	_multimesh.visible_instance_count = count
 
