@@ -184,9 +184,7 @@ func _simulate(label: String, um: UnitManager, ticks: int, window_from: int = 0)
 	var regroup_us: int = 0
 	for t in range(ticks):
 		var t0: int = Time.get_ticks_usec()
-		for unit in um.units.duplicate():
-			if is_instance_valid(unit):
-				unit.tick(TICK)
+		um.tick_units(TICK)   # kernel pass + object ticks (like _physics_process)
 		var t1: int = Time.get_ticks_usec()
 		um._rebuild_grid()   # Stufe C1: CSR grid from the SoA arrays
 		var t2: int = Time.get_ticks_usec()

@@ -143,6 +143,59 @@ var soa_sep_mult: PackedFloat32Array = PackedFloat32Array()
 ## Separation passes spent tightly stacked (only the separation touches this).
 var soa_overlap: PackedInt32Array = PackedInt32Array()
 
+# --- Combat/move-kernel SoA (Stufe C2, plans/08e) --------------------------------
+## Hold modes (soa_mode): what the kernel services while a unit is held.
+const HOLD_MELEE: int = 0    # in melee range, cooldown running (strike = drop)
+const HOLD_FIRE: int = 1     # firewarrior standing in (melee, fire] band
+const HOLD_MOVE: int = 2     # State.MOVE, walking its planned path (C2.4)
+const HOLD_CHASE: int = 3    # ATTACK approach on a planned path (melee unit)
+const HOLD_CHASE_FIRE: int = 4   # ATTACK approach of a firewarrior (fire range)
+const HOLD_WAIT: int = 5     # second-row waiter standing near its fight
+const HOLD_CORPSE: int = 6   # DEAD, lying flat until the sink phase begins
+const HOLD_PANIC: int = 7    # panicked flight hop (redirect timer in goal.x)
+## Attack-target handle per unit: slot index of attack_target (-1 = none),
+## mirrored at every attack_target write (Unit._sync_soa_target). Because
+## unregister swap-removes slots, the handle alone could silently point at a
+## DIFFERENT unit — soa_tgen stores the slot generation at write time and the
+## kernel validates it against _slot_gen (one compare). A mismatch is never an
+## error: the unit just drops to its object tick, which re-syncs the handle.
+var soa_target: PackedInt32Array = PackedInt32Array()
+var soa_tgen: PackedInt32Array = PackedInt32Array()
+## Hold state: -1 = normal object tick; >= 0 = the unit is HELD by the kernel.
+## For the stand modes (HOLD_MELEE/FIRE) the value is the remaining attack
+## cooldown (written back into Unit._attack_cooldown on drop); the path modes
+## use it as a plain held-marker. While held the unit's object tick is skipped
+## entirely (tick_units); the kernel services it over the arrays and drops it
+## back on any event: strike/shot due, target lost/dead/SIT/converted, out of
+## band, waypoint reached, scan due, steep downhill (stumble zone). Entered
+## only by Unit._enter_soa_hold*, cleared by the kernel and by
+## Unit._clear_soa_hold (state change, knockback, burn, new path...).
+var soa_hold: PackedFloat32Array = PackedFloat32Array()
+var soa_mode: PackedInt32Array = PackedInt32Array()
+## Scan-cadence timer of a held unit (-1 = none). Runs for holds whose object
+## code scans on the 0.25-s cadence (fire stand: threat/priest reaction;
+## aggressive move: engage-on-sight; firewarrior chase): the kernel drops the
+## unit back exactly when its next scan is due, so reactions keep their window.
+var soa_scan: PackedFloat32Array = PackedFloat32Array()
+## Current waypoint of a path hold (HOLD_MOVE/CHASE*): the kernel walks toward
+## it and drops the unit for the waypoint switch (object _advance_path).
+var soa_wp: PackedVector3Array = PackedVector3Array()
+## Chase modes: the TARGET's position at plan time. The object approach
+## re-plans once its goal drifted > 1 m — the slot offset is constant per
+## slot, so target drift == goal drift and the kernel checks it exactly.
+var soa_goal: PackedVector3Array = PackedVector3Array()
+## Walk speed (Unit.speed), captured at register — static per unit kind.
+var soa_speed: PackedFloat32Array = PackedFloat32Array()
+## Knockback-density accumulator of HELD units (fireball salvos): captured
+## from Unit.knockback_accum at hold entry, decayed by the kernel while held,
+## written back on drop/clear. Without this, every fireball splash locked its
+## victims out of the kernel until the accumulator decayed on object ticks.
+var soa_kb: PackedFloat32Array = PackedFloat32Array()
+## Per-slot occupancy generation: bumped in unregister for both touched slots
+## (the freed index and the vacated last slot); never shrinks. Stored handles
+## whose generation no longer matches are stale and fail validation.
+var _slot_gen: PackedInt32Array = PackedInt32Array()
+
 # --- Spatial grid (CSR buckets, rebuilt once per tick) -------------------------
 var _grid_w: int = 64                 # cells per axis (from terrain size)
 var _grid_cells: int = 64 * 64
@@ -198,13 +251,271 @@ func _exit_tree() -> void:
 
 
 func _physics_process(delta: float) -> void:
-	# Iterate a snapshot: an expiring corpse deregisters itself mid-loop via the
-	# corpse_expired signal (erasing from `units`), which would otherwise skip
-	# elements. Dead units still tick — their tick runs the corpse decay.
-	for unit in units.duplicate():
+	tick_units(delta)
+	tick(delta)
+
+
+## The central unit loop (Stufe C2, plans/08e): first the flat combat kernel
+## services every HELD unit over the SoA arrays (no object access), then the
+## object ticks run for everyone else. Iterates a snapshot: an expiring corpse
+## deregisters itself mid-loop via the corpse_expired signal (erasing from
+## `units`), which would otherwise skip elements. Dead units still tick —
+## their tick runs the corpse decay.
+func tick_units(delta: float) -> void:
+	_run_combat_kernels(delta)   # fills _obj_tick with every non-held unit
+	for unit in _obj_tick:
 		if is_instance_valid(unit):
 			unit.tick(delta)
-	tick(delta)
+
+
+## Units to object-tick this frame, collected by the kernel pass (everyone it
+## does not hold). Snapshot semantics like the old units.duplicate() loop:
+## units (un)registered mid-loop are picked up next frame / tick once more.
+var _obj_tick: Array[Unit] = []
+
+
+## Round-robin phase of the staggered facing refresh (held units barely turn —
+## a full _face_point per tick is object-property cost for nothing).
+var _kernel_tick: int = 0
+
+
+## Flat combat/move kernel (Stufe C2): one pass over the SoA arrays servicing
+## every held unit — target-handle validation (generation compare), liveness/
+## tribe/targetable/SIT checks, per-mode distance band or waypoint step, the
+## attack cooldown (stand modes) and the scan-cadence timer. Anything beyond
+## "keep holding" drops the unit back to its object tick THIS tick: soa_hold
+## resets to -1 and the decremented timers are written back (minus this tick's
+## delta — the object tick re-applies it), so no time is ever counted twice.
+## Path modes read the terrain heightmap directly (inline bilinear lerp) — a
+## get_height object call per mover would eat most of the kernel's win.
+func _run_combat_kernels(delta: float) -> void:
+	_kernel_tick += 1
+	var n: int = units.size()
+	if n == 0:
+		return
+	var hold: PackedFloat32Array = soa_hold
+	var mode_arr: PackedInt32Array = soa_mode
+	var scan: PackedFloat32Array = soa_scan
+	var tgt: PackedInt32Array = soa_target
+	var tgen: PackedInt32Array = soa_tgen
+	var gen: PackedInt32Array = _slot_gen
+	var pos: PackedVector3Array = soa_pos
+	var wp_arr: PackedVector3Array = soa_wp
+	var goal_arr: PackedVector3Array = soa_goal
+	var speed_arr: PackedFloat32Array = soa_speed
+	var sstate: PackedInt32Array = soa_state
+	var stribe: PackedInt32Array = soa_tribe
+	var sflags: PackedInt32Array = soa_flags
+	var st_attack: int = Unit.State.ATTACK
+	var st_move: int = Unit.State.MOVE
+	var st_dead: int = Unit.State.DEAD
+	var st_sit: int = Unit.State.SIT
+	var st_panic: int = Unit.State.PANIC
+	var melee_r2: float = Balance.MELEE_RANGE * Balance.MELEE_RANGE
+	var fire_r2: float = Balance.FIREWARRIOR_FIRE_RANGE * Balance.FIREWARRIOR_FIRE_RANGE
+	var direct_r2: float = Unit.COMBAT_DIRECT_RANGE * Unit.COMBAT_DIRECT_RANGE
+	# Waiters ring around the group ANCHOR, which may trail the defender by up
+	# to 2x the wait radius — the drop band must cover that, or the wait hold
+	# never engages (the fine positioning keeps its 0.25-s scan cadence).
+	var wait_r2: float = (Unit.MELEE_WAIT_RADIUS * 2.0 + 0.6) \
+		* (Unit.MELEE_WAIT_RADIUS * 2.0 + 0.6)
+	var arrive: float = Unit.ARRIVE_EPS
+	var kb: PackedFloat32Array = soa_kb
+	var kb_decay: float = Unit.KNOCKBACK_ACCUM_DECAY * delta
+	var obj: Array[Unit] = _obj_tick
+	obj.clear()
+	# Terrain heightmap for the inline Y snap / slope probe of the path modes
+	# (path holds are only entered with the manager's terrain present).
+	var heights: PackedFloat32Array = terrain_data.heights if terrain_data != null \
+		else PackedFloat32Array()
+	var hverts: int = terrain_data.verts if terrain_data != null else 2
+	var hmax: float = float(hverts - 1)
+	var phase: int = _kernel_tick & 7
+	for i in range(n):
+		var cd: float = hold[i]
+		if cd < 0.0:
+			obj.append(units[i])
+			continue
+		# Knockback-accumulator decay of held units (object _tick_knockback is
+		# skipped while held; written back into the object field on drop).
+		if kb[i] > 0.0:
+			kb[i] = maxf(kb[i] - kb_decay, 0.0)
+		var mode: int = mode_arr[i]
+		var st_i: int = sstate[i]
+		var drop: bool
+		match mode:
+			HOLD_MOVE:
+				drop = st_i != st_move
+			HOLD_CORPSE:
+				drop = st_i != st_dead
+			HOLD_PANIC:
+				drop = st_i != st_panic
+			_:
+				drop = st_i != st_attack
+		# The held-value timer: attack cooldown in the stand modes, remaining
+		# lie time for a corpse, min(panic end, redirect) for a panicker.
+		# The path/wait modes use it as a plain marker (approach and second
+		# row never tick the attack cooldown — same as the object code).
+		if mode <= HOLD_FIRE or mode >= HOLD_CORPSE:
+			cd -= delta
+			if cd <= 0.0:
+				drop = true
+		# Scan cadence (fire stand / aggressive move / firewarrior chase).
+		var sc: float = scan[i]
+		if sc >= 0.0 and not drop:
+			sc -= delta
+			if sc <= 0.0:
+				drop = true
+				# Clamp: the drop write-back below keys on >= 0. An expired
+				# timer must reach the object as "due now", or the object's
+				# scheduled scan never fires again.
+				scan[i] = 0.0
+			else:
+				scan[i] = sc
+		# Target validation for every mode with a combat target.
+		var dx: float = 0.0
+		var dz: float = 0.0
+		var d2: float = 0.0
+		if not drop and mode != HOLD_MOVE and mode <= HOLD_WAIT:
+			var t: int = tgt[i]
+			if t < 0 or t >= n or tgen[i] != gen[t]:
+				drop = true   # stale handle (target unregistered / slot reused)
+			else:
+				var ts: int = sstate[t]
+				if ts == st_dead or ts == st_sit or stribe[t] == stribe[i] \
+						or (sflags[t] & FLAG_TARGETABLE) == 0:
+					drop = true
+				else:
+					var pi0: Vector3 = pos[i]
+					var pt: Vector3 = pos[t]
+					dx = pt.x - pi0.x
+					dz = pt.z - pi0.z
+					d2 = dx * dx + dz * dz
+					match mode:
+						HOLD_MELEE:
+							if d2 > melee_r2:
+								drop = true
+						HOLD_FIRE:
+							if d2 <= melee_r2 or d2 > fire_r2:
+								drop = true
+						HOLD_WAIT:
+							# Second row: stand near the fight; drifting past
+							# the waiting ring hands fine control back.
+							if d2 > wait_r2:
+								drop = true
+						HOLD_CHASE:
+							# Close enough for the direct-step pursuit (or the
+							# strike itself) -> object; target drifted from its
+							# plan-time spot -> object re-plans the path.
+							if d2 <= direct_r2:
+								drop = true
+							else:
+								var g: Vector3 = goal_arr[i]
+								var gx: float = pt.x - g.x
+								var gz: float = pt.z - g.z
+								if gx * gx + gz * gz > 1.0:
+									drop = true
+						HOLD_CHASE_FIRE:
+							if d2 <= fire_r2:
+								drop = true
+							else:
+								var gf: Vector3 = goal_arr[i]
+								var gfx: float = pt.x - gf.x
+								var gfz: float = pt.z - gf.z
+								if gfx * gfx + gfz * gfz > 1.0:
+									drop = true
+					if not drop and (mode <= HOLD_FIRE or mode == HOLD_WAIT) \
+							and ((i + phase) & 7) == 0 and d2 > 0.000001:
+						# Staggered facing refresh (~4x per second at 30 Hz);
+						# the path modes walk, so their facing tracks the
+						# waypoint below.
+						units[i].facing = Vector3(dx, 0.0, dz).normalized()
+		# Path step (walk toward the current waypoint; the waypoint SWITCH also
+		# happens here — dropping per waypoint cost an object tick every ~7
+		# ticks per mover; only the route end / stumble zone drop out). The
+		# panic hop shares it (its one-point flee path just never switches).
+		if not drop and ((mode >= HOLD_MOVE and mode <= HOLD_CHASE_FIRE)
+				or mode == HOLD_PANIC):
+			var pi: Vector3 = pos[i]
+			var wp: Vector3 = wp_arr[i]
+			var wx: float = wp.x - pi.x
+			var wz: float = wp.z - pi.z
+			var wd: float = sqrt(wx * wx + wz * wz)
+			# Slope probe 0.6 m ahead: pi.y IS the terrain height here (snapped
+			# every step), so one bilinear read suffices.
+			var inv_d: float = 1.0 / maxf(wd, 0.001)
+			var fx: float = clampf(pi.x + wx * inv_d * 0.6, 0.0, hmax)
+			var fz: float = clampf(pi.z + wz * inv_d * 0.6, 0.0, hmax)
+			var x0: int = mini(int(fx), hverts - 2)
+			var z0: int = mini(int(fz), hverts - 2)
+			var tx: float = fx - float(x0)
+			var tz: float = fz - float(z0)
+			var row: int = z0 * hverts + x0
+			var h1: float = lerpf(
+				lerpf(heights[row], heights[row + 1], tx),
+				lerpf(heights[row + hverts], heights[row + hverts + 1], tx), tz)
+			var slope: float = (h1 - pi.y) / 0.6
+			if slope < -Unit.STEEP_ROLL_SLOPE:
+				drop = true   # stumble zone: the object path rolls the dice
+			else:
+				var spd: float = speed_arr[i]
+				if slope > 0.0:
+					spd *= clampf(1.0 - slope * Unit.UPHILL_SLOWDOWN,
+						Unit.MIN_SPEED_FACTOR, 1.0)
+				# Clamped like move_toward: never overshoot the waypoint.
+				var step: float = minf(spd * delta, wd)
+				var nx: float = pi.x + wx * inv_d * step
+				var nz: float = pi.z + wz * inv_d * step
+				fx = clampf(nx, 0.0, hmax)
+				fz = clampf(nz, 0.0, hmax)
+				x0 = mini(int(fx), hverts - 2)
+				z0 = mini(int(fz), hverts - 2)
+				tx = fx - float(x0)
+				tz = fz - float(z0)
+				row = z0 * hverts + x0
+				var ny: float = lerpf(
+					lerpf(heights[row], heights[row + 1], tx),
+					lerpf(heights[row + hverts], heights[row + hverts + 1], tx), tz)
+				var u3: Unit = units[i]
+				var moved: Vector3 = Vector3(nx, ny, nz)
+				pos[i] = moved
+				u3.position = moved
+				if wd - step <= arrive:
+					# Waypoint reached (same check as _advance_path): advance
+					# the object's path cursor right here; only the route end
+					# drops back (arrival / _on_path_finished / _clear_path).
+					var upath: PackedVector3Array = u3._path
+					var nidx: int = u3._path_index + 1
+					if nidx >= upath.size():
+						drop = true
+					else:
+						u3._path_index = nidx
+						var nwp: Vector3 = upath[nidx]
+						wp_arr[i] = nwp
+						var fdx: float = nwp.x - nx
+						var fdz: float = nwp.z - nz
+						if fdx * fdx + fdz * fdz > 0.000001:
+							u3.facing = Vector3(fdx, 0.0, fdz).normalized()
+		if drop:
+			hold[i] = -1.0
+			var u: Unit = units[i]
+			if mode <= HOLD_FIRE:
+				u._attack_cooldown = cd + delta
+			elif mode == HOLD_CORPSE:
+				# Held time went into cd; the object tick re-applies its delta.
+				u._corpse_timer = Unit.CORPSE_DURATION - cd - delta
+			elif mode == HOLD_PANIC:
+				# goal.x parked the entry value of min(panic, redirect).
+				var elapsed: float = goal_arr[i].x - cd - delta
+				u._panic_time -= elapsed
+				u._panic_redirect -= elapsed
+			if scan[i] >= 0.0:
+				u._target_search_timer = scan[i] + delta
+				scan[i] = -1.0
+			u.knockback_accum = kb[i]
+			obj.append(u)
+		elif mode <= HOLD_FIRE or mode >= HOLD_CORPSE:
+			hold[i] = cd
 
 
 func tick(delta: float) -> void:
@@ -578,10 +889,14 @@ func _apply_combat_groups(delta: float) -> void:
 		if nav_grid != null and not nav_grid.is_cell_walkable(
 				nav_grid.world_to_cell(Vector3(nx, 0.0, nz))):
 			continue
-		defender.position.x = nx
-		defender.position.z = nz
+		var ny: float = defender.position.y
 		if terrain_data != null:
-			defender.position.y = terrain_data.get_height(nx, nz)
+			ny = terrain_data.get_height(nx, nz)
+		defender.position = Vector3(nx, ny, nz)
+		# SoA mirror (C1 writer audit gap, found in C2): a defender standing in
+		# melee does not move on its own — without this its soa_pos went stale
+		# under the group push until its next own movement.
+		defender._sync_soa_pos()
 	_group_push_phase = (_group_push_phase + 1) % slices
 
 
@@ -773,6 +1088,17 @@ func register(unit: Unit) -> void:
 	soa_veh_sep.append(unit.vehicle_separation)
 	soa_sep_mult.append(unit.separation_speed_mult)
 	soa_overlap.append(0)
+	soa_target.append(-1)
+	soa_tgen.append(0)
+	soa_hold.append(-1.0)
+	soa_mode.append(HOLD_MELEE)
+	soa_scan.append(-1.0)
+	soa_wp.append(Vector3.ZERO)
+	soa_goal.append(Vector3.ZERO)
+	soa_speed.append(unit.speed)
+	soa_kb.append(0.0)
+	if _slot_gen.size() <= unit._idx:
+		_slot_gen.resize(unit._idx + 1)   # zero-filled; unregister bumps
 	unit._bind_soa(self)
 	_grid_extra.append(unit._idx)   # visible to queries before the next build
 	# A mass spawn (stress test: 4000 registers before the first tick) would
@@ -805,6 +1131,15 @@ func unregister(unit: Unit) -> void:
 		soa_veh_sep[index] = soa_veh_sep[last]
 		soa_sep_mult[index] = soa_sep_mult[last]
 		soa_overlap[index] = soa_overlap[last]
+		soa_target[index] = soa_target[last]
+		soa_tgen[index] = soa_tgen[last]
+		soa_hold[index] = soa_hold[last]
+		soa_mode[index] = soa_mode[last]
+		soa_scan[index] = soa_scan[last]
+		soa_wp[index] = soa_wp[last]
+		soa_goal[index] = soa_goal[last]
+		soa_speed[index] = soa_speed[last]
+		soa_kb[index] = soa_kb[last]
 		soa_pos.resize(last)
 		soa_state.resize(last)
 		soa_tribe.resize(last)
@@ -812,6 +1147,20 @@ func unregister(unit: Unit) -> void:
 		soa_veh_sep.resize(last)
 		soa_sep_mult.resize(last)
 		soa_overlap.resize(last)
+		soa_target.resize(last)
+		soa_tgen.resize(last)
+		soa_hold.resize(last)
+		soa_mode.resize(last)
+		soa_scan.resize(last)
+		soa_wp.resize(last)
+		soa_goal.resize(last)
+		soa_speed.resize(last)
+		soa_kb.resize(last)
+		# Both touched slots change occupancy: stored (index, generation)
+		# handles onto the removed unit AND onto the moved unit go stale — the
+		# kernel drops those holders to their object tick, which re-syncs.
+		_slot_gen[index] += 1
+		_slot_gen[last] += 1
 		if moved != unit:
 			moved._idx = index
 		unit._idx = -1

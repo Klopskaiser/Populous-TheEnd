@@ -90,6 +90,16 @@ func _tick_attack(delta: float) -> void:
 				_retarget_or_idle()
 				return
 			_face_point(target.position)
+			# C2.4 chase hold (planned-path leg only): the kernel walks the
+			# path, keeps the scan cadence and drops us back on arrival in
+			# fire range / target drift / waypoint switch.
+			if state == State.ATTACK and attack_target == target and _has_path() \
+					and _combat_goal != Vector3.INF:
+				# goal = _combat_goal: for the firewarrior dest == target
+				# position, so the kernel's drift check IS the re-plan check.
+				_enter_soa_path_hold(UnitManager.HOLD_CHASE_FIRE,
+					_path[_path_index], _combat_goal,
+					maxf(_target_search_timer, 0.0))
 			return
 	# Fire (stand): medium range, or reserve row inside melee range.
 	if _has_path():
@@ -102,6 +112,14 @@ func _tick_attack(delta: float) -> void:
 		_attack_cooldown = FIRE_COOLDOWN
 		anim_start_ms = Time.get_ticks_msec()   # sync the throw with the shot
 		_throw_fireball(target)
+	# Stable fire hold (Stufe C2, plans/08e): standing in the (melee, fire]
+	# band waiting out the cooldown — the kernel keeps the distance band AND
+	# the scan cadence (passed as timer), so the threat/priest reactions keep
+	# their 0.25-s window (the kernel drops us back for every scheduled scan).
+	# The reserve row inside melee range stays fully object-ticked.
+	if dist > MELEE_RANGE and _attack_cooldown > 0.0 and state == State.ATTACK \
+			and attack_target == target and _unit_target_attackable(target):
+		_enter_soa_hold(maxf(_target_search_timer, 0.0), UnitManager.HOLD_FIRE)
 
 
 ## Target selection prefers an enemy preacher in range (firewarriors hunt

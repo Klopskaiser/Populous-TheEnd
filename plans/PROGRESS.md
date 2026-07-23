@@ -6054,3 +6054,100 @@ der ATTACK/MOVE-Objekt-Tick-Bulk (36 ms). **Der Weg zu 30 FPS ist Stufe C2**
 (Kampf-Kernels über die C1-Arrays): Detailplan **[08e_perf_combat_kernels_stufe_c2.md](08e_perf_combat_kernels_stufe_c2.md)**
 mit Messdaten, Swap-Remove-Referenzproblem und Etappen C2.1–C2.5 erstellt;
 Umsetzung offen (Nutzer-Entscheid).
+
+### Phase 8.e (Stufe C2) — Hold-Kernels über die SoA-Arrays (2026-07-23)
+
+**Plan [08e_perf_combat_kernels_stufe_c2.md](08e_perf_combat_kernels_stufe_c2.md),
+Etappen C2.1–C2.4 umgesetzt** plus Zusatz-Kernels (Waiter, Leichen, Panik,
+Knockback-Decay). Kernidee „Hold-Kernel": Einheiten in **stabilen Situationen**
+melden sich per `_enter_soa_hold*` beim Manager an; ab dem nächsten Tick
+bedient sie ein flacher Array-Kernel (`UnitManager._run_combat_kernels`) und
+ihr **Objekt-Tick wird komplett übersprungen** (`tick_units` iteriert nur noch
+die vom Kernel gesammelte `_obj_tick`-Liste). Jedes Ereignis (Schlag fällig,
+Ziel tot/SIT/konvertiert/außer Band, Wegpunkt-Routenende, Scan fällig,
+Steilhang, Knockback, Brand, State-Wechsel, neuer Pfad) **droppt** die Einheit
+noch im selben Tick zurück auf den Objekt-Pfad — Choreografie (Slots, Pairing,
+Strikes, Scans, Re-Plans) bleibt unverändert Objekt-Code.
+
+**Architektur (`unit_manager.gd`, `unit.gd`, `firewarrior.gd`, `combat_group.gd`):**
+- **C2.1 — soa_target als Generation-Handle:** `soa_target`/`soa_tgen` +
+  `_slot_gen` (Bump beider Slots bei Swap-Remove; wächst monoton). Gepflegt an
+  JEDEM `attack_target`-Write (`_sync_soa_target`: _begin_attack/_end_attack/
+  _on_target_died/_switch_target_to — alle Writer liegen in unit.gd).
+  **Abweichung vom Plan:** Option 2 (Handles) statt Option 1 (Remap), denn
+  Ranged-Angreifer halten Ziele OHNE Combat-Group-Sitz — ein Remap über die
+  Gruppen wäre unvollständig gewesen. Stale Handles validieren nie (1 Vergleich)
+  und heilen sich über den Objekt-Tick (Attacker verliert max. 1 Tick).
+- **Hold-Modi** (`soa_mode`): 0 MELEE (in Reichweite, Cooldown läuft; C2.2),
+  1 FIRE (Feuerkrieger im (melee, fire]-Band, Scan-Timer läuft mit; C2.3),
+  2 MOVE (Marsch entlang geplantem Pfad; C2.4), 3/4 CHASE/CHASE_FIRE
+  (Kampf-Anmarsch auf A*-Pfad; Drop bei Ankunft im Direkt-/Feuerband ODER
+  Ziel-Drift > 1 m — exakt das Objekt-Re-Plan-Kriterium, da Slot-Offsets
+  konstant sind), 5 WAIT (zweite Reihe nahe am Kampf, Scan-Kadenz), 6 CORPSE
+  (Liegezeit der Leiche; Drop exakt zum Sink-Beginn, `corpse_sink_depth` liest
+  erst dann wieder den Live-Timer), 7 PANIC (Flucht-Hop; hold =
+  min(Panikende, Redirect), Timer werden beim Drop aus der Held-Zeit
+  rekonstruiert — Entry-Wert geparkt in `soa_goal.x`).
+- **Path-Kernel** (Modi 2/3/4/7): Wegpunkt in `soa_wp`, Speed in `soa_speed`
+  (statisch je Typ), Y-Snap + Hangbremse über **inline-bilineare Reads auf
+  `terrain_data.heights`** (3 Objekt-`get_height`-Calls pro Mover wären der
+  halbe Gewinn). **Wegpunkt-Wechsel passiert im Kernel** (`_path_index`-
+  Vorschub + Facing-Update am Wechseltick); nur Routenende/Steilhang droppen.
+  Nur Fußvolk (`vehicle_separation <= 0`, nicht `flies`); Stolper-Würfel
+  bleibt Objekt (Kernel droppt in der Steilhang-Zone).
+- **Timer-Semantik:** Stand-Modi parken `_attack_cooldown` im Hold-Wert
+  (Write-back beim Drop MINUS das laufende delta — der Objekt-Tick desselben
+  Frames zieht es selbst ab, nichts wird doppelt gezählt); `soa_scan` hält die
+  0,25-s-Scan-Kadenz am Leben (Feuer-Stand: Threat/Priester-Reaktion;
+  Attack-Move: Engage-on-sight; FW-Chase) — Drop exakt zum fälligen Scan.
+- **Knockback-Accum in SoA** (`soa_kb`): Feuerball-Salven setzten
+  `knockback_accum` auf hunderte Kämpfer und sperrten sie sonst dauerhaft aus
+  dem Kernel aus (Decay lief nur im Objekt-Tick). Der Kernel decayt selbst;
+  `apply_knockback` cleart ZUERST (Write-back), liest dann den frischen Wert.
+- **Event-Clears** (`_clear_soa_hold`, modusbewusst): `_set_state` (jeder
+  Wechsel), `_end_attack`, `_switch_target_to`, `displace`/`apply_knockback`,
+  `ignite`/`scorch`, `_start_path_to`/`set_path` (ersetzte Route bei
+  gleichbleibendem State!), `start_panic`-Refresh, `CombatGroup.remove_member`
+  + `promote_waiters` (Slot-Beförderung wirkt sofort, nicht erst beim Scan).
+- **Gefundene C1-Lücke:** der Combat-Group-Push schrieb `defender.position`
+  ohne `_sync_soa_pos()` — stale `soa_pos` für gedrängte Defender (gefixt).
+
+**Messung (gleiche Maschine/Session, `benchmark_stress`; Baseline = Stand
+0.9.5+Vorrunde):** Peak-Block t300–449 **59,1 → 46,6 ms (−21 %)** (units-Phase
+48,8 → 35,8), Marschblock t150–299 **53,0 → 35,5 (−33 %)**, Gesamt-Ø 24,8 →
+20,5 ms, Kampf-Fenster 16,0 → 13,8 ms; Nachlauf-Blöcke −20…−30 %. Läufe
+streuen ±1–2 ms (46,6–48,5 über vier Läufe desselben Stands). Am Peak sind
+~2 600 von ~4 000 Slots im Kernel (Walk bis 1 470, Chase ~850, Melee 300–830,
+Leichen bis 1 000, Feuer 130–240); der Kernel kostet dabei ~5 ms, die
+verbliebenen ~1 300 Objekt-Ticks ~30 ms.
+
+**Ziel ≤ ~28 ms NICHT erreicht** — Bucket-Profil der Rest-Objekt-Ticks:
+warrior/ATTACK 663×25 µs, firewarrior/ATTACK 179×36 µs: das sind die
+gewollten Drop-Ticks (Scans alle 0,25 s à 20–40 µs im Mega-Crowd, Strikes,
+Re-Plans) plus Direct-Step-Pendeln (~180 Units < 2,5 m) plus Brand-Paniker
+(bewusst Objekt: Burn-Damage). Fortsetzungskandidaten im 08e-Plan
+(„Fortsetzung"): Scan-Kosten, Walkability-Map für Direct-Step,
+Separation/Group-Push (~8 ms), C2.5.
+
+**Stolpersteine/Erkenntnisse:**
+1. **Scan-Timer-Write-back-Falle:** der Kernel schrieb den abgelaufenen
+   Scan-Timer NEGATIV in `soa_scan`; der Drop-Write-back keyte auf `>= 0` und
+   übersprang ihn — der Objekt-Timer lief nie ab, Feuerkrieger scannten nie
+   wieder nach Nahkampf-Bedrohungen (Suite-Test fing es). Abgelaufene Timer
+   auf 0 klemmen, damit sie als „jetzt fällig" ankommen.
+2. **Test-Szenario-Falle:** Ein Brave als Fernkampf-Zielscheibe läuft per
+   Retaliation in den Nahkampf — für Feuer-Stand-Tests das Ziel in einen
+   eigenen Brawl vor Ort binden.
+3. Entry-Gates zuerst zu konservativ (`knockback_accum > 0` sperrte nach jedem
+   Feuerball-Splash) — Messen der Hold-Raten pro Modus (Scratch-Diagnose) war
+   der Schlüssel, um die echten Blocker zu finden.
+4. Die Objekt-Ticks, die übrig bleiben, sind die TEUREN (25–36 µs statt
+   13 µs Durchschnitt) — Hold-Kernels verschieben den Mix.
+
+**Verifikation:** Suite **2697/2697 grün, 3 Läufe** (inkl. neuem
+`tests/test_combat_kernels.gd`: C2.1-Handle-Invariante nach jedem Tick,
+Melee-/Feuer-/Walk-/Chase-/Corpse-Hold-Verhalten, Swap-Remove-Invalidierung,
+Threat-Reaktion unter Kernel, Displace-Clear), Ladecheck sauber,
+`benchmark_mass` Schlacht-Fenster ohne Regression (s. u.), Stress-Benchmark
+wie oben. **Offen:** In-Game-Stresstest-FPS auf dem Referenzrechner
+(maßgeblich) + Kampf-Feel-Sichtprüfung durch den Nutzer.

@@ -286,6 +286,16 @@ var _idx: int = -1
 var _soa_pos: PackedVector3Array
 var _soa_state: PackedInt32Array
 var _soa_flags: PackedInt32Array
+## Combat/move-kernel arrays (Stufe C2, plans/08e): target handle + hold state.
+var _soa_target: PackedInt32Array
+var _soa_tgen: PackedInt32Array
+var _soa_hold: PackedFloat32Array
+var _soa_mode: PackedInt32Array
+var _soa_scan: PackedFloat32Array
+var _soa_wp: PackedVector3Array
+var _soa_goal: PackedVector3Array
+var _soa_kb: PackedFloat32Array
+var _mgr_slot_gen: PackedInt32Array
 
 
 ## Called by UnitManager.register after the SoA slots were appended.
@@ -293,6 +303,15 @@ func _bind_soa(manager: UnitManager) -> void:
 	_soa_pos = manager.soa_pos
 	_soa_state = manager.soa_state
 	_soa_flags = manager.soa_flags
+	_soa_target = manager.soa_target
+	_soa_tgen = manager.soa_tgen
+	_soa_hold = manager.soa_hold
+	_soa_mode = manager.soa_mode
+	_soa_scan = manager.soa_scan
+	_soa_wp = manager.soa_wp
+	_soa_goal = manager.soa_goal
+	_soa_kb = manager.soa_kb
+	_mgr_slot_gen = manager._slot_gen
 
 
 ## Mirrors position into the manager's SoA arrays. Every writer that sets the
@@ -324,6 +343,126 @@ func _compute_soa_flags() -> int:
 	if unit_kind() == &"preacher":
 		f |= UnitManager.FLAG_PREACHER
 	return f
+
+
+## Mirrors attack_target into the SoA handle (slot index + generation, see
+## UnitManager.soa_target) — call after EVERY attack_target write. A target
+## without a live slot (unregistered, bare test) stores -1.
+func _sync_soa_target() -> void:
+	var i: int = _idx
+	if i < 0:
+		return
+	var t: Unit = attack_target
+	if t != null and is_instance_valid(t) and t._idx >= 0:
+		_soa_target[i] = t._idx
+		_soa_tgen[i] = _mgr_slot_gen[t._idx]
+	else:
+		_soa_target[i] = -1
+
+
+## Opts this unit into the manager's STAND hold kernel (Stufe C2, plans/08e):
+## from the NEXT tick_units on, the flat kernel services it over the arrays
+## and its object tick is skipped, until the kernel (or an event) drops it
+## back. Called from the stable in-range branches of _tick_attack (melee
+## strike hold; firewarrior fire stand passes its scan timer + mode). Refuses
+## units with per-tick object work pending (burning, knockback playout/decay).
+func _enter_soa_hold(scan_timer: float = -1.0,
+		mode: int = UnitManager.HOLD_MELEE) -> void:
+	var i: int = _idx
+	if i < 0 or _burn_time > 0.0 or _knockback_remaining != Vector3.ZERO:
+		return
+	var t: Unit = attack_target
+	if t == null or not is_instance_valid(t):
+		return
+	var ti: int = t._idx
+	if ti < 0:
+		return
+	_soa_target[i] = ti
+	_soa_tgen[i] = _mgr_slot_gen[ti]
+	# Stand modes park their cooldown in the hold slot; the waiter hold has
+	# none and stores a plain held-marker.
+	_soa_hold[i] = _attack_cooldown if mode <= UnitManager.HOLD_FIRE else 1.0
+	_soa_mode[i] = mode
+	_soa_scan[i] = scan_timer
+	_soa_kb[i] = knockback_accum   # kernel-side decay while held
+
+
+## Path-hold entry (C2.4): the kernel walks this unit toward `wp` (the current
+## path waypoint) and drops it back for the waypoint switch, the stumble roll
+## on steep downhill, or — chase modes — when the target needs a reaction
+## (arrival in range, drift past the re-plan threshold, death/SIT/conversion).
+## `goal` is the TARGET's position at plan time (chase drift check); the plain
+## walk (HOLD_MOVE) passes no target. Same pending-work gates as the stand
+## entry; additionally ground foot units only (vehicles/flyers keep their own
+## movement code) and never without terrain (bare tests).
+func _enter_soa_path_hold(mode: int, wp: Vector3, goal: Vector3 = Vector3.ZERO,
+		scan_timer: float = -1.0) -> void:
+	var i: int = _idx
+	if i < 0 or _burn_time > 0.0 or _knockback_remaining != Vector3.ZERO:
+		return
+	if vehicle_separation > 0.0 or flies or terrain_data == null:
+		return
+	if mode != UnitManager.HOLD_MOVE:
+		var t: Unit = attack_target
+		if t == null or not is_instance_valid(t):
+			return
+		var ti: int = t._idx
+		if ti < 0:
+			return
+		_soa_target[i] = ti
+		_soa_tgen[i] = _mgr_slot_gen[ti]
+	_soa_hold[i] = 1.0   # held-marker; path modes carry no cooldown
+	_soa_mode[i] = mode
+	_soa_scan[i] = scan_timer
+	_soa_wp[i] = wp
+	_soa_goal[i] = goal
+	_soa_kb[i] = knockback_accum   # kernel-side decay while held
+
+
+## Panic-hold entry (see _tick_panic): holds until the next redirect or the
+## panic end, whichever comes first — both object timers are reconstructed
+## from the elapsed held time on drop (entry value parked in goal.x).
+func _enter_soa_panic_hold() -> void:
+	var i: int = _idx
+	if i < 0 or _burn_time > 0.0 or _knockback_remaining != Vector3.ZERO:
+		return
+	if vehicle_separation > 0.0 or flies or terrain_data == null:
+		return
+	var span: float = minf(_panic_time, _panic_redirect)
+	if span <= 0.0:
+		return
+	_soa_hold[i] = span
+	_soa_mode[i] = UnitManager.HOLD_PANIC
+	_soa_scan[i] = -1.0
+	_soa_wp[i] = _path[_path_index]
+	_soa_goal[i] = Vector3(span, 0.0, 0.0)
+	_soa_kb[i] = knockback_accum   # kernel-side decay while held
+
+
+## Drops this unit out of the hold kernel (no-op when not held), writing the
+## kernel-side timers back into the object fields (stand modes own the attack
+## cooldown while held; path modes never touch it). MUST run on every event
+## that gives a held unit per-tick object work again while its state stays
+## unchanged (displace/knockback, ignite/scorch, target switch, a replaced
+## path); state changes clear via _set_state.
+func _clear_soa_hold() -> void:
+	var i: int = _idx
+	if i < 0 or _soa_hold.size() <= i or _soa_hold[i] < 0.0:
+		return
+	var mode: int = _soa_mode[i]
+	if mode <= UnitManager.HOLD_FIRE:
+		_attack_cooldown = _soa_hold[i]
+	elif mode == UnitManager.HOLD_CORPSE:
+		_corpse_timer = CORPSE_DURATION - _soa_hold[i]
+	elif mode == UnitManager.HOLD_PANIC:
+		var elapsed: float = _soa_goal[i].x - _soa_hold[i]
+		_panic_time -= elapsed
+		_panic_redirect -= elapsed
+	_soa_hold[i] = -1.0
+	if _soa_scan[i] >= 0.0:
+		_target_search_timer = _soa_scan[i]
+		_soa_scan[i] = -1.0
+	knockback_accum = _soa_kb[i]   # kernel-decayed while held
 
 ## Render slot bookkeeping, managed by the UnitRenderer.
 var _render_index: int = -1
@@ -741,6 +880,16 @@ func _tick_move(delta: float) -> void:
 		return
 	if _advance_path(delta):
 		_on_path_finished()
+		return
+	# C2.4 walk hold: steady march along the planned path — the kernel steps
+	# toward the current waypoint (aggressive movers keep their scan cadence
+	# via the timer) and drops us back for the waypoint switch/stumble zone.
+	if state == State.MOVE and _has_path():
+		var scan_t: float = -1.0
+		if move_aggressive and _is_combatant():
+			scan_t = maxf(_target_search_timer, 0.0)
+		_enter_soa_path_hold(UnitManager.HOLD_MOVE, _path[_path_index],
+			Vector3.ZERO, scan_t)
 
 
 ## Distance at which a waypoint counts as reached. Ground units need pinpoint
@@ -901,6 +1050,10 @@ func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = fals
 
 
 func _start_path_to(target: Vector3) -> void:
+	# A replaced route invalidates a running walk hold (same-state order, e.g.
+	# MOVE -> new MOVE: _set_state's clear does not fire) — without this the
+	# kernel would keep walking the OLD waypoint until its next drop.
+	_clear_soa_hold()
 	if path_service != null:
 		# Defer to the manager's path queue (spread over frames).
 		_pending_target = target
@@ -1026,6 +1179,7 @@ func _trim_own_cell_waypoint(path: PackedVector3Array) -> PackedVector3Array:
 
 ## Directly injects a path (used by tests and by order handling).
 func set_path(path: PackedVector3Array) -> void:
+	_clear_soa_hold()   # a replaced path invalidates a running walk hold
 	_pending_target = Vector3.INF  # cancel any queued request
 	_path = path
 	_path_index = 0
@@ -1134,6 +1288,16 @@ func _tick_dead(delta: float) -> void:
 	if _corpse_timer >= CORPSE_DURATION + CORPSE_SINK_DURATION:
 		_corpse_done = true
 		corpse_expired.emit(self)
+		return
+	# C2 corpse hold: a lying corpse only counts this timer — park the whole
+	# LIE phase in the kernel (a mass battle carries hundreds of corpses).
+	# The kernel drops us back exactly when the sink phase starts, which the
+	# object ticks (corpse_sink_depth reads the live timer while sinking).
+	if _idx >= 0 and _corpse_timer < CORPSE_DURATION:
+		_soa_hold[_idx] = CORPSE_DURATION - _corpse_timer
+		_soa_mode[_idx] = UnitManager.HOLD_CORPSE
+		_soa_scan[_idx] = -1.0
+		_soa_kb[_idx] = knockback_accum
 
 
 ## 0.0 while the corpse lies, then how many metres it has sunk below its
@@ -1155,14 +1319,18 @@ func displace(dir: Vector3, dist: float) -> void:
 	var flat: Vector3 = Vector3(dir.x, 0.0, dir.z)
 	if flat.length_squared() < 0.000001:
 		return
+	_clear_soa_hold()   # the knockback playout needs the object tick (C2)
 	_knockback_remaining += flat.normalized() * dist
 
 
 ## Fireball knockback: the hit-density accumulator makes rapid successive hits
-## shove progressively harder; it decays in _tick_knockback.
+## shove progressively harder; it decays in _tick_knockback (or, while the
+## unit is kernel-held, in the kernel — hence the clear FIRST, which writes
+## the decayed value back into knockback_accum before it is read here).
 func apply_knockback(dir: Vector3) -> void:
 	if state == State.DEAD:
 		return
+	_clear_soa_hold()
 	var dist: float = KNOCKBACK_BASE + knockback_accum * KNOCKBACK_STACK_BONUS
 	knockback_accum += 1.0
 	displace(dir, dist)
@@ -1533,6 +1701,7 @@ func burn_fx_height() -> float:
 func ignite(source_pos: Vector3, _source = null) -> void:
 	if state == State.DEAD:
 		return
+	_clear_soa_hold()   # burn damage/panic re-assert need the object tick (C2)
 	var fresh: bool = not is_burning()
 	_burn_time = BURN_DURATION
 	if fresh:
@@ -1550,6 +1719,7 @@ func ignite(source_pos: Vector3, _source = null) -> void:
 func scorch(source_pos: Vector3, _source = null) -> void:
 	if state == State.DEAD:
 		return
+	_clear_soa_hold()   # burn damage/panic re-assert need the object tick (C2)
 	if not is_burning():
 		_play_sfx(&"unit_burning", 200)
 	_burn_time = BURN_DURATION
@@ -1618,6 +1788,7 @@ func start_panic(source_pos: Vector3, duration: float = PANIC_DURATION) -> void:
 		return
 	panic_source = source_pos
 	if state == State.PANIC:
+		_clear_soa_hold()   # settle the held time BEFORE refreshing the timer
 		_panic_time = maxf(_panic_time, duration)
 		return
 	_on_combat_interrupt()
@@ -1650,6 +1821,12 @@ func _tick_panic(delta: float) -> void:
 		_pick_panic_target()
 	if _has_path():
 		_advance_path(delta)
+		# C2 panic hold: the scramble hop is a plain one-point walk — the
+		# kernel steps it and counts min(panic end, redirect) in the hold
+		# value (entry parked in goal.x for the drop write-back). Burning
+		# panickers keep their object tick (burn damage), via the entry gate.
+		if state == State.PANIC and _has_path():
+			_enter_soa_panic_hold()
 
 
 ## Short random flight hop, biased away from the panic source; clamped onto a
@@ -1997,6 +2174,14 @@ func _tick_attack(delta: float) -> void:
 				_begin_attack(alt)
 				return
 		_wait_near(target, delta)
+		# C2 wait hold: already standing near the fight (the ring centres on
+		# the ANCHOR, so allow its full trail distance) — the kernel keeps
+		# watch (target liveness, ring band, scan cadence) until the next
+		# scheduled scan; a slot promotion clears the hold directly
+		# (CombatGroup.promote_waiters).
+		if state == State.ATTACK and attack_target == target \
+				and _flat_dist(position, target.position) <= MELEE_WAIT_RADIUS * 2.0:
+			_enter_soa_hold(maxf(_target_search_timer, 0.0), UnitManager.HOLD_WAIT)
 		return
 	var dist: float = _flat_dist(position, target.position)
 	if dist > MELEE_RANGE:
@@ -2013,6 +2198,17 @@ func _tick_attack(delta: float) -> void:
 			_retarget_or_idle()
 			return
 		_face_point(target.position)
+		# C2.4 chase hold (planned-path leg only — the direct-step pursuit
+		# keeps its per-step walkability check on the object path): the kernel
+		# walks the path and drops us back on arrival in direct range, target
+		# drift past the re-plan threshold, or the waypoint switch. goal =
+		# target position now: dest is target + a constant slot offset, so
+		# target drift equals the object's goal-drift re-plan check.
+		if state == State.ATTACK and attack_target == target and _has_path() \
+				and _combat_goal != Vector3.INF \
+				and dist > COMBAT_DIRECT_RANGE:
+			_enter_soa_path_hold(UnitManager.HOLD_CHASE, _path[_path_index],
+				target.position)
 		return
 	# In range: stand still, face the target and strike on cooldown.
 	_in_melee = true
@@ -2023,6 +2219,14 @@ func _tick_attack(delta: float) -> void:
 	if _attack_cooldown <= 0.0:
 		_attack_cooldown = ATTACK_COOLDOWN
 		_do_strike(target)
+	# Stable melee hold (Stufe C2, plans/08e): waiting out the cooldown in
+	# range is the most common ATTACK situation — hand it to the manager's
+	# flat kernel; the object tick resumes on strike/any change. The strike
+	# above may have killed/rolled the target or retargeted us — re-validate.
+	if _attack_cooldown > 0.0 and state == State.ATTACK \
+			and attack_target == target and is_instance_valid(target) \
+			and target.state != State.DEAD:
+		_enter_soa_hold()
 
 
 ## Rolls an attack kind and applies its (strength-scaled) damage to the target.
@@ -2145,6 +2349,7 @@ func _begin_attack(enemy: Unit) -> void:
 	_on_combat_interrupt()
 	_end_attack()
 	attack_target = enemy
+	_sync_soa_target()
 	_attack_cooldown = 0.0
 	_combat_goal = Vector3.INF
 	# Melee units bind into the target's fight right away (pairing rules);
@@ -2496,8 +2701,10 @@ func enter_hut(hut) -> void:
 ## on _end_attack — the group is the others' fight against us and only
 ## dissolves when we die, convert or leave the world.
 func _end_attack() -> void:
+	_clear_soa_hold()
 	_leave_combat_group()
 	attack_target = null
+	_sync_soa_target()
 	_target_ordered = false
 	_in_melee = false
 	_combat_waiting = false
@@ -2508,7 +2715,9 @@ func _end_attack() -> void:
 func _on_target_died(target) -> void:
 	if attack_target != target:
 		return
+	_clear_soa_hold()
 	attack_target = null
+	_sync_soa_target()
 	_in_melee = false
 	_combat_goal = Vector3.INF
 	_retarget_or_idle()
@@ -2756,7 +2965,9 @@ func _found_group_on(enemy: Unit) -> void:
 func _switch_target_to(u: Unit) -> void:
 	if state != State.ATTACK or u == null or not is_instance_valid(u):
 		return
+	_clear_soa_hold()   # must react to the new opponent on its object tick
 	attack_target = u
+	_sync_soa_target()
 	_in_melee = false
 	_combat_goal = Vector3.INF
 
@@ -2955,6 +3166,7 @@ func _due_to_scan(delta: float) -> bool:
 func _set_state(new_state: State) -> void:
 	if new_state == state:
 		return
+	_clear_soa_hold()   # a held unit leaving ATTACK ticks itself again (C2)
 	state = new_state
 	if _idx >= 0:
 		_soa_state[_idx] = new_state   # SoA mirror (sole state writer)

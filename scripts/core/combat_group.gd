@@ -44,6 +44,7 @@ func remove_member(u) -> void:
 		promote_waiters()
 	if u != null and is_instance_valid(u) and u.combat_group == self:
 		u.combat_group = null
+		u._clear_soa_hold()   # a held member must rebind on its object tick
 
 
 ## Moves waiters into free attacker slots (arrival order), skipping stale
@@ -54,6 +55,9 @@ func promote_waiters() -> void:
 		if w != null and is_instance_valid(w) and w.state != Unit.State.DEAD \
 				and w.combat_group == self:
 			attackers.append(w)
+			# A kernel-held waiter (C2 wait hold) must take its slot NOW, not
+			# on its next scheduled scan drop.
+			w._clear_soa_hold()
 
 
 ## Drops freed/dead/foreign entries, then back-fills from the second row.

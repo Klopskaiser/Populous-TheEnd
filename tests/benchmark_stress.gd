@@ -131,9 +131,7 @@ func _simulate(um: UnitManager, commands: TribeCommands, tribes: Array[Tribe],
 				if is_instance_valid(u) and u.state != Unit.State.DEAD:
 					alive_at_window += 1
 		var t0: int = Time.get_ticks_usec()
-		for unit in um.units.duplicate():
-			if is_instance_valid(unit):
-				unit.tick(TICK)
+		um.tick_units(TICK)   # kernel pass + object ticks (like _physics_process)
 		var t1: int = Time.get_ticks_usec()
 		um._rebuild_grid()
 		var t2: int = Time.get_ticks_usec()
