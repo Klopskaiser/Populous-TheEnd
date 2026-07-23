@@ -133,6 +133,10 @@ const FLAG_TARGETABLE: int = 8
 ## Static per kind (set at register): drives the per-cell preacher bits that
 ## make the firewarriors' priest-hunting scan grid-maskable.
 const FLAG_PREACHER: int = 16
+## Riding an airship deck at altitude (event-mirrored like the crew flags):
+## melee scans skip such targets without an is_airborne() object call. The
+## THROWN half of is_airborne() is read from soa_state instead.
+const FLAG_AIRBORNE: int = 32
 
 var soa_pos: PackedVector3Array = PackedVector3Array()
 var soa_state: PackedInt32Array = PackedInt32Array()
@@ -151,8 +155,10 @@ const HOLD_MOVE: int = 2     # State.MOVE, walking its planned path (C2.4)
 const HOLD_CHASE: int = 3    # ATTACK approach on a planned path (melee unit)
 const HOLD_CHASE_FIRE: int = 4   # ATTACK approach of a firewarrior (fire range)
 const HOLD_WAIT: int = 5     # second-row waiter standing near its fight
-const HOLD_CORPSE: int = 6   # DEAD, lying flat until the sink phase begins
-const HOLD_PANIC: int = 7    # panicked flight hop (redirect timer in goal.x)
+const HOLD_CHASE_DIRECT: int = 6   # direct-step pursuit inside COMBAT_DIRECT_RANGE
+const HOLD_CORPSE: int = 7   # DEAD, lying flat until the sink phase begins
+const HOLD_PANIC: int = 8    # panicked flight hop (entry span parked in goal.x)
+const HOLD_CAST: int = 9     # preacher standing and channeling (span in goal.x)
 ## Attack-target handle per unit: slot index of attack_target (-1 = none),
 ## mirrored at every attack_target write (Unit._sync_soa_target). Because
 ## unregister swap-removes slots, the handle alone could silently point at a
@@ -262,6 +268,7 @@ func _physics_process(delta: float) -> void:
 ## `units`), which would otherwise skip elements. Dead units still tick —
 ## their tick runs the corpse decay.
 func tick_units(delta: float) -> void:
+	_scan_cache_ready = true   # in-game loop -> the shared scan cache is live
 	_run_combat_kernels(delta)   # fills _obj_tick with every non-held unit
 	for unit in _obj_tick:
 		if is_instance_valid(unit):
@@ -311,6 +318,7 @@ func _run_combat_kernels(delta: float) -> void:
 	var st_dead: int = Unit.State.DEAD
 	var st_sit: int = Unit.State.SIT
 	var st_panic: int = Unit.State.PANIC
+	var st_cast: int = Unit.State.CAST
 	var melee_r2: float = Balance.MELEE_RANGE * Balance.MELEE_RANGE
 	var fire_r2: float = Balance.FIREWARRIOR_FIRE_RANGE * Balance.FIREWARRIOR_FIRE_RANGE
 	var direct_r2: float = Unit.COMBAT_DIRECT_RANGE * Unit.COMBAT_DIRECT_RANGE
@@ -330,6 +338,11 @@ func _run_combat_kernels(delta: float) -> void:
 		else PackedFloat32Array()
 	var hverts: int = terrain_data.verts if terrain_data != null else 2
 	var hmax: float = float(hverts - 1)
+	# Flat walkability mirror for the direct-step pursuit (entry gated on a
+	# present nav grid, so the empty fallback is never actually read).
+	var walkable: PackedByteArray = nav_grid.walkable_map if nav_grid != null \
+		else PackedByteArray()
+	var nav_size: int = terrain_data.size if terrain_data != null else 1
 	var phase: int = _kernel_tick & 7
 	for i in range(n):
 		var cd: float = hold[i]
@@ -350,12 +363,15 @@ func _run_combat_kernels(delta: float) -> void:
 				drop = st_i != st_dead
 			HOLD_PANIC:
 				drop = st_i != st_panic
+			HOLD_CAST:
+				drop = st_i != st_cast
 			_:
 				drop = st_i != st_attack
-		# The held-value timer: attack cooldown in the stand modes, remaining
-		# lie time for a corpse, min(panic end, redirect) for a panicker.
-		# The path/wait modes use it as a plain marker (approach and second
-		# row never tick the attack cooldown — same as the object code).
+		# The held-value timer: attack cooldown in the stand modes; remaining
+		# lie time for a corpse; min(panic end, redirect) for a panicker;
+		# min(scan, chant) for a channeling preacher. The path/wait modes use
+		# it as a plain marker (approach and second row never tick the attack
+		# cooldown — same as the object code).
 		if mode <= HOLD_FIRE or mode >= HOLD_CORPSE:
 			cd -= delta
 			if cd <= 0.0:
@@ -376,7 +392,7 @@ func _run_combat_kernels(delta: float) -> void:
 		var dx: float = 0.0
 		var dz: float = 0.0
 		var d2: float = 0.0
-		if not drop and mode != HOLD_MOVE and mode <= HOLD_WAIT:
+		if not drop and mode != HOLD_MOVE and mode <= HOLD_CHASE_DIRECT:
 			var t: int = tgt[i]
 			if t < 0 or t >= n or tgen[i] != gen[t]:
 				drop = true   # stale handle (target unregistered / slot reused)
@@ -403,6 +419,11 @@ func _run_combat_kernels(delta: float) -> void:
 							# the waiting ring hands fine control back.
 							if d2 > wait_r2:
 								drop = true
+						HOLD_CHASE_DIRECT:
+							# Arrived in melee -> strike branch; target fled
+							# past the direct band -> the object plans a path.
+							if d2 <= melee_r2 or d2 > direct_r2:
+								drop = true
 						HOLD_CHASE:
 							# Close enough for the direct-step pursuit (or the
 							# strike itself) -> object; target drifted from its
@@ -424,7 +445,8 @@ func _run_combat_kernels(delta: float) -> void:
 								var gfz: float = pt.z - gf.z
 								if gfx * gfx + gfz * gfz > 1.0:
 									drop = true
-					if not drop and (mode <= HOLD_FIRE or mode == HOLD_WAIT) \
+					if not drop and (mode <= HOLD_FIRE or mode == HOLD_WAIT
+							or mode == HOLD_CHASE_DIRECT) \
 							and ((i + phase) & 7) == 0 and d2 > 0.000001:
 						# Staggered facing refresh (~4x per second at 30 Hz);
 						# the path modes walk, so their facing tracks the
@@ -496,6 +518,57 @@ func _run_combat_kernels(delta: float) -> void:
 						var fdz: float = nwp.z - nz
 						if fdx * fdx + fdz * fdz > 0.000001:
 							u3.facing = Vector3(fdx, 0.0, fdz).normalized()
+		# Direct-step pursuit (C2.4b): walk straight at the target's slot
+		# position (target pos + the constant slot offset parked in soa_goal),
+		# with the slope brake and the per-step walkability check of
+		# _step_toward (an unwalkable step is skipped, never a drop — the
+		# object code stands still there too).
+		if not drop and mode == HOLD_CHASE_DIRECT:
+			var pid: Vector3 = pos[i]
+			var offs: Vector3 = goal_arr[i]
+			var ptd: Vector3 = pos[tgt[i]]
+			var ddx: float = ptd.x + offs.x - pid.x
+			var ddz: float = ptd.z + offs.z - pid.z
+			var dd: float = sqrt(ddx * ddx + ddz * ddz)
+			if dd > 0.001:
+				var inv_dd: float = 1.0 / dd
+				var sfx: float = clampf(pid.x + ddx * inv_dd * 0.6, 0.0, hmax)
+				var sfz: float = clampf(pid.z + ddz * inv_dd * 0.6, 0.0, hmax)
+				var sx0: int = mini(int(sfx), hverts - 2)
+				var sz0: int = mini(int(sfz), hverts - 2)
+				var stx: float = sfx - float(sx0)
+				var stz: float = sfz - float(sz0)
+				var srow: int = sz0 * hverts + sx0
+				var sh1: float = lerpf(
+					lerpf(heights[srow], heights[srow + 1], stx),
+					lerpf(heights[srow + hverts], heights[srow + hverts + 1], stx), stz)
+				var sslope: float = (sh1 - pid.y) / 0.6
+				if sslope < -Unit.STEEP_ROLL_SLOPE:
+					drop = true   # stumble zone: the object path rolls the dice
+				else:
+					var sspd: float = speed_arr[i]
+					if sslope > 0.0:
+						sspd *= clampf(1.0 - sslope * Unit.UPHILL_SLOWDOWN,
+							Unit.MIN_SPEED_FACTOR, 1.0)
+					var sstep: float = minf(sspd * delta, dd)
+					var snx: float = pid.x + ddx * inv_dd * sstep
+					var snz: float = pid.z + ddz * inv_dd * sstep
+					var cellw: int = clampi(int(snz), 0, nav_size - 1) * nav_size \
+						+ clampi(int(snx), 0, nav_size - 1)
+					if walkable[cellw] != 0:
+						sfx = clampf(snx, 0.0, hmax)
+						sfz = clampf(snz, 0.0, hmax)
+						sx0 = mini(int(sfx), hverts - 2)
+						sz0 = mini(int(sfz), hverts - 2)
+						stx = sfx - float(sx0)
+						stz = sfz - float(sz0)
+						srow = sz0 * hverts + sx0
+						var sny: float = lerpf(
+							lerpf(heights[srow], heights[srow + 1], stx),
+							lerpf(heights[srow + hverts], heights[srow + hverts + 1], stx), stz)
+						var smoved: Vector3 = Vector3(snx, sny, snz)
+						pos[i] = smoved
+						units[i].position = smoved
 		if drop:
 			hold[i] = -1.0
 			var u: Unit = units[i]
@@ -509,6 +582,11 @@ func _run_combat_kernels(delta: float) -> void:
 				var elapsed: float = goal_arr[i].x - cd - delta
 				u._panic_time -= elapsed
 				u._panic_redirect -= elapsed
+			elif mode == HOLD_CAST:
+				# goal.x parked the entry value of min(scan, chant).
+				var celapsed: float = goal_arr[i].x - cd - delta
+				u._target_search_timer -= celapsed
+				u._on_hold_elapsed(celapsed)
 			if scan[i] >= 0.0:
 				u._target_search_timer = scan[i] + delta
 				scan[i] = -1.0
@@ -533,6 +611,9 @@ func tick(delta: float) -> void:
 ## registered afterwards via _grid_extra; swap-removed slots are filtered by
 ## the callers' live index/position checks.
 func _rebuild_grid() -> void:
+	_sim_tick += 1   # drives the scan-cache TTL (in-game AND manager tests)
+	if (_sim_tick & 511) == 0:
+		_scan_cache.clear()   # periodic full drop (dead battle areas)
 	var n: int = units.size()
 	_grid_built = n
 	_grid_extra.clear()
@@ -818,14 +899,23 @@ var _group_push_phase: int = 0
 var _group_empty_bucket: Array = []
 
 
+var _group_prune_phase: int = 0
+
+
 func _apply_combat_groups(delta: float) -> void:
 	if combat_groups.is_empty():
 		return
-	# Prune + anchor follow, every tick (cheap, O(groups)).
+	# Liveness + anchor follow every tick; the full prune sweep is staggered
+	# (1/8 of the groups per tick — see CombatGroup.is_alive_light).
+	_group_prune_phase = (_group_prune_phase + 1) & 7
+	var gi: int = 0
 	var kept: Array = []
 	var anchor_hash: Dictionary = {}
 	for g in combat_groups:
-		if not g.is_alive():
+		gi += 1
+		var alive: bool = g.is_alive() if (gi & 7) == _group_prune_phase \
+			else g.is_alive_light()
+		if not alive:
 			g.release_all()
 			continue
 		g.anchor = g.anchor.move_toward(
@@ -1378,6 +1468,127 @@ func get_enemy_candidates(pos: Vector3, radius: float, enemy_of: int,
 			result.append(units[e])
 			if result.size() >= max_count:
 				return result
+	return result
+
+
+# --- Cell scan cache (Stufe C3 / plans 08e Fortsetzung) ---------------------------
+
+## The block-level enemy-candidate cache: combat scans in a mass battle run on
+## the 0.25-s cadence but each paid a full ring collection (examined budget up
+## to 300 array checks). Scanners inside the same 2x2-cell block hunting the
+## same enemy tribe share ONE collection for SCAN_CACHE_TTL_TICKS instead: the
+## cache stores candidate slot indices + generations collected from the BLOCK
+## CENTRE with an enlarged radius; get_enemy_candidates_cached then applies
+## the caller's EXACT radius and revalidates liveness/tribe/targetable per
+## call (stale/swap-removed slots fail the generation check) — aggro ranges
+## and target priorities stay exact, only the candidate-subset noise under the
+## examined budget differs (same approximation class as the budget itself).
+const SCAN_CACHE_TTL_TICKS: int = 6
+## Covers the largest cached caller radius (firewarrior aggro 13) plus the
+## worst scanner offset from its block centre (half block diagonal ~5.7).
+const SCAN_CACHE_RADIUS: float = 19.0
+## Small bucket for the common melee-aggro scans (radius <= 8): 8 + ~5.7.
+const SCAN_CACHE_RADIUS_SMALL: float = 13.7
+const SCAN_CACHE_MAX: int = 40
+
+var _scan_cache: Dictionary = {}
+## Sim-tick counter driving the cache TTL; bumped by _rebuild_grid (runs both
+## in-game and in manager-driven tests). Consumers fall back to the uncached
+## query until the first tick_units ran (bare tests keep exact behaviour).
+var _sim_tick: int = 0
+var _scan_cache_ready: bool = false
+## Scan-cache telemetry (pure counters, benchmark output only).
+static var dbg_scan_hits: int = 0
+static var dbg_scan_builds: int = 0
+static var dbg_scan_uncached: int = 0
+
+
+## Index variant for the hot combat scans (same result contract as
+## get_enemy_candidates: living targetable enemies of `enemy_of` within
+## `radius`, capped at SCAN_MAX_CANDIDATES): callers filter and SCORE over the
+## SoA arrays and only fetch the objects that survive — the per-candidate
+## property reads (position/state/is_airborne) were the measured bulk of a
+## scan, not the collection. Callers keep their own SIT/airborne/unreachable
+## filtering and scoring.
+func get_enemy_candidate_indices(pos: Vector3, radius: float,
+		enemy_of: int) -> PackedInt32Array:
+	var result: PackedInt32Array = PackedInt32Array()
+	# Density gate (one mask read): with enemies present in the scanner's OWN
+	# grid cell the direct masked collection is dirt cheap — it fills its
+	# candidate cap within the first ring (measured ~+2-5 ms when the tightly
+	# interleaved combat benchmark went through the cache). The shared cache
+	# only pays off where enemies are SPARSE in scan range (deep inside a
+	# friendly blob, where a direct scan burns its full examined budget).
+	var dense: bool = false
+	if _grid_w > 0 and _cell_tribes.size() == _grid_cells:
+		var oc: int = clampi(int(pos.z / HASH_CELL_SIZE), 0, _grid_w - 1) * _grid_w \
+			+ clampi(int(pos.x / HASH_CELL_SIZE), 0, _grid_w - 1)
+		dense = (_cell_tribes[oc] & (0xFF & ~(1 << (enemy_of & 7)))) != 0
+	if dense or not _scan_cache_ready or radius > SCAN_CACHE_RADIUS - 5.7:
+		dbg_scan_uncached += 1
+		for u in get_enemy_candidates(pos, radius, enemy_of, Unit.SCAN_MAX_CANDIDATES):
+			if u._idx >= 0:
+				result.append(u._idx)
+		return result
+	# Radius bucket: small scans (melee aggro 8 and below) must not pay the
+	# full firewarrior-radius collection on every cache MISS — in a scattered
+	# fight the hit rate is low and the build cost dominates (measured +7 ms
+	# on the spread-out combat benchmark with one shared 19 m bucket).
+	var bucket_r: float = SCAN_CACHE_RADIUS_SMALL if radius <= 8.0 else SCAN_CACHE_RADIUS
+	var bw: float = HASH_CELL_SIZE * 2.0
+	var bx: int = int(pos.x / bw)
+	var bz: int = int(pos.z / bw)
+	var key: int = ((bz * 4096 + bx) * 8 + (enemy_of & 7)) * 2 \
+		+ (0 if bucket_r == SCAN_CACHE_RADIUS_SMALL else 1)
+	var entry: Array = _scan_cache.get(key, [])
+	if entry.is_empty() or _sim_tick >= int(entry[0]):
+		dbg_scan_builds += 1
+		var center: Vector3 = Vector3(
+			(float(bx) + 0.5) * bw, 0.0, (float(bz) + 0.5) * bw)
+		var found: Array[Unit] = get_enemy_candidates(
+			center, bucket_r, enemy_of, SCAN_CACHE_MAX)
+		var idxs: PackedInt32Array = PackedInt32Array()
+		var gens: PackedInt32Array = PackedInt32Array()
+		for u in found:
+			var ui: int = u._idx
+			if ui >= 0:
+				idxs.append(ui)
+				gens.append(_slot_gen[ui])
+		entry = [_sim_tick + SCAN_CACHE_TTL_TICKS, idxs, gens]
+		_scan_cache[key] = entry
+	else:
+		dbg_scan_hits += 1
+	# Revalidate + exact-radius filter over the shared candidate list; capped
+	# like the direct query so the callers' scoring cost stays bounded.
+	var idx_list: PackedInt32Array = entry[1]
+	var gen_list: PackedInt32Array = entry[2]
+	var n: int = units.size()
+	var r2: float = radius * radius
+	var st_dead: int = Unit.State.DEAD
+	for k in range(idx_list.size()):
+		var i: int = idx_list[k]
+		if i >= n or gen_list[k] != _slot_gen[i]:
+			continue   # slot re-used since the collection
+		if soa_tribe[i] == enemy_of or soa_state[i] == st_dead \
+				or (soa_flags[i] & FLAG_TARGETABLE) == 0:
+			continue
+		var p: Vector3 = soa_pos[i]
+		var ddx: float = p.x - pos.x
+		var ddz: float = p.z - pos.z
+		if ddx * ddx + ddz * ddz <= r2:
+			result.append(i)
+			if result.size() >= Unit.SCAN_MAX_CANDIDATES:
+				break
+	return result
+
+
+## Object-list convenience wrapper over get_enemy_candidate_indices (callers
+## that act on every candidate anyway, e.g. the preacher's pacify sweep).
+func get_enemy_candidates_cached(pos: Vector3, radius: float,
+		enemy_of: int) -> Array[Unit]:
+	var result: Array[Unit] = []
+	for i in get_enemy_candidate_indices(pos, radius, enemy_of):
+		result.append(units[i])
 	return result
 
 

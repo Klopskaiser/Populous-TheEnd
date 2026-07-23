@@ -6149,5 +6149,110 @@ Separation/Group-Push (~8 ms), C2.5.
 Melee-/Feuer-/Walk-/Chase-/Corpse-Hold-Verhalten, Swap-Remove-Invalidierung,
 Threat-Reaktion unter Kernel, Displace-Clear), Ladecheck sauber,
 `benchmark_mass` Schlacht-Fenster ohne Regression (s. u.), Stress-Benchmark
-wie oben. **Offen:** In-Game-Stresstest-FPS auf dem Referenzrechner
-(maßgeblich) + Kampf-Feel-Sichtprüfung durch den Nutzer.
+wie oben. **Nutzertest 2026-07-23: In-Game-Stresstest 15–20 FPS (vorher ~10).**
+
+### Phase 8.e Fortsetzung „C3" — Scan-Pipeline, Direct-Step, Group-Pass, C2.5 (2026-07-23)
+
+**Nutzer-Auftrag:** die vier Fortsetzungspunkte aus dem 08e-Plan, Punkt 1 als
+Zell-Scan-Cache mit ausdrücklicher Balance-Erhaltung; Zauber-Nachwirkungen
+(Brand-Paniker) bewusst ausgeklammert (werden mit den Zaubern optimiert).
+
+**1. Scan-Pipeline (unit_manager.gd, unit.gd, firewarrior.gd):**
+- **Block-Scan-Cache:** `get_enemy_candidate_indices` sammelt Kandidaten
+  einmal pro 2×2-Zellblock × Feind-Stamm (Blockzentrum, Radius-Bucket 13,7
+  für Scans ≤ 8 bzw. 19 für FW-Aggro 13, Cap 40) mit **TTL 6 Ticks** und
+  liefert Slot-Indizes + Generationen; jeder Konsument revalidiert per Arrays
+  (Gen/Tribe/DEAD/targetable) und filtert seinen EXAKTEN Radius —
+  Aggro-Reichweiten und Prioritäten bleiben unverändert, nur das
+  Kandidaten-Subset-Rauschen unter dem examined-Budget ändert sich (dieselbe
+  Näherungsklasse wie das Budget selbst). **Hit-Rate im Peak ~95 %**
+  (~7 000 Hits / 350 Builds je 30 Ticks, ~130 Keys). Scharf nur im
+  tick_units-Pfad (`_scan_cache_ready`); Tests ohne Kernel-Loop behalten die
+  exakte Direktabfrage. TTL-Uhr `_sim_tick` in `_rebuild_grid`.
+  **Density-Gate (1 Masken-Read):** steht ein Feind in der EIGENEN Grid-Zelle
+  des Scanners, geht die Anfrage direkt (die maskierte Sammlung füllt ihr Cap
+  im ersten Ring und ist spottbillig — im dicht verzahnten combat-Benchmark
+  kostete der Cache-Weg dort +2–5 ms); der Cache greift nur, wo Feinde in
+  Scanreichweite RAR sind (tief im eigenen Blob, wo der Direktscan sein
+  examined-Budget verbrennt). `_melee_threat` (Radius 1,2) bleibt bewusst
+  komplett auf der engen Direktabfrage (6/48).
+- **Wichtigste Erkenntnis:** Nicht die Sammlung, sondern das **Scoring pro
+  Kandidat** war der Scan-Fresser (u.position/u.state-Property-Reads,
+  `is_airborne()`-Call, Gruppengraph für `_melee_engage_cost` — je ~1,5–2 µs
+  × 24 Kandidaten). `_scan_for_enemy` scored jetzt array-basiert: Distanz aus
+  `soa_pos`, SIT/THROWN aus `soa_state`, Deck-Reiter über das neue statische
+  **FLAG_AIRBORNE**; Melee-Kandidaten werden per Packed-Sort
+  ((quantisierte Distanz << 13) | Index — exakt in f32) in Distanzordnung
+  besucht mit **zwei Early-Exits** (erster Kosten-0-Kandidat gewinnt; sobald
+  d ≥ best_score, kann nichts mehr gewinnen) — Objekt-Fetches nur noch für
+  die wenigen ernsthaften Kandidaten. `_melee_threat` (FW) ebenso Index-basiert.
+**2. Direct-Step-Chase-Hold (`HOLD_CHASE_DIRECT`):** Verfolgung innerhalb
+COMBAT_DIRECT_RANGE (2,5 m) läuft im Kernel: Ziel = Zielposition + konstanter
+Slot-Offset (in `soa_goal` geparkt), Hangbremse + Walkability pro Schritt
+gegen die neue flache **`NavGrid.walkable_map`** (PackedByteArray, gepflegt
+vom einzigen Solidity-Writer `update_region`); unbegehbarer Schritt wird wie
+in `_step_toward` übersprungen, nie gedroppt. Deckt auch das
+Melee-Range-Pendeln ab (Drop bei d ≤ 1,2 → Strike-Zweig, Re-Entry am Pendel).
+Im Peak ~180–350 Direct-Holds.
+**3. Combat-Group-Pass:** Voll-Prune jeder Gruppe lief JEDEN Tick — bei ~540
+Gruppen ~5–6 ms, obwohl echte Mutationen (Tod/Konversion/Retarget)
+event-getrieben über remove_member/_dissolve_own_group laufen und der Sweep
+nur freed/geleakte Einträge fängt. Jetzt gestaffelt: 1/8 der Gruppen voll
+(`is_alive`), Rest `is_alive_light` (nur Defender-Validität + Nicht-leer).
+Groups-Anteil 5,5–6,2 → **~4,6–5,2 ms** (Rest = Anchor-Follow + Push-Pass +
+Dictionary — weitere Staffelung wäre verhaltenssensibel).
+**4. C2.5 Prediger:**
+- `_claimed_by_peer` von O(Stammes-Prediger) auf **O(1)**: der Sitz-Fall
+  liest `u.converting_preacher`, der Anmarsch-Fall das neue Reverse-Feld
+  `Unit._convert_claim` (gestempelt von `Preacher._set_convert_target`,
+  rückvalidiert gegen `c._convert_target == u` — stale Werte zählen nie,
+  kein Clearing nötig). Bei ~100 Predigern/Armee kostete die alte Schleife
+  150–300 µs pro Scan. Bekannte (seltene) Drift dokumentiert im Code: nur der
+  LETZTE Claimer wird erinnert.
+- **CAST-Stand-Hold (`HOLD_CAST`):** der reine Channel-Stand (kein
+  Anmarsch-Fokus) parkt im Kernel bis min(Scan, Chant); beide Objekt-Timer
+  werden beim Drop aus der Held-Zeit rekonstruiert (Chant über den neuen
+  virtuellen Hook `_on_hold_elapsed`). Im Peak ~30–55 CAST-Holds.
+
+**Messung (`benchmark_stress`, gleiche Maschine/Session):** Peak-Block
+t300–449 46,6 → **43,8–44,1 ms** (units ~33; sep+groups 8,1 → 7,8 —
+zwischenzeitlich 9,4, der Group-Fix holte das zurück), Gesamt-Ø 20,5 →
+19,4–20,7 ms, schlimmster Kampf-Tick 51–60 ms (vorher 57–80).
+**Gesamt seit C2-Baseline: 59,1 → ~44 ms (−25 %).** Läufe streuen mit dem
+RNG-Schlachtverlauf ±2–3 ms (ein Ausreißer-Lauf mit ~90 mehr Überlebenden
+maß 47). `benchmark_mass` im fairen SELBEN-Tages-A/B (C2-Stand via git stash
+nachgemessen): combat 2000 15,2 → 12,8, combat 4000 27,6 → 21,0, krieger
+23,0 → 19,3, feuerkrieger 27,4 → 26,7, krieger+prediger 32,0 → 25,4 —
+**überall besser**.
+
+**Stolpersteine/Erkenntnisse:**
+1. Ein Cache, der nur die Sammlung teilt, brachte NICHTS messbar — erst die
+   Index-API mit Array-Scoring schlug durch. Perf-Diagnose vor Optimierung
+   (Bucket-Profil je Typ×State + Kernel/Objekt-Split im Scratch-Diag) war
+   erneut der Schlüssel.
+2. **Der Direktscan ist dichteabhängig billig** (füllt sein Kandidaten-Cap im
+   ersten Ring, ~5 µs bei Feindkontakt) — ein Cache lohnt NUR im
+   Feind-armen Umfeld. Ohne das Density-Gate war der Cache im dichten
+   combat-Benchmark eine 2–5-ms-REGRESSION; ebenso `_melee_threat` (1,2 m)
+   über den 19-m-Cache (+5 ms in der FW-Schlacht). Erst per A/B-Läufen
+   gefunden (Cache zwangsweise aus).
+3. **Benchmark-Vergleiche nur am selben Tag/Systemzustand:** die
+   „Regressionen" gegen die Vortageswerte lösten sich auf, als der
+   C2-Stand per git stash HEUTE nachgemessen wurde — die Maschine war
+   durchweg ~20–30 % langsamer als gestern. Für A/B immer beide Stände
+   frisch messen.
+4. Die per-Tick-Kosten der VERBLEIBENDEN Objekt-Ticks steigen mit jeder
+   Hold-Stufe (nur die teuren Scan-/Strike-/Event-Ticks bleiben übrig) — die
+   Bucket-SUMME ist die relevante Metrik, nicht µs/Tick.
+5. State-Enum-Falle im Diag: „State 8" ist CAST, nicht PANIC — der vermeintliche
+   Panik-Posten waren channelnde Prediger (deshalb war der Panik-Hold im
+   Stresstest wirkungslos: dort brennen die Paniker und bleiben per Gate im
+   Objekt-Tick; der Hold greift für Schwarm-Panik in anderen Szenarien).
+6. `tribe.preachers`-Kommentar „a handful" stimmte im Stresstest längst nicht
+   mehr (100/Armee) — Skalierungsannahmen in Kommentaren regelmäßig prüfen.
+
+**Verifikation:** Suite **2697/2697 grün, 3 Läufe** (test_conversion_targeting
+auf die neue Setter-API umgestellt), Ladecheck sauber, `benchmark_mass` wie
+oben, Stress-Benchmark wie oben. **Offen:** In-Game-FPS-Test durch den
+Nutzer; Restposten + weitere Ideen (Thread-Fan-out, GDExtension) im 08e-Plan
+unter „Fortsetzung C3".

@@ -144,8 +144,11 @@ func _nearest_enemy_priest(radius: float) -> Unit:
 
 
 ## Nearest living enemy within melee range (the immediate threat to defend
-## against); null when nothing is in our face. Capped enemies-only candidate
-## query (phase 8.2) — the tiny radius needs no deep sweep.
+## against); null when nothing is in our face. Deliberately the DIRECT capped
+## query, not the block scan cache: for this tiny radius (1.2 m) the masked
+## collection with its small budget is far cheaper than revalidating a shared
+## wide-radius candidate list (measured +5 ms on the pure-firewarrior battle
+## when this went through the cache).
 func _melee_threat() -> Unit:
 	if path_service == null:
 		return null

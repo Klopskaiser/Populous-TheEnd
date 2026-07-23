@@ -105,6 +105,19 @@ func is_alive() -> bool:
 	return not (attackers.is_empty() and waiters.is_empty())
 
 
+## is_alive WITHOUT the prune sweep: real membership changes (death,
+## conversion, retarget) run event-driven through remove_member /
+## _dissolve_own_group anyway — the sweep only catches freed/leaked entries.
+## The manager's per-tick pass therefore full-prunes each group only every
+## few ticks (staggered) and uses this cheap check in between (C3: with ~540
+## live groups the every-tick prune alone cost ~5 ms).
+func is_alive_light() -> bool:
+	if defender == null or not is_instance_valid(defender) \
+			or defender.state == Unit.State.DEAD or defender.combat_group != self:
+		return false
+	return not (attackers.is_empty() and waiters.is_empty())
+
+
 ## Clears every binding without notifying anyone (stale-group cleanup; death
 ## and conversion use Unit._dissolve_own_group, which also retargets members).
 func release_all() -> void:

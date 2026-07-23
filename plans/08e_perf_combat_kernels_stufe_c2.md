@@ -5,12 +5,13 @@
 > Ist-Stand & Messwerte: [PROGRESS.md](PROGRESS.md).
 >
 > **Stand 2026-07-23: C2.1–C2.4 umgesetzt** (plus Zusatz-Kernels Waiter/Leichen/
-> Panik/Knockback-Decay). Peak-Block **59,1 → 46,6 ms (−21 %)**, Marschphase
-> −33 %; Suite 2697 grün. **30-FPS-Ziel noch nicht erreicht** — der Rest ist
-> scan-dominiert (Waiter-/Threat-Scans, 0,25-s-Kadenz) + Direct-Step-Pendeln +
-> Manager-Passes; Fortsetzungskandidaten unten. Details: PROGRESS.md
-> „Phase 8.e (Stufe C2)". Abweichung zu unten: Designproblem Nr. 1 wurde mit
-> **Option 2 (Generation-Handles)** gelöst, nicht Option 1 — Ranged-Angreifer
+> Panik/Knockback-Decay), danach **Fortsetzungsrunde „C3"** (Scan-Cache +
+> Index-Scoring, Direct-Step-Hold, Group-Pass, C2.5). Peak-Block
+> **59,1 → 44,1 ms (−25 %)**, Marschphase −27…−33 %; Suite 2697 grün.
+> In-Game nach C2: 15–20 FPS (Nutzertest) — **30-FPS-Ziel noch nicht
+> erreicht**; Restposten unten. Details: PROGRESS.md „Phase 8.e".
+> Abweichung zu unten: Designproblem Nr. 1 wurde mit **Option 2
+> (Generation-Handles)** gelöst, nicht Option 1 — Ranged-Angreifer
 > (Feuerkrieger ohne Gruppensitz) sind über die Combat-Groups NICHT auffindbar,
 > ein Remap wäre unvollständig gewesen; die Handles sind selbstheilend.
 
@@ -129,15 +130,30 @@ Wegpunktwechsel, Ankunft, Stolper-Roll als Objekt-Events.
 - `res://tests/run_tests.gd` grün; `--headless --quit` sauber.
 - In-Game Stresstest: FPS am Höhepunkt, Kampf-Feel-Sichtprüfung.
 
-## Fortsetzung (nach C2.4, Stand 2026-07-23 — Peak 46,6 ms, Ziel ≤ ~28 ms)
+## Fortsetzung „C3" (umgesetzt 2026-07-23, zweite Runde — Peak 46,6 → 44,1 ms)
 
-Verbleibende Posten am Peak (Bucket-Profil, PROGRESS.md):
-1. **Scan-dominierte Objekt-Ticks** (~20 ms): Waiter-Alternativ-Scan und
-   Feuerkrieger-Threat/Priest-Scans laufen gewollt alle 0,25 s, kosten aber im
-   Mega-Crowd 20–40 µs (examined-Budget 300 bzw. 48). Kandidaten: kleineres
-   Waiter-Scan-Budget (balance-sensitiv! → Langzeittest), Scan-Ergebnis-Cache
-   pro Zelle/Tick.
-2. **Direct-Step-Pendeln** (~150–200 Units, dist ≤ 2,5 m): Chase-Kernel für
-   den Direktschritt braucht eine flache Walkability-Map (NavGrid spiegeln).
-3. **Manager-Passes** (~8 ms: Separation + Combat-Group-Push) — eigener Block.
-4. C2.5 Prediger-CAST (~2 ms) + Brand-Paniker (bewusst Objekt-Tick).
+Die vier Punkte der Nachmessung, alle umgesetzt (Details PROGRESS.md „C3"):
+1. **Block-Scan-Cache** (verhaltensschonend, Balance-Vorgabe): Kandidaten-
+   Sammlung einmal pro 2×2-Zellblock × Stamm × ~0,2 s (Hit-Rate ~95 %),
+   Konsumenten filtern exakt (Radius/Liveness) und **scoren über die
+   SoA-Arrays** (Index-API + Distanz-Sortierung mit Early-Exit) — die
+   Property-Reads pro Kandidat waren der eigentliche Scan-Fresser, nicht die
+   Sammlung.
+2. **Direct-Step-Chase-Hold** (`HOLD_CHASE_DIRECT`): Verfolgung ≤ 2,5 m läuft
+   im Kernel gegen die neue flache `NavGrid.walkable_map`; deckt auch das
+   Melee-Range-Pendeln ab (Drop bei d ≤ 1,2 → Strike, Re-Entry beim Pendeln).
+3. **Combat-Group-Pass**: der Voll-Prune jeder Gruppe lief jeden Tick
+   (~540 Gruppen ≈ 5–6 ms) — echte Mutationen sind event-getrieben, der
+   Sweep fängt nur Leichen/Leaks → gestaffelt auf 1/8 der Gruppen pro Tick
+   (`is_alive_light` dazwischen). Groups-Anteil ~5,5 → ~2,5 ms.
+4. **C2.5**: `_claimed_by_peer` von O(Stammes-Prediger) auf O(1)
+   (Reverse-Claim-Feld am Ziel, rückvalidiert) + CAST-Stand-Hold
+   (`HOLD_CAST`, Scan-/Chant-Timer rekonstruiert). Brand-Paniker bewusst
+   ausgelassen (Zauber-Nachwirkung, wird mit den Zaubern optimiert).
+
+**Restposten am Peak (~44 ms)**: warrior/ATTACK-Drop-Ticks ~13,5 ms (Strikes,
+Waiter-Scans, Pendel-Events), firewarrior/ATTACK ~7,6 ms (Threat/Priest-Scans
++ Schuss-Erzeugung), Kernel ~8 ms, sep+groups ~7,8 ms, SIT/ROLL/Leichen-Reste.
+Weitere Ideen (abnehmender Ertrag): Kernel-/Separation-Fan-out auf Threads
+(SoA ist jetzt der Snapshot — Stufe-B-Blocker weg), GDExtension/C++ für die
+Kernels, Feuerkrieger-Schusspfad, Zauber-Nachwirkungen (Brand/Panik).

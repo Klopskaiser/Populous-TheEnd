@@ -21,6 +21,11 @@ var path_worker: PathWorker = null
 
 var _astar: AStarGrid2D = AStarGrid2D.new()
 var _building_cells: Dictionary[Vector2i, bool] = {}  # cells blocked by buildings
+## Flat walkability mirror of the unit grid (index = z * size + x, 1 =
+## walkable): the C2 movement kernels check their steps against this without
+## an AStarGrid2D object call per unit. Maintained by update_region — the
+## single solidity writer (fill_solid_region funnels through it).
+var walkable_map: PackedByteArray = PackedByteArray()
 ## Second grid for wide vehicles (siege engine, phase 7f): a cell is passable
 ## only when at least one fully walkable 2x2 block contains it — 1-cell gaps
 ## and narrow ledges stay closed to vehicles. Derived from the unit grid on
@@ -35,6 +40,7 @@ var _vehicle_obstacles: Dictionary[Vector2i, int] = {}
 
 func _init(p_terrain: TerrainData) -> void:
 	terrain = p_terrain
+	walkable_map.resize(terrain.size * terrain.size)
 	_astar.region = Rect2i(0, 0, terrain.size, terrain.size)
 	_astar.cell_size = Vector2(TerrainData.CELL_SIZE, TerrainData.CELL_SIZE)
 	_astar.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES
@@ -226,6 +232,7 @@ func update_region(rect: Rect2i) -> void:
 			var cell: Vector2i = Vector2i(x, z)
 			var solid: bool = _building_cells.has(cell) or not terrain.is_walkable(cell)
 			_astar.set_point_solid(cell, solid)
+			walkable_map[z * terrain.size + x] = 0 if solid else 1
 			if path_worker != null:
 				delta_cells.append(z * terrain.size + x)
 				delta_solids.append(1 if solid else 0)

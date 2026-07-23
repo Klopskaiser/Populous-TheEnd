@@ -31,6 +31,16 @@ var _convert_target = null
 var _preach_sound_timer: float = 0.0
 
 
+## Sets the approach focus AND stamps the reverse claim on the target (see
+## _claimed_by_peer: O(1) instead of a loop over the tribe's preacher list).
+## The reverse field is validated back against this preacher at read time, so
+## it never needs clearing — assigning null only drops our own side.
+func _set_convert_target(t) -> void:
+	_convert_target = t
+	if t != null and is_instance_valid(t):
+		t._convert_claim = self
+
+
 func _init() -> void:
 	max_health = Balance.PREACHER_HP
 	health = max_health
@@ -77,27 +87,32 @@ func _engage_on_sight(delta: float) -> bool:
 	# Convertible: prefer an unclaimed target so preachers fan out instead of
 	# piling onto the same crowd (falls back to the nearest if all are claimed).
 	var focus: Unit = _pick_convert_focus()
-	_convert_target = focus if focus != null else enemy
+	_set_convert_target(focus if focus != null else enemy)
 	_set_state(State.CAST)
 	return true
 
 
 ## True when another OWN preacher is already converting `u` (it sits under him)
-## or walking toward it as its focus. Iterates the tribe's PREACHER list (a
-## handful) instead of all units — an all-units scan cost a three-digit ms share
-## per tick in a mass battle with many preachers (same fix as
-## Firewarrior._nearest_enemy_priest).
+## or walking toward it as its focus. O(1) via the target's fields (C2.5, was
+## a loop over the tribe's preacher LIST — with ~100 preachers per army in the
+## stress test that alone cost 150-300 us per scan): the sitting case reads
+## u.converting_preacher, the approach case reads the reverse claim stamped by
+## _set_convert_target. Both are validated back against the preacher, so stale
+## fields never count. Known (rare) drift from the old loop: only the LAST
+## claimer is remembered — if it gives the target up while an earlier claimer
+## is still approaching, the target briefly reads as free again (the old
+## nearest_any fallback double-teams in that situation anyway).
 func _claimed_by_peer(u: Unit) -> bool:
-	if tribe == null or u == null:
+	if u == null:
 		return false
-	for p in tribe.preachers:
-		if p == null or not is_instance_valid(p) or p == self or p.state == State.DEAD:
-			continue
-		if u.state == State.SIT and u.converting_preacher == p:
-			return true
-		if (p as Preacher)._convert_target == u:
-			return true
-	return false
+	if u.state == State.SIT:
+		var cp = u.converting_preacher
+		return cp != null and is_instance_valid(cp) and cp != self \
+			and cp.state != State.DEAD and cp.tribe_id == tribe_id
+	var c = u._convert_claim
+	return c != null and is_instance_valid(c) and c != self \
+		and c.state != State.DEAD and c.tribe_id == tribe_id \
+		and (c as Preacher)._convert_target == u
 
 
 ## Nearest convertible enemy in range, preferring one no peer preacher has
@@ -109,10 +124,9 @@ func _pick_convert_focus() -> Unit:
 	var d_free: float = INF
 	var nearest_any: Unit = null
 	var d_any: float = INF
-	# Enemies-only candidates (phase 8.2): friends in the crowd no longer eat
-	# the candidate budget, and the buckets are visited without the NW bias.
-	for u in path_service.get_enemy_candidates(
-			position, AGGRO_RADIUS, tribe_id, SCAN_MAX_CANDIDATES):
+	# Enemies-only candidates from the shared block cache (C3; SIT included).
+	for u in path_service.get_enemy_candidates_cached(
+			position, AGGRO_RADIUS, tribe_id):
 		if u == self or u.state == State.SIT or u.is_conversion_immune() \
 				or not u.is_targetable():
 			continue
@@ -134,7 +148,7 @@ func order_attack(enemy: Unit) -> void:
 	if enemy != null and is_instance_valid(enemy) and enemy.state != State.DEAD \
 			and enemy.tribe_id != tribe_id and not enemy.is_conversion_immune():
 		_end_attack()   # clears _target_ordered — re-set it below (sticky order)
-		_convert_target = enemy
+		_set_convert_target(enemy)
 		_target_ordered = true   # march to THIS one; the auto-scan must not drop it
 		_set_state(State.CAST)
 		return
@@ -153,7 +167,7 @@ func _engage_assault_foe(foe: Unit) -> void:
 		_begin_attack(foe)
 		return
 	if foe != null and is_instance_valid(foe) and not foe.is_conversion_immune():
-		_convert_target = foe
+		_set_convert_target(foe)
 		_set_state(State.CAST)
 	else:
 		_begin_attack(foe)
@@ -206,6 +220,17 @@ func _tick_convert(delta: float) -> void:
 	if _preach_sound_timer <= 0.0:
 		_preach_sound_timer = PREACH_SOUND_INTERVAL
 		_emit_combat_hit(&"preach")
+	# C2.5 cast hold: the pure channel stand (no approach focus) does nothing
+	# until the next scheduled scan or chant — park it in the kernel; both
+	# timers are reconstructed from the held time on drop (_on_hold_elapsed).
+	if state == State.CAST and (t == null or not is_instance_valid(t)):
+		_enter_soa_cast_hold(minf(_target_search_timer, _preach_sound_timer))
+
+
+## Kernel-held time (HOLD_CAST) reaches the chant timer here (see
+## Unit._on_hold_elapsed; the scan timer is handled generically).
+func _on_hold_elapsed(elapsed: float) -> void:
+	_preach_sound_timer -= elapsed
 
 
 ## Scan pass while channeling: duel-check, pacify everyone convertible in
@@ -230,12 +255,12 @@ func _refresh_conversion() -> void:
 	var d_free: float = INF
 	var nearest_any: Unit = null
 	var d_any: float = INF
-	# Enemies-only, examined-capped candidates (like _pick_convert_focus): an
-	# uncapped get_units_in_radius here materialised HUNDREDS of units (friends
-	# included) per casting preacher per scan in a battle blob — the outer half
-	# of the O(K*n) conversion-scan blowup.
-	for u in path_service.get_enemy_candidates(
-			position, AGGRO_RADIUS, tribe_id, SCAN_MAX_CANDIDATES):
+	# Enemies-only candidates from the shared block cache (C3): an uncapped
+	# get_units_in_radius here once materialised HUNDREDS of units per casting
+	# preacher per scan; the capped query fixed that, the cache now also
+	# shares the collection between neighbouring preachers (SIT included).
+	for u in path_service.get_enemy_candidates_cached(
+			position, AGGRO_RADIUS, tribe_id):
 		if u == self or u.state == State.DEAD or u.tribe_id == tribe_id:
 			continue
 		# Housed/protected units (e.g. a tower's crew reserve) are never a
@@ -280,7 +305,7 @@ func _refresh_conversion() -> void:
 	# unclaimed one so preachers fan out (user report: no double-teaming).
 	var nearest: Unit = nearest_free if nearest_free != null else nearest_any
 	if nearest != null:
-		_convert_target = nearest
+		_set_convert_target(nearest)
 		return
 	_convert_target = null
 	# Nothing of my own to convert (everyone in range is a peer's already, and

@@ -70,8 +70,9 @@ func test_preachers_spread_to_different_targets() -> void:
 	var pb: Preacher = w.um.spawn_unit(PREACHER_SCENE, 0, Vector3(51, 5, 50)) as Preacher
 	var e1: Unit = w.um.spawn_unit(BRAVE_SCENE, 1, Vector3(53, 5, 50))
 	var e2: Unit = w.um.spawn_unit(BRAVE_SCENE, 1, Vector3(53, 5, 52))
-	# Preacher A has already claimed e1 as its focus.
-	pa._convert_target = e1
+	# Preacher A has already claimed e1 as its focus (the setter stamps the
+	# reverse claim on the target — the O(1) path _claimed_by_peer reads).
+	pa._set_convert_target(e1)
 	check(pb._claimed_by_peer(e1), "e1 is seen as claimed by peer preacher A")
 	check(not pb._claimed_by_peer(e2), "e2 is unclaimed")
 	# So B picks the OTHER enemy instead of piling onto e1.

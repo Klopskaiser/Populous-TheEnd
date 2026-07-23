@@ -342,6 +342,8 @@ func _compute_soa_flags() -> int:
 		f |= UnitManager.FLAG_TARGETABLE
 	if unit_kind() == &"preacher":
 		f |= UnitManager.FLAG_PREACHER
+	if rides_airborne():
+		f |= UnitManager.FLAG_AIRBORNE
 	return f
 
 
@@ -419,6 +421,55 @@ func _enter_soa_path_hold(mode: int, wp: Vector3, goal: Vector3 = Vector3.ZERO,
 	_soa_kb[i] = knockback_accum   # kernel-side decay while held
 
 
+## Direct-pursuit hold entry (C2.4b, see _tick_attack): the kernel steps
+## straight at the target's slot position (target + `offset`, parked in
+## soa_goal) with the slope brake and the flat-map walkability check of
+## _step_toward; drops on arrival in melee range or when the target flees
+## past COMBAT_DIRECT_RANGE (back to the A* leg).
+func _enter_soa_direct_hold(offset: Vector3) -> void:
+	var i: int = _idx
+	if i < 0 or _burn_time > 0.0 or _knockback_remaining != Vector3.ZERO:
+		return
+	if vehicle_separation > 0.0 or flies or terrain_data == null:
+		return
+	var t: Unit = attack_target
+	if t == null or not is_instance_valid(t):
+		return
+	var ti: int = t._idx
+	if ti < 0:
+		return
+	_soa_target[i] = ti
+	_soa_tgen[i] = _mgr_slot_gen[ti]
+	_soa_hold[i] = 1.0   # held-marker (no cooldown while pursuing)
+	_soa_mode[i] = UnitManager.HOLD_CHASE_DIRECT
+	_soa_scan[i] = -1.0
+	_soa_goal[i] = Vector3(offset.x, 0.0, offset.z)
+	_soa_kb[i] = knockback_accum
+
+
+## Channel-stand hold entry (C2.5, see Preacher._tick_convert): nothing
+## happens between the scheduled scan and the next chant — the kernel counts
+## min(scan, chant) and both timers are reconstructed from the elapsed held
+## time on drop (entry value parked in goal.x; the chant via _on_hold_elapsed).
+func _enter_soa_cast_hold(span: float) -> void:
+	var i: int = _idx
+	if i < 0 or span <= 0.0 or _burn_time > 0.0 \
+			or _knockback_remaining != Vector3.ZERO:
+		return
+	_soa_hold[i] = span
+	_soa_mode[i] = UnitManager.HOLD_CAST
+	_soa_scan[i] = -1.0
+	_soa_goal[i] = Vector3(span, 0.0, 0.0)
+	_soa_kb[i] = knockback_accum
+
+
+## Hook for held time that passed outside the object tick (kernel drop /
+## event clear of a HOLD_CAST): subclasses with own stand timers apply the
+## elapsed seconds here (the preacher's chant timer).
+func _on_hold_elapsed(_elapsed: float) -> void:
+	pass
+
+
 ## Panic-hold entry (see _tick_panic): holds until the next redirect or the
 ## panic end, whichever comes first — both object timers are reconstructed
 ## from the elapsed held time on drop (entry value parked in goal.x).
@@ -458,6 +509,10 @@ func _clear_soa_hold() -> void:
 		var elapsed: float = _soa_goal[i].x - _soa_hold[i]
 		_panic_time -= elapsed
 		_panic_redirect -= elapsed
+	elif mode == UnitManager.HOLD_CAST:
+		var celapsed: float = _soa_goal[i].x - _soa_hold[i]
+		_target_search_timer -= celapsed
+		_on_hold_elapsed(celapsed)
 	_soa_hold[i] = -1.0
 	if _soa_scan[i] >= 0.0:
 		_target_search_timer = _soa_scan[i]
@@ -555,6 +610,11 @@ var attack_anim: StringName = &"punch"
 ## Target this attacker rolled "keep fighting although it sits" for (untyped:
 ## may be freed) — the 5% roll happens once per sitting spell, not per tick.
 var _sit_decision_target = null
+## Reverse conversion claim (C2.5): the last enemy preacher that took this
+## unit as its approach focus (untyped: may be freed). Written by
+## Preacher._set_convert_target, validated back against the preacher at read
+## time (_claimed_by_peer) — never cleared, stale values simply fail the check.
+var _convert_claim = null
 ## Cached A* goal while approaching a target (replanned when it drifts).
 var _combat_goal: Vector3 = Vector3.INF
 ## No combat path planning before this tick (set after a failed A*).
@@ -2198,17 +2258,18 @@ func _tick_attack(delta: float) -> void:
 			_retarget_or_idle()
 			return
 		_face_point(target.position)
-		# C2.4 chase hold (planned-path leg only — the direct-step pursuit
-		# keeps its per-step walkability check on the object path): the kernel
-		# walks the path and drops us back on arrival in direct range, target
-		# drift past the re-plan threshold, or the waypoint switch. goal =
-		# target position now: dest is target + a constant slot offset, so
-		# target drift equals the object's goal-drift re-plan check.
-		if state == State.ATTACK and attack_target == target and _has_path() \
-				and _combat_goal != Vector3.INF \
-				and dist > COMBAT_DIRECT_RANGE:
-			_enter_soa_path_hold(UnitManager.HOLD_CHASE, _path[_path_index],
-				target.position)
+		# C2.4 chase hold: the kernel walks the pursuit. Planned-path leg
+		# (goal = target position now: dest is target + a constant slot
+		# offset, so target drift equals the object's re-plan check) or —
+		# inside COMBAT_DIRECT_RANGE — the direct step at the slot position
+		# (goal = the slot OFFSET; per-step walkability via the flat nav map).
+		if state == State.ATTACK and attack_target == target:
+			if dist > COMBAT_DIRECT_RANGE:
+				if _has_path() and _combat_goal != Vector3.INF:
+					_enter_soa_path_hold(UnitManager.HOLD_CHASE,
+						_path[_path_index], target.position)
+			elif nav_grid != null:
+				_enter_soa_direct_hold(dest - target.position)
 		return
 	# In range: stand still, face the target and strike on cooldown.
 	_in_melee = true
@@ -2811,40 +2872,89 @@ func _maybe_retaliate(attacker) -> void:
 
 ## Nearest enemy in radius, scored by the group-slot cost (free enemies and
 ## open seats first — 1v1 preference structurally). Candidates come from the
-## ring-ordered, enemies-only query (phase 8.2): friendly units no longer
-## consume the candidate budget (blob blindness) and buckets are visited
-## outward from the own cell (no NW-first direction bias).
-func _scan_for_enemy(radius: float, max_examined: int = 0) -> Unit:
+## shared block scan cache (C3): one ring collection per 2x2-cell block and
+## tribe per ~0.2 s instead of per scan; the exact radius/liveness filtering
+## happens inside the cached query, scoring stays per scanner. The old
+## `max_examined` budget lives in the cache collection now (the parameter is
+## kept for the callers but no longer narrows individual scans).
+func _scan_for_enemy(radius: float, _max_examined: int = 0) -> Unit:
 	if path_service == null:
 		return null
-	var flat: Vector2 = Vector2(position.x, position.z)
+	var mgr: UnitManager = path_service
+	var idxs: PackedInt32Array = mgr.get_enemy_candidate_indices(
+		position, radius, tribe_id)
+	if idxs.is_empty():
+		return null
+	var pos_arr: PackedVector3Array = mgr.soa_pos
+	var sstate: PackedInt32Array = mgr.soa_state
+	var sflags: PackedInt32Array = mgr.soa_flags
+	var mgr_units: Array[Unit] = mgr.units
+	var px: float = position.x
+	var pz: float = position.z
+	var st_sit: int = State.SIT
+	var st_thrown: int = State.THROWN
+	var self_idx: int = _idx
 	var best: Unit = null
-	var best_score: float = INF
-	var ranged: bool = _is_ranged()
 	var now: int = Time.get_ticks_msec()
 	var check_unreach: bool = not _unreach_targets.is_empty()
-	if max_examined <= 0:
-		max_examined = UnitManager.SCAN_MAX_EXAMINED
-	for u in path_service.get_enemy_candidates(position, radius, tribe_id,
-			SCAN_MAX_CANDIDATES, max_examined):
-		if u == self:
+	if _is_ranged():
+		# Pure nearest-by-distance over the arrays; the object is only fetched
+		# for the would-be best (and only when an unreachable cache exists).
+		var best_d: float = INF
+		for k in idxs:
+			if k == self_idx or sstate[k] == st_sit:
+				continue   # sitting converts are no threat
+			var pk: Vector3 = pos_arr[k]
+			var ddx: float = pk.x - px
+			var ddz: float = pk.z - pz
+			var d: float = sqrt(ddx * ddx + ddz * ddz)
+			if d >= best_d:
+				continue
+			var u: Unit = mgr_units[k]
+			if check_unreach \
+					and int(_unreach_targets.get(u.get_instance_id(), 0)) > now:
+				continue   # recently proven unreachable (up on a cliff)
+			best_d = d
+			best = u
+		return best
+	# Melee: score = distance + engage cost * 1000 (free enemies / open seats
+	# first — the 1-vs-N pairing preference). The cost needs the group graph
+	# (object), so candidates are visited in DISTANCE order (packed sort of
+	# (quantised d | index) keys) with two early exits: the first cost-0
+	# candidate wins outright, and once a candidate's plain distance exceeds
+	# the best score no later one can win either. This bounds the expensive
+	# per-candidate object work to a couple of fetches in the common case.
+	var order: PackedFloat32Array = PackedFloat32Array()
+	for k in idxs:
+		var st_k: int = sstate[k]
+		if k == self_idx or st_k == st_sit:
 			continue
-		if u.state == State.SIT:
-			continue   # sitting converts are no threat (and shall keep sitting)
-		if not ranged and u.is_airborne():
+		if st_k == st_thrown or (sflags[k] & UnitManager.FLAG_AIRBORNE) != 0:
 			continue   # melee cannot reach airship deck crew / whirled units
+		var pk2: Vector3 = pos_arr[k]
+		var dx2: float = pk2.x - px
+		var dz2: float = pk2.z - pz
+		# (quantised distance << 13) | slot index — exact in f32 (< 2^24).
+		order.append(float(
+			(int(sqrt(dx2 * dx2 + dz2 * dz2) * 64.0) << 13) | k))
+	order.sort()
+	var best_score: float = INF
+	for v in order:
+		var vi: int = int(v)
+		var dq: float = float(vi >> 13) / 64.0
+		if dq >= best_score:
+			break   # sorted by distance: nothing later can win
+		var u2: Unit = mgr_units[vi & 8191]
 		if check_unreach \
-				and int(_unreach_targets.get(u.get_instance_id(), 0)) > now:
-			continue   # recently proven unreachable (up on a cliff, phase 8.2)
-		var d: float = Vector2(u.position.x, u.position.z).distance_to(flat)
-		# The engage cost dominates the score so free enemies / open seats are
-		# picked first (1-vs-N pairing); ranged units fire without a seat.
-		var score: float = d
-		if not ranged:
-			score += float(_melee_engage_cost(u)) * 1000.0
+				and int(_unreach_targets.get(u2.get_instance_id(), 0)) > now:
+			continue
+		var cost: int = _melee_engage_cost(u2)
+		var score: float = dq + float(cost) * 1000.0
 		if score < best_score:
 			best_score = score
-			best = u
+			best = u2
+			if cost == 0:
+				break   # nearest free enemy: unbeatable
 	return best
 
 
