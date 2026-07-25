@@ -482,3 +482,32 @@ const TRIBE_MAX_UNITS: int = 1000
 const TREE_GROWTH_TIME: float = 75.0
 ## Holz-Ertrag je Wachstumsstufe (Index = Stufe 0..4).
 const TREE_YIELDS: Array[int] = [0, 1, 2, 3, 4]
+
+## Parameter je Baumtyp, indiziert per TreeResource.TreeType (STANDARD/LEAF/
+## BAMBOO). growth_*/repro_* sind Multiplikatoren auf Wachstum/Vermehrung je
+## nach Untergrund (Gras vs. Nicht-Gras, TerrainData.is_grass); Faktor 0 heißt
+## Pause bzw. keine Sprossen. max_stage begrenzt Wachstum UND Ertrag (Bambus:
+## Stufe 2 = max. 2 Holz über TREE_YIELDS). min_spacing/density_limit steuern,
+## wie dicht der Typ stehen darf; grass_only-Typen sprießen nur auf Gras.
+const TREE_TYPE_PARAMS: Array[Dictionary] = [
+	{ "growth_grass": 1.0, "growth_off": 1.0,  "repro_grass": 1.0, "repro_off": 1.0,
+	  "max_stage": 4, "min_spacing": 2, "density_limit": 6, "grass_only": false,
+	  "model": "models/trees/tree.glb",
+	  "stage_scales": [0.28, 0.35, 0.55, 0.8, 1.0] },
+	{ "growth_grass": 1.5, "growth_off": 0.75, "repro_grass": 1.2, "repro_off": 0.6,
+	  "max_stage": 4, "min_spacing": 2, "density_limit": 6, "grass_only": false,
+	  "model": "models/trees/tree_leaf.glb",
+	  "stage_scales": [0.28, 0.35, 0.55, 0.8, 1.0] },
+	{ "growth_grass": 1.0, "growth_off": 0.0,  "repro_grass": 3.0, "repro_off": 0.0,
+	  "max_stage": 2, "min_spacing": 1, "density_limit": 18, "grass_only": true,
+	  "model": "models/trees/tree_bamboo.glb",
+	  "stage_scales": [0.3, 0.65, 1.0] },
+]
+## Startbestand (Map-Gen): Typ-Anteile der Wildverteilung auf Gras-Zellen
+## (Nicht-Gras bleibt immer Standard) plus reine Laub-/Bambus-Haine.
+const TREE_LEAF_SHARE: float = 0.20
+const TREE_BAMBOO_SHARE: float = 0.10
+const TREE_GROVES_PER_STANDARD_MAP: int = 3   # Haine je 128er-Fläche (skaliert wie TREE_COUNT)
+const TREE_GROVE_TREES_MIN: int = 8
+const TREE_GROVE_TREES_MAX: int = 14
+const TREE_GROVE_RADIUS: int = 6

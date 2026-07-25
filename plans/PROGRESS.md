@@ -1255,7 +1255,7 @@ Sprites nur noch, wenn sie wirklich davor ist.
   Terrain-Trefferpunkt (`_set_rally`), sonst weiterhin `_command_move`.
 - **Produktions-/Ausbildungsbalken über Gebäuden:** `Building.production_progress()`
   (Basis −1 = keiner) + billboard-Sprite-Balken (`_create_overlay`/`_update_overlay`,
-  Tiefen­test aus, Textur nur bei Wertänderung neu). `Hut.production_progress()`
+  Tiefentest aus, Textur nur bei Wertänderung neu). `Hut.production_progress()`
   = Fortschritt bis zum nächsten Brave (`1 - spawn_timer/SPAWN_INTERVAL`), −1
   während Bau oder bei erreichtem Bevölkerungslimit.
 - Tests: `test_carry_animation_base`, `test_group_slot_offset`,
@@ -6256,3 +6256,57 @@ auf die neue Setter-API umgestellt), Ladecheck sauber, `benchmark_mass` wie
 oben, Stress-Benchmark wie oben. **Offen:** In-Game-FPS-Test durch den
 Nutzer; Restposten + weitere Ideen (Thread-Fan-out, GDExtension) im 08e-Plan
 unter „Fortsetzung C3".
+
+## Erweiterung — Komplexere Holzwirtschaft: Drei Baumtypen (2026-07-25)
+
+**Feature (Nutzerwunsch aus Plan-Session vom 2026-07-23, dort nie umgesetzt):**
+Bäume haben jetzt einen Typ (`TreeResource.TreeType`: STANDARD/LEAF/BAMBOO) mit
+untergrundabhängigem Verhalten (Gras vs. Nicht-Gras):
+
+| Typ | Wachstum | Vermehrung | Besonderheiten |
+|---|---|---|---|
+| Standard | überall 1,0× | überall 1,0× | wie bisher; einziger Typ, den der Förster pflanzt |
+| Laubbaum | Gras 1,5× / sonst 0,75× | Gras 1,2× / sonst 0,6× | Kugel-Krone (helleres Grün) |
+| Bambus | Gras 1,0× / sonst 0 (Pause) | Gras 3,0× / sonst 0 | nur bis Stufe 2 (max. 2 Holz), Spacing 1, Dichtegrenze 18, Sprossen nur auf Gras; dünner Halm + Schopf |
+
+**Umsetzung:**
+- [terrain_data.gd](../scripts/core/terrain_data.gd): `GRASS_MIN/GRASS_MAX` +
+  `is_grass(cell)` als Single Source of Truth; die duplizierten Färb-Schwellen in
+  [terrain.gd](../scripts/core/terrain.gd) und [minimap.gd](../scripts/ui/minimap.gd)
+  referenzieren sie jetzt (`SAND_TOP = GRASS_MIN`, `ROCK_BOTTOM = GRASS_MAX`).
+- [balance.gd](../scripts/core/balance.gd): `TREE_TYPE_PARAMS` (growth/repro-Faktoren,
+  max_stage, min_spacing, density_limit, grass_only, Modellpfad, stage_scales je Typ)
+  + Map-Gen-Konstanten (`TREE_LEAF_SHARE 0.20`, `TREE_BAMBOO_SHARE 0.10`,
+  `TREE_GROVES_PER_STANDARD_MAP 3`, Hain-Größe 8–14, Radius 6).
+- [tree_resource.gd](../scripts/core/tree_resource.gd): `type` + `on_grass`-Cache;
+  `set_stage` clampt auf `max_stage()`; `grow_tick` multipliziert den **delta** mit dem
+  Bodenfaktor (Faktor 0 = saubere Pause, Verformung wirkt sofort); prozedurale
+  Fallback-Visuals je Typ. **Perf:** Fallback-Meshes/-Materialien sind jetzt geteilte
+  `static`-Ressourcen je Typ (vorher 2 Mesh- + 2 Material-Instanzen pro Baum);
+  `ignite()` dupliziert die Kronen-Materialinstanz vor dem Einfärben (sonst färbte
+  sich der ganze Wald). `STAGE_SCALES`-Konstante entfiel (jetzt in der Typtabelle).
+- [tree_manager.gd](../scripts/core/tree_manager.gd): `MAX_TREES 400 → 1000`;
+  `spawn_tree(c, stage, type)` rückwärtskompatibel (`type` **vor** `set_stage` gesetzt);
+  `register()` setzt `on_grass`; Gras-Cache-Invalidierung über `Events.terrain_deformed`
+  (guarded verbunden — Bus fehlt headless, Tests rufen `_on_terrain_deformed` direkt);
+  `_reproduce()` mit Typ-Dichtegrenze und Bodenfaktor **nach** der 0,2-Kappe (Standard/
+  Laub behalten die Bestandskurve, Bambus bekommt Headroom bis 0,6); `_sprout_near`
+  erbt Typ + Typ-Spacing + `grass_only`-Filter; `spawn_trees` würfelt den Typ nur auf
+  Gras-Zellen; neu `spawn_groves(count)` (reine Laub-/Bambus-Haine auf Gras,
+  deterministisch über die von `spawn_trees` geseedete `_rng`). `_neighbor_count`
+  zählt bewusst alle Typen („Bambus verdrängt" — physische Zell-Konkurrenz).
+- [main.gd](../scripts/core/main.gd): `spawn_groves` nach `spawn_trees`, Flächenskalierung
+  wie `tree_count` (128er: 3 Haine, 256er: 12). `_ensure_trees_near` bleibt bewusst
+  Standard (planbare Start-Holzbasis); Förster pflanzt per Default weiter Standard
+  (forester.gd unverändert, verifiziert).
+- Assets: Modell-Slots `assets/models/trees/tree.glb`, `tree_leaf.glb`,
+  `tree_bamboo.glb` (Ordner leer → überall prozeduraler Fallback; nach Ablegen einer
+  glb einmal `--headless --import`).
+
+**Verifikation:** Ladecheck sauber; Suite **2807/2807 grün**, davon 110 Checks neu in
+[test_tree_types.gd](../tests/test_tree_types.gd) (Laub-Faktoren auf Gras/Sand,
+Bambus-Stufe-2-Kappe + exakt 2 Holz, Bambus auf Sand tot, Sprossen nur auf Gras,
+Typ-Vererbung, `spawn_tree(c, 2)` bleibt STANDARD, Gras-Cache-Invalidierung nach
+Verformung, Map-Gen-Typverteilung auf Gras/Sand); 20-s-Headless-Start ohne
+Laufzeitfehler. **Offen:** manueller Spieltest durch den Nutzer (Mischwald/Haine
+sichtbar, Feuer/Tornado auf Mischwald, Landbridge/Absinken unter Bambushain).

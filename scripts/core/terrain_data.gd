@@ -14,6 +14,13 @@ const CELL_SIZE: float = 1.0   # world metres per cell
 const SEA_LEVEL: float = 2.0   # water line
 const MAX_SLOPE: float = 1.5   # max corner height delta for a walkable cell (metres)
 
+## Grass band (single source of truth for visuals AND gameplay): cells whose
+## height falls in [GRASS_MIN, GRASS_MAX) read as grass — below is sand/beach,
+## above is rock. Terrain/minimap colouring and the tree-type rules (leaf trees
+## and bamboo, phase 7d+) all derive from these two thresholds.
+const GRASS_MIN: float = SEA_LEVEL + 1.5
+const GRASS_MAX: float = SEA_LEVEL + 8.0
+
 # Island generation tuning
 const BASE_LAND: float = 6.0
 const NOISE_AMP: float = 6.0
@@ -217,6 +224,14 @@ func cell_height(cell: Vector2i) -> float:
 	var h01: float = heights[(cell.y + 1) * verts + cell.x]
 	var h11: float = heights[(cell.y + 1) * verts + cell.x + 1]
 	return (h00 + h10 + h01 + h11) * 0.25
+
+## True when the cell's (average) height lies in the grass band — the gameplay
+## ground-type query used by the tree types (leaf/bamboo growth and sprouting).
+func is_grass(cell: Vector2i) -> bool:
+	if not in_bounds(cell):
+		return false
+	var h: float = cell_height(cell)
+	return h >= GRASS_MIN and h < GRASS_MAX
 
 ## A cell is walkable if it sits above the sea line and is not too steep.
 func is_walkable(cell: Vector2i) -> bool:

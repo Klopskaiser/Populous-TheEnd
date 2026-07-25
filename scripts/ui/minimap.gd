@@ -17,8 +17,8 @@ const OVERLAY_INTERVAL: float = 0.2
 
 # Height colour steps — kept consistent with Terrain._color_for_height so the
 # minimap matches the 3D terrain.
-const SAND_TOP: float = TerrainData.SEA_LEVEL + 1.5
-const ROCK_BOTTOM: float = TerrainData.SEA_LEVEL + 8.0
+const SAND_TOP: float = TerrainData.GRASS_MIN
+const ROCK_BOTTOM: float = TerrainData.GRASS_MAX
 const COLOR_SAND: Color = Color(0.83, 0.74, 0.50)
 const COLOR_GRASS: Color = Color(0.29, 0.55, 0.24)
 const COLOR_ROCK: Color = Color(0.45, 0.44, 0.42)

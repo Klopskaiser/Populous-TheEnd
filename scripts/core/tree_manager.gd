@@ -2,6 +2,9 @@ class_name TreeManager extends Node
 
 ## Registry for wild trees (child of Main). Drives growth and reproduction,
 ## answers nearest-tree queries and handles claiming/felling for workers.
+## Trees carry a TYPE (standard/leaf/bamboo, Balance.TREE_TYPE_PARAMS) whose
+## ground-dependent factors this manager feeds via the cached on_grass flag
+## (set on spawn/register, refreshed on Events.terrain_deformed).
 ##
 ## Reproduction: every REPRO_INTERVAL a few random trees are sampled; the
 ## spawn chance per parent scales super-linearly with the number of nearby
@@ -10,11 +13,12 @@ class_name TreeManager extends Node
 
 const TREE_SCENE: PackedScene = preload("res://scenes/tree_resource.tscn")
 
-## Minimum cell distance between two trees.
+## Minimum cell distance between two trees (default; bamboo packs denser via
+## its per-type min_spacing in Balance.TREE_TYPE_PARAMS).
 const MIN_SPACING: int = 2
-## Hard global limit (raised for phase 7d so several foresters do not starve
-## each other; natural reproduction shares the same cap unobtrusively).
-const MAX_TREES: int = 400
+## Hard global limit (raised again for the tree types: bamboo reproduces 3x
+## and would starve at the old 400 cap; no per-type limits by design).
+const MAX_TREES: int = 1000
 const REPRO_INTERVAL: float = 5.0
 const REPRO_BASE_CHANCE: float = 0.004
 ## Neighbourhood radius (cells, Chebyshev) for density/chance.
@@ -43,6 +47,27 @@ func setup(p_terrain_data: TerrainData, p_nav_grid: NavGrid) -> void:
 	nav_grid = p_nav_grid
 
 
+func _ready() -> void:
+	# Grass-cache invalidation on terrain deformation (Landbridge, quake, …).
+	# Guarded lookup — the Events bus autoload is absent in headless tests.
+	var bus: Node = get_node_or_null("/root/Events")
+	if bus != null:
+		bus.terrain_deformed.connect(_on_terrain_deformed)
+
+
+## Recomputes the cached on_grass flag for every tree whose cell lies in the
+## deformed rect (tests call this directly — no Events bus headless).
+func _on_terrain_deformed(rect: Rect2i) -> void:
+	if terrain_data == null:
+		return
+	for dz in range(rect.size.y):
+		for dx in range(rect.size.x):
+			var c: Vector2i = rect.position + Vector2i(dx, dz)
+			var tree: TreeResource = _occupied.get(c, null)
+			if tree != null and is_instance_valid(tree):
+				tree.on_grass = terrain_data.is_grass(c)
+
+
 func _physics_process(delta: float) -> void:
 	tick(delta)
 
@@ -67,7 +92,8 @@ func tick(delta: float) -> void:
 # --- Initial distribution ------------------------------------------------------
 
 ## Deterministic start distribution; start trees get random grown stages
-## (new trees later always sprout small).
+## (new trees later always sprout small). Grass cells roll a tree type
+## (bamboo/leaf/standard shares from Balance); off-grass is always standard.
 func spawn_trees(count: int, p_seed: int) -> void:
 	if nav_grid == null:
 		return
@@ -83,14 +109,61 @@ func spawn_trees(count: int, p_seed: int) -> void:
 			continue
 		if _too_close(c):
 			continue
-		spawn_tree(c, _rng.randi_range(1, TreeResource.MAX_STAGE))
+		var type: TreeResource.TreeType = TreeResource.TreeType.STANDARD
+		if terrain_data.is_grass(c):
+			var roll: float = _rng.randf()
+			if roll < Balance.TREE_BAMBOO_SHARE:
+				type = TreeResource.TreeType.BAMBOO
+			elif roll < Balance.TREE_BAMBOO_SHARE + Balance.TREE_LEAF_SHARE:
+				type = TreeResource.TreeType.LEAF
+		var params: Dictionary = Balance.TREE_TYPE_PARAMS[type]
+		spawn_tree(c, _rng.randi_range(1, int(params.max_stage)), type)
 		placed += 1
 	if placed < count:
 		push_warning("Only %d of %d trees spawned" % [placed, count])
 
 
-func spawn_tree(c: Vector2i, stage: int = 0) -> TreeResource:
+## Pure leaf/bamboo groves on grass (map start, after spawn_trees — shares the
+## already-seeded _rng, so the fixed call order keeps map gen deterministic).
+func spawn_groves(count: int) -> void:
+	if nav_grid == null:
+		return
+	for i in range(count):
+		var seed_cell: Vector2i = Vector2i(-1, -1)
+		for attempt in range(40):
+			var c: Vector2i = Vector2i(
+				_rng.randi_range(0, terrain_data.size - 1),
+				_rng.randi_range(0, terrain_data.size - 1))
+			if nav_grid.is_cell_walkable(c) and terrain_data.is_grass(c) \
+					and not _too_close(c):
+				seed_cell = c
+				break
+		if seed_cell.x < 0:
+			continue
+		var type: TreeResource.TreeType = TreeResource.TreeType.LEAF \
+			if _rng.randf() < 0.5 else TreeResource.TreeType.BAMBOO
+		var params: Dictionary = Balance.TREE_TYPE_PARAMS[type]
+		var grove_size: int = _rng.randi_range(
+			Balance.TREE_GROVE_TREES_MIN, Balance.TREE_GROVE_TREES_MAX)
+		for j in range(grove_size):
+			if trees.size() >= MAX_TREES:
+				return
+			var c: Vector2i = seed_cell + Vector2i(
+				_rng.randi_range(-Balance.TREE_GROVE_RADIUS, Balance.TREE_GROVE_RADIUS),
+				_rng.randi_range(-Balance.TREE_GROVE_RADIUS, Balance.TREE_GROVE_RADIUS))
+			if not nav_grid.is_cell_walkable(c):
+				continue
+			if bool(params.grass_only) and not terrain_data.is_grass(c):
+				continue
+			if _too_close(c, int(params.min_spacing)):
+				continue
+			spawn_tree(c, _rng.randi_range(1, int(params.max_stage)), type)
+
+
+func spawn_tree(c: Vector2i, stage: int = 0,
+		type: TreeResource.TreeType = TreeResource.TreeType.STANDARD) -> TreeResource:
 	var tree: TreeResource = TREE_SCENE.instantiate() as TreeResource
+	tree.type = type   # BEFORE set_stage — the stage clamp is type-dependent
 	tree.set_stage(stage)
 	tree.position = nav_grid.cell_to_world(c)
 	add_child(tree)
@@ -106,6 +179,9 @@ func register(tree: TreeResource, c: Vector2i = Vector2i(-1, -1)) -> void:
 	if c.x >= 0:
 		_occupied[c] = tree
 		_tree_cells[tree] = c
+		# Standalone test nodes without a cell keep the default on_grass = true.
+		if terrain_data != null:
+			tree.on_grass = terrain_data.is_grass(c)
 	var bucket: Vector2i = _pos_bucket(tree.position)
 	if not _pos_buckets.has(bucket):
 		_pos_buckets[bucket] = []
@@ -156,18 +232,26 @@ func _reproduce() -> void:
 		var parent_cell: Vector2i = _tree_cells.get(parent, Vector2i(-1, -1))
 		if parent_cell.x < 0:
 			continue
+		var params: Dictionary = Balance.TREE_TYPE_PARAMS[parent.type]
 		var neighbors: int = _neighbor_count(parent_cell)
-		if neighbors > DENSITY_LIMIT:
+		if neighbors > int(params.density_limit):
 			continue
 		# Super-linear in the neighbour count: woods seed faster than the sum
 		# of their individual trees would.
 		var chance: float = clampf(
 			REPRO_BASE_CHANCE * pow(float(maxi(neighbors, 1)), 1.5), 0.0, 0.2)
+		# Type factor AFTER the 0.2 cap: standard/leaf keep the legacy curve
+		# shape, bamboo gets headroom up to 0.6 instead of starving at the
+		# clamp; off-grass factor 0 (bamboo) yields chance 0 — no special case.
+		chance *= float(params.repro_grass if parent.on_grass else params.repro_off)
 		if _rng.randf() > chance:
 			continue
-		_sprout_near(parent_cell)
+		_sprout_near(parent_cell, parent.type)
 
 
+## Counts ALL types (physical cell competition — a per-type index would buy no
+## gameplay): dense bamboo therefore suppresses the reproduction of neighbouring
+## other types. "Bamboo crowds out" — thematically intended.
 func _neighbor_count(c: Vector2i) -> int:
 	var count: int = 0
 	for dz in range(-NEIGHBOR_RADIUS, NEIGHBOR_RADIUS + 1):
@@ -179,7 +263,11 @@ func _neighbor_count(c: Vector2i) -> int:
 	return count
 
 
-func _sprout_near(parent_cell: Vector2i) -> void:
+## Sprouts inherit their parent's type (with its spacing; grass_only types
+## reject non-grass candidate cells within the 8 attempts).
+func _sprout_near(parent_cell: Vector2i,
+		type: TreeResource.TreeType = TreeResource.TreeType.STANDARD) -> void:
+	var params: Dictionary = Balance.TREE_TYPE_PARAMS[type]
 	for attempt in range(8):
 		var offset: Vector2i = Vector2i(
 			_rng.randi_range(-SPROUT_MAX, SPROUT_MAX),
@@ -189,17 +277,19 @@ func _sprout_near(parent_cell: Vector2i) -> void:
 		var c: Vector2i = parent_cell + offset
 		if nav_grid == null or not nav_grid.is_cell_walkable(c):
 			continue
-		if _too_close(c):
+		if bool(params.grass_only) and (terrain_data == null or not terrain_data.is_grass(c)):
+			continue
+		if _too_close(c, int(params.min_spacing)):
 			continue
 		# Natural sprouts start as a small grown tree (stage 1) — the sapling
 		# stage 0 is reserved for forester plantings.
-		spawn_tree(c, 1)
+		spawn_tree(c, 1, type)
 		return
 
 
-func _too_close(c: Vector2i) -> bool:
-	for dz in range(-MIN_SPACING, MIN_SPACING + 1):
-		for dx in range(-MIN_SPACING, MIN_SPACING + 1):
+func _too_close(c: Vector2i, spacing: int = MIN_SPACING) -> bool:
+	for dz in range(-spacing, spacing + 1):
+		for dx in range(-spacing, spacing + 1):
 			if _occupied.has(c + Vector2i(dx, dz)):
 				return true
 	return false

@@ -12,9 +12,10 @@ class_name Terrain extends Node3D
 
 const CHUNK: int = 16  # cells per chunk side
 
-# Height thresholds for vertex colouring (relative to sea level).
-const SAND_TOP: float = TerrainData.SEA_LEVEL + 1.5
-const ROCK_BOTTOM: float = TerrainData.SEA_LEVEL + 8.0
+# Height thresholds for vertex colouring — the shared grass band from
+# TerrainData (also drives the tree-type gameplay rules).
+const SAND_TOP: float = TerrainData.GRASS_MIN
+const ROCK_BOTTOM: float = TerrainData.GRASS_MAX
 
 const COLOR_SAND: Color = Color(0.83, 0.74, 0.50)
 const COLOR_GRASS: Color = Color(0.29, 0.55, 0.24)

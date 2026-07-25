@@ -257,6 +257,10 @@ func _ready() -> void:
 	# Scale the wild-tree count with the map area (128 -> TREE_COUNT, 256 -> 4x).
 	var tree_count: int = TREE_COUNT * (td.size * td.size) / (TerrainData.SIZE * TerrainData.SIZE)
 	_tree_manager.spawn_trees(tree_count, GameState.ISLAND_SEED)
+	# Pure leaf/bamboo groves on grass — same area scaling (128er: 3, 256er: 12);
+	# deterministic because spawn_groves reuses the _rng seeded by spawn_trees.
+	_tree_manager.spawn_groves(Balance.TREE_GROVES_PER_STANDARD_MAP
+		* (td.size * td.size) / (TerrainData.SIZE * TerrainData.SIZE))
 	match config.mode:
 		MatchConfig.Mode.DEBUG_BATTLE:
 			# Sandbox: two armies clashing, no bases and no win tracking.
