@@ -102,6 +102,14 @@ func is_targetable() -> bool:
 	return false  # attackers go for the crew
 
 
+## Auto-aggro rule (user request): an unmanned GROUND vehicle is harmless —
+## and capturable loot — so auto-acquisition ignores it; only an explicit
+## attack order engages it. Airships opt out: a drifting zeppelin stays
+## auto-attackable as before.
+func auto_attackable() -> bool:
+	return crew_rides_on_deck() or boarded_count() > 0
+
+
 ## Vehicles never play the man-sized death cry — they have their own burn/burst
 ## cues (set at the destruction site).
 func death_sfx_key() -> StringName:

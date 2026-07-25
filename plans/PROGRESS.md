@@ -6389,3 +6389,27 @@ Gebäude-Stufe + Fahrzeug-Zündung; kein Blast bei `drown()`/`burst_into_wood()`
 **Verifikation:** Ladecheck sauber; Suite **2828/2828 grün** (32 Dateien).
 **Offen:** manueller Spieltest (Katapult-Wrack versinkt flüssig; Rammen-Explosion
 Optik/Balance im Gefecht).
+
+**Folgerunde (Nutzerwunsch): Blastfeld vergrößert + Auto-Aggro-Regel für
+unbemannte Bodenfahrzeuge.**
+- **Blastfeld:** `FIRERAM_DEATH_BLAST_HALF_WIDTH 1.0 → 1.5` (3 Zellen breit)
+  und `_BACK 3.0 → 4.0` (4 Zellen hinter der Rumpf-Mitte); vorne unverändert
+  2. Feld jetzt 3 x 6. Feldgrenzen-Test entsprechend erweitert (seitlich
+  1,2 m drin / 2,0 m draußen, hinten 3,5 m drin / 4,5 m draußen).
+- **Auto-Aggro:** Unbemannte gegnerische **Boden**-Fahrzeuge (Katapult,
+  Feuerramme; `boarded_count() == 0`) werden nicht mehr automatisch
+  angegriffen — sie sind harmlos und kaperbar. Neuer Helper
+  `CrewedVehicle.auto_attackable()` ([crewed_vehicle.gd](../scripts/units/crewed_vehicle.gd)):
+  `crew_rides_on_deck() or boarded_count() > 0` — **Zeppeline bleiben
+  unverändert** immer Auto-Ziel. Gate nur in den beiden Auto-Scans
+  (`SiegeEngine._nearest_enemy_unit`, `FireRam._nearest_enemy_unit`);
+  ausdrückliche Angriffsbefehle (`order_attack`) treffen unbemannte
+  Fahrzeuge weiterhin. Normale Einheiten zielen ohnehin nie auf Fahrzeuge
+  (`is_targetable() == false`), Luftschiff-Deckcrew ebenso wenig — dort
+  keine Änderung nötig.
+- Tests: [test_siege.gd](../tests/test_siege.gd)
+  (`test_catapult_scan_skips_unmanned_ground_vehicle` inkl. „bemannt →
+  wieder Ziel", `test_catapult_scan_still_takes_unmanned_airship`),
+  [test_fire_ram.gd](../tests/test_fire_ram.gd)
+  (`test_armed_ram_ignores_unmanned_vehicle_until_ordered`).
+  Suite **2835/2835 grün**.

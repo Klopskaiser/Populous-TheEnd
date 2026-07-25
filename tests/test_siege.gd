@@ -15,6 +15,7 @@ const FORESTER_SCENE: PackedScene = preload("res://scenes/buildings/forester.tsc
 const HUT_SCENE: PackedScene = preload("res://scenes/buildings/hut.tscn")
 const SIEGE_SCENE: PackedScene = preload("res://scenes/units/siege_engine.tscn")
 const FIRE_RAM_SCENE: PackedScene = preload("res://scenes/units/fire_ram.tscn")
+const AIRSHIP_SCENE: PackedScene = preload("res://scenes/units/airship.tscn")
 const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
 const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
 
@@ -204,6 +205,45 @@ func test_catapult_may_target_enemy_catapult() -> void:
 	check(mine._may_target_vehicle(foe), "a catapult may target another catapult")
 	mine.order_attack(foe)
 	check(mine.attack_target == foe, "catapult locks onto the enemy catapult")
+	_free_world(w)
+
+
+## Auto-aggro (user request): an unmanned enemy GROUND vehicle is harmless and
+## capturable — the catapult's auto-fire scan skips it; once the vehicle is
+## manned it becomes a normal auto target again (vehicle or its crew).
+func test_catapult_scan_skips_unmanned_ground_vehicle() -> void:
+	var w: Dictionary = _make_world()
+	var cat: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(60, 60))) as SiegeEngine
+	var ram: FireRam = w.unit_manager.spawn_unit(
+		FIRE_RAM_SCENE, 1, cat.position + Vector3(8.0, 0, 0)) as FireRam
+	check(cat._nearest_enemy_unit(SiegeEngine.FIRE_RANGE) == null,
+		"the unmanned enemy ram is skipped by the auto-fire scan")
+	# Board an enemy brave onto the ram (the shared helper is typed SiegeEngine).
+	var crew: Brave = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, ram.position + Vector3(1.0, 0.0, 0.0)) as Brave
+	crew.order_crew(ram)
+	var ticks: int = 0
+	while not crew.siege_boarded and ticks < MAX_TICKS:
+		_tick_world(w)
+		ticks += 1
+	check(crew.siege_boarded, "the enemy crew boarded the ram")
+	var found: Unit = cat._nearest_enemy_unit(SiegeEngine.FIRE_RANGE)
+	check(found == ram or found == crew,
+		"the manned ram (or its crew) is auto-acquirable again")
+	_free_world(w)
+
+
+## Zeppelins are exempt from the unmanned-vehicle rule: a drifting (crewless)
+## airship stays auto-attackable, exactly as before.
+func test_catapult_scan_still_takes_unmanned_airship() -> void:
+	var w: Dictionary = _make_world()
+	var cat: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(60, 60))) as SiegeEngine
+	var ship: Airship = w.unit_manager.spawn_unit(
+		AIRSHIP_SCENE, 1, cat.position + Vector3(8.0, 0, 0)) as Airship
+	check(cat._nearest_enemy_unit(SiegeEngine.FIRE_RANGE) == ship,
+		"an unmanned zeppelin is still auto-acquired (unchanged)")
 	_free_world(w)
 
 

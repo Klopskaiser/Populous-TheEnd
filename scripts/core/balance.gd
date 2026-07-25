@@ -135,14 +135,15 @@ const FIRERAM_FLAME_CONTACT_FACTOR: float = 5.0
 const FIRERAM_FIRE_LIVES: int = 3
 const FIRERAM_LIFE_REGEN_TIME: float = 30.0
 ## Todesexplosion (nur Boden-Tode: Feuer, Terrainriss, Verlassen-Timeout —
-## Ertrinken/Tornado nicht): Rechteck 2 Zellen breit, FRONT Zellen vor und
-## BACK Zellen hinter der Rumpf-Mitte. Trifft ALLES im Feld (auch die eigene,
-## gerade freigelassene Crew): Einheiten DAMAGE + Feuerball-Rückstoß, Gebäude
-## +1 Zerstörungsstufe, Fahrzeuge 1 Feuertreffer/Hüllentreffer.
+## Ertrinken/Tornado nicht): Rechteck 2·HALF_WIDTH Zellen breit (3), FRONT
+## Zellen vor und BACK Zellen hinter der Rumpf-Mitte. Trifft ALLES im Feld
+## (auch die eigene, gerade freigelassene Crew): Einheiten DAMAGE +
+## Feuerball-Rückstoß, Gebäude +1 Zerstörungsstufe, Fahrzeuge 1 Feuertreffer/
+## Hüllentreffer.
 const FIRERAM_DEATH_BLAST_DAMAGE: int = 20
 const FIRERAM_DEATH_BLAST_FRONT: float = 2.0
-const FIRERAM_DEATH_BLAST_BACK: float = 3.0
-const FIRERAM_DEATH_BLAST_HALF_WIDTH: float = 1.0
+const FIRERAM_DEATH_BLAST_BACK: float = 4.0
+const FIRERAM_DEATH_BLAST_HALF_WIDTH: float = 1.5
 
 # --- Luftschiff ---
 const AIRSHIP_SPEED: float = 5.0

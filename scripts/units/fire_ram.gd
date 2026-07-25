@@ -604,6 +604,10 @@ func _nearest_enemy_unit(max_range: float) -> Unit:
 			continue
 		if not u.is_targetable() and not _may_target_vehicle(u):
 			continue
+		# Unmanned enemy ground vehicle: harmless, capturable — auto-fire
+		# ignores it, only an explicit order burns it.
+		if u is CrewedVehicle and not u.auto_attackable():
+			continue
 		if u.is_airborne():
 			continue   # flames stay on the ground
 		var d: float = _flat_dist(position, u.position)

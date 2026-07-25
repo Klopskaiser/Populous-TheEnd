@@ -274,6 +274,10 @@ func _nearest_enemy_unit(max_range: float) -> Unit:
 		# (its crew takes the shot's splash) — catapult-vs-catapult/ram/airship.
 		if not u.is_targetable() and not (u is CrewedVehicle):
 			continue
+		# ... unless the ground vehicle is unmanned (harmless, capturable) —
+		# only an explicit order bombards it; airships stay auto-attackable.
+		if u is CrewedVehicle and not u.auto_attackable():
+			continue
 		var d: float = _flat_dist(position, u.position)
 		if d < MIN_RANGE or d > max_range:
 			continue

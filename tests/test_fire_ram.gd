@@ -679,6 +679,24 @@ func test_ram_does_not_regenerate_without_crew() -> void:
 	_free_world(w)
 
 
+## Auto-aggro (user request): an unmanned enemy GROUND vehicle is harmless and
+## capturable — the armed ram's auto-acquisition ignores it; an explicit order
+## still burns it.
+func test_armed_ram_ignores_unmanned_vehicle_until_ordered() -> void:
+	var w: Dictionary = _make_world()
+	var ram: FireRam = _armed_ram(w)
+	var foe: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 1, ram.position + Vector3(0, 0, 5.0)) as SiegeEngine
+	for i in range(30):
+		_tick_world(w)
+	check(ram.attack_target == null and ram.state != Unit.State.ATTACK,
+		"the unmanned enemy catapult is never auto-acquired")
+	check(not foe.is_burning(), "no flames were opened on it")
+	ram.order_attack(foe)
+	check(ram.attack_target == foe, "an explicit order still burns it")
+	_free_world(w)
+
+
 # --- Death blast --------------------------------------------------------------------
 
 ## Burns the ram down with FIRE_LIVES anonymous (null-source) ignites — each
@@ -691,29 +709,32 @@ func _burn_down(ram: FireRam) -> void:
 func test_death_blast_hits_field_units_and_throws_them() -> void:
 	var w: Dictionary = _make_world()
 	var ram: FireRam = _spawn_ram(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
-	var p: Vector3 = ram.position   # heading +z: field = 2 ahead / 3 behind, 2 wide
+	var p: Vector3 = ram.position   # heading +z: field = 2 ahead / 4 behind, 3 wide
 	var front_in: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, p + Vector3(0, 0, 1.5))
-	var back_in: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, p + Vector3(0, 0, -2.5))
+	var back_in: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, p + Vector3(0, 0, -3.5))
+	var side_in: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, p + Vector3(1.2, 0, 0.5))
 	var friend_in: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 0, p + Vector3(0.5, 0, -1.0))
-	var side_out: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, p + Vector3(1.5, 0, 0.5))
+	var side_out: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, p + Vector3(2.0, 0, 0.5))
 	var front_out: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, p + Vector3(0, 0, 2.5))
-	var back_out: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, p + Vector3(0, 0, -3.5))
+	var back_out: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, p + Vector3(0, 0, -4.5))
 	_burn_down(ram)
 	check(ram.state == Unit.State.DEAD, "the ram burnt down")
 	check(front_in.health == front_in.max_health - FireRam.BLAST_DAMAGE,
 		"unit 1.5 m ahead took the blast damage")
 	check(front_in.state == Unit.State.THROWN, "... and was thrown into an arc")
 	check(back_in.health == back_in.max_health - FireRam.BLAST_DAMAGE,
-		"unit 2.5 m behind took the blast damage (3-deep tail)")
+		"unit 3.5 m behind took the blast damage (4-deep tail)")
 	check(back_in.state == Unit.State.THROWN, "... and was thrown into an arc")
+	check(side_in.health == side_in.max_health - FireRam.BLAST_DAMAGE,
+		"unit 1.2 m to the side took the blast damage (3 wide)")
 	check(friend_in.health == friend_in.max_health - FireRam.BLAST_DAMAGE,
 		"own unit inside the field is hit too (friendly fire)")
 	check(side_out.health == side_out.max_health,
-		"unit 1.5 m to the side stays unhurt (field is 2 wide)")
+		"unit 2.0 m to the side stays unhurt (field is 3 wide)")
 	check(front_out.health == front_out.max_health,
 		"unit 2.5 m ahead stays unhurt (field reaches 2 ahead)")
 	check(back_out.health == back_out.max_health,
-		"unit 3.5 m behind stays unhurt (field reaches 3 behind)")
+		"unit 4.5 m behind stays unhurt (field reaches 4 behind)")
 	_free_world(w)
 
 
