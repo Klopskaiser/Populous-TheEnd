@@ -107,19 +107,19 @@ func test_tree_growth_and_yield() -> void:
 	tree.set_stage(0)
 	check(tree.wood_yield() == 0, "sapling (stage 0) holds no wood")
 	check(not tree.can_claim(), "a sapling cannot be harvested")
-	# A step >= (1 + GROWTH_SPREAD) * GROWTH_TIME always crosses the randomised
-	# interval, so one grow_tick call advances exactly one stage.
-	var step: float = TreeResource.GROWTH_TIME * 2.0
-	tree.grow_tick(step)
-	check(tree.stage == 1, "sapling grows to stage 1")
-	check(tree.wood_yield() == 1, "stage 1 yields 1 wood")
-	tree.grow_tick(step)
-	check(tree.stage == 2 and tree.wood_yield() == 2, "stage 2 yields 2 wood")
-	tree.grow_tick(step)
-	check(tree.stage == 3 and tree.wood_yield() == 3, "stage 3 yields 3 wood")
-	tree.grow_tick(step)
-	check(tree.stage == 4 and tree.wood_yield() == 4, "big tree (stage 4) yields 4 wood")
-	tree.grow_tick(step * 5.0)
+	# Growth is a probabilistic roll (one per GROWTH_ROLL_INTERVAL); with the
+	# seeded static RNG the tick counts are deterministic. Tick until each next
+	# stage is reached and verify the per-stage yields along the way.
+	TreeResource.growth_rng.seed = 424242
+	tree.growth_timer = TreeResource.GROWTH_ROLL_INTERVAL
+	for target in range(1, 5):
+		var guard: int = 0
+		while tree.stage < target and guard < 100000:
+			tree.grow_tick(1.0)
+			guard += 1
+		check(tree.stage == target and tree.wood_yield() == target,
+			"stage %d reached and yields %d wood" % [target, target])
+	tree.grow_tick(TreeResource.GROWTH_TIME * 100.0)
 	check(tree.stage == 4, "tree never grows past the max stage")
 	check(tree.chop_time() > 3.4, "big trees take longer to fell")
 

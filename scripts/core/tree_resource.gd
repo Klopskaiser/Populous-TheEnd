@@ -6,10 +6,13 @@ class_name TreeResource extends Node3D
 ## harvested ONE unit at a time: each harvest drops the tree a growth stage (a
 ## big tree takes four trips); the last unit removes it. Several workers may
 ## harvest the same tree at once (as many as it has wood, so max 4 on a big
-## tree). Growth and reproduction are driven by the TreeManager. Growth happens
-## at RANDOM intervals around GROWTH_TIME (the average is unchanged). Trees do
-## not block the NavGrid (thin obstacles). Fire (spells, lava) IGNITES a tree:
-## it burns down and is destroyed completely, yielding no wood.
+## tree). Growth and reproduction are driven by the TreeManager. Growth is
+## PROBABILISTIC: every GROWTH_ROLL_INTERVAL seconds the tree rolls once with
+## growth_chance() — the mean time per stage stays GROWTH_TIME (per ground
+## factor), but individual trees spread out geometrically instead of growing
+## in synchronised waves. Trees do not block the NavGrid (thin obstacles).
+## Fire (spells, lava) IGNITES a tree: it burns down and is destroyed
+## completely, yielding no wood.
 ##
 ## Tree TYPES (Balance.TREE_TYPE_PARAMS, ground band via TerrainData.is_grass):
 ## STANDARD grows everywhere (the only type the forester plants); LEAF grows/
@@ -23,11 +26,10 @@ enum TreeType {STANDARD, LEAF, BAMBOO}
 const MAX_STAGE: int = 4
 ## Remaining wood per stage: 0 = sapling (0), then 1/2/3/4.
 const YIELDS: Array[int] = Balance.TREE_YIELDS
-## Average seconds per growth stage; the actual per-stage interval is randomised
-## around this mean (see _next_growth_time).
+## MEAN seconds per growth stage (expected value of the probabilistic roll).
 const GROWTH_TIME: float = Balance.TREE_GROWTH_TIME
-## Spread factor for the randomised growth interval (mean stays GROWTH_TIME).
-const GROWTH_SPREAD: float = 0.5
+## Seconds between growth rolls (see grow_tick / growth_chance).
+const GROWTH_ROLL_INTERVAL: float = Balance.TREE_GROWTH_ROLL_INTERVAL
 ## How long a burning tree stays alight before it is destroyed.
 const BURN_TIME: float = 1.8
 
@@ -37,7 +39,9 @@ var type: TreeType = TreeType.STANDARD
 var on_grass: bool = true
 
 var stage: int = 0
-var growth_timer: float = GROWTH_TIME
+## Seconds until the next growth ROLL; starts at a random phase offset (see
+## _init) so trees spawned in the same frame do not all roll simultaneously.
+var growth_timer: float = GROWTH_ROLL_INTERVAL
 ## Workers currently harvesting this tree; untyped entries (may be freed).
 var claimers: Array = []
 ## Set once when the last wood is taken (or when it burns) — guards late
@@ -55,6 +59,14 @@ var _crown_mat: StandardMaterial3D = null
 ## ignite() localises the crown material before tinting it, so a burning tree
 ## does not recolour the whole forest.
 static var _shared_visuals: Dictionary = {}
+
+## RNG for the growth rolls and phase offsets — static and seedable, so the
+## headless tests can make growth deterministic (randomly seeded by default).
+static var growth_rng: RandomNumberGenerator = RandomNumberGenerator.new()
+
+
+func _init() -> void:
+	growth_timer = growth_rng.randf_range(0.0, GROWTH_ROLL_INTERVAL)
 
 
 func _params() -> Dictionary:
@@ -123,27 +135,34 @@ func set_stage(p_stage: int) -> void:
 		_crown.visible = stage >= 1
 
 
-## Called by the TreeManager tick; grows one stage when the (randomised) timer
-## runs out. Saplings grow like any other tree — they just have one extra stage.
-## The type's ground factor scales the DELTA (not the rolled interval), so a
-## terrain deformation takes effect immediately and factor 0 (bamboo off grass)
-## is a clean pause.
+## Called by the TreeManager tick. Growth is PROBABILISTIC: every
+## GROWTH_ROLL_INTERVAL seconds the tree rolls growth_chance() once. The mean
+## time per stage is exactly GROWTH_TIME / ground factor, but the individual
+## stage times follow a geometric distribution — trees planted together no
+## longer grow in synchronised waves. Factor 0 (bamboo off grass) pauses the
+## roll clock entirely; a terrain deformation takes effect on the next tick.
+## Saplings grow like any other tree — they just have one extra stage.
 func grow_tick(delta: float) -> void:
 	if stage >= max_stage():
 		return
-	var f: float = float(_params().growth_grass if on_grass else _params().growth_off)
-	if f <= 0.0:
+	var chance: float = growth_chance()
+	if chance <= 0.0:
 		return
-	growth_timer -= delta * f
-	if growth_timer <= 0.0:
-		growth_timer += _next_growth_time()
-		set_stage(stage + 1)
+	growth_timer -= delta
+	while growth_timer <= 0.0:
+		growth_timer += GROWTH_ROLL_INTERVAL
+		if growth_rng.randf() < chance:
+			set_stage(stage + 1)
+			if stage >= max_stage():
+				return
 
 
-## Randomised interval around the mean GROWTH_TIME (uniform, so the average
-## growth rate is unchanged from the old fixed cadence).
-func _next_growth_time() -> float:
-	return GROWTH_TIME * (1.0 + randf_range(-GROWTH_SPREAD, GROWTH_SPREAD))
+## Probability to advance one stage per roll: roll interval x ground factor /
+## GROWTH_TIME — chosen so the EXPECTED stage time stays GROWTH_TIME / factor
+## (the pre-roll growth rate is preserved exactly).
+func growth_chance() -> float:
+	var f: float = float(_params().growth_grass if on_grass else _params().growth_off)
+	return minf(GROWTH_ROLL_INTERVAL * f / GROWTH_TIME, 1.0)
 
 
 # --- Burning (fire spells / lava) ---------------------------------------------

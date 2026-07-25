@@ -478,8 +478,12 @@ const MANA_PRAY_BONUS: float = 0.3
 const TRIBE_MAX_UNITS: int = 1000
 
 # --- Bäume ---
-## Mittlere Zeit pro Wachstumsstufe (real +-50 % gestreut).
+## Mittlere Zeit pro Wachstumsstufe (Erwartungswert des Wachstums-Rolls).
 const TREE_GROWTH_TIME: float = 75.0
+## Wachstum ist probabilistisch: alle TREE_GROWTH_ROLL_INTERVAL Sekunden würfelt
+## jeder Baum einmal (Chance = Intervall x Bodenfaktor / TREE_GROWTH_TIME), so
+## bleibt die mittlere Rate erhalten, aber es gibt keine synchronen Wachstumswellen.
+const TREE_GROWTH_ROLL_INTERVAL: float = 10.0
 ## Holz-Ertrag je Wachstumsstufe (Index = Stufe 0..4).
 const TREE_YIELDS: Array[int] = [0, 1, 2, 3, 4]
 

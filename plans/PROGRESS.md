@@ -6310,3 +6310,26 @@ Typ-Vererbung, `spawn_tree(c, 2)` bleibt STANDARD, Gras-Cache-Invalidierung nach
 Verformung, Map-Gen-Typverteilung auf Gras/Sand); 20-s-Headless-Start ohne
 Laufzeitfehler. **Offen:** manueller Spieltest durch den Nutzer (Mischwald/Haine
 sichtbar, Feuer/Tornado auf Mischwald, Landbridge/Absinken unter Bambushain).
+
+**Folgerunde (Nutzerfeedback): Probabilistisches Wachstum statt Wachstumswellen.**
+Befund bestätigt: `growth_timer` startete für jeden Baum fix bei `GROWTH_TIME`
+(75 s) — die ±50-%-Streuung griff erst NACH dem ersten Stufenaufstieg, alle
+Startbäume der Karte wuchsen beim ersten Mal synchron (und blieben um Vielfache
+von 75 s geclustert). Umbau in [tree_resource.gd](../scripts/core/tree_resource.gd):
+- **Wachstums-Roll:** alle `TREE_GROWTH_ROLL_INTERVAL = 10 s` (Balance) würfelt
+  jeder Baum einmal; Chance pro Roll = `Intervall x Bodenfaktor / GROWTH_TIME`
+  (`growth_chance()`, Standard ≈ 13,3 %). Erwartungswert pro Stufe bleibt exakt
+  `GROWTH_TIME / Faktor` (geometrische Verteilung) — Rate erhalten, Streuung
+  maximal entzerrt. Bodenfaktor wirkt jetzt auf die CHANCE (Faktor 0 = Bambus
+  abseits Gras pausiert die Roll-Uhr wie zuvor den Timer).
+- **Phasen-Desync:** `growth_timer` (jetzt Zeit bis zum nächsten Roll) startet
+  per `_init()` mit Zufalls-Offset in `[0, Intervall)` — auch die Roll-Momente
+  gleichzeitig gespawnter Bäume fallen nicht in denselben Frame.
+- **Seedbarer RNG:** Rolls laufen über `static var TreeResource.growth_rng`;
+  Tests seeden ihn für Determinismus. `GROWTH_SPREAD`/`_next_growth_time` entfielen.
+- Tests angepasst: [test_economy.gd](../tests/test_economy.gd)
+  (`test_tree_growth_and_yield` tickt geseedet bis zur Zielstufe statt
+  „1 Riesen-Delta = 1 Stufe"), [test_tree_types.gd](../tests/test_tree_types.gd)
+  (Chance-Werte je Typ/Boden, geseedeter Mittelwert-Test ~75 s ±15 %,
+  Phasen-Desync-Test). Suite **2805/2805 grün, 3 Läufe** (Flakiness-Absicherung,
+  da der RNG produktiv zufällig geseedet ist).

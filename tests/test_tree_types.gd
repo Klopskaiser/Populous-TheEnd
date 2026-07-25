@@ -31,38 +31,61 @@ func _make_tm(td: TerrainData) -> Dictionary:
 	return {"td": td, "nav": nav, "tm": tm}
 
 
-# --- Growth factors -------------------------------------------------------------
+# --- Growth (probabilistic rolls) -------------------------------------------------
 
-func test_leaf_grows_faster_on_grass() -> void:
+func test_growth_chance_by_type_and_ground() -> void:
+	var base: float = TreeResource.GROWTH_ROLL_INTERVAL / TreeResource.GROWTH_TIME
+	var grass: Dictionary = _make_tm(_flat_terrain(5.0))
+	var standard_g: TreeResource = grass.tm.spawn_tree(Vector2i(20, 20), 1)
+	var leaf_g: TreeResource = grass.tm.spawn_tree(
+		Vector2i(40, 40), 1, TreeResource.TreeType.LEAF)
+	check_near(standard_g.growth_chance(), base, "standard on grass rolls the base chance")
+	check_near(leaf_g.growth_chance(), base * 1.5, "leaf on grass rolls 1.5x")
+	var sand: Dictionary = _make_tm(_flat_terrain(3.0))
+	var standard_s: TreeResource = sand.tm.spawn_tree(Vector2i(20, 20), 1)
+	var leaf_s: TreeResource = sand.tm.spawn_tree(
+		Vector2i(40, 40), 1, TreeResource.TreeType.LEAF)
+	var bamboo_s: TreeResource = sand.tm.spawn_tree(
+		Vector2i(60, 60), 1, TreeResource.TreeType.BAMBOO)
+	check_near(standard_s.growth_chance(), base, "standard off grass keeps the base chance")
+	check_near(leaf_s.growth_chance(), base * 0.75, "leaf off grass rolls 0.75x")
+	check_near(bamboo_s.growth_chance(), 0.0, "bamboo off grass rolls 0 (pause)")
+	grass.tm.free()
+	sand.tm.free()
+
+
+func test_growth_mean_rate_preserved() -> void:
+	# Many seeded stage-1 -> stage-2 runs: the MEAN tick count must stay close
+	# to GROWTH_TIME (the roll chance is calibrated to preserve the old rate).
 	var w: Dictionary = _make_tm(_flat_terrain(5.0))
-	var standard: TreeResource = w.tm.spawn_tree(Vector2i(20, 20), 1)
-	var leaf: TreeResource = w.tm.spawn_tree(
-		Vector2i(40, 40), 1, TreeResource.TreeType.LEAF)
-	check(standard.on_grass and leaf.on_grass, "both trees sit on grass")
-	standard.growth_timer = 10.0
-	leaf.growth_timer = 10.0
-	for i in range(7):
-		standard.grow_tick(1.0)
-		leaf.grow_tick(1.0)
-	check(leaf.stage == 2, "leaf on grass grew (factor 1.5: 7 ticks x 1.5 > 10)")
-	check(standard.stage == 1, "standard did not grow yet (7 ticks x 1.0 < 10)")
+	var tree: TreeResource = w.tm.spawn_tree(Vector2i(20, 20), 1)
+	TreeResource.growth_rng.seed = 20260725
+	var samples: int = 200
+	var total_ticks: int = 0
+	for i in range(samples):
+		tree.set_stage(1)
+		tree.growth_timer = TreeResource.GROWTH_ROLL_INTERVAL
+		var guard: int = 0
+		while tree.stage == 1 and guard < 100000:
+			tree.grow_tick(1.0)
+			guard += 1
+		total_ticks += guard
+	var mean: float = float(total_ticks) / float(samples)
+	check(absf(mean - TreeResource.GROWTH_TIME) < TreeResource.GROWTH_TIME * 0.15,
+		"mean stage time stays near GROWTH_TIME (got %.1f, want ~%.0f)"
+			% [mean, TreeResource.GROWTH_TIME])
 	w.tm.free()
 
 
-func test_leaf_grows_slower_off_grass() -> void:
-	var w: Dictionary = _make_tm(_flat_terrain(3.0))
-	var standard: TreeResource = w.tm.spawn_tree(Vector2i(20, 20), 1)
-	var leaf: TreeResource = w.tm.spawn_tree(
-		Vector2i(40, 40), 1, TreeResource.TreeType.LEAF)
-	check(not standard.on_grass and not leaf.on_grass, "both trees sit on sand")
-	standard.growth_timer = 10.0
-	leaf.growth_timer = 10.0
-	for i in range(10):
-		standard.grow_tick(1.0)
-		leaf.grow_tick(1.0)
-	check(standard.stage == 2, "standard grew off grass (factor 1.0)")
-	check(leaf.stage == 1, "leaf off grass is slower (10 ticks x 0.75 < 10)")
-	w.tm.free()
+func test_growth_roll_phases_desynced() -> void:
+	# Trees created in the same frame start with different roll offsets — no
+	# synchronised growth frame for the whole starting forest.
+	var offsets: Dictionary = {}
+	for i in range(8):
+		var tree: TreeResource = TreeResource.new()
+		offsets[snappedf(tree.growth_timer, 0.0001)] = true
+		tree.free()
+	check(offsets.size() > 1, "spawn-time roll phases differ between trees")
 
 
 # --- Bamboo ----------------------------------------------------------------------
