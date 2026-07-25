@@ -67,6 +67,14 @@ const MODEL_SCALE: float = 0.85
 ## LIFE_REGEN_TIME. Physical destruction (water/terrain/tornado) bypasses this.
 const FIRE_LIVES: int = Balance.FIRERAM_FIRE_LIVES
 const LIFE_REGEN_TIME: float = Balance.FIRERAM_LIFE_REGEN_TIME
+## Death blast (every ground destruction — fire, terrain rip, uncrewed timeout;
+## drowning and the tornado tip bypass _destroy_vehicle and stay blast-free):
+## a rect 2 * BLAST_HALF_WIDTH wide, BLAST_FRONT ahead / BLAST_BACK behind the
+## hull centre. Hits EVERYTHING inside, the just-released own crew included.
+const BLAST_DAMAGE: int = Balance.FIRERAM_DEATH_BLAST_DAMAGE
+const BLAST_FRONT: float = Balance.FIRERAM_DEATH_BLAST_FRONT
+const BLAST_BACK: float = Balance.FIRERAM_DEATH_BLAST_BACK
+const BLAST_HALF_WIDTH: float = Balance.FIRERAM_DEATH_BLAST_HALF_WIDTH
 
 ## Worker references (injected by UnitManager.spawn_unit via unit.set() — a
 ## silent no-op without these declarations; flames must ignite trees/piles).
@@ -217,8 +225,7 @@ func _apply_fire_hit(source) -> void:
 	if _fire_hits == 1:
 		_play_sfx(&"siege_burning")
 	if _fire_hits >= FIRE_LIVES:
-		_death_sfx = &"siege_death_burn"
-		_destroy_vehicle(false)
+		_destroy_vehicle(true)
 
 
 ## Throttle key for a fire source. A source exposing fire_attack_key() (the fire
@@ -254,6 +261,76 @@ func burn_fx_scale() -> float:
 		1: return 1.3
 		2: return 1.8
 		_: return 2.8
+
+
+## Ground destruction: the ram never sinks — it always bursts apart (model
+## hidden, debris, burst cue) and detonates over the death-blast rectangle.
+## Drowning and the tornado tip bypass _destroy_vehicle, so they stay
+## blast-free (the ram dies quietly in water / as tornado wood).
+func _destroy_vehicle(_burst: bool) -> void:
+	if state == State.DEAD:
+		return
+	var origin: Vector3 = position
+	var forward: Vector3 = _heading.normalized() \
+		if _heading.length_squared() > 0.000001 else Vector3(0, 0, 1)
+	super._destroy_vehicle(true)
+	_death_blast(origin, forward)
+
+
+## The detonation: everything inside the rect along ∈ [-BLAST_BACK, BLAST_FRONT]
+## x |side| <= BLAST_HALF_WIDTH (heading frame, like the flame rectangle).
+## Units take BLAST_DAMAGE plus the fireball throw-back arc; buildings take one
+## destruction stage; ground vehicles one fire hit, a (low) airship one hull
+## hit. Friendly fire on purpose — the released crew stands right at the wreck.
+func _death_blast(origin: Vector3, forward: Vector3) -> void:
+	var right: Vector3 = Vector3(-forward.z, 0.0, forward.x)
+	if path_service != null:
+		var centre: Vector3 = origin + forward * ((BLAST_FRONT - BLAST_BACK) * 0.5)
+		var broad: float = (BLAST_FRONT + BLAST_BACK) * 0.5 + BLAST_HALF_WIDTH + 0.5
+		for u in path_service.get_units_in_radius(centre, broad):
+			if u == self or u.state == State.DEAD:
+				continue
+			if u.state == State.THROWN or u.rides_airborne():
+				continue
+			# Ground burst: anything well above the wreck (cruising airship,
+			# a ledge overhead) is out of reach.
+			if u.position.y - origin.y > 2.5:
+				continue
+			var rel: Vector3 = u.position - origin
+			var along: float = rel.x * forward.x + rel.z * forward.z
+			var side: float = rel.x * right.x + rel.z * right.z
+			if along < -BLAST_BACK or along > BLAST_FRONT \
+					or absf(side) > BLAST_HALF_WIDTH:
+				continue
+			if u is Airship:
+				u.register_hull_hit(origin)
+				continue
+			if u is CrewedVehicle:
+				u.ignite(origin, null)
+				continue
+			u.take_damage(BLAST_DAMAGE, null)
+			if u.state == State.DEAD:
+				continue
+			var away: Vector3 = Vector3(u.position.x - origin.x, 0.0,
+				u.position.z - origin.z)
+			if away.length_squared() < 0.000001:
+				away = Vector3(1, 0, 0).rotated(Vector3.UP, randf() * TAU)
+			u.throw_airborne(away.normalized() * FireballBolt.THROW_BACK
+				+ Vector3.UP * FireballBolt.THROW_UP)
+	if building_manager != null:
+		# Centreline samples like _apply_flames; duplicate() because a stage
+		# can level a construction site and mutate the list.
+		var candidates: Array = building_manager.buildings.duplicate()
+		var blasted: Dictionary = {}
+		for i in range(int(BLAST_FRONT + BLAST_BACK)):
+			var sample: Vector3 = origin + forward * (-BLAST_BACK + 0.5 + float(i))
+			var flat: Vector2 = Vector2(sample.x, sample.z)
+			for b in candidates:
+				if not is_instance_valid(b) or b.health <= 0 or blasted.has(b):
+					continue
+				if b.footprint_distance_to(flat) <= BLAST_HALF_WIDTH:
+					blasted[b] = true
+					b.apply_destruction_stages(1)
 
 
 ## Rotates the hull toward `facing` at the fixed turn rate.

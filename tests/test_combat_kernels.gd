@@ -11,6 +11,7 @@ const TICK: float = 1.0 / 30.0
 const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
 const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
 const FIREWARRIOR_SCENE: PackedScene = preload("res://scenes/units/firewarrior.tscn")
+const SIEGE_SCENE: PackedScene = preload("res://scenes/units/siege_engine.tscn")
 
 
 func _flat_terrain(h: float = 5.0) -> TerrainData:
@@ -287,6 +288,38 @@ func test_corpse_hold_expires_on_schedule() -> void:
 	for i in range(rest):
 		_frame(w)
 	check(u not in w.unit_manager.units, "corpse expired and left the registry")
+	_free_world(w)
+
+
+## Regression (user bug after C2): a vehicle wreck pushes its own sink visual
+## from _tick_visual (object tick), so the corpse hold must NOT park it — under
+## the kernel loop the burnt catapult stood fully intact for the whole lie time
+## while the death cue had already played. A dead vehicle keeps its object
+## ticks (its corpse timer counts live, headless proxy for the sink motion —
+## the position.y drift itself is gated on is_inside_tree and only shows
+## in-game); sprite corpses stay parked, and expiry keeps its schedule.
+func test_vehicle_wreck_keeps_object_ticks_when_dead() -> void:
+	var w: Dictionary = _make_world()
+	var veh: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 1, Vector3(30.0, 0.0, 30.0)) as SiegeEngine
+	var corpse: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(40, 40))
+	corpse.take_damage(9999)
+	veh._destroy_vehicle(false)   # burn-out death: the sink path
+	check(veh.state == Unit.State.DEAD, "vehicle died")
+	_frame(w)   # first dead tick: the sprite corpse parks, the vehicle must not
+	check(w.unit_manager.soa_mode[corpse._idx] == UnitManager.HOLD_CORPSE,
+		"the sprite corpse still parks in the kernel (contrast)")
+	check(w.unit_manager.soa_hold[veh._idx] < 0.0,
+		"a dead vehicle is never parked in the corpse hold")
+	for i in range(30):   # ~1 s
+		_frame(w)
+	check(veh._corpse_timer > 0.9,
+		"the wreck's object tick keeps running (corpse timer live at %.2f s)"
+			% veh._corpse_timer)
+	var rest: int = int((Unit.CORPSE_DURATION + Unit.CORPSE_SINK_DURATION) * 30.0) + 30
+	for i in range(rest):
+		_frame(w)
+	check(veh not in w.unit_manager.units, "the wreck expired on the corpse schedule")
 	_free_world(w)
 
 

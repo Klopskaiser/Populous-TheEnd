@@ -1353,7 +1353,11 @@ func _tick_dead(delta: float) -> void:
 	# LIE phase in the kernel (a mass battle carries hundreds of corpses).
 	# The kernel drops us back exactly when the sink phase starts, which the
 	# object ticks (corpse_sink_depth reads the live timer while sinking).
-	if _idx >= 0 and _corpse_timer < CORPSE_DURATION:
+	# Sprite corpses only: the renderer PULLS their sink via corpse_sink_depth,
+	# but vehicles PUSH their own sink from _tick_visual — holding them freezes
+	# the wreck in plain sight. There are only a handful of vehicles, so their
+	# dead object ticks cost nothing.
+	if _idx >= 0 and _corpse_timer < CORPSE_DURATION and renders_as_sprite():
 		_soa_hold[_idx] = CORPSE_DURATION - _corpse_timer
 		_soa_mode[_idx] = UnitManager.HOLD_CORPSE
 		_soa_scan[_idx] = -1.0

@@ -6333,3 +6333,59 @@ von 75 s geclustert). Umbau in [tree_resource.gd](../scripts/core/tree_resource.
   (Chance-Werte je Typ/Boden, geseedeter Mittelwert-Test ~75 s ±15 %,
   Phasen-Desync-Test). Suite **2805/2805 grün, 3 Läufe** (Flakiness-Absicherung,
   da der RNG produktiv zufällig geseedet ist).
+
+## Fix + Erweiterung — Fahrzeug-Sink-Freeze (C2-Hold) & Feuerramme-Todesexplosion (2026-07-25, Nutzerreport/-wunsch)
+
+**Bug (Regression aus Phase 8.e, Commit 13d8466):** Zerstörte Boden-Fahrzeuge
+verschwanden zu spät — der Todes-Sound spielte sofort, aber das Wrack stand
+`CORPSE_DURATION` (6 s) intakt herum und poppte dann nach nur ~0,8 m Sinken weg.
+Ursache: `Unit._tick_dead` parkte **jede** Leiche im `HOLD_CORPSE`-Kernel
+(Objekt-Tick übersprungen). Der Kernel-Kontrakt gilt aber nur für Sprite-Einheiten
+(Renderer **zieht** die Sink-Tiefe via `corpse_sink_depth()`); Fahrzeuge **schieben**
+ihr Versinken selbst in `CrewedVehicle._tick_visual`, das nur aus dem eigenen
+`tick()` läuft. Betroffen: die Sink-Todespfade (Verbrennen, Ertrinken) von
+Katapult/Feuerramme; Burst-Tode verstecken das Modell synchron und waren okay.
+
+- **Fix** ([unit.gd](../scripts/units/unit.gd), `_tick_dead`): Corpse-Hold nur noch
+  `if … and renders_as_sprite()` — tote Fahrzeuge behalten ihre Objekt-Ticks und
+  sinken ab Todeszeitpunkt kontinuierlich (0,8 m/s, ~2,5 s bis unter den Boden).
+  Perf unverändert: die Massenoptimierung (hunderte Sprite-Leichen im Kernel)
+  bleibt; Fahrzeuge sind eine Handvoll.
+- **Headless-Grenze:** `_tick_visual` ist auf `is_inside_tree()` gegated — im Test
+  ist das Y-Driften nicht beobachtbar (auch `root.add_child` in `_initialize`
+  reicht nicht, `is_inside_tree()` bleibt false). Der Regressionstest
+  ([test_combat_kernels.gd](../tests/test_combat_kernels.gd),
+  `test_vehicle_wreck_keeps_object_ticks_when_dead`) prüft deshalb das eigentliche
+  Signal: totes Fahrzeug wird **nicht** geparkt, `_corpse_timer` zählt live
+  (Sprite-Leiche als Gegenprobe geparkt), Expiry bleibt im Zeitplan.
+
+**Erweiterung — Feuerramme zerplatzt mit Todesexplosion:** Bei jeder
+Boden-Zerstörung (Feuer-Leben aufgebraucht, Terrainriss, 180-s-Verlassen-Timeout —
+alle laufen durch `_destroy_vehicle`; Ertrinken/Tornado bewusst nicht) zerbirst
+die Ramme immer (Burst-Optik + Debris + `siege_death_burst`, kein Sinken mehr)
+und detoniert über einem Rechteck **2 Zellen breit, 2 vor + 3 hinter der
+Rumpf-Mitte** (entlang `_heading`, Technik wie `_apply_flames`: Broad-Phase
+`get_units_in_radius`, Narrow-Phase im Heading-Frame — einmalig pro Tod, kein
+Dauer-Overhead):
+
+- **Einheiten:** 20 Schaden (`FIRERAM_DEATH_BLAST_DAMAGE`) + Feuerball-Rückstoß
+  (`throw_airborne` mit `FireballBolt.THROW_BACK/UP`, Landung → Rollen).
+  **Friendly Fire absichtlich** — auch die gerade freigelassene eigene Crew
+  (Nutzerentscheidung). Übersprungen: DEAD/THROWN, `rides_airborne()`, Einheiten
+  > 2,5 m über dem Wrack (kreuzendes Luftschiff/Felsvorsprung).
+- **Gebäude:** +1 Zerstörungsstufe (`apply_destruction_stages(1)`) via
+  Mittellinien-Samples + `footprint_distance_to` (Dedupe pro Gebäude).
+- **Fahrzeuge:** 1 Feuertreffer (`ignite(origin, null)` — Nachbar-Ramme verliert
+  garantiert 1 Leben, Katapult brennt an), tiefes Luftschiff `register_hull_hit`.
+
+Dateien: [balance.gd](../scripts/core/balance.gd) (4 neue
+`FIRERAM_DEATH_BLAST_*`-Konstanten), [fire_ram.gd](../scripts/units/fire_ram.gd)
+(`_destroy_vehicle`-Override erzwingt Burst + `_death_blast()`; `_apply_fire_hit`
+ohne eigenes `_death_sfx` mehr), [test_fire_ram.gd](../tests/test_fire_ram.gd)
+(3 neue Tests: Feldgrenzen vorne/hinten/seitlich + Wurf + Friendly Fire;
+Gebäude-Stufe + Fahrzeug-Zündung; kein Blast bei `drown()`/`burst_into_wood()`;
+`test_ram_burns_and_sinks_…` → `test_ram_burns_down_…` umbenannt).
+
+**Verifikation:** Ladecheck sauber; Suite **2828/2828 grün** (32 Dateien).
+**Offen:** manueller Spieltest (Katapult-Wrack versinkt flüssig; Rammen-Explosion
+Optik/Balance im Gefecht).

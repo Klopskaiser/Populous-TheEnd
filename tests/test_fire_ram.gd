@@ -590,7 +590,7 @@ func test_ram_fires_again_after_crew_converted() -> void:
 
 # --- Destruction & capture (shared vehicle rules) ---------------------------------------
 
-func test_ram_burns_and_sinks_and_is_capturable() -> void:
+func test_ram_burns_down_and_is_capturable() -> void:
 	var w: Dictionary = _make_world()
 	var ram: FireRam = _spawn_ram(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
 	# Unmanned ram: an enemy brave boards it -> ownership switches.
@@ -676,4 +676,84 @@ func test_ram_does_not_regenerate_without_crew() -> void:
 	for _i in range(int((FireRam.LIFE_REGEN_TIME + 5.0) / TICK)):
 		_tick_world(w)
 	check(ram._fire_hits == 1, "an uncrewed ram does not heal")
+	_free_world(w)
+
+
+# --- Death blast --------------------------------------------------------------------
+
+## Burns the ram down with FIRE_LIVES anonymous (null-source) ignites — each
+## counts once, the last one triggers _destroy_vehicle and the death blast.
+func _burn_down(ram: FireRam) -> void:
+	for _i in range(FireRam.FIRE_LIVES):
+		ram.ignite(ram.position)
+
+
+func test_death_blast_hits_field_units_and_throws_them() -> void:
+	var w: Dictionary = _make_world()
+	var ram: FireRam = _spawn_ram(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
+	var p: Vector3 = ram.position   # heading +z: field = 2 ahead / 3 behind, 2 wide
+	var front_in: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, p + Vector3(0, 0, 1.5))
+	var back_in: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, p + Vector3(0, 0, -2.5))
+	var friend_in: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 0, p + Vector3(0.5, 0, -1.0))
+	var side_out: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, p + Vector3(1.5, 0, 0.5))
+	var front_out: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, p + Vector3(0, 0, 2.5))
+	var back_out: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, p + Vector3(0, 0, -3.5))
+	_burn_down(ram)
+	check(ram.state == Unit.State.DEAD, "the ram burnt down")
+	check(front_in.health == front_in.max_health - FireRam.BLAST_DAMAGE,
+		"unit 1.5 m ahead took the blast damage")
+	check(front_in.state == Unit.State.THROWN, "... and was thrown into an arc")
+	check(back_in.health == back_in.max_health - FireRam.BLAST_DAMAGE,
+		"unit 2.5 m behind took the blast damage (3-deep tail)")
+	check(back_in.state == Unit.State.THROWN, "... and was thrown into an arc")
+	check(friend_in.health == friend_in.max_health - FireRam.BLAST_DAMAGE,
+		"own unit inside the field is hit too (friendly fire)")
+	check(side_out.health == side_out.max_health,
+		"unit 1.5 m to the side stays unhurt (field is 2 wide)")
+	check(front_out.health == front_out.max_health,
+		"unit 2.5 m ahead stays unhurt (field reaches 2 ahead)")
+	check(back_out.health == back_out.max_health,
+		"unit 3.5 m behind stays unhurt (field reaches 3 behind)")
+	_free_world(w)
+
+
+func test_death_blast_stages_buildings_and_ignites_vehicles() -> void:
+	var w: Dictionary = _make_world()
+	# Own hut with its footprint reaching into the 3-deep tail (placed BEFORE the
+	# ram so the ram's nav-block disc cannot veto the placement).
+	var hut: Building = w.building_manager.place(
+		HUT_SCENE, w.tribe, Vector2i(60, 55), 0, true)
+	check(hut != null, "hut placed behind the ram's spot")
+	var ram: FireRam = _spawn_ram(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
+	var foe: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 1, ram.position + Vector3(0, 0, 1.5)) as SiegeEngine
+	_burn_down(ram)
+	check(ram.state == Unit.State.DEAD, "the ram burnt down")
+	check(hut.destruction_stage() == 1,
+		"a building in the field takes exactly one destruction stage")
+	check(foe.is_burning(), "a vehicle in the field catches fire (one fire hit)")
+	check(foe.state != Unit.State.DEAD, "the vehicle is staged, not levelled")
+	_free_world(w)
+
+
+func test_death_blast_only_on_ground_destruction() -> void:
+	var w: Dictionary = _make_world()
+	# Drowning (flooded terrain): the wreck goes under without a blast.
+	var ram: FireRam = _spawn_ram(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
+	var bystander: Unit = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, ram.position + Vector3(0, 0, 1.5))
+	ram.drown()
+	check(ram.state == Unit.State.DEAD, "the ram drowned")
+	check(bystander.health == bystander.max_health
+			and bystander.state != Unit.State.THROWN,
+		"drowning triggers no death blast")
+	# Tornado tip: torn into wood, no blast either.
+	var ram2: FireRam = _spawn_ram(w, 0, w.nav.cell_to_world(Vector2i(80, 80)))
+	var bystander2: Unit = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, ram2.position + Vector3(0, 0, 1.5))
+	ram2.burst_into_wood()
+	check(ram2.state == Unit.State.DEAD, "the tornado tore the ram apart")
+	check(bystander2.health == bystander2.max_health
+			and bystander2.state != Unit.State.THROWN,
+		"the tornado tip triggers no death blast")
 	_free_world(w)
