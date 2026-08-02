@@ -223,6 +223,11 @@ func _ready() -> void:
 	status_fx.name = "StatusFxRenderer"
 	add_child(status_fx)
 	status_fx.setup(_unit_manager, _tree_manager)
+	# Splash rings over everything sinking in the sea (phase 10a).
+	var water_fx: WaterFxRenderer = WaterFxRenderer.new()
+	water_fx.name = "WaterFxRenderer"
+	add_child(water_fx)
+	water_fx.setup(_unit_manager, _building_manager)
 	# Range rings for ranged units, toggled with G (phase 7f).
 	var ranges: RangeRenderer = RangeRenderer.new()
 	ranges.name = "RangeRenderer"

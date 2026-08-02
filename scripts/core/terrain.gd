@@ -33,6 +33,10 @@ const COLOR_WATER_HIGHLIGHT: Color = Color(0.13, 0.30, 0.58)
 ## SEA_LEVEL, and it lines the visible waterline up with the gameplay water
 ## threshold (SEA_LEVEL + Unit.WATER_EPS).
 const WATER_SURFACE_LIFT: float = 0.03
+## Target edge length (metres) of one water-plane subdivision cell. The waves are
+## a vertex displacement, so the sea needs geometry — but only enough to resolve
+## an ~18 m swell smoothly.
+const WATER_WAVE_CELL: float = 2.0
 ## Wet, darker sand right at the waterline; fades into COLOR_SAND over
 ## SHORE_BAND metres. Vertex colours are computed during the chunk build
 ## anyway, so the shore costs nothing at runtime.
@@ -123,6 +127,14 @@ func _ensure_water() -> void:
 	water.position = Vector3(
 		data.size * 0.5, TerrainData.SEA_LEVEL + WATER_SURFACE_LIFT, data.size * 0.5)
 	var water_tex: Texture2D = AssetLibrary.texture("textures/terrain/water.png")
+	if water_tex == null:
+		# The wave shader displaces vertices, so the plane needs geometry. One
+		# vertex per WATER_WAVE_CELL metres — far finer than the ~18 m swell,
+		# far coarser than the terrain (a 128 map gets 66x66 verts).
+		var subdiv: int = clampi(
+			int(float(data.size) / WATER_WAVE_CELL), 16, 160)
+		plane.subdivide_width = subdiv
+		plane.subdivide_depth = subdiv
 	if water_tex != null:
 		# User texture wins: tinted, but still fully opaque.
 		var tmat: StandardMaterial3D = StandardMaterial3D.new()

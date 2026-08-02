@@ -130,8 +130,15 @@ const DROWN_FLAIL_DURATION: float = Balance.DROWN_FLAIL_DURATION
 const DROWN_SINK_DURATION: float = Balance.DROWN_SINK_DURATION
 const DROWN_FLOAT_DEPTH: float = Balance.DROWN_FLOAT_DEPTH
 const DROWN_SINK_DEPTH: float = Balance.DROWN_SINK_DEPTH
+const DROWN_MIN_DEPTH: float = Balance.DROWN_MIN_DEPTH
+const DROWN_DRAG_RADIUS: float = Balance.DROWN_DRAG_RADIUS
+const DROWN_DRAG_SPEED: float = Balance.DROWN_DRAG_SPEED
 ## Tolerance above SEA_LEVEL that still counts as water for gameplay checks.
 const WATER_EPS: float = 0.05
+## How far a body may have sunk below the waterline and still show a surface
+## splash (a drowned sprite never gets deeper than DROWN_FLOAT_DEPTH +
+## DROWN_SINK_DEPTH = 2.8, so it splashes for its whole descent).
+const SPLASH_MAX_DEPTH: float = 3.0
 
 # --- Knockback (fireball, phase 5c; weakened in 5d for the roll chance) ---------
 ## Shove distance of a single un-stacked fireball hit (metres)...
@@ -671,6 +678,10 @@ var _corpse_done: bool = false
 ## than a State of its own — every "is this unit gone?" check in the codebase
 ## already tests State.DEAD, and drowning wants exactly those semantics.
 var _drowning: bool = false
+## Where the drowning body is dragged to while it flails: the nearest spot with
+## real depth. Without it a unit that rolled in stops right on the waterline and
+## visibly sinks into the beach.
+var _drown_target: Vector3 = Vector3.ZERO
 
 # --- Knockback state (fireball, phase 5c) ---------------------------------------
 ## Hit-density accumulator: +1 per fireball hit, decays over time; scales the
@@ -1412,6 +1423,18 @@ func _tick_dead(delta: float) -> void:
 		_corpse_done = true
 		corpse_expired.emit(self)
 		return
+	if _drowning:
+		# Dragged out into real water, so the body goes under in the SEA instead
+		# of on the waterline it happened to cross. Speed-limited (not spread
+		# over a fixed time), so a short pull looks like a short pull.
+		var dx: float = _drown_target.x - position.x
+		var dz: float = _drown_target.z - position.z
+		var dist: float = sqrt(dx * dx + dz * dz)
+		if dist > 0.001:
+			var step: float = minf(DROWN_DRAG_SPEED * delta, dist)
+			position.x += dx / dist * step
+			position.z += dz / dist * step
+			_sync_soa_pos()
 	# C2 corpse hold: a lying corpse only counts this timer — park the whole
 	# LIE phase in the kernel (a mass battle carries hundreds of corpses).
 	# The kernel drops us back exactly when the sink phase starts, which the
@@ -1810,6 +1833,28 @@ func fling_from_carry(velocity: Vector3) -> void:
 	_throw_velocity = velocity
 
 
+## True while this unit is going under IN THE SEA, so the WaterFxRenderer draws
+## a splash ring on the surface above it. Covers both drowned sprite bodies
+## (which sink via corpse_sink_depth) and burnt-out vehicle wrecks (which push
+## their own Y down). Presentation only — headless-safe, no renderer needed.
+func water_splash_active() -> bool:
+	if state != State.DEAD or _corpse_done or terrain_data == null:
+		return false
+	# Cheap float gate first: only a body at or below the waterline (and not yet
+	# deep) can splash. A battlefield full of land corpses never reaches the
+	# terrain sample below.
+	var y: float = position.y - corpse_sink_depth()
+	if y > TerrainData.SEA_LEVEL + WATER_EPS \
+			or y <= TerrainData.SEA_LEVEL - SPLASH_MAX_DEPTH:
+		return false
+	return _is_water_at(position.x, position.z)
+
+
+## Radius (metres) of that splash ring.
+func water_splash_radius() -> float:
+	return 0.9
+
+
 ## True when the sea covers the given world XZ. Single source of truth for
 ## every "is this water?" gameplay check (throw landing, roll, knockback,
 ## cliff probe).
@@ -1831,11 +1876,39 @@ func drown() -> void:
 		# MUST be set before _die(): _die() locks the corpse pose exactly once
 		# and the per-tick dead path never refreshes the animation again.
 		_drowning = true
+		_drown_target = _deep_water_near(position)
 		position.y = TerrainData.SEA_LEVEL - DROWN_FLOAT_DEPTH
 		_sync_soa_pos()
 		_play_sfx(&"water_splash", 150)
 	health = 0
 	_die()
+
+
+## Nearest spot with real depth (seabed at least DROWN_MIN_DEPTH below the
+## waterline) within DROWN_DRAG_RADIUS, else the deepest spot found. Called once
+## per drowning — a ring scan of ~40 height samples, never in a hot path.
+func _deep_water_near(from: Vector3) -> Vector3:
+	if terrain_data == null:
+		return from
+	var want: float = TerrainData.SEA_LEVEL - DROWN_MIN_DEPTH
+	if terrain_data.get_height(from.x, from.z) <= want:
+		return from   # already out in open water
+	var best: Vector3 = from
+	var best_h: float = terrain_data.get_height(from.x, from.z)
+	var r: float = 1.0
+	while r <= DROWN_DRAG_RADIUS:
+		for i in range(8):
+			var a: float = TAU * float(i) / 8.0
+			var px: float = from.x + cos(a) * r
+			var pz: float = from.z + sin(a) * r
+			var h: float = terrain_data.get_height(px, pz)
+			if h <= want:
+				return Vector3(px, 0.0, pz)   # nearest ring wins
+			if h < best_h:
+				best_h = h
+				best = Vector3(px, 0.0, pz)
+		r += DROWN_DRAG_RADIUS / 5.0
+	return best
 
 
 # --- Burning (7c lava) --------------------------------------------------------------

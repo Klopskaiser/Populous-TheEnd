@@ -6645,3 +6645,52 @@ Flutungstoden in `test_spells.gd`).
 **Offen:** manuelle Prüfung durch den Nutzer (Wasseroptik/Küstenlinie,
 Ertrinkanimation ohne treibende Leiche, `airborne`-Pose beim Tornado,
 Feuerrammen-Flamme, FPS-Vergleich).
+
+### Phase 10a — Nachbesserung Wasser nach Nutzertest (2026-08-02)
+
+Nutzerrückmeldung nach dem ersten Test: Wasseroberfläche zu statisch, kein
+sichtbarer Spritzer beim Versinken, und Hineingerollte versanken **exakt an der
+Uferkante** („ertranken quasi an Land"). Drei Änderungen:
+
+1. **Bewegte Wellen.** `shaders/water.gdshader` verschiebt jetzt Vertices
+   (Summe aus drei Sinus, Amplitude 7 cm, Wellenlänge ~18 m) und rekonstruiert
+   die Normale per zentraler Differenz aus derselben Funktion — das Licht
+   wandert also wirklich über die Dünung. Die Fragment-Stufe kommt dadurch
+   **ganz ohne Trigonometrie** aus (Kammfarbe reitet auf einem Varying) und ist
+   billiger als die vorherige Version. Dafür braucht die Ebene Geometrie:
+   `Terrain.WATER_WAVE_CELL = 2.0` → ~1 Vertex je 2 m (128er-Karte: 66×66
+   Vertices). Amplitude bewusst klein, damit die sichtbare Wasserlinie weiter
+   zur Spielschwelle `SEA_LEVEL + WATER_EPS` passt. Der Textur-Override-Pfad
+   bleibt wellenlos (StandardMaterial).
+
+2. **Spritzer beim Versinken.** Neuer `scripts/ui/water_fx_renderer.gd`
+   (`class_name WaterFxRenderer`): **eine** MultiMesh flach liegender,
+   alpha-gescissorter Quads auf der Wasseroberfläche — ein Draw-Call für alle
+   Spritzer der Partie, Muster wie `StatusFxRenderer`/`StarsRenderer`. Vier
+   prozedurale Frames (aufweitender Schaumring + Tropfen), ersetzbar über
+   `assets/textures/effects/splash.png`. Die Regel liegt bei den Quellen, nicht
+   im Renderer: `Unit.water_splash_active()` (deckt Sprite-Leichen **und**
+   Fahrzeugwracks ab, weil es die effektive Höhe inkl. `corpse_sink_depth()`
+   prüft) und `Building.water_splash_active()`. Beide sind headless testbar.
+   Perf: der Test steigt zuerst über einen reinen Float-Vergleich aus, damit
+   ein Schlachtfeld voller Landleichen nie die Terrainabtastung erreicht.
+
+3. **Wirklich ins Wasser gezogen.** Neue Konstanten `DROWN_MIN_DEPTH 1.2`,
+   `DROWN_DRAG_RADIUS 6.0`, `DROWN_DRAG_SPEED 3.5`. `Unit.drown()` sucht einmalig
+   per Ringscan (~40 Höhenabfragen) die nächste Stelle mit echter Tiefe —
+   findet sich keine, die tiefste im Radius. `_tick_dead` zieht den Körper mit
+   begrenztem Tempo dorthin, solange er noch nicht angekommen ist. Damit
+   versinkt niemand mehr auf der Wasserlinie, die er zufällig überquert hat.
+   Tempo-begrenzt statt über eine feste Zeit interpoliert, damit ein kurzer Zug
+   auch kurz aussieht.
+
+**Erkenntnis:** Der Auslöser war nicht die Ertrink-Logik, sondern die Geometrie
+des Ufers — `is_walkable` entscheidet über den **Zellmittelwert**, `_is_water_at`
+über die interpolierte Höhe. Dazwischen liegt ein schmaler Streifen, in dem eine
+Einheit „im Wasser" ist, der Meeresboden aber nur Zentimeter unter dem Spiegel
+liegt. Genau dort landeten die Hineingerollten.
+
+**Verifikation:** Suite **3001/3001 grün** (Suite `test_drowning.gd` von 12 auf
+18 Tests gewachsen: Drag ins tiefe Wasser, kein Drag im offenen Meer, Spritzer
+bei Einheit/Gebäude, kein Spritzer an Land, Spritz-Frames weiten sich auf),
+Ladecheck sauber. Manuelle Prüfung der Optik erneut durch den Nutzer.

@@ -25,7 +25,8 @@ assets/
 │   └── trees/tree.glb
 ├── textures/
 │   ├── terrain/                 # sand.png, grass.png, rock.png, water.png (water optional)
-│   ├── effects/                 # optional: panic.png, burning.png, injured.png (Status-Icons)
+│   ├── effects/                 # optional: panic.png, burning.png, injured.png (Status-Icons),
+│   │                            #           splash.png (Spritzer auf dem Wasser)
 │   └── spells/                  # optional: fireball.png, swarm.png, tornado.png, lava.png
 └── audio/
     ├── music/*.ogg              # alle Dateien = Playlist (Loop)
@@ -203,6 +204,9 @@ dargestellt (nicht ersetzbar). Die Pixel-Icons lassen sich pro Effekt ersetzen:
 - `panic.png`, `burning.png`
 - **`burning.png` ist das spielweite Feuer:** brennende Einheiten und Bäume,
   **und** der Flammenkegel der Feuerramme nutzen dieselben Frames.
+- `splash.png` — Spritzring auf der Wasseroberfläche über allem, was gerade im
+  Meer versinkt (Einheiten, Fahrzeugwracks, geflutete Gebäude). Wird **flach
+  liegend** von oben gesehen dargestellt, also von oben zeichnen.
 - Format: ein einzelnes Bild **oder** ein horizontaler Streifen **quadratischer**
   Frames (Framezahl = Breite ÷ Höhe), abgespielt als Loop (~6,7 fps).
 - Transparenter Hintergrund (Alpha), Lossless-Import belassen.

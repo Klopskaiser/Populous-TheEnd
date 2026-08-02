@@ -40,6 +40,16 @@ func _make_coast(w: Dictionary, shore_x: int = 26) -> void:
 	w.nav.update_region(Rect2i(0, 0, w.td.size, w.td.size))
 
 
+## Gently shelving beach: the seabed rises 0.5 m per metre from x=16 (depth 2 m)
+## up to dry land. Unlike _make_coast this has a real shallow zone — the case
+## where a body used to sink standing on the waterline.
+func _make_beach(w: Dictionary) -> void:
+	for z in range(w.td.verts):
+		for x in range(w.td.verts):
+			w.td.set_vertex_height(x, z, clampf((float(x) - 16.0) * 0.5, 0.0, 6.0))
+	w.nav.update_region(Rect2i(0, 0, w.td.size, w.td.size))
+
+
 func _free_world(w: Dictionary) -> void:
 	w.unit_manager.free()
 
@@ -156,6 +166,118 @@ func test_pathfinding_never_routes_through_water() -> void:
 	check(w.td.get_height(unit.position.x, unit.position.z) > TerrainData.SEA_LEVEL,
 		"the unit ended up on land")
 	_free_world(w)
+
+
+# --- Being dragged into real water ---------------------------------------------------
+
+## A unit that crosses the waterline must not sink on the shoreline it happened
+## to touch: it is dragged out to a spot with real depth while it flails.
+func test_drowning_body_is_dragged_into_deep_water() -> void:
+	var w: Dictionary = _make_world()
+	_make_beach(w)
+	var unit: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
+	# Put it right on the waterline (seabed barely below the sea line).
+	unit.position = Vector3(19.9, 0.0, 30.0)
+	var shore_depth: float = TerrainData.SEA_LEVEL \
+		- w.td.get_height(unit.position.x, unit.position.z)
+	check(shore_depth < Unit.DROWN_MIN_DEPTH,
+		"it starts in the shallows (%.2f m)" % shore_depth)
+	unit.drown()
+	check(unit._drowning, "the unit drowns")
+	var target_depth: float = TerrainData.SEA_LEVEL \
+		- w.td.get_height(unit._drown_target.x, unit._drown_target.z)
+	check(target_depth >= Unit.DROWN_MIN_DEPTH,
+		"the drag target has real depth (%.2f m)" % target_depth)
+	while not unit._corpse_done:
+		unit.tick(TICK)
+		if absf(unit.position.x - unit._drown_target.x) < 0.05:
+			break
+	check_near(unit.position.x, unit._drown_target.x,
+		"the body has arrived out in the water", 0.1)
+	check(TerrainData.SEA_LEVEL - w.td.get_height(unit.position.x, unit.position.z)
+		>= Unit.DROWN_MIN_DEPTH, "it sinks where the water is actually deep")
+	_free_world(w)
+
+
+## A unit that is already out in open water is not dragged anywhere.
+func test_drowning_in_open_water_does_not_drag() -> void:
+	var w: Dictionary = _make_world()
+	_make_beach(w)
+	var unit: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
+	unit.position = Vector3(12.0, 0.0, 30.0)
+	unit.drown()
+	check_near(unit._drown_target.x, 12.0, "the drag target is where it died", 0.01)
+	check_near(unit._drown_target.z, 30.0, "…on both axes", 0.01)
+	_free_world(w)
+
+
+# --- Surface splash -------------------------------------------------------------------
+
+## The splash ring shows from the moment of drowning until the body is gone.
+func test_drowning_shows_a_surface_splash() -> void:
+	var w: Dictionary = _make_world()
+	_make_coast(w)
+	var unit: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
+	check(not unit.water_splash_active(), "a living unit shows no splash")
+	unit.position = Vector3(12.0, 0.0, 30.0)
+	unit.drown()
+	check(unit.water_splash_active(), "the drowning body splashes")
+	var t: float = 0.0
+	while t < Unit.DROWN_FLAIL_DURATION + Unit.DROWN_SINK_DURATION * 0.5:
+		unit.tick(TICK)
+		t += TICK
+	check(unit.water_splash_active(), "it keeps splashing while it sinks")
+	while not unit._corpse_done:
+		unit.tick(TICK)
+	check(not unit.water_splash_active(), "the splash ends with the body")
+	_free_world(w)
+
+
+## A death on dry land never splashes.
+func test_land_death_shows_no_splash() -> void:
+	var w: Dictionary = _make_world()
+	_make_coast(w)
+	var unit: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(40, 30))
+	unit.take_damage(unit.max_health)
+	check(unit.state == Unit.State.DEAD, "the unit died on land")
+	check(not unit.water_splash_active(), "no splash on dry land")
+	_free_world(w)
+
+
+## Buildings that slide into the sea splash too; ones that sink on land do not.
+func test_building_splash_only_in_water() -> void:
+	var w: Dictionary = _make_world()
+	_make_coast(w)
+	var hut: Building = Building.new()
+	hut.terrain_data = w.td
+	hut.footprint = Vector2i(3, 3)
+	hut.position = Vector3(40, 5, 30)
+	hut._destroyed = true
+	check(not hut.water_splash_active(), "a wreck on land does not splash")
+	hut.position = Vector3(12, 1, 30)
+	check(hut.water_splash_active(), "a wreck in the sea splashes")
+	check(hut.water_splash_radius() > 1.0, "the ring scales with the footprint")
+	hut._sink_time = Building.SINK_DURATION
+	check(not hut.water_splash_active(), "the splash ends when the wreck is gone")
+	hut.free()
+	_free_world(w)
+
+
+## The procedural splash frames widen over their four phases.
+func test_splash_frames_expand() -> void:
+	var frames: Array[Texture2D] = []
+	for i in range(4):
+		frames.append(WaterFxRenderer.splash_frame(i))
+	check(frames.size() == 4, "four splash phases exist")
+	for f in frames:
+		check(f.get_width() == WaterFxRenderer.TEX, "frames are square and sized")
+	# The ring of the last phase reaches further out than the first one.
+	var first: Image = frames[0].get_image()
+	var last: Image = frames[3].get_image()
+	var edge: int = WaterFxRenderer.TEX - 3
+	var mid: int = WaterFxRenderer.TEX / 2
+	check(first.get_pixel(edge, mid).a < 0.5, "the first ring is still narrow")
+	check(last.get_pixel(edge, mid).a > 0.5, "the last ring has widened outwards")
 
 
 # --- Corpse behaviour ---------------------------------------------------------------

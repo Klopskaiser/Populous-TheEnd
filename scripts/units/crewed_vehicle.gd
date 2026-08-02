@@ -251,6 +251,11 @@ func burst_into_wood() -> void:
 	_die()
 
 
+## A wreck displaces a lot more water than a man.
+func water_splash_radius() -> float:
+	return 1.8
+
+
 ## Flooded ground (terrain spells): the wreck goes under — crew released.
 func drown() -> void:
 	if state == State.DEAD:

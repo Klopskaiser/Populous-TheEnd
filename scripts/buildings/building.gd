@@ -1304,6 +1304,20 @@ func shatter() -> void:
 	destroy()
 
 
+## True while this wreck is sinking IN THE SEA — the WaterFxRenderer then draws
+## a splash ring on the surface above it until it is gone. Presentation only.
+func water_splash_active() -> bool:
+	if not _destroyed or terrain_data == null or _sink_time >= SINK_DURATION:
+		return false
+	return terrain_data.get_height(position.x, position.z) \
+		<= TerrainData.SEA_LEVEL + Unit.WATER_EPS
+
+
+## Radius (metres) of that splash ring — a hut displaces less than a temple.
+func water_splash_radius() -> float:
+	return maxf(float(footprint.x), float(footprint.y)) * 0.6
+
+
 ## Terrain integrity (7c): mostly flooded — the wreck slides sideways into
 ## the water while sinking below the waves.
 func slide_into_water(dir: Vector3) -> void:

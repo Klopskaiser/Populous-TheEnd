@@ -58,7 +58,8 @@ existiert bereits und wird nur poliert.
 |---|---|---|
 | **Animationen** | `scripts/ui/placeholder_sprites.gd` | `_anims_for()` (:74) um `airborne` + `drown` für **alle** Kinds erweitern; `_anim_fps()` (:141) `airborne` 5.0 / `drown` 6.0; `_build_frames()` (:169) zwei neue `match`-Zweige — `airborne` 2 Frames (Arme/Beine gespreizt, bewusst **nicht** die Kugelform von `_frame_roll`, damit THROWN und ROLL unterscheidbar bleiben), `drown` 3 Frames (Arme über dem Kopf, wechselseitig winkend, Beine unterhalb y=18 weggelassen); Dekorations-Ausschlussliste (:246) um `drown` erweitern (`airborne` behält Accessoires) |
 | **Anim-Auswahl** | `scripts/units/unit.gd` | `_anim_base()` (:3388): `THROWN → &"airborne"`, `ROLL → &"roll"` (Aufsplittung), `DEAD → &"drown"` wenn `_drowning`, sonst `&"dead"` |
-| **Wasser** | `scripts/core/terrain.gd`, `shaders/water.gdshader` (neu) | `_ensure_water()` (:91) undurchsichtig; neue Konstanten `COLOR_WATER = Color(0.055, 0.16, 0.40)`, `COLOR_WATER_HIGHLIGHT = Color(0.13, 0.30, 0.58)`, `WATER_SURFACE_LIFT = 0.03`, `COLOR_SHORE = Color(0.62, 0.55, 0.38)`, `SHORE_BAND = 0.9`. Neuer Shader: opaque, zwei `sin()`, keine Textur, keine Vertex-Verschiebung. Texturpfad `assets/textures/terrain/water.png` bleibt als Override (dann `StandardMaterial3D` **ohne** Alpha). Küstensaum gratis über `_color_for_height()` (:132) |
+| **Wasser** | `scripts/core/terrain.gd`, `shaders/water.gdshader` (neu) | `_ensure_water()` (:91) undurchsichtig; neue Konstanten `COLOR_WATER = Color(0.055, 0.16, 0.40)`, `COLOR_WATER_HIGHLIGHT = Color(0.13, 0.30, 0.58)`, `WATER_SURFACE_LIFT = 0.03`, `WATER_WAVE_CELL = 2.0`, `COLOR_SHORE = Color(0.62, 0.55, 0.38)`, `SHORE_BAND = 0.9`. Neuer Shader: opaque, **bewegte Wellen** als Vertex-Verschiebung (Summe aus drei Sinus, Amplitude 7 cm, Wellenlänge ~18 m) mit aus derselben Funktion rekonstruierter Normale; Fragment-Stufe ohne Trigonometrie. Dafür bekommt die Ebene eine Unterteilung (~1 Vertex je 2 m). Texturpfad `assets/textures/terrain/water.png` bleibt als Override (dann `StandardMaterial3D` **ohne** Alpha und ohne Wellen). Küstensaum gratis über `_color_for_height()` (:132) |
+| **Spritzer** | `scripts/ui/water_fx_renderer.gd` (neu, `class_name WaterFxRenderer`) | Eine MultiMesh flach liegender, alpha-gescissorter Quads auf der Wasseroberfläche über allem, was gerade versinkt — ein Draw-Call für die ganze Partie. Quellen entscheiden selbst: `Unit.water_splash_active()`/`water_splash_radius()` (deckt Sprites **und** Fahrzeugwracks ab) und `Building.water_splash_active()`/`water_splash_radius()`. Vier prozedurale Frames (aufweitender Schaumring + Tropfen), ersetzbar über `assets/textures/effects/splash.png`. Verdrahtung in `main.gd` neben dem `StatusFxRenderer` |
 | **Minimap** | `scripts/ui/minimap.gd` | Wasserfarben an `Terrain.COLOR_WATER` angleichen; Tiefenrampe (`height_to_color` :93) **behalten** (Lesbarkeit von Kanälen/Seen; `tests/test_ui_logic.gd:57` hängt daran) |
 | **Ertrinken** | `scripts/units/unit.gd`, `scripts/core/balance.gd` | Neue Flagge `_drowning`; gemeinsame Wasserprobe `_is_water_at(x, z)` ersetzt die drei Literalkopien (:1488, :1575, :1852); `drown()` (:1760) mit Pose-Reihenfolge, Auftrieb, `_sync_soa_pos()`, Splash-SFX; drei Leichen-Timing-Helfer; **Kernel-Hold-Guard** in `_tick_dead` (:1393); Freigabe der erzwungenen Bewegung ins Wasser an fünf Stellen (siehe Umsetzungsschritte) |
 | **Fahrzeuge** | `scripts/units/crewed_vehicle.gd` | `drown()` (:255): vor `super.drown()` `position.y` auf mindestens `SEA_LEVEL` heben, damit das Wrack sein Absinken sichtbar beginnt statt unsichtbar auf dem Meeresboden |
@@ -79,6 +80,12 @@ const DROWN_SINK_DURATION: float = 1.1
 const DROWN_FLOAT_DEPTH: float = 0.9
 ## Zusätzliche Absinktiefe (m) — Sprite-Höhe + Tiefen-Bias-Reserve.
 const DROWN_SINK_DEPTH: float = 1.9
+## So tief muss der Meeresboden unter dem Wasserspiegel liegen, damit eine
+## Stelle als "richtiges Wasser" zum Versinken zählt.
+const DROWN_MIN_DEPTH: float = 1.2
+## Suchradius für diese Stelle und Tempo, mit dem der Körper dorthin gezogen wird.
+const DROWN_DRAG_RADIUS: float = 6.0
+const DROWN_DRAG_SPEED: float = 3.5
 ```
 
 Farb- und Geometriewerte (Wasser, Küstensaum, Flammenquads, Gebäude-Kippung)

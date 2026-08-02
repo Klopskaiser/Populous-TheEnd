@@ -239,6 +239,18 @@ const DROWN_FLOAT_DEPTH: float = 0.9
 ## Absinktiefe (m) — Sprite-Höhe plus Reserve gegen den Tiefen-Bias des
 ## Billboard-Shaders, damit am Ende nichts mehr durch die Wasserfläche lugt.
 const DROWN_SINK_DEPTH: float = 1.9
+## So tief muss der Meeresboden unter dem Wasserspiegel liegen, damit eine
+## Stelle als "richtiges Wasser" zum Versinken zählt. Ohne das versinken
+## Hineingerollte exakt an der Uferkante und ertrinken optisch an Land.
+const DROWN_MIN_DEPTH: float = 1.2
+## Suchradius (m), in dem beim Ertrinken eine solche Stelle gesucht wird; die
+## Einheit wird dorthin ins Wasser gezogen. Findet sich nichts tief genug, gilt
+## die tiefste Stelle im Radius.
+const DROWN_DRAG_RADIUS: float = 6.0
+## Tempo (m/s), mit dem der Körper hinausgezogen wird. Reicht bei der kurzen
+## Ertrink-Lebensdauer für den vollen Suchradius, sieht aber nicht nach Rutschen
+## aus.
+const DROWN_DRAG_SPEED: float = 3.5
 
 # =============================================================================
 # ROLLEN (Statuseffekt — Schubser, Wurf-Landungen, Stolpern)
