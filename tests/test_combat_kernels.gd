@@ -323,6 +323,92 @@ func test_vehicle_wreck_keeps_object_ticks_when_dead() -> void:
 	_free_world(w)
 
 
+## Second row (2026-08-02, plans/08e): a waiter whose target's melee slots are
+## full belongs to the kernel in BOTH of its situations — walking to its ring
+## point (HOLD_WAIT_WALK) and standing settled there (HOLD_WAIT). Before the
+## rework the hold gate measured the distance to the DEFENDER while the ring
+## centres on the group anchor, and it covered only the standing case: in the
+## stress battle 213 of ~225 waiters paid a full object tick every tick.
+func test_waiter_holds_while_closing_up_and_standing() -> void:
+	seed(4711)
+	var w: Dictionary = _make_world()
+	var defender: Unit = _spawn(w, WARRIOR_SCENE, 1, Vector2(30.0, 30.0))
+	defender.max_health = 100000
+	defender.health = defender.max_health
+	var attackers: Array[Unit] = []
+	for k in range(Unit.MAX_MELEE_ATTACKERS):
+		var a: Unit = _spawn(w, WARRIOR_SCENE, 0,
+			Vector2(30.0 + 0.8 * cos(float(k)), 30.0 + 0.8 * sin(float(k))))
+		a.max_health = 100000
+		a.health = a.max_health
+		a._begin_attack(defender)
+		attackers.append(a)
+	# The surplus attacker finds every slot taken -> second row.
+	var waiter: Unit = _spawn(w, WARRIOR_SCENE, 0, Vector2(36.0, 30.0))
+	waiter.max_health = 100000
+	waiter.health = waiter.max_health
+	waiter.order_attack(defender)
+	var start_dist: float = waiter._flat_dist(waiter.position, defender.position)
+	var walk_held: bool = false
+	var stand_held: bool = false
+	var object_ticks: int = 0
+	for i in range(240):   # 8 s
+		_frame(w)
+		if i % 30 == 0:
+			_check_target_handles(w, "second row")   # sampled: 5 units x 240 = noise
+		if waiter._idx < 0:
+			break
+		if w.unit_manager.soa_hold[waiter._idx] >= 0.0:
+			if w.unit_manager.soa_mode[waiter._idx] == UnitManager.HOLD_WAIT_WALK:
+				walk_held = true
+			elif w.unit_manager.soa_mode[waiter._idx] == UnitManager.HOLD_WAIT:
+				stand_held = true
+		elif waiter._combat_waiting:
+			object_ticks += 1
+	check(walk_held, "the closing-up waiter walks in the kernel (HOLD_WAIT_WALK)")
+	check(stand_held, "the settled waiter stands in the kernel (HOLD_WAIT)")
+	check(waiter._flat_dist(waiter.position, defender.position) < start_dist - 1.0,
+		"the kernel actually moved the waiter toward the fight (%.1f -> %.1f m)" % [
+			start_dist, waiter._flat_dist(waiter.position, defender.position)])
+	# Scan cadence (0.25 s) is the only regular object tick left for a waiter;
+	# 8 s therefore allow ~32 of them plus a few event ticks.
+	check(object_ticks < 60,
+		"waiting costs object ticks only at the scan cadence (got %d in 240)" % object_ticks)
+	_free_world(w)
+
+
+## A freed melee slot promotes a KERNEL-HELD waiter immediately (the hold must
+## not delay it to the next scan drop) — CombatGroup.promote_waiters.
+func test_waiter_promotion_clears_the_kernel_hold() -> void:
+	seed(4712)
+	var w: Dictionary = _make_world()
+	var defender: Unit = _spawn(w, WARRIOR_SCENE, 1, Vector2(30.0, 30.0))
+	defender.max_health = 100000
+	defender.health = defender.max_health
+	var attackers: Array[Unit] = []
+	for k in range(Unit.MAX_MELEE_ATTACKERS):
+		var a: Unit = _spawn(w, WARRIOR_SCENE, 0,
+			Vector2(30.0 + 0.8 * cos(float(k)), 30.0 + 0.8 * sin(float(k))))
+		a.max_health = 100000
+		a.health = a.max_health
+		a._begin_attack(defender)
+		attackers.append(a)
+	var waiter: Unit = _spawn(w, WARRIOR_SCENE, 0, Vector2(31.5, 31.5))
+	waiter.max_health = 100000
+	waiter.health = waiter.max_health
+	waiter.order_attack(defender)
+	for i in range(60):
+		_frame(w)
+	var group = defender.combat_group
+	check(group != null and group.is_waiter(waiter), "surplus attacker sits in the second row")
+	attackers[0]._end_attack()   # frees a slot -> promote_waiters
+	check(w.unit_manager.soa_hold[waiter._idx] < 0.0,
+		"promotion cleared the waiter's kernel hold at once")
+	_frame(w)
+	check(group.attacker_index(waiter) >= 0, "the promoted waiter took the free slot")
+	_free_world(w)
+
+
 ## Knockback needs the object tick: a displace on a held unit clears its hold.
 func test_hold_clears_on_displace() -> void:
 	seed(11)

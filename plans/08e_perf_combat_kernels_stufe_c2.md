@@ -151,6 +151,21 @@ Die vier Punkte der Nachmessung, alle umgesetzt (Details PROGRESS.md „C3"):
    (`HOLD_CAST`, Scan-/Chant-Timer rekonstruiert). Brand-Paniker bewusst
    ausgelassen (Zauber-Nachwirkung, wird mit den Zaubern optimiert).
 
+## Fortsetzung „C4" (umgesetzt 2026-08-02) — Harness-Fix + zweite Reihe
+
+Vorab-Befund: `tests/diag_stress_battle.gd` umging `tick_units()` und maß damit
+die Vor-C2-Welt — die „Restposten"-Zahlen unten stammen aus dieser kaputten
+Messung und sind mit Vorsicht zu lesen. Harness repariert (Kernel/Objekt/
+Manager-Split, Hold-/Drop-Quoten je Modus, Grund je ungehaltenem ATTACK-Tick),
+`benchmark_stress` geseedet (vorher jeder Lauf eine andere Schlacht).
+Gefunden und behoben: die **zweite Reihe** lief komplett im Objekt-Tick
+(213/Tick, ~3 ms) — Halteband maß zum Verteidiger statt zum Ring-Mittelpunkt,
+und für den *anmarschierenden* Waiter gab es gar keinen Hold (neu:
+`HOLD_WAIT_WALK`). Messrahmen: auf dem Referenzrechner schwanken identische
+Läufe um ±25 % (Laptop-Boost + Security-Dienste) — ab jetzt nur noch geseedet,
+paarweise verschränkt und über das Minimum aus N verglichen. Details und
+Zahlen: PROGRESS.md „C4".
+
 **Restposten am Peak (~44 ms)**: warrior/ATTACK-Drop-Ticks ~13,5 ms (Strikes,
 Waiter-Scans, Pendel-Events), firewarrior/ATTACK ~7,6 ms (Threat/Priest-Scans
 + Schuss-Erzeugung), Kernel ~8 ms, sep+groups ~7,8 ms, SIT/ROLL/Leichen-Reste.

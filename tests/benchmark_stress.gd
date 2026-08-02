@@ -14,8 +14,15 @@ extends SceneTree
 ##
 ## NOT part of the test suite (no test_ prefix). Run with:
 ##   godot --headless -s res://tests/benchmark_stress.gd
+##
+## The global RNG is SEEDED (2026-08-02): unseeded, every run fought a
+## different battle (survivors in the window varied by ~100, peak-block times
+## by 31-48 ms) and A/B comparisons drowned in that noise. Same seed = same
+## battle up to the point where a change alters behaviour.
 
 const TICK: float = 1.0 / 30.0
+## Fixed RNG seed, like tests/run_tests.gd (see the note above).
+const BENCH_SEED: int = 20260802
 ## 60 simulated seconds: 5 s idle, ~8 s march, then the mega-brawl.
 const TICKS: int = 1800
 ## Combat window: from first contact (armies start 30 cells from the centre).
@@ -41,6 +48,7 @@ const SIEGE_SCENE: PackedScene = preload("res://scenes/units/siege_engine.tscn")
 
 
 func _initialize() -> void:
+	seed(BENCH_SEED)
 	var td: TerrainData = TerrainData.new()
 	td.generate_island(1337)
 	var nav: NavGrid = NavGrid.new(td)

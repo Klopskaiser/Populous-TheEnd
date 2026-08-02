@@ -159,6 +159,14 @@ const HOLD_CHASE_DIRECT: int = 6   # direct-step pursuit inside COMBAT_DIRECT_RA
 const HOLD_CORPSE: int = 7   # DEAD, lying flat until the sink phase begins
 const HOLD_PANIC: int = 8    # panicked flight hop (entry span parked in goal.x)
 const HOLD_CAST: int = 9     # preacher standing and channeling (span in goal.x)
+## Second-row waiter still CLOSING UP on its ring point (absolute destination
+## in soa_goal). Deliberately numbered outside the timed band (CORPSE..CAST):
+## it carries no countdown, just like the other walking modes.
+const HOLD_WAIT_WALK: int = 10
+## How close to its ring point a walking waiter must get before the kernel
+## hands it back (the object then re-picks its centre and takes the standing
+## HOLD_WAIT). Well inside the object's own settle band (wait radius + 0.6).
+const WAIT_WALK_ARRIVE: float = 0.3
 ## Attack-target handle per unit: slot index of attack_target (-1 = none),
 ## mirrored at every attack_target write (Unit._sync_soa_target). Because
 ## unregister swap-removes slots, the handle alone could silently point at a
@@ -322,11 +330,14 @@ func _run_combat_kernels(delta: float) -> void:
 	var melee_r2: float = Balance.MELEE_RANGE * Balance.MELEE_RANGE
 	var fire_r2: float = Balance.FIREWARRIOR_FIRE_RANGE * Balance.FIREWARRIOR_FIRE_RANGE
 	var direct_r2: float = Unit.COMBAT_DIRECT_RANGE * Unit.COMBAT_DIRECT_RANGE
-	# Waiters ring around the group ANCHOR, which may trail the defender by up
-	# to 2x the wait radius — the drop band must cover that, or the wait hold
-	# never engages (the fine positioning keeps its 0.25-s scan cadence).
-	var wait_r2: float = (Unit.MELEE_WAIT_RADIUS * 2.0 + 0.6) \
-		* (Unit.MELEE_WAIT_RADIUS * 2.0 + 0.6)
+	# Waiters ring around a CENTRE parked in soa_goal (the group anchor, or the
+	# defender when the anchor trails too far) — the two bands below are the
+	# tests Unit._wait_near makes itself: "close enough to stand still" around
+	# the centre, and "the centre still tracks the target".
+	var wait_ring_r2: float = (Unit.MELEE_WAIT_RADIUS + 0.6) \
+		* (Unit.MELEE_WAIT_RADIUS + 0.6)
+	var wait_centre_r2: float = (Unit.MELEE_WAIT_RADIUS * 2.0) \
+		* (Unit.MELEE_WAIT_RADIUS * 2.0)
 	var arrive: float = Unit.ARRIVE_EPS
 	var kb: PackedFloat32Array = soa_kb
 	var kb_decay: float = Unit.KNOCKBACK_ACCUM_DECAY * delta
@@ -372,7 +383,7 @@ func _run_combat_kernels(delta: float) -> void:
 		# min(scan, chant) for a channeling preacher. The path/wait modes use
 		# it as a plain marker (approach and second row never tick the attack
 		# cooldown — same as the object code).
-		if mode <= HOLD_FIRE or mode >= HOLD_CORPSE:
+		if mode <= HOLD_FIRE or (mode >= HOLD_CORPSE and mode <= HOLD_CAST):
 			cd -= delta
 			if cd <= 0.0:
 				drop = true
@@ -392,7 +403,8 @@ func _run_combat_kernels(delta: float) -> void:
 		var dx: float = 0.0
 		var dz: float = 0.0
 		var d2: float = 0.0
-		if not drop and mode != HOLD_MOVE and mode <= HOLD_CHASE_DIRECT:
+		if not drop and ((mode != HOLD_MOVE and mode <= HOLD_CHASE_DIRECT)
+				or mode == HOLD_WAIT_WALK):
 			var t: int = tgt[i]
 			if t < 0 or t >= n or tgen[i] != gen[t]:
 				drop = true   # stale handle (target unregistered / slot reused)
@@ -415,10 +427,20 @@ func _run_combat_kernels(delta: float) -> void:
 							if d2 <= melee_r2 or d2 > fire_r2:
 								drop = true
 						HOLD_WAIT:
-							# Second row: stand near the fight; drifting past
-							# the waiting ring hands fine control back.
-							if d2 > wait_r2:
+							# Second row: hand fine control back when the waiter
+							# has to close up on its ring, or when the parked
+							# centre no longer tracks the target (the object
+							# then picks a new centre).
+							var wc: Vector3 = goal_arr[i]
+							var wcx: float = pi0.x - wc.x
+							var wcz: float = pi0.z - wc.z
+							if wcx * wcx + wcz * wcz > wait_ring_r2:
 								drop = true
+							else:
+								var wtx: float = pt.x - wc.x
+								var wtz: float = pt.z - wc.z
+								if wtx * wtx + wtz * wtz > wait_centre_r2:
+									drop = true
 						HOLD_CHASE_DIRECT:
 							# Arrived in melee -> strike branch; target fled
 							# past the direct band -> the object plans a path.
@@ -446,7 +468,7 @@ func _run_combat_kernels(delta: float) -> void:
 								if gfx * gfx + gfz * gfz > 1.0:
 									drop = true
 					if not drop and (mode <= HOLD_FIRE or mode == HOLD_WAIT
-							or mode == HOLD_CHASE_DIRECT) \
+							or mode == HOLD_CHASE_DIRECT or mode == HOLD_WAIT_WALK) \
 							and ((i + phase) & 7) == 0 and d2 > 0.000001:
 						# Staggered facing refresh (~4x per second at 30 Hz);
 						# the path modes walk, so their facing tracks the
@@ -518,19 +540,30 @@ func _run_combat_kernels(delta: float) -> void:
 						var fdz: float = nwp.z - nz
 						if fdx * fdx + fdz * fdz > 0.000001:
 							u3.facing = Vector3(fdx, 0.0, fdz).normalized()
-		# Direct-step pursuit (C2.4b): walk straight at the target's slot
-		# position (target pos + the constant slot offset parked in soa_goal),
-		# with the slope brake and the per-step walkability check of
-		# _step_toward (an unwalkable step is skipped, never a drop — the
-		# object code stands still there too).
-		if not drop and mode == HOLD_CHASE_DIRECT:
+		# Direct-step walk (C2.4b): straight at a destination, with the slope
+		# brake and the per-step walkability check of Unit._step_toward (an
+		# unwalkable step is skipped, never a drop — the object code stands
+		# still there too). Two users: the melee pursuit (destination = target
+		# position + the constant slot offset parked in soa_goal) and the
+		# second-row waiter closing up on its ring point (absolute destination
+		# in soa_goal; it drops on arrival so the object can take the standing
+		# wait hold).
+		if not drop and (mode == HOLD_CHASE_DIRECT or mode == HOLD_WAIT_WALK):
 			var pid: Vector3 = pos[i]
 			var offs: Vector3 = goal_arr[i]
-			var ptd: Vector3 = pos[tgt[i]]
-			var ddx: float = ptd.x + offs.x - pid.x
-			var ddz: float = ptd.z + offs.z - pid.z
+			var ddx: float
+			var ddz: float
+			if mode == HOLD_CHASE_DIRECT:
+				var ptd: Vector3 = pos[tgt[i]]
+				ddx = ptd.x + offs.x - pid.x
+				ddz = ptd.z + offs.z - pid.z
+			else:
+				ddx = offs.x - pid.x
+				ddz = offs.z - pid.z
 			var dd: float = sqrt(ddx * ddx + ddz * ddz)
-			if dd > 0.001:
+			if mode == HOLD_WAIT_WALK and dd <= WAIT_WALK_ARRIVE:
+				drop = true   # arrived: the object re-checks its ring and stands
+			elif dd > 0.001:
 				var inv_dd: float = 1.0 / dd
 				var sfx: float = clampf(pid.x + ddx * inv_dd * 0.6, 0.0, hmax)
 				var sfz: float = clampf(pid.z + ddz * inv_dd * 0.6, 0.0, hmax)
@@ -592,7 +625,7 @@ func _run_combat_kernels(delta: float) -> void:
 				scan[i] = -1.0
 			u.knockback_accum = kb[i]
 			obj.append(u)
-		elif mode <= HOLD_FIRE or mode >= HOLD_CORPSE:
+		elif mode <= HOLD_FIRE or (mode >= HOLD_CORPSE and mode <= HOLD_CAST):
 			hold[i] = cd
 
 

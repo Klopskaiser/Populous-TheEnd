@@ -389,6 +389,39 @@ func _enter_soa_hold(scan_timer: float = -1.0,
 	_soa_kb[i] = knockback_accum   # kernel-side decay while held
 
 
+## Second-row hold entry (C2, reworked 2026-08-02). HOLD_WAIT parks the ring
+## CENTRE in soa_goal: the kernel keeps the standing waiter exactly while the
+## two conditions _wait_near re-evaluates still hold — it stands inside the
+## band around that centre, and the centre still tracks the target.
+## HOLD_WAIT_WALK parks the ring POINT instead and the kernel walks the waiter
+## there (the same direct step as the melee pursuit), dropping on arrival.
+## Either way a centre that drifts while the waiter is held (the anchor follows
+## its defender) is corrected on the next scan drop, at most 0.25 s later; a
+## second-row unit standing a step off its ring is invisible (see _wait_near).
+func _enter_soa_wait_hold(scan_timer: float, goal: Vector3,
+		mode: int = UnitManager.HOLD_WAIT) -> void:
+	var i: int = _idx
+	if i < 0 or _burn_time > 0.0 or _knockback_remaining != Vector3.ZERO:
+		return
+	if mode == UnitManager.HOLD_WAIT_WALK \
+			and (vehicle_separation > 0.0 or flies or terrain_data == null
+				or nav_grid == null):
+		return   # kernel walking is for ground foot units with terrain + nav
+	var t: Unit = attack_target
+	if t == null or not is_instance_valid(t):
+		return
+	var ti: int = t._idx
+	if ti < 0:
+		return
+	_soa_target[i] = ti
+	_soa_tgen[i] = _mgr_slot_gen[ti]
+	_soa_hold[i] = 1.0   # plain held-marker: a waiter runs no attack cooldown
+	_soa_mode[i] = mode
+	_soa_scan[i] = scan_timer
+	_soa_goal[i] = goal
+	_soa_kb[i] = knockback_accum
+
+
 ## Path-hold entry (C2.4): the kernel walks this unit toward `wp` (the current
 ## path waypoint) and drops it back for the waypoint switch, the stumble roll
 ## on steep downhill, or — chase modes — when the target needs a reaction
@@ -2237,15 +2270,25 @@ func _tick_attack(delta: float) -> void:
 					and _melee_engage_cost(alt) < MAX_MELEE_ATTACKERS:
 				_begin_attack(alt)
 				return
-		_wait_near(target, delta)
-		# C2 wait hold: already standing near the fight (the ring centres on
-		# the ANCHOR, so allow its full trail distance) — the kernel keeps
-		# watch (target liveness, ring band, scan cadence) until the next
-		# scheduled scan; a slot promotion clears the hold directly
-		# (CombatGroup.promote_waiters).
-		if state == State.ATTACK and attack_target == target \
-				and _flat_dist(position, target.position) <= MELEE_WAIT_RADIUS * 2.0:
-			_enter_soa_hold(maxf(_target_search_timer, 0.0), UnitManager.HOLD_WAIT)
+		var wait_centre: Vector3 = _wait_center(target)
+		var wait_dest: Vector3 = _wait_near(target, delta, wait_centre)
+		# C2 wait hold: the second row has nothing to decide until its next
+		# scan — the kernel keeps watch (target liveness, ring band, scan
+		# cadence); a slot promotion clears the hold directly
+		# (CombatGroup.promote_waiters). BOTH waiter situations go to the
+		# kernel: standing settled in the band, and walking to the ring point.
+		# Measured 2026-08-02 (plans/08e): the old gate compared to the
+		# DEFENDER although the ring centres on the anchor (which trails by up
+		# to 2x the wait radius), and it only ever covered the standing case —
+		# in the stress battle 213 of ~225 waiters are permanently closing up
+		# (the second row does not fit inside the ring) and paid a full object
+		# tick every single tick.
+		if state == State.ATTACK and attack_target == target:
+			if wait_dest == Vector3.INF:
+				_enter_soa_wait_hold(maxf(_target_search_timer, 0.0), wait_centre)
+			else:
+				_enter_soa_wait_hold(maxf(_target_search_timer, 0.0), wait_dest,
+					UnitManager.HOLD_WAIT_WALK)
 		return
 	var dist: float = _flat_dist(position, target.position)
 	if dist > MELEE_RANGE:
@@ -3208,18 +3251,33 @@ func _approach(dest: Vector3, delta: float) -> bool:
 ## deterministic per-unit ring point, so they spread). The ring is centred on
 ## the group ANCHOR (follows the defender lazily) instead of sticking to the
 ## target's every step.
-func _wait_near(target: Unit, delta: float) -> void:
-	var center: Vector3 = target.position
+## Returns the ring point it is walking to, or Vector3.INF when it already
+## stands settled in the band — the caller picks the matching kernel hold
+## (walking vs. standing). `center` may be passed in when the caller already
+## computed it.
+func _wait_near(target: Unit, delta: float,
+		center: Vector3 = Vector3.INF) -> Vector3:
+	if center == Vector3.INF:
+		center = _wait_center(target)
+	if _flat_dist(position, center) <= MELEE_WAIT_RADIUS + 0.6:
+		_face_point(target.position)
+		return Vector3.INF
+	var angle: float = float(get_instance_id() % 628) * 0.01
+	var dest: Vector3 = center + Vector3(
+		cos(angle) * MELEE_WAIT_RADIUS, 0.0, sin(angle) * MELEE_WAIT_RADIUS)
+	_step_toward(dest, delta)
+	_face_point(target.position)
+	return dest
+
+
+## The point the second row rings around: the group ANCHOR while it still
+## tracks the fight, else the defender itself (see _wait_near).
+func _wait_center(target: Unit) -> Vector3:
 	var g = combat_group
 	if g != null and g.defender == target \
 			and _flat_dist(g.anchor, target.position) <= MELEE_WAIT_RADIUS * 2.0:
-		center = g.anchor
-	if _flat_dist(position, center) > MELEE_WAIT_RADIUS + 0.6:
-		var angle: float = float(get_instance_id() % 628) * 0.01
-		var dest: Vector3 = center + Vector3(
-			cos(angle) * MELEE_WAIT_RADIUS, 0.0, sin(angle) * MELEE_WAIT_RADIUS)
-		_step_toward(dest, delta)
-	_face_point(target.position)
+		return g.anchor
+	return target.position
 
 
 ## Moves directly toward a point on the XZ plane (no pathing), snapping Y.

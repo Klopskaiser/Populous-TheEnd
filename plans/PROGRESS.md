@@ -6447,3 +6447,114 @@ Vermehrung unverändert probabilistisch):
   Halbstufen-Skala zwischen den Stufen-Skalen, Quantisierungs-Check,
   Fraktions-Streuung im Map-Gen; test_economy tickt exakt GROWTH_TIME je
   Stufe). Suite **2844/2844 grün, 3 Läufe**, Ladecheck sauber.
+
+## Phase 8.e Fortsetzung „C4" — Diagnose-Harness repariert, zweite Reihe in den Kernel (2026-08-02)
+
+**Nutzer-Auftrag:** Phase 8.e ohne vorherige In-Game-Messung weiter optimieren;
+Maßstab sind die Headless-Benchmarks (Restposten aus dem 08e-Plan).
+
+**1. Das Diagnose-Harness maß eine Welt, die es nicht mehr gibt.**
+[diag_stress_battle.gd](../tests/diag_stress_battle.gd) rief in seiner Messschleife
+`unit.tick()` für JEDE Einheit auf und umging damit `UnitManager.tick_units()` samt
+komplettem Kernel-Pass — Ø 74,5 ms/Tick gegenüber 44–48 ms in `benchmark_stress`.
+Die Buckets (warrior/ATTACK 29 ms) waren reine Vor-C2-Zahlen und als Zielauswahl
+wertlos. Umgebaut auf die echte Reihenfolge (`_run_combat_kernels` + Objekt-Ticks der
+nicht gehaltenen Einheiten) und um die Kennzahlen erweitert, die die eigentliche
+Frage beantworten:
+- Kernel- / Objekt- / Manager-Split je Tick,
+- je `HOLD_*`-Modus: gehaltene und gedroppte Einheiten pro Tick (Drop-Quote),
+- je kind/state: wie viel der Objektzeit **Kernel-Drops** sind und wie viel Ticks
+  sind, die **ohne Hold enden** (= die Einheit zahlt nächsten Tick wieder voll),
+- für ATTACK-Ticks ohne Hold zusätzlich der **Grund** (kein Ziel / Waiter mit
+  Untergründen / Nahkampf-Stand / Anmarsch / sonstige).
+
+Erste echte Messung (Ø je Tick im Fenster t300–449): Kernel 6,0 | Objekt 20,5 |
+Manager 7,9 ms. Größter Einzelposten: `warrior/ATTACK` 8,8 ms bei n=422 — davon nur
+3,7 ms Kernel-Drops. **231 Objekt-Ticks pro Tick waren Einheiten, die der Kernel nie
+übernommen hat**, davon 192–213 Waiter der zweiten Reihe (2,7–3,0 ms/Tick).
+
+**2. Warum die zweite Reihe nie in den Kernel kam (zwei unabhängige Ursachen).**
+- Die Halte-Bedingung in `Unit._tick_attack` maß die Distanz zum **Verteidiger**
+  (`<= MELEE_WAIT_RADIUS * 2`), der Waiter ringt aber um den **Gruppen-Anker**, der
+  dem Verteidiger bis zu 2× Wartradius nachläuft. Ein sauber stehender Waiter kann
+  damit >5 m vom Verteidiger entfernt sein — Hold abgelehnt.
+- Viel wichtiger: es gab überhaupt nur einen Hold für den **stehenden** Waiter. Die
+  Sub-Klassifikation im Harness zeigte, dass 213 von ~225 Waitern dauerhaft
+  „nicht settled" sind — die zweite Reihe passt physisch nicht in den Ring
+  (Ringband 2,3 m ≈ 27 Plätze bei Separationsradius 0,44), sie läuft also
+  **permanent** auf ihren Ringpunkt zu und wird von der Separation wieder
+  herausgedrückt.
+
+**Umsetzung:**
+- [unit.gd](../scripts/units/unit.gd): `_wait_center()` herausgezogen (der Punkt, um
+  den die zweite Reihe ringt); `_wait_near()` gibt jetzt den Ringpunkt zurück bzw.
+  `Vector3.INF`, wenn die Einheit settled steht. `_enter_soa_wait_hold(scan, goal,
+  mode)` parkt bei `HOLD_WAIT` den **Ring-Mittelpunkt** und bei `HOLD_WAIT_WALK` den
+  **Ringpunkt** in `soa_goal`.
+- [unit_manager.gd](../scripts/core/unit_manager.gd): `HOLD_WAIT` prüft jetzt exakt
+  die zwei Bedingungen, die `_wait_near` selbst auswertet (steht im Band um den
+  geparkten Mittelpunkt; Mittelpunkt trackt noch das Ziel) statt einer Distanz zum
+  Verteidiger. Neu `HOLD_WAIT_WALK` (Modus 10, bewusst außerhalb des getimten Bands
+  CORPSE..CAST): der vorhandene Direktschritt-Kernel läuft jetzt wahlweise auf ein
+  **absolutes** Ziel statt auf Zielposition+Slot-Offset; Drop bei Ankunft
+  (`WAIT_WALK_ARRIVE` 0,3 m), damit die Einheit den Stand-Hold übernimmt.
+- Verhalten unverändert bis auf eine bewusste, dokumentierte Näherung: der Ringpunkt
+  wird während eines Holds nicht jeden Tick nachgeführt, sondern spätestens beim
+  nächsten Scan-Drop (0,25 s). Der Anker folgt seinem Verteidiger ohnehin nur träge;
+  `_wait_near` hält selbst fest, dass „irgendwo nah genug" genügt.
+- Slot-Beförderung bleibt sofort wirksam (`CombatGroup.promote_waiters` ruft
+  `_clear_soa_hold`, modusunabhängig).
+
+**Wirkung im Harness:** Waiter-Objekt-Ticks 213 → 0 (164 laufen im Kernel,
+`WAIT_WALK`-Drop-Quote 12 %); `warrior/ATTACK` n=422 → 253.
+
+**3. `benchmark_stress` seedet den RNG (`BENCH_SEED`).** Ohne Seed kämpfte jeder Lauf
+eine ANDERE Schlacht (Überlebende im Fenster 2550–2634) — A/B-Vergleiche waren
+strukturell unmöglich. Mit Seed sind Überlebende (2598) und Pfadzahl (64349) über
+Läufe hinweg identisch.
+
+**4. Messung — ehrliches Ergebnis.** Auch bei identischem Workload streuen die Zeiten
+auf dem Referenzrechner um **±25 %** (drei geseedete Läufe desselben Standes: 31,3 /
+38,3 / 39,0 ms). Ursache ist die Maschine, nicht das Szenario: Laptop-CPU
+(Ryzen 7 8840HS) mit Boost-/Thermikdrift plus zwei Security-Dienste (MsSense,
+SSPService) im Hintergrund. Deshalb **paarweise verschränkt** gemessen (NEU/ALT
+abwechselnd, Vorstand je Paar per `git stash`), Peak-Block t300–449:
+
+| Paar | NEU | ALT |
+|---|---|---|
+| 1 | 38,55 | 41,52 |
+| 2 | 39,61 | 36,72 |
+| 3 | 30,64 | 37,17 |
+| Ø | **36,3** | **38,5** |
+| Minimum | **30,6** | **36,7** |
+
+Zwei von drei Paaren und beide Aggregate sprechen für die Änderung (Ø −6 %, Minimum
+−17 %), Paar 2 widerspricht. **Das Rauschen ist größer als der Effekt** — die
+belastbare Aussage ist strukturell: ~213 Objekt-Ticks à ~14 µs pro Tick entfallen,
+ersetzt durch ~164 Kernel-Schritte; das entspricht den erwarteten ~2–3 ms und deckt
+sich mit dem gemessenen Trend. `benchmark_mass` ohne Regression (combat 2000 11,4 |
+combat 4000 19,7 | krieger 15,5 | feuerkrieger 17,4 | krieger+prediger 15,5 ms).
+
+**Stolpersteine/Erkenntnisse:**
+1. **Ein Messwerkzeug, das den optimierten Pfad umgeht, führt die Optimierung in die
+   Irre.** Das Harness stammte aus der Vor-C2-Zeit und wurde bei C2/C3 nie
+   nachgezogen; seine Zahlen wanderten trotzdem in die Plandokumente.
+2. Der erste Fix-Anlauf (nur das Halteband korrigieren) machte es **schlechter**
+   (WAIT-Holds 24,6 → 9,3): Er verlangte „settled", was fast nie zutrifft. Erst die
+   Sub-Klassifikation der Ablehngründe zeigte, dass der Anmarsch der Normalfall ist.
+3. Ein neuer Hold-Modus muss gegen alle **Bereichsprüfungen** im Kernel geprüft
+   werden (`mode >= HOLD_CORPSE` hätte den Modus 10 als getimten Hold behandelt);
+   die Namensliste im Harness lief prompt out-of-bounds — und ein Skriptfehler im
+   `-s`-Skript beendet Godot NICHT, der SceneTree idlet weiter (18 min Leerlauf,
+   Ausgabe hing im `tail`-Puffer). Diagnoseläufe deshalb ungepiped starten.
+4. **Auf dieser Maschine sind Einzelmessungen wertlos.** Für den Rest der Phase gilt:
+   geseedet, paarweise verschränkt, Minimum über N als Vergleichsgröße.
+
+**Verifikation:** Suite **2887/2887 grün** (davon 50 neu:
+`test_waiter_holds_while_closing_up_and_standing` — Walk- und Stand-Hold, echte
+Annäherung, Objekt-Ticks nur noch zur Scan-Kadenz; `test_waiter_promotion_clears_the_kernel_hold`),
+Ladecheck sauber, `benchmark_mass` ohne Regression.
+**Offen:** In-Game-FPS-Nachweis am Referenzrechner (bewusst übersprungen, siehe
+Nutzerentscheidung); nächste Restposten laut Harness: `warrior/Anmarsch (Pfad)`
+1,5 ms (28 × 53 µs), `warrior/sonstige` 1,35 ms (15 × 85 µs), `firewarrior/ATTACK`
+5,0 ms, Manager (sep+groups) 7,8–9,0 ms.
