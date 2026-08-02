@@ -1343,14 +1343,20 @@ func _begin_sinking() -> void:
 		visible = false
 		queue_free()
 		return
+	if water_splash_active():
+		_play_sfx(&"water_splash")   # the wreck hits the sea
 	set_process(true)
 
 
 func _process(delta: float) -> void:
 	if _destroyed:
+		var was_above: bool = _sink_time < SINK_DURATION * 0.5
 		_sink_time += delta
 		position.y -= SINK_DEPTH / SINK_DURATION * delta
 		position += _slide_dir * SLIDE_SPEED * delta
+		# Halfway down the wreck is under the surface (phase 10a).
+		if was_above and _sink_time >= SINK_DURATION * 0.5 and water_splash_active():
+			_play_sfx(&"water_sink")
 		# One slow rocking lean while it goes under, so the wreck settles instead
 		# of dropping straight down like a lift. Mutually exclusive with the raid
 		# wobble (that branch is only reached when NOT destroyed).

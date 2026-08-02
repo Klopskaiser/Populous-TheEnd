@@ -554,6 +554,30 @@ func ignite_in_radius(pos: Vector3, radius: float) -> int:
 
 ## Destroys every standing tree within `radius` (world XZ) outright — the
 ## tornado shreds trees (no wood, no burn).
+## Drowns every tree inside `rect` that the sea now covers and returns how many
+## were lost. Called after a terrain deformation (phase 10a) — a flooded tree
+## goes under instead of standing in the sea. Water is defined by the sea level
+## alone; there is no modelled depth.
+func remove_flooded(rect: Rect2i) -> int:
+	if terrain_data == null:
+		return 0
+	var lost: int = 0
+	for tree in trees.duplicate():
+		if not is_instance_valid(tree):
+			continue
+		var c: Vector2i = Vector2i(
+			int(floor(tree.position.x / TerrainData.CELL_SIZE)),
+			int(floor(tree.position.z / TerrainData.CELL_SIZE)))
+		if not rect.has_point(c):
+			continue
+		if terrain_data.get_height(tree.position.x, tree.position.z) \
+				> TerrainData.SEA_LEVEL + Unit.WATER_EPS:
+			continue
+		_remove_tree(tree)
+		lost += 1
+	return lost
+
+
 func destroy_in_radius(pos: Vector3, radius: float) -> void:
 	var flat: Vector2 = Vector2(pos.x, pos.z)
 	for tree in trees.duplicate():

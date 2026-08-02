@@ -266,7 +266,7 @@ func drown() -> void:
 	crew.clear()
 	_unblock_nav()
 	_sinking = true
-	_death_sfx = &"siege_death_burn"   # sinks like a burnt-out wreck
+	_death_sfx = &"water_splash"   # it hits the sea; water_sink follows below
 	# Start the sink AT the surface: with the opaque sea (phase 10a) a wreck
 	# already standing on the seabed would be born invisible and its whole
 	# SINK_SPEED descent would never be seen.
@@ -643,9 +643,17 @@ func tick(delta: float) -> void:
 		_crew_prune_timer = 0.5
 		_prune_crew()
 		_resummon_crew()
+		# Water is fatal to a siege engine no matter HOW it got there (phase
+		# 10a). The spell-driven flooding is caught by SpellContext, but this
+		# self-check closes every other route (a wreck drifting, a morph outside
+		# the checked rect, a future push mechanic). A handful of vehicles at
+		# 2 Hz — the cost is nil, and it makes the rule unconditional.
+		if state != State.DEAD and not flies \
+				and _is_water_at(position.x, position.z):
+			drown()
 		# Terrain integrity: a spell ripped the ground under the chassis
 		# apart (cliff beyond anything drivable) -> the vehicle bursts.
-		if state != State.DEAD and _chassis_height_span() > BREAK_HEIGHT_SPAN:
+		elif state != State.DEAD and _chassis_height_span() > BREAK_HEIGHT_SPAN:
 			_destroy_vehicle(true)
 		# Abandoned: no crew (and none inbound, crew already pruned above) for
 		# UNCREWED_LIFETIME seconds -> the siege engine bursts. Airships opt out
@@ -807,7 +815,12 @@ func _tick_visual(delta: float) -> void:
 	if not is_inside_tree():
 		return
 	if _sinking and state == State.DEAD:
+		var was_above: bool = position.y >= TerrainData.SEA_LEVEL
 		position.y -= SINK_SPEED * delta
+		# Hull dips below the waterline: the wreck goes under (phase 10a).
+		if was_above and position.y < TerrainData.SEA_LEVEL \
+				and _is_water_at(position.x, position.z):
+			_play_sfx(&"water_sink", 150)
 	var heading: Vector3 = _model_heading()
 	if heading.length_squared() > 0.000001:
 		rotation.y = atan2(heading.x, heading.z)

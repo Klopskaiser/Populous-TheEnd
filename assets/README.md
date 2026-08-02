@@ -256,7 +256,8 @@ richtig und erwünscht.
 | `unit_injured.ogg` | Einheit (nicht Schamanin) fällt unter 25 % Leben (einmal pro Unterschreitung) |
 | `unit_death.ogg` | Tod einer Einheit außer der Schamanin — gedrosselt bei Massensterben |
 | `unit_burning.ogg` | Einheit fängt Feuer (Lava/Feuerzauber) |
-| `water_splash.ogg` | Einheit schlägt im Wasser auf und ertrinkt (max. alle 0,15 s) |
+| `water_splash.ogg` | Etwas schlägt im Wasser auf: ertrinkende Einheit, Fahrzeugwrack, ins Meer rutschendes Gebäude (max. alle 0,15 s) |
+| `water_sink.ogg` | Dasselbe geht kurz darauf unter der Oberfläche verloren (Gluckern) |
 | `shaman_hurt.ogg` | Schamanin erleidet Schaden (max. alle 1,2 s; mehrere Varianten empfohlen) |
 | `shaman_death.ogg` | Tod der Schamanin |
 

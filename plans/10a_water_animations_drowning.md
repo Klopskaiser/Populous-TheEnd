@@ -53,9 +53,15 @@ existiert bereits und wird nur poliert.
 - **Undurchsichtiges Wasser löst „keine treibende Leiche" geometrisch**: die
   ertrinkende Figur sinkt durch die Wasserfläche und ist danach verdeckt.
   Keine zusätzliche Alpha-Logik im Renderer.
-- **Fahrzeuge und Luftschiff bleiben unverändert**: `CrewedVehicle` hat sein
-  eigenes `_sinking`, `Airship.drown()` ist ein No-op. Diskriminator ist
+- **Fahrzeuge und Luftschiff behalten ihr eigenes Versinken**: `CrewedVehicle`
+  hat `_sinking`, `Airship.drown()` ist ein No-op. Diskriminator ist
   `Unit.renders_as_sprite()`.
+- **Alles, was ins Wasser gelangt, wird zerstört** (Nutzer-Festlegung) —
+  Einheiten, Belagerungsgeräte, Bäume und Holzstapel, **egal auf welchem Weg**.
+  Für Fahrzeuge heißt das eine eigene, gedrosselte Selbstprüfung im
+  Fahrzeug-Tick statt Verlass auf den Zauber-Pfad; für Bäume/Stapel eine
+  Aufräumrunde in `check_terrain_integrity` plus eine Sperre in
+  `WoodPileManager.deposit()` (Holz im Meer ist verloren, es treibt nicht).
 
 ## Deliverables
 
@@ -67,7 +73,9 @@ existiert bereits und wird nur poliert.
 | **Spritzer** | `scripts/ui/water_fx_renderer.gd` (neu, `class_name WaterFxRenderer`) | Eine MultiMesh flach liegender, alpha-gescissorter Quads auf der Wasseroberfläche über allem, was gerade versinkt — ein Draw-Call für die ganze Partie. Quellen entscheiden selbst: `Unit.water_splash_active()`/`water_splash_radius()` (deckt Sprites **und** Fahrzeugwracks ab) und `Building.water_splash_active()`/`water_splash_radius()`. Vier prozedurale Frames (aufweitender Schaumring + Tropfen), ersetzbar über `assets/textures/effects/splash.png`. Verdrahtung in `main.gd` neben dem `StatusFxRenderer` |
 | **Minimap** | `scripts/ui/minimap.gd` | Wasserfarben an `Terrain.COLOR_WATER` angleichen; Tiefenrampe (`height_to_color` :93) **behalten** (Lesbarkeit von Kanälen/Seen; `tests/test_ui_logic.gd:57` hängt daran) |
 | **Ertrinken** | `scripts/units/unit.gd`, `scripts/core/balance.gd` | Neue Flagge `_drowning`; gemeinsame Wasserprobe `_is_water_at(x, z)` ersetzt die drei Literalkopien (:1488, :1575, :1852); `drown()` (:1760) mit Pose-Reihenfolge, Auftrieb, `_sync_soa_pos()`, Splash-SFX; drei Leichen-Timing-Helfer; **Kernel-Hold-Guard** in `_tick_dead` (:1393); Freigabe der erzwungenen Bewegung ins Wasser an fünf Stellen (siehe Umsetzungsschritte) |
-| **Fahrzeuge** | `scripts/units/crewed_vehicle.gd` | `drown()` (:255): vor `super.drown()` `position.y` auf mindestens `SEA_LEVEL` heben, damit das Wrack sein Absinken sichtbar beginnt statt unsichtbar auf dem Meeresboden |
+| **Fahrzeuge** | `scripts/units/crewed_vehicle.gd` | `drown()` (:255): vor `super.drown()` `position.y` auf mindestens `SEA_LEVEL` heben, damit das Wrack sein Absinken sichtbar beginnt statt unsichtbar auf dem Meeresboden. Dazu eine Selbstprüfung im vorhandenen 0,5-s-Block von `tick()`: steht das Fahrzeug im Wasser, ertrinkt es — unabhängig davon, wie es dorthin kam (Luftschiffe über `flies` ausgenommen) |
+| **Bäume & Holzstapel** | `scripts/core/tree_manager.gd`, `scripts/core/wood_pile_manager.gd`, `scripts/spells/spell_context.gd` | Neue `remove_flooded(rect)` in beiden Managern, aufgerufen aus `check_terrain_integrity` (bisher nur Gebäude + Einheiten). `WoodPileManager.deposit()` weist Wasserstellen ab — ins Meer geworfenes Holz ist verloren |
+| **Wasser-Sounds** | `scripts/units/unit.gd`, `crewed_vehicle.gd`, `scripts/buildings/building.gd` | `water_splash` beim Aufschlag (über `death_sfx_key()`, damit es **einen** Todessound gibt), `water_sink` beim Untergehen (Einheit: flankengetriggert am Ende der Zappelphase; Fahrzeug: sobald der Rumpf die Wasserlinie unterschreitet; Gebäude: auf halber Sinkstrecke) |
 | **Feuerramme 2D** | `scripts/units/fire_ram.gd`, `scripts/ui/status_fx_renderer.gd` | `StatusFxRenderer` bekommt `static flame_textures()` (analog `UnitRenderer.blob_texture()`); `_show_flame_cone()` (:779) baut **eine** `MultiMeshInstance3D` mit `FLAME_QUADS = 7` aufrechten Billboard-Quads (Material-Rezept aus `StatusFxRenderer`: unshaded, `BILLBOARD_ENABLED`, `TRANSPARENCY_ALPHA_SCISSOR` → bleibt im Opaque-Pass); `_tick_visual()` (:817) marschiert die Quads entlang der Rumpfachse über `FIRE_RANGE`, Größe `FLAME_QUAD_MIN 0.9 → FLAME_QUAD_MAX 1.7`, Hangneigungs-Basis (:835-838) entfällt |
 | **Gebäude-Versinken** | `scripts/buildings/building.gd` | *(optional, zuletzt)* `_process` (:1331) Zerstörungszweig: `_mesh_root` kippt über `SINK_TILT 0.14` rad mit langsamem Wippen (`SINK_TILT_HZ 0.8`), bei gleitenden Wracks in Gleitrichtung |
 | **Doku** | `assets/README.md` | Animationsliste um `airborne`, `drown` ergänzen (Sheet-Override `assets/units/<kind>/<anim>.png` funktioniert automatisch, weil `UnitSpriteLibrary` über `_anims_for()` iteriert) |

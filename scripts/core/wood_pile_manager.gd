@@ -72,6 +72,35 @@ func remove_pile(pile: WoodPile) -> void:
 		pile.free()
 
 
+## True when the sea covers this spot (phase 10a: water is defined by the sea
+## level alone — there is no modelled depth).
+func is_flooded(pos: Vector3) -> bool:
+	return terrain_data != null \
+		and terrain_data.get_height(pos.x, pos.z) <= TerrainData.SEA_LEVEL + Unit.WATER_EPS
+
+
+## Sinks every pile inside `rect` that the sea now covers and returns how many
+## were lost. Called after a terrain deformation — flooded wood goes under with
+## everything else instead of bobbing on the surface.
+func remove_flooded(rect: Rect2i) -> int:
+	if terrain_data == null:
+		return 0
+	var lost: int = 0
+	for pile in piles.duplicate():
+		if not is_instance_valid(pile):
+			continue
+		var c: Vector2i = Vector2i(
+			int(floor(pile.position.x / TerrainData.CELL_SIZE)),
+			int(floor(pile.position.z / TerrainData.CELL_SIZE)))
+		if not rect.has_point(c) or not is_flooded(pile.position):
+			continue
+		remove_pile(pile)
+		lost += 1
+	if lost > 0:
+		_emit_total()
+	return lost
+
+
 func total_wood() -> int:
 	var total: int = 0
 	for pile in piles:
@@ -80,8 +109,12 @@ func total_wood() -> int:
 
 
 ## Drops wood on the ground at pos: fills nearby piles first, creates new
-## piles (max 5 each) for the rest.
+## piles (max 5 each) for the rest. Wood dropped INTO the sea is lost — a
+## drowning carrier, a wreck's refund or tornado debris must never leave a pile
+## floating on the water (phase 10a).
 func deposit(pos: Vector3, amount: int) -> void:
+	if is_flooded(pos):
+		return
 	while amount > 0:
 		var pile: WoodPile = _pile_with_space_near(pos)
 		if pile == null:

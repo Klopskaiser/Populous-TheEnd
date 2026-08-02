@@ -358,7 +358,11 @@ func test_landbridge_builds_walkable_ramp() -> void:
 	var wpm: WoodPileManager = WoodPileManager.new()
 	wpm.setup(td)
 	ctx.wood_pile_manager = wpm
-	wpm.deposit(Vector3(65, 0, 64), 3)   # pile inside the future corridor
+	# Wood cannot be dropped into the sea at all (phase 10a) — the pile that
+	# rides the ramp up sits on the LAND part of the corridor.
+	wpm.deposit(Vector3(65, 0, 64), 3)   # into the channel = into the water
+	check(wpm.piles.is_empty(), "wood dropped into the channel is lost, not floating")
+	wpm.deposit(Vector3(58.5, 0, 64), 3)   # land inside the future corridor
 	var pile: WoodPile = wpm.piles[0]
 	var spell: LandbridgeSpell = LandbridgeSpell.new()
 	check(spell.execute(tribe, Vector3(69, 0, 64), ctx), "ramp cast succeeds")

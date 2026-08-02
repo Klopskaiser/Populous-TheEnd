@@ -6735,3 +6735,48 @@ u. a. `test_drowning_body_is_pulled_past_the_waterline`,
 `test_water_contact_kills_all_momentum`, `test_seabed_is_not_meshed` inkl. der
 Zusicherung, dass die Zone direkt unter der Wasserlinie **erhalten** bleibt),
 Ladecheck sauber.
+
+### Phase 10a — Alles im Wasser wird zerstört + Versink-Sound (2026-08-02)
+
+Nutzer-Klarstellung: **alle Belagerungsgeräte und Holzstapel/Bäume, die auf
+welchem Weg auch immer ins Wasser gelangen, werden ebenfalls zerstört.** Dazu
+ein Soundeffekt fürs Versinken.
+
+1. **Bäume und Holzstapel.** `TreeManager.remove_flooded(rect)` und
+   `WoodPileManager.remove_flooded(rect)` löschen alles, was der Meeresspiegel
+   nach einer Terrainänderung überdeckt; `SpellContext.check_terrain_integrity`
+   ruft beide auf (bisher behandelte es nur Gebäude und Einheiten — Bäume und
+   Stapel folgten dem sinkenden Boden per `TerrainMorph._snap_props` einfach
+   unter Wasser). Zusätzlich weist `WoodPileManager.deposit()` Wasserstellen ab:
+   ins Meer geworfenes Holz ist verloren, statt darauf zu treiben (deckt
+   ertrinkende Träger, Wracks und Trümmer in einem Rutsch ab).
+2. **Belagerungsgeräte.** `CrewedVehicle.tick()` prüft im vorhandenen
+   0,5-s-Block, ob das Fahrzeug im Wasser steht, und ertränkt es dann — die
+   Regel gilt damit unabhängig davon, wie es dorthin kam (nicht nur über den
+   Zauber-Pfad in `SpellContext`). Ein paar Fahrzeuge mit 2 Hz kosten nichts.
+   Luftschiffe sind über `flies` ausgenommen.
+3. **Sound.** Zwei Namen, klare Rollen: `water_splash` beim Aufschlag,
+   `water_sink` beim Untergehen. `Unit.death_sfx_key()` liefert beim Ertrinken
+   `water_splash` (statt eines zusätzlichen Rufs — ein Todessound, nicht zwei),
+   `Unit._tick_dead` spielt `water_sink` flankengetriggert am Ende der
+   Zappelphase (kein zusätzliches Flag nötig). `CrewedVehicle` nutzt beim
+   Wassertod `water_splash` statt `siege_death_burn` und spielt `water_sink`,
+   sobald der Rumpf unter die Wasserlinie taucht; `Building` analog beim
+   Beginn des Versinkens bzw. auf halber Sinkstrecke.
+
+**Stolperstein (wichtig):** Die `deposit()`-Sperre hat
+`test_landbridge_builds_walkable_ramp` **still** abbrechen lassen — der Test
+legte seinen Stapel absichtlich in den Wasserkanal, `wpm.piles[0]` lief danach
+out of bounds und die Methode brach ab. Der Runner meldete trotzdem
+„0 failed", weil die restlichen `check()`-Aufrufe schlicht nie liefen; auffällig
+war nur die **gesunkene Gesamtzahl** der Zusicherungen (3026 → 3011). Lehre:
+nach Änderungen an geteilten Managern nicht nur auf „0 failed" schauen, sondern
+die Zusicherungszahl vergleichen und den Suite-Output auf `SCRIPT ERROR` prüfen.
+Der Test deckt jetzt beide Regeln ab (Stapel im Kanal ist verloren, Stapel auf
+Land reitet die Rampe hoch).
+
+**Verifikation:** Suite **3026/3026 grün**, Output frei von `SCRIPT ERROR`,
+Ladecheck sauber. `test_drowning.gd` jetzt 26 Tests (u. a.
+`test_vehicle_in_water_destroys_itself`, `test_flooded_trees_are_destroyed`,
+`test_flooded_wood_piles_are_destroyed`, `test_drowning_death_sound_is_the_splash`,
+`test_vehicle_water_death_sound`).

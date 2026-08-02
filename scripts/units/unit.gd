@@ -787,9 +787,11 @@ func unit_kind() -> StringName:
 
 ## Sound key played on death (AudioManager._on_unit_died). Subclasses override:
 ## the shaman has her own cry, vehicles have burn/burst variants, the airship
-## its own crash. Empty = silent.
+## its own crash. Empty = silent. A death in water always replaces the cry with
+## the splash — the body hits the sea, the "water_sink" gurgle follows a beat
+## later when it goes under (see _tick_dead).
 func death_sfx_key() -> StringName:
-	return &"unit_death"
+	return &"water_splash" if _drowning else &"unit_death"
 
 
 ## True for units that seek out enemies on their own while idle (Warrior/
@@ -1424,6 +1426,11 @@ func _tick_dead(delta: float) -> void:
 		corpse_expired.emit(self)
 		return
 	if _drowning:
+		# The flail is over: the body goes under. Edge-triggered off the timer,
+		# so it needs no extra flag.
+		if _corpse_timer >= DROWN_FLAIL_DURATION \
+				and _corpse_timer - delta < DROWN_FLAIL_DURATION:
+			_play_sfx(&"water_sink", 150)
 		# Dragged out into real water, so the body goes under in the SEA instead
 		# of on the waterline it happened to cross. Speed-limited (not spread
 		# over a fixed time), so a short pull looks like a short pull.
@@ -1885,8 +1892,8 @@ func drown() -> void:
 		_drown_target = _water_entry_target(position)
 		position.y = TerrainData.SEA_LEVEL - DROWN_FLOAT_DEPTH
 		_sync_soa_pos()
-		_play_sfx(&"water_splash", 150)
 	health = 0
+	# The splash itself rides on death_sfx_key() (one death sound, not two).
 	_die()
 
 

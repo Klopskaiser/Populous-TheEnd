@@ -298,6 +298,91 @@ func test_splash_frames_expand() -> void:
 	check(last.get_pixel(edge, mid).a > 0.5, "the last ring has widened outwards")
 
 
+# --- Everything else that ends up in the water ----------------------------------------
+
+## A siege engine in the sea is destroyed no matter how it got there — the
+## vehicle checks its own ground, independently of the spell that flooded it.
+func test_vehicle_in_water_destroys_itself() -> void:
+	var w: Dictionary = _make_world()
+	_make_coast(w)
+	var ram: Unit = _spawn(w, FIRE_RAM_SCENE, 0, Vector2(40, 30))
+	check(ram.state != Unit.State.DEAD, "it starts alive on land")
+	# Move it into the sea without any spell involvement.
+	ram.position = Vector3(12.0, 5.0, 30.0)
+	for i in range(12):
+		ram.tick(TICK)
+		if ram.state == Unit.State.DEAD:
+			break
+	check(ram.state == Unit.State.DEAD, "a siege engine in the sea is destroyed")
+	check(ram._sinking, "the wreck sinks")
+	_free_world(w)
+
+
+## Trees swallowed by a terrain morph are destroyed instead of standing in the sea.
+func test_flooded_trees_are_destroyed() -> void:
+	var w: Dictionary = _make_world()
+	var tm: TreeManager = TreeManager.new()
+	tm.terrain_data = w.td
+	tm.nav_grid = w.nav
+	tm.spawn_trees(30, 12345)
+	var before: int = tm.trees.size()
+	check(before > 0, "trees were planted")
+	# Flood the whole map, then run the integrity rules over it.
+	for z in range(w.td.verts):
+		for x in range(w.td.verts):
+			w.td.set_vertex_height(x, z, 0.5)
+	check(tm.remove_flooded(Rect2i(0, 0, w.td.size, w.td.size)) == before,
+		"every flooded tree is gone")
+	check(tm.trees.is_empty(), "no tree is left standing in the sea")
+	tm.free()
+	_free_world(w)
+
+
+## Wood piles behave the same, and no new pile can be dropped into the water.
+func test_flooded_wood_piles_are_destroyed() -> void:
+	var w: Dictionary = _make_world()
+	_make_coast(w)
+	var wpm: WoodPileManager = WoodPileManager.new()
+	wpm.terrain_data = w.td
+	wpm.deposit(Vector3(40, 0, 30), 4)
+	check(wpm.piles.size() == 1, "a pile lies on the land")
+	# Dropping wood into the sea leaves nothing behind.
+	wpm.deposit(Vector3(12, 0, 30), 4)
+	check(wpm.piles.size() == 1, "wood dropped into the sea is lost, not floating")
+	# Flood the land pile's ground and re-run the rule.
+	for z in range(w.td.verts):
+		for x in range(w.td.verts):
+			w.td.set_vertex_height(x, z, 0.5)
+	check(wpm.remove_flooded(Rect2i(0, 0, w.td.size, w.td.size)) == 1,
+		"the flooded pile is removed")
+	check(wpm.piles.is_empty(), "no wood is left floating")
+	wpm.free()
+	_free_world(w)
+
+
+# --- Water sounds ---------------------------------------------------------------------
+
+## A death in water is announced by the splash, not the normal death cry.
+func test_drowning_death_sound_is_the_splash() -> void:
+	var w: Dictionary = _make_world()
+	var unit: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
+	check(unit.death_sfx_key() == &"unit_death", "a live unit uses the normal cry")
+	unit.drown()
+	check(unit.death_sfx_key() == &"water_splash", "drowning plays the splash")
+	_free_world(w)
+
+
+## The sinking wreck of a vehicle announces itself with the splash too.
+func test_vehicle_water_death_sound() -> void:
+	var w: Dictionary = _make_world()
+	_make_coast(w)
+	var ram: Unit = _spawn(w, FIRE_RAM_SCENE, 0, Vector2(40, 30))
+	ram.drown()
+	check(ram.death_sfx_key() == &"water_splash",
+		"a wreck going into the sea uses the water sound, not the burn sound")
+	_free_world(w)
+
+
 # --- Corpse behaviour ---------------------------------------------------------------
 
 ## A drowned body flails briefly, sinks deep and is gone far sooner than a land

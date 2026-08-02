@@ -46,7 +46,8 @@ func apply_terrain_change(rect: Rect2i) -> void:
 ## Buildings touched by the change burst when their foundation got too
 ## uneven (debris flies, instant destruction) or slide into the water once
 ## mostly flooded; units standing on flooded ground drown instantly (thrown
-## units keep flying — their landing handles water on its own).
+## units keep flying — their landing handles water on its own); flooded trees
+## and wood piles are destroyed.
 func check_terrain_integrity(rect: Rect2i) -> void:
 	if terrain_data == null:
 		return
@@ -77,8 +78,14 @@ func check_terrain_integrity(rect: Rect2i) -> void:
 			if not grown.has_point(cell):
 				continue
 			if terrain_data.get_height(u.position.x, u.position.z) \
-					<= TerrainData.SEA_LEVEL + 0.05:
+					<= TerrainData.SEA_LEVEL + Unit.WATER_EPS:
 				u.drown()
+	# Props go under with everything else: a flooded tree or wood pile must not
+	# be left standing in the sea (phase 10a).
+	if tree_manager != null:
+		tree_manager.remove_flooded(grown)
+	if wood_pile_manager != null:
+		wood_pile_manager.remove_flooded(grown)
 
 
 ## Height span (highest minus lowest vertex) under the building's footprint.
