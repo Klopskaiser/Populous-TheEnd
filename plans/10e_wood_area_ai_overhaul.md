@@ -66,6 +66,11 @@ die Selbstheilung bei unerreichbaren Bauplätzen gebraucht.
   bevor abgeliefert wird. Der bestehende Einzelbaum-Befehl behält seine
   Ein-Stück-pro-Fuhre-Logik — ein 50 m entfernter Hain wäre mit
   Einzelstücktransport unspielbar.
+- **Fäll-Befehle bestätigen sich sichtbar:** ein Rechtsklick auf einen Baum
+  **und** das Holzfäll-Rechteck lassen um jeden betroffenen Baum einen weißen
+  Auswahlkreis **zweimal aufblinken**. Rein visuelle Quittung, keine dauerhafte
+  Markierung — sie sagt „dieser Baum / diese Bäume sind beauftragt" und
+  verschwindet danach wieder.
 - **Das 1000-Bevölkerungs-Ziel muss nicht getestet werden** (Laufzeit), aber
   die Mechanik darf es nicht strukturell verhindern. Hinweis:
   `CLAUDE.md` §4 nennt 1500 Einheiten pro Stamm, `Balance.TRIBE_MAX_UNITS`
@@ -84,6 +89,8 @@ die Selbstheilung bei unerreichbaren Bauplätzen gebraucht.
 | **Brave** | `scripts/units/brave.gd` | Felder `chop_area: Rect2`, `chop_area_poly: PackedVector2Array`; `has_chop_area()`, `order_chop_area(area, poly)` (erst `_interrupt_tasks()`, dann setzen — Reihenfolge ist wichtig), `_next_area_tree()`. `_next_loose_tree()` (:1007) verzweigt bei Flächenauftrag dorthin; `_tick_loose_chop()` (:817) füllt die Tragkapazität; `_tick_loose_deliver()` (:856) bevorzugt ein Depot innerhalb `HARVEST_DEPOT_PREFER_RADIUS`, sonst wie bisher `_nearest_own_building()`/`_loose_drop_target()`. Fläche leer + nichts getragen → `_stop_all()` |
 | **UI** | `scripts/ui/selection_manager.gd` | `static harvest_arm_active`; Armieren nur mit selektierten Braves; Linksklick-Drag nutzt die bestehende Drag-Mechanik; bei Freigabe werden die 4 Rechteck-Ecken auf das Terrain geraycastet → Welt-Viereck (XZ) + Hülle; unterhalb der Drag-Schwelle wird nur entwaffnet (kein versehentlicher Riesenauftrag). Darstellung: grünes Fadenkreuz + „Holz fällen" am Cursor, grünes statt blaues Rechteck |
 | **Input** | `project.godot` | Neue Action `harvest_area_arm` = Taste 66 ohne Modifier; `select_all_huts` auf Taste 66 **mit** `shift_pressed`. **Wichtig:** im `elif`-Zweig muss `select_all_huts` **vor** `harvest_area_arm` geprüft werden — eine Action ohne Modifier matcht in Godot auch einen Tastendruck mit Modifier. Rückfallebene, falls das im Spieltest zickt: `harvest_area_arm` auf eine freie Taste (C/X/N/M) legen |
+| **Bestätigungs-Blinken** | `scripts/ui/tree_mark_renderer.gd` (neu, `class_name TreeMarkRenderer`), Verdrahtung in `scripts/core/main.gd` | Weißer Auswahlkreis um jeden beauftragten Baum, **zweimal aufblinkend**, dann weg. Eine MultiMesh flach liegender Ringe (`TorusMesh`, `SHADING_MODE_UNSHADED`, weiß, `cast_shadow = OFF`) nach dem Muster von `scripts/ui/selection_ring_renderer.gd` — ein Draw-Call, kein Node-Churn, auch wenn ein Rechteck 60 Bäume erfasst. API: `flash(trees: Array[TreeResource])`. Intern eine Liste `{pos, radius, t}`; `_process` zählt `t` hoch und packt pro Frame nur die Einträge in der **An**-Phase in die MultiMesh (Sichtbarkeit über die gepackte Instanzzahl, nicht über Alpha — die Ringe bleiben im Opaque-Pass). Abgelaufene Einträge fallen aus der Liste. Ringradius aus `TreeResource.stage`, damit der Kreis zum Baum passt |
+| **Auslöser** | `scripts/ui/selection_manager.gd` | Rechtsklick auf einen Baum (`_dispatch_context_command` :839, Zweig `tree_resource`) → `flash([tree])`; Freigabe des Fäll-Rechtecks (`_fire_harvest`) → `flash(tree_manager.trees_in_area(...))`. Nur wenn der Befehl auch **angenommen** wurde (`order_chop`/`order_chop_area` > 0), sonst quittiert das Blinken einen Fehlschlag |
 
 ### Neue Balance-Konstanten (Teil 1)
 
@@ -91,6 +98,9 @@ die Selbstheilung bei unerreichbaren Bauplätzen gebraucht.
 # --- Flächen-Holzernte (Taste B) ---
 const HARVEST_AREA_MIN_SIDE: float = 2.0
 const HARVEST_AREA_MAX_SIDE: float = 80.0
+## Bestätigungs-Blinken um beauftragte Bäume: zweimal an/aus.
+const TREE_MARK_BLINKS: int = 2
+const TREE_MARK_BLINK_TIME: float = 0.18
 ## Innerhalb dieses Radius wird ein Holzlager dem nächsten Gebäude vorgezogen.
 const HARVEST_DEPOT_PREFER_RADIUS: float = 40.0
 ```
@@ -232,14 +242,17 @@ const AI_ARMY_SHARE_PREACHER: float = 0.30
 2. Teil 1: `TribeCommands.order_chop_area` + Brave-Flächenauftrag + Tests.
 3. Teil 1: UI (Armieren, Rechteck, Raycast) + `project.godot` (`B`/`Shift+B`)
    → danach `--headless --quit`.
-4. Teil 2.0: KI-Tick-Cache, **vorher/nachher messen**
+4. Teil 1: `TreeMarkRenderer` + beide Auslöser (Rechtsklick auf einen Baum,
+   Rechteck-Freigabe) — nach `--headless --import` wegen der neuen
+   `class_name`-Datei.
+5. Teil 2.0: KI-Tick-Cache, **vorher/nachher messen**
    (`tests/benchmark_earlygame.gd`, `tests/benchmark_stress.gd`).
-5. Teil 2.1: `ai_state.gd` — Schwellwerte + reine Funktionen + Tests
+6. Teil 2.1: `ai_state.gd` — Schwellwerte + reine Funktionen + Tests
    (schnell, komplett headless).
-6. Teil 2.2: Holzlogistik (braucht Schritt 2).
-7. Teil 2.3: Bauplatzsuche/Layout (braucht den Sofort-Abriss aus 10d).
-8. Teil 2.4: Armee/Fahrzeuge/Zauber.
-9. Klärung `TRIBE_MAX_UNITS` 1000 vs. CLAUDE.md 1500, Doku, PROGRESS.md,
+7. Teil 2.2: Holzlogistik (braucht Schritt 2).
+8. Teil 2.3: Bauplatzsuche/Layout (braucht den Sofort-Abriss aus 10d).
+9. Teil 2.4: Armee/Fahrzeuge/Zauber.
+10. Klärung `TRIBE_MAX_UNITS` 1000 vs. CLAUDE.md 1500, Doku, PROGRESS.md,
    Commit/Push.
 
 ## Tests
@@ -255,7 +268,12 @@ const AI_ARMY_SHARE_PREACHER: float = 0.30
 `test_area_job_ends_when_the_area_is_empty`,
 `test_new_order_cancels_the_area_job`,
 `test_oversized_area_is_clamped`,
-`test_area_job_skips_trees_on_another_island`.
+`test_area_job_skips_trees_on_another_island`,
+`test_mark_flash_lasts_two_blinks` (reine Zeitrechnung auf dem
+`TreeMarkRenderer`: nach `flash([baum])` ist ein Eintrag aktiv, nach
+`TREE_MARK_BLINKS * 2 * TREE_MARK_BLINK_TIME` keiner mehr),
+`test_mark_flash_is_on_off_on_off` (Sichtbarkeit an den vier Phasenmitten),
+`test_mark_radius_follows_tree_stage`.
 
 **Erweiterung `tests/test_ai.gd`** (reine Statics + Ein-Tick-Zusicherungen,
 keine Langläufe):
@@ -287,6 +305,10 @@ Skalierungsziel).
   werden abgearbeitet, mehrere Fuhren, Ablage am nächsten Lager/Gebäude,
   danach stehen die Braves dort still.
 - `Shift+B` wählt weiterhin alle Hütten.
+- **Bestätigung:** Rechtsklick auf einen Baum → weißer Kreis blinkt **zweimal**
+  um genau diesen Baum. Rechteck über einen Hain → alle erfassten Bäume blinken
+  gemeinsam zweimal auf, danach ist nichts mehr markiert. Ein abgelehnter
+  Befehl (keine Braves selektiert, Baum unerreichbar) blinkt **nicht**.
 - Ein Bewegungsbefehl bricht den Flächenauftrag sofort ab.
 - Langes Skirmish gegen die KI: baut sie über 300 Bevölkerung hinaus weiter,
   holt sie sichtbar Holz von weit entfernten Hainen, stehen ihre Gebäude mit
