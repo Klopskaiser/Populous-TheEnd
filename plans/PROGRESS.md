@@ -6694,3 +6694,44 @@ liegt. Genau dort landeten die Hineingerollten.
 18 Tests gewachsen: Drag ins tiefe Wasser, kein Drag im offenen Meer, Spritzer
 bei Einheit/Gebäude, kein Spritzer an Land, Spritz-Frames weiten sich auf),
 Ladecheck sauber. Manuelle Prüfung der Optik erneut durch den Nutzer.
+
+### Phase 10a — Wasser vereindeutigt + Meeresboden entfällt (2026-08-02)
+
+Nutzer-Klarstellung: **Wasser ist allein über eine Höhenschwelle definiert; es
+gibt keine echte Tiefe unter der Oberfläche, alles Wasser darf gleich tief
+sein.** Dazu: der Uferzug war zu stark und griff immer; er soll nur greifen,
+wenn wirklich in Küstennähe ertrunken wird, und nur so weit ziehen, dass die
+Einheit im Wasser ist. Einheiten sollen bei Wasserkontakt ihr komplettes
+Momentum verlieren.
+
+1. **Uferzug rein waagerecht statt tiefenbasiert.** `DROWN_MIN_DEPTH` und
+   `DROWN_DRAG_RADIUS` sind ersatzlos weg. Neu: `DROWN_SHORE_MARGIN 0.9`
+   (so weit muss der Körper hinter der Wasserlinie liegen),
+   `DROWN_DRAG_MAX 2.5` (Obergrenze des Zugs), `DROWN_DRAG_SPEED 2.5`.
+   `Unit._water_entry_target()` prüft „hier Wasser **und** eine Margin weiter
+   seewärts noch Wasser". Ist das schon erfüllt, wird **gar nicht** gezogen;
+   findet sich in `DROWN_DRAG_MAX` nichts Passendes, bleibt der Körper ebenfalls
+   liegen (statt irgendwohin gezerrt zu werden). Seerichtung = Terraingefälle,
+   Rückfallebene 8 Proben. Kosten: eine Handvoll Höhenabfragen **einmal** pro
+   Ertrinken — kein Ringscan mehr.
+2. **Wasserkontakt löscht jedes Momentum.** `drown()` nullt jetzt explizit
+   `_knockback_remaining`, `_throw_velocity`, `_roll_init_speed` und
+   `throw_carrier`, bevor `_die()` läuft.
+3. **Meeresboden wird nicht mehr vernetzt.** Da die See undurchsichtig und
+   tiefenlos ist, kann der Boden nie gesehen werden:
+   `Terrain._build_chunk_mesh` überspringt Zellen, deren **vier** Ecken tiefer
+   als `SEA_LEVEL - SEABED_CULL_MARGIN (0.6)` liegen; Chunks aus reiner offener
+   See bekommen gar kein Mesh. Die Vertices bleiben im Puffer (Index-Arithmetik
+   unverändert), nur die Indexliste schrumpft, und `rebuild_chunks` wertet das
+   nach jeder Verformung neu aus — eine Landbrücke bringt ihre Zellen sofort
+   zurück. Die 0,6-m-Marge ist deutlich größer als das Wellental (max. 4 cm
+   unter `SEA_LEVEL`), es kann also nichts durchscheinen.
+   Gemessen (Standard-Seed): **Insel 18 900 statt 32 768 Dreiecke (−42,3 %)**,
+   Seenland −4,7 %, Bergpass/Plateau ±0 (dort gibt es kaum offene See). Dazu
+   entfällt das komplette Überzeichnen des Bodens unter der Wasserfläche.
+
+**Verifikation:** Suite **3010/3010 grün** (`test_drowning.gd` jetzt 20 Tests,
+u. a. `test_drowning_body_is_pulled_past_the_waterline`,
+`test_water_contact_kills_all_momentum`, `test_seabed_is_not_meshed` inkl. der
+Zusicherung, dass die Zone direkt unter der Wasserlinie **erhalten** bleibt),
+Ladecheck sauber.

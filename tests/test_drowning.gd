@@ -168,38 +168,40 @@ func test_pathfinding_never_routes_through_water() -> void:
 	_free_world(w)
 
 
-# --- Being dragged into real water ---------------------------------------------------
+# --- Being pulled just past the waterline ---------------------------------------------
 
-## A unit that crosses the waterline must not sink on the shoreline it happened
-## to touch: it is dragged out to a spot with real depth while it flails.
-func test_drowning_body_is_dragged_into_deep_water() -> void:
+## A unit that goes under right on the shoreline is nudged seawards until it is
+## properly behind the waterline — and no further. Water is defined by the sea
+## level alone (no modelled depth), so this is a purely horizontal correction.
+func test_drowning_body_is_pulled_past_the_waterline() -> void:
 	var w: Dictionary = _make_world()
 	_make_beach(w)
 	var unit: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
-	# Put it right on the waterline (seabed barely below the sea line).
-	unit.position = Vector3(19.9, 0.0, 30.0)
-	var shore_depth: float = TerrainData.SEA_LEVEL \
-		- w.td.get_height(unit.position.x, unit.position.z)
-	check(shore_depth < Unit.DROWN_MIN_DEPTH,
-		"it starts in the shallows (%.2f m)" % shore_depth)
+	# Right on the waterline: water here, dry land a step further inland.
+	unit.position = Vector3(20.0, 0.0, 30.0)
+	check(w.td.get_height(unit.position.x + Unit.DROWN_SHORE_MARGIN, 30.0)
+		> TerrainData.SEA_LEVEL, "it starts balancing on the waterline")
 	unit.drown()
 	check(unit._drowning, "the unit drowns")
-	var target_depth: float = TerrainData.SEA_LEVEL \
-		- w.td.get_height(unit._drown_target.x, unit._drown_target.z)
-	check(target_depth >= Unit.DROWN_MIN_DEPTH,
-		"the drag target has real depth (%.2f m)" % target_depth)
+	var pull: float = unit.position.distance_to(unit._drown_target)
+	check(pull > 0.0, "it gets pulled seawards")
+	check(pull <= Unit.DROWN_DRAG_MAX,
+		"the pull stays short (%.2f m <= %.2f m)" % [pull, Unit.DROWN_DRAG_MAX])
 	while not unit._corpse_done:
 		unit.tick(TICK)
 		if absf(unit.position.x - unit._drown_target.x) < 0.05:
 			break
-	check_near(unit.position.x, unit._drown_target.x,
-		"the body has arrived out in the water", 0.1)
-	check(TerrainData.SEA_LEVEL - w.td.get_height(unit.position.x, unit.position.z)
-		>= Unit.DROWN_MIN_DEPTH, "it sinks where the water is actually deep")
+	# Target reached and genuinely past the waterline in the seaward direction.
+	check_near(unit.position.x, unit._drown_target.x, "the body arrived", 0.1)
+	check(w.td.get_height(unit.position.x, unit.position.z)
+		<= TerrainData.SEA_LEVEL + Unit.WATER_EPS, "it sinks in the water")
+	check(w.td.get_height(unit.position.x - Unit.DROWN_SHORE_MARGIN, unit.position.z)
+		<= TerrainData.SEA_LEVEL + Unit.WATER_EPS,
+		"…and a margin further out is still water, so it is not on the edge")
 	_free_world(w)
 
 
-## A unit that is already out in open water is not dragged anywhere.
+## A unit that is already properly in the water is not moved at all.
 func test_drowning_in_open_water_does_not_drag() -> void:
 	var w: Dictionary = _make_world()
 	_make_beach(w)
@@ -208,6 +210,22 @@ func test_drowning_in_open_water_does_not_drag() -> void:
 	unit.drown()
 	check_near(unit._drown_target.x, 12.0, "the drag target is where it died", 0.01)
 	check_near(unit._drown_target.z, 30.0, "…on both axes", 0.01)
+	_free_world(w)
+
+
+## Touching water ends every kind of motion — no knockback play-out, no throw
+## arc, no rolling slide carries a body on once it is in the sea.
+func test_water_contact_kills_all_momentum() -> void:
+	var w: Dictionary = _make_world()
+	_make_coast(w)
+	var unit: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(12, 30))
+	unit.throw_airborne(Vector3(-8, 4, 0))
+	unit.displace(Vector3(-1, 0, 0), 3.0)
+	unit.drown()
+	check(unit._knockback_remaining == Vector3.ZERO, "pending knockback is gone")
+	check(unit._throw_velocity == Vector3.ZERO, "the throw velocity is gone")
+	check_near(unit._roll_init_speed, 0.0, "no roll momentum is left", 0.001)
+	check(unit.throw_carrier == null, "no carrier keeps hold of the body")
 	_free_world(w)
 
 
@@ -377,6 +395,36 @@ func test_vehicle_drown_stays_instant() -> void:
 
 
 # --- Terrain / shore colour ----------------------------------------------------------
+
+## The sea is opaque and has no depth, so the seabed is not meshed at all — but
+## the band around the waterline must survive, or a wave trough would open a
+## hole into the void.
+func test_seabed_is_not_meshed() -> void:
+	var td: TerrainData = _flat_terrain()
+	var deep: float = TerrainData.SEA_LEVEL - Terrain.SEABED_CULL_MARGIN - 1.0
+	for i in range(td.heights.size()):
+		td.heights[i] = deep
+	# A single land plateau in one corner so the map is not entirely sea.
+	for z in range(0, 20):
+		for x in range(0, 20):
+			td.set_vertex_height(x, z, 6.0)
+	var terrain: Terrain = Terrain.new()
+	terrain.build(td)
+	var open_sea: MeshInstance3D = terrain.get_node_or_null("Chunks/Chunk_5_5")
+	check(open_sea != null and open_sea.mesh == null,
+		"a chunk of pure open sea carries no mesh at all")
+	var land: MeshInstance3D = terrain.get_node_or_null("Chunks/Chunk_0_0")
+	check(land != null and land.mesh != null, "the land chunk is meshed")
+	# Shallow water just under the line stays, so nothing shows through a trough.
+	for z in range(td.verts):
+		for x in range(td.verts):
+			td.set_vertex_height(x, z, TerrainData.SEA_LEVEL - 0.1)
+	terrain.rebuild_chunks(Rect2i(0, 0, td.size, td.size))
+	var shallow: MeshInstance3D = terrain.get_node_or_null("Chunks/Chunk_5_5")
+	check(shallow != null and shallow.mesh != null,
+		"terrain right under the waterline is still meshed")
+	terrain.free()
+
 
 ## The waterline gets a darker wet-sand band that fades into dry sand.
 func test_shore_color_is_wet_sand() -> void:

@@ -130,8 +130,8 @@ const DROWN_FLAIL_DURATION: float = Balance.DROWN_FLAIL_DURATION
 const DROWN_SINK_DURATION: float = Balance.DROWN_SINK_DURATION
 const DROWN_FLOAT_DEPTH: float = Balance.DROWN_FLOAT_DEPTH
 const DROWN_SINK_DEPTH: float = Balance.DROWN_SINK_DEPTH
-const DROWN_MIN_DEPTH: float = Balance.DROWN_MIN_DEPTH
-const DROWN_DRAG_RADIUS: float = Balance.DROWN_DRAG_RADIUS
+const DROWN_SHORE_MARGIN: float = Balance.DROWN_SHORE_MARGIN
+const DROWN_DRAG_MAX: float = Balance.DROWN_DRAG_MAX
 const DROWN_DRAG_SPEED: float = Balance.DROWN_DRAG_SPEED
 ## Tolerance above SEA_LEVEL that still counts as water for gameplay checks.
 const WATER_EPS: float = 0.05
@@ -1872,11 +1872,17 @@ func _is_water_at(x: float, z: float) -> bool:
 func drown() -> void:
 	if state == State.DEAD:
 		return
+	# Water kills all momentum: no knockback play-out, no throw arc, no rolling
+	# slide. Whatever carried the unit in ends the moment it touches the sea.
+	_knockback_remaining = Vector3.ZERO
+	_throw_velocity = Vector3.ZERO
+	_roll_init_speed = 0.0
+	throw_carrier = null
 	if renders_as_sprite():
 		# MUST be set before _die(): _die() locks the corpse pose exactly once
 		# and the per-tick dead path never refreshes the animation again.
 		_drowning = true
-		_drown_target = _deep_water_near(position)
+		_drown_target = _water_entry_target(position)
 		position.y = TerrainData.SEA_LEVEL - DROWN_FLOAT_DEPTH
 		_sync_soa_pos()
 		_play_sfx(&"water_splash", 150)
@@ -1884,30 +1890,57 @@ func drown() -> void:
 	_die()
 
 
-## Nearest spot with real depth (seabed at least DROWN_MIN_DEPTH below the
-## waterline) within DROWN_DRAG_RADIUS, else the deepest spot found. Called once
-## per drowning — a ring scan of ~40 height samples, never in a hot path.
-func _deep_water_near(from: Vector3) -> Vector3:
+## Where a body that went under right at the shoreline has to be nudged to:
+## just far enough past the waterline to be IN the water, and no further.
+##
+## Water is defined by the sea-level threshold alone — there is no modelled
+## depth, all water is equally "deep" — so this is a purely horizontal question.
+## A unit that already drowns properly in the water is not moved at all, and a
+## unit with no water within DROWN_DRAG_MAX stays where it fell rather than
+## being yanked around. Called once per drowning: a handful of height samples.
+func _water_entry_target(from: Vector3) -> Vector3:
 	if terrain_data == null:
 		return from
-	var want: float = TerrainData.SEA_LEVEL - DROWN_MIN_DEPTH
-	if terrain_data.get_height(from.x, from.z) <= want:
-		return from   # already out in open water
-	var best: Vector3 = from
-	var best_h: float = terrain_data.get_height(from.x, from.z)
-	var r: float = 1.0
-	while r <= DROWN_DRAG_RADIUS:
-		for i in range(8):
-			var a: float = TAU * float(i) / 8.0
-			var px: float = from.x + cos(a) * r
-			var pz: float = from.z + sin(a) * r
-			var h: float = terrain_data.get_height(px, pz)
-			if h <= want:
-				return Vector3(px, 0.0, pz)   # nearest ring wins
-			if h < best_h:
-				best_h = h
-				best = Vector3(px, 0.0, pz)
-		r += DROWN_DRAG_RADIUS / 5.0
+	# "Further into the sea" = downhill; at a shore that always points seawards.
+	var dir: Vector3 = _downhill_vector()
+	if dir.length_squared() < 0.000001:
+		dir = _seaward_dir(from)
+	if dir.length_squared() < 0.000001:
+		return from
+	dir = dir.normalized()
+	if _past_waterline(from.x, from.z, dir):
+		return from   # already properly in the water
+	var step: float = DROWN_SHORE_MARGIN * 0.5
+	var d: float = step
+	while d <= DROWN_DRAG_MAX:
+		var px: float = from.x + dir.x * d
+		var pz: float = from.z + dir.z * d
+		if _past_waterline(px, pz, dir):
+			return Vector3(px, 0.0, pz)
+		d += step
+	return from
+
+
+## Water here AND still water DROWN_SHORE_MARGIN further along `dir` — i.e. this
+## spot lies behind the waterline rather than balancing on it.
+func _past_waterline(x: float, z: float, dir: Vector3) -> bool:
+	return _is_water_at(x, z) and _is_water_at(
+		x + dir.x * DROWN_SHORE_MARGIN, z + dir.z * DROWN_SHORE_MARGIN)
+
+
+## Fallback direction when the ground is flat: the lowest of eight probes.
+func _seaward_dir(from: Vector3) -> Vector3:
+	var best: Vector3 = Vector3.ZERO
+	var best_h: float = INF
+	for i in range(8):
+		var a: float = TAU * float(i) / 8.0
+		var dx: float = cos(a)
+		var dz: float = sin(a)
+		var h: float = terrain_data.get_height(
+			from.x + dx * DROWN_DRAG_MAX, from.z + dz * DROWN_DRAG_MAX)
+		if h < best_h:
+			best_h = h
+			best = Vector3(dx, 0.0, dz)
 	return best
 
 

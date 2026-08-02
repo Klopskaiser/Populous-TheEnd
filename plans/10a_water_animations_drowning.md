@@ -42,9 +42,14 @@ existiert bereits und wird nur poliert.
   `TerrainData.is_walkable` bleiben unangetastet. Nur *erzwungene* Bewegung
   (Rückstoß, Rollen, Wurf, Tornado, Klippensturz) überschreitet die
   Wasserkante — und endet dort immer im Ertrinken.
-- **Der Meeresboden bleibt als Geometrie erhalten** (wird von `get_height`,
-  `HeightMapShape3D`-Kollision und allen Terrainzaubern gebraucht) — er ist
-  künftig nur nicht mehr sichtbar.
+- **Wasser ist allein über die Höhenschwelle `SEA_LEVEL` definiert**
+  (Nutzer-Festlegung): es gibt keine modellierte Tiefe, alles Wasser ist gleich
+  tief. Keine Spielmechanik darf die Tiefe des Meeresbodens auswerten.
+- **Der Meeresboden bleibt als Datenmodell erhalten** (`get_height`,
+  `HeightMapShape3D`-Kollision und alle Terrainzauber brauchen ihn), wird aber
+  **nicht mehr vernetzt**: Zellen, deren vier Ecken tiefer als
+  `SEA_LEVEL - SEABED_CULL_MARGIN` liegen, entfallen aus dem Indexpuffer
+  (Insel-Karte: −42 % Dreiecke).
 - **Undurchsichtiges Wasser löst „keine treibende Leiche" geometrisch**: die
   ertrinkende Figur sinkt durch die Wasserfläche und ist danach verdeckt.
   Keine zusätzliche Alpha-Logik im Renderer.
@@ -80,12 +85,12 @@ const DROWN_SINK_DURATION: float = 1.1
 const DROWN_FLOAT_DEPTH: float = 0.9
 ## Zusätzliche Absinktiefe (m) — Sprite-Höhe + Tiefen-Bias-Reserve.
 const DROWN_SINK_DEPTH: float = 1.9
-## So tief muss der Meeresboden unter dem Wasserspiegel liegen, damit eine
-## Stelle als "richtiges Wasser" zum Versinken zählt.
-const DROWN_MIN_DEPTH: float = 1.2
-## Suchradius für diese Stelle und Tempo, mit dem der Körper dorthin gezogen wird.
-const DROWN_DRAG_RADIUS: float = 6.0
-const DROWN_DRAG_SPEED: float = 3.5
+## Wasser ist allein über die Höhe definiert (keine modellierte Tiefe), der
+## Uferzug daher rein waagerecht: so weit muss der Körper HINTER der
+## Wasserlinie liegen, Obergrenze des Zugs, Tempo.
+const DROWN_SHORE_MARGIN: float = 0.9
+const DROWN_DRAG_MAX: float = 2.5
+const DROWN_DRAG_SPEED: float = 2.5
 ```
 
 Farb- und Geometriewerte (Wasser, Küstensaum, Flammenquads, Gebäude-Kippung)

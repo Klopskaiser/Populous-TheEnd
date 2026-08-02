@@ -42,6 +42,10 @@ const WATER_WAVE_CELL: float = 2.0
 ## anyway, so the shore costs nothing at runtime.
 const COLOR_SHORE: Color = Color(0.62, 0.55, 0.38)
 const SHORE_BAND: float = 0.9
+## Terrain more than this far below the sea line is not meshed at all — the sea
+## is opaque and has no modelled depth, so the seabed can never be seen. The
+## margin is far larger than the wave trough, so nothing shows through.
+const SEABED_CULL_MARGIN: float = 0.6
 
 var data: TerrainData = null
 
@@ -222,14 +226,28 @@ func _build_chunk_mesh(cx: int, cz: int, mi: MeshInstance3D) -> void:
 			colors[idx] = _color_for_height(h)
 
 	# Godot front faces use CLOCKWISE winding (seen from the front, here: +Y above).
+	# Cells that lie entirely under the (opaque, depthless) sea are skipped: they
+	# can never be seen, so drawing them is pure overdraw. SEABED_CULL_MARGIN
+	# keeps a band of terrain around the waterline so no gap opens under the
+	# wave troughs. Vertices stay in the buffer, only the index list shrinks —
+	# the index arithmetic is unchanged, and rebuild_chunks re-evaluates this
+	# after every deformation (a landbridge brings its cells straight back).
+	var cull_below: float = TerrainData.SEA_LEVEL - SEABED_CULL_MARGIN
 	for lz in range(d - 1):
 		for lx in range(w - 1):
 			var tl: int = lz * w + lx
 			var tr: int = tl + 1
 			var bl: int = (lz + 1) * w + lx
 			var br: int = bl + 1
+			if verts[tl].y < cull_below and verts[tr].y < cull_below \
+					and verts[bl].y < cull_below and verts[br].y < cull_below:
+				continue
 			indices.append(tl); indices.append(tr); indices.append(bl)
 			indices.append(tr); indices.append(br); indices.append(bl)
+
+	if indices.is_empty():
+		mi.mesh = null   # chunk is entirely open sea
+		return
 
 	var arrays: Array = []
 	arrays.resize(Mesh.ARRAY_MAX)

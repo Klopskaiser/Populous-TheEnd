@@ -239,18 +239,16 @@ const DROWN_FLOAT_DEPTH: float = 0.9
 ## Absinktiefe (m) — Sprite-Höhe plus Reserve gegen den Tiefen-Bias des
 ## Billboard-Shaders, damit am Ende nichts mehr durch die Wasserfläche lugt.
 const DROWN_SINK_DEPTH: float = 1.9
-## So tief muss der Meeresboden unter dem Wasserspiegel liegen, damit eine
-## Stelle als "richtiges Wasser" zum Versinken zählt. Ohne das versinken
-## Hineingerollte exakt an der Uferkante und ertrinken optisch an Land.
-const DROWN_MIN_DEPTH: float = 1.2
-## Suchradius (m), in dem beim Ertrinken eine solche Stelle gesucht wird; die
-## Einheit wird dorthin ins Wasser gezogen. Findet sich nichts tief genug, gilt
-## die tiefste Stelle im Radius.
-const DROWN_DRAG_RADIUS: float = 6.0
-## Tempo (m/s), mit dem der Körper hinausgezogen wird. Reicht bei der kurzen
-## Ertrink-Lebensdauer für den vollen Suchradius, sieht aber nicht nach Rutschen
-## aus.
-const DROWN_DRAG_SPEED: float = 3.5
+## Wasser ist allein über die Höhe definiert — es gibt keine modellierte Tiefe,
+## alles Wasser ist gleich "tief". Der Uferzug ist deshalb eine rein waagerechte
+## Frage: so weit muss der Körper HINTER der Wasserlinie liegen, damit er im
+## Wasser und nicht auf der Kante versinkt.
+const DROWN_SHORE_MARGIN: float = 0.9
+## Obergrenze des Uferzugs (m). Wer weiter draußen ertrinkt, wird gar nicht
+## gezogen; wer nichts Passendes in Reichweite hat, bleibt ebenfalls liegen.
+const DROWN_DRAG_MAX: float = 2.5
+## Tempo (m/s) des Uferzugs.
+const DROWN_DRAG_SPEED: float = 2.5
 
 # =============================================================================
 # ROLLEN (Statuseffekt — Schubser, Wurf-Landungen, Stolpern)
