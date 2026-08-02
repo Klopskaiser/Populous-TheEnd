@@ -18,15 +18,28 @@ const TARGET_HEIGHT: float = 0.8
 const MAX_LIFETIME: float = 3.0
 
 ## Chance that a hit knocks the target over into a short roll (phase 5d).
-## Low per ball — many projectiles raise the effective odds.
-const ROLL_CHANCE: float = 0.1
+## Low per ball — many projectiles raise the effective odds. Phase 10c split
+## part of it off into LIFT_CHANCE: the sum is unchanged, some knock-overs
+## became small uppercuts instead.
+const ROLL_CHANCE: float = Balance.FW_FIREBALL_ROLL_CHANCE
 ## A target that is ALREADY rolling is easier to keep rolling: follow-up hits
 ## (the balls are homing) extend the tumble with this higher chance.
-const ROLL_CHANCE_ROLLING: float = 0.4
+const ROLL_CHANCE_ROLLING: float = Balance.FW_FIREBALL_ROLL_CHANCE_ROLLING
+## Chance that the hit lifts the target off the ground instead (phase 10c).
+const LIFT_CHANCE: float = Balance.FW_FIREBALL_LIFT_CHANCE
+const LIFT_CHANCE_ROLLING: float = Balance.FW_FIREBALL_LIFT_CHANCE_ROLLING
+## A lift REPLACES the ground shove: less horizontal, a small hop upward.
+const LIFT_PUSH: float = Balance.FW_FIREBALL_LIFT_PUSH
+const LIFT_UP: float = Balance.FW_FIREBALL_LIFT_UP
 ## In tight formations the knock-over can also topple adjacent units...
 const NEIGHBOR_ROLL_RADIUS: float = 0.9
 ## ...each with this chance, for an even shorter tumble.
 const NEIGHBOR_ROLL_CHANCE: float = 0.5
+
+## Outcomes of impact_outcome (see below).
+const OUTCOME_PUSH: int = 0
+const OUTCOME_ROLL: int = 1
+const OUTCOME_LIFT: int = 2
 
 var shooter = null   # untyped: may be freed mid-flight
 var target = null    # untyped: may be freed mid-flight
@@ -151,26 +164,52 @@ func _impact() -> void:
 		dir = target.position - shooter.position
 	else:
 		dir = target.position - _launch_from
-	target.apply_knockback(dir)
-	# Knock-over roll (phase 5d): low chance per ball, higher on targets that
-	# already tumble (extends the roll). A fresh knock-over can also topple
-	# adjacent units in tight formations, for an even shorter roll.
+	# A target that is ALREADY in the air takes NO ground shove (a shove on a
+	# flying unit did nothing sensible anyway) — the ball whirls it higher
+	# instead, which is what makes fireball combos read on screen.
+	if target.is_airborne():
+		target.apply_lift(dir, LIFT_PUSH, LIFT_UP)
+		return
+	# Knock-over roll (phase 5d) / uppercut (phase 10c): low chance per ball,
+	# higher on targets that already tumble (extends the roll). A fresh
+	# knock-over can also topple adjacent units in tight formations.
 	var was_rolling: bool = target.state == Unit.State.ROLL
-	var chance: float = ROLL_CHANCE_ROLLING if was_rolling else ROLL_CHANCE
-	if randf() < chance:
-		target.start_roll(dir, Unit.MINI_ROLL_DURATION)
-		if not was_rolling and target.path_service != null:
-			for u in target.path_service.get_units_in_radius(
-					target.position, NEIGHBOR_ROLL_RADIUS):
-				if u == target or u.state == Unit.State.DEAD \
-						or u.state == Unit.State.THROWN:
-					continue
-				if randf() < NEIGHBOR_ROLL_CHANCE:
-					u.start_roll(dir, Unit.NEIGHBOR_ROLL_DURATION)
+	var lift_chance: float = LIFT_CHANCE_ROLLING if was_rolling else LIFT_CHANCE
+	var roll_chance: float = ROLL_CHANCE_ROLLING if was_rolling else ROLL_CHANCE
+	match impact_outcome(randf(), lift_chance, roll_chance):
+		OUTCOME_LIFT:
+			# The lift REPLACES the ground shove (less horizontal, a hop up).
+			target.apply_lift(dir, LIFT_PUSH, LIFT_UP)
+			return
+		OUTCOME_ROLL:
+			target.apply_knockback(dir)
+			target.start_roll(dir, Unit.MINI_ROLL_DURATION)
+			if not was_rolling and target.path_service != null:
+				for u in target.path_service.get_units_in_radius(
+						target.position, NEIGHBOR_ROLL_RADIUS):
+					if u == target or u.state == Unit.State.DEAD \
+							or u.state == Unit.State.THROWN:
+						continue
+					if randf() < NEIGHBOR_ROLL_CHANCE:
+						u.start_roll(dir, Unit.NEIGHBOR_ROLL_DURATION)
+		_:
+			target.apply_knockback(dir)
 	# Fire interrupts a preacher's conversion: progress is lost, the unit
 	# stands back up (phase 5c). A roll above already broke the trance.
 	if target.state == Unit.State.SIT:
 		target.reset_conversion()
+
+
+## Which of the three impact reactions a roll `r` in [0,1) selects. Pure and
+## static so the split is exhaustively testable headless (same pattern as
+## SiegeShot.roll_chance_for_slope). LIFT takes the bottom slice, ROLL the
+## next one, everything above is a plain shove.
+static func impact_outcome(r: float, lift_chance: float, roll_chance: float) -> int:
+	if r < lift_chance:
+		return OUTCOME_LIFT
+	if r < lift_chance + roll_chance:
+		return OUTCOME_ROLL
+	return OUTCOME_PUSH
 
 
 func _target_alive() -> bool:

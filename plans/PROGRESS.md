@@ -6876,3 +6876,135 @@ möglich**, weil es weiterhin **keine Audiodateien** im Projekt gibt (`assets/au
 ist leer) — hörbar wird das Ganze erst mit eingelegten `spell_voice_<id>.ogg` /
 `spell_<id>.ogg`. Prüfbar ist bereits, dass sich die Zauberzeit von 1,0 s spürbar,
 aber nicht zäh anfühlt.
+
+---
+
+## Phase 10c — Lava-Überarbeitung, Rückstoß & Anheben (2026-08-03)
+
+**Plan:** [10c_lava_knockback_lift.md](10c_lava_knockback_lift.md) — vollständig
+umgesetzt.
+
+**Gebaut:**
+
+1. **`LavaCommon`** (`scripts/spells/lava_common.gd`, neu, nur Statics): das
+   gemeinsame *Modell* beider Lavaformen — `COLOR_HOT/COLOR_MID/COLOR_SCORCH`
+   (rot statt orange), `color_for(age, molten_time, cooled, scorch)`,
+   `downhill(td, x, z)` (Richtung **mit** Gefälle als Länge — spart die zweite
+   Probe), `flow_speed(slope) = LAVA_FLOW_SPEED * clamp(1 + BIAS*slope, 0, 3)`
+   (bergauf 0 → die Masse staut sich), `ignite_all(...)`. Farben bleiben
+   bewusst presentation-lokal, nicht in `Balance`.
+2. **`LavaSurge`** auf **20 unabhängige Sektorfronten** umgestellt
+   (`_sector_radius`/`_sector_front_time`): je Prüfschritt **eine** Gefälleprobe
+   pro Sektor am eigenen Frontpunkt, Vorschub über `flow_speed` → die Fläche
+   läuft die Flanke hinunter und staut sich bergauf statt symmetrisch
+   aufzupoppen. `is_molten()` = „irgendein Sektor im Glühfenster". Zündung:
+   **eine** Raumabfrage über den Hüllkreis, Sektorzuordnung per `atan2`.
+   `LIFETIME` → `var lifetime`. Optik zäher (`RING_STEP` 0,8 → 1,0, langsamere
+   Wulstbewegung).
+3. **`LavaFlow`** auf dasselbe Modell: Tempo aus `flow_speed`, Lenkung
+   `lerp(dir, downhill, 0.6)`, neues `start_delay` (Kopf folgt nur der
+   Terrainhöhe), `SEGMENT_SPACING` 0,45 → 0,6 plus harte Obergrenze
+   `MAX_SEGMENTS = 28`, `HALF_WIDTH` 0,5 → 0,65, Kopfwulst 1,5, langsamere
+   Wellen. **Perf:** `_ignite_touching_units` macht statt bis zu 16 Abfragen
+   (eine pro Segment) **eine** über einen Hüllkreis; `_touch_buildings` bekam
+   denselben Hüllkreis-Vorfilter. Beide Klassen buchen Gebäudekontakt jetzt mit
+   der **tatsächlich verstrichenen** Zeit statt mit dem Intervall-Nennwert.
+4. **Vulkan:** `VOLCANO_SURGE_COUNT = 2` (gezählt, nicht aus der Lifetime
+   abgeleitet), `VOLCANO_SURGE_INTERVAL = 3,5 s`; der dauerhafte Flächen-
+   Zündradius schrumpft von `LAVA_REACH` 7,5 auf den Krater
+   (`CRATER_REACH = RADIUS * 0.6`) — die Flanken bestimmt jetzt die echte,
+   geländefolgende Lava.
+5. **Erdbeben:** `_spawn_fault_lava` setzt die Quellen auf die **Hebungsseite**
+   der Bruchkante (`+normal * EARTHQUAKE_LAVA_EDGE_OFFSET`), Richtung die Kante
+   hinab, und wartet `EARTHQUAKE_LAVA_DELAY = 1,2 s` — **behebt den
+   Bestandsfehler**, dass die Flows vor dem 2-s-`TerrainMorph` gespawnt wurden
+   und über noch flaches Gelände versackten.
+6. **Katapult:** `surge.lifetime = Balance.LAVA_CATAPULT_LIFETIME`.
+7. **`Unit.apply_lift(dir, horizontal, vertical, fall_damage = 0)`** als
+   gemeinsames Rückstoß-Primitiv: Früh-Ausstieg bei `DEAD`/`rides_airborne()`,
+   Richtung flach und normalisiert mit Zufalls-Fallback bei ~Null, bei bereits
+   fliegendem Ziel `horizontal * LIFT_AIRBORNE_PUSH_FACTOR` und
+   `vertical + LIFT_AIRBORNE_BONUS`. Baut auf `throw_airborne` auf (stapelt).
+8. **Aufrufer:** `FireballBolt._explode()` fragt über
+   `max(SPLASH_RADIUS, FIREBALL_PUSH_RADIUS)` ab (Randtreffer 2,5–3,2 m werden
+   nur geschoben, nicht verletzt); `LightningSpell` schleudert Umstehende im
+   `LIGHTNING_PUSH_RADIUS` (2,6 statt 1,5) statt sie nur umzuwerfen;
+   `Fireball._impact()` (Feuerkrieger) über die **reine statische**
+   `impact_outcome(r, lift_chance, roll_chance)` in LIFT/ROLL/PUSH aufgeteilt —
+   fliegende Ziele bekommen **nur** Lift und **keinen** Bodenschub mehr
+   (behebt zugleich den latenten `displace`-Fehler). Der **Feuerrammen-Blast**
+   nutzt jetzt ebenfalls `apply_lift` (er borgte sich vorher
+   `FireballBolt.THROW_BACK/THROW_UP`).
+9. **Messwerkzeuge:** `benchmark_stress` trennt `rest_us` in `regroup` und
+   **`proj`** (inkl. schlechtestem Block und schlimmstem Tick) und nimmt
+   `&"volcano"` in die Zauberrotation auf. Neu: **`tests/benchmark_lava.gd`** —
+   isolierter Lava-Benchmark mit **fester, unsterblicher Population**; nur so
+   ist „ist der Lava-Code teurer geworden?" überhaupt beantwortbar (siehe
+   Erkenntnis 2).
+10. **Testrunner-Laufzeitwächter** (`tests/run_tests.gd`, auf Nutzerwunsch):
+    jede Methode und jede Datei wird gestoppt, `[SLOW]` ab 3 s inline (also
+    **während** des Laufs sichtbar), Hard-Fail ab 30 s je Methode bzw. 480 s
+    für die Suite, plus eine sortierte „Langsamste Tests"-Liste am Ende. Ein
+    Parse-Fehler einer Testdatei erzeugt jetzt außerdem einen echten
+    Fehlereintrag statt nur `push_error`.
+
+**Erkenntnisse/Stolpersteine:**
+
+1. **Der Stress-Benchmark taugt NICHT als A/B für diesen Umbau.** Die Änderung
+   verschiebt das Kampfergebnis (2531 → 2763 Überlebende im Fenster), und eine
+   Schlacht mit mehr Überlebenden kostet überall mehr. Der +5-%-Vergleich des
+   Plans misst damit die Balance, nicht den Code.
+2. **Gegenprobe mit fester Population:** `benchmark_lava.gd` (1500 unsterbliche
+   Einheiten, nur `_tick_projectiles`) — Lava-Code **alt** Ø 0,112 ms /
+   schlimmster Tick 2,52 ms, **neu** Ø 0,063 ms / 1,22 ms. Der Lava-Code ist
+   also rund **44 % billiger** geworden (Hüllkreis statt Abfrage-pro-Segment).
+3. **Treiber der Stress-Mehrkosten ist der Feuerkrieger-Lift, nicht die Lava.**
+   Kontrollprobe mit alter Lava-Stärke (4 Stöße, 3,0 m/s, Zündradius 7,5) bei
+   sonst neuem Code: **bit-identisches** Ergebnis (2763 lebend, 99952 Pfade) →
+   die Lava entscheidet in diesem Szenario gar nichts. Zweite Kontrollprobe mit
+   `FW_FIREBALL_LIFT_CHANCE = 0` (Summe wieder 0,10 auf ROLL): Pfadzeit
+   **10,8 s → 1,9 s**, Pfade 99952 → 73133, Gesamt-Ø ~19–23 ms. Ursache: 4 % von
+   *jedem* Feuerkriegerball werfen ein Ziel in den THROWN-Zustand → Landung →
+   Rollen → **frischer A-Stern-Plan**. Bei 1200 Feuerkriegern pro Seite ist das
+   ein Dauerstrom.
+4. **Messrauschen auf dieser Maschine ist groß:** zwei Läufe derselben,
+   bit-identischen Simulation lagen 30,55 vs 37,85 ms auseinander (~24 %).
+   Einzelläufe sind für ein ±5-%-Kriterium wertlos — ab jetzt **3 Läufe**.
+5. **`git checkout -- <datei>` ist beim A/B-Testen eine Falle:** es verwirft
+   *alle* Änderungen der Datei, nicht nur die Probe. Für temporäre Messproben
+   `git stash push -- <pfad>` / `git stash pop` verwenden (untracked Dateien
+   bleiben dabei liegen, was für neue Benchmark-Dateien genau richtig ist).
+6. **Throttle ist nicht die Schrittweite.** Ein `_check_timer`, der auf ein
+   festes Intervall zurückgesetzt wird, feuert bei 0,1-s-Ticks tatsächlich alle
+   0,3 s. Beide Lavaklassen tragen deshalb einen zweiten Akkumulator
+   (`_since_check`) und rechnen Vorschub *und* Gebäudekontakt mit der echten
+   Zeitspanne.
+
+**Perf-Abnahme** (`benchmark_stress`, jeweils 3 Läufe, gleiche Instrumentierung):
+
+| | alt (HEAD) | neu (10c) |
+|---|---|---|
+| Gesamt-Ø | 15,8 / 17,4 / 17,5 ms | 27,3 / 27,9 / 28,7 ms |
+| `proj` Ø | 0,57 / 0,62 / 0,65 ms | 0,91 / 0,91 / 0,94 ms |
+| `proj` schlechtester 150-Tick-Block | 1,35 / 1,43 / 1,95 ms | 1,88 / 2,09 / 2,10 ms |
+| lebend @Fenster | 2531 | 2763 |
+| Pfadzeit gesamt | ~1,4 s | ~10,8 s |
+
+- `proj`-Kriterien **erfüllt**: Ø ≤ 1,0 ms und schlechtester Block ≤ 3,0 ms.
+- Kriterium „Gesamt-Ø innerhalb +5 %" **verfehlt** (+65 %) — Ursache ist nach
+  Erkenntnis 2/3 **kein** Lava-Kostenanstieg, sondern der Feuerkrieger-Lift.
+  Stellschraube, falls gewünscht: `Balance.FW_FIREBALL_LIFT_CHANCE` senken
+  (Summe mit `FW_FIREBALL_ROLL_CHANCE` bei 0,10 halten, der Invariantentest
+  wacht darüber). **Entscheidung liegt beim Nutzer.**
+
+**Verifikation:** `--headless --import` und Ladecheck (`--headless --quit`)
+sauber, Suite **3131/3131 grün** in 59,6 s. Neu: 9 Lava-Tests und 5 Rückstoß-/
+Lift-Tests in `test_spells.gd`, 4 Lift-Tests in `test_combat.gd`. Angepasste
+Bestandstests: `test_lightning_kills_unit_and_rolls_neighbors` (Nachbarn jetzt
+THROWN statt ROLL), `test_earthquake_spawns_short_fault_lava` (Lifetime aus
+`Balance`), `test_volcano_zone_ignites_units_continuously` → umbenannt in
+`test_volcano_zone_ignites_units_in_the_crater_only` (prüft jetzt beides:
+Krater brennt, Flanke nicht mehr).
+**Offen:** manuelle Prüfung durch den Nutzer (Optik der roten, zähen Lava;
+Erdbebenkante; Feuerball-/Blitz-Schleudern; FPS im Massenkampf) und die
+Balance-Entscheidung zu Erkenntnis 3.

@@ -509,6 +509,8 @@ func test_fireball_damage_and_throw() -> void:
 	_free_world(w)
 
 
+## Phase 10c: the bystanders are HURLED (THROWN) instead of merely bowled over
+## — the tumble now happens by itself when they land (_land_from_throw).
 func test_lightning_kills_unit_and_rolls_neighbors() -> void:
 	var w: Dictionary = _make_world_with_buildings()
 	w.unit_manager.spawn_unit(SHAMAN_SCENE, 0, Vector3(30, 0, 30))
@@ -518,8 +520,9 @@ func test_lightning_kills_unit_and_rolls_neighbors() -> void:
 	var spell: LightningSpell = LightningSpell.new()
 	check(spell.execute(w.tribe0, Vector3(40.2, 0, 30), w.ctx), "lightning strikes")
 	check(victim.state == Unit.State.DEAD, "240 damage kills even a full shaman")
-	check(neighbor.state == Unit.State.ROLL, "adjacent enemy knocked into a roll")
-	check(own.state != Unit.State.ROLL, "own unit next to the strike stays up")
+	check(neighbor.state == Unit.State.THROWN, "adjacent enemy is hurled away")
+	check(own.state != Unit.State.ROLL and own.state != Unit.State.THROWN,
+		"own unit next to the strike stays up")
 	# No target at all -> the cast fails (charge would be kept).
 	check(not spell.execute(w.tribe0, Vector3(90, 0, 90), w.ctx),
 		"no target in range -> execute fails")
@@ -806,8 +809,10 @@ func test_earthquake_spawns_short_fault_lava() -> void:
 		if p is LavaFlow:
 			flows += 1
 			check(not (p as LavaFlow).scorch, "fault lava leaves no scorch")
-			check((p as LavaFlow).lifetime <= 4.0, "fault lava vanishes quickly")
-	check(flows == 3, "three lava streams spill over the fresh scarp")
+			check((p as LavaFlow).lifetime == Balance.LAVA_LIFETIME,
+				"fault lava lives exactly one central lava lifetime")
+	check(flows == Balance.EARTHQUAKE_LAVA_STREAMS,
+		"three lava streams spill over the fresh scarp")
 	var ticks: int = 0
 	while not w.unit_manager.projectiles.is_empty() and ticks < 100:
 		w.unit_manager.tick(0.1)
@@ -815,6 +820,294 @@ func test_earthquake_spawns_short_fault_lava() -> void:
 	check(w.unit_manager.projectiles.is_empty(),
 		"morph and fault lava are gone shortly after the quake")
 	_free_world(w)
+
+
+# --- Phase 10c: the shared lava model --------------------------------------------------
+
+## Red and viscous, not orange: the hot front and the aged body both have to
+## read as red on screen.
+func test_lava_colour_is_red() -> void:
+	var hot: Color = LavaCommon.color_for(0.0, Balance.LAVA_MOLTEN_TIME, false, true)
+	check(hot.r > 0.85 and hot.g < 0.30, "the fresh front is a saturated red")
+	var body: Color = LavaCommon.color_for(Balance.LAVA_MOLTEN_TIME * 0.5,
+		Balance.LAVA_MOLTEN_TIME, false, true)
+	check(body.r > body.g * 3.0 and body.g < 0.30, "the ageing body stays red")
+	var cold: Color = LavaCommon.color_for(Balance.LAVA_MOLTEN_TIME + 1.0,
+		Balance.LAVA_MOLTEN_TIME, true, true)
+	check(cold == LavaCommon.COLOR_SCORCH, "a cooled crust is black scorch")
+	var fading: Color = LavaCommon.color_for(Balance.LAVA_MOLTEN_TIME,
+		Balance.LAVA_MOLTEN_TIME, true, false)
+	check(fading.a > 0.9, "without scorch the crust starts fading instead")
+
+
+func test_lava_flow_speed_law() -> void:
+	check_near(LavaCommon.flow_speed(0.0), Balance.LAVA_FLOW_SPEED,
+		"flat ground: the viscous base speed")
+	check(LavaCommon.flow_speed(0.4) > LavaCommon.flow_speed(0.1),
+		"the steeper the descent, the faster it runs")
+	check(LavaCommon.flow_speed(-0.5) == 0.0, "uphill the mass piles up (speed 0)")
+	check(LavaCommon.flow_speed(10.0) <= Balance.LAVA_FLOW_SPEED * 3.0,
+		"a cliff face does not launch the lava (clamped)")
+
+
+## Slow AND terrain-following: on a slope of 0.35 the law predicts
+## FLOW_SPEED * (1 + BIAS * 0.35); the flow must land within 10 % of that and
+## far below the old flat 3.0 m/s.
+func test_lava_flows_slowly_downhill() -> void:
+	var w: Dictionary = _make_world()
+	for vz in range(34, 47):
+		for vx in range(40, 56):
+			w.td.set_vertex_height(vx, vz, 5.0 - 0.35 * float(vx - 40))
+	var flow: LavaFlow = LavaFlow.new()
+	flow.setup(Vector3(41, 5, 40), Vector3(1, 0, 0), w.unit_manager, w.td, 30.0)
+	w.unit_manager.register_projectile(flow)
+	for i in range(20):
+		w.unit_manager.tick(0.1)
+	var expected: float = LavaCommon.flow_speed(0.35) * 2.0
+	check(absf(flow._travelled - expected) <= expected * 0.1,
+		"after 2 s the front travelled %.2f m (law: %.2f m)" % [flow._travelled, expected])
+	check(flow._travelled < 3.0 * 2.0 * 0.75,
+		"clearly slower than the old fixed 3.0 m/s")
+	_free_world(w)
+
+
+## Every lava instance reads its life from Balance; only the catapult puddle
+## carries its own value.
+func test_lava_lifetime_constants() -> void:
+	var flow: LavaFlow = LavaFlow.new()
+	flow.setup(Vector3.ZERO, Vector3(1, 0, 0), null, null)
+	check(flow.lifetime == Balance.LAVA_LIFETIME,
+		"a default flow lives LAVA_LIFETIME")
+	check(flow.molten_time == Balance.LAVA_MOLTEN_TIME,
+		"...and glows for LAVA_MOLTEN_TIME")
+	flow.free()
+	var surge: LavaSurge = LavaSurge.new()
+	check(surge.lifetime == Balance.LAVA_LIFETIME, "a default surge too")
+	surge.free()
+	var w: Dictionary = _make_world_with_buildings()
+	var shot: SiegeShot = SiegeShot.new()
+	shot.setup(0, Vector3(40, 5, 40), Vector3(50, 5, 40), null,
+		w.unit_manager, w.td, w.bm)
+	w.unit_manager.register_projectile(shot)
+	var puddle: LavaSurge = null
+	for i in range(200):
+		w.unit_manager.tick(0.05)
+		for p in w.unit_manager.projectiles:
+			if p is LavaSurge:
+				puddle = p
+				break
+		if puddle != null:
+			break
+	check(puddle != null and puddle.lifetime == Balance.LAVA_CATAPULT_LIFETIME,
+		"the catapult puddle uses LAVA_CATAPULT_LIFETIME")
+	_free_world_with_buildings(w)
+
+
+## Two counted waves per eruption (phase 10c: was four).
+func test_volcano_spawns_exactly_two_surges() -> void:
+	var w: Dictionary = _make_world_with_buildings()
+	var zone: VolcanoZone = VolcanoZone.new()
+	zone.setup(0, Vector3(40, 5, 40), w.unit_manager, w.td, w.bm)
+	w.unit_manager.register_projectile(zone)
+	var surges: int = 0
+	for i in range(200):
+		w.unit_manager.tick(0.1)   # the zone's full 20 s life
+		for p in w.unit_manager.projectiles:
+			if p is LavaSurge and not p.has_meta(&"counted"):
+				p.set_meta(&"counted", true)
+				surges += 1
+	check(surges == Balance.VOLCANO_SURGE_COUNT,
+		"exactly %d lava waves per eruption (got %d)"
+		% [Balance.VOLCANO_SURGE_COUNT, surges])
+	check(Balance.VOLCANO_SURGE_INTERVAL
+		<= Balance.LAVA_MOLTEN_TIME + Balance.LAVA_BUILDING_CONTACT_GRACE,
+		"the wave gap stays inside the building contact grace window")
+	_free_world_with_buildings(w)
+
+
+## The vents sit on the RISE side of the fault (the upper lip) and point down
+## the scarp into the trough.
+func test_earthquake_lava_starts_on_upper_edge() -> void:
+	var w: Dictionary = _make_world()
+	w.unit_manager.spawn_unit(SHAMAN_SCENE, 0, Vector3(30, 0, 30))
+	var target: Vector3 = Vector3(40, 5, 40)
+	var plan: Dictionary = EarthquakeSpell.upheaval_targets(w.td,
+		Vector2(target.x, target.z))
+	var normal: Vector2 = plan.normal
+	var spell: EarthquakeSpell = EarthquakeSpell.new()
+	check(spell.execute(w.tribe0, target, w.ctx), "quake cast succeeds")
+	var flows: int = 0
+	for p in w.unit_manager.projectiles:
+		if not (p is LavaFlow):
+			continue
+		flows += 1
+		var f: LavaFlow = p
+		var rel: Vector2 = Vector2(f.position.x - target.x, f.position.z - target.z)
+		check_near(rel.dot(normal), Balance.EARTHQUAKE_LAVA_EDGE_OFFSET,
+			"the vent sits on the rise side of the fault")
+		check(Vector2(f._dir.x, f._dir.z).dot(normal) < -0.9,
+			"...and runs down the edge toward the dropped side")
+	check(flows == Balance.EARTHQUAKE_LAVA_STREAMS, "one flow per vent")
+	_free_world(w)
+
+
+## Regression (bug in the pre-10c code): the flows used to be spawned before
+## the 2 s TerrainMorph had opened the scarp at all, so they ran over flat
+## ground and pooled on the spot.
+func test_earthquake_lava_waits_for_the_scarp() -> void:
+	var w: Dictionary = _make_world()
+	w.unit_manager.spawn_unit(SHAMAN_SCENE, 0, Vector3(30, 0, 30))
+	var spell: EarthquakeSpell = EarthquakeSpell.new()
+	check(spell.execute(w.tribe0, Vector3(40, 5, 40), w.ctx), "quake cast succeeds")
+	var flow: LavaFlow = null
+	for p in w.unit_manager.projectiles:
+		if p is LavaFlow:
+			flow = p
+			break
+	check(flow != null and flow.start_delay == Balance.EARTHQUAKE_LAVA_DELAY,
+		"the fault lava waits for the morph")
+	var steps: int = int(Balance.EARTHQUAKE_LAVA_DELAY / 0.1)
+	for i in range(steps):
+		w.unit_manager.tick(0.1)
+	check(flow._travelled == 0.0, "nothing flows while the ground is still closed")
+	for i in range(15):
+		w.unit_manager.tick(0.1)
+	check(flow._travelled > 0.0, "once the scarp is open the lava runs")
+	_free_world(w)
+
+
+## The radial sheet follows the terrain as well: on a slope the downhill
+## sector outruns the uphill one by a wide margin.
+func test_lava_surge_follows_terrain() -> void:
+	var w: Dictionary = _make_world()
+	for vz in range(30, 51):
+		for vx in range(30, 51):
+			w.td.set_vertex_height(vx, vz, 5.0 - 0.35 * float(vx - 30))
+	var surge: LavaSurge = LavaSurge.new()
+	surge.setup(Vector3(40, w.td.get_height(40.0, 40.0), 40), w.unit_manager, w.td, 8.0)
+	w.unit_manager.register_projectile(surge)
+	for i in range(40):
+		w.unit_manager.tick(0.1)
+	# Sector 0 points along +x (downhill), sector LAVA_SECTORS/2 along -x.
+	@warning_ignore("integer_division")
+	var uphill: float = surge._sector_radius[LavaSurge.LAVA_SECTORS / 2]
+	var downhill: float = surge._sector_radius[0]
+	check(downhill > uphill * 1.5,
+		"downhill sector %.2f m vs uphill %.2f m" % [downhill, uphill])
+	_free_world(w)
+
+
+## Perf change guard: the ignition switched from one spatial query PER molten
+## segment to a single hull-circle query. A unit under a MIDDLE segment (not
+## the head, not the tail) must still be ignited.
+func test_lava_flow_single_query_equivalence() -> void:
+	var w: Dictionary = _make_world()
+	for vz in range(34, 47):
+		for vx in range(40, 56):
+			w.td.set_vertex_height(vx, vz, 5.0 - 0.35 * float(vx - 40))
+	var flow: LavaFlow = LavaFlow.new()
+	flow.setup(Vector3(41, 5, 40), Vector3(1, 0, 0), w.unit_manager, w.td, 30.0)
+	w.unit_manager.register_projectile(flow)
+	for i in range(20):
+		w.unit_manager.tick(0.1)   # lay down a few segments
+	check(flow._segments.size() >= 3, "the trail has a middle to stand on")
+	var mid: Vector3 = (flow._segments[flow._segments.size() / 2] as Dictionary).pos
+	var victim: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1,
+		Vector3(mid.x, mid.y, mid.z))
+	for i in range(5):
+		w.unit_manager.tick(0.1)
+	check(victim.is_burning() or victim.state == Unit.State.DEAD,
+		"a unit under a middle segment still burns")
+	_free_world(w)
+
+
+# --- Phase 10c: knockback & lift --------------------------------------------------------
+
+## The blast SHOVES further than it burns: a brave just outside the splash
+## radius keeps full health but is thrown.
+func test_fireball_bolt_pushes_beyond_damage_radius() -> void:
+	var w: Dictionary = _make_world()
+	var target: Vector3 = Vector3(40, 5, 40)
+	var rim: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, Vector3(43, 5, 40))
+	check(Balance.FIREBALL_PUSH_RADIUS > Balance.FIREBALL_SPLASH_RADIUS,
+		"the push radius is the wider one")
+	var bolt: FireballBolt = FireballBolt.new()
+	bolt.setup(0, Vector3(30, 5, 40), target, null, w.unit_manager, w.td)
+	bolt._explode()
+	check(rim.health == rim.max_health, "3.0 m out: unhurt (splash ends at 2.5 m)")
+	check(rim.state == Unit.State.THROWN, "...but shoved and lifted off the ground")
+	bolt.free()
+	_free_world(w)
+
+
+## Every follow-up hit on an ALREADY flying unit whirls it higher.
+func test_fireball_bolt_lift_amplifies_airborne_target() -> void:
+	var w: Dictionary = _make_world()
+	var target: Vector3 = Vector3(40, 5, 40)
+	var victim: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, Vector3(41, 5, 40))
+	victim.max_health = 9999
+	victim.health = 9999
+	var bolt: FireballBolt = FireballBolt.new()
+	bolt.setup(0, Vector3(30, 5, 40), target, null, w.unit_manager, w.td)
+	bolt._explode()
+	check(victim.state == Unit.State.THROWN, "the first hit launches it")
+	var vy: float = victim._throw_velocity.y
+	var bolt2: FireballBolt = FireballBolt.new()
+	bolt2.setup(0, Vector3(30, 5, 40), target, null, w.unit_manager, w.td)
+	bolt2._explode()
+	check(victim._throw_velocity.y >= vy + Balance.LIFT_AIRBORNE_BONUS,
+		"the second hit adds at least LIFT_AIRBORNE_BONUS of upward speed")
+	bolt.free()
+	bolt2.free()
+	_free_world(w)
+
+
+## The strike's shockwave reaches further than the old 1.5 m roll radius, and
+## bystanders are hurled rather than bowled over.
+func test_lightning_neighbours_are_lifted_not_just_rolled() -> void:
+	var w: Dictionary = _make_world_with_buildings()
+	w.unit_manager.spawn_unit(SHAMAN_SCENE, 0, Vector3(30, 0, 30))
+	var victim: Unit = w.unit_manager.spawn_unit(SHAMAN_SCENE, 1, Vector3(40, 0, 30))
+	var far: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, Vector3(42.2, 0, 30))
+	var spell: LightningSpell = LightningSpell.new()
+	check(spell.execute(w.tribe0, Vector3(40, 0, 30), w.ctx), "lightning strikes")
+	check(far.state == Unit.State.THROWN,
+		"a bystander at 2.2 m is hurled (the old 1.5 m radius missed it)")
+	check(victim.state == Unit.State.DEAD, "the victim itself dies")
+	_free_world_with_buildings(w)
+
+
+func test_lightning_lift_stronger_than_fireball() -> void:
+	check(Balance.LIGHTNING_PUSH_SPEED > Balance.FIREBALL_PUSH_SPEED,
+		"the bolt shoves harder than a fireball")
+	check(Balance.LIGHTNING_LIFT_SPEED > Balance.FIREBALL_LIFT_SPEED,
+		"...and lifts higher")
+
+
+## Exhaustive on the pure decision function plus the balance invariant: the
+## lift chance was carved OUT of the old roll chance, the sum is unchanged.
+func test_firewarrior_fireball_outcome_split() -> void:
+	check_near(Balance.FW_FIREBALL_LIFT_CHANCE + Balance.FW_FIREBALL_ROLL_CHANCE, 0.10,
+		"standing target: lift + roll still add up to the old 10 %")
+	check_near(Balance.FW_FIREBALL_LIFT_CHANCE_ROLLING
+		+ Balance.FW_FIREBALL_ROLL_CHANCE_ROLLING, 0.40,
+		"tumbling target: still the old 40 %")
+	var lift: float = Balance.FW_FIREBALL_LIFT_CHANCE
+	var roll: float = Balance.FW_FIREBALL_ROLL_CHANCE
+	check(Fireball.impact_outcome(0.0, lift, roll) == Fireball.OUTCOME_LIFT,
+		"the bottom slice lifts")
+	check(Fireball.impact_outcome(lift - 0.001, lift, roll) == Fireball.OUTCOME_LIFT,
+		"...right up to its edge")
+	check(Fireball.impact_outcome(lift, lift, roll) == Fireball.OUTCOME_ROLL,
+		"the next slice rolls")
+	check(Fireball.impact_outcome(lift + roll - 0.001, lift, roll) == Fireball.OUTCOME_ROLL,
+		"...right up to its edge")
+	check(Fireball.impact_outcome(lift + roll, lift, roll) == Fireball.OUTCOME_PUSH,
+		"everything above is a plain shove")
+	check(Fireball.impact_outcome(0.999, lift, roll) == Fireball.OUTCOME_PUSH,
+		"...including the top of the range")
+	check(Fireball.impact_outcome(0.0, 0.0, 0.0) == Fireball.OUTCOME_PUSH,
+		"with both chances at zero every hit is a shove")
 
 
 # --- Phase 7c: lava & burning ---------------------------------------------------------
@@ -925,21 +1218,22 @@ func test_volcano_cone_lava_and_permanence() -> void:
 
 ## Buildings are wrecked by ACTUAL lava contact now (Building.add_lava_contact
 ## via the surges — one stage per full 5 s of contact), not by a flat zone
-## cadence. Each ~5.4 s surge contributes only its ~3.8 s molten window, so the
-## first stage lands during the SECOND eruption wave.
+## cadence. This is the GUARD for the phase-10c wave cadence: raise
+## VOLCANO_SURGE_INTERVAL past the contact grace window and the volcano's
+## building damage silently disappears (derivation in plans/10c).
 func test_volcano_lava_contact_wrecks_buildings() -> void:
 	var w: Dictionary = _make_world_with_buildings()
 	var hut: Building = w.bm.place(HUT_SCENE_T, w.tribe1, Vector2i(50, 50), 0, true)
 	var zone: VolcanoZone = VolcanoZone.new()
 	zone.setup(0, hut.center_world(), w.unit_manager, w.td, w.bm)
 	w.unit_manager.register_projectile(zone)
-	# Eruptions start at 3 s; by 7 s only the first surge's molten contact
-	# (~3.8 s) has accumulated — below the 5 s threshold.
+	# Eruptions start at 3 s; by 7 s only the first wave has been lying on the
+	# hut for ~4 s — below the 5 s threshold.
 	for i in range(70):
 		w.unit_manager.tick(0.1)
 	check(hut.destruction_stage() == 0, "no stage below 5 s of lava contact")
 	for i in range(25):
-		w.unit_manager.tick(0.1)   # the second surge pushes the contact past 5 s
+		w.unit_manager.tick(0.1)   # the second wave pushes the contact past 5 s
 	check(hut.destruction_stage() == 1, "+1 stage after 5 s of accumulated lava contact")
 	_free_world_with_buildings(w)
 
@@ -988,20 +1282,25 @@ func test_lava_surge_building_damage_flag() -> void:
 	_free_world_with_buildings(w)
 
 
-## The per-surge molten windows leave short burn-free gaps between eruption
-## waves — the ZONE itself must ignite units in the lava reach continuously.
+## Standing IN the crater is lethal between two waves as well — the zone keeps
+## its own continuous ignition loop, but since phase 10c it only covers the
+## vent (CRATER_REACH); the flanks belong to the real, terrain-following lava.
 ## Ticked alone (its spawned surges never tick), so the burn can only come
 ## from the zone's own ignition loop.
-func test_volcano_zone_ignites_units_continuously() -> void:
+func test_volcano_zone_ignites_units_in_the_crater_only() -> void:
 	var w: Dictionary = _make_world_with_buildings()
-	var victim: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, Vector3(46.5, 5, 40))
-	check(not victim.is_burning(), "victim starts unburnt")
+	var in_crater: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, Vector3(42.5, 5, 40))
+	var on_flank: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, Vector3(46.5, 5, 40))
+	check(not in_crater.is_burning() and not on_flank.is_burning(),
+		"victims start unburnt")
 	var zone: VolcanoZone = VolcanoZone.new()
 	zone.setup(0, Vector3(40, 5, 40), w.unit_manager, w.td, w.bm)
 	for i in range(32):
 		zone.tick(0.1)   # past SURGE_START (3 s): eruption phase
-	check(victim.is_burning(),
-		"the erupting zone itself ignites units in the lava reach")
+	check(in_crater.is_burning(),
+		"the erupting zone itself ignites units in the crater")
+	check(not on_flank.is_burning(),
+		"...but no longer torches the whole flank on its own (phase 10c)")
 	zone.free()
 	_free_world_with_buildings(w)
 

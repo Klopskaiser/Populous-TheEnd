@@ -749,6 +749,82 @@ func test_fireball_applies_knockback() -> void:
 	_free_world(w)
 
 
+# --- Phase 10c: lift instead of a ground shove -------------------------------------
+
+## A ball that hits an ALREADY flying target never shoves the ground (a shove
+## on a flying unit did nothing sensible anyway) — it always whirls it higher.
+func test_firewarrior_fireball_always_lifts_airborne_target() -> void:
+	var w: Dictionary = _make_world()
+	var shooter: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(26, 30))
+	var enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
+	enemy.max_health = 100000
+	enemy.health = 100000
+	enemy.throw_airborne(Vector3(1.0, 0.0, 0.0) * 2.0 + Vector3.UP * 5.0)
+	check(enemy.state == Unit.State.THROWN, "the target is in the air")
+	var vy: float = enemy._throw_velocity.y
+	var vx: float = enemy._throw_velocity.x
+	var ball: Fireball = Fireball.new()
+	ball.setup(shooter, enemy, shooter.position + Vector3(0.0, 1.1, 0.0))
+	var ticks: int = 0
+	while not ball.done and ticks < 200:
+		ball.tick(TICK)
+		ticks += 1
+	check(ball.done, "fireball impacted")
+	check(enemy._knockback_remaining == Vector3.ZERO,
+		"no ground shove on a flying target")
+	check(enemy._throw_velocity.y >= vy + Balance.LIFT_AIRBORNE_BONUS,
+		"the hit adds height instead")
+	check(enemy._throw_velocity.x > vx, "and a little more push along the flight")
+	ball.free()
+	_free_world(w)
+
+
+## Deck passengers ride the airship; nothing throws them off it.
+func test_apply_lift_ignores_deck_passengers() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = w.unit_manager.spawn_unit(
+		preload("res://scenes/units/airship.tscn"), 0, Vector3(30, 5, 30))
+	var crew: Unit = _spawn(w, BRAVE_SCENE, 0, Vector2(30, 31))
+	crew.order_crew(ship)
+	var ticks: int = 0
+	while not crew.is_crew_seated() and ticks < 400:
+		crew.tick(TICK)
+		w.unit_manager.tick(TICK)
+		ticks += 1
+	check(crew.rides_airborne(), "the brave rides the deck")
+	var before: int = crew.state
+	crew.apply_lift(Vector3(1, 0, 0), 8.0, 9.0)
+	check(crew.state == before, "apply_lift leaves a deck passenger alone")
+	check(crew.state != Unit.State.THROWN, "...it is never thrown off the ship")
+	_free_world(w)
+
+
+## The lightning hands over raw difference vectors — a unit standing exactly on
+## the strike point yields a ZERO direction. It must still be launched, in some
+## direction, instead of straight up or not at all.
+func test_apply_lift_zero_direction_fallback() -> void:
+	var w: Dictionary = _make_world()
+	var victim: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
+	victim.apply_lift(Vector3.ZERO, 6.0, 7.0)
+	check(victim.state == Unit.State.THROWN, "a zero direction still launches")
+	var flat: Vector2 = Vector2(victim._throw_velocity.x, victim._throw_velocity.z)
+	check_near(flat.length(), 6.0, "the horizontal speed is the requested one")
+	check_near(victim._throw_velocity.y, 7.0, "and so is the vertical one")
+	_free_world(w)
+
+
+## An unnormalised direction (the callers hand over raw offsets) must not scale
+## the launch speed with the distance.
+func test_apply_lift_normalises_the_direction() -> void:
+	var w: Dictionary = _make_world()
+	var victim: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
+	victim.apply_lift(Vector3(12.0, 99.0, 0.0), 5.0, 6.0)
+	var flat: Vector2 = Vector2(victim._throw_velocity.x, victim._throw_velocity.z)
+	check_near(flat.length(), 5.0, "length and Y of the direction are ignored")
+	check_near(victim._throw_velocity.y, 6.0, "the vertical speed is the parameter")
+	_free_world(w)
+
+
 # --- Preacher conversion (phase 5c) ------------------------------------------------
 
 ## A preacher near an enemy brave makes it sit, the progress runs, and on

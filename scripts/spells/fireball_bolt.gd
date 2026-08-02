@@ -13,8 +13,11 @@ const DIRECT_DAMAGE: int = Balance.FIREBALL_DIRECT_DAMAGE
 const SPLASH_DAMAGE: int = Balance.FIREBALL_SPLASH_DAMAGE
 const DIRECT_RADIUS: float = Balance.FIREBALL_DIRECT_RADIUS   # counts as a direct hit
 const SPLASH_RADIUS: float = Balance.FIREBALL_SPLASH_RADIUS   # small area of effect
-const THROW_BACK: float = 5.0      # horizontal launch speed away from impact
-const THROW_UP: float = 6.0        # vertical launch speed
+## Phase 10c: the blast SHOVES further than it burns — units between
+## SPLASH_RADIUS and PUSH_RADIUS are thrown and lifted without taking damage.
+const PUSH_RADIUS: float = Balance.FIREBALL_PUSH_RADIUS
+const PUSH_SPEED: float = Balance.FIREBALL_PUSH_SPEED
+const LIFT_SPEED: float = Balance.FIREBALL_LIFT_SPEED
 
 var done: bool = false
 var tribe_id: int = 0
@@ -63,8 +66,20 @@ func _explode() -> void:
 		unit_manager.tree_manager.ignite_in_radius(target_pos, SPLASH_RADIUS)
 	if unit_manager.wood_pile_manager != null:
 		unit_manager.wood_pile_manager.ignite_in_radius(target_pos, SPLASH_RADIUS)
-	for u in unit_manager.get_units_in_radius(target_pos, SPLASH_RADIUS):
+	# ONE query over the wider push radius; the damage test below narrows it
+	# back down to the splash radius.
+	for u in unit_manager.get_units_in_radius(target_pos, maxf(SPLASH_RADIUS, PUSH_RADIUS)):
 		if u.state == Unit.State.DEAD or u.tribe_id == tribe_id:
+			continue
+		var flat_d: float = Vector2(u.position.x - target_pos.x,
+			u.position.z - target_pos.z).length()
+		var away: Vector3 = Vector3(u.position.x - target_pos.x, 0.0,
+			u.position.z - target_pos.z)
+		if flat_d > SPLASH_RADIUS:
+			# Rim of the blast: shoved and lifted, but unhurt (and vehicles
+			# out there are neither hulled nor set alight).
+			if not (u is CrewedVehicle):
+				u.apply_lift(away, PUSH_SPEED, LIFT_SPEED)
 			continue
 		if u is Airship:
 			# The airship's hull takes a counted hit instead of burning:
@@ -77,20 +92,15 @@ func _explode() -> void:
 			# then sinks; the crew takes the splash on its own.
 			u.ignite(target_pos)
 			continue
-		var flat_d: float = Vector2(u.position.x - target_pos.x,
-			u.position.z - target_pos.z).length()
 		var dmg: int = DIRECT_DAMAGE if flat_d <= DIRECT_RADIUS else SPLASH_DAMAGE
 		var attacker = shooter if (shooter != null and is_instance_valid(shooter)) else null
 		u.take_damage(dmg, attacker)
 		if u.state == Unit.State.DEAD:
 			continue
 		# Knocked back and lifted into a small arc; they land rolling and come
-		# to a stop quickly on flat ground.
-		var away: Vector3 = Vector3(u.position.x - target_pos.x, 0.0,
-			u.position.z - target_pos.z)
-		if away.length_squared() < 0.000001:
-			away = Vector3(1, 0, 0).rotated(Vector3.UP, randf() * TAU)
-		u.throw_airborne(away.normalized() * THROW_BACK + Vector3.UP * THROW_UP)
+		# to a stop quickly on flat ground. A target that is already flying is
+		# whirled higher still (Unit.apply_lift).
+		u.apply_lift(away, PUSH_SPEED, LIFT_SPEED)
 
 
 func _ready() -> void:

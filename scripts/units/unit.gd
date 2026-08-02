@@ -1794,6 +1794,33 @@ func throw_airborne(velocity: Vector3, fall_damage: int = 0) -> void:
 	_set_state(State.THROWN)
 
 
+## Knockback WITH lift (phase 10c): shoves the unit away along `dir` and lifts
+## it off the ground in one go — the shared primitive behind the fireball
+## spell, the firestorm bolts, the lightning shockwave and the firewarrior's
+## occasional uppercut. `dir` may be unnormalised or even (near) zero (the
+## lightning hands over raw difference vectors); a zero direction picks a
+## random one so nobody is launched straight up out of a stack.
+##
+## A target that is ALREADY flying takes a WEAKER horizontal push but MORE
+## height — every follow-up hit whirls it higher (throw_airborne stacks the
+## velocity, so the arc keeps growing).
+func apply_lift(dir: Vector3, horizontal: float, vertical: float,
+		fall_damage: int = 0) -> void:
+	if state == State.DEAD or rides_airborne():
+		return   # deck passengers are carried by the airship, never thrown
+	var flat: Vector3 = Vector3(dir.x, 0.0, dir.z)
+	if flat.length_squared() < 0.000001:
+		flat = Vector3(1, 0, 0).rotated(Vector3.UP, randf() * TAU)
+	else:
+		flat = flat.normalized()
+	var h: float = horizontal
+	var v: float = vertical
+	if state == State.THROWN:
+		h *= Balance.LIFT_AIRBORNE_PUSH_FACTOR
+		v += Balance.LIFT_AIRBORNE_BONUS
+	throw_airborne(flat * h + Vector3.UP * v, fall_damage)
+
+
 func _tick_thrown(delta: float) -> void:
 	_throw_time += delta
 	if _throw_time >= THROWN_MAX_DURATION:

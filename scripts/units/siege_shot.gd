@@ -197,6 +197,7 @@ func _spawn_lava(wreck_buildings: bool) -> void:
 		else target_pos.y, target_pos.z),
 		unit_manager, terrain_data, LAVA_RADIUS, building_manager)
 	surge.damage_buildings = wreck_buildings
+	surge.lifetime = Balance.LAVA_CATAPULT_LIFETIME
 	unit_manager.register_projectile(surge)
 
 

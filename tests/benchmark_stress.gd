@@ -36,8 +36,10 @@ const SIEGE_CREW: int = 3
 const OFFSET: int = 30
 const MARCH_TICK: int = 150            # 5 s idle delay
 const CAST_INTERVAL_TICKS: int = 150   # one tribe casts every 5 s
+## The volcano rides along since phase 10c: its lava is the most expensive
+## projectile in the game, and without it the `proj` phase measures nothing.
 const SPELLS: Array[StringName] = [
-	&"tornado", &"earthquake", &"swarm", &"firestorm"]
+	&"tornado", &"earthquake", &"swarm", &"firestorm", &"volcano"]
 
 const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
 const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
@@ -97,7 +99,10 @@ func _simulate(um: UnitManager, commands: TribeCommands, tribes: Array[Tribe],
 	var grid_us: int = 0
 	var path_us: int = 0
 	var sep_us: int = 0
-	var rest_us: int = 0
+	var regroup_us: int = 0
+	## Projectile phase on its own (phase 10c: lava has to be visible here).
+	var proj_us: int = 0
+	var proj_worst: int = 0
 	var spell_index: int = 0
 	var alive_at_window: int = 0
 	var worst_tick_at: int = -1
@@ -106,7 +111,9 @@ func _simulate(um: UnitManager, commands: TribeCommands, tribes: Array[Tribe],
 	var block_us: int = 0
 	var block_units: int = 0
 	var block_sep: int = 0
+	var block_proj: int = 0
 	var block_worst: int = 0
+	var worst_block_proj: float = 0.0
 	for t in range(TICKS):
 		if t == MARCH_TICK:
 			for tribe in tribes:
@@ -149,14 +156,17 @@ func _simulate(um: UnitManager, commands: TribeCommands, tribes: Array[Tribe],
 		um._apply_combat_groups(TICK)
 		var t4: int = Time.get_ticks_usec()
 		um._apply_idle_regroup(TICK)
-		um._tick_projectiles(TICK)
 		var t5: int = Time.get_ticks_usec()
+		um._tick_projectiles(TICK)
+		var t6: int = Time.get_ticks_usec()
 		units_us += t1 - t0
 		grid_us += t2 - t1
 		path_us += t3 - t2
 		sep_us += t4 - t3
-		rest_us += t5 - t4
-		var took: int = t5 - t0
+		regroup_us += t5 - t4
+		proj_us += t6 - t5
+		proj_worst = maxi(proj_worst, t6 - t5)
+		var took: int = t6 - t0
 		total_us += took
 		if took > worst_us:
 			worst_us = took
@@ -166,18 +176,23 @@ func _simulate(um: UnitManager, commands: TribeCommands, tribes: Array[Tribe],
 		block_us += took
 		block_units += t1 - t0
 		block_sep += t4 - t3
+		block_proj += t6 - t5
 		block_worst = maxi(block_worst, took)
 		if (t + 1) % 150 == 0:
 			var alive: int = 0
 			for u in um.units:
 				if is_instance_valid(u) and u.state != Unit.State.DEAD:
 					alive += 1
-			print("  t%4d-%4d: Ø %6.2f ms (units %6.2f, sep %5.2f) | worst %6.2f | lebend %d" % [
+			var block_proj_ms: float = float(block_proj) / 150000.0
+			worst_block_proj = maxf(worst_block_proj, block_proj_ms)
+			print("  t%4d-%4d: Ø %6.2f ms (units %6.2f, sep %5.2f, proj %5.2f) | worst %6.2f | lebend %d" % [
 				t - 149, t, float(block_us) / 150000.0, float(block_units) / 150000.0,
-				float(block_sep) / 150000.0, float(block_worst) / 1000.0, alive])
+				float(block_sep) / 150000.0, block_proj_ms,
+				float(block_worst) / 1000.0, alive])
 			block_us = 0
 			block_units = 0
 			block_sep = 0
+			block_proj = 0
 			block_worst = 0
 	var n: float = float(TICKS)
 	print("stress 4x%d: Ø %.2f ms | Ø Kampf-Fenster %.2f ms | schlimmster Tick %.2f ms (t=%d) | lebend @Fenster %d | Pfade %d (%d Fehlschläge, %.1f ms) | Budget ~33 ms" % [
@@ -185,10 +200,12 @@ func _simulate(um: UnitManager, commands: TribeCommands, tribes: Array[Tribe],
 		float(window_us) / float(TICKS - WINDOW_FROM) / 1000.0,
 		float(worst_us) / 1000.0, worst_tick_at, alive_at_window,
 		Unit.dbg_plan_calls, Unit.dbg_plan_fails, float(Unit.dbg_plan_us) / 1000.0])
-	print("  Ø Phasen: units %.2f | grid %.2f | paths %.2f | sep+groups %.2f | regroup+proj %.2f ms" % [
+	print("  Ø Phasen: units %.2f | grid %.2f | paths %.2f | sep+groups %.2f | regroup %.2f | proj %.2f ms" % [
 		float(units_us) / n / 1000.0, float(grid_us) / n / 1000.0,
 		float(path_us) / n / 1000.0, float(sep_us) / n / 1000.0,
-		float(rest_us) / n / 1000.0])
+		float(regroup_us) / n / 1000.0, float(proj_us) / n / 1000.0])
+	print("  proj: Ø %.2f ms | schlechtester 150-Tick-Block Ø %.2f ms | schlimmster Tick %.2f ms" % [
+		float(proj_us) / n / 1000.0, worst_block_proj, float(proj_worst) / 1000.0])
 
 
 ## Cast point like Main._stress_spell_target: nearest enemy around the shaman.

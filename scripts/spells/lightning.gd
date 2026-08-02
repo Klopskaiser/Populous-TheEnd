@@ -2,13 +2,18 @@ class_name LightningSpell extends Spell
 
 ## "Blitz": strikes the target point. An enemy BUILDING there takes +2
 ## destruction stages; otherwise the nearest enemy unit around the point takes
-## 4x a brave's life (240) and its adjacent units are knocked into a short
-## roll (longer only on a slope, via the normal fall-line rolling). No target
-## at all -> the cast fails and the charge is kept.
+## 4x a brave's life (240) and its adjacent units are hurled away and lifted
+## off the ground (phase 10c — noticeably harder than the fireball; they land
+## rolling by themselves). No target at all -> the cast fails and the charge
+## is kept.
 
 const UNIT_DAMAGE: int = Balance.LIGHTNING_UNIT_DAMAGE
 const TARGET_RADIUS: float = 3.0    # victim search radius around the click
-const NEIGHBOR_RADIUS: float = 1.5  # adjacent units start rolling
+## Phase 10c: the strike's shockwave HURLS the bystanders (stronger than the
+## fireball's) instead of merely bowling them over.
+const PUSH_RADIUS: float = Balance.LIGHTNING_PUSH_RADIUS
+const PUSH_SPEED: float = Balance.LIGHTNING_PUSH_SPEED
+const LIFT_SPEED: float = Balance.LIGHTNING_LIFT_SPEED
 const BUILDING_STAGES: int = Balance.LIGHTNING_BUILDING_STAGES
 ## The white beam is visible this long.
 const BEAM_TIME: float = 0.35
@@ -63,12 +68,15 @@ func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:
 	_spawn_beam(victim.position, ctx)
 	# Adjacent units first (the victim's position may deregister on death).
 	if ctx.unit_manager != null:
-		for u in ctx.unit_manager.get_units_in_radius(victim.position, NEIGHBOR_RADIUS):
+		for u in ctx.unit_manager.get_units_in_radius(victim.position, PUSH_RADIUS):
 			if u == victim or u.state == Unit.State.DEAD or u.tribe_id == tribe.id:
 				continue
 			var away: Vector3 = Vector3(u.position.x - victim.position.x, 0.0,
 				u.position.z - victim.position.z)
-			u.start_roll(away)
+			# apply_lift normalises and falls back on a random direction for
+			# the units standing exactly on the strike point; the tumble comes
+			# for free when they land (_land_from_throw).
+			u.apply_lift(away, PUSH_SPEED, LIFT_SPEED)
 	victim.take_damage(UNIT_DAMAGE, caster)
 	return true
 

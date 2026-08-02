@@ -269,6 +269,31 @@ const SHOVE_ROLL_CHANCE: float = 0.25
 const STEEP_ROLL_CHANCE_PER_SEC: float = 0.5
 
 # =============================================================================
+# RÜCKSTOSS & ANHEBEN (Phase 10c — Unit.apply_lift)
+# =============================================================================
+
+## Feuerball-Zauber und jeder Feuerregen-Bolt: Schubradius etwas GRÖSSER als
+## der Schadensradius (2,5) — Randtreffer werden nur geschoben, nicht verletzt.
+const FIREBALL_PUSH_RADIUS: float = 3.2
+const FIREBALL_PUSH_SPEED: float = 5.0
+const FIREBALL_LIFT_SPEED: float = 6.5
+## Blitz: stärker als der Feuerball.
+const LIGHTNING_PUSH_RADIUS: float = 2.6
+const LIGHTNING_PUSH_SPEED: float = 7.0
+const LIGHTNING_LIFT_SPEED: float = 9.0
+## Feuerkrieger: Teil der Umwerf-Chance wird zu "Anheben" — Summe unverändert.
+const FW_FIREBALL_ROLL_CHANCE: float = 0.06
+const FW_FIREBALL_LIFT_CHANCE: float = 0.04
+const FW_FIREBALL_ROLL_CHANCE_ROLLING: float = 0.30
+const FW_FIREBALL_LIFT_CHANCE_ROLLING: float = 0.10
+## Ein Lift ERSETZT den Bodenschub: weniger Horizontale, kleiner Hüpfer.
+const FW_FIREBALL_LIFT_PUSH: float = 1.2
+const FW_FIREBALL_LIFT_UP: float = 3.0
+## Treffer auf bereits fliegende Ziele: der Lift wird IMMER verstärkt.
+const LIFT_AIRBORNE_BONUS: float = 4.0
+const LIFT_AIRBORNE_PUSH_FACTOR: float = 0.5
+
+# =============================================================================
 # BRAND / LAVA (Einheiten)
 # =============================================================================
 
@@ -280,6 +305,23 @@ const BURN_TOTAL_DAMAGE: int = 60
 const LAVA_BUILDING_STAGE_TIME: float = 5.0
 ## … wobei der Kontaktzähler resettet, wenn so lange keine Lava anliegt.
 const LAVA_BUILDING_CONTACT_GRACE: float = 1.0
+
+# --- LAVA: Fluss, Lebensdauer, Kostendeckel (Phase 10c) ---
+## Lebensdauer JEDER Lava-Instanz nach dem Spawn (Vulkan, Erdbeben, …).
+const LAVA_LIFETIME: float = 5.0
+## Katapult-Pfütze: eigener Wert, Verhalten sonst identisch.
+const LAVA_CATAPULT_LIFETIME: float = 5.0
+## Zähflüssig: Grundtempo der Front (m/s) — vorher 3,0-3,2.
+const LAVA_FLOW_SPEED: float = 0.9
+## Hangabhängigkeit: Tempo = FLOW_SPEED * (1 + BIAS * Gefälle), bergauf 0.
+const LAVA_SLOPE_BIAS: float = 2.5
+## Unter diesem Gefälle staut sich die Lava zur Pfütze.
+const LAVA_MIN_SLOPE: float = 0.04
+## Glühdauer einer frisch überströmten Stelle (Schadensfenster).
+const LAVA_MOLTEN_TIME: float = 3.0
+## Kostendeckel: Kontaktprüfung und Mesh-Neubau (Sekunden).
+const LAVA_CONTACT_INTERVAL: float = 0.25
+const LAVA_VISUAL_INTERVAL: float = 0.2
 
 # =============================================================================
 # ZAUBER — Ladungen (charge_cost = Mana pro Ladung) und Reichweite
@@ -374,10 +416,23 @@ const EARTHQUAKE_RADIUS: float = 7.0
 const EARTHQUAKE_BUILDING_STAGES: int = 2
 const EARTHQUAKE_UNIT_DAMAGE: int = 15     # 1/4 Brave-Leben
 
+# --- Erdbeben-Lava (Phase 10c) ---
+const EARTHQUAKE_LAVA_STREAMS: int = 3
+## Versatz von der Bruchlinie auf die HEBUNGSSEITE (obere Kante).
+const EARTHQUAKE_LAVA_EDGE_OFFSET: float = 0.8
+## Wartezeit, bis der TerrainMorph die Kante geöffnet hat.
+const EARTHQUAKE_LAVA_DELAY: float = 1.2
+const EARTHQUAKE_LAVA_RANGE: float = 3.5
+
 # --- Vulkan ---
 const VOLCANO_RADIUS: float = 5.0
 ## Lebensdauer der aktiven Vulkanzone (Lava/Stufenschaden).
 const VOLCANO_ZONE_LIFETIME: float = 20.0
+## Gezählte Lavastöße je Ausbruch (robust gegen spätere Lifetime-Änderungen).
+const VOLCANO_SURGE_COUNT: int = 2
+## ACHTUNG: > LAVA_MOLTEN_TIME + LAVA_BUILDING_CONTACT_GRACE schaltet den
+## Gebäudeschaden des Vulkans still ab (Herleitung in plans/10c).
+const VOLCANO_SURGE_INTERVAL: float = 3.5
 
 # --- Ebene / Absinken / Landbrücke ---
 const FLATTEN_HALF_EXTENT: float = 4.5     # halbe Kantenlänge des Quadrats

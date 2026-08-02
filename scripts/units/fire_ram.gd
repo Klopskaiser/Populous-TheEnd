@@ -322,10 +322,10 @@ func _death_blast(origin: Vector3, forward: Vector3) -> void:
 				continue
 			var away: Vector3 = Vector3(u.position.x - origin.x, 0.0,
 				u.position.z - origin.z)
-			if away.length_squared() < 0.000001:
-				away = Vector3(1, 0, 0).rotated(Vector3.UP, randf() * TAU)
-			u.throw_airborne(away.normalized() * FireballBolt.THROW_BACK
-				+ Vector3.UP * FireballBolt.THROW_UP)
+			# Same launch strength as a fireball blast (phase 10c: via the
+			# shared lift primitive, which handles the zero-direction case
+			# and amplifies hits on units that are already flying).
+			u.apply_lift(away, FireballBolt.PUSH_SPEED, FireballBolt.LIFT_SPEED)
 	if building_manager != null:
 		# Centreline samples like _apply_flames; duplicate() because a stage
 		# can level a construction site and mutate the list.
