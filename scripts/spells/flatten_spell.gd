@@ -37,6 +37,7 @@ func execute(_tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:
 	_fling_units(target, level, ctx)
 	var morph: TerrainMorph = TerrainMorph.new()
 	morph.setup(ctx, plan, DURATION)
+	morph.sfx_id = id
 	ctx.unit_manager.register_projectile(morph)
 	return true
 

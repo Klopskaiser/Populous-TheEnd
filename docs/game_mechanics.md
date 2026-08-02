@@ -56,7 +56,7 @@ als Arbeiter-Unterhalt (siehe §4).
 | **Krieger** | 120 | 4,0 m/s | Nahkampf ×3,0 | Stärkster Nahkämpfer; schubst fast nie (4 % statt 15 %), schlägt lieber zu. Aggro-Radius 8 m. |
 | **Feuerkrieger** | 60 | 4,0 m/s | Feuerball: 9 HP (Einheiten) / 5 HP (Gebäude), Reichweite 8 m, alle 1,5 s | Fernkämpfer; großer Aggro-Radius (13 m). Kann Wachtürme bemannen (+3 m Reichweite). |
 | **Prediger** | 90 | 4,0 m/s | konvertiert statt zu kämpfen | **Bekehrt** Feinde (Reichweite 5 m, Dauer zufällig 4–9 s). Mehrere Prediger verteilen sich auf verschiedene Ziele; Einheiten **in Bekehrung sind kein gültiges Ziel** für Nah-/Fernkampf (Katapult ausgenommen). |
-| **Schamanin** | 240 (4× Brave) | 4,0 m/s | Nahkampf ×2,0; einzige Zauberwirkerin (Wind-up 0,6 s) | Genau eine pro Stamm. Stirbt sie, **respawnt** sie nach **20 s** am Reinkarnationsplatz; der Stamm des Tötenden erhält einmalig **15 %** seiner Ladungskapazität als Manaboost. |
+| **Schamanin** | 240 (4× Brave) | 4,0 m/s | Nahkampf ×2,0; einzige Zauberwirkerin (Wind-up 1,0 s) | Genau eine pro Stamm. Stirbt sie, **respawnt** sie nach **20 s** am Reinkarnationsplatz; der Stamm des Tötenden erhält einmalig **15 %** seiner Ladungskapazität als Manaboost. |
 | **Katapult** | — (nicht direkt angreifbar) | 2,0 m/s | Schuss: Reichweite 3–15 m; Einschlag 15 HP im 2-m-Radius (**Friendly Fire!**); Gebäude +1 Zerstörungsstufe; Raider im eigenen Gebäude: 30 HP + Rauswurf | Fahrzeug mit Crew (bis 6): Schuss-Cooldown 6 s bei 2 Crew → 3 s bei voller Crew. Bekämpft wird die **Crew**, nicht das Fahrzeug; ein unbemanntes Katapult kann jeder Stamm übernehmen. |
 
 ---
@@ -75,7 +75,7 @@ Enum `Unit.State` in `scripts/units/unit.gd`:
 | `ATTACK` | Kämpft im Nahkampf/Fernkampf gegen ein Einheitenziel. |
 | `TRAIN` | In einem Trainingsgebäude; kommt als Kampfeinheit wieder heraus. |
 | `PANIC` | Flieht kopflos vor der Panikquelle; nicht steuerbar (Details §6 Statuseffekte). |
-| `CAST` | Schamanin wirkt einen Zauber (Wind-up, dann Release). |
+| `CAST` | Schamanin wirkt einen Zauber: 1,0 s Wind-up (sie spricht die Zauberformel), dann Release. |
 | `THROWN` | Durch die Luft geschleudert (Feuerball, Tornado) — Wurfparabel bis zur Landung. |
 | `DEAD` | Tot; Leiche liegt 6 s und versinkt dann im Boden (1 s Animation). |
 | `SIT` | Von einem feindlichen Prediger fixiert (Bekehrung läuft). |
@@ -222,7 +222,15 @@ sowie von selbst beim Hinablaufen sehr steiler Hänge (Stolpern).
 **Ladungssystem:** Mana wird automatisch in Zauber-Ladungen umgewandelt (je
 Zauber `charge_cost` Mana pro Ladung, gespeichert bis `max_charges`). Casts
 verbrauchen Ladungen; es gibt **keinen separaten Cooldown**. Anzeige als
-Ladungs-Pips in der Zauberleiste. Nur die Schamanin zaubert (Wind-up 0,6 s).
+Ladungs-Pips in der Zauberleiste. Nur die Schamanin zaubert.
+
+**Zauberzeit:** Jeder Zauber hat ein Wind-up von **1,0 s**
+(`Balance.SHAMAN_CAST_TIME`), in dem die Schamanin die **Zauberformel** spricht
+(Sound `spell_voice_<id>`). Der Sound des Effekts (`spell_<id>`) kommt getrennt
+davon, erst wenn der Effekt **tatsächlich eintritt** — beim Einschlag, beim
+Ausbruch oder sobald sich der Boden zu bewegen beginnt. Aus einem Wachturm oder
+vom Luftschiffdeck zaubert sie **ohne** Wind-up; dort fallen Formel und Effekt
+zusammen.
 
 | Taste | Zauber | Mana/Ladung | Max. Ladungen | Reichweite | Effekt |
 |---|---|---|---|---|---|

@@ -44,5 +44,6 @@ func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:
 		return false
 	var morph: TerrainMorph = TerrainMorph.new()
 	morph.setup(ctx, plan, DURATION)
+	morph.sfx_id = id
 	ctx.unit_manager.register_projectile(morph)
 	return true

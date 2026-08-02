@@ -23,5 +23,12 @@ signal spell_charges_changed(tribe_id: int)
 signal building_completed(building: Node)
 ## A training building released a freshly trained unit at pos.
 signal unit_trained(kind: StringName, pos: Vector3)
+## The shaman began a cast at her own position: the wind-up started and she
+## speaks the incantation (AudioManager plays spell_voice_<id>). Fires once per
+## cast order, before the effect exists — for the instant casts from a tower or
+## an airship deck it coincides with the release.
+signal spell_cast_started(spell_id: StringName, pos: Vector3)
 ## A spell was successfully cast (charge consumed) at the target position.
+## No sound hangs off this one: since phase 10b the effect's own sound is played
+## by whatever entity produces it, when it actually happens (see SpellAudio).
 signal spell_cast(spell_id: StringName, pos: Vector3)

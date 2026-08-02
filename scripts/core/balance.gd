@@ -56,8 +56,9 @@ const PREACHER_KICK_CHANCE: float = 0.1
 const SHAMAN_HP: int = 240              # 4 x Brave
 const SHAMAN_SPEED: float = 4.0
 const SHAMAN_MELEE_STRENGTH: float = 2.0   # 2 x Brave-Schaden
-## Wind-up vor dem Zauber-Release.
-const SHAMAN_CAST_TIME: float = 0.6
+## Wind-up vor dem Zauber-Release: die Zeit, in der die Schamanin die
+## Zauberformel spricht (Phase 10b). Für alle Zauber gleich.
+const SHAMAN_CAST_TIME: float = 1.0
 ## Mana-Bonus (Anteil der Ladungskapazität) für den Stamm, der sie tötet.
 const SHAMAN_KILL_BONUS_SHARE: float = 0.15
 ## Wartezeit bis zum Respawn am Reinkarnationsplatz.

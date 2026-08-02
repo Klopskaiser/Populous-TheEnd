@@ -5,6 +5,11 @@ extends Node
 ## through AssetLibrary — a missing file simply plays nothing (one warning per
 ## name), so the game works without any audio assets. Combat hit sounds stay
 ## in CombatAudio (with its own throttle); this manager covers everything else.
+##
+## Slots are handed out by AudioSlots.pick_slot (phase 10b): prio 1 = spell
+## incantations + shaman death, prio 2 = siege engine / airship deaths, prio 3 =
+## everything else. A prio 3 sound is dropped before an important one is cut
+## off, and a saturated pool never drops a sound while a slot is still idle.
 
 const SFX_POOL_SIZE: int = 8
 const UI_POOL_SIZE: int = 4
@@ -17,6 +22,16 @@ var _sfx_pool: Array[AudioStreamPlayer3D] = []
 var _sfx_index: int = 0
 var _ui_pool: Array[AudioStreamPlayer] = []
 var _ui_index: int = 0
+## Per-slot allocator state (see AudioSlots): priority of the sound currently on
+## the slot and when it started. Only meaningful while the slot is playing.
+var _sfx_prio: PackedInt32Array = PackedInt32Array()
+var _sfx_start_ms: PackedInt64Array = PackedInt64Array()
+var _ui_prio: PackedInt32Array = PackedInt32Array()
+var _ui_start_ms: PackedInt64Array = PackedInt64Array()
+## Scratch buffers for the "is this slot busy" snapshot pick_slot works on
+## (reused so a play call allocates nothing).
+var _sfx_busy: Array = []
+var _ui_busy: Array = []
 var _music_player: AudioStreamPlayer
 var _ambience_player: AudioStreamPlayer
 var _music_tracks: Array[AudioStream] = []
@@ -40,6 +55,14 @@ func _enter_tree() -> void:
 
 
 func _ready() -> void:
+	_sfx_prio.resize(SFX_POOL_SIZE)
+	_sfx_start_ms.resize(SFX_POOL_SIZE)
+	_ui_prio.resize(UI_POOL_SIZE)
+	_ui_start_ms.resize(UI_POOL_SIZE)
+	_sfx_prio.fill(AudioSlots.PRIO_NORMAL)
+	_ui_prio.fill(AudioSlots.PRIO_NORMAL)
+	_sfx_busy.resize(SFX_POOL_SIZE)
+	_ui_busy.resize(UI_POOL_SIZE)
 	for i in range(SFX_POOL_SIZE):
 		var player: AudioStreamPlayer3D = AudioStreamPlayer3D.new()
 		player.max_distance = 60.0
@@ -66,7 +89,7 @@ func _ready() -> void:
 	if events != null:
 		events.building_completed.connect(_on_building_completed)
 		events.unit_trained.connect(_on_unit_trained)
-		events.spell_cast.connect(_on_spell_cast)
+		events.spell_cast_started.connect(_on_spell_cast_started)
 		events.building_destroyed.connect(_on_building_destroyed)
 		events.unit_died.connect(_on_unit_died)
 
@@ -78,36 +101,63 @@ func _ready() -> void:
 ## instead of the base file — one is picked at random per play.
 ## min_interval_ms > 0 throttles repeats of the SAME name (mass events like
 ## panic waves or death piles collapse into one sound per interval).
-func play_sfx(name: StringName, pos: Vector3, min_interval_ms: int = 0) -> void:
-	if min_interval_ms > 0:
-		var now: int = Time.get_ticks_msec()
-		if now - int(_sfx_last_ms.get(name, -min_interval_ms)) < min_interval_ms:
-			return
-		_sfx_last_ms[name] = now
+## priority: PRIO_AUTO derives it from the name (AudioSlots.default_priority);
+## pass one explicitly to override.
+func play_sfx(name: StringName, pos: Vector3, min_interval_ms: int = 0,
+		priority: int = AudioSlots.PRIO_AUTO) -> void:
+	# Resolve the file first: a missing sound must neither steal a slot nor burn
+	# the throttle window.
 	var streams: Array = _streams_for("audio/sfx/%s" % name)
 	if streams.is_empty():
 		return
-	var player: AudioStreamPlayer3D = _sfx_pool[_sfx_index]
-	_sfx_index = (_sfx_index + 1) % SFX_POOL_SIZE
-	if player.playing:
-		return   # pool exhausted -> drop (throttle)
+	var now: int = Time.get_ticks_msec()
+	if min_interval_ms > 0 \
+			and now - int(_sfx_last_ms.get(name, -min_interval_ms)) < min_interval_ms:
+		return
+	var want: int = priority if priority != AudioSlots.PRIO_AUTO \
+		else AudioSlots.default_priority(name)
+	var idx: int = AudioSlots.pick_slot(_busy_snapshot(_sfx_pool, _sfx_busy),
+		_sfx_prio, _sfx_start_ms, want, _sfx_index, now)
+	if idx == -1:
+		return
+	_sfx_index = (idx + 1) % SFX_POOL_SIZE
+	_sfx_prio[idx] = want
+	_sfx_start_ms[idx] = now
+	# Only a sound that actually starts consumes its throttle window (before
+	# phase 10b a dropped sound silenced the next interval as well).
+	_sfx_last_ms[name] = now
+	var player: AudioStreamPlayer3D = _sfx_pool[idx]
 	player.stream = streams[randi() % streams.size()]
 	player.global_position = pos
 	player.play()
 
 
 ## Plays assets/audio/ui/<name>.ogg non-positionally; silent when missing.
-## Supports the same random numbered variants as play_sfx.
+## Supports the same random numbered variants as play_sfx. UI feedback is always
+## prio 3 — it competes only with itself (own pool).
 func play_ui(name: StringName) -> void:
 	var streams: Array = _streams_for("audio/ui/%s" % name)
 	if streams.is_empty():
 		return
-	var player: AudioStreamPlayer = _ui_pool[_ui_index]
-	_ui_index = (_ui_index + 1) % UI_POOL_SIZE
-	if player.playing:
+	var now: int = Time.get_ticks_msec()
+	var idx: int = AudioSlots.pick_slot(_busy_snapshot(_ui_pool, _ui_busy),
+		_ui_prio, _ui_start_ms, AudioSlots.PRIO_NORMAL, _ui_index, now)
+	if idx == -1:
 		return
+	_ui_index = (idx + 1) % UI_POOL_SIZE
+	_ui_prio[idx] = AudioSlots.PRIO_NORMAL
+	_ui_start_ms[idx] = now
+	var player: AudioStreamPlayer = _ui_pool[idx]
 	player.stream = streams[randi() % streams.size()]
 	player.play()
+
+
+## Busy flags of a pool for AudioSlots.pick_slot. Fills a preallocated scratch
+## array — play calls happen dozens of times per second in a battle.
+func _busy_snapshot(pool: Array, scratch: Array) -> Array:
+	for i in range(pool.size()):
+		scratch[i] = pool[i].playing
+	return scratch
 
 
 ## True when any file (base or numbered variant) for this sfx name exists
@@ -251,8 +301,12 @@ func _on_unit_trained(_kind: StringName, pos: Vector3) -> void:
 	play_sfx(&"training_done", pos)
 
 
-func _on_spell_cast(spell_id: StringName, pos: Vector3) -> void:
-	play_sfx(StringName("spell_%s" % spell_id), pos)
+## The shaman's incantation, at the START of the wind-up and at HER position
+## (phase 10b). The sound of the spell itself is played by whatever entity
+## creates the effect, when the effect actually happens — see SpellAudio.
+## Critical priority: the incantation must never lose its slot to battle noise.
+func _on_spell_cast_started(spell_id: StringName, pos: Vector3) -> void:
+	play_sfx(SpellAudio.voice_name(spell_id), pos, 0, AudioSlots.PRIO_CRITICAL)
 
 
 func _on_building_destroyed(building: Node) -> void:
@@ -270,7 +324,7 @@ func _on_unit_died(unit: Node) -> void:
 		else &"unit_death"
 	if key == &"":
 		return
-	play_sfx(key, (unit as Node3D).position, 200)
+	play_sfx(key, (unit as Node3D).global_position, 200)
 
 
 # --- Volume helpers (session-scoped, for the options UI) ------------------------------

@@ -35,7 +35,8 @@ assets/
     │                              # fireball_0.ogg, throw_0.ogg, preach_0.ogg — beliebig
     │                              # viele nummerierte Varianten ab _0, ohne Lücken
     ├── sfx/building_complete.ogg, building_destroyed.ogg, training_done.ogg, build_place.ogg
-    ├── sfx/spell_<id>.ogg       # vollständige Liste siehe Abschnitt Audio
+    ├── sfx/spell_voice_<id>.ogg # Zauberformel (Cast-Beginn) — Liste siehe Abschnitt Audio
+    ├── sfx/spell_<id>.ogg       # Sound des Effekts (Einschlag/Ausbruch) — ebenda
     └── ui/select_unit.ogg, select_building.ogg, click.ogg
 ```
 
@@ -229,6 +230,22 @@ richtig und erwünscht.
 - Fehlende Kampfsounds werden weiterhin synthetisiert; alle anderen fehlenden Sounds
   bleiben einfach stumm.
 
+### Sound-Prioritäten
+
+Es spielen nur begrenzt viele Sounds gleichzeitig (8 Slots für Welt-Sounds, 12
+eigene für Kampftreffer). Wird es eng, entscheidet die Priorität, wer den Slot
+bekommt (`scripts/core/audio_slots.gd`):
+
+| Prio | Sounds | Verhalten |
+|---|---|---|
+| **1** | `spell_voice_*`, `shaman_death` | Verdrängen bei Bedarf laufende Sounds niedrigerer Priorität |
+| **2** | `airship_death`, `siege_death_burn`, `siege_death_burst` | Verdrängen Prio 3 |
+| **3** | alles Übrige | Wird als Erstes verworfen, wenn kein Slot frei ist |
+
+Solange ein Slot frei ist, wird **nie** etwas verworfen — unabhängig von der
+Priorität. Gleichrangige Sounds verdrängen sich erst, wenn das Opfer schon
+250 ms läuft; Kampftreffer verdrängen sich gar nicht (eigener Pool).
+
 ### Vollständige Liste der einsetzbaren Sounds
 
 > **Varianten überall erlaubt:** Jeder Sound-Name (sfx **und** ui) kann statt
@@ -306,21 +323,45 @@ sobald ein Platz frei wird; Fallback = stumm):
 | `tree_burning.ogg` | Baum fängt Feuer |
 | `wood_chop.ogg` | Brave erntet Holz von einem Baum (gedrosselt) |
 
-**Zauber** — `audio/sfx/spell_<id>.ogg`, gespielt beim erfolgreichen Wirken.
-Die zehn gültigen IDs (aus `scripts/spells/*.gd`):
+**Zauber** — jeder Zauber hat **zwei** Sounds zu **zwei verschiedenen
+Zeitpunkten**:
 
-| Datei | Zauber |
+- `audio/sfx/spell_voice_<id>.ogg` — die **Zauberformel** der Schamanin. Startet
+  beim **Beginn** des Zaubervorgangs (Wind-up, 1,0 s), an **ihrer** Position.
+  Priorität 1 (siehe oben), wird also nie von Kampflärm verdrängt.
+- `audio/sfx/spell_<id>.ogg` — der Sound des **Effekts selbst** (Donner,
+  Einschlag, Ausbruch, mahlender Boden). Spielt erst, wenn der Effekt
+  **tatsächlich eintritt** — bei Wurf-/Terrainzaubern also deutlich später als
+  die Formel — und dort, wo er passiert.
+
+Die elf gültigen IDs (aus `scripts/spells/*.gd`):
+
+| Formel | Effekt | Zauber | Effekt spielt |
+|---|---|---|---|
+| `spell_voice_fireball.ogg` | `spell_fireball.ogg` | Feuerball | beim Einschlag (max. alle 60 ms) |
+| `spell_voice_lightning.ogg` | `spell_lightning.ogg` | Blitz | je Blitzsäule (jeder Treffer) |
+| `spell_voice_swarm.ogg` | `spell_swarm.ogg` | Insektenschwarm | wenn die Wolke erscheint |
+| `spell_voice_landbridge.ogg` | `spell_landbridge.ogg` | Landbrücke | wenn sich der Boden zu heben beginnt |
+| `spell_voice_tornado.ogg` | `spell_tornado.ogg` | Tornado | wenn der Trichter erscheint |
+| `spell_voice_earthquake.ogg` | `spell_earthquake.ogg` | Erdbeben | wenn sich der Boden zu bewegen beginnt |
+| `spell_voice_volcano.ogg` | `spell_volcano.ogg` | Vulkan | wenn sich der Kegel zu heben beginnt |
+| `spell_voice_firestorm.ogg` | `spell_firestorm.ogg` | Feuerregen | beim ersten Geschoss der Salve |
+| `spell_voice_flatten.ogg` | `spell_flatten.ogg` | Ebene | wenn sich der Boden zu bewegen beginnt |
+| `spell_voice_sink.ogg` | `spell_sink.ogg` | Absinken | wenn sich der Boden zu senken beginnt |
+| `spell_voice_supertornado.ogg` | `spell_supertornado.ogg` | Supertornado | wenn der Haupttrichter erscheint |
+
+**Zusatzsounds der Zauber** — `audio/sfx/` (Fallback = stumm):
+
+| Datei | Wird gespielt bei |
 |---|---|
-| `spell_fireball.ogg` | Feuerball |
-| `spell_lightning.ogg` | Blitz |
-| `spell_swarm.ogg` | Insektenschwarm |
-| `spell_landbridge.ogg` | Landbrücke |
-| `spell_tornado.ogg` | Tornado |
-| `spell_earthquake.ogg` | Erdbeben |
-| `spell_volcano.ogg` | Vulkan |
-| `spell_firestorm.ogg` | Feuerregen |
-| `spell_flatten.ogg` | Ebene |
-| `spell_sink.ogg` | Absinken |
+| `spell_tornado_loop.ogg` | Heulen, folgt dem Tornado, solange er steht (Dauerschleife) |
+| `spell_supertornado_loop.ogg` | Dasselbe für den Haupttrichter des Supertornados (die 2 Satelliten bleiben stumm) |
+| `spell_swarm_loop.ogg` | Summen, folgt der Schwarmwolke (Dauerschleife) |
+| `spell_volcano_erupt.ogg` | Ein Ausbruch des Vulkans (einer je Lavastoß) |
+| `lava_start.ogg` | Lava tritt aus — jede Quelle (Vulkan, Erdbeben-Verwerfung, Katapult-Pfütze), max. alle 0,25 s |
+
+> Fehlt eine `*_loop.ogg`, greift automatisch der gleichnamige Einzelsound ohne
+> `_loop` und wird wiederholt.
 
 **UI** — `audio/ui/` (Fallback = stumm; je Auswahl-/Befehlsvorgang genau EIN Sound,
 auch bei vielen Einheiten):
@@ -332,6 +373,7 @@ auch bei vielen Einheiten):
 | `select_building.ogg` | Gebäude selektiert |
 | `move_unit.ogg` | Move-Befehl an Einheiten (ohne Schamanin) |
 | `move_shaman.ogg` | Move-Befehl an eine Gruppe mit Schamanin |
+| `move_blocked.ogg` | Move-Befehl auf ein unerreichbares Ziel (abgelehnt) |
 | `click.ogg` | *(reserviert — noch an keinen Button angebunden)* |
 
 ## Export-Builds (Notiz für später)

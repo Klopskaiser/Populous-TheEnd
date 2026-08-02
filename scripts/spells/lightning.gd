@@ -160,7 +160,10 @@ class LightningBeam extends Node3D:
 
 	## Jagged bolt: a polyline from high above down to the strike point with
 	## lateral jitter per joint; every segment is a thin bright cylinder.
+	## The thunderclap rides along here, so every outcome of the spell (building,
+	## airship, vehicle, unit, burnable) is covered — they all spawn a beam.
 	func _ready() -> void:
+		SpellAudio.play_effect(self, &"lightning", global_position)
 		var mat: StandardMaterial3D = StandardMaterial3D.new()
 		mat.albedo_color = Color(1.0, 1.0, 0.9)
 		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED

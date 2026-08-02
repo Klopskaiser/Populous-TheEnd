@@ -75,6 +75,9 @@ func tick(delta: float) -> void:
 func _spawn_surge() -> void:
 	if unit_manager == null:
 		return
+	# position, not global_position: _spawn_surge runs from tick(), which in
+	# headless tests happens outside the scene tree (see TerrainMorph).
+	SpellAudio.play_named(self, &"spell_volcano_erupt", position)
 	var surge: LavaSurge = LavaSurge.new()
 	surge.setup(position, unit_manager, terrain_data, LAVA_REACH, building_manager)
 	unit_manager.register_projectile(surge)

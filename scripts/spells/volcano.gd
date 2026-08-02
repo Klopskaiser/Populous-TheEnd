@@ -27,6 +27,7 @@ func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:
 		return false
 	var morph: TerrainMorph = TerrainMorph.new()
 	morph.setup(ctx, plan, DURATION)
+	morph.sfx_id = id
 	ctx.unit_manager.register_projectile(morph)
 	var zone: VolcanoZone = VolcanoZone.new()
 	zone.setup(tribe.id, target, ctx.unit_manager, ctx.terrain_data,

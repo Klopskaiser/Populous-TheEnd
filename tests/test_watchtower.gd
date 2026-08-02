@@ -309,6 +309,40 @@ func test_shaman_casts_from_tower_with_range_bonus() -> void:
 	_free_world(w)
 
 
+## Phase 10b: the tower cast has no wind-up, so incantation and effect coincide
+## — she still speaks it (its critical priority guarantees it a slot).
+func test_instant_tower_cast_emits_voice() -> void:
+	var w: Dictionary = _make_world()
+	var tower: Watchtower = _tower(w, w.tribe0)
+	var shaman: Unit = w.unit_manager.spawn_unit(SHAMAN_SCENE, 0, Vector3(31, 0, 32))
+	tower.admit_crew(shaman)
+	var spell: StubSpell = StubSpell.new()
+	spell.cast_range = 9.0
+	spell.charges = 1
+	check(not shaman._voice_played, "nothing spoken before the order")
+	check((shaman as Shaman).order_cast(spell, Vector3(38, 5, 31), null),
+		"tower cast accepted")
+	check(shaman._voice_played, "the incantation is spoken from the tower too")
+	check(spell.charges == 0, "and the spell fires in the same call (no wind-up)")
+	_free_world(w)
+
+
+## An out-of-range tower cast is refused before anything happens — no charge,
+## and no incantation either.
+func test_failed_tower_cast_stays_silent() -> void:
+	var w: Dictionary = _make_world()
+	var tower: Watchtower = _tower(w, w.tribe0)
+	var shaman: Unit = w.unit_manager.spawn_unit(SHAMAN_SCENE, 0, Vector3(31, 0, 32))
+	tower.admit_crew(shaman)
+	var spell: StubSpell = StubSpell.new()
+	spell.cast_range = 9.0
+	spell.charges = 1
+	check(not (shaman as Shaman).order_cast(spell, Vector3(44, 5, 31), null),
+		"cast beyond cast_range + 3 fails")
+	check(not shaman._voice_played, "a refused cast speaks no incantation")
+	_free_world(w)
+
+
 # --- Crew protection ---------------------------------------------------------
 
 func test_garrisoned_crew_is_protected() -> void:

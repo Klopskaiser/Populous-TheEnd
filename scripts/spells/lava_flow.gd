@@ -223,6 +223,7 @@ func _point_color(seg: Dictionary) -> Color:
 
 
 func _ready() -> void:
+	SpellAudio.play_named(self, &"lava_start", global_position, 250)
 	_ribbon = MeshInstance3D.new()
 	_ribbon.mesh = ImmediateMesh.new()
 	var mat: StandardMaterial3D = StandardMaterial3D.new()

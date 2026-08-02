@@ -41,6 +41,7 @@ func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:
 		return false
 	var morph: TerrainMorph = TerrainMorph.new()
 	morph.setup(ctx, plan, DURATION)
+	morph.sfx_id = id
 	ctx.unit_manager.register_projectile(morph)
 	_spawn_fault_lava(target, plan, ctx)
 	_hit_buildings(tribe, target, ctx)

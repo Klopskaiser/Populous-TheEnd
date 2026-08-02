@@ -23,6 +23,10 @@ var pending_ctx: SpellContext = null
 ## to its live position each cast tick so a moving airship/vehicle is still hit.
 var pending_target_unit: Unit = null
 var _cast_timer: float = 0.0
+## Latched once the incantation for the CURRENT cast order was spoken. Needed
+## because _casting flips back and forth every tick while she hovers on the edge
+## of cast range — without the latch the incantation would stutter.
+var _voice_played: bool = false
 ## True while standing in range playing the cast wind-up (vs. walking there).
 var _casting: bool = false
 
@@ -58,6 +62,7 @@ func order_cast(spell: Spell, target: Vector3, ctx: SpellContext,
 		target_unit: Unit = null) -> bool:
 	if spell == null:
 		return false
+	_voice_played = false
 	# Locked device target: aim at its current position (kept fresh below while
 	# walking into range).
 	if target_unit != null and is_instance_valid(target_unit) \
@@ -72,6 +77,9 @@ func order_cast(spell: Spell, target: Vector3, ctx: SpellContext,
 		var origin: Vector3 = garrison_target.center_world()
 		if _flat_dist(origin, target) > spell.cast_range + Watchtower.TOWER_RANGE_BONUS:
 			return false
+		# No wind-up here, so incantation and effect coincide — she still speaks
+		# it, and its critical priority guarantees it a slot.
+		_emit_spell_voice(spell)
 		if spell.cast(tribe, target, ctx):
 			_emit_spell_cast(spell, target)
 			return true
@@ -85,6 +93,7 @@ func order_cast(spell: Spell, target: Vector3, ctx: SpellContext,
 			return false
 		if _flat_dist(ship.position, target) > spell.cast_range + Balance.AIRSHIP_RANGE_BONUS:
 			return false
+		_emit_spell_voice(spell)
 		if spell.cast(tribe, target, ctx):
 			_emit_spell_cast(spell, target)
 			return true
@@ -116,6 +125,7 @@ func _cancel_cast() -> void:
 	pending_ctx = null
 	pending_target_unit = null
 	_casting = false
+	_voice_played = false
 
 
 ## Rolls, throws and fights interrupt a pending cast for good (the charge is
@@ -157,6 +167,8 @@ func _tick_cast(delta: float) -> void:
 	if not _casting:
 		_casting = true
 		_apply_animation(true)   # restart the cast wind-up at frame 0
+		if not _voice_played:
+			_emit_spell_voice(pending_spell)
 	_face_point(pending_target)
 	_cast_timer -= delta
 	if _cast_timer > 0.0:
@@ -170,14 +182,29 @@ func _tick_cast(delta: float) -> void:
 	_set_state(State.IDLE)
 
 
-## Announces a successful cast on the Events bus (AudioManager plays the
-## matching spell_<id> sound).
+## Announces a successful cast (charge consumed) on the Events bus. Carries no
+## sound since phase 10b — the effect's own sound comes from the entity that
+## produces it, when it actually happens.
 func _emit_spell_cast(spell: Spell, target: Vector3) -> void:
 	if not is_inside_tree():
 		return
 	var events: Node = get_node_or_null("/root/Events")
 	if events != null:
 		events.spell_cast.emit(spell.id, target)
+
+
+## The incantation at the START of the cast, at HER position (AudioManager plays
+## spell_voice_<id>). The latch is set unconditionally — also outside the scene
+## tree — so the "spoken once per cast order" rule holds in headless tests too.
+func _emit_spell_voice(spell: Spell) -> void:
+	if spell == null:
+		return
+	_voice_played = true
+	if not is_inside_tree():
+		return
+	var events: Node = get_node_or_null("/root/Events")
+	if events != null:
+		events.spell_cast_started.emit(spell.id, position)
 
 
 ## Walk frames while moving into range; the cast animation only during the

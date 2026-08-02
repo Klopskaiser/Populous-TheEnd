@@ -33,6 +33,7 @@ func execute(_tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:
 		return false   # nothing above the sea floor: charge kept
 	var morph: TerrainMorph = TerrainMorph.new()
 	morph.setup(ctx, plan, DURATION)
+	morph.sfx_id = id
 	ctx.unit_manager.register_projectile(morph)
 	return true
 

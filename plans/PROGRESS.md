@@ -6780,3 +6780,99 @@ Ladecheck sauber. `test_drowning.gd` jetzt 26 Tests (u. a.
 `test_vehicle_in_water_destroys_itself`, `test_flooded_trees_are_destroyed`,
 `test_flooded_wood_piles_are_destroyed`, `test_drowning_death_sound_is_the_splash`,
 `test_vehicle_water_death_sound`).
+
+## Phase 10b — Zauberformeln, Effektsounds, Sound-Prioritäten (2026-08-03)
+
+Plan: [10b_sound_priority_spell_voices.md](10b_sound_priority_spell_voices.md).
+
+**Gebaut:**
+
+1. **Prioritäts-Allokator** (`scripts/core/audio_slots.gd`, neu,
+   `class_name AudioSlots`): Konstanten `PRIO_AUTO 0` / `PRIO_CRITICAL 1` /
+   `PRIO_IMPORTANT 2` / `PRIO_NORMAL 3` / `STEAL_SAME_PRIO_MS 250`, dazu
+   `pick_slot(playing, prios, starts, want_prio, cursor, now_ms,
+   steal_same_prio_ms = 250)` und `default_priority(name)`. Auswahl in drei
+   Stufen: freier Slot (ab Cursor, ringförmig) → ältester Slot mit **schlechterer**
+   Prio → ältester Slot **gleicher** Prio, aber nur wenn er schon
+   `steal_same_prio_ms` läuft. Sonst `-1` (Sound entfällt).
+   **Behebt den Bestandsbug:** `play_sfx`/`play_ui`/`combat_audio` prüften nur
+   den *einen* Slot unter dem Round-Robin-Cursor und verwarfen den Sound, auch
+   wenn 7 von 8 Slots frei waren.
+2. **`AudioManager`** (`scripts/core/audio_manager.gd`): Slot-Zustand
+   (`_sfx_prio`/`_sfx_start_ms`, `_ui_prio`/`_ui_start_ms`) + vorbelegte
+   Busy-Scratchpuffer; `play_sfx(name, pos, min_interval_ms = 0,
+   priority = PRIO_AUTO)`. Reihenfolge neu: **erst** Datei auflösen (fehlende
+   Datei stiehlt keinen Slot und verbrennt kein Throttle-Fenster), dann Throttle
+   nur *prüfen*, dann Slot wählen, und den Throttle-Zeitstempel **erst setzen,
+   wenn der Sound wirklich startet**. `_on_spell_cast` entfällt, neu
+   `_on_spell_cast_started` → `spell_voice_<id>` mit `PRIO_CRITICAL`.
+3. **`CombatAudio`** nutzt denselben Allokator über seine 12 eigenen Slots, mit
+   `PRIO_NORMAL` und `steal_same_prio_ms = 0` (Treffer verdrängen sich nie
+   gegenseitig — die Poolgröße allein drosselt). Header erklärt, warum das
+   Subsystem getrennt bleibt.
+4. **Zauberformel getrennt vom Effekt:** neues Signal
+   `Events.spell_cast_started(spell_id, pos)`; `Shaman._emit_spell_voice()` mit
+   Latch `_voice_played` (Reset in `order_cast` und `_cancel_cast`), aufgerufen
+   beim Wind-up-Start (`_tick_cast`) **und** in beiden Sofort-Pfaden (Wachturm,
+   Luftschiffdeck) vor `spell.cast(...)`. `Events.spell_cast` bleibt bestehen,
+   trägt aber keinen Sound mehr.
+5. **`SpellAudio`** (`scripts/core/spell_audio.gd`, neu): `voice_name(id)`,
+   `effect_name(id, suffix)`, `play_effect(...)`, `play_named(...)`,
+   `start_loop(...)` — alle mit dem Pflicht-Guard `is_inside_tree()` vor dem
+   `get_node_or_null("/root/AudioManager")`.
+6. **Effekt-Hooks:** Feuerball im `_explode()` (60 ms Throttle, Feuerregen
+   schickt 12 Bolts durch dieselbe Klasse), Feuerregen einmalig beim ersten
+   Bolt, Blitz in `LightningBeam._ready` (deckt damit *alle* Ausgänge ab),
+   Tornado/Supertornado über das neue Feld `TornadoVortex.sfx_id` (`&""` =
+   stumm → die 2 Satelliten schweigen) inkl. `_loop`-Howl, Schwarm mit
+   `spell_swarm_loop`, `spell_volcano_erupt` je Lavastoß, `lava_start` in
+   `LavaSurge`/`LavaFlow`, und für **alle fünf Terrainzauber** gemeinsam über
+   das neue Feld `TerrainMorph.sfx_id` (Sound beim **ersten Morph-Schritt**).
+7. **Zauberzeit** `Balance.SHAMAN_CAST_TIME` 0,6 → **1,0 s**.
+8. **Drive-by (mit dem Nutzer abgestimmt):** `AudioManager._on_unit_died` nutzt
+   jetzt `global_position` statt `position` (Konsistenz mit allen anderen
+   Hooks); `assets/README.md` kannte `move_blocked.ogg` nicht und listete nur
+   10 statt 11 Zauber-IDs.
+
+**Erkenntnisse/Stolpersteine:**
+
+1. **`pick_slot` konnte NICHT in `audio_manager.gd` liegen** (so hatte es der
+   Phasenplan vorgesehen, ausdrücklich „ohne Autoload testbar"): Der Testrunner
+   ist `extends SceneTree` und wird per `-s` gestartet, **Autoloads existieren
+   dort nicht** — der Identifier `AudioManager` ist zur Laufzeit null. Zusätzlich
+   hätte `CombatAudio` (kein Autoload) eine statische Funktion über eine Instanz
+   aufgerufen → Warnung `STATIC_CALLED_ON_INSTANCE`. Deshalb die eigene
+   `class_name`-Datei `AudioSlots`. Inhaltlich unverändert.
+2. **`global_position` außerhalb des Szenenbaums ist ein Fehler — auch als
+   Argument.** Der `is_inside_tree()`-Guard in `SpellAudio` kam zu spät: bei
+   `SpellAudio.play_effect(self, id, global_position)` wird das Argument
+   **vorher** ausgewertet. In `TerrainMorph.tick()` und
+   `VolcanoZone._spawn_surge()` (beide laufen headless) hagelte es
+   `Condition "!is_inside_tree()" is true`. Lösung: an Tick-Pfaden `position`
+   statt `global_position` — die Projektile hängen am UnitManager im Ursprung,
+   in `_ready`-Pfaden (nur im Spiel) bleibt `global_position`.
+3. **Cast-Zeit exakt auf den Tick zu testen geht nicht.** 10 × `tick(0.1)`
+   lässt den Timer durch Float-Akkumulation minimal **über** 0 stehen, der
+   Zauber löst erst beim 11. Tick aus. Der Test klammert die Zauberzeit deshalb
+   ein (nach 0,9 s nichts, nach 1,1 s ausgelöst).
+4. **`tests/test_tree_types.gd` ist flaky** — die Zahl seiner Zusicherungen
+   schwankt von Lauf zu Lauf (gemessen 113/115/116/117/118), **auch auf dem
+   unveränderten Stand vor 10b**. Das verfälscht den sonst verlässlichen
+   Vergleich der Suite-Gesamtzahl. Nicht Teil von 10b, aber beim nächsten
+   Vergleich einkalkulieren (oder gezielt untersuchen).
+5. Der Same-Prio-Steal ist **altersgetaktet**, deshalb widersprechen sich
+   „Massenschlacht bleibt gedrosselt" und „alter gleichrangiger Sound gibt den
+   Slot frei" nicht: in der Schlacht liegen die Slot-Starts wenige Dutzend ms
+   auseinander, also unter den 250 ms.
+
+**Verifikation:** `--headless --import` und Ladecheck sauber (keine neuen
+Warnungen), Suite **3068/3068 grün**, Output frei von `SCRIPT ERROR`. Neu:
+`tests/test_audio_priority.gd` (11 Tests, 20 Zusicherungen), 4 Cast-/Formel-Tests
+in `test_spells.gd` und 2 Sofort-Cast-Tests in `test_watchtower.gd`. Referenzlauf
+des unveränderten Stands (HEAD, eigener Worktree) lag bei 3024 — die Differenz
+deckt sich mit den 41 neuen Zusicherungen (± Drift aus Punkt 4).
+**Offen:** manuelle Prüfung durch den Nutzer. Sie ist **nur eingeschränkt
+möglich**, weil es weiterhin **keine Audiodateien** im Projekt gibt (`assets/audio/**`
+ist leer) — hörbar wird das Ganze erst mit eingelegten `spell_voice_<id>.ogg` /
+`spell_<id>.ogg`. Prüfbar ist bereits, dass sich die Zauberzeit von 1,0 s spürbar,
+aber nicht zäh anfühlt.

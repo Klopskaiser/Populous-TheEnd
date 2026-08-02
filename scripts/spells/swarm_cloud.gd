@@ -86,6 +86,9 @@ func _sting_nearby() -> void:
 
 
 func _ready() -> void:
+	SpellAudio.play_effect(self, &"swarm", global_position)
+	# Buzzing follows the cloud; released automatically when it is freed.
+	SpellAudio.start_loop(self, &"spell_swarm_loop")
 	# Placeholder swarm visual: a loose cluster of small dark spheres.
 	var mat: StandardMaterial3D = StandardMaterial3D.new()
 	mat.albedo_color = Color(0.15, 0.12, 0.05)

@@ -171,6 +171,9 @@ func _sheet_point(dir: Vector3, r: float) -> Vector3:
 
 
 func _ready() -> void:
+	# Shared by every lava source (volcano surge, catapult puddle) — throttled
+	# because an eruption stacks several of these.
+	SpellAudio.play_named(self, &"lava_start", global_position, 250)
 	_mesh = MeshInstance3D.new()
 	_mesh.mesh = ImmediateMesh.new()
 	var mat: StandardMaterial3D = StandardMaterial3D.new()

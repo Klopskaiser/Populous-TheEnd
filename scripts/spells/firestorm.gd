@@ -74,6 +74,10 @@ class FirestormShower extends Node3D:
 		_spawned += 1
 		if unit_manager == null:
 			return
+		if _spawned == 1:
+			# One roar for the whole salvo, at its start — the twelve impacts
+			# bring their own (throttled) fireball sounds.
+			SpellAudio.play_effect(self, &"firestorm", target_pos)
 		var angle: float = _rng.randf() * TAU
 		var dist: float = sqrt(_rng.randf()) * FirestormSpell.SPREAD_RADIUS
 		var impact: Vector3 = target_pos + Vector3(cos(angle) * dist, 0.0, sin(angle) * dist)

@@ -15,6 +15,11 @@ const STEP_INTERVAL: float = 0.15
 var done: bool = false
 var ctx: SpellContext = null
 var duration: float = 3.0
+## Spell id whose sound (spell_<id>) plays when the ground actually starts to
+## move — every terrain spell sets it after setup(). Empty = silent.
+var sfx_id: StringName = &""
+
+var _sfx_played: bool = false
 
 var _indices: PackedInt32Array = PackedInt32Array()
 var _from: PackedFloat32Array = PackedFloat32Array()
@@ -48,6 +53,16 @@ func tick(delta: float) -> void:
 	if _step_timer > 0.0 and _time < duration:
 		return
 	_step_timer = STEP_INTERVAL
+	if not _sfx_played:
+		# The grinding starts with the FIRST step, not with the cast order —
+		# that is what "when the effect happens" means for a terrain spell.
+		_sfx_played = true
+		if sfx_id != &"":
+			# position, not global_position: this runs from tick(), and headless
+			# tests tick projectiles while the UnitManager is outside the tree,
+			# where reading global_position is an error. The manager sits at the
+			# origin, so the two are the same in game.
+			SpellAudio.play_effect(self, sfx_id, position)
 	var t: float = clampf(_time / duration, 0.0, 1.0)
 	var smooth: float = t * t * (3.0 - 2.0 * t)
 	var td: TerrainData = ctx.terrain_data

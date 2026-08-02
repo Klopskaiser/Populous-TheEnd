@@ -16,6 +16,11 @@ class_name TornadoVortex extends Node3D
 var lifetime: float = Balance.TORNADO_LIFETIME
 var radius: float = Balance.TORNADO_RADIUS   # pickup / building-hit radius
 var top_height: float = 8.0                  # riders spiral up to the tip
+## Spell id this funnel makes its noise under: one spell_<id> on appearance plus
+## a spell_<id>_loop howl that follows it (phase 10b). Empty = silent, which is
+## what the Supertornado's satellites use — its own roar covers them, and three
+## howls at once would only muddy it.
+var sfx_id: StringName = &"tornado"
 ## Movement profile: parks on the cast point first, then crawls off and
 ## accelerates over ACCEL_TIME up to MAX_SPEED.
 const IDLE_TIME: float = 1.0
@@ -352,6 +357,11 @@ func _release_all_riders() -> void:
 
 
 func _ready() -> void:
+	if sfx_id != &"":
+		SpellAudio.play_effect(self, sfx_id, global_position)
+		# The howl follows the funnel and is released automatically once this
+		# node is freed (AudioManager._process).
+		SpellAudio.start_loop(self, SpellAudio.effect_name(sfx_id, &"_loop"))
 	# Placeholder funnel: a dense stack of widening grey rings.
 	var mat: StandardMaterial3D = StandardMaterial3D.new()
 	mat.albedo_color = Color(0.75, 0.75, 0.78, 0.8)

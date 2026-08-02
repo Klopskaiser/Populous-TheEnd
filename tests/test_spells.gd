@@ -237,6 +237,78 @@ func test_move_order_cancels_pending_cast_and_keeps_charge() -> void:
 	_free_world(w)
 
 
+# --- Cast wind-up and incantation (phase 10b) -----------------------------------------
+
+## Spawns a shaman already inside cast range of `target`, with a charged spell
+## ordered. Returns {shaman, spell}.
+func _armed_shaman(w: Dictionary, target: Vector3) -> Dictionary:
+	var shaman: Unit = w.unit_manager.spawn_unit(SHAMAN_SCENE, 0, Vector3(30, 0, 30))
+	var spell: DummySpell = DummySpell.new(&"dummy", 10.0, 4)
+	w.tribe0.set_spells([spell] as Array[Spell])
+	spell.charges = 1
+	w.tc.cast_spell(w.tribe0, &"dummy", target)
+	return {"shaman": shaman, "spell": spell}
+
+
+func test_cast_time_is_one_second() -> void:
+	check_near(Balance.SHAMAN_CAST_TIME, 1.0, "the wind-up is 1.0 s for every spell")
+	var w: Dictionary = _make_world()
+	var a: Dictionary = _armed_shaman(w, Vector3(33, 0, 30))   # inside cast_range
+	for i in range(9):
+		a.shaman.tick(TICK)
+	check(a.spell.executed == 0, "nothing fired after 0.9 s of wind-up")
+	# Two more ticks, not one: 10 x 0.1 leaves the timer a hair above zero
+	# (float accumulation), so bracket the wind-up instead of counting on the
+	# exact tick it crosses.
+	a.shaman.tick(TICK)
+	a.shaman.tick(TICK)
+	check(a.spell.executed == 1, "the spell releases once the 1.0 s wind-up is over")
+	_free_world(w)
+
+
+func test_spell_voice_emitted_at_windup_start() -> void:
+	var w: Dictionary = _make_world()
+	var a: Dictionary = _armed_shaman(w, Vector3(33, 0, 30))
+	check(not a.shaman._voice_played, "no incantation before the first tick")
+	a.shaman.tick(TICK)
+	check(a.shaman._voice_played, "the incantation starts with the wind-up")
+	check(a.spell.executed == 0, "and well before the spell itself goes off")
+	_free_world(w)
+
+
+## On the edge of cast range _casting flips off and on again every tick. The
+## latch must survive that, otherwise the incantation stutters.
+func test_spell_voice_not_repeated_at_range_edge() -> void:
+	var w: Dictionary = _make_world()
+	var a: Dictionary = _armed_shaman(w, Vector3(33, 0, 30))
+	var shaman: Unit = a.shaman
+	shaman.tick(TICK)
+	check(shaman._casting and shaman._voice_played, "wind-up running, incantation spoken")
+	# Shove her out of range: the wind-up aborts and she walks again.
+	shaman.position = Vector3(60, 0, 30)
+	shaman.tick(TICK)
+	check(not shaman._casting, "out of range -> wind-up aborted")
+	check(shaman._voice_played, "the latch survives the abort")
+	# Back in range: the wind-up restarts, the incantation does NOT.
+	shaman.position = Vector3(30, 0, 30)
+	shaman.tick(TICK)
+	check(shaman._casting, "back in range -> wind-up restarted")
+	check(shaman._voice_played, "still latched, so nothing is spoken a second time")
+	# Only a NEW cast order speaks again.
+	shaman.order_move(Vector3(31, 0, 30))
+	check(not shaman._voice_played, "cancelling the cast clears the latch")
+	_free_world(w)
+
+
+func test_spell_audio_names() -> void:
+	check(SpellAudio.voice_name(&"fireball") == &"spell_voice_fireball",
+		"incantation file name")
+	check(SpellAudio.effect_name(&"lightning") == &"spell_lightning",
+		"effect file name")
+	check(SpellAudio.effect_name(&"tornado", &"_loop") == &"spell_tornado_loop",
+		"suffixed effect name (the tornado's howl)")
+
+
 # --- Shaman kill bonus ----------------------------------------------------------------
 
 func test_shaman_kill_grants_charge_bonus() -> void:

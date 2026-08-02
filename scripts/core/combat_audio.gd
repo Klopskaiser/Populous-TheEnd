@@ -9,6 +9,14 @@ class_name CombatAudio extends Node
 ## Events.combat_hit through a pooled set of positional players. Throttled
 ## (global min interval + fixed pool) so mass battles cannot overload the
 ## audio bus.
+##
+## Why this stays a subsystem of its own instead of moving into AudioManager:
+## it owns a procedural synthesizer the manager has no use for, and it has by
+## far the highest event density in the game. With its own pool, combat hits
+## never compete for the slots AudioManager reserves for spell incantations and
+## death cries. It does share the allocator (AudioSlots.pick_slot) so that a hit
+## is no longer dropped while eleven of twelve slots sit idle — but with
+## same-priority stealing disabled, so the pool size alone caps mass battles.
 
 const VARIANTS: int = 3
 const POOL_SIZE: int = 12
@@ -26,6 +34,10 @@ var _sounds: Dictionary = {}   # kind -> Array[AudioStreamWAV]
 var _pool: Array[AudioStreamPlayer3D] = []
 var _pool_index: int = 0
 var _last_play_ms: int = 0
+## Allocator state per slot (see AudioSlots) + reused busy-flag scratch.
+var _pool_prio: PackedInt32Array = PackedInt32Array()
+var _pool_start_ms: PackedInt64Array = PackedInt64Array()
+var _pool_busy: Array = []
 var _rng: RandomNumberGenerator = RandomNumberGenerator.new()
 
 
@@ -38,6 +50,10 @@ func _ready() -> void:
 			for v in range(count):
 				variants.append(_make_stream(kind, v))
 		_sounds[kind] = variants
+	_pool_prio.resize(POOL_SIZE)
+	_pool_prio.fill(AudioSlots.PRIO_NORMAL)
+	_pool_start_ms.resize(POOL_SIZE)
+	_pool_busy.resize(POOL_SIZE)
 	for i in range(POOL_SIZE):
 		var player: AudioStreamPlayer3D = AudioStreamPlayer3D.new()
 		player.max_distance = 60.0
@@ -57,10 +73,17 @@ func _on_combat_hit(kind: StringName, pos: Vector3) -> void:
 	var variants: Array = _sounds.get(kind, _sounds.get(&"punch", []))
 	if variants.is_empty():
 		return
-	var player: AudioStreamPlayer3D = _pool[_pool_index]
-	_pool_index = (_pool_index + 1) % POOL_SIZE
-	if player.playing:
+	for i in range(POOL_SIZE):
+		_pool_busy[i] = _pool[i].playing
+	# steal_same_prio_ms = 0: hits never cut each other off — a full pool simply
+	# drops the sound, which is the throttle that keeps mass battles sane.
+	var idx: int = AudioSlots.pick_slot(_pool_busy, _pool_prio, _pool_start_ms,
+		AudioSlots.PRIO_NORMAL, _pool_index, now, 0)
+	if idx == -1:
 		return   # pool exhausted -> drop the sound (throttle)
+	_pool_index = (idx + 1) % POOL_SIZE
+	_pool_start_ms[idx] = now
+	var player: AudioStreamPlayer3D = _pool[idx]
 	player.stream = variants[_rng.randi_range(0, variants.size() - 1)]
 	player.global_position = pos
 	player.play()

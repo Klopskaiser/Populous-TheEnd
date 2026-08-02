@@ -121,6 +121,10 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
 - **Ladungssystem (wie im Original):** Mana wird automatisch in **Zauber-Ladungen**
   umgewandelt (je Zauber `charge_cost` und `max_charges`); Casts verbrauchen gespeicherte
   Ladungen, es gibt keinen separaten Cooldown. Anzeige als Ladungs-Pips in der Zauberleiste.
+- **Zauberzeit 1,0 s für alle Zauber** (`Balance.SHAMAN_CAST_TIME`): In diesem Wind-up
+  spricht die Schamanin die **Zauberformel** (`spell_voice_<id>`). Der Sound des Zaubers
+  selbst (`spell_<id>`) kommt getrennt davon, erst **wenn der Effekt eintritt**
+  (Einschlag/Ausbruch/Bodenbewegung). Aus Wachturm und Luftschiff zaubert sie ohne Wind-up.
 - **Zaubersprüche:** Grundset (1–5) aus Phase 6, erweitertes Set (6–10) aus Phase 7c.
   „Ladungen" = `max_charges`; der **Mana-Bedarf pro Ladung** (`charge_cost`) steigt mit
   der Mächtigkeit — die **hohen Zauber** (Erdbeben/Vulkan/Feuerregen, auch Tornado/Ebene)

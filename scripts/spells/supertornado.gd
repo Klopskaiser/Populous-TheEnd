@@ -22,6 +22,7 @@ func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:
 	main.setup(tribe.id, target, ctx.unit_manager, ctx.terrain_data,
 		ctx.building_manager, Balance.SUPERTORNADO_RADIUS,
 		Balance.SUPERTORNADO_TOP_HEIGHT, Balance.SUPERTORNADO_LIFETIME)
+	main.sfx_id = id   # only the main funnel roars; the satellites stay silent
 	ctx.unit_manager.register_projectile(main)
 	# Two normal-sized satellite tornados around it.
 	var limit: float = float(TerrainData.SIZE) * TerrainData.CELL_SIZE - 1.0
@@ -32,6 +33,7 @@ func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:
 		at.x = clampf(at.x, 1.0, limit)
 		at.z = clampf(at.z, 1.0, limit)
 		var sat: TornadoVortex = TornadoVortex.new()
+		sat.sfx_id = &""
 		sat.setup(tribe.id, at, ctx.unit_manager, ctx.terrain_data,
 			ctx.building_manager)
 		ctx.unit_manager.register_projectile(sat)

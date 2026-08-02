@@ -53,6 +53,9 @@ func tick(delta: float) -> void:
 
 func _explode() -> void:
 	done = true
+	# The impact IS the spell's sound (phase 10b). Throttled because a firestorm
+	# rains twelve bolts through this very class.
+	SpellAudio.play_effect(self, &"fireball", target_pos, 60)
 	if unit_manager == null:
 		return
 	# Fire sets nearby trees and wood piles alight (phase 7d).
