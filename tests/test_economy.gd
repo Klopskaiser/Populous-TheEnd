@@ -107,16 +107,11 @@ func test_tree_growth_and_yield() -> void:
 	tree.set_stage(0)
 	check(tree.wood_yield() == 0, "sapling (stage 0) holds no wood")
 	check(not tree.can_claim(), "a sapling cannot be harvested")
-	# Growth is a probabilistic roll (one per GROWTH_ROLL_INTERVAL); with the
-	# seeded static RNG the tick counts are deterministic. Tick until each next
-	# stage is reached and verify the per-stage yields along the way.
-	TreeResource.growth_rng.seed = 424242
-	tree.growth_timer = TreeResource.GROWTH_ROLL_INTERVAL
+	# Growth is continuous and deterministic: GROWTH_TIME seconds advance
+	# exactly one stage (standard tree, ground factor 1.0). Verify the
+	# per-stage yields along the way.
 	for target in range(1, 5):
-		var guard: int = 0
-		while tree.stage < target and guard < 100000:
-			tree.grow_tick(1.0)
-			guard += 1
+		tree.grow_tick(TreeResource.GROWTH_TIME * 1.001)
 		check(tree.stage == target and tree.wood_yield() == target,
 			"stage %d reached and yields %d wood" % [target, target])
 	tree.grow_tick(TreeResource.GROWTH_TIME * 100.0)

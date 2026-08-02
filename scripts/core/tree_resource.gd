@@ -7,12 +7,13 @@ class_name TreeResource extends Node3D
 ## big tree takes four trips); the last unit removes it. Several workers may
 ## harvest the same tree at once (as many as it has wood, so max 4 on a big
 ## tree). Growth and reproduction are driven by the TreeManager. Growth is
-## PROBABILISTIC: every GROWTH_ROLL_INTERVAL seconds the tree rolls once with
-## growth_chance() — the mean time per stage stays GROWTH_TIME (per ground
-## factor), but individual trees spread out geometrically instead of growing
-## in synchronised waves. Trees do not block the NavGrid (thin obstacles).
-## Fire (spells, lava) IGNITES a tree: it burns down and is destroyed
-## completely, yielding no wood.
+## CONTINUOUS and deterministic: `growth` (in stages) advances by ground
+## factor / GROWTH_TIME per second; the WOOD stage is floor(growth) (still the
+## four yield stages), while the model scale interpolates smoothly between the
+## stage scales — applied in quantised steps (~every 0.5 s on the fastest
+## grower) to keep transform updates cheap. Trees do not block the NavGrid
+## (thin obstacles). Fire (spells, lava) IGNITES a tree: it burns down and is
+## destroyed completely, yielding no wood.
 ##
 ## Tree TYPES (Balance.TREE_TYPE_PARAMS, ground band via TerrainData.is_grass):
 ## STANDARD grows everywhere (the only type the forester plants); LEAF grows/
@@ -26,22 +27,40 @@ enum TreeType {STANDARD, LEAF, BAMBOO}
 const MAX_STAGE: int = 4
 ## Remaining wood per stage: 0 = sapling (0), then 1/2/3/4.
 const YIELDS: Array[int] = Balance.TREE_YIELDS
-## MEAN seconds per growth stage (expected value of the probabilistic roll).
+## Seconds per growth stage at ground factor 1.0 (deterministic).
 const GROWTH_TIME: float = Balance.TREE_GROWTH_TIME
-## Seconds between growth rolls (see grow_tick / growth_chance).
-const GROWTH_ROLL_INTERVAL: float = Balance.TREE_GROWTH_ROLL_INTERVAL
+## Growth distance between applied visual scale updates. Derivation: the
+## fastest grower (leaf on grass, factor 1.5) takes 50 s per stage, so 0.01
+## stages ~= 0.5 s — one transform update per half second at the fastest, and
+## correspondingly fewer on slower trees (instead of one per 30-Hz tick).
+const GROWTH_SCALE_QUANT: float = 0.01
 ## How long a burning tree stays alight before it is destroyed.
 const BURN_TIME: float = 1.8
 
-var type: TreeType = TreeType.STANDARD
+## Growth hot-path caches (grow_tick runs per tree per 30-Hz tick — the
+## Balance dictionary lookups live here instead, refreshed only when type or
+## ground change via the setters below).
+var _max_stage: int = 4
+var _rate: float = 1.0 / Balance.TREE_GROWTH_TIME
+
+var type: TreeType = TreeType.STANDARD:
+	set(value):
+		type = value
+		_refresh_growth_cache()
 ## Cached ground flag (grass band), set by the TreeManager on spawn/register
 ## and refreshed when the terrain deforms under the tree.
-var on_grass: bool = true
+var on_grass: bool = true:
+	set(value):
+		on_grass = value
+		_refresh_growth_cache()
 
+## Continuous growth progress in STAGES [0, max_stage]; the wood stage is its
+## floor. Advances deterministically in grow_tick — no growth randomness.
+var growth: float = 0.0
+## Wood stage = floor(growth), kept as an int for all yield/claim consumers.
 var stage: int = 0
-## Seconds until the next growth ROLL; starts at a random phase offset (see
-## _init) so trees spawned in the same frame do not all roll simultaneously.
-var growth_timer: float = GROWTH_ROLL_INTERVAL
+## Growth value the visual scale was last applied at (quantisation anchor).
+var _scaled_growth: float = -1.0
 ## Workers currently harvesting this tree; untyped entries (may be freed).
 var claimers: Array = []
 ## Set once when the last wood is taken (or when it burns) — guards late
@@ -60,26 +79,20 @@ var _crown_mat: StandardMaterial3D = null
 ## does not recolour the whole forest.
 static var _shared_visuals: Dictionary = {}
 
-## RNG for the growth rolls and phase offsets — static and seedable, so the
-## headless tests can make growth deterministic (randomly seeded by default).
-static var growth_rng: RandomNumberGenerator = RandomNumberGenerator.new()
-
-
-func _init() -> void:
-	growth_timer = growth_rng.randf_range(0.0, GROWTH_ROLL_INTERVAL)
-
 
 func _params() -> Dictionary:
 	return Balance.TREE_TYPE_PARAMS[type]
 
 
+func _refresh_growth_cache() -> void:
+	var p: Dictionary = Balance.TREE_TYPE_PARAMS[type]
+	_max_stage = int(p.max_stage)
+	_rate = float(p.growth_grass if on_grass else p.growth_off) / GROWTH_TIME
+
+
 ## Highest growth stage this type reaches (bamboo stops at 2 = max. 2 wood).
 func max_stage() -> int:
-	return int(_params().max_stage)
-
-
-func _stage_scale(s: int) -> float:
-	return float(_params().stage_scales[s])
+	return _max_stage
 
 
 ## Wood still in the tree (a sapling holds none).
@@ -127,42 +140,70 @@ func _prune_claimers() -> void:
 		return w != null and is_instance_valid(w))
 
 
+## Sets the wood stage directly (spawn, harvest): growth snaps to the stage
+## boundary and the visual scale is applied immediately.
 func set_stage(p_stage: int) -> void:
-	stage = clampi(p_stage, 0, max_stage())
-	scale = Vector3.ONE * _stage_scale(stage)
+	set_growth(float(clampi(p_stage, 0, max_stage())))
+
+
+## Sets the continuous growth progress (in stages) and syncs the wood stage,
+## crown visibility and visual scale.
+func set_growth(g: float) -> void:
+	growth = clampf(g, 0.0, float(max_stage()))
+	stage = mini(int(growth), max_stage())
 	# The sapling (stage 0) is a bare stick — no crown yet.
 	if _crown != null:
 		_crown.visible = stage >= 1
+	_apply_growth_scale(true)
 
 
-## Called by the TreeManager tick. Growth is PROBABILISTIC: every
-## GROWTH_ROLL_INTERVAL seconds the tree rolls growth_chance() once. The mean
-## time per stage is exactly GROWTH_TIME / ground factor, but the individual
-## stage times follow a geometric distribution — trees planted together no
-## longer grow in synchronised waves. Factor 0 (bamboo off grass) pauses the
-## roll clock entirely; a terrain deformation takes effect on the next tick.
-## Saplings grow like any other tree — they just have one extra stage.
+## Called by the TreeManager tick. Growth is CONTINUOUS: `growth` advances by
+## growth_rate() stages per second (no randomness); the wood stage is its
+## floor. Rate 0 (bamboo off grass) is a clean pause; a terrain deformation
+## takes effect on the next tick. Saplings grow like any other tree — they
+## just have one extra stage. The visual scale is applied in quantised steps
+## (GROWTH_SCALE_QUANT) so a 30-Hz tick does not touch the transform.
 func grow_tick(delta: float) -> void:
-	if stage >= max_stage():
+	var cap: float = float(max_stage())
+	if growth >= cap:
 		return
-	var chance: float = growth_chance()
-	if chance <= 0.0:
+	var rate: float = growth_rate()
+	if rate <= 0.0:
 		return
-	growth_timer -= delta
-	while growth_timer <= 0.0:
-		growth_timer += GROWTH_ROLL_INTERVAL
-		if growth_rng.randf() < chance:
-			set_stage(stage + 1)
-			if stage >= max_stage():
-				return
+	growth = minf(growth + delta * rate, cap)
+	var new_stage: int = mini(int(growth), max_stage())
+	if new_stage != stage:
+		stage = new_stage
+		if _crown != null:
+			_crown.visible = stage >= 1
+	_apply_growth_scale(false)
 
 
-## Probability to advance one stage per roll: roll interval x ground factor /
-## GROWTH_TIME — chosen so the EXPECTED stage time stays GROWTH_TIME / factor
-## (the pre-roll growth rate is preserved exactly).
-func growth_chance() -> float:
-	var f: float = float(_params().growth_grass if on_grass else _params().growth_off)
-	return minf(GROWTH_ROLL_INTERVAL * f / GROWTH_TIME, 1.0)
+## Continuous growth speed in stages per second: ground factor / GROWTH_TIME
+## (cached; refreshed when type or ground change).
+func growth_rate() -> float:
+	return _rate
+
+
+## Applies the interpolated model scale, quantised: outside of forced syncs
+## the transform is only touched after GROWTH_SCALE_QUANT stages of progress
+## (~0.5 s on the fastest grower) — per tick this is a single float compare.
+func _apply_growth_scale(force: bool) -> void:
+	if not force and growth - _scaled_growth < GROWTH_SCALE_QUANT:
+		return
+	_scaled_growth = growth
+	scale = Vector3.ONE * _growth_scale()
+
+
+## Model scale at the current growth: linear blend between the neighbouring
+## stage scales (continuous visual growth instead of four jumps).
+func _growth_scale() -> float:
+	var scales: Array = _params().stage_scales
+	var last: int = scales.size() - 1
+	if growth >= float(last):
+		return float(scales[last])
+	var i: int = int(growth)
+	return lerpf(float(scales[i]), float(scales[i + 1]), growth - float(i))
 
 
 # --- Burning (fire spells / lava) ---------------------------------------------
@@ -214,7 +255,7 @@ func burn_tick(delta: float) -> bool:
 	_burn_time -= delta
 	# Shrink and flicker while burning down.
 	var t: float = clampf(_burn_time / BURN_TIME, 0.0, 1.0)
-	scale = Vector3.ONE * _stage_scale(stage) * maxf(t, 0.05)
+	scale = Vector3.ONE * _growth_scale() * maxf(t, 0.05)
 	if _crown_mat != null:
 		_crown_mat.emission_energy_multiplier = 1.5 + randf() * 1.5
 	if _burn_time <= 0.0:
@@ -226,7 +267,7 @@ func burn_tick(delta: float) -> bool:
 func _ready() -> void:
 	_create_visuals()
 	_create_click_body()
-	set_stage(stage)   # apply crown visibility now that the mesh exists
+	set_growth(growth)   # apply crown visibility now that the mesh exists
 
 
 ## User-provided model per type (assets/models/trees/tree.glb / tree_leaf.glb /

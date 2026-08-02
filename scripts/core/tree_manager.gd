@@ -117,7 +117,11 @@ func spawn_trees(count: int, p_seed: int) -> void:
 			elif roll < Balance.TREE_BAMBOO_SHARE + Balance.TREE_LEAF_SHARE:
 				type = TreeResource.TreeType.LEAF
 		var params: Dictionary = Balance.TREE_TYPE_PARAMS[type]
-		spawn_tree(c, _rng.randi_range(1, int(params.max_stage)), type)
+		var tree: TreeResource = spawn_tree(
+			c, _rng.randi_range(1, int(params.max_stage)), type)
+		# Spread the growth fraction so same-stage start trees do not cross
+		# their wood-stage boundaries in sync (growth is deterministic now).
+		tree.set_growth(tree.growth + _rng.randf())
 		placed += 1
 	if placed < count:
 		push_warning("Only %d of %d trees spawned" % [placed, count])
@@ -157,7 +161,9 @@ func spawn_groves(count: int) -> void:
 				continue
 			if _too_close(c, int(params.min_spacing)):
 				continue
-			spawn_tree(c, _rng.randi_range(1, int(params.max_stage)), type)
+			var tree: TreeResource = spawn_tree(
+				c, _rng.randi_range(1, int(params.max_stage)), type)
+			tree.set_growth(tree.growth + _rng.randf())
 
 
 func spawn_tree(c: Vector2i, stage: int = 0,

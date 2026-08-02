@@ -6413,3 +6413,37 @@ unbemannte Bodenfahrzeuge.**
   [test_fire_ram.gd](../tests/test_fire_ram.gd)
   (`test_armed_ram_ignores_unmanned_vehicle_until_ordered`).
   Suite **2835/2835 grün**.
+
+**Folgerunde 2 (Nutzerwunsch): Kontinuierliches Wachstum + stufenlose Modellskalierung.**
+Wachstum jetzt DETERMINISTISCH und kontinuierlich (kein Chance-Roll mehr;
+Vermehrung unverändert probabilistisch):
+- [tree_resource.gd](../scripts/core/tree_resource.gd): neues Feld `growth`
+  (Fortschritt in Stufen, 0..max_stage) wächst mit `Bodenfaktor / GROWTH_TIME`
+  pro Sekunde (`growth_rate()`); die **Holzstufe** bleibt `floor(growth)` mit den
+  vier Ertragsstufen. Das **Modell** skaliert stufenlos: `_growth_scale()`
+  interpoliert linear zwischen den Nachbar-`stage_scales`. `set_stage` snappt
+  `growth` auf die Stufengrenze (Ernte senkt wie bisher um genau eine Stufe);
+  `set_growth(g)` neu für fraktionale Werte. `growth_rng`/Roll-Konstanten entfielen.
+- **Transform-Budget (0,5-s-Vorgabe):** Die Skalierung wird quantisiert
+  angewendet — nur nach `GROWTH_SCALE_QUANT = 0.01` Stufen Fortschritt
+  (Herleitung: schnellster Baum Laub/Gras = 50 s/Stufe → 0,01 Stufen ≈ 0,5 s).
+  Pro Tick bleibt sonst nur ein Float-Vergleich; langsamere Bäume aktualisieren
+  automatisch seltener, ausgewachsene nie.
+- **Hot-Path-Cache:** `_rate`/`_max_stage` je Baum gecacht (Setter auf `type`/
+  `on_grass` refreshen) — die Balance-Dictionary-Lookups sind aus dem
+  30-Hz-Pfad raus.
+- [tree_manager.gd](../scripts/core/tree_manager.gd): Startbäume
+  (`spawn_trees`/`spawn_groves`) bekommen eine zufällige Wachstumsfraktion
+  (`set_growth(growth + randf)`, geseedet) — sonst würden gleichstufige
+  Startbäume ihre (jetzt deterministischen) Stufengrenzen synchron überqueren.
+- **Perf gemessen** (neu [benchmark_tree_growth.gd](../tests/benchmark_tree_growth.gd):
+  1000 Bäume, 3000 Ticks à 1/30 s, headless, 3 Läufe): Roll-Baseline
+  876–1141 µs/Tick → kontinuierlich **822–879 µs/Tick** (wachsender Wald,
+  Worst Case) bzw. **380–386 µs/Tick** (ausgewachsen). Ohne Quantisierung wären
+  es 30 000 Transform-Updates/s gewesen (~+0,4–0,6 ms/Tick gemessen bei
+  Zwischenstand mit Updates alle 0,01 Stufen ohne Cache); mit Quantisierung
+  + Cache liegt der Endstand UNTER der Baseline.
+- Tests: Wachstums-Tests deterministisch umgeschrieben (Rate je Typ/Boden,
+  Halbstufen-Skala zwischen den Stufen-Skalen, Quantisierungs-Check,
+  Fraktions-Streuung im Map-Gen; test_economy tickt exakt GROWTH_TIME je
+  Stufe). Suite **2844/2844 grün, 3 Läufe**, Ladecheck sauber.

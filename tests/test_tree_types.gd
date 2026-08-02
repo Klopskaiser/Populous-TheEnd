@@ -31,61 +31,59 @@ func _make_tm(td: TerrainData) -> Dictionary:
 	return {"td": td, "nav": nav, "tm": tm}
 
 
-# --- Growth (probabilistic rolls) -------------------------------------------------
+# --- Growth (continuous, deterministic) --------------------------------------------
 
-func test_growth_chance_by_type_and_ground() -> void:
-	var base: float = TreeResource.GROWTH_ROLL_INTERVAL / TreeResource.GROWTH_TIME
+func test_growth_rate_by_type_and_ground() -> void:
+	var base: float = 1.0 / TreeResource.GROWTH_TIME
 	var grass: Dictionary = _make_tm(_flat_terrain(5.0))
 	var standard_g: TreeResource = grass.tm.spawn_tree(Vector2i(20, 20), 1)
 	var leaf_g: TreeResource = grass.tm.spawn_tree(
 		Vector2i(40, 40), 1, TreeResource.TreeType.LEAF)
-	check_near(standard_g.growth_chance(), base, "standard on grass rolls the base chance")
-	check_near(leaf_g.growth_chance(), base * 1.5, "leaf on grass rolls 1.5x")
+	check_near(standard_g.growth_rate(), base, "standard on grass grows at the base rate")
+	check_near(leaf_g.growth_rate(), base * 1.5, "leaf on grass grows 1.5x")
 	var sand: Dictionary = _make_tm(_flat_terrain(3.0))
 	var standard_s: TreeResource = sand.tm.spawn_tree(Vector2i(20, 20), 1)
 	var leaf_s: TreeResource = sand.tm.spawn_tree(
 		Vector2i(40, 40), 1, TreeResource.TreeType.LEAF)
 	var bamboo_s: TreeResource = sand.tm.spawn_tree(
 		Vector2i(60, 60), 1, TreeResource.TreeType.BAMBOO)
-	check_near(standard_s.growth_chance(), base, "standard off grass keeps the base chance")
-	check_near(leaf_s.growth_chance(), base * 0.75, "leaf off grass rolls 0.75x")
-	check_near(bamboo_s.growth_chance(), 0.0, "bamboo off grass rolls 0 (pause)")
+	check_near(standard_s.growth_rate(), base, "standard off grass keeps the base rate")
+	check_near(leaf_s.growth_rate(), base * 0.75, "leaf off grass grows 0.75x")
+	check_near(bamboo_s.growth_rate(), 0.0, "bamboo off grass grows 0 (pause)")
 	grass.tm.free()
 	sand.tm.free()
 
 
-func test_growth_mean_rate_preserved() -> void:
-	# Many seeded stage-1 -> stage-2 runs: the MEAN tick count must stay close
-	# to GROWTH_TIME (the roll chance is calibrated to preserve the old rate).
+func test_growth_is_continuous_and_deterministic() -> void:
 	var w: Dictionary = _make_tm(_flat_terrain(5.0))
 	var tree: TreeResource = w.tm.spawn_tree(Vector2i(20, 20), 1)
-	TreeResource.growth_rng.seed = 20260725
-	var samples: int = 200
-	var total_ticks: int = 0
-	for i in range(samples):
-		tree.set_stage(1)
-		tree.growth_timer = TreeResource.GROWTH_ROLL_INTERVAL
-		var guard: int = 0
-		while tree.stage == 1 and guard < 100000:
-			tree.grow_tick(1.0)
-			guard += 1
-		total_ticks += guard
-	var mean: float = float(total_ticks) / float(samples)
-	check(absf(mean - TreeResource.GROWTH_TIME) < TreeResource.GROWTH_TIME * 0.15,
-		"mean stage time stays near GROWTH_TIME (got %.1f, want ~%.0f)"
-			% [mean, TreeResource.GROWTH_TIME])
+	# Half a stage time: wood stage unchanged, model scale strictly between
+	# the two neighbouring stage scales (continuous visual growth).
+	tree.grow_tick(TreeResource.GROWTH_TIME * 0.5)
+	check(tree.stage == 1, "half a stage time keeps the wood stage")
+	check(tree.growth > 1.45 and tree.growth < 1.55, "growth progressed continuously")
+	var s1: float = float(Balance.TREE_TYPE_PARAMS[0].stage_scales[1])
+	var s2: float = float(Balance.TREE_TYPE_PARAMS[0].stage_scales[2])
+	check(tree.scale.x > s1 and tree.scale.x < s2,
+		"model scale sits between the stage scales")
+	tree.grow_tick(TreeResource.GROWTH_TIME * 0.51)
+	check(tree.stage == 2, "one full stage time advances exactly one wood stage")
 	w.tm.free()
 
 
-func test_growth_roll_phases_desynced() -> void:
-	# Trees created in the same frame start with different roll offsets — no
-	# synchronised growth frame for the whole starting forest.
-	var offsets: Dictionary = {}
-	for i in range(8):
-		var tree: TreeResource = TreeResource.new()
-		offsets[snappedf(tree.growth_timer, 0.0001)] = true
-		tree.free()
-	check(offsets.size() > 1, "spawn-time roll phases differ between trees")
+func test_growth_scale_updates_quantized() -> void:
+	# A single 30-Hz tick moves growth far below GROWTH_SCALE_QUANT — the
+	# transform must NOT be touched every tick (update budget), but it must
+	# move once enough growth accumulated.
+	var w: Dictionary = _make_tm(_flat_terrain(5.0))
+	var tree: TreeResource = w.tm.spawn_tree(Vector2i(20, 20), 1)
+	var before: float = tree.scale.x
+	tree.grow_tick(1.0 / 30.0)
+	check(tree.growth > 1.0, "growth advanced on the tick")
+	check_near(tree.scale.x, before, "scale untouched below the quantisation step")
+	tree.grow_tick(10.0)
+	check(tree.scale.x > before, "scale advanced after enough growth")
+	w.tm.free()
 
 
 # --- Bamboo ----------------------------------------------------------------------
@@ -96,9 +94,7 @@ func test_bamboo_caps_at_stage_two_and_two_wood() -> void:
 		Vector2i(30, 30), 4, TreeResource.TreeType.BAMBOO)
 	check(bamboo.stage == 2, "spawn stage is clamped to the bamboo max stage 2")
 	check(bamboo.wood_yield() == 2, "stage 2 bamboo holds 2 wood")
-	bamboo.growth_timer = 0.5
-	for i in range(5):
-		bamboo.grow_tick(1.0)
+	bamboo.grow_tick(TreeResource.GROWTH_TIME * 100.0)
 	check(bamboo.stage == 2, "bamboo never grows past stage 2")
 	var wood: int = bamboo.harvest_one() + bamboo.harvest_one()
 	check(wood == 2 and bamboo.felled_flag, "bamboo yields exactly 2 wood in total")
@@ -110,10 +106,8 @@ func test_bamboo_dead_on_sand() -> void:
 	var bamboo: TreeResource = w.tm.spawn_tree(
 		Vector2i(30, 30), 1, TreeResource.TreeType.BAMBOO)
 	check(not bamboo.on_grass, "bamboo registered as off-grass")
-	bamboo.growth_timer = 1.0
-	for i in range(50):
-		bamboo.grow_tick(1.0)
-	check(bamboo.stage == 1, "bamboo off grass does not grow (factor 0)")
+	bamboo.grow_tick(TreeResource.GROWTH_TIME * 10.0)
+	check(bamboo.stage == 1, "bamboo off grass does not grow (rate 0)")
 	for i in range(60):
 		w.tm._reproduce()
 	check(w.tm.trees.size() == 1, "bamboo off grass never reproduces (factor 0)")
@@ -183,6 +177,13 @@ func test_map_gen_rolls_all_types_on_grass() -> void:
 	check(seen.has(TreeResource.TreeType.STANDARD), "map gen placed standard trees")
 	check(seen.has(TreeResource.TreeType.LEAF), "map gen placed leaf trees")
 	check(seen.has(TreeResource.TreeType.BAMBOO), "map gen placed bamboo")
+	# Start trees get a spread growth fraction so their (deterministic) wood
+	# stage boundaries do not line up in sync.
+	var fractional: int = 0
+	for tree: TreeResource in w.tm.trees:
+		if absf(tree.growth - roundf(tree.growth)) > 0.01:
+			fractional += 1
+	check(fractional > 0, "wild start trees carry spread growth fractions")
 	w.tm.free()
 
 

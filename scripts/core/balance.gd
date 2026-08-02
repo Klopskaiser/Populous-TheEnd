@@ -488,12 +488,11 @@ const MANA_PRAY_BONUS: float = 0.3
 const TRIBE_MAX_UNITS: int = 1000
 
 # --- Bäume ---
-## Mittlere Zeit pro Wachstumsstufe (Erwartungswert des Wachstums-Rolls).
+## Sekunden pro Wachstumsstufe (deterministisch; durch den Bodenfaktor des
+## Baumtyps geteilt). Wachstum ist KONTINUIERLICH: `growth` (in Stufen) steigt
+## mit Faktor / TREE_GROWTH_TIME pro Sekunde, die Holzstufe ist floor(growth),
+## das Modell skaliert stufenlos (quantisiert, s. TreeResource.GROWTH_SCALE_QUANT).
 const TREE_GROWTH_TIME: float = 75.0
-## Wachstum ist probabilistisch: alle TREE_GROWTH_ROLL_INTERVAL Sekunden würfelt
-## jeder Baum einmal (Chance = Intervall x Bodenfaktor / TREE_GROWTH_TIME), so
-## bleibt die mittlere Rate erhalten, aber es gibt keine synchronen Wachstumswellen.
-const TREE_GROWTH_ROLL_INTERVAL: float = 10.0
 ## Holz-Ertrag je Wachstumsstufe (Index = Stufe 0..4).
 const TREE_YIELDS: Array[int] = [0, 1, 2, 3, 4]
 
