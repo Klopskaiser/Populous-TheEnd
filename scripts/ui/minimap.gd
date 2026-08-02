@@ -22,8 +22,11 @@ const ROCK_BOTTOM: float = TerrainData.GRASS_MAX
 const COLOR_SAND: Color = Color(0.83, 0.74, 0.50)
 const COLOR_GRASS: Color = Color(0.29, 0.55, 0.24)
 const COLOR_ROCK: Color = Color(0.45, 0.44, 0.42)
-const COLOR_WATER: Color = Color(0.12, 0.24, 0.42)
-const COLOR_WATER_DEEP: Color = Color(0.07, 0.15, 0.30)
+# Matched to Terrain.COLOR_WATER / COLOR_WATER_HIGHLIGHT so world and minimap
+# agree. The depth ramp below stays DELIBERATELY — the 3D sea is flat and opaque
+# now, but the minimap needs it to keep channels and lakes readable.
+const COLOR_WATER: Color = Color(0.10, 0.24, 0.52)
+const COLOR_WATER_DEEP: Color = Color(0.04, 0.11, 0.30)
 
 ## Round island mask (default). Square maps (phase 7i) set this false so the
 ## corners — where players can start — are not clipped away.
@@ -88,8 +91,10 @@ static func map_to_world(map_xz: Vector2, map_size: float, world_size: float) ->
 		clampf(map_xz.y / map_size, 0.0, 1.0) * world_size)
 
 
-## Height -> minimap colour. Below the sea line is dark water; above it follows
-## the same sand/grass/rock ramp as the terrain vertex colours.
+## Height -> minimap colour. Below the sea line is dark water (depth-tinted for
+## readability, unlike the flat 3D sea); above it follows the same
+## sand/grass/rock ramp as the terrain vertex colours. The terrain's wet-shore
+## band is intentionally NOT mirrored here — the minimap wants a crisp coast.
 static func height_to_color(h: float) -> Color:
 	if h <= TerrainData.SEA_LEVEL:
 		var d: float = clampf((TerrainData.SEA_LEVEL - h) / TerrainData.SEA_LEVEL, 0.0, 1.0)

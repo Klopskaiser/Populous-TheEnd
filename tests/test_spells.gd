@@ -639,6 +639,7 @@ func test_integrity_flood_slides_building_and_drowns_units() -> void:
 	check(hut.health == 0, "mostly flooded building is destroyed (slides into the sea)")
 	check(not _has_debris(w), "flooding sinks the model instead of bursting it")
 	check(wet.state == Unit.State.DEAD, "follower on flooded ground drowns instantly")
+	check(wet._drowning, "the flood death is an animated drowning (phase 10a)")
 	check(dry.state != Unit.State.DEAD, "follower on dry ground is unaffected")
 	_free_world_with_buildings(w)
 
@@ -1062,5 +1063,6 @@ func test_sink_floods_coastal_building_and_units() -> void:
 	check(hut.health == 0, "mostly flooded building slides into the water")
 	check(not _has_debris(w), "flooded building sinks instead of bursting")
 	check(victim.state == Unit.State.DEAD, "follower on the flooded plot drowns")
+	check(victim._drowning, "the flood death is an animated drowning (phase 10a)")
 	check(dry.state != Unit.State.DEAD, "distant follower survives")
 	_free_world_with_buildings(w)

@@ -70,11 +70,15 @@ static var _cache: Dictionary[StringName, SpriteFrames] = {}
 ## All animation bases a kind carries. "jump" is frame-driven by the hop
 ## visual; punch/kick/shove are the three melee strike animations (their cycle
 ## length matches Unit.ATTACK_COOLDOWN so fighting looks continuous); "throw"
-## (firewarrior only) is the ranged fireball throw.
+## (firewarrior only) is the ranged fireball throw; "airborne" is the flight
+## through the air (thrown, tornado ride, fall off an airship) as opposed to
+## the ground tumble "roll"; "drown" is the death in water (the opaque sea
+## plane clips the submerged half of the figure).
 static func _anims_for(kind: StringName) -> Array[StringName]:
 	var anims: Array[StringName] = [
 		&"idle", &"walk", &"attack", &"jump", &"carry", &"carry_walk",
-		&"punch", &"kick", &"shove", &"dead", &"sit", &"roll"]
+		&"punch", &"kick", &"shove", &"dead", &"sit", &"roll",
+		&"airborne", &"drown"]
 	if kind in CASTER_KINDS:
 		anims.append(&"cast")
 	if kind == &"firewarrior":
@@ -158,6 +162,12 @@ static func _anim_fps(anim: StringName) -> float:
 			return 10.0
 		&"cast":
 			return 4.0
+		# Slow limb flutter while flying (a throw lasts 0.3-3 s).
+		&"airborne":
+			return 5.0
+		# Fast panic flail over the short Balance.DROWN_FLAIL_DURATION window.
+		&"drown":
+			return 6.0
 		_:
 			return 2.0
 
@@ -238,12 +248,24 @@ static func _build_frames(kind: StringName, anim: StringName, view: StringName) 
 		&"cast":
 			images = [_frame_stand(paint_view, 0), _frame_cast(paint_view)]
 			bobs = [0, 0]
+		&"airborne":
+			images = [_frame_airborne(paint_view, 0), _frame_airborne(paint_view, 1)]
+			bobs = [0, 1]
+		&"drown":
+			images = [
+				_frame_drown(paint_view, 0), _frame_drown(paint_view, 1),
+				_frame_drown(paint_view, 2),
+			]
+			bobs = [0, 1, 0]
 		_:
 			images = [_frame_stand(paint_view, 0), _frame_stand(paint_view, 1)]
 			bobs = [0, 1]
-	# No accents on the corpse, the sitting pose or the tumbling ball: the
-	# shield/helmet/hood positions assume a standing body.
-	var decorate: bool = not (anim in [&"dead", &"sit", &"roll"])
+	# No accents on the corpse, the sitting pose, the tumbling ball or the
+	# drowning flail: those poses do not match the shield/helmet/hood positions,
+	# which all assume a standing body. "airborne" DOES keep its accents — it
+	# uses the standard torso/head rows, so a tumbling warrior still shows his
+	# sword and shield.
+	var decorate: bool = not (anim in [&"dead", &"sit", &"roll", &"drown"])
 	if paint_view in DIAGONAL_PAINT_VIEWS:
 		# Diagonals show BOTH accessories at both (asymmetric) hands, so mirroring
 		# body and accents together is correct — decorate first, then flip.
@@ -701,4 +723,52 @@ static func _frame_cast(view: StringName) -> Image:
 		img.fill_rect(Rect2i(2, 2, 2, 7), C_LIMB)     # both arms raised
 		img.fill_rect(Rect2i(12, 2, 2, 7), C_LIMB)
 	_draw_legs_stand(img)
+	return img
+
+
+## Flying through the air (thrown, tornado ride, fall off an airship): arms
+## flung outwards/up and legs splayed — deliberately NOT the curled ball of
+## _frame_roll, so THROWN and ROLL stay distinguishable on screen. Uses the
+## standard torso/head rows so the kind accents still line up. Phase 1 flings
+## the limbs one pixel further out.
+static func _frame_airborne(view: StringName, phase: int) -> Image:
+	var img: Image = _new_image()
+	var bob: int = phase
+	_draw_torso(img, view, bob)
+	_draw_head(img, view, bob)
+	var out: int = phase          # extra spread on the second frame
+	if view == &"right":
+		img.fill_rect(Rect2i(10 + out, 3 + bob, 2, 5), C_LIMB)   # near arm flung up/forward
+		img.fill_rect(Rect2i(2 - out, 6 + bob, 3, 2), C_LIMB)    # trailing arm behind
+	else:
+		img.fill_rect(Rect2i(1, 3 + bob - out, 3, 2), C_LIMB)    # left arm flung out
+		img.fill_rect(Rect2i(12, 3 + bob - out, 3, 2), C_LIMB)   # right arm flung out
+		img.fill_rect(Rect2i(2, 5 + bob, 2, 3), C_LIMB)
+		img.fill_rect(Rect2i(12, 5 + bob, 2, 3), C_LIMB)
+	# Legs splayed apart instead of the straight stand.
+	_draw_leg(img, 6, 2 - out, C_LIMB)
+	_draw_leg(img, 9, 13 + out, C_LIMB)
+	return img
+
+
+## Dying in water: a full-height figure with both arms thrown straight up above
+## the head, waving left/right — the opaque sea plane clips everything below the
+## waterline, so only the upper body and the flailing arms stay visible. The
+## legs below y=18 are omitted on purpose (they never show above the surface and
+## would read as "standing in a puddle" if the sink were interrupted).
+static func _frame_drown(view: StringName, phase: int) -> Image:
+	var img: Image = _new_image()
+	var bob: int = 1 if phase == 1 else 0        # head dips on the middle frame
+	_draw_torso(img, view, 2 + bob)              # torso sits lower (sunken)
+	_draw_head(img, view, 2 + bob)
+	# Both arms up; the raised one alternates so the figure looks like it is
+	# waving for help.
+	var left_up: int = 0 if phase == 1 else 2
+	var right_up: int = 2 if phase == 1 else 0
+	if view == &"right":
+		img.fill_rect(Rect2i(9, 2 + right_up, 2, 8), C_LIMB)
+	else:
+		img.fill_rect(Rect2i(3, 2 + left_up, 2, 8), C_LIMB)
+		img.fill_rect(Rect2i(11, 2 + right_up, 2, 8), C_LIMB)
+	img.fill_rect(Rect2i(6, 18 + bob, 4, 4), C_LIMB)   # sunken hips, no legs
 	return img

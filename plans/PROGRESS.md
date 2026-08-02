@@ -6558,3 +6558,90 @@ Ladecheck sauber, `benchmark_mass` ohne Regression.
 Nutzerentscheidung); nächste Restposten laut Harness: `warrior/Anmarsch (Pfad)`
 1,5 ms (28 × 53 µs), `warrior/sonstige` 1,35 ms (15 × 85 µs), `firewarrior/ATTACK`
 5,0 ms, Manager (sep+groups) 7,8–9,0 ms.
+
+---
+
+## Phase 10a — Wasser, Animationen, Ertrinken, 2D-Feuer (2026-08-02)
+
+Plan: [10a_water_animations_drowning.md](10a_water_animations_drowning.md). Erster
+umgesetzter Block der Phase-10-Reihe (10b–10e liegen als Plandokumente bereit).
+
+**Gebaut:**
+
+1. **Zwei neue Animationen** (`scripts/ui/placeholder_sprites.gd`): `airborne`
+   (2 Frames, Arme/Beine gespreizt) und `drown` (3 Frames, Arme über dem Kopf,
+   wechselseitig winkend) für **alle** Kinds. `Unit._anim_base()` splittet
+   `ROLL`/`THROWN` auf (vorher rendern beide `roll`) und liefert bei `DEAD` je
+   nach `_drowning` `drown` oder `dead`. `drown` steht in der Dekorations-
+   Ausschlussliste, `airborne` behält Accessoires (Standard-Torso/Kopf-Zeilen).
+   Der Sheet-Override-Pfad (`assets/units/<kind>/<anim>.png`) funktioniert ohne
+   Codeänderung, weil `UnitSpriteLibrary` über `_anims_for()` iteriert.
+   **`cast` existierte bereits** (Schamanin/Prediger) — nur Regressionstest ergänzt.
+
+2. **Undurchsichtiges Wasser** (`scripts/core/terrain.gd`, neu
+   `shaders/water.gdshader`): tiefblaue, opake Ebene, 3 cm über `SEA_LEVEL`
+   (`WATER_SURFACE_LIFT`) — das beseitigt Z-Fighting mit exakt auf Meeresniveau
+   geebnetem Terrain und richtet die sichtbare Wasserlinie auf die Spiel-Schwelle
+   `SEA_LEVEL + WATER_EPS` aus. Shader bewusst minimal (2 × `sin()`, keine Textur,
+   keine Vertex-Verschiebung, Opaque-Pass). Der Texturpfad
+   `assets/textures/terrain/water.png` bleibt als Override, dann ohne Alpha.
+   Küstensaum gratis über `_color_for_height()` (nasser Sand bis `SEA_LEVEL +
+   SHORE_BAND`). Minimap-Wasserfarben angeglichen, Tiefenrampe dort **behalten**.
+   **Perf-Erwartung: netto positiv** — die map-große transparente Ebene verlässt
+   den Transparent-Pass und der Meeresboden wird nicht mehr sichtbar überzeichnet.
+
+3. **Ertrink-Mechanik** (`scripts/units/unit.gd`, `scripts/core/balance.gd`):
+   Neue Flagge `_drowning` auf `State.DEAD` — **kein neuer State**, weil
+   `State.DEAD` an ~200 Stellen geprüft wird und exakt die gewünschte Semantik
+   trägt (nicht anvisierbar/selektierbar, außerhalb der Bevölkerung, von
+   Separation/Scans/KI ignoriert) und vier Bestandstests `state == DEAD` direkt
+   nach `drown()` prüfen. Neue Konstanten `DROWN_FLAIL_DURATION 0.7`,
+   `DROWN_SINK_DURATION 1.1`, `DROWN_FLOAT_DEPTH 0.9`, `DROWN_SINK_DEPTH 1.9`;
+   Leichen-Timing über `_corpse_lie_duration/_corpse_sink_duration/
+   _corpse_sink_distance`. Gemeinsame Wasserprobe `_is_water_at(x, z)` ersetzt
+   drei Literalkopien.
+   **Erzwungene Bewegung darf jetzt ins Wasser** (Wegfindung weiterhin nie):
+   `_tick_knockback` schiebt hinein und ertränkt, `_tick_roll` ruft `drown()`,
+   `_end_roll` prüft **vor** dem `nearest_walkable_cell`-Snap auf Wasser,
+   `_cliff_drop_ahead` liefert über Wasser den echten Fallabstand (statt 0),
+   `_tick_thrown` landet die Parabel auf `max(ground, SEA_LEVEL)`.
+   `CrewedVehicle.drown()` hebt das Wrack vor dem Absinken auf `SEA_LEVEL`.
+
+4. **Feuerramme: 2D-Feuer** (`scripts/units/fire_ram.gd`,
+   `scripts/ui/status_fx_renderer.gd`): die 3 emissiven `BoxMesh`-Segmente sind
+   durch **eine** `MultiMeshInstance3D` mit 7 aufrechten Billboard-Quads ersetzt
+   (unshaded, `BILLBOARD_ENABLED`, `TRANSPARENCY_ALPHA_SCISSOR` → bleibt im
+   Opaque-Pass). Neues `StatusFxRenderer.flame_textures()` teilt die Frames mit
+   brennenden Einheiten und Bäumen — ein Look, ein Override-Punkt
+   (`assets/textures/effects/burning.png`). Die gesamte Hangneigungs-Basis
+   entfällt. **Rein visuell**, `_apply_flames()` unverändert. 1 Draw-Call statt 3.
+
+5. **Gebäude-Versinken poliert:** eine langsame Kippbewegung (`SINK_TILT 0.14`,
+   `SINK_TILT_HZ 0.8`) im Zerstörungszweig von `Building._process`.
+
+**Erkenntnisse/Stolpersteine:**
+
+1. **Der Kernel-Corpse-Hold war das eigentliche Risiko.** `_tick_dead` parkt
+   Sprite-Leichen in `HOLD_CORPSE`, was den Objekt-Tick komplett überspringt —
+   eine ertrinkende Einheit hätte ~6 s auf dem Wasser getrieben, statt zu
+   versinken. Guard `and not _drowning`, abgesichert durch
+   `test_drowning_unit_is_never_kernel_held`.
+2. **Reihenfolge in `drown()` ist tragend:** `_die()` friert die Leichen-Pose
+   genau einmal ein und der Dead-Tick aktualisiert die Animation nie wieder —
+   `_drowning` muss davor stehen.
+3. **„Zelle unbegehbar" ≠ „Wasser".** `is_walkable` nutzt den Zell-Mittelwert,
+   `_is_water_at` die interpolierte Höhe; dazwischen liegt am Ufer ein schmales
+   Band, in dem der Rückstoß weiterhin stoppt statt zu ertränken. Für Tests
+   heißt das: ein einzelner Feuerball-Schubser (0,35 m) reicht am Ufer nicht,
+   erst gestapelte Treffer tragen über die Kante.
+4. **Balance-Nebenwirkung:** Einheiten an Küstenklippen sterben jetzt häufiger
+   (`_cliff_drop_ahead` startet den Sturz über Wasser statt zu blocken). Bewusst
+   so — beim Spieltest gegenprüfen.
+
+**Verifikation:** `--headless --import` (neuer Shader) und Ladecheck sauber,
+Suite **2979/2979 grün** (davon 90 neu: `tests/test_drowning.gd` mit 12 Tests,
+Atlas-/Cast-Regressionen in `test_combat.gd`, `_drowning`-Zusicherungen an beiden
+Flutungstoden in `test_spells.gd`).
+**Offen:** manuelle Prüfung durch den Nutzer (Wasseroptik/Küstenlinie,
+Ertrinkanimation ohne treibende Leiche, `airborne`-Pose beim Tornado,
+Feuerrammen-Flamme, FPS-Vergleich).

@@ -223,6 +223,24 @@ const CORPSE_SINK_DURATION: float = 1.0
 const CORPSE_SINK_DEPTH: float = 1.6
 
 # =============================================================================
+# ERTRINKEN (Phase 10a)
+# =============================================================================
+# Eine ins Wasser gerollte/geschleuderte Einheit stirbt sofort, zappelt aber
+# noch kurz an der Oberfläche und versinkt dann unter der (undurchsichtigen)
+# Wasserfläche. Zusammen deutlich kürzer als eine Leiche an Land — im Wasser
+# soll nichts treiben.
+
+## Zappeldauer an der Oberfläche (Drown-Animation).
+const DROWN_FLAIL_DURATION: float = 0.7
+## Absinkdauer danach; anschließend ist die Leiche verschwunden.
+const DROWN_SINK_DURATION: float = 1.1
+## Wie tief die Figur beim Zappeln schon im Wasser steht (m unter SEA_LEVEL).
+const DROWN_FLOAT_DEPTH: float = 0.9
+## Absinktiefe (m) — Sprite-Höhe plus Reserve gegen den Tiefen-Bias des
+## Billboard-Shaders, damit am Ende nichts mehr durch die Wasserfläche lugt.
+const DROWN_SINK_DEPTH: float = 1.9
+
+# =============================================================================
 # ROLLEN (Statuseffekt — Schubser, Wurf-Landungen, Stolpern)
 # =============================================================================
 

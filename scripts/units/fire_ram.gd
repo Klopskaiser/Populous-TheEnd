@@ -56,9 +56,15 @@ const NOZZLE_OFFSET: float = 1.2
 ## land flames again. (>= MIN_RANGE by construction; MIN_RANGE still drives the
 ## RangeRenderer inner ring and balance.)
 const FLAME_MIN_RANGE: float = maxf(NOZZLE_OFFSET, Balance.FIRERAM_MIN_RANGE)
-## Flame segments hover this far above the sampled ground (box half-height plus a
-## touch), so the beam licks along the terrain instead of clipping into it.
+## Flame billboards hover this far above the sampled ground so the beam licks
+## along the terrain instead of clipping into it.
 const FLAME_LIFT: float = 0.35
+## 2D fire billboards along the beam centreline (phase 10a). Their heights grow
+## from nozzle to tip along the same taper as the damage rectangle.
+const FLAME_QUADS: int = 7
+const FLAME_QUAD_MIN: float = 0.9
+const FLAME_QUAD_MAX: float = 1.7
+const FLAME_FRAME_TIME: float = 0.09
 ## Placeholder-model shrink factor (footprint 1.2 x 1.8 instead of the shared
 ## vehicle chassis 1.4 x 2.2).
 const MODEL_SCALE: float = 0.85
@@ -101,10 +107,13 @@ var _life_regen_frac: float = 0.0
 ## Hull heading, slewed toward `facing` at TURN_RATE (real turn inertia —
 ## `facing` itself snaps instantly everywhere in the codebase).
 var _heading: Vector3 = Vector3(0, 0, 1)
-## Flame cone visual meshes (in-game only, lazily built).
-var _flame_cone: Node3D = null
-## The 3 flame segments, laid onto the terrain each visual tick.
-var _flame_segs: Array[MeshInstance3D] = []
+## Flame billboard chain (in-game only, lazily built).
+var _flame_cone: MultiMeshInstance3D = null
+var _flame_mm: MultiMesh = null
+var _flame_mat: StandardMaterial3D = null
+var _flame_frames: Array[Texture2D] = []
+var _flame_frame: int = 0
+var _flame_frame_t: float = 0.0
 
 
 func _init() -> void:
@@ -774,67 +783,74 @@ func _create_model() -> void:
 	_finish_model(root)
 
 
-## Lazily built flame-cone overlay along local +z while a burst runs
-## (model-relative — it turns with the hull automatically).
+## Lazily built flame overlay: a chain of upright 2D fire billboards marching
+## along the beam centreline (phase 10a — the old three emissive boxes read as
+## a solid 3D wedge). One MultiMesh = one draw call, alpha-scissored so it stays
+## in the opaque pass, and it shares its frames with every other flame in the
+## game via StatusFxRenderer.flame_textures().
 func _show_flame_cone(show: bool) -> void:
-	if not is_inside_tree() or _model == null:
+	if not is_inside_tree():
 		return
 	if _flame_cone == null:
 		if not show:
 			return
-		_flame_cone = Node3D.new()
-		_flame_cone.name = "FlameCone"
-		var colors: Array[Color] = [
-			Color(1.0, 0.85, 0.3, 0.9), Color(1.0, 0.55, 0.08, 0.8),
-			Color(0.85, 0.25, 0.05, 0.7)]
-		for i in range(3):
-			var seg: MeshInstance3D = MeshInstance3D.new()
-			seg.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-			# Placed in world space each visual tick (_tick_visual) so the beam
-			# follows the ground; top_level keeps the parent's Y-rotation/scale out.
-			seg.top_level = true
-			var box: BoxMesh = BoxMesh.new()
-			# Segment widths fan out 2 -> 3 across the beam (matches the collision
-			# taper in _flame_half_width): 2.0 / 2.5 / 3.0.
-			box.size = Vector3(lerpf(FLAME_WIDTH, FLAME_END_WIDTH, float(i) / 2.0),
-				0.5, FIRE_RANGE / 3.0)
-			seg.mesh = box
-			var mat: StandardMaterial3D = StandardMaterial3D.new()
-			mat.albedo_color = colors[i]
-			mat.emission_enabled = true
-			mat.emission = Color(colors[i].r, colors[i].g * 0.8, 0.05)
-			mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-			mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-			seg.material_override = mat
-			_flame_cone.add_child(seg)
-			_flame_segs.append(seg)
-		_model.add_child(_flame_cone)
+		var quad: QuadMesh = QuadMesh.new()
+		quad.size = Vector2(1.0, 1.0)
+		# Anchor at the bottom edge so the flame rises out of the ground.
+		quad.center_offset = Vector3(0.0, 0.5, 0.0)
+		_flame_mat = StandardMaterial3D.new()
+		_flame_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_flame_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+		_flame_mat.billboard_keep_scale = true
+		_flame_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+		_flame_mat.alpha_scissor_threshold = 0.5
+		_flame_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+		_flame_frames = StatusFxRenderer.flame_textures()
+		_flame_mat.albedo_texture = _flame_frames[0]
+		quad.material = _flame_mat
+		_flame_mm = MultiMesh.new()
+		_flame_mm.transform_format = MultiMesh.TRANSFORM_3D
+		_flame_mm.mesh = quad
+		_flame_mm.instance_count = FLAME_QUADS
+		var mmi: MultiMeshInstance3D = MultiMeshInstance3D.new()
+		mmi.name = "FlameCone"
+		mmi.multimesh = _flame_mm
+		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		# Placed in world space each visual tick so the beam follows the ground.
+		mmi.top_level = true
+		add_child(mmi)
+		_flame_cone = mmi
 	_flame_cone.visible = show
 
 
-## Lays the flame beam along the terrain in front of the hull (each segment
-## snapped to the ground height and pitched to the slope) plus the width flicker.
+## Marches the fire billboards along the beam in front of the hull: each quad is
+## snapped to the ground height, sized along the same 2.0 -> 3.0 taper as the
+## damage rectangle, and the whole chain flickers. Purely visual — the flame
+## rectangle in _apply_flames is untouched.
 func _tick_visual(delta: float) -> void:
 	super._tick_visual(delta)
 	if not is_inside_tree():
 		return
 	if _flame_cone == null or not _flame_cone.visible or terrain_data == null:
 		return
-	var s: float = 0.85 + 0.3 * absf(sin(float(Time.get_ticks_msec()) * 0.02))
+	var now_ms: int = Time.get_ticks_msec()
+	if _flame_frames.size() > 1:
+		_flame_frame_t += delta
+		if _flame_frame_t >= FLAME_FRAME_TIME:
+			_flame_frame_t = 0.0
+			_flame_frame = (_flame_frame + 1) % _flame_frames.size()
+			_flame_mat.albedo_texture = _flame_frames[_flame_frame]
+	var s: float = 0.85 + 0.3 * absf(sin(float(now_ms) * 0.02))
 	var fwd: Vector3 = Vector3(sin(rotation.y), 0.0, cos(rotation.y))
-	var half: float = FIRE_RANGE / 6.0
-	for i in range(_flame_segs.size()):
-		var d: float = NOZZLE_OFFSET + FIRE_RANGE / 6.0 + FIRE_RANGE / 3.0 * float(i)
+	for i in range(FLAME_QUADS):
+		var d: float = NOZZLE_OFFSET \
+			+ FIRE_RANGE * (float(i) + 0.5) / float(FLAME_QUADS)
 		var cx: float = position.x + fwd.x * d
 		var cz: float = position.z + fwd.z * d
-		var y_back: float = terrain_data.get_height(cx - fwd.x * half, cz - fwd.z * half)
-		var y_front: float = terrain_data.get_height(cx + fwd.x * half, cz + fwd.z * half)
-		var cy: float = 0.5 * (y_back + y_front) + FLAME_LIFT
-		# Pitch the segment along the slope so the segments chain into a beam that
-		# runs down/up the hill instead of stepping through it.
-		var slope_fwd: Vector3 = Vector3(fwd.x, (y_front - y_back) / (2.0 * half),
-			fwd.z).normalized()
-		var right: Vector3 = Vector3.UP.cross(slope_fwd).normalized()
-		var up: Vector3 = slope_fwd.cross(right).normalized()
-		_flame_segs[i].global_transform = Transform3D(
-			Basis(right * s, up, slope_fwd), Vector3(cx, cy, cz))
+		var cy: float = terrain_data.get_height(cx, cz) + FLAME_LIFT
+		var grow: float = lerpf(FLAME_QUAD_MIN, FLAME_QUAD_MAX,
+			float(i) / float(FLAME_QUADS - 1))
+		var scale: float = grow * s
+		_flame_mm.set_instance_transform(i, Transform3D(
+			Basis.IDENTITY.scaled(Vector3(scale, scale, scale)),
+			Vector3(cx, cy, cz)))

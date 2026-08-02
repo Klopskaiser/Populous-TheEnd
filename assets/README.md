@@ -135,9 +135,15 @@ einzeln nachgeliefert werden.
     `walk.png` darf 8 Zeilen haben und `dead.png` gleichzeitig 5.
 - **Frames (Spalten):** Anzahl = `Bildbreite / frame_width`, frei wählbar pro Animation.
 - **Animationsnamen** (Dateiname = `<anim>.png`): `idle, walk, attack, punch, kick,
-  shove, jump, carry, carry_walk, dead, sit, roll` — zusätzlich `cast` (nur Schamanin/
-  Prediger) und `throw` (nur Feuerkrieger). Fehlt eine Datei, wird nur diese Animation
-  prozedural dargestellt.
+  shove, jump, carry, carry_walk, dead, sit, roll, airborne, drown` — zusätzlich
+  `cast` (nur Schamanin/Prediger) und `throw` (nur Feuerkrieger). Fehlt eine Datei,
+  wird nur diese Animation prozedural dargestellt.
+  - `roll` = Purzeln **am Boden**, `airborne` = Flug **durch die Luft** (Wurf,
+    Tornado, Sturz vom Luftschiff) — bewusst zwei verschiedene Posen.
+  - `drown` = Ertrinken im Wasser. Die Figur wird an der Wasseroberfläche
+    gezeigt und dann darunter gezogen; die untere Hälfte des Sprites wird von
+    der undurchsichtigen Wasserfläche abgeschnitten, sollte also nicht die
+    Bildaussage tragen.
 - **fps** pro Animation optional im Manifest; sonst gelten die eingebauten Defaults.
 
 **Stammesfarbe:** Die Sprites dürfen voll koloriert sein. Bereiche, die die Stammesfarbe
@@ -195,6 +201,8 @@ Schaden** (unter 25 % Leben) wird mit den klassischen kreisenden Sternen
 dargestellt (nicht ersetzbar). Die Pixel-Icons lassen sich pro Effekt ersetzen:
 
 - `panic.png`, `burning.png`
+- **`burning.png` ist das spielweite Feuer:** brennende Einheiten und Bäume,
+  **und** der Flammenkegel der Feuerramme nutzen dieselben Frames.
 - Format: ein einzelnes Bild **oder** ein horizontaler Streifen **quadratischer**
   Frames (Framezahl = Breite ÷ Höhe), abgespielt als Loop (~6,7 fps).
 - Transparenter Hintergrund (Alpha), Lossless-Import belassen.
@@ -244,6 +252,7 @@ richtig und erwünscht.
 | `unit_injured.ogg` | Einheit (nicht Schamanin) fällt unter 25 % Leben (einmal pro Unterschreitung) |
 | `unit_death.ogg` | Tod einer Einheit außer der Schamanin — gedrosselt bei Massensterben |
 | `unit_burning.ogg` | Einheit fängt Feuer (Lava/Feuerzauber) |
+| `water_splash.ogg` | Einheit schlägt im Wasser auf und ertrinkt (max. alle 0,15 s) |
 | `shaman_hurt.ogg` | Schamanin erleidet Schaden (max. alle 1,2 s; mehrere Varianten empfohlen) |
 | `shaman_death.ogg` | Tod der Schamanin |
 

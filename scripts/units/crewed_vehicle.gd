@@ -262,6 +262,10 @@ func drown() -> void:
 	_unblock_nav()
 	_sinking = true
 	_death_sfx = &"siege_death_burn"   # sinks like a burnt-out wreck
+	# Start the sink AT the surface: with the opaque sea (phase 10a) a wreck
+	# already standing on the seabed would be born invisible and its whole
+	# SINK_SPEED descent would never be seen.
+	position.y = maxf(position.y, TerrainData.SEA_LEVEL)
 	super.drown()
 
 

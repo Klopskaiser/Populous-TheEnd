@@ -8,7 +8,10 @@ class_name Terrain extends Node3D
 ## - Collision: one StaticBody3D + HeightMapShape3D, used only for mouse raycasts.
 ##   HeightMapShape3D is origin-centred with a fixed 1.0 spacing, so the body is
 ##   offset by (SIZE/2, 0, SIZE/2) to line up with world coordinates [0..SIZE].
-## - Water: a semi-transparent PlaneMesh at sea_level.
+## - Water: an OPAQUE deep-blue PlaneMesh at sea_level (Populous style — there is
+##   no sea floor to look at, it is simply water). The seabed geometry still
+##   exists (get_height, HeightMapShape3D raycasts and every terrain spell need
+##   it), it is just never visible.
 
 const CHUNK: int = 16  # cells per chunk side
 
@@ -20,6 +23,21 @@ const ROCK_BOTTOM: float = TerrainData.GRASS_MAX
 const COLOR_SAND: Color = Color(0.83, 0.74, 0.50)
 const COLOR_GRASS: Color = Color(0.29, 0.55, 0.24)
 const COLOR_ROCK: Color = Color(0.45, 0.44, 0.42)
+
+## Deep, opaque Populous blue plus the lighter crest tint the water shader
+## ripples towards.
+const COLOR_WATER: Color = Color(0.055, 0.16, 0.40)
+const COLOR_WATER_HIGHLIGHT: Color = Color(0.13, 0.30, 0.58)
+## The sea plane sits this far ABOVE sea level. It keeps the plane out of the
+## coplanar z-fight with terrain that a Flatten/Sink spell levelled exactly onto
+## SEA_LEVEL, and it lines the visible waterline up with the gameplay water
+## threshold (SEA_LEVEL + Unit.WATER_EPS).
+const WATER_SURFACE_LIFT: float = 0.03
+## Wet, darker sand right at the waterline; fades into COLOR_SAND over
+## SHORE_BAND metres. Vertex colours are computed during the chunk build
+## anyway, so the shore costs nothing at runtime.
+const COLOR_SHORE: Color = Color(0.62, 0.55, 0.38)
+const SHORE_BAND: float = 0.9
 
 var data: TerrainData = null
 
@@ -88,28 +106,40 @@ func _create_material() -> Material:
 	return mat
 
 
+## The sea: one OPAQUE plane. Nothing below it is ever seen, which is exactly
+## what makes a drowned unit disappear (it sinks through the surface) without
+## any extra renderer work. Opaque is also cheaper than the old alpha-blended
+## plane — it leaves the transparent pass and stops the seabed being overdrawn.
 func _ensure_water() -> void:
 	if has_node("Water"):
 		return
 	var water: MeshInstance3D = MeshInstance3D.new()
 	water.name = "Water"
-	# The translucent sea plane must not shadow the sea floor (phase 8).
+	# A map-sized plane casting through all shadow cascades is pure waste.
 	water.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var plane: PlaneMesh = PlaneMesh.new()
 	plane.size = Vector2(data.size, data.size)
 	water.mesh = plane
-	water.position = Vector3(data.size * 0.5, TerrainData.SEA_LEVEL, data.size * 0.5)
-	var wmat: StandardMaterial3D = StandardMaterial3D.new()
-	wmat.albedo_color = Color(0.15, 0.35, 0.6, 0.55)
-	wmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	wmat.metallic = 0.2
-	wmat.roughness = 0.1
+	water.position = Vector3(
+		data.size * 0.5, TerrainData.SEA_LEVEL + WATER_SURFACE_LIFT, data.size * 0.5)
 	var water_tex: Texture2D = AssetLibrary.texture("textures/terrain/water.png")
 	if water_tex != null:
-		wmat.albedo_texture = water_tex
-		wmat.albedo_color = Color(0.5, 0.7, 0.9, 0.65)   # lighter tint over the texture
-		wmat.uv1_scale = Vector3(float(data.size) * 0.05, float(data.size) * 0.05, 1.0)
-	water.material_override = wmat
+		# User texture wins: tinted, but still fully opaque.
+		var tmat: StandardMaterial3D = StandardMaterial3D.new()
+		tmat.albedo_texture = water_tex
+		tmat.albedo_color = COLOR_WATER * 1.6
+		tmat.metallic = 0.1
+		tmat.roughness = 0.25
+		tmat.uv1_scale = Vector3(float(data.size) * 0.05, float(data.size) * 0.05, 1.0)
+		water.material_override = tmat
+	else:
+		var smat: ShaderMaterial = ShaderMaterial.new()
+		smat.shader = preload("res://shaders/water.gdshader")
+		smat.set_shader_parameter("deep", Vector3(
+			COLOR_WATER.r, COLOR_WATER.g, COLOR_WATER.b))
+		smat.set_shader_parameter("crest", Vector3(
+			COLOR_WATER_HIGHLIGHT.r, COLOR_WATER_HIGHLIGHT.g, COLOR_WATER_HIGHLIGHT.b))
+		water.material_override = smat
 	add_child(water)
 
 
@@ -130,6 +160,11 @@ func _chunk_node(cx: int, cz: int) -> MeshInstance3D:
 
 
 func _color_for_height(h: float) -> Color:
+	if h < TerrainData.SEA_LEVEL + SHORE_BAND:
+		# Wet sand at the waterline, fading into dry sand — gives the opaque sea
+		# a readable shore instead of a hard colour cut.
+		return COLOR_SHORE.lerp(COLOR_SAND, clampf(
+			(h - TerrainData.SEA_LEVEL) / SHORE_BAND, 0.0, 1.0))
 	if h < SAND_TOP:
 		return COLOR_SAND
 	elif h < ROCK_BOTTOM:

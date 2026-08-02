@@ -122,6 +122,17 @@ const CORPSE_SINK_DURATION: float = Balance.CORPSE_SINK_DURATION
 ## so nothing pokes out of slopes at the end).
 const CORPSE_SINK_DEPTH: float = Balance.CORPSE_SINK_DEPTH
 
+## Drowning (phase 10a): a unit that rolls/is thrown into the sea dies at once
+## but keeps flailing at the surface for a moment before it sinks below the
+## opaque water plane. Deliberately much shorter than the land corpse — nothing
+## may float on the sea.
+const DROWN_FLAIL_DURATION: float = Balance.DROWN_FLAIL_DURATION
+const DROWN_SINK_DURATION: float = Balance.DROWN_SINK_DURATION
+const DROWN_FLOAT_DEPTH: float = Balance.DROWN_FLOAT_DEPTH
+const DROWN_SINK_DEPTH: float = Balance.DROWN_SINK_DEPTH
+## Tolerance above SEA_LEVEL that still counts as water for gameplay checks.
+const WATER_EPS: float = 0.05
+
 # --- Knockback (fireball, phase 5c; weakened in 5d for the roll chance) ---------
 ## Shove distance of a single un-stacked fireball hit (metres)...
 const KNOCKBACK_BASE: float = 0.35
@@ -655,6 +666,11 @@ var _combat_path_fail_until_ms: int = 0
 ## Corpse decay: seconds since death; corpse_expired fires once at the end.
 var _corpse_timer: float = 0.0
 var _corpse_done: bool = false
+## Died in water (phase 10a): swaps the corpse pose to "drown" and the decay
+## timings to the much shorter DROWN_* curve. Deliberately a flag on DEAD rather
+## than a State of its own — every "is this unit gone?" check in the codebase
+## already tests State.DEAD, and drowning wants exactly those semantics.
+var _drowning: bool = false
 
 # --- Knockback state (fireball, phase 5c) ---------------------------------------
 ## Hit-density accumulator: +1 per fireball hit, decays over time; scales the
@@ -1374,11 +1390,25 @@ func _die() -> void:
 ## Corpse decay: lie for CORPSE_DURATION, sink into the ground over
 ## CORPSE_SINK_DURATION (the renderer reads corpse_sink_depth()), then fire
 ## corpse_expired exactly once.
+## How long the corpse lies before it starts sinking (drowned units flail at
+## the surface only briefly).
+func _corpse_lie_duration() -> float:
+	return DROWN_FLAIL_DURATION if _drowning else CORPSE_DURATION
+
+
+func _corpse_sink_duration() -> float:
+	return DROWN_SINK_DURATION if _drowning else CORPSE_SINK_DURATION
+
+
+func _corpse_sink_distance() -> float:
+	return DROWN_SINK_DEPTH if _drowning else CORPSE_SINK_DEPTH
+
+
 func _tick_dead(delta: float) -> void:
 	if _corpse_done:
 		return
 	_corpse_timer += delta
-	if _corpse_timer >= CORPSE_DURATION + CORPSE_SINK_DURATION:
+	if _corpse_timer >= _corpse_lie_duration() + _corpse_sink_duration():
 		_corpse_done = true
 		corpse_expired.emit(self)
 		return
@@ -1390,7 +1420,10 @@ func _tick_dead(delta: float) -> void:
 	# but vehicles PUSH their own sink from _tick_visual — holding them freezes
 	# the wreck in plain sight. There are only a handful of vehicles, so their
 	# dead object ticks cost nothing.
-	if _idx >= 0 and _corpse_timer < CORPSE_DURATION and renders_as_sprite():
+	# A DROWNING unit is never parked: its whole visible life is 1.8 s and the
+	# hold would freeze it floating on the sea for the full CORPSE_DURATION.
+	if _idx >= 0 and not _drowning and _corpse_timer < CORPSE_DURATION \
+			and renders_as_sprite():
 		_soa_hold[_idx] = CORPSE_DURATION - _corpse_timer
 		_soa_mode[_idx] = UnitManager.HOLD_CORPSE
 		_soa_scan[_idx] = -1.0
@@ -1398,12 +1431,13 @@ func _tick_dead(delta: float) -> void:
 
 
 ## 0.0 while the corpse lies, then how many metres it has sunk below its
-## ground position (linear until fully submerged at CORPSE_SINK_DEPTH).
+## position (linear until fully submerged). Drowned units use the shorter,
+## deeper DROWN_* curve so they end up well below the opaque water plane.
 func corpse_sink_depth() -> float:
 	if state != State.DEAD:
 		return 0.0
-	return CORPSE_SINK_DEPTH * clampf(
-		(_corpse_timer - CORPSE_DURATION) / CORPSE_SINK_DURATION, 0.0, 1.0)
+	return _corpse_sink_distance() * clampf(
+		(_corpse_timer - _corpse_lie_duration()) / _corpse_sink_duration(), 0.0, 1.0)
 
 
 # --- Knockback (fireball, phase 5c) ----------------------------------------------
@@ -1447,11 +1481,19 @@ func _tick_knockback(delta: float) -> void:
 		_knockback_remaining = Vector3.ZERO
 	var nx: float = position.x + step.x
 	var nz: float = position.z + step.z
-	# Never shove anyone into water/obstacles (overview risk 6) — but a downward
-	# cliff edge launches the unit off it instead of stopping at the rim.
+	# Obstacles still stop the shove, and a downward cliff edge launches the unit
+	# off it instead of stopping at the rim. WATER, however, no longer stops it
+	# (phase 10a — this deliberately reverses the old "never shove into water"
+	# rule of overview risk 6): the unit is pushed in and drowns. Pathfinding is
+	# untouched, so only forced movement can ever reach the sea.
 	if nav_grid != null and not nav_grid.is_cell_walkable(
 			nav_grid.world_to_cell(Vector3(nx, 0.0, nz))):
 		_knockback_remaining = Vector3.ZERO
+		if _is_water_at(nx, nz):
+			position.x = nx
+			position.z = nz
+			drown()
+			return
 		var push_dir: Vector3 = Vector3(step.x, 0.0, step.z)
 		var drop: float = _cliff_drop_ahead(push_dir)
 		if drop > 0.0:
@@ -1485,8 +1527,11 @@ func _cliff_drop_ahead(dir: Vector3) -> float:
 	var below: Vector3 = Vector3(
 		position.x + flat.x * CLIFF_PROBE_DIST, 0.0, position.z + flat.z * CLIFF_PROBE_DIST)
 	var below_h: float = terrain_data.get_height(below.x, below.z)
-	if below_h <= TerrainData.SEA_LEVEL + 0.05:
-		return 0.0   # water at the base: keep the caller's stop, do not launch in
+	if below_h <= TerrainData.SEA_LEVEL + WATER_EPS:
+		# Sea at the base (phase 10a): launch out over the water and let the
+		# landing drown the unit, instead of stopping at the rim. The fall
+		# damage never matters — the landing is lethal either way.
+		below_h = TerrainData.SEA_LEVEL
 	var drop: float = position.y - below_h
 	return drop if drop >= CLIFF_FALL_MIN_DROP else 0.0
 
@@ -1570,11 +1615,10 @@ func _on_stumble() -> void:
 
 func _tick_roll(delta: float) -> void:
 	_roll_time += delta
-	# Rolling into water is instant death (no deferral).
-	if terrain_data != null and terrain_data.get_height(position.x, position.z) \
-			<= TerrainData.SEA_LEVEL + 0.05:
-		health = 0
-		_die()
+	# Rolling into water drowns the unit right there (no deferral) — the roll
+	# crosses the shoreline freely, it is the water itself that stops it.
+	if _is_water_at(position.x, position.z):
+		drown()
 		return
 	# Trapped-roll safety nets (phase 8.2, earthquake bowls — the fall line
 	# there never flattens below ROLL_END_SLOPE, so the roll never ended and
@@ -1639,6 +1683,12 @@ func _tick_roll(delta: float) -> void:
 ## Lands the unit: clamp onto a walkable cell (overview risk 6), then either
 ## die (deferred roll damage) or get back up.
 func _end_roll() -> void:
+	# A roll that ended OVER water must not be snapped back onto land — that is
+	# what used to save units from the sea. Only the exits that bypass the
+	# per-tick water check can get here (building block, stall probe, time cap).
+	if _is_water_at(position.x, position.z):
+		drown()
+		return
 	if nav_grid != null:
 		var cell: Vector2i = nav_grid.world_to_cell(position)
 		if not nav_grid.is_cell_walkable(cell):
@@ -1737,11 +1787,16 @@ func _tick_thrown(delta: float) -> void:
 	var ground: float = 0.0
 	if terrain_data != null:
 		ground = terrain_data.get_height(position.x, position.z)
-	if position.y > ground and _throw_velocity.y > 0.0:
+	# Over the sea the arc ends AT the surface, not on the seabed — otherwise
+	# the figure would flash down to the sea floor for one frame before drown()
+	# lifts it back up. _land_from_throw still gets the true ground height, so
+	# its water test is unaffected.
+	var land_y: float = maxf(ground, TerrainData.SEA_LEVEL)
+	if position.y > land_y and _throw_velocity.y > 0.0:
 		return
-	if position.y > ground:
+	if position.y > land_y:
 		return   # still falling
-	position.y = ground
+	position.y = land_y
 	_sync_soa_pos()
 	_land_from_throw(ground)
 
@@ -1755,11 +1810,30 @@ func fling_from_carry(velocity: Vector3) -> void:
 	_throw_velocity = velocity
 
 
-## Instant water death: landing in the sea after a throw, or the ground
-## flooding away under the unit (terrain spells, 7c integrity rules).
+## True when the sea covers the given world XZ. Single source of truth for
+## every "is this water?" gameplay check (throw landing, roll, knockback,
+## cliff probe).
+func _is_water_at(x: float, z: float) -> bool:
+	return terrain_data != null \
+		and terrain_data.get_height(x, z) <= TerrainData.SEA_LEVEL + WATER_EPS
+
+
+## Death in water: landing in the sea after a throw, rolling or being shoved
+## in, or the ground flooding away under the unit (terrain spells, 7c integrity
+## rules). Sprite units flail at the surface for a moment and then sink below
+## the opaque water plane, which is what makes the corpse disappear — no
+## renderer work needed. Vehicles keep their own sink (CrewedVehicle._sinking)
+## and the airship ignores water entirely.
 func drown() -> void:
 	if state == State.DEAD:
 		return
+	if renders_as_sprite():
+		# MUST be set before _die(): _die() locks the corpse pose exactly once
+		# and the per-tick dead path never refreshes the animation again.
+		_drowning = true
+		position.y = TerrainData.SEA_LEVEL - DROWN_FLOAT_DEPTH
+		_sync_soa_pos()
+		_play_sfx(&"water_splash", 150)
 	health = 0
 	_die()
 
@@ -1849,7 +1923,7 @@ func _land_from_throw(ground: float) -> void:
 	_throw_fall_damage = 0
 	var momentum: Vector3 = Vector3(_throw_velocity.x, 0.0, _throw_velocity.z)
 	_throw_velocity = Vector3.ZERO
-	if terrain_data != null and ground <= TerrainData.SEA_LEVEL + 0.05:
+	if terrain_data != null and ground <= TerrainData.SEA_LEVEL + WATER_EPS:
 		drown()
 		return
 	if nav_grid != null:
@@ -3399,10 +3473,12 @@ func _anim_base() -> StringName:
 			return &"cast"
 		State.SIT:
 			return &"sit"
-		State.ROLL, State.THROWN:
-			return &"roll"
+		State.ROLL:
+			return &"roll"          # tumbling ALONG the ground
+		State.THROWN:
+			return &"airborne"      # flying THROUGH the air
 		State.DEAD:
-			return &"dead"
+			return &"drown" if _drowning else &"dead"
 		State.CREW:
 			if crew_action_anim != &"":
 				return crew_action_anim   # airship deck combat (throw / cast)

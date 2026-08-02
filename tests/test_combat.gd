@@ -645,6 +645,35 @@ func test_strike_anims_in_atlas() -> void:
 	check(int(views[0][1]) == 4, "punch alternates both fists (4 frames)")
 
 
+## Phase 10a: flying through the air and dying in water are their own
+## animations, for every kind. The frame counts are asserted so the atlas
+## (5 kinds x 8 views) cannot silently balloon.
+func test_airborne_and_drown_anims_in_atlas() -> void:
+	var atlas: Dictionary = PlaceholderSprites.build_atlas(
+		[&"brave", &"warrior", &"firewarrior"] as Array[StringName])
+	var table: Dictionary = atlas.table
+	for kind: StringName in [&"brave", &"warrior", &"firewarrior"]:
+		check(table[kind].has(&"airborne"), "%s has an airborne animation" % kind)
+		check(table[kind].has(&"drown"), "%s has a drown animation" % kind)
+		check((table[kind][&"airborne"] as Array).size() == 8,
+			"%s airborne exists in all eight views" % kind)
+		check((table[kind][&"drown"] as Array).size() == 8,
+			"%s drown exists in all eight views" % kind)
+	check(int(table[&"brave"][&"airborne"][0][1]) == 2, "airborne has 2 frames")
+	check(int(table[&"brave"][&"drown"][0][1]) == 3, "drown has 3 frames")
+
+
+## The cast animation exists (phase 6) and stays caster-only.
+func test_cast_anim_is_caster_only() -> void:
+	var atlas: Dictionary = PlaceholderSprites.build_atlas(
+		[&"shaman", &"preacher", &"brave", &"warrior"] as Array[StringName])
+	var table: Dictionary = atlas.table
+	check(table[&"shaman"].has(&"cast"), "the shaman has a cast animation")
+	check(table[&"preacher"].has(&"cast"), "the preacher has a cast animation")
+	check(not table[&"brave"].has(&"cast"), "the brave has no cast animation")
+	check(not table[&"warrior"].has(&"cast"), "the warrior has no cast animation")
+
+
 ## A strike switches the unit's animation to the rolled kind's animation.
 func test_strike_sets_matching_anim() -> void:
 	check(Unit.kind_to_anim(&"punch") == &"punch", "punch maps to punch anim")

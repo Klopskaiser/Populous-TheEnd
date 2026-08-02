@@ -46,6 +46,10 @@ const SITE_MIN_HP: int = 1
 ## Destroyed buildings sink into the ground (visual only), then free themselves.
 const SINK_DURATION: float = 2.0
 const SINK_DEPTH: float = 5.0
+## One slow rocking lean while the wreck goes under (radians / Hz) — purely
+## visual, so the building settles instead of dropping like a lift.
+const SINK_TILT: float = 0.14
+const SINK_TILT_HZ: float = 0.8
 ## Sideways drift of a flooded wreck sliding into the water (7c integrity rule).
 const SLIDE_SPEED: float = 1.6
 ## A building that survived a terrain morph levels its foundation back at
@@ -1333,6 +1337,13 @@ func _process(delta: float) -> void:
 		_sink_time += delta
 		position.y -= SINK_DEPTH / SINK_DURATION * delta
 		position += _slide_dir * SLIDE_SPEED * delta
+		# One slow rocking lean while it goes under, so the wreck settles instead
+		# of dropping straight down like a lift. Mutually exclusive with the raid
+		# wobble (that branch is only reached when NOT destroyed).
+		if _mesh_root != null:
+			var lean: float = SINK_TILT * sin(_sink_time * TAU * SINK_TILT_HZ)
+			_mesh_root.rotation.z = lean
+			_mesh_root.rotation.x = lean * 0.6
 		if _sink_time >= SINK_DURATION:
 			queue_free()
 		return

@@ -104,25 +104,48 @@ func _make_effect(bit: int, fx_name: StringName, height: float, size: Vector2,
 ## Asset texture (single image or horizontal strip of square frames) when
 ## present, otherwise the procedural placeholder frames.
 func _load_textures(fx_name: StringName) -> Array[Texture2D]:
-	var img: Image = AssetLibrary.image("textures/effects/%s.png" % fx_name)
-	if img != null:
-		var frames: Array[Texture2D] = []
-		var fh: int = img.get_height()
-		var count: int = maxi(img.get_width() / maxi(fh, 1), 1)
-		if img.get_format() != Image.FORMAT_RGBA8:
-			img.convert(Image.FORMAT_RGBA8)
-		for i in range(count):
-			var frame: Image = Image.create(fh, fh, false, Image.FORMAT_RGBA8)
-			frame.blit_rect(img, Rect2i(i * fh, 0, fh, fh), Vector2i.ZERO)
-			frames.append(ImageTexture.create_from_image(frame))
-		return frames
+	if fx_name == &"burning":
+		return flame_textures()
+	var sheet: Array[Texture2D] = _sheet_frames(fx_name)
+	if not sheet.is_empty():
+		return sheet
 	match fx_name:
 		&"panic":
 			return [_panic_frame(0), _panic_frame(1)]
-		&"burning":
-			return [_burning_frame(0), _burning_frame(1), _burning_frame(2)]
 		_:
 			return [_injured_frame(0), _injured_frame(1)]
+
+
+## The game-wide fire frames, cached. Shared by units, burning trees AND the
+## fire ram's flame cone, so every flame in the game looks the same and there is
+## exactly one asset override point (assets/textures/effects/burning.png).
+static var _flame_frames: Array[Texture2D] = []
+
+
+static func flame_textures() -> Array[Texture2D]:
+	if _flame_frames.is_empty():
+		_flame_frames = _sheet_frames(&"burning")
+		if _flame_frames.is_empty():
+			_flame_frames = [_burning_frame(0), _burning_frame(1), _burning_frame(2)]
+	return _flame_frames
+
+
+## Slices assets/textures/effects/<name>.png (single image or horizontal strip
+## of square frames) into textures; empty when the file is absent.
+static func _sheet_frames(fx_name: StringName) -> Array[Texture2D]:
+	var frames: Array[Texture2D] = []
+	var img: Image = AssetLibrary.image("textures/effects/%s.png" % fx_name)
+	if img == null:
+		return frames
+	var fh: int = img.get_height()
+	var count: int = maxi(img.get_width() / maxi(fh, 1), 1)
+	if img.get_format() != Image.FORMAT_RGBA8:
+		img.convert(Image.FORMAT_RGBA8)
+	for i in range(count):
+		var frame: Image = Image.create(fh, fh, false, Image.FORMAT_RGBA8)
+		frame.blit_rect(img, Rect2i(i * fh, 0, fh, fh), Vector2i.ZERO)
+		frames.append(ImageTexture.create_from_image(frame))
+	return frames
 
 
 func _process(delta: float) -> void:
