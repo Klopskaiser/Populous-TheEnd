@@ -482,7 +482,8 @@ const CLIFF_PROBE_DIST: float = 2.0
 ## Fallschaden pro gestürztem Meter, gedeckelt auf 1/2 Brave-Leben.
 const CLIFF_FALL_DAMAGE_PER_M: float = 6.0
 const CLIFF_FALL_MAX_DAMAGE: int = 30   # 30
-## Rolldauer pro gestürztem Meter (s), geklemmt auf [MINI_ROLL_DURATION, 2.0].
+## Rolldauer pro gestürztem Meter (s), geklemmt auf
+## [MINI_ROLL_DURATION, CLIFF_ROLL_MAX_DURATION].
 const CLIFF_ROLL_PER_M: float = 0.33
 const CLIFF_ROLL_MAX_DURATION: float = 3.0
 ## Horizontale/vertikale Startgeschwindigkeit des Sturzes (m/s): der kleine

@@ -238,6 +238,6 @@ const CONSTRUCTION_STALL_REFUND: float = 1.0
 
 - [x] Testsuite grün (**3273/3273**, dreimal identisch), `--headless --quit` fehlerfrei
 - [x] `benchmark_earlygame` ohne Insel-Flutfüllungs-Regress (10/446 ms → 10/439 ms)
-- [ ] Manuelle Prüfung durch den Nutzer bestanden
+- [x] Manuelle Prüfung durch den Nutzer bestanden (2026-08-04)
 - [x] PROGRESS.md ergänzt, Checkbox 10d in [00_overview.md](00_overview.md) abgehakt
 - [x] Commit/Push

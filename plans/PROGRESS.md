@@ -7494,5 +7494,12 @@ vollständig umgesetzt.
   `test_ai.test_defeat_condition` (Hütte/Kreis retten keinen Stamm mehr),
   `test_building_assault` (Kreis ignoriert Zauber/Katapult/Lava),
   `test_shaman_respawn` (kein „beschädigter Kreis" mehr möglich).
-- **Manuelle Prüfung durch den Nutzer ausstehend** (die 8 Schritte im
-  Plandokument).
+- **Manuelle Prüfung durch den Nutzer am 2026-08-04 bestanden** (die 8 Schritte
+  im Plandokument: Kreis unter Beschuss unverwundbar, Selbstzerstörung nach dem
+  letzten Anhänger und Ausscheiden nach dem Schamanentod, Sofort-Abriss ohne
+  Baustufe, Arbeiter-Abriss von halbfertigem und fertigem Gebäude, unerreichbare
+  Insel ohne Bauarbeiter, Bau mit selektierten Braves, Angriffs-Cursor beim
+  Linksklick, Selektionszahl beim Bekehren). Der rote Fortschrittsbalken als
+  Abriss-Anzeige wurde damit ebenfalls abgenommen — **kein Text-Overlay nötig**.
+
+**Phase 10d ist damit abgeschlossen.**
