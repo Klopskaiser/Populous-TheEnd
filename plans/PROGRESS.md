@@ -7328,3 +7328,28 @@ Seitwärtsübertrag, Weltgrenzen-Mauer, Eigenschaften fliegender Ziele) — das 
 jetzt allgemeine Spielregeln, keine Zauber-Interna mehr.
 
 **Verifikation:** Ladecheck sauber, Suite **3226/3226 grün**.
+
+### Nachtrag 10c (7) — Zustands-Overlays ohne Schatten (2026-08-03)
+
+Nutzerbefund: die kreisenden Sterne des Zustands „kritisch verletzt" werfen
+Schatten. Bestätigt — `StarsRenderer` war der **einzige** Overlay-Renderer, der
+`cast_shadow` nie gesetzt hat und damit auf Godots Default
+`SHADOW_CASTING_SETTING_ON` stand. In einer Massenschlacht fluteten damit
+hunderte Billboard-Quads die Shadow-Map der Sonne.
+
+- `StarsRenderer._ready()` setzt jetzt `SHADOW_CASTING_SETTING_OFF`.
+- Gegenprüfung aller anderen Zustandsanzeigen: `StatusFxRenderer` (Panik,
+  Brand, Verletzt) setzt es bereits in seinem `_make_effect`-Helper für jeden
+  Effekt — dort war nichts offen. Ebenso Selektionsring, Reichweitenring,
+  Routenanzeige, Wasser-FX, Unit-Sprites und Bauvorschau.
+- Gebäude, Bäume und Fahrzeuge werfen weiterhin Schatten (Weltgeometrie).
+
+**Regel (Nutzervorgabe, jetzt in `CLAUDE.md` §6):** Zustandsanzeigen werfen
+**keinerlei** Schatten.
+
+**Wächter:** `test_status_overlays_never_cast_shadows` instanziiert
+`StarsRenderer` und `StatusFxRenderer`, ruft `_ready()` und prüft den Renderer
+selbst bzw. jedes erzeugte `GeometryInstance3D`-Kind — headless möglich, weil
+nur MultiMesh/Material/ImageTexture gebaut werden, keine Shader.
+
+**Verifikation:** Ladecheck sauber, Suite **3229/3229 grün**.

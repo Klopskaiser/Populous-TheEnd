@@ -250,3 +250,30 @@ func _collect_input_blockers(node: Node, cell: Control,
 				and (child as Control).mouse_filter == Control.MOUSE_FILTER_STOP:
 			out.append(child.get_class())
 		_collect_input_blockers(child, cell, out)
+
+
+# --- Status overlays never cast shadows ---------------------------------------
+
+## Project rule (user spec): a unit's STATE display is a UI glyph floating over
+## its head — it must never reach the Sun's shadow map. The circling crit-damage
+## stars were still on Godot's default SHADOW_CASTING_ON and did cast shadows in
+## a mass battle (user report); every status renderer is checked here so the next
+## one cannot slip through the same way.
+func test_status_overlays_never_cast_shadows() -> void:
+	var stars: StarsRenderer = StarsRenderer.new()
+	stars._ready()
+	check(stars.cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_OFF,
+		"the crit-damage stars cast no shadow")
+	stars.free()
+
+	var fx: StatusFxRenderer = StatusFxRenderer.new()
+	fx._ready()
+	var checked: int = 0
+	for child in fx.get_children():
+		if child is GeometryInstance3D:
+			checked += 1
+			check((child as GeometryInstance3D).cast_shadow
+				== GeometryInstance3D.SHADOW_CASTING_SETTING_OFF,
+				"%s casts no shadow" % child.name)
+	check(checked >= 3, "panic, burning and injured overlays were all checked")
+	fx.free()

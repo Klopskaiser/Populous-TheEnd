@@ -173,6 +173,11 @@ Laufzeit-Terrainverformung (Erdbeben/Vulkan/Ebene/Absinken).
   Ein tödlicher Treffer in der Luft tötet nicht sofort: die Einheit fällt als
   Ragdoll zu Boden und stirbt bei der Landung.
 
+**Zustandsanzeigen werfen keinerlei Schatten** (Sterne bei kritischer
+Verletzung, Panik, Brand): es sind UI-Glyphen über dem Kopf, und in der
+Massenschlacht würden hunderte davon die Shadow-Map fluten. Weltgeometrie
+(Gebäude, Bäume, Fahrzeuge) wirft weiterhin Schatten.
+
 **Skirmish-Karten (Phase 7i):** Auswahl im Skirmish-Setup — **Insel** (Standard,
 128), **Seenland** (256, See mittig, Start in den Ecken), **Bergpass** (256, Gebirge
 mit 3 Pässen), **Plateau** (128, erhöhte Start-Plateaus mit Rampe). Terrain-Kantenlänge

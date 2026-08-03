@@ -33,6 +33,11 @@ func setup(p_unit_manager: UnitManager) -> void:
 
 
 func _ready() -> void:
+	# Status overlays NEVER cast a shadow (project rule): these are UI glyphs
+	# floating over a unit's head, and in a mass battle hundreds of them flooded
+	# the Sun's shadow map. This one was left on the default SHADOW_CASTING_ON
+	# until the user spotted the shadows in-game.
+	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	for f in range(FRAME_COUNT):
 		_textures.append(_make_frame_texture(f))
 	var quad: QuadMesh = QuadMesh.new()
