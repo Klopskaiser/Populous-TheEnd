@@ -573,11 +573,15 @@ func _make_spell_cell(entry: Dictionary) -> Control:
 	var pip_row: HBoxContainer = HBoxContainer.new()
 	pip_row.add_theme_constant_override("separation", 2)
 	pip_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	# Decoration only: the pips must not swallow the cell's right-click
+	# (MOUSE_FILTER_STOP is the default and blocks the bubbling, see below).
+	pip_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var pips: Array[ColorRect] = []
 	for i in range(int(entry["max_charges"])):
 		var pip: ColorRect = ColorRect.new()
 		pip.custom_minimum_size = Vector2(6, 5)
 		pip.color = _pip_empty_color()
+		pip.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		pip_row.add_child(pip)
 		pips.append(pip)
 	cell.add_child(pip_row)
@@ -588,6 +592,13 @@ func _make_spell_cell(entry: Dictionary) -> Control:
 		% [entry["name"], entry.get("hotkey", "")]
 	b.disabled = true   # enabled by set_spell_state once a charge is stored
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# PASS, not the default STOP: a Control with STOP ends the gui_input
+	# bubbling even for events it does not handle at all. The button ignores
+	# right-clicks (and a disabled one ignores everything), so with STOP the
+	# cell below never saw the toggle click — the first version of this simply
+	# did nothing (user report). PASS keeps the left-click working and lets the
+	# right-click travel on to the cell.
+	b.mouse_filter = Control.MOUSE_FILTER_PASS
 	UiTheme.style_button(b)
 	var spell_id: StringName = entry["id"]
 	b.pressed.connect(func() -> void: _on_spell_pressed(spell_id))
@@ -600,8 +611,10 @@ func _make_spell_cell(entry: Dictionary) -> Control:
 	bar_bg.custom_minimum_size = Vector2(0, 3)
 	bar_bg.color = _pip_empty_color()
 	bar_bg.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bar_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE   # decoration only
 	var bar_fill: ColorRect = ColorRect.new()
 	bar_fill.color = UiTheme.GOLD
+	bar_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bar_fill.anchor_left = 0.0
 	bar_fill.anchor_top = 0.0
 	bar_fill.anchor_right = 0.0
@@ -613,10 +626,10 @@ func _make_spell_cell(entry: Dictionary) -> Control:
 	bar_bg.add_child(bar_fill)
 	cell.add_child(bar_bg)
 
-	# Right-click anywhere on the cell toggles the spell's charging. It sits on
-	# the CELL, not the button: a disabled button (no charge stored yet) takes
-	# no input at all, and an enabled one only accepts left-clicks — either way
-	# the right-click lands here.
+	# Right-click anywhere on the cell toggles the spell's charging. The handler
+	# sits on the CELL (the button and the decorations pass their events on, see
+	# their mouse_filter above), so the whole tile is a valid target.
+	cell.mouse_filter = Control.MOUSE_FILTER_STOP
 	cell.gui_input.connect(func(event: InputEvent) -> void:
 		_on_spell_cell_input(event, spell_id))
 
@@ -641,6 +654,9 @@ func _on_spell_cell_input(event: InputEvent, spell_id: StringName) -> void:
 		return
 	_tribe_commands.set_spell_active(player, spell_id, not spell.active)
 	_refresh_spells()
+	# Consume it, or the same right-click would also reach the world below and
+	# be read as a move order.
+	accept_event()
 
 
 func _build_followers_tab() -> Control:

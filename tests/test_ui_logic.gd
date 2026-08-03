@@ -214,3 +214,39 @@ func test_selection_ring_circle_is_uniform() -> void:
 		Vector3(1, 0, 1).normalized(), false, Vector2(4.5, 4.5))
 	check(absf((b * Vector3(0, 0, 1)).length() - 4.5) < 0.01, "circle keeps its radius on Z")
 	check(absf((b * Vector3(1, 0, 0)).length() - 4.5) < 0.01, "circle keeps its radius on X")
+
+
+# --- Phase 10c: spell cell wiring (right-click toggle) ------------------------
+
+## Regression guard for a bug the user hit: the toggle handler sits on the CELL,
+## but a child Control with MOUSE_FILTER_STOP ends Godot's gui_input bubbling
+## even for events it does not handle. Button and decorations therefore MUST NOT
+## be STOP, or the right-click never reaches the handler and nothing happens.
+## Widget construction only — no viewport, no texture contents.
+func test_spell_cell_lets_the_right_click_through_to_the_cell() -> void:
+	var sidebar: Sidebar = Sidebar.new()
+	var entries: Array = Sidebar.default_spell_entries()
+	check(not entries.is_empty(), "there are spell entries to build from")
+	var cell: Control = sidebar._make_spell_cell(entries[0])
+	check(cell != null, "the cell was built")
+	check(cell.mouse_filter == Control.MOUSE_FILTER_STOP,
+		"the cell itself receives gui_input")
+	check(cell.gui_input.get_connections().size() == 1,
+		"exactly one toggle handler on the cell")
+	var blockers: Array[String] = []
+	_collect_input_blockers(cell, cell, blockers)
+	check(blockers.is_empty(),
+		"no child swallows the right-click: %s" % ", ".join(blockers))
+	cell.free()   # built detached, so the sidebar does not own it
+	sidebar.free()
+
+
+## Every Control BELOW the cell must be PASS or IGNORE — STOP would end the
+## bubbling before the cell's handler runs.
+func _collect_input_blockers(node: Node, cell: Control,
+		out: Array[String]) -> void:
+	for child in node.get_children():
+		if child is Control and child != cell \
+				and (child as Control).mouse_filter == Control.MOUSE_FILTER_STOP:
+			out.append(child.get_class())
+		_collect_input_blockers(child, cell, out)

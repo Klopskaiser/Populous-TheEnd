@@ -11,6 +11,11 @@ class_name Fireball extends Node3D
 ## Shooter/target references are untyped — either may be freed mid-flight.
 
 const SPEED: float = Balance.FIREWARRIOR_FIREBALL_SPEED
+## Chasing an AIRBORNE target the ball keeps picking up speed (phase 10c): a
+## unit whirled up by a fireball combo outran the flat 12 m/s, so the shots
+## trailed uselessly behind it (user report).
+const AIR_ACCEL: float = Balance.FIREWARRIOR_FIREBALL_AIR_ACCEL
+const AIR_MAX_SPEED: float = Balance.FIREWARRIOR_FIREBALL_AIR_MAX_SPEED
 const HIT_RANGE: float = 0.5
 ## Aim at chest height rather than the feet.
 const TARGET_HEIGHT: float = 0.8
@@ -57,6 +62,10 @@ const BUILDING_HIT_RANGE: float = 1.6
 
 var _dest: Vector3 = Vector3.ZERO
 var _age: float = 0.0
+## Current flight speed: SPEED on the ground, ramping up while the target is
+## airborne (see AIR_ACCEL). Once gained it is kept — the ball has already
+## committed to a fast chase and its lifetime is short anyway.
+var _speed: float = SPEED
 
 
 var _launch_from: Vector3 = Vector3.ZERO
@@ -89,7 +98,9 @@ func tick(delta: float) -> void:
 		return
 	if _target_alive():
 		_dest = target.position + Vector3(0.0, TARGET_HEIGHT, 0.0)
-	position = position.move_toward(_dest, SPEED * delta)
+		if target.is_airborne():
+			_speed = minf(_speed + AIR_ACCEL * delta, AIR_MAX_SPEED)
+	position = position.move_toward(_dest, _speed * delta)
 	if _hits_terrain():
 		done = true   # smacked into a cliff face / the ground — no damage
 		return

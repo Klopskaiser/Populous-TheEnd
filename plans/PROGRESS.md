@@ -7206,3 +7206,33 @@ Tests: paralleles Laden, Abschalten behält Ladungen und Fortschritt, alle
 Zauber starten aktiv, Einkommen ohne Abnehmer verfällt, Killbonus skaliert mit
 dem Opferstamm; Förster-Unterhalt-Test auf Einkommensdeckung umgestellt.
 **Offen:** Sichtprüfung von Ladebalken und Rechtsklick-Toggle im Spiel.
+
+### Nachtrag 10c (4) — Rechtsklick-Bug, Feuerball-Beschleunigung (2026-08-03)
+
+1. **Rechtsklick auf Zauber tat nichts** (Nutzerreport, Startmission). Ursache
+   war eine falsche Annahme über Godots `gui_input`: ein Control mit
+   `MOUSE_FILTER_STOP` **beendet die Weitergabe an die Eltern auch für
+   Ereignisse, die es selbst gar nicht behandelt**. `Button` ist standardmäßig
+   STOP und ignoriert Rechtsklicks (ein *deaktivierter* Button ignoriert
+   ohnehin alles) — der Klick verpuffte also, bevor die Zelle ihn sah. Fix:
+   Zauber-Button auf `MOUSE_FILTER_PASS`, Pips und Ladebalken auf
+   `MOUSE_FILTER_IGNORE` (reine Deko), Zelle explizit STOP. Zusätzlich
+   `accept_event()`, damit derselbe Rechtsklick nicht auch noch als
+   Bewegungsbefehl in der Welt landet.
+   **Regressionstest** `test_spell_cell_lets_the_right_click_through_to_the_cell`
+   baut die Zelle und prüft, dass **kein** Kind STOP ist und genau ein Handler
+   an der Zelle hängt — headless prüfbar, weil nur Widgets gebaut werden, kein
+   Viewport nötig.
+2. **Feuerkrieger-Feuerbälle beschleunigen gegen Luftziele** (Nutzerwunsch):
+   `Fireball._speed` startet bei `FIREWARRIOR_FIREBALL_SPEED` und wächst pro
+   Sekunde um `FIREWARRIOR_FIREBALL_AIR_ACCEL` (22 m/s²) bis
+   `FIREWARRIOR_FIREBALL_AIR_MAX_SPEED` (34 m/s), solange das Ziel
+   `is_airborne()` ist. Einmal gewonnenes Tempo bleibt (die Lebensdauer des
+   Balls ist mit 3 s ohnehin kurz). Gegen Bodenziele bleibt es beim Grundtempo.
+   Vorher zog eine hochgeschleuderte Einheit den Bällen davon.
+
+**Verifikation:** Ladecheck sauber, Suite **3193/3193 grün**. Neu:
+`test_firewarrior_fireball_accelerates_after_airborne_target`,
+`test_firewarrior_fireball_keeps_base_speed_on_the_ground`,
+`test_spell_cell_lets_the_right_click_through_to_the_cell`.
+**Offen:** erneute Sichtprüfung des Rechtsklick-Toggles im Spiel.

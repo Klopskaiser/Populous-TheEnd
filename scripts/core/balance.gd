@@ -39,6 +39,11 @@ const FIREWARRIOR_AGGRO_RADIUS: float = 13.0
 const FIREWARRIOR_FIREBALL_DAMAGE: int = 9
 ## Fluggeschwindigkeit (m/s) des Feuerkrieger-Feuerballs (zielsuchend).
 const FIREWARRIOR_FIREBALL_SPEED: float = 12.0
+## Verfolgt der Ball ein LUFTZIEL (geschleuderte Einheit, Zeppelin), gewinnt er
+## kontinuierlich Tempo (m/s²) — mit dem Grundtempo holte er hochgeschleuderte
+## Ziele kaum ein. Gedeckelt, damit er nicht durch das Ziel hindurchschießt.
+const FIREWARRIOR_FIREBALL_AIR_ACCEL: float = 22.0
+const FIREWARRIOR_FIREBALL_AIR_MAX_SPEED: float = 34.0
 ## Schaden eines Feuerballs an Gebäuden.
 const FIREWARRIOR_BUILDING_DAMAGE: int = 5
 

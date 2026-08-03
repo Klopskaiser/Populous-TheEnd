@@ -779,6 +779,54 @@ func test_firewarrior_fireball_always_lifts_airborne_target() -> void:
 	_free_world(w)
 
 
+## A ball chasing a whirled-up target keeps picking up speed until it catches
+## it — at the flat base speed the shots just trailed behind (user report).
+func test_firewarrior_fireball_accelerates_after_airborne_target() -> void:
+	var w: Dictionary = _make_world()
+	var shooter: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(20, 30))
+	var flyer: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
+	flyer.max_health = 100000
+	flyer.health = 100000
+	# Hurled away from the shooter, faster than the ball's base speed.
+	flyer.throw_airborne(Vector3(1, 0, 0) * (Fireball.SPEED * 1.2) + Vector3.UP * 5.0)
+	check(flyer.is_airborne(), "the target is in the air and running away")
+	var ball: Fireball = Fireball.new()
+	ball.terrain_data = w.td
+	ball.setup(shooter, flyer, shooter.position + Vector3(0.0, 1.1, 0.0))
+	check(ball._speed == Fireball.SPEED, "it launches at the base speed")
+	var ticks: int = 0
+	while not ball.done and ticks < 200:
+		ball.tick(TICK)
+		if flyer.state == Unit.State.THROWN:
+			flyer.tick(TICK)
+		ticks += 1
+	check(ball._speed > Fireball.SPEED,
+		"the chase sped it up (%.1f -> %.1f m/s)" % [Fireball.SPEED, ball._speed])
+	check(ball._speed <= Fireball.AIR_MAX_SPEED, "but not past the cap")
+	check(flyer.health < 100000, "and it actually caught up and hit")
+	ball.free()
+	_free_world(w)
+
+
+## A ground target needs no chase bonus: the ball stays at its base speed.
+func test_firewarrior_fireball_keeps_base_speed_on_the_ground() -> void:
+	var w: Dictionary = _make_world()
+	var shooter: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(26, 30))
+	var enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
+	enemy.max_health = 100000
+	enemy.health = 100000
+	var ball: Fireball = Fireball.new()
+	ball.setup(shooter, enemy, shooter.position + Vector3(0.0, 1.1, 0.0))
+	var ticks: int = 0
+	while not ball.done and ticks < 200:
+		ball.tick(TICK)
+		ticks += 1
+	check(ball._speed == Fireball.SPEED, "no acceleration against a walker")
+	check(enemy.health < 100000, "the shot still lands")
+	ball.free()
+	_free_world(w)
+
+
 ## Deck passengers ride the airship; nothing throws them off it.
 func test_apply_lift_ignores_deck_passengers() -> void:
 	var w: Dictionary = _make_world()
