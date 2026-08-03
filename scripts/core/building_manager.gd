@@ -100,22 +100,33 @@ func _on_building_destroyed(building: Building) -> void:
 	buildings.erase(building)
 
 
-## Sends idle braves of the owning tribe to under-construction sites nearby.
+## Sends idle braves of the owning tribe to under-construction sites — and, since
+## phase 10d, to buildings being demolished — nearby. Sites nobody can walk to
+## (own island, phase 10d) are skipped entirely: workers used to march off to an
+## unreachable plot and get stuck there.
 func _recruit_workers() -> void:
 	if unit_manager == null:
 		return
 	for building in buildings:
-		if not building.under_construction:
+		if not building.under_construction and not building.demolishing:
 			continue
-		if building.wood_stalled:
+		if building.wood_stalled and not building.demolishing:
 			continue  # waiting for new wood (re-checked on an interval)
 		if building.workers.size() >= Building.MAX_WORKERS:
 			continue
+		if building.approach_island() < 0:
+			continue  # no walkable approach spot at all: nobody can work here
 		for unit in unit_manager.get_units_in_radius(building.center_world(), RECRUIT_RADIUS):
 			if building.workers.size() >= Building.MAX_WORKERS:
 				break
-			if unit is Brave and unit.tribe_id == building.tribe_id \
-					and unit.state == Unit.State.IDLE:
+			if not (unit is Brave and unit.tribe_id == building.tribe_id
+					and unit.state == Unit.State.IDLE):
+				continue
+			if not building.worker_can_reach(unit.position):
+				continue  # other island (water/cliff between them)
+			if building.demolishing:
+				(unit as Brave).order_demolish(building)
+			else:
 				(unit as Brave).order_build(building)
 
 

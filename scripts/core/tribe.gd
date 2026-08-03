@@ -70,6 +70,13 @@ var _upkeep_debt: float = 0.0
 ## Income share (mana/s) already reserved by upkeep this tick; cleared in tick().
 var _upkeep_rate_claimed: float = 0.0
 
+## Out of the match (phase 10d): the tribe lost its last unit. Everything it
+## still owned was razed by eliminate(); it takes no orders any more (UI and AI
+## both bail out), produces nothing and charges no spells. The object itself
+## stays around so the win evaluation and the statistics remain consistent.
+## Irreversible.
+var eliminated: bool = false
+
 var _events: Node = null
 var _events_resolved: bool = false
 
@@ -333,6 +340,38 @@ func remove_building(building: Building) -> void:
 
 ## Called by buildings when their capacity changes (construction finished).
 func notify_housing_changed() -> void:
+	_emit_population()
+
+
+# --- Elimination (phase 10d) ------------------------------------------------------
+
+## The tribe is out: everything it still owns is razed and its magic goes dead.
+## Called exactly once by GameState.check_defeats on the transition to "defeated".
+## Buildings and vehicles go down so no orphaned base keeps standing on the map;
+## the Tribe object itself lives on (see `eliminated`).
+func eliminate() -> void:
+	if eliminated:
+		return
+	eliminated = true
+	# destroy() calls back into remove_building -> iterate a copy.
+	for building in buildings.duplicate():
+		if is_instance_valid(building) and building.health > 0:
+			building.destroy()
+	# Crewed vehicles (catapult, fire ram, airship) are units, not buildings —
+	# with nobody left to man them they are scrap too.
+	for unit in units.duplicate():
+		if is_instance_valid(unit) and unit is CrewedVehicle \
+				and unit.state != Unit.State.DEAD:
+			unit.take_damage(unit.max_health)
+	# No more magic: stored charges and the half-filled charge bars are void.
+	for spell in spells:
+		spell.charges = 0
+		spell.charge_mana = 0.0
+		spell.charge_progress = 0.0
+	mana = 0.0
+	_upkeep_debt = 0.0
+	_emit_mana()
+	_emit_spell_charges()
 	_emit_population()
 
 

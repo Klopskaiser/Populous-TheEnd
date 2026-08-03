@@ -20,6 +20,8 @@ var _tribe_commands: TribeCommands = null
 var _nav_grid: NavGrid = null
 var _world_root: Node3D = null   # parent for the ghost mesh
 var _tribe: Tribe = null
+## Selection, so freshly placed buildings inherit the selected braves (10d).
+var _selection: SelectionManager = null
 
 var _build_scene: PackedScene = null
 var _build_footprint: Vector2i = Vector2i.ONE
@@ -32,11 +34,25 @@ var _ghost_valid: bool = false
 
 
 func setup(p_tribe_commands: TribeCommands, p_nav_grid: NavGrid,
-		p_world_root: Node3D, p_tribe: Tribe) -> void:
+		p_world_root: Node3D, p_tribe: Tribe,
+		p_selection: SelectionManager = null) -> void:
 	_tribe_commands = p_tribe_commands
 	_nav_grid = p_nav_grid
 	_world_root = p_world_root
 	_tribe = p_tribe
+	_selection = p_selection
+
+
+## Braves that were selected when the building was placed start building right
+## away (phase 10d) — no separate right-click needed. Long walks are fine on
+## purpose; only workers on another island are left out (TribeCommands filters).
+func _send_selected_braves(building: Building) -> void:
+	if building == null or _selection == null or _tribe_commands == null:
+		return
+	var braves: Array[Unit] = _selection.selected_braves()
+	if braves.is_empty():
+		return
+	_tribe_commands.order_build(braves, building)
 
 
 func is_active() -> bool:
@@ -191,7 +207,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			return  # clicks over the sidebar never place/cancel
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			if _ghost_valid:
-				_tribe_commands.place_building(_tribe, _build_scene, _ghost_cell, _orientation)
+				var placed: Building = _tribe_commands.place_building(
+					_tribe, _build_scene, _ghost_cell, _orientation)
+				_send_selected_braves(placed)
 				cancel()
 			get_viewport().set_input_as_handled()
 		elif mb.button_index == MOUSE_BUTTON_RIGHT:

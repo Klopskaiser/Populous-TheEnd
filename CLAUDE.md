@@ -83,6 +83,10 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
 - **Rally Points (Pflicht-Feature):** Für **alle Gebäude** – insbesondere Trainingshütten –
   müssen Sammelpunkte per UI oder Rechtsklick setzbar sein. Neu erzeugte/ausgebildete
   Einheiten laufen automatisch zum Rally Point.
+- **`Entf` reißt alle selektierten eigenen Gebäude ab** (Details in §5).
+- **Beim Platzieren selektierte Braves bauen automatisch mit** — kein zusätzlicher
+  Rechtsklick nötig. Braves auf einer **anderen Insel** werden nicht mitgeschickt
+  (sie könnten den Bauplatz nie erreichen).
 
 ## 5. Gebäude & Wirtschaft
 
@@ -113,6 +117,21 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
   mehr Stücke aus dem Modell. Stufe 4 (100 %): Gebäude **versinkt im Boden** und ist
   zerstört, der Bauplatz ist wieder normal betretbar/bebaubar.
   Details: `plans\06_shaman_spells.md`.
+- **Abriss (`Entf`, Phase 10d):** Eigene Gebäude sind abreißbar, der Auftrag ist
+  **endgültig** (kein Abbrechen). Eine Baustelle **ohne Baufortschritt** ist sofort weg
+  und gibt **100 %** des eingesetzten Holzes zurück; alles andere wird eine
+  **Arbeiter-Aufgabe** mit **75 %** Erstattung — der Baufortschritt läuft rückwärts, das
+  Gebäude schrumpft sichtbar und das Holz kommt **portionsweise** als Bodenstapel am
+  Bauplatz an. Ein abzureißendes Gebäude ist **nicht nutzbar** (Besatzung/Trainees werden
+  lebend ausgeworfen) und zeigt seinen Abriss über den **roten** Fortschrittsbalken.
+  Der **Reinkarnationsplatz ist nicht abreißbar**.
+- **Bauverfall (Phase 10d):** Eine Baustelle, die **2 Minuten** keinerlei Fortschritt macht
+  (kein Holz, keine Planierung, kein Aufbau), **verfällt** und gibt ihr geliefertes Holz
+  am Platz zurück. Das räumt unerreichbare und vergessene Bauplätze wieder ab.
+- **Erreichbarkeit (Phase 10d):** Bauarbeiter werden **nur** für Baustellen angeworben, die
+  sie zu Fuß erreichen können (gleiche Navigationsinsel). Ein Arbeiter, dem das Gelände
+  seine Baustelle wegnimmt (Landbrücke, Erdbeben, Absinken), legt sein Holz ab und
+  beendet den Auftrag statt hängen zu bleiben.
 
 ## 6. Magiesystem
 
@@ -192,6 +211,19 @@ ist pro Karte variabel.
   - **Train-State:** Braves in Trainingsgebäude schicken, Armee aufbauen.
   - **Attack-State:** Truppen sammeln und mit Schamanin + Trupps die Spielerbasis angreifen.
 - Übergänge z. B. nach Schwellwerten (Bevölkerung, Gebäudezahl, Armeegröße, Mana).
+
+**Siegbedingungen (Phase 10d):**
+
+- Der **Reinkarnationsplatz ist unverwundbar** — kein Schaden von Einheiten, Zaubern,
+  Katapulten, Lava oder Terrainverformung, und er ist nicht abreißbar.
+- Er **zerstört sich selbst**, sobald der Stamm außer der Schamanin **keinen Anhänger**
+  mehr hat. Danach ist kein Respawn mehr möglich.
+- Ein Stamm ist **besiegt, wenn er keine lebende Einheit mehr hat** — Gebäude retten ihn
+  nicht (eine Hütte produziert nur mit Besatzung, und Besatzung sind selbst Einheiten).
+- Beim Ausscheiden werden **alle** restlichen Gebäude und Fahrzeuge zerstört und Mana wie
+  Zauberladungen geleert. Ein ausgeschiedener Stamm nimmt **keine Befehle** mehr an (UI
+  **und** KI), produziert nichts und zaubert nicht. Das ist **irreversibel**; der Stamm
+  bleibt nur als Datenobjekt für Siegauswertung und Statistik erhalten.
 
 ## 8. Geplante Projektstruktur & Konventionen
 

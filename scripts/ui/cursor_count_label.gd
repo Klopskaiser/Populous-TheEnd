@@ -29,7 +29,10 @@ func _process(_delta: float) -> void:
 		return
 	var count: int = 0
 	for u in _selection.selected:
-		if is_instance_valid(u) and u.state != Unit.State.DEAD:
+		# The tribe filter is the cheap belt-and-braces for the conversion case:
+		# the SelectionManager already drops converted units on the signal.
+		if is_instance_valid(u) and u.state != Unit.State.DEAD \
+				and u.tribe_id == _selection.player_tribe_id:
 			count += 1
 	visible = count > 0
 	if visible:

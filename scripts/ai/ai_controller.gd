@@ -169,6 +169,8 @@ func _process(delta: float) -> void:
 func tick_ai() -> void:
 	if tribe == null or commands == null:
 		return
+	if tribe.eliminated:
+		return   # out of the match (10d): no decisions, no orders
 	var snap: Dictionary = make_snapshot()
 	_tick_count += 1
 	if debug_log and _tick_count % 60 == 0:

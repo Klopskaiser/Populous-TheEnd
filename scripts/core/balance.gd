@@ -506,6 +506,20 @@ const RAID_DPS_PER_RAIDER: float = 6.0
 ## Maximale gleichzeitige Nahkampf-Abreißer pro Gebäude.
 const MAX_MELEE_RAIDERS: int = 15
 
+# --- Abriss (Entf) & Bauverfall ---
+## Erstattung beim Abriss OHNE erreichte Baustufe (build_progress == 0): das
+## eingesetzte Holz kommt vollständig als Bodenstapel zurück.
+const DEMOLISH_REFUND_UNBUILT: float = 1.0
+## Erstattung ab Baustufe 1 und bei fertigen Gebäuden: drei Viertel.
+const DEMOLISH_REFUND_BUILT: float = 0.75
+## Abrissrate als Faktor auf Brave.BUILD_RATE (1.0 = gleich schnell wie Bauen).
+const DEMOLISH_RATE_FACTOR: float = 1.0
+## Sekunden ohne jeden Baufortschritt (kein Holz, keine Planierung, kein
+## Aufbau), nach denen eine Baustelle von selbst verfällt.
+const CONSTRUCTION_STALL_TIMEOUT: float = 120.0
+## Erstattung einer verfallenen Baustelle (Anteil des gelieferten Holzes).
+const CONSTRUCTION_STALL_REFUND: float = 1.0
+
 ## Bauplan-Größen (Footprint in Zellen, Breite x Tiefe; 1 Zelle = 1 m).
 ## Der Eingang liegt auf der Südseite; nicht-quadratische Footprints werden
 ## beim Drehen automatisch getauscht.

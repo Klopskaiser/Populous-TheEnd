@@ -42,6 +42,23 @@ func setup(p_nav_grid: NavGrid, p_building_manager: BuildingManager,
 	tree_manager = p_tree_manager
 
 
+# --- Elimination guards (phase 10d) -----------------------------------------------
+# An eliminated tribe takes no orders at all. The API is inhomogeneous — only
+# place_building/set_spell_active/cast_spell/demolish_building are handed a Tribe,
+# every order_* method just gets units — so there are two guards: one on the tribe
+# object, one that resolves the tribe from a unit.
+
+## True while this tribe may still act.
+func _tribe_active(tribe: Tribe) -> bool:
+	return tribe != null and not tribe.eliminated
+
+
+## True while this unit may still take orders (its tribe is not out). Units
+## without a tribe reference (tests) are allowed through.
+func _unit_active(unit: Unit) -> bool:
+	return unit != null and (unit.tribe == null or not unit.tribe.eliminated)
+
+
 # --- Building placement -----------------------------------------------------------
 
 ## Places a building (as a construction site) with its footprint top-left at
@@ -49,7 +66,7 @@ func setup(p_nav_grid: NavGrid, p_building_manager: BuildingManager,
 ## the plot is invalid.
 func place_building(tribe: Tribe, building_scene: PackedScene, cell: Vector2i,
 		orientation: int = 0) -> Building:
-	if tribe == null or building_scene == null or building_manager == null:
+	if not _tribe_active(tribe) or building_scene == null or building_manager == null:
 		return null
 	var probe: Building = building_scene.instantiate() as Building
 	if probe == null:
@@ -91,6 +108,25 @@ func can_place_at(cell: Vector2i, footprint: Vector2i) -> bool:
 	return hi - lo <= MAX_LEVEL_DIFF
 
 
+## Scraps one of the tribe's own buildings (key Entf, phase 10d). A site that
+## never reached a build stage vanishes right away and drops its full wood; every
+## other building becomes a worker job at 75 % refund. The order is FINAL.
+## Returns true when the demolition was accepted (started or done instantly).
+## The reincarnation circle cannot be scrapped — it is the tribe's lifeline and
+## has no wood cost to hand back.
+func demolish_building(tribe: Tribe, building: Building) -> bool:
+	if not _tribe_active(tribe) or building == null or not is_instance_valid(building):
+		return false
+	if building.tribe_id != tribe.id or building.health <= 0:
+		return false
+	if building is ReincarnationSite:
+		return false
+	if building.demolishing:
+		return false
+	building.begin_demolish()
+	return true
+
+
 # --- Unit orders ----------------------------------------------------------------------
 
 ## Move order in packs of GROUP_SIZE: the selection is sorted spatially so
@@ -102,8 +138,10 @@ func order_move(units: Array[Unit], target: Vector3, queue_up: bool = false,
 		aggressive: bool = false) -> void:
 	var alive: Array[Unit] = []
 	for unit in units:
-		if unit.state != Unit.State.DEAD:
+		if unit.state != Unit.State.DEAD and _unit_active(unit):
 			alive.append(unit)
+	if alive.is_empty():
+		return
 	# Spatial sort: units that stand together march together.
 	alive.sort_custom(func(a: Unit, b: Unit) -> bool:
 		var ka: float = a.position.z * 1000.0 + a.position.x
@@ -162,7 +200,7 @@ func any_unreachable(units: Array[Unit], target: Vector3) -> bool:
 func order_pickup(units: Array[Unit], pile: WoodPile) -> void:
 	var movers: Array[Unit] = []
 	for unit in units:
-		if unit.state == Unit.State.DEAD:
+		if unit.state == Unit.State.DEAD or not _unit_active(unit):
 			continue
 		if unit is Brave:
 			(unit as Brave).order_pickup(pile)
@@ -175,7 +213,7 @@ func order_pickup(units: Array[Unit], pile: WoodPile) -> void:
 func order_chop(units: Array[Unit], tree: TreeResource) -> void:
 	var movers: Array[Unit] = []
 	for unit in units:
-		if unit.state == Unit.State.DEAD:
+		if unit.state == Unit.State.DEAD or not _unit_active(unit):
 			continue
 		if unit is Brave:
 			(unit as Brave).order_chop(tree)
@@ -186,37 +224,81 @@ func order_chop(units: Array[Unit], tree: TreeResource) -> void:
 
 
 ## Braves join the construction site as workers; non-braves just walk there.
-func order_build(units: Array[Unit], building: Building) -> void:
+## Returns the number of braves actually put on the job: braves on another
+## island cannot reach the plot (phase 10d) and are left out entirely instead of
+## walking off and getting stuck.
+func order_build(units: Array[Unit], building: Building) -> int:
+	if building == null or not is_instance_valid(building):
+		return 0
+	var assigned: int = 0
 	var movers: Array[Unit] = []
 	for unit in units:
-		if unit.state == Unit.State.DEAD:
+		if unit.state == Unit.State.DEAD or not _unit_active(unit):
 			continue
-		if unit is Brave:
+		if unit is Brave and unit.tribe_id == building.tribe_id \
+				and building.worker_can_reach(unit.position):
 			(unit as Brave).order_build(building)
-		else:
+			if (unit as Brave).job == building:
+				assigned += 1
+			else:
+				movers.append(unit)   # site was full: at least walk over
+		elif building.worker_can_reach(unit.position):
 			movers.append(unit)
 	if not movers.is_empty():
 		order_move(movers, building.center_world())
+	return assigned
 
 
 ## Braves repair the damaged (finished) building; non-braves just walk there.
 ## The wood cost — floor(damage fraction * wood_cost) — is fetched/absorbed by
-## the same pipeline as construction wood.
-func order_repair(units: Array[Unit], building: Building) -> void:
+## the same pipeline as construction wood. Returns the number of braves put on
+## the job (see order_build for the reachability rule).
+func order_repair(units: Array[Unit], building: Building) -> int:
 	if building == null or not is_instance_valid(building) or building.under_construction:
-		return
+		return 0
 	if building.health <= 0 or building.health >= building.max_health:
-		return
+		return 0
+	var assigned: int = 0
 	var movers: Array[Unit] = []
 	for unit in units:
-		if unit.state == Unit.State.DEAD:
+		if unit.state == Unit.State.DEAD or not _unit_active(unit):
 			continue
-		if unit is Brave and unit.tribe_id == building.tribe_id:
+		if unit is Brave and unit.tribe_id == building.tribe_id \
+				and building.worker_can_reach(unit.position):
 			(unit as Brave).order_repair(building)
-		else:
+			if (unit as Brave).job == building:
+				assigned += 1
+			else:
+				movers.append(unit)
+		elif building.worker_can_reach(unit.position):
 			movers.append(unit)
 	if not movers.is_empty():
 		order_move(movers, building.center_world())
+	return assigned
+
+
+## Braves tear the building down (phase 10d); non-braves just walk there.
+## Returns the number of braves actually put on the demolition.
+func order_demolish(units: Array[Unit], building: Building) -> int:
+	if building == null or not is_instance_valid(building) or not building.demolishing:
+		return 0
+	var assigned: int = 0
+	var movers: Array[Unit] = []
+	for unit in units:
+		if unit.state == Unit.State.DEAD or not _unit_active(unit):
+			continue
+		if unit is Brave and unit.tribe_id == building.tribe_id \
+				and building.worker_can_reach(unit.position):
+			(unit as Brave).order_demolish(building)
+			if (unit as Brave).job == building:
+				assigned += 1
+			else:
+				movers.append(unit)
+		elif building.worker_can_reach(unit.position):
+			movers.append(unit)
+	if not movers.is_empty():
+		order_move(movers, building.center_world())
+	return assigned
 
 
 ## Assigns braves to a forester's worker slots; non-braves just walk there.
@@ -226,7 +308,7 @@ func order_forester(units: Array[Unit], forester: Forester) -> void:
 		return
 	var movers: Array[Unit] = []
 	for unit in units:
-		if unit.state == Unit.State.DEAD:
+		if unit.state == Unit.State.DEAD or not _unit_active(unit):
 			continue
 		if unit is Brave and unit.tribe_id == forester.tribe_id:
 			(unit as Brave).order_forester(forester)
@@ -244,7 +326,7 @@ func order_train(building: TrainingBuilding, units: Array[Unit]) -> void:
 		return
 	for unit in units:
 		if unit is Brave and unit.state != Unit.State.DEAD \
-				and unit.tribe_id == building.tribe_id:
+				and _unit_active(unit) and unit.tribe_id == building.tribe_id:
 			(unit as Brave).order_train(building)
 
 
@@ -252,7 +334,7 @@ func order_train(building: TrainingBuilding, units: Array[Unit]) -> void:
 ## spell bar). Stored charges stay castable and the partial fill is kept — only
 ## the mana income stops flowing into it, freeing that share for the others.
 func set_spell_active(tribe: Tribe, spell_id: StringName, value: bool) -> bool:
-	if tribe == null:
+	if not _tribe_active(tribe):
 		return false
 	var spell: Spell = tribe.get_spell(spell_id)
 	if spell == null:
@@ -270,7 +352,7 @@ func set_spell_active(tribe: Tribe, spell_id: StringName, value: bool) -> bool:
 ## position while walking into range (UI spell-targeting on catapult/airship).
 func cast_spell(tribe: Tribe, spell_id: StringName, target: Vector3,
 		target_unit: Unit = null) -> bool:
-	if tribe == null:
+	if not _tribe_active(tribe):
 		return false
 	var spell: Spell = tribe.get_spell(spell_id)
 	if spell == null or spell.charges <= 0:
@@ -296,7 +378,8 @@ func order_crew(units: Array[Unit], engine: Unit) -> void:
 	var free: int = vehicle.max_crew - vehicle.crew_count()
 	var candidates: Array[Unit] = []
 	for unit in units:
-		if unit == null or not is_instance_valid(unit) or unit.state == Unit.State.DEAD:
+		if unit == null or not is_instance_valid(unit) \
+				or unit.state == Unit.State.DEAD or not _unit_active(unit):
 			continue
 		if unit.siege_engine == engine:
 			continue   # already (walking to be) crew of this vehicle
@@ -322,7 +405,8 @@ func order_attack_building(units: Array[Unit], building: Building) -> void:
 	if building == null or not is_instance_valid(building) or building.health <= 0:
 		return
 	for unit in units:
-		if unit == null or not is_instance_valid(unit) or unit.state == Unit.State.DEAD:
+		if unit == null or not is_instance_valid(unit) \
+				or unit.state == Unit.State.DEAD or not _unit_active(unit):
 			continue
 		if unit.tribe_id == building.tribe_id \
 				and not (unit is CrewedVehicle and building.has_raiders()):
@@ -337,7 +421,7 @@ func order_workshop(units: Array[Unit], workshop: Workshop) -> void:
 		return
 	var movers: Array[Unit] = []
 	for unit in units:
-		if unit.state == Unit.State.DEAD:
+		if unit.state == Unit.State.DEAD or not _unit_active(unit):
 			continue
 		if unit is Brave and unit.tribe_id == workshop.tribe_id:
 			(unit as Brave).order_workshop(workshop)
@@ -354,7 +438,7 @@ func order_depot_haul(units: Array[Unit], depot: WoodDepot) -> void:
 		return
 	var movers: Array[Unit] = []
 	for unit in units:
-		if unit.state == Unit.State.DEAD:
+		if unit.state == Unit.State.DEAD or not _unit_active(unit):
 			continue
 		if unit is Brave and unit.tribe_id == depot.tribe_id:
 			(unit as Brave).order_depot_haul(depot)
@@ -371,7 +455,8 @@ func order_garrison(units: Array[Unit], tower: Watchtower) -> void:
 	if tower == null or not is_instance_valid(tower) or not tower.is_usable():
 		return
 	for unit in units:
-		if unit == null or not is_instance_valid(unit) or unit.state == Unit.State.DEAD:
+		if unit == null or not is_instance_valid(unit) \
+				or unit.state == Unit.State.DEAD or not _unit_active(unit):
 			continue
 		if unit.tribe_id != tower.tribe_id or not unit.can_garrison():
 			continue
@@ -386,7 +471,8 @@ func order_man_hut(units: Array[Unit], hut: Hut) -> void:
 		return
 	var movers: Array[Unit] = []
 	for unit in units:
-		if unit == null or not is_instance_valid(unit) or unit.state == Unit.State.DEAD:
+		if unit == null or not is_instance_valid(unit) \
+				or unit.state == Unit.State.DEAD or not _unit_active(unit):
 			continue
 		if unit is Brave and unit.tribe_id == hut.tribe_id:
 			(unit as Brave).order_man_hut(hut, true)
@@ -408,7 +494,8 @@ func order_attack(units: Array[Unit], enemy: Unit) -> void:
 	if not enemy.is_targetable() and not (enemy is Airship):
 		return
 	for unit in units:
-		if unit == null or not is_instance_valid(unit) or unit.state == Unit.State.DEAD:
+		if unit == null or not is_instance_valid(unit) \
+				or unit.state == Unit.State.DEAD or not _unit_active(unit):
 			continue
 		if unit.tribe_id == enemy.tribe_id:
 			continue   # never attack own tribe

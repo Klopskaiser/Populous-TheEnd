@@ -277,3 +277,89 @@ func test_status_overlays_never_cast_shadows() -> void:
 				"%s casts no shadow" % child.name)
 	check(checked >= 3, "panic, burning and injured overlays were all checked")
 	fx.free()
+
+
+# --- Selection state (phase 10d) ---------------------------------------------
+# Pure state, no viewport: the SelectionManager is built outside the tree and
+# only its state functions are exercised.
+
+const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
+const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
+
+
+func _make_selection() -> SelectionManager:
+	var sel: SelectionManager = SelectionManager.new()
+	sel.player_tribe_id = 0
+	sel._ready()
+	return sel
+
+
+## Bug (user report): arming the attack-move with F and then LEFT-clicking left
+## the red "Angriff" cursor on screen until the next right-click or Esc.
+func test_cancel_armed_modes_clears_attack() -> void:
+	var sel: SelectionManager = _make_selection()
+	SelectionManager.attack_arm_active = true
+	SelectionManager.unload_arm_active = true
+	sel.cancel_armed_modes()
+	check(not SelectionManager.attack_arm_active, "the armed attack-move is cleared")
+	check(not SelectionManager.unload_arm_active, "the armed airship unload is cleared")
+	sel.free()
+
+
+func test_left_click_cancels_armed_attack() -> void:
+	var sel: SelectionManager = _make_selection()
+	SelectionManager.attack_arm_active = true
+	var press: InputEventMouseButton = InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	press.position = Vector2(400.0, 300.0)
+	sel._unhandled_input(press)
+	check(not SelectionManager.attack_arm_active,
+		"a left-click press drops the armed attack-move right away")
+	SelectionManager.drag_active = false   # do not leak the drag flag
+	sel.free()
+
+
+## Bug (user report): a unit converted away by an enemy preacher kept counting
+## in the cursor's selection number. The bus signal drops it immediately.
+func test_converted_unit_leaves_selection() -> void:
+	var sel: SelectionManager = _make_selection()
+	var mine: Unit = BRAVE_SCENE.instantiate() as Unit
+	mine.tribe_id = 0
+	var lost: Unit = BRAVE_SCENE.instantiate() as Unit
+	lost.tribe_id = 0
+	sel.selected = [mine, lost] as Array[Unit]
+
+	lost.tribe_id = 1                 # the conversion switched its tribe
+	sel._on_unit_converted(lost)
+	check(sel.selected.size() == 1, "the converted unit left the selection")
+	check(sel.selected[0] == mine, "the own unit stayed selected")
+	# An own unit reported by mistake must not be dropped.
+	sel._on_unit_converted(mine)
+	check(sel.selected.size() == 1, "an own unit is never dropped")
+	mine.free()
+	lost.free()
+	sel.free()
+
+
+func test_selected_braves_filters_dead_and_foreign() -> void:
+	var sel: SelectionManager = _make_selection()
+	var good: Unit = BRAVE_SCENE.instantiate() as Unit
+	good.tribe_id = 0
+	var dead: Unit = BRAVE_SCENE.instantiate() as Unit
+	dead.tribe_id = 0
+	dead.state = Unit.State.DEAD
+	var foreign: Unit = BRAVE_SCENE.instantiate() as Unit
+	foreign.tribe_id = 1
+	var warrior: Unit = WARRIOR_SCENE.instantiate() as Unit
+	warrior.tribe_id = 0
+	sel.selected = [good, dead, foreign, warrior] as Array[Unit]
+
+	var braves: Array[Unit] = sel.selected_braves()
+	check(braves.size() == 1, "only the living own brave is returned")
+	check(braves[0] == good, "and it is the right one")
+	good.free()
+	dead.free()
+	foreign.free()
+	warrior.free()
+	sel.free()

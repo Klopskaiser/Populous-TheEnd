@@ -47,7 +47,8 @@ func apply_terrain_change(rect: Rect2i) -> void:
 ## uneven (debris flies, instant destruction) or slide into the water once
 ## mostly flooded; units standing on flooded ground drown instantly (thrown
 ## units keep flying — their landing handles water on its own); flooded trees
-## and wood piles are destroyed.
+## and wood piles are destroyed. The reincarnation circle is exempt (10d): it is
+## invulnerable and survives both a broken foundation and flooding.
 func check_terrain_integrity(rect: Rect2i) -> void:
 	if terrain_data == null:
 		return
@@ -56,6 +57,8 @@ func check_terrain_integrity(rect: Rect2i) -> void:
 		for b in building_manager.buildings.duplicate():
 			if not is_instance_valid(b) or b.health <= 0:
 				continue
+			if b is ReincarnationSite:
+				continue   # invulnerable, also against the terrain (10d)
 			if not grown.intersects(b.footprint_rect()):
 				continue
 			if _flooded_fraction(b) >= FLOOD_FRACTION:

@@ -16,6 +16,10 @@ const SHAMAN_SCENE: PackedScene = preload("res://scenes/units/shaman.tscn")
 var respawn_timer: float = 0.0
 ## True while a respawn countdown is running (shaman dead).
 var respawn_pending: bool = false
+## Latch for the self-destruction (10d): the circle only gives itself up once it
+## has actually SEEN a follower. Without it a site placed before the tribe's
+## braves exist (match setup order) would sink on its very first tick.
+var _saw_followers: bool = false
 
 
 func _init() -> void:
@@ -30,9 +34,43 @@ func display_name() -> String:
 
 
 ## The reincarnation circle cannot be attacked by ground units (melee storm /
-## firewarrior fire) — only spells and catapults can damage it.
+## firewarrior fire).
 func is_assailable_by_units() -> bool:
 	return false
+
+
+# --- Invulnerability (phase 10d) ---------------------------------------------
+# The circle takes NO damage at all any more: not from units, spells, catapults,
+# lava or terrain deformation (SpellContext.check_terrain_integrity skips it).
+# It only ever disappears through its own self-destruction below — that makes the
+# defeat chain "last follower dies -> circle sinks -> shaman dies -> tribe out"
+# the single way a tribe can be eliminated, instead of a lucky volcano roll.
+
+func take_damage(_amount: int, _source: int = DMG_GENERIC) -> void:
+	pass
+
+
+func apply_destruction_stages(_count: int) -> void:
+	pass
+
+
+func add_lava_contact(_seconds: float) -> void:
+	pass
+
+
+## True once the tribe has no living follower left — the shaman herself does not
+## count. The circle then gives itself up (see _tick_active): with nobody left to
+## rebuild, keeping the tribe's lifeline alive would only stall the match.
+func _tribe_has_no_followers() -> bool:
+	if tribe == null:
+		return false
+	for unit in tribe.units:
+		if not is_instance_valid(unit) or unit.state == Unit.State.DEAD:
+			continue
+		if unit == tribe.shaman:
+			continue
+		return false
+	return true
 
 
 ## Remaining respawn wait for UI countdowns; -1 while the shaman lives.
@@ -41,10 +79,19 @@ func respawn_remaining() -> float:
 
 
 ## Runs only while the site is usable (Building.tick gates on is_usable) —
-## a wrecked or destroyed site cannot reincarnate the shaman.
+## a destroyed site cannot reincarnate the shaman. Since 10d the circle is
+## invulnerable, so "not usable" only ever means "gone".
 func _tick_active(delta: float) -> void:
 	if tribe == null or unit_manager == null:
 		return
+	# Self-destruction (10d): no followers left -> the circle sinks like any other
+	# wreck. There is no way back — a destroyed site never reincarnates again.
+	if _tribe_has_no_followers():
+		if _saw_followers:
+			destroy()
+			return
+	else:
+		_saw_followers = true
 	var shaman: Unit = tribe.shaman
 	if shaman != null and is_instance_valid(shaman) and shaman.state != Unit.State.DEAD:
 		respawn_pending = false   # never a second shaman

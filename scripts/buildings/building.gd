@@ -172,6 +172,8 @@ var _selection_ring: MeshInstance3D = null
 var _rally_marker: Node3D = null
 var _overlay_sprite: Sprite3D = null
 var _overlay_progress: float = -1.0
+## Whether the currently drawn bar is the (red) demolition variant.
+var _overlay_demolish: bool = false
 ## Crew-pip overlay (world-space, below the production bar), shown on
 ## select/hover for every building that reports a crew capacity (all except the
 ## watchtower — see crew_display_capacity).
@@ -184,6 +186,28 @@ var _flush_timer: float = FLUSH_INTERVAL
 var _absorb_timer: float = ABSORB_INTERVAL
 var _clear_timer: float = 0.0   # footprint-clear throttle (phase 7i)
 var _wood_recheck_timer: float = 0.0
+
+# --- Demolition (phase 10d) ---------------------------------------------------
+## True while the player's demolition order is being worked off: the building is
+## unusable, build_progress runs BACKWARDS and the refund is paid out in
+## portions as it drops. Never reset except by destroy() — the order is final.
+var demolishing: bool = false
+## build_progress when the demolition started (reference for the progress bar).
+var _demolish_start_progress: float = 0.0
+var _demolish_refund_total: int = 0
+var _demolish_refund_paid: int = 0
+
+# --- Construction decay (phase 10d) -------------------------------------------
+## Last observed progress signature (build_progress, wood_delivered, open
+## flatten cells) and how long it has been unchanged. A site that makes no
+## progress at all for Balance.CONSTRUCTION_STALL_TIMEOUT decays.
+var _decay_signature: Vector3 = Vector3(-1.0, -1.0, -1.0)
+var _decay_timer: float = 0.0
+
+## Island label of the worker approach point, cached against the NavGrid's
+## change_version (see approach_island()).
+var _approach_island: int = -1
+var _approach_island_version: int = -1
 
 
 ## German display name, overridden by subclasses (UI language is German).
@@ -291,6 +315,53 @@ func delivery_point() -> Vector3:
 	return edge_spawn_position()
 
 
+# --- Worker reachability (phase 10d) ---------------------------------------------
+
+## Island label of the worker approach point. delivery_point() is guaranteed to
+## be a WALKABLE cell, so a plain island comparison is exact and O(1) — no A*
+## needed. Cached against NavGrid.change_version (pattern from
+## AIController._plot_reachable). -1 = no approach spot at all: nobody can ever
+## work here (fully enclosed / island-less plot).
+func approach_island() -> int:
+	if nav_grid == null:
+		return 0   # headless tests without navigation: permissive
+	if _approach_island_version == nav_grid.change_version:
+		return _approach_island
+	_approach_island_version = nav_grid.change_version
+	_approach_island = nav_grid.island_at(nav_grid.world_to_cell(delivery_point()))
+	return _approach_island
+
+
+## True when a worker standing at `from` can walk to this building's approach
+## spot (same island). Permissive without a NavGrid so headless tests run.
+func worker_can_reach(from: Vector3) -> bool:
+	if nav_grid == null:
+		return true
+	var mine: int = approach_island()
+	if mine < 0:
+		return false
+	var theirs: int = nav_grid.island_at(nav_grid.world_to_cell(from))
+	if theirs < 0:
+		# The worker's own cell is not walkable — it stands ON a footprint
+		# (graders do), on a cliff or in shallow water. That says nothing about
+		# island membership, so stay permissive instead of pulling it off the job.
+		return true
+	return theirs == mine
+
+
+## True while another worker can still join this site/demolition.
+func has_worker_room() -> bool:
+	return workers.size() < MAX_WORKERS
+
+
+## Drops `amount` wood as ground piles at the delivery point (there is no tribe
+## wood stock). Wood dropped into water is lost — same rule as any other pile.
+func _refund_wood(amount: int) -> void:
+	if amount <= 0 or wood_pile_manager == null:
+		return
+	wood_pile_manager.deposit(delivery_point(), amount)
+
+
 func _ready() -> void:
 	set_process(false)   # only enabled for the destruction sink
 	_create_visuals()
@@ -340,6 +411,8 @@ func tick(delta: float) -> void:
 			_lava_contact_accum = 0.0
 	if under_construction:
 		_tick_construction(delta)
+		if _destroyed:
+			return   # the site decayed away (10d) or was torn down mid-tick
 		# Sites are raidable too (bug backlog #2): melee demolition ticks the
 		# (wood-scaled) site HP down; destroy() frees the plot mid-tick.
 		_tick_raid(delta)
@@ -349,7 +422,9 @@ func tick(delta: float) -> void:
 		if _foundation_disturbed and health > 0:
 			_tick_foundation_smoothing(delta)
 		_tick_raid(delta)
-		if health > 0 and health < max_health and _absorbs_repair_wood():
+		# No repair absorption during the demolition — it would eat the refund.
+		if health > 0 and health < max_health and _absorbs_repair_wood() \
+				and not demolishing:
 			_tick_repair_absorb(delta)
 		# A building being stormed from the inside stops producing (the stage
 		# gate also disables it once the demolition passes 30 %).
@@ -377,10 +452,11 @@ func destruction_stage() -> int:
 	return 0
 
 
-## Usable = finished, alive and below stage 1 damage. Gates all production
-## (hut spawns, training) and the housing capacity.
+## Usable = finished, alive, below stage 1 damage and not being torn down. Gates
+## all production (hut spawns, training) and the housing capacity.
 func is_usable() -> bool:
-	return not under_construction and health > 0 and destruction_stage() == 0
+	return not under_construction and health > 0 and destruction_stage() == 0 \
+		and not demolishing
 
 
 ## Damage worth `count` destruction stages (30% of max HP each) — lightning
@@ -436,7 +512,8 @@ func repair_wood_missing() -> int:
 ## wants_more_wood for construction; wood_incoming counts carried/claimed
 ## wood and piles near the entrance).
 func wants_more_repair_wood() -> bool:
-	return not under_construction and health > 0 and health < max_health \
+	return not under_construction and not demolishing \
+		and health > 0 and health < max_health \
 		and repair_wood_missing() > wood_incoming()
 
 
@@ -891,21 +968,26 @@ func _create_overlay() -> void:
 
 ## Shows a progress bar above the building — only while it is selected or
 ## hovered (and actually producing). Texture is only rebuilt when the value
-## moves.
+## moves. During a demolition the bar shows the teardown instead: this cannot go
+## through a production_progress() override, because every producing subclass
+## returns -1.0 as soon as the building is not usable.
 func _update_overlay() -> void:
 	if _overlay_sprite == null:
 		return
-	var p: float = production_progress() if (selected or hovered) else -1.0
+	var p: float = -1.0
+	if selected or hovered:
+		p = demolish_progress() if demolishing else production_progress()
 	if p < 0.0:
 		if _overlay_sprite.visible:
 			_overlay_sprite.visible = false
 		_overlay_progress = -1.0
 		return
 	_overlay_sprite.visible = true
-	if absf(p - _overlay_progress) < 0.02:
+	if absf(p - _overlay_progress) < 0.02 and demolishing == _overlay_demolish:
 		return
 	_overlay_progress = p
-	_overlay_sprite.texture = _make_bar_texture(p)
+	_overlay_demolish = demolishing
+	_overlay_sprite.texture = _make_bar_texture(p, demolishing)
 
 
 ## Crew occupancy shown as pips on select/hover (hut pattern, generalised to
@@ -952,15 +1034,18 @@ static func _make_crew_texture(filled: int, capacity: int) -> ImageTexture:
 	return ImageTexture.create_from_image(img)
 
 
-## Dark bar background with a gold fill proportional to progress.
-static func _make_bar_texture(progress: float) -> ImageTexture:
+## Dark bar background with a gold fill proportional to progress. A demolition
+## (10d) fills RED instead — the same bar, but unmistakably not production.
+static func _make_bar_texture(progress: float, demolish: bool = false) -> ImageTexture:
 	var w: int = 32
 	var h: int = 6
 	var img: Image = Image.create_empty(w, h, false, Image.FORMAT_RGBA8)
 	img.fill(Color(0.09, 0.06, 0.03, 0.9))
 	var fill: int = clampi(int(round(clampf(progress, 0.0, 1.0) * float(w - 2))), 0, w - 2)
 	if fill > 0:
-		img.fill_rect(Rect2i(1, 1, fill, h - 2), Color(0.85, 0.68, 0.30))
+		var color: Color = Color(0.90, 0.28, 0.18) if demolish \
+			else Color(0.85, 0.68, 0.30)
+		img.fill_rect(Rect2i(1, 1, fill, h - 2), color)
 	return ImageTexture.create_from_image(img)
 
 
@@ -969,10 +1054,17 @@ func _tick_construction(delta: float) -> void:
 	if _flush_timer <= 0.0:
 		_flush_timer = FLUSH_INTERVAL
 		_flush_deformation()
+	if not demolishing:
+		_tick_decay(delta)
+		if _destroyed:
+			return
 	_absorb_timer -= delta
 	if _absorb_timer <= 0.0:
 		_absorb_timer = ABSORB_INTERVAL
-		_absorb_piles()
+		# A site being torn down must NOT re-absorb the refund it just paid out
+		# (the piles land at the same delivery point). Load-bearing guard.
+		if not demolishing:
+			_absorb_piles()
 	if wood_stalled:
 		_wood_recheck_timer -= delta
 		if _wood_recheck_timer <= 0.0:
@@ -1012,6 +1104,137 @@ func _clear_footprint() -> void:
 		var out: Vector2i = nav_grid.nearest_walkable_cell(cell)
 		if out.x >= 0 and not rect.has_point(out):
 			u.order_move(nav_grid.cell_to_world(out))
+
+
+# --- Demolition (phase 10d) ----------------------------------------------------
+
+## True once the building reached at least the first build stage. Only sites that
+## never got that far can be scrapped instantly; everything else has to be torn
+## down by workers. finish_construction sets build_progress = 1.0, so finished
+## buildings always count as "with build stage".
+func has_build_stage() -> bool:
+	return build_progress > 0.0
+
+
+## Wood physically sitting in this building. NOT wood_delivered alone: a
+## pre_built building (match start, tests) never ran a delivery, so its
+## wood_delivered is 0 while it still cost its full price. _repair_hp_pool is
+## excluded — that wood is already converted into HP.
+func _demolish_refund_base() -> int:
+	var built: int = wood_delivered if under_construction else wood_cost
+	return maxi(0, built) + repair_wood
+
+
+## Wood the player gets back for scrapping this building.
+func demolish_refund_total() -> int:
+	var factor: float = Balance.DEMOLISH_REFUND_BUILT if has_build_stage() \
+		else Balance.DEMOLISH_REFUND_UNBUILT
+	return int(floor(float(_demolish_refund_base()) * factor))
+
+
+## Starts the demolition. Returns true when the building was scrapped right away
+## (no build stage reached): the full wood drops at the plot and it is gone.
+## Otherwise the demolition becomes a worker job — build_progress then runs
+## backwards and the refund is paid out in portions. The order is FINAL: there
+## is no cancel.
+func begin_demolish() -> bool:
+	if _destroyed or demolishing:
+		return _destroyed
+	if not has_build_stage():
+		_flush_deformation()
+		_refund_wood(demolish_refund_total())
+		destroy()
+		return true
+	demolishing = true
+	_demolish_start_progress = build_progress
+	_demolish_refund_total = demolish_refund_total()
+	_demolish_refund_paid = 0
+	# A wood-stalled site is skipped by the recruiter — clear it, or the
+	# demolition would never get any hands.
+	wood_stalled = false
+	_on_disabled()          # crew / trainees / garrison out, alive
+	_flush_deformation()
+	_update_construction_visual()
+	if tribe != null:
+		tribe.notify_housing_changed()
+	# Workers already on this building are mid-sub-task (flatten/chop/build/
+	# repair) and would keep working against the demolition: send them back
+	# through the task choice.
+	for worker in workers.duplicate():
+		if is_instance_valid(worker):
+			worker.switch_to_demolish()
+	return false
+
+
+## Progress of the demolition itself (0..1) — feeds the info bar above the
+## building while it is being torn down.
+func demolish_progress() -> float:
+	if not demolishing:
+		return -1.0
+	return clampf(1.0 - build_progress / maxf(_demolish_start_progress, 0.0001), 0.0, 1.0)
+
+
+## Applies `amount` of demolition work (a worker's build rate). Returns false
+## once the building is gone. The refund is paid out along the way so the player
+## sees the wood come back in portions.
+func work_demolish(amount: float) -> bool:
+	if not demolishing or _destroyed:
+		return false
+	build_progress = maxf(build_progress - amount, 0.0)
+	_update_construction_visual()
+	_pay_demolish_refund()
+	if build_progress <= 0.0:
+		_finish_demolish()
+		return false
+	return true
+
+
+## Pays out the share of the refund the demolition has already earned.
+func _pay_demolish_refund() -> void:
+	var due: int = int(floor(float(_demolish_refund_total) * demolish_progress()))
+	var owed: int = due - _demolish_refund_paid
+	if owed <= 0:
+		return
+	# Counted as paid even when the wood lands in water and is lost — otherwise
+	# this would retry every tick forever.
+	_demolish_refund_paid += owed
+	_refund_wood(owed)
+
+
+## Last stone gone: pay whatever is left and remove the building.
+func _finish_demolish() -> void:
+	var rest: int = _demolish_refund_total - _demolish_refund_paid
+	if rest > 0:
+		_demolish_refund_paid += rest
+		_refund_wood(rest)
+	_flush_deformation()
+	destroy()
+
+
+## Construction decay (phase 10d): a site that makes NO progress at all for
+## Balance.CONSTRUCTION_STALL_TIMEOUT falls apart again and gives its wood back.
+## Progress is anything that moves the build forward — a graded cell, delivered
+## wood or build progress. Catches the unreachable plot (no worker ever arrives),
+## the forgotten site and the one whose wood source dried up for good.
+func _tick_decay(delta: float) -> void:
+	var signature: Vector3 = Vector3(build_progress, float(wood_delivered),
+		float(_flatten_remaining.size()))
+	if signature != _decay_signature:
+		_decay_signature = signature
+		_decay_timer = 0.0
+		return
+	_decay_timer += delta
+	if _decay_timer >= Balance.CONSTRUCTION_STALL_TIMEOUT:
+		_decay_stalled_site()
+
+
+## The site rotted away: hand the delivered wood back as piles and remove it.
+## The refund MUST happen before destroy() — destroy() pays nothing and clears
+## under_construction.
+func _decay_stalled_site() -> void:
+	_flush_deformation()
+	_refund_wood(int(floor(float(wood_delivered) * Balance.CONSTRUCTION_STALL_REFUND)))
+	destroy()
 
 
 ## Subclass logic while the building is operational.
@@ -1145,7 +1368,8 @@ func wood_incoming() -> int:
 
 ## True while workers should still fetch more wood.
 func wants_more_wood() -> bool:
-	return under_construction and wood_needed_total() > wood_incoming()
+	return under_construction and not demolishing \
+		and wood_needed_total() > wood_incoming()
 
 
 ## HP ceiling of the construction site from the delivered-wood fraction,
@@ -1204,7 +1428,7 @@ func _absorb_piles() -> void:
 ## building can only be completed once all wood is on site. Requires the
 ## foundation to be flattened first.
 func add_build_progress(amount: float) -> void:
-	if not under_construction or not foundation_done:
+	if not under_construction or not foundation_done or demolishing:
 		return
 	build_progress = clampf(build_progress + amount, 0.0, progress_cap())
 	_update_construction_visual()
@@ -1281,6 +1505,10 @@ func destroy() -> void:
 	# would keep building it (_job_active) and finish_construction could
 	# resurrect it. The guard in finish_construction relies on this too.
 	under_construction = false
+	# Same reason for the demolition flag: the wreck lives on for SINK_DURATION,
+	# and _job_active() honours `demolishing` — the crew would keep hammering at
+	# a building that is already gone.
+	demolishing = false
 	if nav_grid != null:
 		nav_grid.fill_solid_region(footprint_rect(), false)
 	# The footprint is walkable again: the demolishers step out alive (IDLE).
@@ -1541,15 +1769,18 @@ func _click_body_height() -> float:
 
 
 ## The building "grows out of the ground" with the build progress
-## (placeholder); during the flatten phase only a sliver is visible.
+## (placeholder); during the flatten phase only a sliver is visible. A demolition
+## (10d) runs the same visual backwards — build_progress is the single source for
+## both directions.
 func _update_construction_visual() -> void:
 	if _mesh_root == null:
 		return
+	var building_up: bool = under_construction or demolishing
 	# Asset-driven path: full-size model, texture swapped per build stage
 	# (4 stages over build_progress; finished -> baked/default texture).
 	if _has_custom_model and _has_build_textures():
 		_mesh_root.scale = Vector3.ONE
-		if not under_construction:
+		if not building_up:
 			if _build_visual_stage != 0:
 				_build_visual_stage = 0
 				_apply_surface_texture(null)
@@ -1560,7 +1791,7 @@ func _update_construction_visual() -> void:
 			_apply_surface_texture(_stage_texture(_build_tex_rel(idx)))
 		return
 	# Fallback: the placeholder "grows out of the ground" via Y scaling.
-	var s: float = 1.0 if not under_construction else 0.1 + 0.9 * build_progress
+	var s: float = 1.0 if not building_up else 0.1 + 0.9 * build_progress
 	_mesh_root.scale = Vector3(1.0, maxf(s, 0.05), 1.0)
 
 

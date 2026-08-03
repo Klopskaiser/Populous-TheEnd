@@ -1336,6 +1336,12 @@ func _on_unit_converted(unit: Unit) -> void:
 		soa_tribe[unit._idx] = unit.tribe_id
 	if unit_renderer != null:
 		unit_renderer.update_unit_color(unit)
+	# Bus signal (10d): listeners with per-tribe unit lists — above all the
+	# selection — drop it right away instead of re-scanning every frame.
+	if is_inside_tree():
+		var events: Node = get_node_or_null("/root/Events")
+		if events != null:
+			events.unit_converted.emit(unit)
 
 
 # --- Spawning -------------------------------------------------------------------

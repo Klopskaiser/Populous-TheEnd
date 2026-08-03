@@ -630,6 +630,168 @@ func test_workers_skip_enemy_guarded_piles() -> void:
 	_free_world(w)
 
 
+# --- Worker reachability (phase 10d) -------------------------------------------
+
+## Flat land split by a water channel at x = 50: cells left of it and right of it
+## are separate nav islands, so a worker on one side can never reach the other.
+func _split_terrain() -> TerrainData:
+	var td: TerrainData = TerrainData.new()
+	for i in range(td.heights.size()):
+		td.heights[i] = 5.0
+	for z in range(td.size + 1):
+		for x in range(48, 53):
+			td.set_vertex_height(x, z, TerrainData.SEA_LEVEL - 2.0)
+	return td
+
+
+## Same wiring as _make_world, but on the split terrain (islands built up front
+## so the labels are fresh on the first query).
+func _make_island_world() -> Dictionary:
+	var td: TerrainData = _split_terrain()
+	var nav: NavGrid = NavGrid.new(td)
+	var tribe: Tribe = Tribe.new(0)
+	var tm: TreeManager = TreeManager.new()
+	tm.setup(td, nav)
+	var wpm: WoodPileManager = WoodPileManager.new()
+	wpm.setup(td)
+	var um: UnitManager = UnitManager.new()
+	um.setup(td, nav, [tribe] as Array[Tribe], tm, wpm)
+	var bm: BuildingManager = BuildingManager.new()
+	bm.setup(td, nav, um, wpm)
+	var tc: TribeCommands = TribeCommands.new()
+	tc.setup(nav, bm, um, tm)
+	return {
+		"td": td, "nav": nav, "tribe": tribe,
+		"unit_manager": um, "building_manager": bm,
+		"tree_manager": tm, "wood_pile_manager": wpm, "commands": tc,
+	}
+
+
+func test_unreachable_site_gets_no_workers() -> void:
+	var w: Dictionary = _make_island_world()
+	# Site east of the channel, idle brave west of it — within the 30 m recruit
+	# radius, but not on the same island.
+	var hut: Hut = w.commands.place_building(w.tribe, HUT_SCENE, Vector2i(56, 60)) as Hut
+	check(hut != null, "site placed on the far island")
+	var brave: Brave = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(44, 60))) as Brave
+	check(not hut.worker_can_reach(brave.position),
+		"the brave really is on the other island")
+
+	for i in range(60):
+		w.building_manager.tick(TICK)
+		brave.tick(TICK)
+	check(brave.job == null, "the recruiter never drafts a brave it cannot get there")
+	check(brave.state == Unit.State.IDLE, "it stays idle instead of marching off")
+	_free_world(w)
+
+
+func test_order_build_skips_unreachable_braves() -> void:
+	var w: Dictionary = _make_island_world()
+	var hut: Hut = w.commands.place_building(w.tribe, HUT_SCENE, Vector2i(56, 60)) as Hut
+	var far: Brave = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(44, 60))) as Brave
+	var near: Brave = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(60, 60))) as Brave
+
+	var assigned: int = w.commands.order_build([far, near] as Array[Unit], hut)
+	check(assigned == 1, "only the reachable brave is put on the job")
+	check(near.job == hut, "the near brave joined")
+	check(far.job == null, "the brave across the water was left out")
+	check(far.state == Unit.State.IDLE, "and was not sent on a hopeless walk")
+	_free_world(w)
+
+
+func test_order_build_moves_surplus_braves_to_the_plot() -> void:
+	var w: Dictionary = _make_world()
+	var hut: Hut = w.commands.place_building(w.tribe, HUT_SCENE, Vector2i(60, 60)) as Hut
+	# Fill every worker slot, then order one more.
+	var crew: Array[Unit] = []
+	for i in range(Building.MAX_WORKERS):
+		var b: Brave = w.unit_manager.spawn_unit(
+			BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(56, 56 + i))) as Brave
+		b.order_build(hut)
+		crew.append(b)
+	check(hut.workers.size() == Building.MAX_WORKERS, "the site is full")
+	check(not hut.has_worker_room(), "no worker room left")
+
+	var surplus: Brave = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(70, 70))) as Brave
+	var assigned: int = w.commands.order_build([surplus] as Array[Unit], hut)
+	check(assigned == 0, "a full site takes no more workers")
+	check(surplus.job == null, "the surplus brave has no job")
+	check(surplus.state == Unit.State.MOVE, "but it does walk to the plot")
+	_free_world(w)
+
+
+## A refused worker must not have dropped its wood already: the capacity check
+## runs BEFORE _interrupt_tasks (10d wart).
+func test_refused_worker_keeps_its_carried_wood() -> void:
+	var w: Dictionary = _make_world()
+	var hut: Hut = w.commands.place_building(w.tribe, HUT_SCENE, Vector2i(60, 60)) as Hut
+	for i in range(Building.MAX_WORKERS):
+		var b: Brave = w.unit_manager.spawn_unit(
+			BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(56, 56 + i))) as Brave
+		b.order_build(hut)
+	var carrier: Brave = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(70, 70))) as Brave
+	carrier.carried_wood = 2
+
+	carrier.order_build(hut)
+	check(carrier.job == null, "the full site refused the carrier")
+	check(carrier.carried_wood == 2, "it still holds its wood")
+	check(w.wood_pile_manager.total_wood() == 0, "nothing was dumped on the ground")
+	_free_world(w)
+
+
+func test_worker_drops_wood_when_site_becomes_unreachable() -> void:
+	var w: Dictionary = _make_world()
+	var hut: Hut = w.commands.place_building(w.tribe, HUT_SCENE, Vector2i(60, 60)) as Hut
+	var brave: Brave = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(40, 60))) as Brave
+	brave.order_build(hut)
+	check(brave.job == hut, "the brave joined while the plot was reachable")
+	brave.carried_wood = 3
+
+	# Flood a channel between them: the site's island label changes.
+	for z in range(w.td.size + 1):
+		for x in range(48, 53):
+			w.td.set_vertex_height(x, z, TerrainData.SEA_LEVEL - 2.0)
+	w.nav.update_region(Rect2i(46, 0, 10, w.td.size))
+	w.nav._islands_computed_ms = -100000   # skip the 1 s island refresh throttle
+	check(not hut.worker_can_reach(brave.position), "the water cut it off")
+
+	# The 1x/s re-check in _tick_job notices and lets it go.
+	var elapsed: float = 0.0
+	while brave.job != null and elapsed < 3.0:
+		brave.tick(TICK)
+		elapsed += TICK
+	check(brave.job == null, "the worker gives up an unreachable job")
+	check(brave.carried_wood == 0, "and drops its wood where it stands")
+	check(w.wood_pile_manager.total_wood() == 3, "the wood is not lost")
+	_free_world(w)
+
+
+func test_approach_island_cache_invalidates_on_navgrid_change() -> void:
+	var w: Dictionary = _make_world()
+	var hut: Hut = w.commands.place_building(w.tribe, HUT_SCENE, Vector2i(60, 60)) as Hut
+	var first: int = hut.approach_island()
+	check(first >= 0, "the site has a walkable approach spot")
+	check(hut.approach_island() == first, "the label is cached (same version)")
+
+	var version_before: int = w.nav.change_version
+	# Drown the whole area around the plot: no approach spot left at all.
+	for z in range(52, 72):
+		for x in range(52, 72):
+			w.td.set_vertex_height(x, z, TerrainData.SEA_LEVEL - 2.0)
+	w.nav.update_region(Rect2i(50, 50, 24, 24))
+	w.nav._islands_computed_ms = -100000
+	check(w.nav.change_version > version_before, "the nav grid bumped its version")
+	check(hut.approach_island() != first,
+		"the cache was invalidated by the walkability change")
+	_free_world(w)
+
+
 func test_wood_stall_recheck_timer() -> void:
 	var w: Dictionary = _make_world()
 	var hut: Hut = w.commands.place_building(w.tribe, HUT_SCENE, Vector2i(60, 60)) as Hut

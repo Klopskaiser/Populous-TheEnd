@@ -89,6 +89,26 @@ func setup(p_unit_manager: UnitManager, p_tribe_commands: TribeCommands = null,
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE  # only draws; input via _unhandled_input
+	# A converted unit leaves the selection IMMEDIATELY (10d bugfix: the cursor
+	# count kept counting it because _prune_selection only runs on command
+	# paths). O(1) per conversion — no per-frame pruning.
+	if is_inside_tree():
+		var events: Node = get_node_or_null("/root/Events")
+		if events != null:
+			events.unit_converted.connect(_on_unit_converted)
+
+
+## An enemy preacher took this unit: drop it from the selection right away.
+func _on_unit_converted(unit: Node) -> void:
+	if unit == null or not is_instance_valid(unit):
+		return
+	var u: Unit = unit as Unit
+	if u == null or u.tribe_id == player_tribe_id:
+		return
+	var idx: int = selected.find(u)
+	if idx >= 0:
+		selected.remove_at(idx)
+		queue_redraw()
 
 
 func _process(_delta: float) -> void:
@@ -104,6 +124,14 @@ func _process(_delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	# Eliminated (10d): the player is out — no selection, no orders at all.
+	var tribe: Tribe = GameState.get_tribe(player_tribe_id)
+	if tribe != null and tribe.eliminated:
+		if not selected.is_empty() or not selected_buildings.is_empty():
+			_set_selection([] as Array[Unit])
+			_clear_selected_building()
+			queue_redraw()
+		return
 	if _build_menu != null and _build_menu.is_active():
 		_dragging = false
 		drag_active = false
@@ -120,6 +148,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			if mb.pressed:
+				# A left click always leaves every armed target mode (10d bugfix:
+				# the red "Angriff" cursor used to stay up until the next
+				# right-click or Esc). Placed before the double-click branch so
+				# click-select, box-select and double-click are all covered.
+				cancel_armed_modes()
 				# Double click on an own unit: select every unit of that kind
 				# currently on screen (phase 7b).
 				if mb.double_click:
@@ -157,8 +190,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				_set_rally(mb.position)
 			else:
 				var aggressive: bool = attack_arm_active
-				attack_arm_active = false
-				queue_redraw()
+				cancel_armed_modes()
 				_command_move(mb.position, mb.shift_pressed, aggressive)
 	elif event is InputEventMouseMotion:
 		var mm: InputEventMouseMotion = event
@@ -179,6 +211,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		if not selected.is_empty():
 			attack_arm_active = true
 			queue_redraw()
+	elif event.is_action_pressed("demolish_building"):
+		_demolish_selected_buildings()
 	elif event.is_action_pressed("select_all_huts"):
 		_select_all_of_type(func(b: Building) -> bool: return b is Hut)
 	elif event.is_action_pressed("select_all_warrior_camps"):
@@ -188,11 +222,20 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("select_all_firewarrior_camps"):
 		_select_all_of_type(func(b: Building) -> bool: return b is FirewarriorCamp)
 	elif event.is_action_pressed("ui_cancel") and (attack_arm_active or unload_arm_active):
-		attack_arm_active = false
-		unload_arm_active = false
-		_unload_airship = null
-		queue_redraw()
+		cancel_armed_modes()
 		get_viewport().set_input_as_handled()
+
+
+## Leaves every armed target mode at once (attack-move, airship unload, spell
+## targeting). Called on a left click, on Esc and when a right-click consumes
+## the armed mode — a single place so no path can leave a stale cursor behind.
+func cancel_armed_modes() -> void:
+	attack_arm_active = false
+	unload_arm_active = false
+	_unload_airship = null
+	if _spell_targeting != null and _spell_targeting.is_active():
+		_spell_targeting.cancel()
+	queue_redraw()
 
 
 ## Arms the airship unload mode (crew tab "Absetzen an…" button): the next
@@ -520,6 +563,22 @@ func _prune_selected_buildings() -> void:
 	selected_building = kept[0] if not kept.is_empty() else null
 
 
+## Key Entf: scraps every selected own building (phase 10d). A site without a
+## build stage is gone instantly and drops its full wood; anything else becomes a
+## worker job at 75 % refund. The order is final — there is no undo.
+func _demolish_selected_buildings() -> void:
+	if _tribe_commands == null:
+		return
+	var tribe: Tribe = GameState.get_tribe(player_tribe_id)
+	if tribe == null:
+		return
+	_prune_selected_buildings()
+	for b in selected_buildings.duplicate():
+		if is_instance_valid(b):
+			_tribe_commands.demolish_building(tribe, b)
+	_prune_selected_buildings()
+
+
 ## Sets the rally point of ALL selected buildings to the clicked terrain
 ## position. A building under the cursor blinks as feedback (e.g. a training
 ## camp's rally dropped onto a hut/tower so graduates walk in).
@@ -550,6 +609,17 @@ func _selection_has_brave() -> bool:
 		if is_instance_valid(u) and u.state != Unit.State.DEAD and u is Brave:
 			return true
 	return false
+
+
+## Every living own Brave in the current selection. Used by the build menu so a
+## freshly placed building immediately gets the selected workers (phase 10d).
+func selected_braves() -> Array[Unit]:
+	var braves: Array[Unit] = []
+	for u in selected:
+		if is_instance_valid(u) and u.state != Unit.State.DEAD and u is Brave \
+				and u.tribe_id == player_tribe_id:
+			braves.append(u)
+	return braves
 
 
 ## Tracks the building under the cursor so it can show its production bar on
@@ -893,6 +963,8 @@ func _dispatch_context_command(hit: Dictionary, queue_up: bool = false) -> bool:
 
 ## Whether _apply_building_command would issue an order for this own building.
 func _building_is_actionable(building: Building) -> bool:
+	if building.demolishing:
+		return true   # right-click puts more hands on the teardown (10d)
 	if building.under_construction:
 		return true
 	if building.is_usable():
@@ -907,6 +979,11 @@ func _building_is_actionable(building: Building) -> bool:
 ## -> build, forester/workshop -> staff, watchtower -> garrison, training
 ## building -> train, otherwise damaged -> repair).
 func _apply_building_command(units: Array[Unit], building: Building) -> void:
+	# The demolition branch must come FIRST: a site being torn down is still
+	# under_construction and would otherwise be sent back to work (10d).
+	if building.demolishing:
+		_tribe_commands.order_demolish(units, building)
+		return
 	if building.under_construction:
 		_tribe_commands.order_build(units, building)
 		return

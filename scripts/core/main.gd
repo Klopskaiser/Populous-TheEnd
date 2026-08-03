@@ -205,7 +205,8 @@ func _ready() -> void:
 	_selection.setup(_unit_manager, _tribe_commands, _build_menu, _spell_targeting,
 		_building_manager)
 	_ring_renderer.setup(_selection)
-	_build_menu.setup(_tribe_commands, nav, self, tribes[GameState.PLAYER_TRIBE])
+	_build_menu.setup(_tribe_commands, nav, self, tribes[GameState.PLAYER_TRIBE],
+		_selection)
 	_spell_targeting.setup(_tribe_commands, tribes[GameState.PLAYER_TRIBE], self,
 		_build_menu, _selection)
 	_sidebar.setup(tribes, GameState.PLAYER_TRIBE, _unit_manager, _building_manager,

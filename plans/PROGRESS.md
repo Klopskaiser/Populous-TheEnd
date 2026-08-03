@@ -7353,3 +7353,146 @@ selbst bzw. jedes erzeugte `GeometryInstance3D`-Kind — headless möglich, weil
 nur MultiMesh/Material/ImageTexture gebaut werden, keine Shader.
 
 **Verifikation:** Ladecheck sauber, Suite **3229/3229 grün**.
+
+## Phase 10d — Siegbedingungen, Abriss, Bauverfall, Erreichbarkeit, UI-Bugs (2026-08-04)
+
+**Plan:** [10d_buildings_win_conditions_ui.md](10d_buildings_win_conditions_ui.md) —
+vollständig umgesetzt.
+
+**Nutzerentscheidungen dieser Sitzung** (im Plandokument nicht vorentschieden):
+
+| Thema | Entscheidung |
+|---|---|
+| Niederlage | **Hütten-Klausel entfällt.** Besiegt = keine lebende Einheit mehr. |
+| Abriss-Anzeige | Kein neuer 3D-Text (das Projekt hat **kein** `Label3D`); der vorhandene Balken zeigt den Abriss, **rot** statt gold. |
+| Abriss abbrechen | **Nein**, der Abriss ist endgültig. |
+| Sofort-Abriss | Wie im Plan: `build_progress == 0`. Damit ist „platzieren → planieren lassen → abreißen" bewusst ein billiges Geländewerkzeug. |
+
+**Gebaut:**
+
+1. **Erreichbarkeit** (`building.gd`): `approach_island()` (Insel-Label von
+   `delivery_point()`, das per `edge_spawn_position()` **garantiert begehbar**
+   ist → O(1)-Vergleich statt A*; Cache gegen `NavGrid.change_version`, `-1` =
+   kein Anlaufpunkt), `worker_can_reach(from)`, `has_worker_room()`,
+   `_refund_wood(amount)`.
+   Gates: `BuildingManager._recruit_workers` überspringt Baustellen ohne
+   Anlaufpunkt und Braves auf anderer Insel; `TribeCommands.order_build`/
+   `order_repair` liefern jetzt `int` (Zahl der zugewiesenen Braves) und lassen
+   unerreichbare Braves ganz aus; `Brave._tick_job` prüft 1×/s und lässt bei
+   Unerreichbarkeit das getragene Holz fallen statt hängen zu bleiben.
+2. **Join-Reihenfolge-Wart** (`brave.gd`): neues `_can_take_worker_slot()` wird
+   **vor** `_interrupt_tasks()` geprüft. Vorher hatte ein an einer vollen
+   Baustelle abgewiesener Brave sein Holz schon fallen gelassen, seinen alten
+   Job verlassen und steckte in `State.BUILD` mit `job == null`.
+3. **Bauverfall** (`building.gd`): Fortschritts-Signatur
+   `Vector3(build_progress, wood_delivered, offene Flatten-Zellen)`; bleibt sie
+   `Balance.CONSTRUCTION_STALL_TIMEOUT` (120 s) unverändert, läuft
+   `_decay_stalled_site()` → `_flush_deformation()` → Erstattung → `destroy()`.
+4. **Abriss** (`building.gd`): `demolishing`-Zustandsmaschine mit
+   `has_build_stage()`, `demolish_refund_total()`, `begin_demolish() -> bool`
+   (true = sofort erledigt), `work_demolish()`, `demolish_progress()`,
+   `_pay_demolish_refund()`, `_finish_demolish()`. `under_construction` wird
+   **nicht** umgeschaltet. Gates: `is_usable()`, `_absorb_piles()`-Auslassung,
+   `_tick_repair_absorb`, `add_build_progress`, `wants_more_wood()`,
+   `wants_more_repair_wood()`, `destroy()` (setzt `demolishing = false`),
+   beide Zweige von `_update_construction_visual()`, `_update_overlay()`.
+5. **Abriss (Braves)**: `Task.DEMOLISH`, `order_demolish()`, `_tick_demolish()`,
+   `_job_active()` um `job.demolishing` erweitert, DEMOLISH-Zweig in
+   `_choose_job_task()` **nach** dem DELIVER-Zweig, und `switch_to_demolish()` —
+   von `begin_demolish()` je Worker gerufen, weil `_choose_job_task` nur über
+   den `Task.NONE`-Zweig erreichbar ist.
+6. **Abriss (API/Hotkey)**: `TribeCommands.demolish_building(tribe, building)`
+   (lehnt fremde Gebäude und den Reinkarnationsplatz ab) +
+   `order_demolish(units, building) -> int`; Input-Action `demolish_building` =
+   `Entf` (physical keycode 4194312); `SelectionManager` wirkt auf **alle**
+   selektierten eigenen Gebäude und bekam einen `demolishing`-Zweig in
+   `_building_is_actionable`/`_apply_building_command`; `Sidebar` sperrt das
+   Crew-Tab beim Abriss.
+7. **Bau mit Selektion**: `SelectionManager.selected_braves()`;
+   `BuildMenu.setup()` nimmt den SelectionManager und reicht die Braves nach
+   erfolgreicher Platzierung an `order_build` weiter.
+8. **Siegbedingungen**: `ReincarnationSite` überschreibt `take_damage`,
+   `apply_destruction_stages` und `add_lava_contact` als **No-op** und ist auch
+   in `SpellContext.check_terrain_integrity` ausgenommen → komplett unverwundbar.
+   Selbstzerstörung in `_tick_active`, sobald der Stamm außer der Schamanin keine
+   lebende Einheit mehr hat, mit **Latch** `_saw_followers`.
+9. **Ausscheiden**: `Tribe.eliminated` + `Tribe.eliminate()` (alle Gebäude
+   zerstören, Fahrzeuge verschrotten, Zauberladungen und Mana leeren);
+   `GameState.check_defeats` ruft es genau einmal beim Übergang;
+   `GameState._process` tickt einen ausgeschiedenen Stamm nicht mehr;
+   `TribeCommands._tribe_active`/`_unit_active` sperren alle Befehlspfade;
+   `AIController.tick_ai` steigt aus; die Spieler-UI verweigert Selektion und
+   Befehle und leert die laufende Selektion.
+10. **UI-Bugs**: `SelectionManager.cancel_armed_modes()` (Angriffs-Move,
+    Zeppelin-Absetzen, Zauber-Zielmodus) wird bei **Linksklick-Druck**, bei Esc
+    und beim Rechtsklick-Konsum gerufen; `Events.unit_converted` (gefeuert aus
+    `UnitManager._on_unit_converted`) entfernt bekehrte Einheiten sofort aus der
+    Selektion, `cursor_count_label` filtert zusätzlich auf den eigenen Stamm.
+
+**Erkenntnisse/Stolpersteine:**
+
+1. **`island_at` liefert `-1` für nicht begehbare Zellen — und Grader stehen auf
+   dem Footprint.** Der erste Wurf von `worker_can_reach` warf damit die eigenen
+   Planierer aus dem Job (2 Testfehlschläge in `test_economy`, 8×8-Werft). Ein
+   `-1` der **Worker**-Zelle ist eine Positionsaussage, keine Inselaussage →
+   dort freizügig `true`.
+2. **`_absorb_piles` muss beim Abriss aus sein.** Sonst frisst die Baustelle
+   alle 0,5 s die Erstattung, die sie eben ausgezahlt hat (die Stapel landen am
+   selben `delivery_point()`). Tragende Zeile, eigener Test.
+3. **`add_build_progress` braucht `or demolishing`.** Ein Worker mitten in der
+   CONSTRUCT-Teilaufgabe baut sonst gegen den Abriss an; zusammen mit
+   `switch_to_demolish()` ist das das Fehlerbild „Balken springt hin und her".
+4. **`destroy()` muss `demolishing` löschen** — das Wrack lebt noch
+   `SINK_DURATION` 2 s, und `_job_active()` respektiert `demolishing`; sonst
+   hämmern die Braves 2 s am bereits zerstörten Gebäude weiter.
+5. **Refund-Bezugswert ist nicht `wood_delivered`.** `BuildingManager.place(…,
+   pre_built = true)` ruft `finish_construction()` ohne `init_construction()` →
+   `wood_delivered` bleibt 0. Jede Start-Hütte hätte 0 erstattet. Richtig:
+   `wood_cost` für fertige Gebäude, `wood_delivered` nur für Baustellen, plus
+   `repair_wood`.
+6. **Der Kreis braucht einen Latch für die Selbstzerstörung.** Gebäude stehen im
+   Match-Aufbau **vor** den Einheiten — ohne `_saw_followers` versinkt ein frisch
+   platzierter Reinkarnationsplatz im ersten Tick. Eigener Test.
+7. **Die Hütten-Klausel in `is_tribe_defeated` war seit 7i eine Zombie-Regel.**
+   Eine Hütte produziert nur mit Besatzung, und Besatzung sind selbst Einheiten
+   — ein Stamm mit 0 Einheiten konnte nie mehr etwas erzeugen, wurde aber auch
+   nie für besiegt erklärt. Der Docstring behauptete noch „a hut (spawns
+   braves)".
+8. **Kein `Label3D` im Projekt.** Die Plananforderung „Overlay zeigt Abriss"
+   war nicht ohne neue UI-Komponente umsetzbar; stattdessen füllt der vorhandene
+   Balken beim Abriss **rot** (`_make_bar_texture(progress, demolish)`). Das ging
+   **nicht** über einen `production_progress()`-Override: jede produzierende
+   Subklasse steigt bei `not is_usable()` mit `-1.0` aus und hätte die Basis
+   überschrieben — der Sonderfall sitzt deshalb in `_update_overlay()`.
+9. **Falsches Grün durch Skriptfehler:** die ersten `test_demolition`-Tests
+   riefen `TribeCommands.place_building(..., true)` — den `pre_built`-Parameter
+   hat nur `BuildingManager.place`. Der Laufzeitfehler brach die Testmethode ab,
+   der Runner zählte nur die bis dahin gelaufenen `check()`s und meldete
+   „17 passed, 0 failed". **Merke:** nach neuen Tests immer auf
+   `SCRIPT ERROR` im Output prüfen, nicht nur auf den Exit-Code.
+10. **Suite-Drift war zurück** (`test_tree_types`, 112–118 Zusicherungen je
+    Lauf): drei `for tree in …: check(...)`-Schleifen mit zufallsabhängiger
+    Iterationszahl. Auf je **eine** aggregierte Zusicherung umgestellt
+    (Abdeckung bleibt: der erste Verstoß wird berichtet). Suite ist wieder
+    deterministisch.
+
+**Verifikation:**
+
+- Suite **3273/3273 grün**, dreimal in Folge mit **identischer** Zahl.
+- Ladecheck `--headless --quit` ohne Fehler.
+- **Perf-Wächter** `benchmark_earlygame` (Risiko „mehr Insel-Flutfüllungen durch
+  die neuen `worker_can_reach`-Aufrufer"): **vorher** 10 Füllungen / 446 ms,
+  **nachher** 10 / 439 ms bzw. 9 / 384 ms; schlimmster Frame vorher 53,5 ms,
+  nachher 51,3 / 47,8 ms. Kein Regress — die Deckelung auf 1 Füllung/s greift,
+  und die Aufrufer sind O(1) gegen den Cache.
+- Neue Testdateien: `tests/test_demolition.gd` (48 Zusicherungen),
+  `tests/test_construction_decay.gd` (16). Erweitert: `test_economy.gd`
+  (Erreichbarkeit + Join-Wart), `test_ui_logic.gd` (Selektionszustand),
+  `test_ai.gd` (Ausscheiden), `test_shaman_respawn.gd` (Unverwundbarkeit +
+  Selbstzerstörung + Latch).
+- Angepasst, weil die Regeln sich absichtlich geändert haben:
+  `test_ai.test_defeat_condition` (Hütte/Kreis retten keinen Stamm mehr),
+  `test_building_assault` (Kreis ignoriert Zauber/Katapult/Lava),
+  `test_shaman_respawn` (kein „beschädigter Kreis" mehr möglich).
+- **Manuelle Prüfung durch den Nutzer ausstehend** (die 8 Schritte im
+  Plandokument).

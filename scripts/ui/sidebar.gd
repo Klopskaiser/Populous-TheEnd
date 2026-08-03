@@ -881,7 +881,7 @@ func _selected_crew_target() -> Object:
 		return null
 	var b: Building = _selection.selected_building
 	if is_instance_valid(b) and not b.under_construction and b.health > 0 \
-			and b.tribe_id == _player_id:
+			and not b.demolishing and b.tribe_id == _player_id:
 		return b
 	if _selection.selected.size() == 1:
 		var u: Unit = _selection.selected[0]

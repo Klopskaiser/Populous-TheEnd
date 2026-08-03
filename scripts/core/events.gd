@@ -32,3 +32,7 @@ signal spell_cast_started(spell_id: StringName, pos: Vector3)
 ## No sound hangs off this one: since phase 10b the effect's own sound is played
 ## by whatever entity produces it, when it actually happens (see SpellAudio).
 signal spell_cast(spell_id: StringName, pos: Vector3)
+## A unit changed tribe (preacher conversion). Listeners that keep per-tribe
+## unit lists — most importantly the selection — drop it right away instead of
+## re-scanning every frame.
+signal unit_converted(unit: Node)

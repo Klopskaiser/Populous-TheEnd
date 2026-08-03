@@ -120,9 +120,14 @@ func test_bamboo_sprouts_only_on_grass() -> void:
 	for i in range(30):
 		w.tm._sprout_near(Vector2i(62, 60), TreeResource.TreeType.BAMBOO)
 	check(w.tm.trees.size() > 1, "sprouting at the grass/sand border produced trees")
+	# Aggregated on purpose: the sprout COUNT is random, so one check per tree
+	# would make the suite's assertion total drift run to run.
+	var off_grass: Vector2i = Vector2i(-1, -1)
 	for tree: TreeResource in w.tm._tree_cells.keys():
 		var c: Vector2i = w.tm._tree_cells[tree]
-		check(w.td.is_grass(c), "tree at %s sits on grass" % c)
+		if not w.td.is_grass(c):
+			off_grass = c
+	check(off_grass.x < 0, "every sprouted tree sits on grass (offender %s)" % off_grass)
 	w.tm.free()
 
 
@@ -135,8 +140,12 @@ func test_sprout_inherits_type() -> void:
 	for i in range(30):
 		w.tm._sprout_near(Vector2i(60, 60), parent.type)
 	check(w.tm.trees.size() > 1, "leaf parent produced sprouts")
+	# Aggregated: the sprout count is random (see above).
+	var wrong_type: int = 0
 	for tree: TreeResource in w.tm.trees:
-		check(tree.type == TreeResource.TreeType.LEAF, "sprout inherited LEAF type")
+		if tree.type != TreeResource.TreeType.LEAF:
+			wrong_type += 1
+	check(wrong_type == 0, "every sprout inherited the LEAF type")
 	w.tm.free()
 
 
@@ -192,7 +201,10 @@ func test_map_gen_standard_only_on_sand() -> void:
 	w.tm.spawn_trees(60, 12345)
 	w.tm.spawn_groves(3)
 	check(w.tm.trees.size() >= 60, "wild distribution spawned on sand")
+	# Aggregated: the tree count varies with the grove rolls (see above).
+	var non_standard: int = 0
 	for tree: TreeResource in w.tm.trees:
-		check(tree.type == TreeResource.TreeType.STANDARD,
-			"off-grass map gen only places standard trees")
+		if tree.type != TreeResource.TreeType.STANDARD:
+			non_standard += 1
+	check(non_standard == 0, "off-grass map gen only places standard trees")
 	w.tm.free()

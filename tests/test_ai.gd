@@ -569,21 +569,21 @@ func test_defeat_condition() -> void:
 		"a dead unit does not keep the tribe alive")
 	tribe.remove_unit(brave)
 
+	# Phase 10d: buildings no longer save a tribe. A hut only produces WITH crew,
+	# and crew members are units themselves — with zero units every hut is idle
+	# forever, so it must not keep a dead tribe in the match.
 	var hut: Building = _usable_hut()
 	tribe.add_building(hut)
-	check(not GameStateScript.is_tribe_defeated(tribe),
-		"a usable hut keeps the tribe alive (spawns braves)")
-	hut.health = int(hut.max_health * 0.5)   # stage >= 1 -> unusable
 	check(GameStateScript.is_tribe_defeated(tribe),
-		"a damaged (unusable) hut cannot save a tribe without units")
+		"a usable hut cannot save a tribe without units (10d: no crew, no spawns)")
 	tribe.remove_building(hut)
 	hut.free()
 
 	var site: Building = SITE_SCENE.instantiate() as Building
 	site.under_construction = false
 	tribe.add_building(site)
-	check(not GameStateScript.is_tribe_defeated(tribe),
-		"a usable reincarnation site keeps the tribe alive (shaman respawn)")
+	check(GameStateScript.is_tribe_defeated(tribe),
+		"a reincarnation site cannot save a tribe without units either (10d)")
 	tribe.remove_building(site)
 	site.free()
 
@@ -751,5 +751,99 @@ func test_ai_casts_firestorm_on_big_cluster() -> void:
 	ai._cast_spells()
 	check(_pending_spell_id(ai_tribe) == &"firestorm",
 		"big enemy cluster -> firestorm before fireball")
+	ai.free()
+	_free_world(w)
+
+
+# --- Elimination (phase 10d) ---------------------------------------------------
+
+## The defeat chain: last follower dies -> the circle self-destructs -> the
+## shaman dies -> the tribe is out and everything it still owned is razed.
+func test_last_shaman_death_eliminates_tribe_and_razes_everything() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var site: Building = w.building_manager.place(
+		SITE_SCENE, tribe, Vector2i(30, 30), 0, true)
+	var hut: Building = w.building_manager.place(
+		HUT_SCENE, tribe, Vector2i(40, 40), 0, true)
+	var brave: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, Vector3(35, 0, 35))
+	var shaman: Unit = w.unit_manager.spawn_unit(SHAMAN_SCENE, 1, Vector3(36, 0, 36))
+	w.building_manager.tick(0.5)
+	check(site.health > 0 and hut.health > 0, "the base stands while followers live")
+
+	# Last follower falls -> the circle gives itself up.
+	brave.take_damage(9999)
+	w.building_manager.tick(0.5)
+	check(site.health <= 0, "the circle self-destructs without followers")
+	check(hut.health > 0, "the hut is still standing at this point")
+
+	# The shaman falls too -> defeated, and eliminate() razes the rest.
+	shaman.take_damage(9999)
+	var gs: Node = GameStateScript.new()
+	gs.tribes = w.tribes
+	gs.start_win_tracking()
+	gs.check_defeats()
+	check(tribe.eliminated, "the tribe is out of the match")
+	check(hut.health <= 0, "its remaining buildings were razed")
+	check(tribe.buildings.is_empty(), "and deregistered from the tribe")
+	gs.free()
+	_free_world(w)
+
+
+## An eliminated tribe accepts nothing any more — from the UI or the AI.
+func test_eliminated_tribe_rejects_all_commands() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var brave: Brave = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, Vector3(40, 0, 40)) as Brave
+	tribe.set_spells(Spell.create_default_set())
+	for spell in tribe.spells:
+		spell.charges = 2
+	var hut: Building = w.building_manager.place(
+		HUT_SCENE, tribe, Vector2i(50, 50), 0, true)
+
+	tribe.eliminate()
+	check(tribe.eliminated, "the tribe is flagged as eliminated")
+	check(hut.health <= 0, "eliminate() razed the base")
+	for spell in tribe.spells:
+		check(spell.charges == 0, "spell charges are void")
+
+	# Every command path refuses.
+	check(w.commands.place_building(tribe, HUT_SCENE, Vector2i(60, 60)) == null,
+		"no more building placement")
+	check(not w.commands.cast_spell(tribe, &"blast", Vector3(45, 5, 45)),
+		"no more spell casts")
+	check(not w.commands.set_spell_active(tribe, &"blast", false),
+		"no more spell toggling")
+	var before: Vector3 = brave.position
+	w.commands.order_move([brave] as Array[Unit], Vector3(60, 5, 60))
+	check(brave.state != Unit.State.MOVE and brave.position == before,
+		"no more move orders")
+	_free_world(w)
+
+
+func test_eliminated_ai_stops_ticking() -> void:
+	# Same base setup as test_build_tick_places_construction_site: the AI needs a
+	# reincarnation anchor, braves and wood in reach before it builds anything.
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var anchor: Vector2i = Vector2i(64, 64)
+	w.building_manager.place(SITE_SCENE, tribe, anchor, 0, true)
+	for i in range(10):
+		w.unit_manager.spawn_unit(BRAVE_SCENE, 1,
+			w.nav.cell_to_world(anchor + Vector2i(6, i - 4)))
+	for i in range(4):
+		w.tree_manager.spawn_tree(anchor + Vector2i(10 + 3 * i, 10), TreeResource.MAX_STAGE)
+	var ai: AIController = _make_ai(w, tribe, anchor)
+
+	var before: int = tribe.buildings.size()
+	ai.tick_ai()
+	check(tribe.buildings.size() > before, "a living AI builds")
+	var while_alive: int = tribe.buildings.size()
+
+	tribe.eliminated = true
+	for i in range(20):
+		ai.tick_ai()
+	check(tribe.buildings.size() == while_alive,
+		"an eliminated AI issues no further orders")
 	ai.free()
 	_free_world(w)

@@ -13,7 +13,7 @@ class_name Brave extends Unit
 ## All logic runs in tick(delta) and works without the scene tree. References
 ## to trees/piles are kept untyped because they may be freed by other workers.
 
-enum Task {NONE, FLATTEN, CHOP, PICKUP, DELIVER, CONSTRUCT, REPAIR, PRODUCE}
+enum Task {NONE, FLATTEN, CHOP, PICKUP, DELIVER, CONSTRUCT, REPAIR, PRODUCE, DEMOLISH}
 ## Sub-phase of the forester job (State.FORESTER, phase 7d): walking in to be
 ## housed, walking out to a plant spot, kneeling to plant, walking back in.
 enum ForesterPhase {JOIN, PLANT_GO, KNEEL, RETURN}
@@ -89,6 +89,9 @@ var _kneel_timer: float = 0.0
 
 var _chop_timer: float = 0.0
 var _retry_timer: float = 0.0
+## Throttle for the job reachability re-check (phase 10d): terrain deformation
+## can cut a worker off from its site mid-job.
+var _job_reach_timer: float = 0.0
 ## Consecutive unreachable-goal failures (escalating backoff, see
 ## _on_seek_failed); reset by any successfully completed sub-task.
 var _seek_fail_streak: int = 0
@@ -215,12 +218,23 @@ func order_chop(tree: TreeResource) -> void:
 	_set_state(State.GATHER)
 
 
+## True while this brave can still take a worker slot at `building`. Checked
+## BEFORE _interrupt_tasks (10d): a brave refused by a full site used to have
+## dropped its wood and left its old job already, and then sat in State.BUILD
+## with job == null until the next tick healed it. Own slot counts as room —
+## _interrupt_tasks only frees it afterwards.
+func _can_take_worker_slot(building: Building) -> bool:
+	return self in building.workers or building.has_worker_room()
+
+
 ## Join a construction site as a worker (fails silently when the site already
 ## has MAX_WORKERS helpers).
 func order_build(building: Building) -> void:
 	if not can_take_orders():
 		return
 	if building == null or not is_instance_valid(building) or not building.under_construction:
+		return
+	if not _can_take_worker_slot(building):
 		return
 	_interrupt_tasks()
 	if not building.join(self):
@@ -239,6 +253,25 @@ func order_repair(building: Building) -> void:
 	if building == null or not is_instance_valid(building) or building.under_construction:
 		return
 	if building.health <= 0 or building.health >= building.max_health:
+		return
+	if not _can_take_worker_slot(building):
+		return
+	_interrupt_tasks()
+	if not building.join(self):
+		return
+	job = building
+	_retry_timer = 0.0
+	_set_state(State.BUILD)
+
+
+## Tear a building down (phase 10d): join it as a worker. The demolition itself
+## is started by TribeCommands.demolish_building — this only puts hands on it.
+func order_demolish(building: Building) -> void:
+	if not can_take_orders():
+		return
+	if building == null or not is_instance_valid(building) or not building.demolishing:
+		return
+	if not _can_take_worker_slot(building):
 		return
 	_interrupt_tasks()
 	if not building.join(self):
@@ -406,6 +439,20 @@ func _tick_job(delta: float) -> void:
 		_interrupt_tasks()
 		_set_state(State.IDLE)
 		return
+	# Terrain deformation (landbridge, earthquake, sink) can cut a worker off
+	# from its site. Checked once a second (O(1) island compare): the brave then
+	# drops its wood where it stands and quits instead of walking forever
+	# against an unreachable goal (phase 10d).
+	_job_reach_timer -= delta
+	if _job_reach_timer <= 0.0:
+		_job_reach_timer = 1.0
+		if not (job as Building).worker_can_reach(position):
+			if carried_wood > 0 and wood_pile_manager != null:
+				wood_pile_manager.deposit(position, carried_wood)
+				carried_wood = 0
+			_interrupt_tasks()
+			_set_state(State.IDLE)
+			return
 	match task:
 		Task.NONE:
 			_retry_timer -= delta
@@ -426,6 +473,8 @@ func _tick_job(delta: float) -> void:
 			_tick_repair(delta)
 		Task.PRODUCE:
 			_tick_produce(delta)
+		Task.DEMOLISH:
+			_tick_demolish(delta)
 
 
 ## A job binds its workers while the building is under construction or (for
@@ -435,6 +484,7 @@ func _tick_job(delta: float) -> void:
 ## never slide into production duty without an explicit order.
 func _job_active() -> bool:
 	return job.under_construction \
+		or job.demolishing \
 		or (job.health > 0 and job.health < job.max_health) \
 		or (job is Workshop and job.is_usable() and self in (job as Workshop).occupants)
 
@@ -445,7 +495,15 @@ func _job_active() -> bool:
 ## flatten cells; once the foundation is level, everyone constructs.
 func _choose_job_task() -> void:
 	if carried_wood > 0:
+		# Deliver first even while tearing the building down: the wood lands as a
+		# ground pile at the same delivery point the refund goes to (the site's
+		# absorption is off during a demolition), so nothing is eaten — and the
+		# brave is not stuck carrying 1-3 wood through the whole teardown.
 		task = Task.DELIVER
+		_reset_seek()
+		return
+	if job.demolishing:
+		task = Task.DEMOLISH
 		_reset_seek()
 		return
 	if not job.under_construction:
@@ -751,6 +809,21 @@ func _tick_construct(delta: float) -> void:
 			_end_subtask()
 
 
+## Tears the job building down (phase 10d): the mirror image of _tick_construct.
+## build_progress runs backwards at the build rate; Building.work_demolish pays
+## the refund out in portions and removes the building at zero. No wood re-check
+## — a demolition never needs any.
+func _tick_demolish(delta: float) -> void:
+	if not job.demolishing:
+		_end_subtask()
+		return
+	if not _seek(job.center_world(), job.interact_range(), delta):
+		return
+	_set_working(true)
+	_face_toward(job.center_world())
+	job.work_demolish(BUILD_RATE * Balance.DEMOLISH_RATE_FACTOR * delta)
+
+
 ## Hammers repair HP into the (damaged, finished) job building. Building.repair
 ## returns false when it runs dry of delivered wood — then re-choose (fetch
 ## more or stall). Full repair releases the worker via the _job_active guard.
@@ -775,6 +848,22 @@ func _job_wants_wood() -> bool:
 	if job is Workshop and job.health >= job.max_health:
 		return (job as Workshop).wants_more_stock_wood()
 	return job.wants_more_repair_wood()
+
+
+## The job building just went into demolition (phase 10d): abandon whatever
+## sub-task is running and re-choose. Without this a worker mid-flatten/chop/
+## build/repair would never notice — _choose_job_task is only reached through the
+## Task.NONE branch of _tick_job. Releases the claims _end_subtask does NOT
+## release (flatten cell, claimed tree), same as _on_seek_failed.
+func switch_to_demolish() -> void:
+	if job != null and is_instance_valid(job):
+		if task_cell.x >= 0:
+			job.release_flatten_cell(task_cell)
+	if tree_manager != null and _tree_valid(task_tree):
+		tree_manager.release_claim(task_tree, self)
+	task_tree = null
+	task_pile = null
+	_end_subtask()   # Task.NONE -> the next tick picks DEMOLISH
 
 
 ## Ends the current sub-task and re-chooses after `retry` seconds. Success

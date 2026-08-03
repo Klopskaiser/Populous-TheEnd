@@ -65,6 +65,40 @@ Sechs zusammengehörige Gebäude-/Regel-Themen:
   keine Zauber. Der Stamm bleibt als Datenobjekt bestehen, damit die
   Siegauswertung und die Statistik konsistent bleiben.
 
+### Nachgetragene Festlegungen (2026-08-04, vor der Umsetzung geklärt)
+
+- **Niederlage: die Hütten-Klausel entfällt.** Besiegt = keine lebende Einheit
+  mehr. Begründung: eine Hütte produziert seit 7i nur **mit** Besatzung, und
+  Besatzung sind selbst Einheiten — ein Stamm mit 0 Einheiten konnte nie mehr
+  etwas erzeugen, wäre aber mit der alten Regel nie ausgeschieden und hätte die
+  ganze Siegkette blockiert.
+- **Abriss-Anzeige:** kein neuer 3D-Text. Das Projekt enthält **kein**
+  `Label3D`; der vorhandene Fortschrittsbalken über dem Gebäude zeigt den
+  Abriss und füllt dabei **rot** statt gold.
+- **Abriss ist endgültig** — kein `cancel_demolish()`.
+- **Sofort-Abriss bleibt bei `build_progress == 0`.** Damit fällt auch die
+  *fertig planierte* Baustelle darunter (der Fortschritt steigt erst ab
+  `foundation_done`): „platzieren → planieren lassen → abreißen" ist bewusst
+  ein billiges Geländewerkzeug.
+
+## Korrigierte Zeilenangaben (Stand 2026-08-04)
+
+Die Bestandsaufnahme oben war teils veraltet:
+
+| oben genannt | tatsächlich |
+|---|---|
+| `brave.gd` `order_build` :226, `_job_active` :452, `_choose_job_task` :462, `_tick_construct` :752, `SEEK_FAIL_QUIT_STREAK` :1203 | :220 / :436 / :446 / :736 / Konstante :52, Auswertung :1183 |
+| `building.gd` `_update_construction_visual` :1514 | :1545 |
+| `unit.gd` `convert_to_tribe` :2100 | :2440 |
+| `ai_controller.gd` `_plot_reachable` :966 | :937 |
+| `reincarnation_site.gd` `is_assailable_by_units` :37 | :34 |
+
+Außerdem sachlich abweichend: **es gibt keinen Stammes-Holzvorrat**
+(`tribe.gd:5-6`) — jede Erstattung wird als Bodenstapel über
+`WoodPileManager.deposit()` gespawnt; und ein einzelner `_tribe_active(tribe)`
+-Guard reicht nicht, weil 17 der 18 mutierenden `TribeCommands`-Methoden keinen
+`Tribe` bekommen (es gibt daher zusätzlich `_unit_active(unit)`).
+
 ## Deliverables
 
 | Bereich | Datei(en) | Inhalt |
@@ -202,7 +236,8 @@ const CONSTRUCTION_STALL_REFUND: float = 1.0
 
 ## Definition of Done
 
-- [ ] Testsuite grün, `--headless --quit` fehlerfrei
+- [x] Testsuite grün (**3273/3273**, dreimal identisch), `--headless --quit` fehlerfrei
+- [x] `benchmark_earlygame` ohne Insel-Flutfüllungs-Regress (10/446 ms → 10/439 ms)
 - [ ] Manuelle Prüfung durch den Nutzer bestanden
-- [ ] PROGRESS.md ergänzt, Checkbox 10d in [00_overview.md](00_overview.md) abgehakt
-- [ ] Commit/Push
+- [x] PROGRESS.md ergänzt, Checkbox 10d in [00_overview.md](00_overview.md) abgehakt
+- [x] Commit/Push

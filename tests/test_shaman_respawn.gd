@@ -2,12 +2,14 @@ extends TestBase
 
 ## Headless tests for phase 6: the shaman respawn at the reincarnation site —
 ## countdown only while she is dead, exactly one new shaman, no respawn
-## without a (usable) site.
+## without a site. Phase 10d added the circle's invulnerability and its
+## self-destruction once the tribe has no follower left.
 
 const TICK: float = 0.5
 
 const SITE_SCENE: PackedScene = preload("res://scenes/buildings/reincarnation_site.tscn")
 const SHAMAN_SCENE: PackedScene = preload("res://scenes/units/shaman.tscn")
+const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
 
 
 func _flat_terrain(h: float = 5.0) -> TerrainData:
@@ -89,26 +91,58 @@ func test_no_respawn_without_site() -> void:
 	_free_world(w)
 
 
-func test_no_respawn_while_site_is_damaged() -> void:
+## Phase 10d: the circle is invulnerable — no damage source touches it, so it can
+## never be "damaged but standing" any more. It stays usable and keeps
+## reincarnating no matter what is thrown at it.
+func test_site_is_invulnerable_and_keeps_reincarnating() -> void:
 	var w: Dictionary = _make_world()
 	var site: ReincarnationSite = w.bm.place(SITE_SCENE, w.tribe0, Vector2i(30, 30), 0, true)
+	var brave: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 0, Vector3(35, 0, 35))
 	var shaman: Unit = w.unit_manager.spawn_unit(SHAMAN_SCENE, 0, Vector3(40, 0, 40))
-	site.apply_destruction_stages(1)
-	check(not site.is_usable(), "damaged site is unusable")
+	var hp: int = site.health
+	site.apply_destruction_stages(3)
+	site.take_damage(site.max_health * 10)
+	site.add_lava_contact(Balance.LAVA_BUILDING_STAGE_TIME * 5.0)
+	check(site.health == hp, "no damage source reduces the circle's HP")
+	check(site.is_usable(), "the circle stays usable through everything")
 	shaman.take_damage(9999)
 	var elapsed: float = 0.0
-	while elapsed < ReincarnationSite.RESPAWN_TIME * 2.0:
-		w.bm.tick(TICK)
-		elapsed += TICK
-	check(_living_shamans(w) == 0, "damaged site cannot reincarnate")
-	# Repair it -> the countdown starts and she returns.
-	site.repair_wood = 99
-	while site.health < site.max_health:
-		check(site.repair(100.0), "repair works with wood delivered")
-	check(site.is_usable(), "site usable again")
-	elapsed = 0.0
 	while elapsed < ReincarnationSite.RESPAWN_TIME + 2.0:
 		w.bm.tick(TICK)
+		brave.tick(TICK)
 		elapsed += TICK
-	check(_living_shamans(w) == 1, "respawn resumes after the repair")
+	check(_living_shamans(w) == 1, "the battered circle still reincarnates her")
+	_free_world(w)
+
+
+## Phase 10d: with no follower left the circle gives itself up — the shaman alone
+## does not count. That is what makes the tribe eliminable at all.
+func test_site_self_destructs_without_followers() -> void:
+	var w: Dictionary = _make_world()
+	var site: ReincarnationSite = w.bm.place(SITE_SCENE, w.tribe0, Vector2i(30, 30), 0, true)
+	var brave: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 0, Vector3(35, 0, 35))
+	var shaman: Unit = w.unit_manager.spawn_unit(SHAMAN_SCENE, 0, Vector3(40, 0, 40))
+	w.bm.tick(TICK)
+	check(site.health > 0, "the circle stands while a brave lives")
+	check(shaman.state != Unit.State.DEAD, "the shaman is alive for this test")
+	brave.take_damage(9999)
+	w.bm.tick(TICK)
+	check(site.health <= 0, "last follower gone -> the circle destroys itself")
+	_free_world(w)
+
+
+## The latch: a site placed BEFORE the tribe's braves exist (match setup order)
+## must not sink on its first tick.
+func test_fresh_site_does_not_self_destruct_before_units_exist() -> void:
+	var w: Dictionary = _make_world()
+	var site: ReincarnationSite = w.bm.place(SITE_SCENE, w.tribe0, Vector2i(30, 30), 0, true)
+	for i in range(10):
+		w.bm.tick(TICK)
+	check(site.health > 0, "an empty tribe's fresh circle survives (setup order)")
+	var brave: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 0, Vector3(35, 0, 35))
+	w.bm.tick(TICK)
+	check(site.health > 0, "still standing once a follower arrived")
+	brave.take_damage(9999)
+	w.bm.tick(TICK)
+	check(site.health <= 0, "and it sinks when that follower dies")
 	_free_world(w)

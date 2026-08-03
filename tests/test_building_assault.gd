@@ -405,15 +405,20 @@ func test_reincarnation_site_not_assailable_by_units() -> void:
 	_free_world(w)
 
 
-func test_reincarnation_site_destroyed_by_spell_or_catapult() -> void:
+## Phase 10d: the circle became COMPLETELY invulnerable — spells, catapults and
+## lava bounce off it. It only ever vanishes through its own self-destruction
+## (see test_shaman_respawn.gd), which makes the defeat chain the single route to
+## eliminating a tribe.
+func test_reincarnation_site_ignores_spells_catapults_and_lava() -> void:
 	var w: Dictionary = _make_world()
 	var site: Building = w.bm.place(SITE_SCENE, w.tribe1, Vector2i(40, 40), 0, true)
-	# Spells / catapults go through apply_destruction_stages / take_damage and
-	# ARE allowed to damage the site.
-	site.apply_destruction_stages(2)   # e.g. lightning
-	check(site.destruction_stage() >= 2, "a spell damages the reincarnation site")
-	site.take_damage(site.health)      # e.g. catapult / further spell
-	check(site.health <= 0, "spells/catapults can destroy the reincarnation site")
+	var hp: int = site.health
+	site.apply_destruction_stages(2)          # e.g. lightning
+	check(site.destruction_stage() == 0, "a spell does not damage the circle")
+	site.take_damage(site.max_health * 10)    # e.g. catapult / further spell
+	check(site.health == hp, "catapult/spell damage leaves the circle untouched")
+	site.add_lava_contact(Balance.LAVA_BUILDING_STAGE_TIME * 5.0)
+	check(site.health == hp and site.is_usable(), "lava does not wreck the circle")
 	_free_world(w)
 
 

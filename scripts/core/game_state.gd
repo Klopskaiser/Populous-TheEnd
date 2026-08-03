@@ -54,6 +54,10 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	for tribe in tribes:
+		# An eliminated tribe (10d) is dead weight: no mana income, no spell
+		# charges. Without this it would keep charging spells forever.
+		if tribe.eliminated:
+			continue
 		tribe.tick(delta)
 	if _win_tracking and not match_over:
 		_defeat_timer -= delta
@@ -94,23 +98,24 @@ func check_defeats() -> void:
 			continue
 		if is_tribe_defeated(tribe):
 			_defeated[tribe.id] = true
+			# Exactly once, on the transition: raze whatever is left and lock the
+			# tribe out of every action (phase 10d).
+			tribe.eliminate()
 			tribe_defeated.emit(tribe.id)
 	_evaluate_match_end()
 
 
-## Defeated = no units left AND no usable building that can spawn units
-## without worker help: a hut (spawns braves) or a reincarnation site
-## (respawns the shaman). Training buildings need a living brave to walk in
-## and damaged/under-construction buildings need workers to fix them — with
-## zero units neither can ever produce again, so they do not save the tribe.
+## Defeated = no living unit left. Buildings cannot save a tribe any more
+## (phase 10d): since 7i a hut only produces WITH crew, and crew members are
+## units themselves — so with zero units every hut is idle forever. Training
+## buildings need a living brave to walk in, damaged/unfinished buildings need
+## workers, and the reincarnation circle only respawns a shaman while followers
+## live (it destroys itself otherwise). A tribe at zero units can never recover.
 static func is_tribe_defeated(tribe: Tribe) -> bool:
+	if tribe.eliminated:
+		return true
 	for unit in tribe.units:
 		if is_instance_valid(unit) and unit.state != Unit.State.DEAD:
-			return false
-	for building in tribe.buildings:
-		if not is_instance_valid(building) or not building.is_usable():
-			continue
-		if building is Hut or building is ReincarnationSite:
 			return false
 	return true
 
