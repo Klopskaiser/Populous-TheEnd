@@ -184,6 +184,10 @@ const STEEP_ROLL_CHANCE_PER_SEC: float = Balance.STEEP_ROLL_CHANCE_PER_SEC
 const THROW_GRAVITY: float = 18.0
 ## Ceiling of every throw arc, in metres above the ground below (phase 10c).
 const LIFT_MAX_HEIGHT: float = Balance.LIFT_MAX_HEIGHT
+## Invisible wall at the world border (phase 10c): how far inside the edge it
+## stands, and how much of the impact speed bounces back off it.
+const WORLD_EDGE_MARGIN: float = Balance.WORLD_EDGE_MARGIN
+const WORLD_BOUNCE_RESTITUTION: float = Balance.WORLD_BOUNCE_RESTITUTION
 ## Friction (m/s^2) that bleeds off a landing throw's roll speed on flat
 ## ground — thrown units tumble on and quickly come to a stop.
 const ROLL_FRICTION: float = 6.0
@@ -1892,6 +1896,32 @@ func apply_lift(dir: Vector3, horizontal: float, vertical: float,
 	throw_airborne(flat * h + Vector3.UP * v, fall_damage)
 
 
+## Invisible wall at the world border (phase 10c, user spec): a unit hurled
+## past the map edge does NOT sail off into nothing — it smacks into the wall
+## in mid-air and is thrown back with part of its speed. Only the axis that
+## actually hit is reflected, so a body flying into a corner ricochets off both
+## walls in turn. Purely a throw rule: walking units never leave the map,
+## because everything outside is unwalkable for the pathfinder anyway.
+func _bounce_off_world_edge() -> void:
+	if terrain_data == null:
+		return
+	var high: float = float(terrain_data.size) * TerrainData.CELL_SIZE \
+		- WORLD_EDGE_MARGIN
+	var low: float = WORLD_EDGE_MARGIN
+	if position.x < low and _throw_velocity.x < 0.0:
+		position.x = low
+		_throw_velocity.x = -_throw_velocity.x * WORLD_BOUNCE_RESTITUTION
+	elif position.x > high and _throw_velocity.x > 0.0:
+		position.x = high
+		_throw_velocity.x = -_throw_velocity.x * WORLD_BOUNCE_RESTITUTION
+	if position.z < low and _throw_velocity.z < 0.0:
+		position.z = low
+		_throw_velocity.z = -_throw_velocity.z * WORLD_BOUNCE_RESTITUTION
+	elif position.z > high and _throw_velocity.z > 0.0:
+		position.z = high
+		_throw_velocity.z = -_throw_velocity.z * WORLD_BOUNCE_RESTITUTION
+
+
 ## Vertical speed whose ballistic apex lands exactly on the throw ceiling,
 ## measured from where the unit is right now (0 at or above the ceiling).
 func _launch_speed_budget() -> float:
@@ -1921,6 +1951,7 @@ func _tick_thrown(delta: float) -> void:
 	var prev_y: float = position.y
 	_throw_velocity.y -= THROW_GRAVITY * delta
 	position += _throw_velocity * delta
+	_bounce_off_world_edge()
 	_sync_soa_pos()   # THROWN never snaps to ground — mirror here
 	var flat: Vector3 = Vector3(_throw_velocity.x, 0.0, _throw_velocity.z)
 	if flat.length_squared() > 0.000001:

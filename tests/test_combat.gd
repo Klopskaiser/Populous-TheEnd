@@ -827,6 +827,94 @@ func test_firewarrior_fireball_keeps_base_speed_on_the_ground() -> void:
 	_free_world(w)
 
 
+## The airborne damage bonus applies to HURLED units, not only to airship deck
+## crew — Unit.is_airborne() is `THROWN or rides_airborne()`. This had no guard
+## at all until the lift made the combo reliable (user question).
+func test_firewarrior_fireball_bonus_hits_hurled_targets() -> void:
+	var w: Dictionary = _make_world()
+	var shooter: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(26, 30))
+	var ground: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
+	var flying: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 34))
+	for victim in [ground, flying]:
+		victim.max_health = 100000
+		victim.health = 100000
+	flying.throw_airborne(Vector3.UP * 5.0)
+	check(flying.is_airborne(), "the second victim is in the air")
+
+	var plain: int = _fireball_damage(w, shooter, ground)
+	var lifted: int = _fireball_damage(w, shooter, flying)
+	check(plain == Unit.FIREBALL_DAMAGE,
+		"a walking target takes the plain %d" % Unit.FIREBALL_DAMAGE)
+	check(lifted > plain, "a hurled one takes more (%d vs %d)" % [lifted, plain])
+	check(lifted == int(roundf(float(Unit.FIREBALL_DAMAGE)
+		* Balance.FIREWARRIOR_AIRBORNE_MULT)),
+		"...exactly the balance bonus")
+	# Phase 10c: a +20 % bonus, no longer double.
+	check(Balance.FIREWARRIOR_AIRBORNE_MULT < 1.5,
+		"the bonus is a surcharge, not a doubling")
+	_free_world(w)
+
+
+## Flies one ball at `victim` and returns the damage it dealt.
+func _fireball_damage(w: Dictionary, shooter: Unit, victim: Unit) -> int:
+	var before: int = victim.health
+	var ball: Fireball = Fireball.new()
+	ball.setup(shooter, victim, shooter.position + Vector3(0.0, 1.1, 0.0))
+	var ticks: int = 0
+	while not ball.done and ticks < 400:
+		ball.tick(TICK)
+		if victim.state == Unit.State.THROWN:
+			victim.tick(TICK)   # keep it airborne while the ball closes in
+		ticks += 1
+	ball.free()
+	return before - victim.health
+
+
+# --- Phase 10c: invisible wall at the world border ---------------------------------
+
+## A unit hurled at the map edge must not sail off into nothing: it hits an
+## invisible wall in mid-air and is thrown back with part of its speed.
+func test_thrown_unit_bounces_off_the_world_edge() -> void:
+	var w: Dictionary = _make_world()
+	var edge: float = float(w.td.size) * TerrainData.CELL_SIZE 		- Balance.WORLD_EDGE_MARGIN
+	var victim: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(edge - 2.0, 30))
+	victim.max_health = 100000
+	victim.health = 100000
+	victim.throw_airborne(Vector3(1, 0, 0) * 12.0 + Vector3.UP * 7.0)
+	var hit_wall: bool = false
+	for i in range(120):
+		if victim.state != Unit.State.THROWN:
+			break
+		victim.tick(TICK)
+		check(victim.position.x <= edge + 0.001,
+			"never past the wall (x=%.2f)" % victim.position.x)
+		if not hit_wall and victim._throw_velocity.x < 0.0:
+			hit_wall = true
+			check(absf(victim._throw_velocity.x) < 12.0,
+				"the bounce is damped, not a mirror")
+	check(hit_wall, "it did bounce back off the wall")
+	_free_world(w)
+
+
+## Into a corner: both axes reflect, so the body ricochets back into the field.
+func test_thrown_unit_bounces_out_of_a_world_corner() -> void:
+	var w: Dictionary = _make_world()
+	var low: float = Balance.WORLD_EDGE_MARGIN
+	var victim: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(low + 2.0, low + 2.0))
+	victim.max_health = 100000
+	victim.health = 100000
+	victim.throw_airborne(Vector3(-10.0, 7.0, -10.0))
+	for i in range(120):
+		if victim.state != Unit.State.THROWN:
+			break
+		victim.tick(TICK)
+		check(victim.position.x >= low - 0.001 and victim.position.z >= low - 0.001,
+			"stays inside both walls (%.2f, %.2f)" % [victim.position.x, victim.position.z])
+	check(victim._throw_velocity.x >= 0.0 and victim._throw_velocity.z >= 0.0,
+		"both axes were turned back into the field")
+	_free_world(w)
+
+
 ## Deck passengers ride the airship; nothing throws them off it.
 func test_apply_lift_ignores_deck_passengers() -> void:
 	var w: Dictionary = _make_world()

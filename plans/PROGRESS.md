@@ -7284,3 +7284,47 @@ beide Ursachen sofort gezeigt.
 **Verifikation:** Ladecheck sauber, Suite **3204/3204 grün**.
 **Offen:** Sichtprüfung von Vulkan (Lücken weg, keine Rotation) und
 Erdbebenteppich im Spiel.
+
+### Nachtrag 10c (6) — Wurfhöhe 8 m, Luftbonus +20 %, Weltgrenze (2026-08-03)
+
+Auslöser war eine Nutzerfrage: gilt der Feuerkrieger-Luftbonus auch für
+**hochgeschleuderte** Ziele? Antwort: ja, vollständig — `Unit.is_airborne()` ist
+`state == THROWN or rides_airborne()`, geschleuderte Einheiten zählen also genau
+wie Zeppelin-Deckcrew. Nahkämpfer werden über `enemy.is_airborne() and not
+_is_ranged()` ausgefiltert, Fernkämpfer nicht. Der Verdoppler hatte **keinen
+einzigen Test** — er war vor dem Lift praktisch kaum erreichbar.
+
+**Geändert (Nutzervorgabe):**
+
+1. `LIFT_MAX_HEIGHT` **6 → 8 m**.
+2. `FIREWARRIOR_AIRBORNE_MULT` **2 (int) → 1,2 (float)** — statt doppelt nur noch
+   **+20 %**. Der Aufruf rundet: `int(roundf(dmg * MULT))`, also 9 → 11.
+   Begründung: mit Lift, Höhendeckel und der Ball-Beschleunigung ist
+   „hochwerfen und abschießen" eine zuverlässige Kombo geworden; der Verdoppler
+   war zu stark. Der Bestandstest in `test_airship.gd` hing am Literal 18 und
+   leitet den Wert jetzt aus `Balance` ab.
+3. **Weltgrenze als unsichtbare Mauer** (`Unit._bounce_off_world_edge`, gerufen
+   direkt nach der Wurfintegration): eine geschleuderte Einheit verlässt die
+   Karte nicht mehr, sondern prallt **in der Luft** dagegen und wird mit
+   `WORLD_BOUNCE_RESTITUTION` (0,45) zurückgeworfen. Die Mauer steht
+   `WORLD_EDGE_MARGIN` (1 m) **innerhalb** des Randes, damit niemand auf der
+   Kante landet. Reflektiert wird nur die Achse, die tatsächlich getroffen hat —
+   in einer Ecke ricochettiert der Körper also an beiden Wänden. Laufende
+   Einheiten brauchen die Regel nicht: außerhalb der Karte ist nichts begehbar.
+   Die Kartengröße ist variabel (`terrain_data.size`), der Rand wird daraus
+   berechnet und gilt damit auch für die 256er-Karten.
+
+**Neue Tests:**
+- `test_firewarrior_fireball_bonus_hits_hurled_targets` — vergleicht denselben
+  Ball gegen ein laufendes und ein geschleudertes Ziel, prüft den Bonus exakt
+  gegen `Balance` und dass er ein Zuschlag und keine Verdopplung ist.
+- `test_thrown_unit_bounces_off_the_world_edge` — die Einheit kommt nie über die
+  Mauer und der Rückprall ist gedämpft.
+- `test_thrown_unit_bounces_out_of_a_world_corner` — beide Achsen werden
+  zurück ins Feld gespiegelt.
+
+**`CLAUDE.md` §6 ergänzt** um einen Abschnitt „Wurfregeln" (Höhendeckel,
+Seitwärtsübertrag, Weltgrenzen-Mauer, Eigenschaften fliegender Ziele) — das sind
+jetzt allgemeine Spielregeln, keine Zauber-Interna mehr.
+
+**Verifikation:** Ladecheck sauber, Suite **3226/3226 grün**.

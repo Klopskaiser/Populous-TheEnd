@@ -387,7 +387,11 @@ func test_airborne_rules_for_deck_crew() -> void:
 	# Preachers cannot convert it.
 	check(not passenger.begin_conversion(null, 5.0),
 		"airship passengers cannot be pacified")
-	# Firewarrior fireballs deal DOUBLE damage against it.
+	# Firewarrior fireballs deal BONUS damage against it (phase 10c: +20 %,
+	# down from double — the value lives in Balance, so derive it here).
+	var bonus_dmg: int = int(roundf(float(Unit.FIREBALL_DAMAGE)
+		* Balance.FIREWARRIOR_AIRBORNE_MULT))
+	check(bonus_dmg > Unit.FIREBALL_DAMAGE, "the airborne bonus is a surcharge")
 	var fw: Unit = w.unit_manager.spawn_unit(
 		FIREWARRIOR_SCENE, 0, w.nav.cell_to_world(Vector2i(64, 60)))
 	w.commands.order_attack([fw] as Array[Unit], passenger)
@@ -396,8 +400,8 @@ func test_airborne_rules_for_deck_crew() -> void:
 			and passenger.state != Unit.State.DEAD and ticks < MAX_TICKS:
 		_tick_world(w)
 		ticks += 1
-	check(passenger.health <= passenger.max_health - 18,
-		"a fireball hit deals double damage (18) against deck crew")
+	check(passenger.health <= passenger.max_health - bonus_dmg,
+		"a fireball hit deals the airborne bonus (%d) against deck crew" % bonus_dmg)
 	_free_world(w)
 
 

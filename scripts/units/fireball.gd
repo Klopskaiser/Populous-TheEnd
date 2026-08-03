@@ -156,11 +156,13 @@ func _impact() -> void:
 	if not _target_alive() or position.distance_to(
 			target.position + Vector3(0.0, TARGET_HEIGHT, 0.0)) > HIT_RANGE * 2.0:
 		return
-	# Targets in the air (airship deck crew, whirled units) take DOUBLE damage
-	# — fire feeds on the wind (user spec).
+	# Targets in the air (airship deck crew AND whirled-up units) take a damage
+	# bonus — fire feeds on the wind. Phase 10c trimmed it from double to +20 %:
+	# with the lift, "hurl it up and shoot it" became a reliable combo, and the
+	# accelerating chase (AIR_ACCEL) made sure the balls connect.
 	var dmg: int = Unit.FIREBALL_DAMAGE
 	if target.is_airborne():
-		dmg *= Balance.FIREWARRIOR_AIRBORNE_MULT
+		dmg = int(roundf(float(dmg) * Balance.FIREWARRIOR_AIRBORNE_MULT))
 	target.take_damage(dmg, shooter)
 	# Impact sound via the Events bus (absent in headless tests).
 	if is_inside_tree():

@@ -197,8 +197,11 @@ const AIRSHIP_CRASH_DAMAGE: int = 30
 const AIRSHIP_DRIFT_SPEED: float = 0.5
 ## Maximaler Abstand zum Absetzpunkt beim "Absetzen an..."-Befehl.
 const AIRSHIP_UNLOAD_RANGE: float = 2.0
-## Feuerkrieger-Schadensfaktor gegen Ziele in der Luft (Deck-Crew, Geschleuderte).
-const FIREWARRIOR_AIRBORNE_MULT: int = 2
+## Feuerkrieger-Schadensfaktor gegen Ziele in der Luft (Deck-Crew UND
+## hochgeschleuderte Einheiten — `Unit.is_airborne()`). Seit Phase 10c nur noch
+## **+20 %** statt doppelt: mit dem Lift ist die Kombo „hochwerfen und
+## abschießen" zuverlässig geworden, der Verdoppler war damit zu stark.
+const FIREWARRIOR_AIRBORNE_MULT: float = 1.2
 
 # =============================================================================
 # NAHKAMPF ALLGEMEIN (alle Einheiten)
@@ -306,10 +309,16 @@ const LIFT_AIRBORNE_PUSH_FACTOR: float = 0.5
 ## sie stapeln sich Feuerball-Kombos zu Würfen aus dem Bild heraus. Es wird
 ## nur der AUFSTIEG gekappt — wer weiter oben startet (vom Zeppelindeck
 ## geschleudert), fällt von dort, statt nach unten versetzt zu werden.
-const LIFT_MAX_HEIGHT: float = 6.0
+const LIFT_MAX_HEIGHT: float = 8.0
 ## Was vom Hochschub nicht mehr unter den Deckel passt, wird stattdessen mit
 ## diesem Faktor auf den SEITLICHEN Schub gelegt (1,0 = eins zu eins).
 const LIFT_SIDEWAYS_TRANSFER: float = 1.0
+## Unsichtbare Mauer an der Weltgrenze: so weit INNERHALB des Kartenrandes
+## steht sie, damit eine geschleuderte Einheit nicht auf der Kante landet.
+const WORLD_EDGE_MARGIN: float = 1.0
+## Rückprall-Anteil der Geschwindigkeit beim Anprall (0 = klebt, 1 = perfekt
+## elastisch). Bewusst klein: ein "leichter Bounce" zurück ins Spielfeld.
+const WORLD_BOUNCE_RESTITUTION: float = 0.45
 
 # =============================================================================
 # BRAND / LAVA (Einheiten)

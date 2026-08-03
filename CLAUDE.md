@@ -157,6 +157,22 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
 (Wurf-Parabel → Rollen bis zum Ausrollen), Gebäudezerstörung in Stufen (§5),
 Laufzeit-Terrainverformung (Erdbeben/Vulkan/Ebene/Absinken).
 
+**Wurfregeln (gelten für JEDEN Wurf, nicht nur Zauber):**
+- **Flughöhen-Deckel** `Balance.LIFT_MAX_HEIGHT` (8 m über dem Boden darunter).
+  Nur der Aufstieg wird gekappt — wer höher startet (vom Zeppelindeck
+  geschleudert), fällt von dort. Was vom Hochschub nicht mehr unter den Deckel
+  passt, wirkt stattdessen **seitlich**.
+- **Weltgrenze = unsichtbare Mauer.** Eine geschleuderte Einheit verlässt die
+  Karte nicht, sondern prallt **in der Luft** dagegen und wird mit einem Teil
+  ihrer Geschwindigkeit zurückgeworfen (`WORLD_BOUNCE_RESTITUTION`); in einer
+  Ecke werden beide Achsen gespiegelt. Laufende Einheiten sind davon nicht
+  betroffen — außerhalb der Karte ist ohnehin nichts begehbar.
+- **Fliegende Ziele:** Nahkampf und Bekehrung kommen nicht an sie heran, Lava
+  ignoriert sie, und Feuerkrieger-Feuerbälle machen **+20 % Schaden**
+  (`FIREWARRIOR_AIRBORNE_MULT`) und **beschleunigen** bei der Verfolgung.
+  Ein tödlicher Treffer in der Luft tötet nicht sofort: die Einheit fällt als
+  Ragdoll zu Boden und stirbt bei der Landung.
+
 **Skirmish-Karten (Phase 7i):** Auswahl im Skirmish-Setup — **Insel** (Standard,
 128), **Seenland** (256, See mittig, Start in den Ecken), **Bergpass** (256, Gebirge
 mit 3 Pässen), **Plateau** (128, erhöhte Start-Plateaus mit Rampe). Terrain-Kantenlänge
