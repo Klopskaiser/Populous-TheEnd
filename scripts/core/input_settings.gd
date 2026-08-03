@@ -13,7 +13,7 @@ class_name InputSettings extends RefCounted
 ##   actions would have no effect and only fake a choice.
 ## - ui_cancel (Esc): context-sensitive cancel/pause wiring — remapping it
 ##   risks states the player cannot leave.
-## - stress_test / time_scale_toggle (F1/F2): debug tools, not game functions.
+## - stress_test / time_scale_toggle (F9/F10): debug tools, not game functions.
 
 const FILE_PATH: String = "user://settings.cfg"
 const SECTION: String = "input"
@@ -33,6 +33,7 @@ const ACTIONS: Array[Array] = [
 	[&"toggle_ranges", "Reichweiten anzeigen", "Befehle"],
 	[&"build_hut", "Hütte bauen", "Bauen"],
 	[&"rotate_building", "Gebäude drehen", "Bauen"],
+	[&"demolish_building", "Gebäude abreißen", "Bauen"],
 	[&"select_all_huts", "Alle Hütten wählen", "Gebäude-Auswahl"],
 	[&"select_all_warrior_camps", "Alle Kasernen wählen", "Gebäude-Auswahl"],
 	[&"select_all_temples", "Alle Tempel wählen", "Gebäude-Auswahl"],

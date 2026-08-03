@@ -363,3 +363,51 @@ func test_selected_braves_filters_dead_and_foreign() -> void:
 	foreign.free()
 	warrior.free()
 	sel.free()
+
+
+# --- Controls menu completeness -----------------------------------------------
+
+## Guard (10d follow-up): the "Steuerung" page is generated from
+## InputSettings.ACTIONS, so a new key action that nobody adds there is invisible
+## AND unrebindable — that is exactly how `demolish_building` slipped through.
+## Rule: every KEY action in the InputMap must be listed, except Godot's own
+## ui_* actions and the debug tools. Mouse-only actions have no key event and are
+## skipped automatically (they are deliberately not rebindable).
+func test_every_key_action_is_in_the_controls_menu() -> void:
+	var listed: Dictionary = {}
+	for entry in InputSettings.ACTIONS:
+		listed[entry[0]] = true
+
+	var missing: Array[String] = []
+	for action in InputMap.get_actions():
+		var name: String = String(action)
+		if name.begins_with("ui_"):
+			continue                      # Godot built-ins (Esc & co.)
+		if action in InputSettings._BLOCKED_ACTIONS:
+			continue                      # debug tools, on purpose
+		var has_key: bool = false
+		for event in InputMap.action_get_events(action):
+			if event is InputEventKey:
+				has_key = true
+				break
+		if not has_key:
+			continue                      # mouse-only action, not rebindable
+		if not listed.has(action):
+			missing.append(name)
+	check(missing.is_empty(),
+		"every key action appears in the controls menu (fehlen: %s)" % str(missing))
+
+
+## Every listed action must actually exist and carry a label + category, so the
+## menu can never render an empty row or rebind into the void.
+func test_controls_menu_has_no_dead_entries() -> void:
+	var dead: Array[String] = []
+	var unlabelled: Array[String] = []
+	for entry in InputSettings.ACTIONS:
+		var action: StringName = entry[0]
+		if not InputMap.has_action(action):
+			dead.append(String(action))
+		if String(entry[1]).is_empty() or String(entry[2]).is_empty():
+			unlabelled.append(String(action))
+	check(dead.is_empty(), "no listed action is missing from the InputMap (%s)" % str(dead))
+	check(unlabelled.is_empty(), "every listed action has label + category (%s)" % str(unlabelled))

@@ -7503,3 +7503,39 @@ vollständig umgesetzt.
   Abriss-Anzeige wurde damit ebenfalls abgenommen — **kein Text-Overlay nötig**.
 
 **Phase 10d ist damit abgeschlossen.**
+
+### Nachtrag 10d (1) — Abriss in der Steuerungsseite + Vollständigkeits-Wächter (2026-08-04)
+
+Nutzerbefund: `Entf` fehlte auf der Menüseite „Steuerung". Ursache ist strukturell —
+die Seite (`main_menu.gd:234 _build_controls_page`) wird vollständig aus
+`InputSettings.ACTIONS` generiert; eine neue Input-Action, die dort nicht
+eingetragen wird, ist im Menü **unsichtbar und nicht belegbar**.
+
+- `InputSettings.ACTIONS` um `[&"demolish_building", "Gebäude abreißen", "Bauen"]`
+  ergänzt (hinter „Gebäude drehen").
+- **Systematischer Abgleich** aller Actions aus `project.godot` gegen die Liste:
+  es fehlte **nur** diese eine. Nicht gelistet sind sonst ausschließlich die
+  Mausaktionen (`select`, `command`, `add_waypoint`, `camera_zoom_in/out`) —
+  bewusst, weil der SelectionManager rohe `MOUSE_BUTTON_*`-Indizes liest und ein
+  Umbelegen nur eine Wahlmöglichkeit vortäuschen würde (im Docstring dokumentiert).
+- **Stale-Kommentar korrigiert:** der Docstring nannte die Debug-Tools
+  `stress_test`/`time_scale_toggle` als „F1/F2" — tatsächlich sind es **F9/F10**
+  (physical keycodes 4194340/4194341).
+
+**Wächter** (`tests/test_ui_logic.gd`, 3 neue Zusicherungen):
+`test_every_key_action_is_in_the_controls_menu` läuft über `InputMap.get_actions()`
+und verlangt für **jede** Action mit `InputEventKey` einen Eintrag in
+`ACTIONS` — ausgenommen Godots `ui_*` und die `_BLOCKED_ACTIONS`; Maus-Actions
+fallen automatisch heraus, weil sie kein Tastenereignis haben. Dazu
+`test_controls_menu_has_no_dead_entries` (jeder gelistete Eintrag existiert im
+InputMap und hat Label + Kategorie). **Negativprobe durchgeführt:** Eintrag
+testweise entfernt → Test schlägt mit `fehlen: ["demolish_building"]` fehl.
+
+**Verifikation:** Suite **3276/3276 grün**, Ladecheck sauber.
+
+**Offen (Nutzerentscheidung):** Die Mausbedienung (Rechtsklick = bewegen,
+Shift+Rechtsklick = Wegpunkt, Doppelklick = alle Einheiten des Typs, Rechtsklick
+auf eigenes Gebäude = Rally/Kontextbefehl, Box-Select) steht **nirgends im Spiel**.
+Ein reiner Info-Abschnitt „Maus" auf der Steuerungsseite (nicht belegbar) wäre die
+naheliegende Ergänzung — bisher nicht gebaut, weil das eine UI-Erweiterung über
+den gemeldeten Fehler hinaus ist.
