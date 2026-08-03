@@ -182,6 +182,8 @@ const STEEP_ROLL_CHANCE_PER_SEC: float = Balance.STEEP_ROLL_CHANCE_PER_SEC
 # --- Throw & panic (phase 6) ---------------------------------------------------------
 ## Gravity of scripted throw arcs (slightly snappy for gameplay feel).
 const THROW_GRAVITY: float = 18.0
+## Ceiling of every throw arc, in metres above the ground below (phase 10c).
+const LIFT_MAX_HEIGHT: float = Balance.LIFT_MAX_HEIGHT
 ## Friction (m/s^2) that bleeds off a landing throw's roll speed on flat
 ## ground — thrown units tumble on and quickly come to a stop.
 const ROLL_FRICTION: float = 6.0
@@ -689,6 +691,10 @@ var _drown_target: Vector3 = Vector3.ZERO
 var knockback_accum: float = 0.0
 ## Pending displacement, played out at KNOCKBACK_SPEED in _tick_knockback.
 var _knockback_remaining: Vector3 = Vector3.ZERO
+## Took its lethal hit while flying or tumbling (phase 10c): the death is
+## deferred to the landing, but the unit is out of the simulation already —
+## no orders, no fight, no target slot, just the ragdoll. See _enter_ragdoll.
+var doomed: bool = false
 
 # --- Conversion state (preacher, phase 5c) ---------------------------------------
 ## Enemy preacher currently pacifying this unit (untyped: may be freed).
@@ -808,11 +814,12 @@ func _is_ranged() -> bool:
 
 ## False for units that can never be attacked directly (the siege engine:
 ## attackers hit its crew instead), that are currently a protected reserve
-## (tower crew, phase 7h — safe from fireballs/melee/conversion until ejected)
-## or that left the live world into a building (in_world = false).
+## (tower crew, phase 7h — safe from fireballs/melee/conversion until ejected),
+## that left the live world into a building (in_world = false) or that are
+## already dead in the air and only playing out their ragdoll (phase 10c).
 ## Filtered in every enemy scan/order.
 func is_targetable() -> bool:
-	return in_world and not garrison_housed
+	return in_world and not garrison_housed and not doomed
 
 
 ## Drawn via the central sprite MultiMesh (UnitRenderer). The siege engine
@@ -956,6 +963,13 @@ func tick(delta: float) -> void:
 	# tick — a mass battle carries hundreds of them (phase 8 perf).
 	if state == State.DEAD:
 		_tick_dead(delta)
+		return
+	# Ragdoll (phase 10c): a body that already took its lethal hit in mid-air
+	# only finishes its arc and tumble. Regeneration, burning and knockback
+	# cannot change its fate, so they are skipped just like for a corpse.
+	if doomed:
+		_tick_state(delta)
+		_apply_animation(false)
 		return
 	_tick_knockback(delta)
 	_tick_regen(delta)
@@ -1347,7 +1361,11 @@ func take_damage(amount: int, attacker = null) -> void:
 		# bursts an airship then sends a shockwave over the just-hurled deck crew
 		# must not delete them at altitude; they die once they roll out below.
 		if state == State.ROLL or state == State.THROWN:
-			return   # deferred: _end_roll / the landing roll finishes it
+			# Deferred: _end_roll / the landing roll finishes it. The unit is a
+			# goner though, so it drops out of the simulation NOW and only
+			# plays its ragdoll out (phase 10c, see _enter_ragdoll).
+			_enter_ragdoll()
+			return
 		# Deck passengers (airship): a lethal hit while riding at altitude is
 		# converted into a fall — they leave the deck, tumble off and die at the
 		# END of the roll (user spec), never standing dead at 12 m. The landing
@@ -1377,6 +1395,35 @@ func take_damage(amount: int, attacker = null) -> void:
 		if health <= threshold and health_before > threshold:
 			_play_sfx(&"unit_injured", 300)
 	_maybe_retaliate(attacker)
+
+
+## Lethal damage while tumbling through the air (or rolling): the death itself
+## stays deferred to the landing — a body must never wink out at altitude — but
+## everything the world still TRACKED about this unit is released right here.
+## From now on it is pure ragdoll: it flies its arc, tumbles out and becomes a
+## corpse, and in between it holds no orders, no fight, no target slot.
+##
+## This is a real saving in a mass battle: a doomed body used to keep a combat
+## group bound (its attackers idled on a dead man for seconds), stayed in every
+## enemy scan, and paid for regeneration, burn and knockback ticks it could
+## never benefit from.
+func _enter_ragdoll() -> void:
+	if doomed:
+		return
+	doomed = true
+	leave_crew()
+	_end_attack()
+	_clear_building_target()
+	_dissolve_own_group()   # attackers retarget NOW, not when the body lands
+	selected = false
+	hop_visual = false
+	waypoint_queue.clear()
+	_clear_path()
+	converting_preacher = null
+	conversion_progress = 0.0
+	_stumble_resume = -1
+	_burn_time = 0.0        # nothing left to burn down
+	_sync_soa_flags()       # no longer a valid target for anyone
 
 
 func _die() -> void:
@@ -1818,7 +1865,24 @@ func apply_lift(dir: Vector3, horizontal: float, vertical: float,
 	if state == State.THROWN:
 		h *= Balance.LIFT_AIRBORNE_PUSH_FACTOR
 		v += Balance.LIFT_AIRBORNE_BONUS
+		# The vertical part STACKS (throw_airborne adds it on top). Without a
+		# budget a fireball combo builds up absurd speed — five hits in half a
+		# second reached 34 m/s. Only as much is granted as still fits under
+		# the ceiling from here; the clamp in _tick_thrown is the backstop.
+		v = minf(v, maxf(_launch_speed_budget() - _throw_velocity.y, 0.0))
 	throw_airborne(flat * h + Vector3.UP * v, fall_damage)
+
+
+## Vertical speed whose ballistic apex lands exactly on the throw ceiling,
+## measured from where the unit is right now (0 at or above the ceiling).
+func _launch_speed_budget() -> float:
+	var head_room: float = LIFT_MAX_HEIGHT
+	if terrain_data != null:
+		head_room = terrain_data.get_height(position.x, position.z) \
+			+ LIFT_MAX_HEIGHT - position.y
+	if head_room <= 0.0:
+		return 0.0
+	return sqrt(2.0 * THROW_GRAVITY * head_room)
 
 
 func _tick_thrown(delta: float) -> void:
@@ -1835,6 +1899,7 @@ func _tick_thrown(delta: float) -> void:
 		if is_instance_valid(throw_carrier):
 			return   # the carrier moves us
 		throw_carrier = null   # carrier vanished mid-air: fall from here
+	var prev_y: float = position.y
 	_throw_velocity.y -= THROW_GRAVITY * delta
 	position += _throw_velocity * delta
 	_sync_soa_pos()   # THROWN never snaps to ground — mirror here
@@ -1844,6 +1909,17 @@ func _tick_thrown(delta: float) -> void:
 	var ground: float = 0.0
 	if terrain_data != null:
 		ground = terrain_data.get_height(position.x, position.z)
+	# Ceiling (phase 10c): stacked lifts must not fling anyone out of the
+	# picture. A unit that was UNDER the ceiling is held at it; one that was
+	# already ABOVE it (hurled off an airship deck) is never snapped down — it
+	# just stops climbing and falls from up there.
+	var ceiling: float = ground + LIFT_MAX_HEIGHT
+	if position.y > ceiling:
+		if prev_y <= ceiling:
+			position.y = ceiling
+			_sync_soa_pos()
+		if _throw_velocity.y > 0.0:
+			_throw_velocity.y = 0.0
 	# Over the sea the arc ends AT the surface, not on the seabed — otherwise
 	# the figure would flash down to the sea floor for one frame before drown()
 	# lifts it back up. _land_from_throw still gets the true ground height, so

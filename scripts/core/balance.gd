@@ -290,8 +290,13 @@ const FW_FIREBALL_LIFT_CHANCE_ROLLING: float = 0.10
 const FW_FIREBALL_LIFT_PUSH: float = 1.2
 const FW_FIREBALL_LIFT_UP: float = 3.0
 ## Treffer auf bereits fliegende Ziele: der Lift wird IMMER verstärkt.
-const LIFT_AIRBORNE_BONUS: float = 4.0
+const LIFT_AIRBORNE_BONUS: float = 2.0
 const LIFT_AIRBORNE_PUSH_FACTOR: float = 0.5
+## Obergrenze der Flughöhe (m über dem Boden darunter) für JEDEN Wurf. Ohne
+## sie stapeln sich Feuerball-Kombos zu Würfen aus dem Bild heraus. Es wird
+## nur der AUFSTIEG gekappt — wer weiter oben startet (vom Zeppelindeck
+## geschleudert), fällt von dort, statt nach unten versetzt zu werden.
+const LIFT_MAX_HEIGHT: float = 6.0
 
 # =============================================================================
 # BRAND / LAVA (Einheiten)

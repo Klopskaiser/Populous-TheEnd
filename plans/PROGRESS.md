@@ -7008,3 +7008,68 @@ Krater brennt, Flanke nicht mehr).
 **Offen:** manuelle Prüfung durch den Nutzer (Optik der roten, zähen Lava;
 Erdbebenkante; Feuerball-/Blitz-Schleudern; FPS im Massenkampf) und die
 Balance-Entscheidung zu Erkenntnis 3.
+
+### Nachtrag 10c — Lift gedeckelt, Ragdoll, Perf-Korrektur (2026-08-03)
+
+Aus dem ersten Nutzertest von 10c: „Der Lift funktioniert, ist aber zu extrem."
+
+**Gebaut:**
+
+1. **Flughöhen-Deckel** `Balance.LIFT_MAX_HEIGHT = 6.0` (m über dem Boden
+   darunter). Zwei Stufen, weil eine allein nicht reicht:
+   - `Unit._launch_speed_budget()` begrenzt beim **Abwurf** die vertikale
+     Geschwindigkeit auf genau die, deren Wurfparabel am Deckel gipfelt. Ohne
+     das schaukelte sich eine Feuerball-Kombo auf **34 m/s** hoch (gemessen),
+     weil `throw_airborne` die Geschwindigkeit stapelt.
+   - `_tick_thrown` kappt zusätzlich die **Position** am Deckel — aber nur,
+     wenn die Einheit im selben Schritt von unten kam. Wer höher **startet**
+     (vom Zeppelindeck geschleudert), wird nie nach unten versetzt, sondern
+     hört nur auf zu steigen.
+2. **`LIFT_AIRBORNE_BONUS` 4,0 → 2,0** — der Nach-oben-Schub pro Feuerball,
+   der ein bereits fliegendes Ziel trifft, ist halbiert.
+3. **Ragdoll für „in der Luft schon tot"** (`Unit.doomed` + `_enter_ragdoll()`).
+   Der Tod bleibt bis zur Landung aufgeschoben (ein Körper darf nicht in 10 m
+   Höhe verschwinden), aber alles, was die Welt über die Einheit noch
+   nachhielt, wird **sofort** freigegeben: Kampfgruppe (die Angreifer suchen
+   im nächsten Tick ein neues Ziel statt drei Sekunden auf einen Toten
+   einzuschlagen), Befehle, Pfad, Bekehrung, Selektion, Brand. Über
+   `is_targetable()` fällt sie aus **allen** Scans (SoA-`FLAG_TARGETABLE`).
+   Ihr `tick()` überspringt Rückstoß, Regeneration und Brand — sie absolviert
+   nur noch Flugbogen, Purzeln und wird dann Leiche.
+   *Nebeneffekt:* die Regeneration konnte einen Ragdoll mit negativer
+   Gesundheit theoretisch zurückholen — das ist jetzt strukturell ausgeschlossen
+   (`test_ragdoll_never_regenerates_back_to_life`).
+
+**Perf — Korrektur der 10c-Zahlen.** Die im Hauptabschnitt genannten „+65 %"
+waren **überwiegend Messartefakt**: Baseline und neuer Stand wurden zu
+verschiedenen Zeiten auf unterschiedlich ausgelasteter Maschine gemessen
+(Schwankung bis ~40 % zwischen bit-identischen Läufen). Ein **verschränktes**
+A/B (alter Stand als Git-Worktree auf `57852f9`, mit derselben
+Benchmark-Datei, abwechselnd ALT/NEU im selben Zeitfenster) ergibt:
+
+| | ALT (Vor-10c) | NEU (10c + Nachtrag) |
+|---|---|---|
+| Gesamt-Ø (3 verschränkte Läufe) | 27,9 / 28,2 / 27,4 ms | 24,3 / 29,7 / 35,1 ms |
+| Pfade (deterministisch) | **65 237** | **57 722** |
+| Pfadzeit | ~2,4 s | ~2,1 s |
+| lebend @Fenster | 2531 | 2586 |
+
+Die **deterministischen** Zähler sind die belastbare Aussage: der Nachtrag hat
+die Pfad-Explosion des ersten 10c-Standes (99 952 Pfade / 10,8 s) beseitigt und
+liegt jetzt **unter** dem Vor-10c-Stand. Ursache ist die Kombination aus
+halbiertem Luftbonus und Höhendeckel (kürzere Flüge, weniger Streuung, weniger
+Neuplanung) plus dem Ragdoll. Die Laufzeit selbst ist im Rauschen betrachtet auf
+**Parität**. Damit ist die Balance-Frage zu `FW_FIREBALL_LIFT_CHANCE` aus dem
+Hauptabschnitt **erledigt** — der Wert 0,04 bleibt.
+
+**Lehre fürs nächste Mal:** Perf-A/B **nur verschränkt** und über einen
+Worktree des Vergleichsstandes messen, nie nacheinander in getrennten
+Zeitfenstern. Deterministische Zähler (Pfadzahl, Überlebende) sind
+aussagekräftiger als Millisekunden.
+
+**Verifikation:** Suite **3150/3150 grün**, Ladecheck sauber. Neu:
+`test_throw_height_is_capped`, `test_height_cap_never_teleports_a_high_body_down`,
+`test_airborne_death_enters_ragdoll`, `test_ragdoll_lands_and_becomes_a_corpse`,
+`test_ragdoll_never_regenerates_back_to_life`,
+`test_ragdoll_drops_out_of_enemy_scans`.
+**Offen:** manuelle Prüfung der Wurfhöhe und des Ragdoll-Verhaltens im Spiel.

@@ -825,6 +825,126 @@ func test_apply_lift_normalises_the_direction() -> void:
 	_free_world(w)
 
 
+## Stacked lifts must not fling anyone out of the picture: however many
+## fireballs pile onto a flying unit, the arc tops out LIFT_MAX_HEIGHT above
+## the ground below.
+func test_throw_height_is_capped() -> void:
+	var w: Dictionary = _make_world()
+	var victim: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
+	victim.max_health = 100000
+	victim.health = 100000
+	var ground: float = w.td.get_height(victim.position.x, victim.position.z)
+	var peak: float = 0.0
+	for i in range(200):
+		# A fireball lands on it every few ticks — the worst case the spells
+		# can produce (Unit.apply_lift stacks the velocity every time).
+		if i % 4 == 0:
+			victim.apply_lift(Vector3(1, 0, 0), Balance.FIREBALL_PUSH_SPEED,
+				Balance.FIREBALL_LIFT_SPEED)
+		victim.tick(0.02)
+		peak = maxf(peak, victim.position.y - ground)
+	check(peak > 1.0, "the lifts do get it off the ground (peak %.2f m)" % peak)
+	# One frame of overshoot is allowed: the ceiling zeroes the RISE, it never
+	# teleports the body back down.
+	check(peak <= Balance.LIFT_MAX_HEIGHT + 0.5,
+		"never higher than %.1f m (peak %.2f m)" % [Balance.LIFT_MAX_HEIGHT, peak])
+	_free_world(w)
+
+
+## A body hurled off an airship deck STARTS above the ceiling — the cap must
+## not snap it down to 6 m, it just falls from where it is.
+func test_height_cap_never_teleports_a_high_body_down() -> void:
+	var w: Dictionary = _make_world()
+	var victim: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
+	victim.position.y = 20.0
+	victim.throw_airborne(Vector3(1.0, 0.0, 0.0) * 2.0 + Vector3.UP * 3.0)
+	victim.tick(0.05)
+	check(victim.position.y > 15.0,
+		"still up at %.1f m, not snapped to the ceiling" % victim.position.y)
+	var y0: float = victim.position.y
+	victim.tick(0.05)
+	check(victim.position.y < y0, "and it falls from there")
+	_free_world(w)
+
+
+# --- Phase 10c: ragdoll — dead in mid-air stops costing anything -------------------
+
+## The lethal hit still lands mid-air but the death stays deferred to the
+## ground (a body must never wink out at altitude). Everything the world
+## tracked about the unit is released immediately, though.
+func test_airborne_death_enters_ragdoll() -> void:
+	var w: Dictionary = _make_world()
+	var attacker: Unit = _spawn(w, WARRIOR_SCENE, 0, Vector2(30, 30))
+	var victim: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30.8, 30))
+	attacker.order_attack(victim)
+	_run(w, [attacker], func() -> bool: return victim.health < victim.max_health)
+	check(victim.combat_group != null, "the fight is bound before the throw")
+	victim.order_move(Vector3(50, 0, 50))
+	victim.throw_airborne(Vector3(1, 0, 0) * 4.0 + Vector3.UP * 5.0)
+	check(victim.state == Unit.State.THROWN, "the victim is in the air")
+	victim.take_damage(10000, attacker)
+	check(victim.state == Unit.State.THROWN,
+		"no death at altitude — it is still flying")
+	check(victim.doomed, "...but it is flagged as a goner")
+	check(not victim.is_targetable(), "a ragdoll is no target for anyone")
+	check(victim.combat_group == null, "its fight dissolved right away")
+	check(victim.waypoint_queue.is_empty(), "its orders are gone")
+	check(attacker.combat_group == null,
+		"the attacker is free to retarget immediately, not in three seconds")
+	_free_world(w)
+
+
+## The ragdoll still plays out: it flies, lands, tumbles and ends as a corpse.
+func test_ragdoll_lands_and_becomes_a_corpse() -> void:
+	var w: Dictionary = _make_world()
+	var victim: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
+	victim.throw_airborne(Vector3(1, 0, 0) * 4.0 + Vector3.UP * 5.0)
+	victim.take_damage(10000)
+	var start_x: float = victim.position.x
+	var ticks: int = 0
+	while victim.state != Unit.State.DEAD and ticks < 600:
+		victim.tick(TICK)
+		ticks += 1
+	check(victim.state == Unit.State.DEAD, "the ragdoll ends as a corpse")
+	check(victim.position.x > start_x, "and it travelled while it fell")
+	check(victim.health == 0, "health is clamped to 0 on death")
+	_free_world(w)
+
+
+## Regeneration must never bring a ragdoll back: the doomed unit skips the
+## regen tick entirely, so its negative health cannot creep back above zero.
+func test_ragdoll_never_regenerates_back_to_life() -> void:
+	var w: Dictionary = _make_world()
+	var victim: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
+	victim.throw_airborne(Vector3.UP * 5.0)
+	victim.take_damage(10000)
+	for i in range(50):
+		if victim.state == Unit.State.DEAD:
+			break
+		victim.tick(TICK)
+	check(victim.health <= 0, "a ragdoll never heals")
+	_free_world(w)
+
+
+## The scan masks read FLAG_TARGETABLE out of the SoA arrays — a ragdoll has
+## to disappear from them, or the living keep chasing a dead man.
+func test_ragdoll_drops_out_of_enemy_scans() -> void:
+	var w: Dictionary = _make_world()
+	var hunter: Unit = _spawn(w, WARRIOR_SCENE, 0, Vector2(30, 30))
+	var victim: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(32, 30))
+	w.unit_manager.tick(TICK)
+	check(not w.unit_manager.get_enemy_candidates(
+		hunter.position, 8.0, hunter.tribe_id, 8).is_empty(),
+		"the living brave is a candidate")
+	victim.throw_airborne(Vector3.UP * 5.0)
+	victim.take_damage(10000)
+	w.unit_manager.tick(TICK)
+	check(w.unit_manager.get_enemy_candidates(
+		hunter.position, 8.0, hunter.tribe_id, 8).is_empty(),
+		"the ragdoll is gone from the enemy scan")
+	_free_world(w)
+
+
 # --- Preacher conversion (phase 5c) ------------------------------------------------
 
 ## A preacher near an enemy brave makes it sit, the progress runs, and on
