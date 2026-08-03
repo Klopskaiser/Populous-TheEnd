@@ -7,7 +7,7 @@ class_name FireballBolt extends Node3D
 ## a small arc (THROWN -> momentum roll). Ticked by the UnitManager's
 ## projectile list; `done` marks it for removal.
 
-const SPEED: float = 16.0
+const SPEED: float = Balance.FIREBALL_BOLT_SPEED
 const ARC_HEIGHT: float = 2.5      # extra apex height of the flight arc
 const DIRECT_DAMAGE: int = Balance.FIREBALL_DIRECT_DAMAGE
 const SPLASH_DAMAGE: int = Balance.FIREBALL_SPLASH_DAMAGE

@@ -113,6 +113,15 @@ func order_cast(spell: Spell, target: Vector3, ctx: SpellContext,
 	return true
 
 
+## Once the incantation itself has STARTED (in range, wind-up running), only
+## death or a tornado may break it (phase 10c, user spec): shoves, knock-overs,
+## fireball throws and lifts bounce off her. She still takes the damage — she
+## is immune to the interrupt, not to the hit. While she is still WALKING into
+## range (`_casting` false) she is an ordinary unit.
+func cast_locked() -> bool:
+	return state == State.CAST and _casting
+
+
 ## Movement orders cancel a pending cast (the charge is kept).
 func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = false) -> void:
 	if state == State.CAST:

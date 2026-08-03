@@ -7073,3 +7073,67 @@ aussagekräftiger als Millisekunden.
 `test_ragdoll_never_regenerates_back_to_life`,
 `test_ragdoll_drops_out_of_enemy_scans`.
 **Offen:** manuelle Prüfung der Wurfhöhe und des Ragdoll-Verhaltens im Spiel.
+
+### Nachtrag 10c (2) — Lava-Clipping, Erdbebenteppich, Cast-Immunität (2026-08-03)
+
+Aus dem zweiten Nutzertest.
+
+1. **Lava-Clipping am Vulkan behoben.** Ursache: das Lavanetz spannt **Sehnen**
+   durch eine gekrümmte Oberfläche (tangential zwischen den 20 Sektoren,
+   radial zwischen den Ringen). Bei 8 cm Bodenabstand stach der Kegel durch.
+   Fix an beiden Lavaformen:
+   - Bodenabstand ist jetzt **hangabhängig**: `SURFACE_LIFT` +
+     `SURFACE_LIFT_PER_SLOPE * Gefälle`, gedeckelt auf `SURFACE_LIFT_MAX`
+     (0,5 m). `LavaSurge` nimmt das Gefälle aus **derselben** Gradientenprobe,
+     die schon den Fluss steuert (`_sector_slope`) — kostet keine zusätzlichen
+     Höhensamples; `LavaFlow` legt es je Segment ab.
+   - `LavaSurge.RING_STEP` 1,0 → **0,6** (feinere radiale Auflösung).
+   - `LavaFlow` sampelt die Höhe jetzt **pro Vertex** statt beide Bandkanten
+     auf die Segmenthöhe zu setzen.
+2. **Erdbeben: ein Lavateppich statt drei Rinnsale.** `LavaFlow` bekam
+   `half_width` und `head_bulge`; die Breite wird **quer zur Fließrichtung**
+   gemessen, also genau entlang der Bruchkante. Das Erdbeben spawnt nur noch
+   **einen** Flow mit `EARTHQUAKE_LAVA_HALF_WIDTH = 5,0` (10 m Spannweite über
+   den 14 m Bruchdurchmesser) und flachem Kopfwulst. Mitgezogen:
+   - Kontaktprüfung ist von „Kreis um jedes Segment" auf eine **Box** je
+     Segment umgestellt (`CONTACT_RADIUS` längs, `half_width` quer) — für das
+     schmale Rinnsal bis auf die Ecken identisch zum alten Kreis.
+   - Das Netz bekommt **Längsbahnen** (`LANE_WIDTH = 1 m`), sonst spannt ein
+     10 m breiter Teppich eine einzige Sehne über alle Bodenwellen.
+   - `EARTHQUAKE_LAVA_STREAMS` ist entfallen.
+3. **Schamanin ist während des Wirkens interrupt-immun** (Nutzervorgabe): neue
+   Basismethode `Unit.cast_locked()` (Standard `false`), von `Shaman`
+   überschrieben auf `state == CAST and _casting` — also erst, wenn die
+   Zauberformel wirklich läuft, nicht schon beim Hinlaufen. `displace()`,
+   `start_roll()` und `throw_airborne()` prallen daran ab. **Schaden trifft
+   sie weiterhin.** Die einzige Ausnahme neben dem Tod ist der **Wirbelsturm**:
+   `throw_airborne` hat dafür einen `force`-Parameter, den nur
+   `TornadoVortex._pick_up_units` setzt. (`CrewedVehicle` musste seine
+   Override-Signatur nachziehen.)
+4. **Feuerkrieger am Höhendeckel schiebt zur Seite.** Was vom Hochschub nicht
+   mehr unter den Deckel passt, wird in `apply_lift` mit
+   `Balance.LIFT_SIDEWAYS_TRANSFER` (1,0 = eins zu eins) auf den
+   **waagerechten** Schub gelegt, statt verworfen zu werden. Gilt für alle
+   Lift-Quellen, nicht nur den Feuerkrieger.
+5. **Zwei Tuning-Werte nach `Balance` gezogen** (waren lokale Konstanten):
+   `FIREBALL_BOLT_SPEED` (16,0 — Schamanen-Feuerball und jeder Feuerregen-Bolt)
+   und `FIREWARRIOR_FIREBALL_SPEED` (12,0).
+
+**Stellschrauben für Wurf/Feuerball — alle in `Balance`:**
+
+| Wert | Bedeutung |
+|---|---|
+| `FIREBALL_LIFT_SPEED` | Hochschub eines Feuerballtreffers am **Boden** |
+| `LIFT_AIRBORNE_BONUS` | zusätzlicher Hochschub, wenn das Ziel **schon fliegt** |
+| `LIFT_MAX_HEIGHT` | Deckel der Flughöhe über Grund (gilt für **jeden** Wurf) |
+| `LIFT_SIDEWAYS_TRANSFER` | wie viel vom nicht nutzbaren Hochschub seitlich wirkt |
+| `FIREBALL_PUSH_SPEED` / `LIFT_AIRBORNE_PUSH_FACTOR` | waagerechter Schub, am Boden bzw. in der Luft |
+| `FIREBALL_BOLT_SPEED` / `FIREWARRIOR_FIREBALL_SPEED` | Fluggeschwindigkeit der Geschosse |
+
+**Verifikation:** Ladecheck sauber, Suite **3157/3157 grün** in 35 s. Neu:
+`test_casting_shaman_is_interrupt_immune`,
+`test_shaman_walking_into_range_is_not_immune`,
+`test_lift_at_the_ceiling_pushes_sideways`; `test_earthquake_*`-Tests auf den
+Teppich umgestellt.
+**Offen:** Sichtprüfung des Clippings und des Erdbebenteppichs im Spiel — die
+Netzgeometrie ist headless nicht prüfbar.

@@ -177,7 +177,8 @@ func take_damage(_amount: int, _attacker = null) -> void:
 
 
 ## Too heavy for tornado throws, fireball knockback and rolls.
-func throw_airborne(_velocity: Vector3, _fall_damage: int = 0) -> void:
+func throw_airborne(_velocity: Vector3, _fall_damage: int = 0,
+		_force: bool = false) -> void:
 	pass
 
 

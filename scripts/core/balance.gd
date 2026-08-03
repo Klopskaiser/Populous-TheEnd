@@ -37,6 +37,8 @@ const FIREWARRIOR_FIRE_COOLDOWN: float = 1.5
 const FIREWARRIOR_AGGRO_RADIUS: float = 13.0
 ## Schaden eines Feuerballs an Einheiten.
 const FIREWARRIOR_FIREBALL_DAMAGE: int = 9
+## Fluggeschwindigkeit (m/s) des Feuerkrieger-Feuerballs (zielsuchend).
+const FIREWARRIOR_FIREBALL_SPEED: float = 12.0
 ## Schaden eines Feuerballs an Gebäuden.
 const FIREWARRIOR_BUILDING_DAMAGE: int = 5
 
@@ -297,6 +299,9 @@ const LIFT_AIRBORNE_PUSH_FACTOR: float = 0.5
 ## nur der AUFSTIEG gekappt — wer weiter oben startet (vom Zeppelindeck
 ## geschleudert), fällt von dort, statt nach unten versetzt zu werden.
 const LIFT_MAX_HEIGHT: float = 6.0
+## Was vom Hochschub nicht mehr unter den Deckel passt, wird stattdessen mit
+## diesem Faktor auf den SEITLICHEN Schub gelegt (1,0 = eins zu eins).
+const LIFT_SIDEWAYS_TRANSFER: float = 1.0
 
 # =============================================================================
 # BRAND / LAVA (Einheiten)
@@ -385,6 +390,8 @@ const FIREBALL_DIRECT_DAMAGE: int = 60     # 1 x Brave-Leben
 const FIREBALL_SPLASH_DAMAGE: int = 30     # 1/2 Brave-Leben
 const FIREBALL_DIRECT_RADIUS: float = 0.8
 const FIREBALL_SPLASH_RADIUS: float = 2.5
+## Fluggeschwindigkeit (m/s) des Schamanen-Feuerballs bzw. jedes Feuerregen-Bolts.
+const FIREBALL_BOLT_SPEED: float = 16.0
 
 # --- Blitz ---
 const LIGHTNING_UNIT_DAMAGE: int = 240     # 4 x Brave-Leben
@@ -422,7 +429,10 @@ const EARTHQUAKE_BUILDING_STAGES: int = 2
 const EARTHQUAKE_UNIT_DAMAGE: int = 15     # 1/4 Brave-Leben
 
 # --- Erdbeben-Lava (Phase 10c) ---
-const EARTHQUAKE_LAVA_STREAMS: int = 3
+## EIN Lavateppich statt mehrerer Rinnsale: halbe Breite quer zur Fließrichtung,
+## also entlang der Bruchkante (Nutzervorgabe — er soll auf ganzer Länge der
+## Kante hinunterlaufen).
+const EARTHQUAKE_LAVA_HALF_WIDTH: float = 5.0
 ## Versatz von der Bruchlinie auf die HEBUNGSSEITE (obere Kante).
 const EARTHQUAKE_LAVA_EDGE_OFFSET: float = 0.8
 ## Wartezeit, bis der TerrainMorph die Kante geöffnet hat.

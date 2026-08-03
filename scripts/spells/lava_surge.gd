@@ -24,7 +24,15 @@ const CHECK_INTERVAL: float = Balance.LAVA_CONTACT_INTERVAL
 const VISUAL_INTERVAL: float = Balance.LAVA_VISUAL_INTERVAL
 ## Independent fronts around the crater; also the mesh's angular resolution.
 const LAVA_SECTORS: int = 20
-const RING_STEP: float = 1.0
+const RING_STEP: float = 0.6
+## How far the sheet floats above the ground it covers. A flat ring mesh cuts
+## CHORDS through a curved surface, so on the volcano's cone the rock poked
+## back through the lava (user report). The error grows with the slope —
+## roughly slope x the chord sagitta — hence the slope term on top of the flat
+## base offset. Capped so the sheet never visibly hovers on a cliff face.
+const SURFACE_LIFT: float = 0.10
+const SURFACE_LIFT_PER_SLOPE: float = 0.25
+const SURFACE_LIFT_MAX: float = 0.5
 
 var done: bool = false
 var unit_manager: UnitManager = null
@@ -49,14 +57,20 @@ var _mesh: MeshInstance3D = null
 ## the sector stops glowing MOLTEN_TIME after it came to a halt.
 var _sector_radius: PackedFloat32Array = PackedFloat32Array()
 var _sector_front_time: PackedFloat32Array = PackedFloat32Array()
+## Terrain steepness at each sector's front, taken from the same gradient
+## probe that drives the flow — the mesh reuses it to lift itself clear of
+## the rock (see SURFACE_LIFT_PER_SLOPE), so it costs no extra samples.
+var _sector_slope: PackedFloat32Array = PackedFloat32Array()
 var _front_radius: float = INNER_RADIUS   # largest sector radius (hull circle)
 
 
 func _init() -> void:
 	_sector_radius.resize(LAVA_SECTORS)
 	_sector_front_time.resize(LAVA_SECTORS)
+	_sector_slope.resize(LAVA_SECTORS)
 	_sector_radius.fill(INNER_RADIUS)
 	_sector_front_time.fill(0.0)
+	_sector_slope.fill(0.0)
 
 
 func setup(at: Vector3, p_unit_manager: UnitManager,
@@ -113,8 +127,10 @@ func _advance_sectors(step: float) -> void:
 			var dir: Vector3 = _sector_dir(i)
 			var slope: float = 0.0
 			if terrain_data != null:
-				slope = LavaCommon.downhill(terrain_data,
-					position.x + dir.x * r, position.z + dir.z * r).dot(dir)
+				var grad: Vector3 = LavaCommon.downhill(terrain_data,
+					position.x + dir.x * r, position.z + dir.z * r)
+				slope = grad.dot(dir)
+				_sector_slope[i] = grad.length()   # reused by the mesh lift
 			var advance: float = LavaCommon.flow_speed(slope) * step
 			if advance > 0.0:
 				r = minf(r + advance, max_radius)
@@ -223,9 +239,9 @@ func _rebuild_mesh() -> void:
 			var o1: float = minf(r1 * bulge, front)
 			var o0: float = minf(r0, front)
 			im.surface_set_color(_band_color(i, o1))
-			im.surface_add_vertex(_sheet_point(dir, o1))
+			im.surface_add_vertex(_sheet_point(dir, o1, i))
 			im.surface_set_color(_band_color(i, o0))
-			im.surface_add_vertex(_sheet_point(dir, o0))
+			im.surface_add_vertex(_sheet_point(dir, o0, i))
 		im.surface_end()
 
 
@@ -235,11 +251,16 @@ func _sink_offset() -> float:
 	return t * SINK_DEPTH
 
 
-func _sheet_point(dir: Vector3, r: float) -> Vector3:
+## One mesh vertex, lifted clear of the rock it covers: the triangle strips
+## are chords through a curved surface, so on a steep cone the terrain pokes
+## back through a sheet that merely sits 8 cm up (user report, volcano).
+func _sheet_point(dir: Vector3, r: float, sector: int) -> Vector3:
 	var wx: float = position.x + dir.x * r
 	var wz: float = position.z + dir.z * r
+	var lift: float = minf(SURFACE_LIFT
+		+ SURFACE_LIFT_PER_SLOPE * _sector_slope[sector], SURFACE_LIFT_MAX)
 	return Vector3(wx - position.x,
-		terrain_data.get_height(wx, wz) + 0.08 - _sink_offset() - position.y,
+		terrain_data.get_height(wx, wz) + lift - _sink_offset() - position.y,
 		wz - position.z)
 
 

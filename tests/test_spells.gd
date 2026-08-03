@@ -811,8 +811,7 @@ func test_earthquake_spawns_short_fault_lava() -> void:
 			check(not (p as LavaFlow).scorch, "fault lava leaves no scorch")
 			check((p as LavaFlow).lifetime == Balance.LAVA_LIFETIME,
 				"fault lava lives exactly one central lava lifetime")
-	check(flows == Balance.EARTHQUAKE_LAVA_STREAMS,
-		"three lava streams spill over the fresh scarp")
+	check(flows == 1, "ONE broad carpet spills over the fresh scarp")
 	var ticks: int = 0
 	while not w.unit_manager.projectiles.is_empty() and ticks < 100:
 		w.unit_manager.tick(0.1)
@@ -947,7 +946,13 @@ func test_earthquake_lava_starts_on_upper_edge() -> void:
 			"the vent sits on the rise side of the fault")
 		check(Vector2(f._dir.x, f._dir.z).dot(normal) < -0.9,
 			"...and runs down the edge toward the dropped side")
-	check(flows == Balance.EARTHQUAKE_LAVA_STREAMS, "one flow per vent")
+		# The carpet's width is measured ACROSS its flow direction, so it lies
+		# along the fault line — that is what makes it cover the whole edge.
+		check(f.half_width == Balance.EARTHQUAKE_LAVA_HALF_WIDTH,
+			"it spans the scarp instead of trickling down one spot")
+		check(f.half_width * 2.0 >= Balance.EARTHQUAKE_RADIUS,
+			"...over most of the quake's diameter")
+	check(flows == 1, "exactly one carpet, not a bundle of rivulets")
 	_free_world(w)
 
 
@@ -1075,6 +1080,71 @@ func test_lightning_neighbours_are_lifted_not_just_rolled() -> void:
 		"a bystander at 2.2 m is hurled (the old 1.5 m radius missed it)")
 	check(victim.state == Unit.State.DEAD, "the victim itself dies")
 	_free_world_with_buildings(w)
+
+
+## Once the incantation is running, only death or a tornado breaks it. Damage
+## still lands — she is immune to the INTERRUPT, not to the hit.
+func test_casting_shaman_is_interrupt_immune() -> void:
+	var w: Dictionary = _make_world()
+	w.tribe0.set_spells(Spell.create_default_set())
+	var shaman: Shaman = w.unit_manager.spawn_unit(SHAMAN_SCENE, 0, Vector3(40, 5, 40))
+	var spell: Spell = w.tribe0.get_spell(&"fireball")
+	check(spell != null, "the tribe knows the fireball")
+	spell.charges = 1
+	check(shaman.order_cast(spell, Vector3(41, 5, 40), w.ctx), "cast ordered")
+	shaman.tick(0.05)   # in range: the wind-up starts
+	check(shaman.cast_locked(), "the incantation is running")
+	var hp0: int = shaman.health
+	shaman.apply_knockback(Vector3(1, 0, 0))
+	check(shaman._knockback_remaining == Vector3.ZERO, "no shove moves her")
+	shaman.start_roll(Vector3(1, 0, 0))
+	check(shaman.state == Unit.State.CAST, "no knock-over topples her")
+	shaman.apply_lift(Vector3(1, 0, 0), 9.0, 9.0)
+	check(shaman.state == Unit.State.CAST, "no fireball lifts her")
+	shaman.take_damage(30)
+	check(shaman.health == hp0 - 30, "...but the damage lands all the same")
+	check(shaman.state == Unit.State.CAST, "and she keeps casting")
+	# The tornado is the one exception (besides death).
+	shaman.throw_airborne(Vector3.UP * 6.0, 0, true)
+	check(shaman.state == Unit.State.THROWN, "a tornado DOES rip her out of it")
+	_free_world(w)
+
+
+## While she is still WALKING into range the wind-up has not begun — there she
+## is an ordinary unit and can be knocked about.
+func test_shaman_walking_into_range_is_not_immune() -> void:
+	var w: Dictionary = _make_world()
+	w.tribe0.set_spells(Spell.create_default_set())
+	var shaman: Shaman = w.unit_manager.spawn_unit(SHAMAN_SCENE, 0, Vector3(20, 5, 20))
+	var spell: Spell = w.tribe0.get_spell(&"fireball")
+	check(spell != null, "the tribe knows the fireball")
+	spell.charges = 1
+	check(shaman.order_cast(spell, Vector3(60, 5, 60), w.ctx), "cast ordered far away")
+	check(not shaman.cast_locked(), "no incantation while she is still walking")
+	shaman.apply_lift(Vector3(1, 0, 0), 5.0, 6.0)
+	check(shaman.state == Unit.State.THROWN, "she can be hurled on the way there")
+	_free_world(w)
+
+
+## At the ceiling the push that no longer fits upward is redirected SIDEWAYS
+## instead of being discarded (user spec).
+func test_lift_at_the_ceiling_pushes_sideways() -> void:
+	var w: Dictionary = _make_world()
+	var victim: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, Vector3(40, 5, 40))
+	victim.max_health = 100000
+	victim.health = 100000
+	# Park it right under the ceiling: no vertical budget left at all.
+	victim.throw_airborne(Vector3.UP * 0.1)
+	victim.position.y = w.td.get_height(40.0, 40.0) + Balance.LIFT_MAX_HEIGHT
+	var h0: float = Vector2(victim._throw_velocity.x, victim._throw_velocity.z).length()
+	var vy0: float = victim._throw_velocity.y
+	victim.apply_lift(Vector3(1, 0, 0), Balance.FIREBALL_PUSH_SPEED,
+		Balance.FIREBALL_LIFT_SPEED)
+	var h1: float = Vector2(victim._throw_velocity.x, victim._throw_velocity.z).length()
+	check(victim._throw_velocity.y <= vy0 + 0.001, "nothing was added upward")
+	check(h1 > h0 + Balance.FIREBALL_PUSH_SPEED * Balance.LIFT_AIRBORNE_PUSH_FACTOR,
+		"the leftover went into the sideways push (%.2f -> %.2f m/s)" % [h0, h1])
+	_free_world(w)
 
 
 func test_lightning_lift_stronger_than_fireball() -> void:

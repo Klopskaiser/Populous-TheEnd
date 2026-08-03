@@ -849,6 +849,14 @@ func rides_airborne() -> bool:
 	return is_crew_seated() and siege_engine.crew_rides_on_deck()
 
 
+## True while the unit is locked into an action that ONLY death or a tornado
+## may break — the shaman's spell wind-up (phase 10c, user spec). Damage still
+## lands normally; what is blocked are the interrupts: shoves, knock-overs,
+## throws and lifts. The tornado passes `force` to get through anyway.
+func cast_locked() -> bool:
+	return false
+
+
 ## In the air right now: thrown/whirled through the sky or riding an airship
 ## deck. Melee can never engage such targets, preachers cannot convert them,
 ## and firewarrior fireballs deal double damage against them.
@@ -1524,6 +1532,8 @@ func corpse_sink_depth() -> float:
 func displace(dir: Vector3, dist: float) -> void:
 	if state == State.DEAD or rides_airborne():
 		return   # deck passengers are carried by the airship, never shoved
+	if cast_locked():
+		return   # a shaman mid-incantation cannot be shoved off her spot
 	var flat: Vector3 = Vector3(dir.x, 0.0, dir.z)
 	if flat.length_squared() < 0.000001:
 		return
@@ -1644,6 +1654,8 @@ func start_roll(dir: Vector3, duration: float = MINI_ROLL_DURATION,
 		initial_speed: float = 0.0, stumble: bool = false) -> void:
 	if state == State.DEAD or rides_airborne():
 		return   # nobody tumbles across an airship deck
+	if cast_locked():
+		return   # the incantation holds: nothing but death or a tornado breaks it
 	var flat: Vector3 = Vector3(dir.x, 0.0, dir.z)
 	if flat.length_squared() > 0.000001:
 		roll_dir = flat.normalized()
@@ -1819,9 +1831,14 @@ func _resume_after_stumble(prev: int) -> void:
 ## On landing the unit takes `fall_damage`, then tumbles on with the throw's
 ## horizontal speed (momentum roll) until it decays; landing or rolling into
 ## water kills instantly. Another throw mid-flight stacks onto the velocity.
-func throw_airborne(velocity: Vector3, fall_damage: int = 0) -> void:
+## `force` is the tornado's key: it is the ONE thing besides death that may
+## rip a casting shaman out of her incantation (phase 10c, user spec).
+func throw_airborne(velocity: Vector3, fall_damage: int = 0,
+		force: bool = false) -> void:
 	if state == State.DEAD or rides_airborne():
 		return   # deck passengers stay aboard (the ship's explode() drops them)
+	if cast_locked() and not force:
+		return
 	if state == State.THROWN:
 		_throw_velocity += velocity
 		_throw_fall_damage = maxi(_throw_fall_damage, fall_damage)
@@ -1869,7 +1886,14 @@ func apply_lift(dir: Vector3, horizontal: float, vertical: float,
 		# budget a fireball combo builds up absurd speed — five hits in half a
 		# second reached 34 m/s. Only as much is granted as still fits under
 		# the ceiling from here; the clamp in _tick_thrown is the backstop.
-		v = minf(v, maxf(_launch_speed_budget() - _throw_velocity.y, 0.0))
+		var budget: float = maxf(_launch_speed_budget() - _throw_velocity.y, 0.0)
+		if v > budget:
+			# Already at the ceiling: the push that no longer fits upward goes
+			# SIDEWAYS instead of being thrown away (user spec, phase 10c) —
+			# a pinned target gets driven across the field, not squeezed
+			# against an invisible lid.
+			h += (v - budget) * Balance.LIFT_SIDEWAYS_TRANSFER
+			v = budget
 	throw_airborne(flat * h + Vector3.UP * v, fall_damage)
 
 

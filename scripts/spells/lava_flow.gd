@@ -9,6 +9,10 @@ class_name LavaFlow extends Node3D
 ## viscously and whose colour ages from a glowing head to black scorch at the
 ## cooled tail (fault lava skips the scorch and fades out instead). Ticked via
 ## the UnitManager projectile list; the ribbon only exists in-game (in-tree).
+##
+## `half_width` scales the same body from a narrow rivulet to a broad CARPET:
+## the earthquake pours one wide sheet over the whole length of its scarp
+## instead of three separate rivulets (user spec).
 
 const SEGMENT_SPACING: float = 0.6
 ## Hard cap on the trail: a long-lived flow must not grow its per-check cost
@@ -24,6 +28,14 @@ const HALF_WIDTH: float = 0.65
 ## instead of popping out of existence.
 const SINK_TIME: float = 1.0
 const SINK_DEPTH: float = 0.8
+## Clearance above the ground, slope-scaled: the ribbon is a chord through a
+## curved surface, so on a scarp the rock pokes through a sheet that merely
+## sits 7 cm up (same fix as LavaSurge.SURFACE_LIFT).
+const SURFACE_LIFT: float = 0.09
+const SURFACE_LIFT_PER_SLOPE: float = 0.25
+const SURFACE_LIFT_MAX: float = 0.5
+## Mesh resolution across a wide body (metres per lane).
+const LANE_WIDTH: float = 1.0
 
 var done: bool = false
 var unit_manager: UnitManager = null
@@ -42,6 +54,12 @@ var scorch: bool = true
 ## to be torn open by the TerrainMorph first). It keeps following the ground
 ## height while it waits, so it rides the rising edge instead of hanging in it.
 var start_delay: float = 0.0
+## Half the width of the body. The default is a rivulet; the earthquake's
+## carpet sets this to half its scarp length and pours down as one sheet.
+var half_width: float = HALF_WIDTH
+## Swelling of the advancing head. A rivulet gets a fat bulb; a broad carpet
+## must not fan out into a mushroom, so its caller dials this down.
+var head_bulge: float = 1.5
 
 var _dir: Vector3 = Vector3(1, 0, 0)
 var _head: Vector3 = Vector3.ZERO
@@ -52,7 +70,9 @@ var _life: float = 0.0
 var _check_timer: float = 0.0
 var _since_check: float = 0.0
 var _visual_timer: float = 0.0
-## Segment entries: {pos: Vector3, age: float, cooled: bool}.
+## Segment entries: {pos: Vector3, age: float, cooled: bool, dir: Vector3,
+## slope: float} — dir spans the body across the flow for the contact test,
+## slope lifts the mesh clear of the rock.
 var _segments: Array[Dictionary] = []
 var _ribbon: MeshInstance3D = null
 
@@ -125,7 +145,8 @@ func _advance(delta: float) -> void:
 	_since_segment += step
 	if _since_segment >= SEGMENT_SPACING:
 		_since_segment = 0.0
-		_segments.append({"pos": _head, "age": 0.0, "cooled": false})
+		_segments.append({"pos": _head, "age": 0.0, "cooled": false,
+			"dir": _dir, "slope": slope})
 		if _segments.size() > MAX_SEGMENTS:
 			_segments.remove_at(0)
 	if _travelled >= flow_range:
@@ -154,11 +175,12 @@ func _ignite_touching_units(step: float) -> void:
 		return
 	var mid: Vector2 = (lo + hi) * 0.5
 	var hull_center: Vector3 = Vector3(mid.x, _head.y, mid.y)
-	var hull_radius: float = lo.distance_to(hi) * 0.5 + CONTACT_RADIUS
+	var reach: float = _contact_half_width()
+	var hull_radius: float = lo.distance_to(hi) * 0.5 + reach
 	for u in unit_manager.get_units_in_radius(hull_center, hull_radius):
 		if u.state == Unit.State.DEAD or u.is_airborne():
 			continue   # airborne units (thrown, airship deck) pass over the lava
-		var touch: Vector3 = _nearest_molten(molten, u.position)
+		var touch: Vector3 = _covering_molten(molten, u.position)
 		if touch.y == INF:
 			continue
 		# This flow is the fire source: a fire ram takes ONE life from the
@@ -173,20 +195,29 @@ func _ignite_touching_units(step: float) -> void:
 	_touch_buildings(molten, hull_center, hull_radius, step)
 
 
+## Reach ACROSS the flow. A rivulet keeps the old circular 0.9 m; a carpet
+## covers its full width, which is the whole point of it.
+func _contact_half_width() -> float:
+	return maxf(half_width, CONTACT_RADIUS)
+
+
 ## Position of the molten segment covering `at`, or a y=INF sentinel when none
-## does (the hull circle is wider than the ribbon).
-func _nearest_molten(molten: Array[Dictionary], at: Vector3) -> Vector3:
-	var best: Vector3 = Vector3(0.0, INF, 0.0)
-	var best_d: float = CONTACT_RADIUS * CONTACT_RADIUS
+## does (the hull circle is wider than the body). Each segment covers a box:
+## CONTACT_RADIUS along the flow, the body's half width across it — for the
+## default rivulet that is the old circle to within a corner.
+func _covering_molten(molten: Array[Dictionary], at: Vector3) -> Vector3:
+	var across_max: float = _contact_half_width()
 	for seg in molten:
 		var p: Vector3 = seg.pos
-		var dx: float = p.x - at.x
-		var dz: float = p.z - at.z
-		var d: float = dx * dx + dz * dz
-		if d <= best_d:
-			best_d = d
-			best = p
-	return best
+		var dx: float = at.x - p.x
+		var dz: float = at.z - p.z
+		var d: Vector3 = seg.dir
+		if absf(dx * d.x + dz * d.z) > CONTACT_RADIUS:
+			continue
+		if absf(dx * -d.z + dz * d.x) > across_max:
+			continue
+		return p
+	return Vector3(0.0, INF, 0.0)
 
 
 ## Buildings touched by any molten segment rack up lava contact time — once per
@@ -203,7 +234,7 @@ func _touch_buildings(molten: Array[Dictionary], hull_center: Vector3,
 		if b.footprint_distance_to(hull_flat) > hull_radius:
 			continue
 		for seg in molten:
-			if b.footprint_distance_to(Vector2(seg.pos.x, seg.pos.z)) <= CONTACT_RADIUS:
+			if b.footprint_distance_to(Vector2(seg.pos.x, seg.pos.z)) <= _contact_half_width():
 				b.add_lava_contact(step)
 				break
 
@@ -221,32 +252,65 @@ func _rebuild_ribbon() -> void:
 	im.clear_surfaces()
 	var points: Array[Dictionary] = _segments.duplicate()
 	if _flowing:
-		points.append({"pos": _head, "age": -0.3, "cooled": false})
-	if points.size() < 2:
+		points.append({"pos": _head, "age": -0.3, "cooled": false,
+			"dir": _dir, "slope": 0.0})
+	var n: int = points.size()
+	if n < 2:
 		return
-	im.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP)
-	for i in range(points.size()):
+	# Per-point frame first: centre, the across-vector, the pulsing half width
+	# and the colour. The lanes below reuse them.
+	var centres: PackedVector3Array = PackedVector3Array()
+	var across: PackedVector3Array = PackedVector3Array()
+	var widths: PackedFloat32Array = PackedFloat32Array()
+	var cols: Array[Color] = []
+	for i in range(n):
 		var p: Vector3 = points[i].pos
-		var next: Vector3 = points[mini(i + 1, points.size() - 1)].pos
+		var next: Vector3 = points[mini(i + 1, n - 1)].pos
 		var prev: Vector3 = points[maxi(i - 1, 0)].pos
 		var along: Vector3 = Vector3(next.x - prev.x, 0.0, next.z - prev.z)
 		if along.length_squared() < 0.000001:
 			along = _dir
 		along = along.normalized()
-		var perp: Vector3 = Vector3(-along.z, 0.0, along.x)
 		# Viscous pulse: the thick body swells and contracts slowly.
 		var wobble: float = 0.85 + 0.15 * sin(_life * 1.8 + float(i) * 1.1)
-		var w: float = HALF_WIDTH * wobble
-		if i == points.size() - 1 and _flowing:
-			w *= 1.5   # bulbous advancing head
-		im.surface_set_color(_point_color(points[i]))
-		var y: float = p.y + 0.07 - _sink_offset()
-		var a: Vector3 = Vector3(p.x, y, p.z) + perp * w - position
-		var b: Vector3 = Vector3(p.x, y, p.z) - perp * w - position
-		im.surface_add_vertex(a)
-		im.surface_set_color(_point_color(points[i]))
-		im.surface_add_vertex(b)
-	im.surface_end()
+		var w: float = half_width * wobble
+		if i == n - 1 and _flowing:
+			w *= head_bulge   # bulbous advancing head
+		centres.append(p)
+		across.append(Vector3(-along.z, 0.0, along.x))
+		widths.append(w)
+		cols.append(_point_color(points[i]))
+	# Lanes ACROSS the body. A rivulet needs only its two edges, but a broad
+	# carpet spanning a whole scarp would cut straight through every bump in
+	# between — so it gets an intermediate lane per metre of width.
+	var lanes: int = maxi(1, int(ceil(half_width * 2.0 / LANE_WIDTH)))
+	for lane in range(lanes):
+		var t0: float = -1.0 + 2.0 * float(lane) / float(lanes)
+		var t1: float = -1.0 + 2.0 * float(lane + 1) / float(lanes)
+		im.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP)
+		for i in range(n):
+			var slope: float = float(points[i].slope)
+			im.surface_set_color(cols[i])
+			im.surface_add_vertex(_body_point(centres[i], across[i],
+				widths[i] * t0, slope))
+			im.surface_set_color(cols[i])
+			im.surface_add_vertex(_body_point(centres[i], across[i],
+				widths[i] * t1, slope))
+		im.surface_end()
+
+
+## One ribbon vertex, `off` metres across the flow and lifted clear of the
+## rock it covers (slope-scaled — same reason as LavaSurge._sheet_point: the
+## mesh is a chord through a curved surface).
+func _body_point(centre: Vector3, across: Vector3, off: float,
+		slope: float) -> Vector3:
+	var wx: float = centre.x + across.x * off
+	var wz: float = centre.z + across.z * off
+	var y: float = centre.y
+	if terrain_data != null:
+		y = terrain_data.get_height(wx, wz)
+	y += minf(SURFACE_LIFT + SURFACE_LIFT_PER_SLOPE * slope, SURFACE_LIFT_MAX)
+	return Vector3(wx, y - _sink_offset(), wz) - position
 
 
 ## Downward offset at the end of life: the stream sinks into the ground.

@@ -10,7 +10,7 @@ class_name Fireball extends Node3D
 ## cap guarantees the ball can never linger (it fizzles without damage).
 ## Shooter/target references are untyped — either may be freed mid-flight.
 
-const SPEED: float = 12.0
+const SPEED: float = Balance.FIREWARRIOR_FIREBALL_SPEED
 const HIT_RANGE: float = 0.5
 ## Aim at chest height rather than the feet.
 const TARGET_HEIGHT: float = 0.8

@@ -193,7 +193,9 @@ func _pick_up_units() -> void:
 	for u in unit_manager.get_units_in_radius(position, radius):
 		if u.state == Unit.State.DEAD or u.state == Unit.State.THROWN:
 			continue
-		u.throw_airborne(Vector3.ZERO, FALL_DAMAGE)
+		# `force`: the twister is the only thing besides death that tears a
+		# casting shaman out of her incantation (phase 10c, user spec).
+		u.throw_airborne(Vector3.ZERO, FALL_DAMAGE, true)
 		if u.state != Unit.State.THROWN:
 			continue   # could not be thrown (e.g. died)
 		u.throw_carrier = self

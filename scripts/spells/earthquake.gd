@@ -18,19 +18,21 @@ const LIFT: float = 0.8            # pile-up at the fault (rise side)
 const DURATION: float = 2.0
 const STAGES: int = Balance.EARTHQUAKE_BUILDING_STAGES
 const UNIT_DAMAGE: int = Balance.EARTHQUAKE_UNIT_DAMAGE
-## Fault lava: short streams that spill over the UPPER edge of the scarp and
-## run down into the trough. They wait for the morph to tear the edge open
-## first (phase 10c — before that they were spawned onto still-flat ground and
-## pooled on the spot).
-const FAULT_LAVA_STREAMS: int = Balance.EARTHQUAKE_LAVA_STREAMS
+## Fault lava: ONE broad carpet that spills over the UPPER edge of the scarp
+## along its whole length and runs down into the trough (user spec — it used
+## to be three separate rivulets). It waits for the morph to tear the edge
+## open first (phase 10c — before that the lava was spawned onto still-flat
+## ground and pooled on the spot).
 const FAULT_LAVA_RANGE: float = Balance.EARTHQUAKE_LAVA_RANGE
 const FAULT_LAVA_LIFETIME: float = Balance.LAVA_LIFETIME
 const FAULT_LAVA_MOLTEN: float = Balance.LAVA_MOLTEN_TIME
 ## Offset from the fault line onto the RISE side (the upper lip).
 const FAULT_LAVA_EDGE_OFFSET: float = Balance.EARTHQUAKE_LAVA_EDGE_OFFSET
 const FAULT_LAVA_DELAY: float = Balance.EARTHQUAKE_LAVA_DELAY
-## Spacing of the vents along the fault line.
-const FAULT_LAVA_SPACING: float = 3.0
+## Half the carpet's span along the fault line.
+const FAULT_LAVA_HALF_WIDTH: float = Balance.EARTHQUAKE_LAVA_HALF_WIDTH
+## A sheet this broad must not fan out into a mushroom at its leading edge.
+const FAULT_LAVA_HEAD_BULGE: float = 1.05
 
 
 func _init() -> void:
@@ -119,28 +121,29 @@ static func upheaval_targets(td: TerrainData, center: Vector2) -> Dictionary:
 		"fault": fault, "normal": normal}
 
 
-## Short-lived lava spilling over the fresh scarp: the vents sit on the RISE
-## side of the fault (the upper lip), point down the edge into the trough and
-## only start running once FAULT_LAVA_DELAY has given the morph time to open
-## the break. `side = (p - center).dot(normal)` in upheaval_targets is negative
-## on the drop side, so +normal is the upper lip and -normal is downhill.
+## One broad lava carpet spilling over the fresh scarp: it starts on the RISE
+## side of the fault (the upper lip), spans the edge over FAULT_LAVA_HALF_WIDTH
+## to either side, runs down into the trough, and only starts moving once
+## FAULT_LAVA_DELAY has given the morph time to open the break.
+## `side = (p - center).dot(normal)` in upheaval_targets is negative on the
+## drop side, so +normal is the upper lip and -normal is downhill — and since
+## the carpet's width is measured across its flow direction, it lies exactly
+## along the fault line.
 func _spawn_fault_lava(target: Vector3, plan: Dictionary, ctx: SpellContext) -> void:
-	var fault: Vector2 = plan.fault
 	var normal: Vector2 = plan.normal
 	var downhill: Vector3 = Vector3(-normal.x, 0.0, -normal.y)   # drop side
-	var first: float = -0.5 * float(FAULT_LAVA_STREAMS - 1) * FAULT_LAVA_SPACING
-	for i in range(FAULT_LAVA_STREAMS):
-		var offset: float = first + float(i) * FAULT_LAVA_SPACING
-		var at: Vector3 = Vector3(
-			target.x + fault.x * offset + normal.x * FAULT_LAVA_EDGE_OFFSET, 0.0,
-			target.z + fault.y * offset + normal.y * FAULT_LAVA_EDGE_OFFSET)
-		at.y = ctx.terrain_data.get_height(at.x, at.z)
-		var flow: LavaFlow = LavaFlow.new()
-		flow.setup(at, downhill, ctx.unit_manager, ctx.terrain_data,
-			FAULT_LAVA_RANGE, FAULT_LAVA_LIFETIME, FAULT_LAVA_MOLTEN, false,
-			ctx.building_manager)
-		flow.start_delay = FAULT_LAVA_DELAY
-		ctx.unit_manager.register_projectile(flow)
+	var at: Vector3 = Vector3(
+		target.x + normal.x * FAULT_LAVA_EDGE_OFFSET, 0.0,
+		target.z + normal.y * FAULT_LAVA_EDGE_OFFSET)
+	at.y = ctx.terrain_data.get_height(at.x, at.z)
+	var flow: LavaFlow = LavaFlow.new()
+	flow.setup(at, downhill, ctx.unit_manager, ctx.terrain_data,
+		FAULT_LAVA_RANGE, FAULT_LAVA_LIFETIME, FAULT_LAVA_MOLTEN, false,
+		ctx.building_manager)
+	flow.start_delay = FAULT_LAVA_DELAY
+	flow.half_width = FAULT_LAVA_HALF_WIDTH
+	flow.head_bulge = FAULT_LAVA_HEAD_BULGE
+	ctx.unit_manager.register_projectile(flow)
 
 
 ## Enemy buildings whose centre lies in the radius take +2 stages.
