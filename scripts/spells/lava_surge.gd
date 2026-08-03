@@ -234,9 +234,14 @@ func _rebuild_mesh() -> void:
 			var i: int = a % LAVA_SECTORS
 			var dir: Vector3 = _sector_dir(i)
 			var front: float = _sector_radius[i]
-			# Viscous, uneven edge; slow (the mass is thick, phase 10c).
-			var bulge: float = 1.0 + 0.06 * sin(float(i) * 1.7 + _life * 1.2)
-			var o1: float = minf(r1 * bulge, front)
+			# NO per-band bulge: it scaled only the OUTER edge of each band, so
+			# whenever the factor fell below 1 a ring-shaped GAP opened between
+			# band k and band k+1 and the rock showed through — and because the
+			# factor was animated, the whole ragged edge appeared to rotate
+			# (both reported by the user). Adjacent bands now share the exact
+			# same radius; the uneven front comes from the per-sector fronts
+			# alone, which is the real terrain-driven raggedness.
+			var o1: float = minf(r1, front)
 			var o0: float = minf(r0, front)
 			im.surface_set_color(_band_color(i, o1))
 			im.surface_add_vertex(_sheet_point(dir, o1, i))

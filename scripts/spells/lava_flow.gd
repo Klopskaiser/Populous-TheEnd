@@ -36,6 +36,12 @@ const SURFACE_LIFT_PER_SLOPE: float = 0.25
 const SURFACE_LIFT_MAX: float = 0.5
 ## Mesh resolution across a wide body (metres per lane).
 const LANE_WIDTH: float = 1.0
+## Hard cap on how fast the head may swing round (rad/s). A viscous mass does
+## not pirouette — and without the cap the head coiled up on itself: past the
+## bottom of a trough the local gradient reverses, it turned back, turned again,
+## and the trail knotted into a blob whose cross-vectors pointed every which way
+## (the earthquake carpet then looked like it lay ACROSS its scarp — user report).
+const MAX_TURN_RATE: float = 1.0
 
 var done: bool = false
 var unit_manager: UnitManager = null
@@ -60,6 +66,11 @@ var half_width: float = HALF_WIDTH
 ## Swelling of the advancing head. A rivulet gets a fat bulb; a broad carpet
 ## must not fan out into a mushroom, so its caller dials this down.
 var head_bulge: float = 1.5
+## How strongly the head is pulled onto the local downhill each step (0 = it
+## keeps the direction it was launched with). A narrow rivulet may wander; a
+## broad carpet must NOT — it has to run straight down the slope it was poured
+## onto, or its whole width turns with it.
+var steer: float = 0.6
 
 var _dir: Vector3 = Vector3(1, 0, 0)
 var _head: Vector3 = Vector3.ZERO
@@ -134,8 +145,12 @@ func _advance(delta: float) -> void:
 	if terrain_data != null:
 		grad = LavaCommon.downhill(terrain_data, _head.x, _head.z)
 	var slope: float = grad.length()
-	if slope >= MIN_SLOPE:
-		_dir = _dir.lerp(grad / slope, 0.6).normalized()
+	if slope >= MIN_SLOPE and steer > 0.0:
+		var want: Vector3 = _dir.lerp(grad / slope, steer).normalized()
+		# Rate-limited turn (see MAX_TURN_RATE): keeps the body from knotting up.
+		var turn: float = clampf(_dir.signed_angle_to(want, Vector3.UP),
+			-MAX_TURN_RATE * delta, MAX_TURN_RATE * delta)
+		_dir = _dir.rotated(Vector3.UP, turn)
 	var speed: float = LavaCommon.flow_speed(grad.dot(_dir))
 	var step: float = speed * delta
 	_head += _dir * step

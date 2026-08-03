@@ -1094,6 +1094,129 @@ func test_lava_flow_single_query_equivalence() -> void:
 	_free_world(w)
 
 
+## Regression (user report): the fault carpet has to run STRAIGHT down the
+## scarp. With gradient steering on, the head turned back at the bottom of the
+## trough, turned again, and knotted up — the trail then had cross-vectors
+## pointing every which way and the 10 m wide sheet looked as if it lay ACROSS
+## its own scarp. Measured on the segment chain: its extent ALONG the fault line
+## must be ~zero, all of its travel goes down the fault normal.
+func test_earthquake_carpet_runs_straight_down_the_scarp() -> void:
+	var w: Dictionary = _make_world()
+	w.unit_manager.spawn_unit(SHAMAN_SCENE, 0, Vector3(30, 0, 30))
+	var target: Vector3 = Vector3(64, 5, 64)
+	var plan: Dictionary = EarthquakeSpell.upheaval_targets(w.td,
+		Vector2(target.x, target.z))
+	var fault: Vector2 = plan.fault
+	var normal: Vector2 = plan.normal
+	var spell: EarthquakeSpell = EarthquakeSpell.new()
+	check(spell.execute(w.tribe0, target, w.ctx), "quake cast succeeds")
+	var flow: LavaFlow = null
+	for p in w.unit_manager.projectiles:
+		if p is LavaFlow:
+			flow = p
+	check(flow != null and flow.steer == 0.0, "the carpet is not steered at all")
+	for i in range(60):
+		w.unit_manager.tick(0.1)
+		if flow.done:
+			break
+	check(flow._segments.size() >= 2, "the carpet laid down a trail")
+	var along_fault: float = 0.0
+	var along_normal: float = 0.0
+	for seg in flow._segments:
+		var rel: Vector2 = Vector2(seg.pos.x - flow.position.x,
+			seg.pos.z - flow.position.z)
+		along_fault = maxf(along_fault, absf(rel.dot(fault)))
+		along_normal = maxf(along_normal, absf(rel.dot(normal)))
+	check(along_fault < 0.15,
+		"the trail does not drift along the fault (%.2f m)" % along_fault)
+	check(along_normal > along_fault * 5.0,
+		"it travels down the normal instead (%.2f m)" % along_normal)
+	_free_world(w)
+
+
+## Turn-rate cap: even a steered rivulet may not spin on the spot.
+func test_lava_flow_turn_rate_is_capped() -> void:
+	var w: Dictionary = _make_world()
+	# A bowl: the gradient points at the centre from every side, so an
+	# unconstrained head would whip around once it overshoots the middle.
+	for vz in range(50, 79):
+		for vx in range(50, 79):
+			var d: float = Vector2(float(vx) - 64.0, float(vz) - 64.0).length()
+			w.td.set_vertex_height(vx, vz, 5.0 + 0.35 * d)
+	var flow: LavaFlow = LavaFlow.new()
+	flow.setup(Vector3(58, 5, 64), Vector3(1, 0, 0), w.unit_manager, w.td, 30.0)
+	w.unit_manager.register_projectile(flow)
+	var prev: Vector3 = flow._dir
+	var worst: float = 0.0
+	for i in range(40):
+		w.unit_manager.tick(0.1)
+		worst = maxf(worst, absf(prev.signed_angle_to(flow._dir, Vector3.UP)))
+		prev = flow._dir
+	check(worst <= LavaFlow.MAX_TURN_RATE * 0.1 + 0.001,
+		"no step turns faster than the cap (worst %.3f rad)" % worst)
+	_free_world(w)
+
+
+## Regression (user report): the volcano sheet showed terrain through ring-shaped
+## GAPS and its ragged front appeared to rotate. Both came from one animated
+## bulge factor that scaled only the OUTER edge of each band — below 1.0 it tore
+## the band pair apart, and the animation swept the tear around. The mesh must
+## therefore be (a) identical for the same sector radii regardless of _life and
+## (b) seamless: every band's outer radius is the next band's inner radius.
+func test_lava_surge_mesh_is_static_and_seamless() -> void:
+	var w: Dictionary = _make_world()
+	# A cone, so the sectors advance and several bands exist.
+	for vz in range(54, 75):
+		for vx in range(54, 75):
+			var d: float = Vector2(float(vx) - 64.0, float(vz) - 64.0).length()
+			w.td.set_vertex_height(vx, vz, 11.0 - 0.7 * d)
+	var surge: LavaSurge = LavaSurge.new()
+	surge.setup(Vector3(64, w.td.get_height(64.0, 64.0), 64), w.unit_manager,
+		w.td, 7.5)
+	surge._mesh = MeshInstance3D.new()
+	surge._mesh.mesh = ImmediateMesh.new()
+	for i in range(30):
+		surge.tick(0.1)
+	var mesh: ImmediateMesh = surge._mesh.mesh
+	check(mesh.get_surface_count() >= 2, "the sheet spans several bands")
+
+	# (b) Seamless: band k's outer radius == band k+1's inner radius. Each
+	# surface starts with [outer(sector 0), inner(sector 0)].
+	var seam_error: float = 0.0
+	var prev_outer: float = -1.0
+	for surf in range(mesh.get_surface_count()):
+		var verts: PackedVector3Array = mesh.surface_get_arrays(surf)[Mesh.ARRAY_VERTEX]
+		if verts.size() < 2:
+			continue
+		var outer: float = Vector2(verts[0].x, verts[0].z).length()
+		var inner: float = Vector2(verts[1].x, verts[1].z).length()
+		if prev_outer >= 0.0:
+			seam_error = maxf(seam_error, absf(inner - prev_outer))
+		prev_outer = outer
+	check(seam_error < 0.001,
+		"no gap between the ring bands (worst seam %.4f m)" % seam_error)
+
+	# (a) Static: same radii, later _life -> byte-identical vertices.
+	var before: PackedVector3Array = mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+	var kept: PackedVector3Array = before.duplicate()
+	surge._life += 1.7
+	surge._rebuild_mesh()
+	var after: PackedVector3Array = mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+	check(after.size() == kept.size(), "same vertex count")
+	# XZ only: the sheet DOES move down at the end of its life (_sink_offset,
+	# 0.675 m at this point) — that is intended. What must not happen is any
+	# horizontal creep, which is what the animated bulge caused.
+	var moved: float = 0.0
+	for i in range(mini(after.size(), kept.size())):
+		moved = maxf(moved, Vector2(after[i].x - kept[i].x,
+			after[i].z - kept[i].z).length())
+	check(moved < 0.001,
+		"the sheet does not creep/rotate sideways (worst %.4f m)" % moved)
+	surge._mesh.free()
+	surge.free()
+	_free_world(w)
+
+
 # --- Phase 10c: knockback & lift --------------------------------------------------------
 
 ## The blast SHOVES further than it burns: a brave just outside the splash

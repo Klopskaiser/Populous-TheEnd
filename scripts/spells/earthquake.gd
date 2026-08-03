@@ -143,6 +143,10 @@ func _spawn_fault_lava(target: Vector3, plan: Dictionary, ctx: SpellContext) -> 
 	flow.start_delay = FAULT_LAVA_DELAY
 	flow.half_width = FAULT_LAVA_HALF_WIDTH
 	flow.head_bulge = FAULT_LAVA_HEAD_BULGE
+	# Dead straight down the scarp: a 10 m wide sheet must not be steered by the
+	# local gradient, or its whole width swings round with the head (it used to
+	# coil up in the trough and end up lying ACROSS the fault — user report).
+	flow.steer = 0.0
 	ctx.unit_manager.register_projectile(flow)
 
 

@@ -7236,3 +7236,51 @@ dem Opferstamm; Förster-Unterhalt-Test auf Einkommensdeckung umgestellt.
 `test_firewarrior_fireball_keeps_base_speed_on_the_ground`,
 `test_spell_cell_lets_the_right_click_through_to_the_cell`.
 **Offen:** erneute Sichtprüfung des Rechtsklick-Toggles im Spiel.
+
+### Nachtrag 10c (5) — Lava-Geometrie: Kringel und Ringlücken (2026-08-03)
+
+Zwei Nutzerreports aus dem Zaubertest, beide mit einem **Diagnoseskript**
+(temporäres `tests/dbg_quake.gd`) objektiv vermessen statt geraten — das hat
+beide Ursachen sofort gezeigt.
+
+1. **Erdbebenlava stand quer zur Bruchkante.** Messung: Kopf hatte 3,63 m
+   zurückgelegt, die Segmentkette spannte aber nur 1,3 m — der Kopf **kringelte
+   sich auf**. Ursache: hinter dem Trogboden dreht der lokale Gradient, die
+   Lenkung (`lerp(dir, downhill, 0.6)`, jeden Schritt) riss den Kopf zurück, dann
+   wieder vor. Bei einem 10 m breiten Teppich dreht sich damit die gesamte
+   Breite mit, weil der Quer-Vektor je Punkt aus der Bahnrichtung stammt →
+   die Fläche lag scheinbar quer auf ihrer eigenen Kante.
+   - `LavaFlow.steer` (neu, Standard 0,6) — Lenkstärke; das Erdbeben setzt
+     **0,0**: der Teppich läuft schnurgerade die Kante hinab.
+   - `LavaFlow.MAX_TURN_RATE` (1,0 rad/s) begrenzt zusätzlich **jede** Drehung
+     des Kopfes; eine zähe Masse pirouettiert nicht.
+   - Nachmessung: Ausdehnung entlang der Bruchkante **0,00 m**, Reise 1,5 m die
+     Kante hinab. Der Teppich pfützt am flachen Trogboden ein (korrekt).
+2. **Vulkan: Terrainlücken in der Lava, Fluss schien zu rotieren.** Beides kam
+   aus **einem** Fehler: der Wulstfaktor `1.0 + 0.06*sin(i*1.7 + _life*1.2)`
+   skalierte nur die **äußere** Kante jedes Ringbandes. Lag er unter 1,0 (die
+   Hälfte der Zeit), klaffte zwischen Band k und Band k+1 ein **Ringspalt** von
+   bis zu 0,45 m — dort schaute der Kegel durch. Und weil der Faktor mit `_life`
+   animiert war, wanderte dieser Spalt um den Kegel: die „Rotation".
+   Fix: Wulst komplett entfernt, benachbarte Bänder teilen exakt denselben
+   Radius. Die unregelmäßige Front entsteht jetzt allein aus den
+   **Sektorfronten**, also aus dem echten Gelände (gemessen: 5,37 / 5,18 / 4,78 /
+   4,94 / 5,41 m auf einem Kegel — reicht als Raggedness).
+   Bestätigt: genau **2** Stöße, jeweils am Krater startend und nach außen/unten
+   laufend.
+
+**Neue Regressionstests** (alle headless, ohne Viewport):
+- `test_earthquake_carpet_runs_straight_down_the_scarp` — Kette darf < 0,15 m
+  entlang der Bruchkante driften und muss > 5× so weit die Normale hinab laufen.
+- `test_lava_flow_turn_rate_is_capped` — Schüssel-Terrain, kein Schritt dreht
+  schneller als `MAX_TURN_RATE`.
+- `test_lava_surge_mesh_is_static_and_seamless` — liest die Vertices via
+  `ImmediateMesh.surface_get_arrays()` zurück und prüft (a) Außenradius Band k
+  == Innenradius Band k+1 (**Lückenfreiheit**) und (b) bei gleichen
+  Sektorradien und späterem `_life` **keine horizontale** Vertexbewegung
+  (**keine Rotation**). Nur XZ, denn das Absinken am Lebensende ist gewollt —
+  der erste Testlauf hat genau das gemessen (0,675 m = `SINK_DEPTH × 0,75`).
+
+**Verifikation:** Ladecheck sauber, Suite **3204/3204 grün**.
+**Offen:** Sichtprüfung von Vulkan (Lücken weg, keine Rotation) und
+Erdbebenteppich im Spiel.
