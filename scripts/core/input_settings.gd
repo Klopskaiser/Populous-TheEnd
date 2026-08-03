@@ -29,6 +29,7 @@ const ACTIONS: Array[Array] = [
 	[&"camera_rotate_left", "Kamera drehen links", "Kamera"],
 	[&"camera_rotate_right", "Kamera drehen rechts", "Kamera"],
 	[&"attack_move_arm", "Angriffsbewegung", "Befehle"],
+	[&"harvest_area_arm", "Holzfäll-Rechteck", "Befehle"],
 	[&"toggle_patrol", "Patrouille an/aus", "Befehle"],
 	[&"toggle_ranges", "Reichweiten anzeigen", "Befehle"],
 	[&"build_hut", "Hütte bauen", "Bauen"],
@@ -54,6 +55,15 @@ const ACTIONS: Array[Array] = [
 ## Non-rebindable actions whose keys are still off-limits for rebinding (their
 ## keycodes are read from the live InputMap, so enum values never drift).
 const _BLOCKED_ACTIONS: Array[StringName] = [&"stress_test", &"time_scale_toggle"]
+
+## Actions bound WITH Shift held (Shift+B = alle Hütten wählen, so plain B stays
+## free for harvest_area_arm). Three consequences, all handled below:
+## - _apply_to_map must re-add the modifier, or rebinding/"Zurücksetzen" would
+##   silently turn Shift+B into a plain B and collide with harvest_area_arm;
+## - action_using_keycode must treat Shift+X and plain X as separate bindings,
+##   or the controls menu reports a phantom conflict between the two;
+## - key_display_name prefixes them, or both menu rows just read "B".
+const _SHIFT_ACTIONS: Array[StringName] = [&"select_all_huts"]
 
 static var _loaded: bool = false
 static var _overrides: Dictionary = {}   # StringName -> int (physical keycode)
@@ -92,7 +102,8 @@ static func key_display_name(action: StringName) -> String:
 		var mapped: int = DisplayServer.keyboard_get_keycode_from_physical(pk)
 		if mapped != 0:
 			keycode = mapped
-	return OS.get_keycode_string(keycode)
+	var name: String = OS.get_keycode_string(keycode)
+	return "Umschalt+" + name if action in _SHIFT_ACTIONS else name
 
 
 ## Other rebindable action already using this physical keycode (conflict
@@ -101,6 +112,8 @@ static func action_using_keycode(keycode: int, except: StringName) -> StringName
 	_ensure_loaded()
 	for entry in ACTIONS:
 		var action: StringName = entry[0]
+		if (action in _SHIFT_ACTIONS) != (except in _SHIFT_ACTIONS):
+			continue   # Shift+X and plain X are different bindings, not a clash
 		if action != except and current_keycode(action) == keycode:
 			return action
 	if keycode == KEY_ESCAPE:
@@ -146,6 +159,8 @@ static func _apply_to_map(action: StringName, physical_keycode: int) -> void:
 	InputMap.action_erase_events(action)
 	var key: InputEventKey = InputEventKey.new()
 	key.physical_keycode = physical_keycode as Key
+	# Shift-bound actions keep their modifier through every rebind/reset.
+	key.shift_pressed = action in _SHIFT_ACTIONS
 	InputMap.action_add_event(action, key)
 
 

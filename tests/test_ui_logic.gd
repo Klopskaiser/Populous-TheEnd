@@ -411,3 +411,103 @@ func test_controls_menu_has_no_dead_entries() -> void:
 			unlabelled.append(String(action))
 	check(dead.is_empty(), "no listed action is missing from the InputMap (%s)" % str(dead))
 	check(unlabelled.is_empty(), "every listed action has label + category (%s)" % str(unlabelled))
+
+
+# --- Harvest rectangle (key B, phase 10e) ---------------------------------------
+
+func _key_event(physical: int, shift: bool = false) -> InputEventKey:
+	var ev: InputEventKey = InputEventKey.new()
+	ev.physical_keycode = physical as Key
+	ev.shift_pressed = shift
+	ev.pressed = true
+	return ev
+
+
+## Arming needs BRAVES — a pure warrior selection cannot fell trees, so the key
+## must do nothing rather than leave a green cursor that fires an empty order.
+func test_harvest_arm_requires_selected_braves() -> void:
+	var sel: SelectionManager = _make_selection()
+	SelectionManager.harvest_arm_active = false
+	sel._unhandled_input(_key_event(KEY_B))
+	check(not SelectionManager.harvest_arm_active,
+		"with an empty selection B does not arm the rectangle")
+
+	var warrior: Unit = WARRIOR_SCENE.instantiate() as Unit
+	warrior.tribe_id = 0
+	sel.selected = [warrior] as Array[Unit]
+	sel._unhandled_input(_key_event(KEY_B))
+	check(not SelectionManager.harvest_arm_active,
+		"a warrior-only selection does not arm the rectangle either")
+
+	var brave: Unit = BRAVE_SCENE.instantiate() as Unit
+	brave.tribe_id = 0
+	sel.selected = [brave] as Array[Unit]
+	sel._unhandled_input(_key_event(KEY_B))
+	check(SelectionManager.harvest_arm_active, "with a brave selected B arms it")
+
+	SelectionManager.harvest_arm_active = false   # do not leak the static flag
+	warrior.free()
+	brave.free()
+	sel.free()
+
+
+## The armed modes are mutually exclusive: two cursor markers at once (and two
+## meanings for the next click) would be ambiguous.
+func test_harvest_arm_and_attack_arm_are_exclusive() -> void:
+	var sel: SelectionManager = _make_selection()
+	var brave: Unit = BRAVE_SCENE.instantiate() as Unit
+	brave.tribe_id = 0
+	sel.selected = [brave] as Array[Unit]
+
+	SelectionManager.attack_arm_active = true
+	sel._unhandled_input(_key_event(KEY_B))
+	check(SelectionManager.harvest_arm_active, "B arms the rectangle")
+	check(not SelectionManager.attack_arm_active, "and drops the armed attack-move")
+
+	sel._unhandled_input(_key_event(KEY_F))
+	check(SelectionManager.attack_arm_active, "F arms the attack-move")
+	check(not SelectionManager.harvest_arm_active, "and drops the harvest rectangle")
+
+	SelectionManager.attack_arm_active = false
+	SelectionManager.harvest_arm_active = false
+	brave.free()
+	sel.free()
+
+
+## Godot compares key modifiers ONLY with exact_match = true, so plain B and
+## Shift+B would otherwise both trigger both actions and the elif order would
+## silently decide. Pins the project.godot bindings as well.
+func test_shift_b_and_b_are_distinct_actions() -> void:
+	var plain: InputEventKey = _key_event(KEY_B)
+	check(plain.is_action_pressed(&"harvest_area_arm", false, true),
+		"plain B is the harvest rectangle")
+	check(not plain.is_action_pressed(&"select_all_huts", false, true),
+		"plain B is NOT 'select all huts'")
+	var shifted: InputEventKey = _key_event(KEY_B, true)
+	check(shifted.is_action_pressed(&"select_all_huts", false, true),
+		"Shift+B selects all huts")
+	check(not shifted.is_action_pressed(&"harvest_area_arm", false, true),
+		"Shift+B is NOT the harvest rectangle")
+
+
+## The rebind path must keep the Shift modifier: without it "Zurücksetzen" turned
+## Shift+B into a plain B and collided with harvest_area_arm for good.
+func test_reset_keeps_the_shift_modifier_on_select_all_huts() -> void:
+	InputSettings.reset_all()
+	var shift_kept: bool = false
+	for event in InputMap.action_get_events(&"select_all_huts"):
+		if event is InputEventKey and (event as InputEventKey).shift_pressed:
+			shift_kept = true
+	check(shift_kept, "after a reset select_all_huts still carries Shift")
+	var plain: InputEventKey = _key_event(KEY_B)
+	check(not plain.is_action_pressed(&"select_all_huts", false, true),
+		"so plain B still does not select all huts")
+
+
+## Shift+X and plain X live in separate binding spaces — the controls menu must
+## not report a phantom conflict between them.
+func test_shift_binding_is_no_conflict_with_the_plain_key() -> void:
+	var conflict: StringName = InputSettings.action_using_keycode(
+		KEY_B, &"harvest_area_arm")
+	check(conflict != &"select_all_huts",
+		"Shift+B does not count as a conflict for the plain-B action")

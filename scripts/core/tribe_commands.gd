@@ -210,17 +210,81 @@ func order_pickup(units: Array[Unit], pile: WoodPile) -> void:
 		order_move(movers, pile.position)
 
 
-func order_chop(units: Array[Unit], tree: TreeResource) -> void:
+## Returns the number of braves put on the job — the UI only blinks its white
+## confirmation ring for an ACCEPTED order.
+func order_chop(units: Array[Unit], tree: TreeResource) -> int:
+	var assigned: int = 0
 	var movers: Array[Unit] = []
 	for unit in units:
 		if unit.state == Unit.State.DEAD or not _unit_active(unit):
 			continue
 		if unit is Brave:
-			(unit as Brave).order_chop(tree)
+			if (unit as Brave).order_chop(tree):
+				assigned += 1
 		else:
 			movers.append(unit)
 	if not movers.is_empty() and is_instance_valid(tree):
 		order_move(movers, tree.position)
+	return assigned
+
+
+# --- Area harvest (key B, phase 10e) ------------------------------------------
+
+const HARVEST_AREA_MIN_SIDE: float = Balance.HARVEST_AREA_MIN_SIDE
+const HARVEST_AREA_MAX_SIDE: float = Balance.HARVEST_AREA_MAX_SIDE
+
+## Standing area-harvest order (key B; from 10e part 2 also the AI wood crews):
+## every brave keeps felling trees inside `area` (world XZ) and delivers full
+## loads until it is worked out. `polygon` optionally narrows the rectangle to
+## the four raycast drag corners (rotated camera).
+##
+## NON-BRAVES ARE IGNORED ENTIRELY — this is a worker job, and marching warriors
+## into a grove would only strand them there. That is a deliberate difference to
+## order_chop, where walking to the tree is at least a plausible intent.
+## Returns the number of braves put on the job.
+func order_chop_area(units: Array[Unit], area: Rect2,
+		polygon: PackedVector2Array = PackedVector2Array()) -> int:
+	var shape: Array = harvest_job_shape(area, polygon)
+	var job_area: Rect2 = shape[0]
+	if job_area.size.x <= 0.0:
+		return 0
+	var assigned: int = 0
+	for unit in units:
+		if unit == null or unit.state == Unit.State.DEAD or not _unit_active(unit):
+			continue
+		if not (unit is Brave):
+			continue
+		if (unit as Brave).order_chop_area(job_area, shape[1]):
+			assigned += 1
+	return assigned
+
+
+## Effective shape of an area order as [Rect2, PackedVector2Array]: the clamped
+## rectangle plus the quad, or an EMPTY quad when the quad is unusable (not four
+## corners, concave or self-crossing) or when clamping moved the rectangle so the
+## quad no longer matches it. Static and world-free, and called by BOTH the
+## command and the UI's confirmation blink — so both see one truth.
+static func harvest_job_shape(area: Rect2, polygon: PackedVector2Array) -> Array:
+	var job: Rect2 = clamp_harvest_area(area)
+	var poly: PackedVector2Array = polygon
+	if job.size.x <= 0.0 or poly.size() != 4 or job != area.abs() \
+			or not TreeManager.is_convex_quad(poly):
+		poly = PackedVector2Array()
+	return [job, poly]
+
+
+## Area orders are clamped AROUND THEIR CENTRE: a whole-map drag must not become
+## an absurd standing order. Below the minimum on BOTH sides it was a stray click
+## (empty Rect2 = rejected); a legitimately thin strip along a row of trees only
+## gets its short side widened to the minimum.
+static func clamp_harvest_area(area: Rect2) -> Rect2:
+	var a: Rect2 = area.abs()
+	if a.size.x < HARVEST_AREA_MIN_SIDE and a.size.y < HARVEST_AREA_MIN_SIDE:
+		return Rect2()
+	var size: Vector2 = Vector2(
+		clampf(a.size.x, HARVEST_AREA_MIN_SIDE, HARVEST_AREA_MAX_SIDE),
+		clampf(a.size.y, HARVEST_AREA_MIN_SIDE, HARVEST_AREA_MAX_SIDE))
+	return Rect2(a.get_center() - size * 0.5, size)
 
 
 ## Braves join the construction site as workers; non-braves just walk there.

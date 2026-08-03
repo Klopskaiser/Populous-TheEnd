@@ -234,6 +234,11 @@ func _ready() -> void:
 	ranges.name = "RangeRenderer"
 	add_child(ranges)
 	ranges.setup(_unit_manager, GameState.PLAYER_TRIBE, td)
+	# White confirmation rings around trees a fell order just accepted (10e).
+	var tree_marks: TreeMarkRenderer = TreeMarkRenderer.new()
+	tree_marks.name = "TreeMarkRenderer"
+	add_child(tree_marks)
+	_selection.tree_mark = tree_marks
 	var combat_audio: CombatAudio = CombatAudio.new()
 	combat_audio.name = "CombatAudio"
 	add_child(combat_audio)

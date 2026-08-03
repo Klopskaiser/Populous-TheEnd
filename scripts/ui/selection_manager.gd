@@ -62,6 +62,21 @@ static var attack_arm_active: bool = false
 static var unload_arm_active: bool = false
 var _unload_airship: Airship = null
 
+## Harvest rectangle armed (key B, phase 10e): the NEXT left drag becomes an
+## area fell order for the selected braves instead of a box select. Unlike the
+## other armed modes this one is DRAWN with the left button, so a left-click
+## press must not disarm it — see the release branch in _unhandled_input.
+static var harvest_arm_active: bool = false
+
+const BOX_FILL: Color = Color(0.4, 0.8, 1.0, 0.15)
+const BOX_LINE: Color = Color(0.4, 0.8, 1.0, 0.9)
+const HARVEST_FILL: Color = Color(0.35, 0.9, 0.4, 0.15)
+const HARVEST_LINE: Color = Color(0.35, 0.9, 0.4, 0.9)
+
+## White confirmation rings for accepted fell orders (assigned by Main; stays
+## null in headless tests, where every flash is a no-op).
+var tree_mark: TreeMarkRenderer = null
+
 var _unit_manager: UnitManager = null
 var _tribe_commands: TribeCommands = null
 var _build_menu: BuildMenu = null
@@ -118,7 +133,9 @@ func _process(_delta: float) -> void:
 	if _dragging and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 		_dragging = false
 		drag_active = false
-		if _drag_max_dist >= DRAG_THRESHOLD_PX:
+		if harvest_arm_active:
+			_fire_harvest(_drag_rect(_drag_current), _drag_max_dist)
+		elif _drag_max_dist >= DRAG_THRESHOLD_PX:
 			_box_select(_drag_rect(_drag_current))
 		queue_redraw()
 
@@ -152,10 +169,13 @@ func _unhandled_input(event: InputEvent) -> void:
 				# the red "Angriff" cursor used to stay up until the next
 				# right-click or Esc). Placed before the double-click branch so
 				# click-select, box-select and double-click are all covered.
-				cancel_armed_modes()
+				# EXCEPTION: the harvest rectangle is drawn WITH the left button
+				# and stays armed until its own release (or Esc / right-click).
+				if not harvest_arm_active:
+					cancel_armed_modes()
 				# Double click on an own unit: select every unit of that kind
 				# currently on screen (phase 7b).
-				if mb.double_click:
+				if mb.double_click and not harvest_arm_active:
 					_dragging = false
 					drag_active = false
 					_double_click_select(mb.position)
@@ -170,10 +190,15 @@ func _unhandled_input(event: InputEvent) -> void:
 				_dragging = false
 				drag_active = false
 				_drag_max_dist = maxf(_drag_max_dist, _drag_start.distance_to(mb.position))
+				if harvest_arm_active:
+					# The armed release NEVER selects: the braves that just got the
+					# order must stay selected (a box select would replace them
+					# with whatever happens to stand in the grove).
+					_fire_harvest(_drag_rect(mb.position), _drag_max_dist)
 				# Once a real box was drawn (max extent counts, not just the
 				# release point), it stays a box — a fast out-and-back drag must
 				# never degrade into a deselecting ground click.
-				if _drag_max_dist < DRAG_THRESHOLD_PX:
+				elif _drag_max_dist < DRAG_THRESHOLD_PX:
 					_click_select(mb.position)
 				else:
 					_box_select(_drag_rect(mb.position))
@@ -181,6 +206,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
 			if unload_arm_active:
 				_fire_unload(mb.position)
+				return
+			if harvest_arm_active:
+				# Rectangle aborted — no order at all (unlike the attack-move arm,
+				# where the right-click IS the trigger).
+				cancel_armed_modes()
 				return
 			_prune_selected_buildings()
 			if not selected_buildings.is_empty():
@@ -195,7 +225,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event is InputEventMouseMotion:
 		var mm: InputEventMouseMotion = event
 		_update_hover(mm.position)
-		if attack_arm_active:
+		if attack_arm_active or harvest_arm_active:
 			queue_redraw()   # the armed cursor marker follows the mouse
 		if _dragging:
 			_drag_current = mm.position
@@ -209,29 +239,43 @@ func _unhandled_input(event: InputEvent) -> void:
 		# Key F arms the attack-move; the next right-click fires it.
 		_prune_selection()
 		if not selected.is_empty():
+			cancel_armed_modes()   # armed modes are mutually exclusive
 			attack_arm_active = true
 			queue_redraw()
 	elif event.is_action_pressed("demolish_building"):
 		_demolish_selected_buildings()
-	elif event.is_action_pressed("select_all_huts"):
+	# Shift+B / B: Godot compares modifiers ONLY with exact_match = true
+	# (InputEventKey::action_match ignores them otherwise), so both branches must
+	# ask exactly — the elif order alone cannot separate B from Shift+B.
+	elif event.is_action_pressed("select_all_huts", false, true):
 		_select_all_of_type(func(b: Building) -> bool: return b is Hut)
+	elif event.is_action_pressed("harvest_area_arm", false, true):
+		# Key B arms the harvest rectangle; the next left DRAG fires it.
+		_prune_selection()
+		if not selected_braves().is_empty():
+			cancel_armed_modes()   # armed modes are mutually exclusive
+			harvest_arm_active = true
+			queue_redraw()
 	elif event.is_action_pressed("select_all_warrior_camps"):
 		_select_all_of_type(func(b: Building) -> bool: return b is WarriorCamp)
 	elif event.is_action_pressed("select_all_temples"):
 		_select_all_of_type(func(b: Building) -> bool: return b is Temple)
 	elif event.is_action_pressed("select_all_firewarrior_camps"):
 		_select_all_of_type(func(b: Building) -> bool: return b is FirewarriorCamp)
-	elif event.is_action_pressed("ui_cancel") and (attack_arm_active or unload_arm_active):
+	elif event.is_action_pressed("ui_cancel") \
+			and (attack_arm_active or unload_arm_active or harvest_arm_active):
 		cancel_armed_modes()
 		get_viewport().set_input_as_handled()
 
 
-## Leaves every armed target mode at once (attack-move, airship unload, spell
-## targeting). Called on a left click, on Esc and when a right-click consumes
-## the armed mode — a single place so no path can leave a stale cursor behind.
+## Leaves every armed target mode at once (attack-move, airship unload, harvest
+## rectangle, spell targeting). Called on a left click, on Esc and when a
+## right-click consumes the armed mode — a single place so no path can leave a
+## stale cursor behind.
 func cancel_armed_modes() -> void:
 	attack_arm_active = false
 	unload_arm_active = false
+	harvest_arm_active = false
 	_unload_airship = null
 	if _spell_targeting != null and _spell_targeting.is_active():
 		_spell_targeting.cancel()
@@ -272,6 +316,76 @@ func _fire_unload(screen_pos: Vector2) -> void:
 	ship.flash_ring()
 
 
+## Executes the armed harvest rectangle: the four screen corners are put on the
+## ground, and the resulting world quad plus its hull become the standing area
+## order. Below the drag threshold it was a click, not a rectangle — then this
+## only DISARMS, so a stray click can never turn into a giant standing order.
+func _fire_harvest(screen_rect: Rect2, drag_dist: float) -> void:
+	harvest_arm_active = false
+	queue_redraw()
+	if drag_dist < DRAG_THRESHOLD_PX or _tribe_commands == null:
+		return
+	_prune_selection()
+	var braves: Array[Unit] = selected_braves()
+	if braves.is_empty():
+		return
+	# TL, TR, BR, BL — screen-to-ground is a projective map, so this cyclic order
+	# survives any camera rotation; only uneven terrain can break convexity, and
+	# TribeCommands.harvest_job_shape drops the quad in that case.
+	var screen: Array[Vector2] = [
+		screen_rect.position,
+		Vector2(screen_rect.end.x, screen_rect.position.y),
+		screen_rect.end,
+		Vector2(screen_rect.position.x, screen_rect.end.y)]
+	var corners: PackedVector2Array = PackedVector2Array()
+	var area: Rect2 = Rect2()
+	for i in range(4):
+		var ground: Vector3 = _screen_to_ground(screen[i])
+		if ground == Vector3.INF:
+			return   # a corner ray points at/above the horizon: no order at all
+		var p: Vector2 = Vector2(ground.x, ground.z)
+		corners.append(p)
+		area = Rect2(p, Vector2.ZERO) if i == 0 else area.expand(p)
+	if _tribe_commands.order_chop_area(braves, area, corners) <= 0:
+		return
+	# Confirmation blink on the SAME shape the braves were given (one truth).
+	var tm: TreeManager = _tribe_commands.tree_manager
+	if tree_mark != null and tm != null:
+		var shape: Array = TribeCommands.harvest_job_shape(area, corners)
+		tree_mark.flash(tm.area_trees(shape[0], shape[1]))
+
+
+## Ground point under a screen position. Terrain raycast first; a ray that leaves
+## the terrain BODY (drag corner past the coast or over the map edge) falls back
+## to the analytic sea-level plane hit clamped into the map, so a corner over the
+## void still yields a usable rectangle edge. Vector3.INF only when the ray points
+## at or above the horizon and cannot be resolved at all.
+func _screen_to_ground(screen_pos: Vector2) -> Vector3:
+	var hit: Dictionary = _raycast(screen_pos, TERRAIN_MASK)
+	if not hit.is_empty():
+		return hit.position
+	var camera: Camera3D = get_viewport().get_camera_3d()
+	if camera == null:
+		return Vector3.INF
+	var from: Vector3 = camera.project_ray_origin(screen_pos)
+	var dir: Vector3 = camera.project_ray_normal(screen_pos)
+	if dir.y > -0.05:
+		return Vector3.INF
+	var p: Vector3 = from + dir * ((TerrainData.SEA_LEVEL - from.y) / dir.y)
+	var td: TerrainData = GameState.terrain_data
+	if td == null:
+		return Vector3(p.x, TerrainData.SEA_LEVEL, p.z)
+	var extent: float = float(td.size) * TerrainData.CELL_SIZE
+	return Vector3(clampf(p.x, 0.0, extent), TerrainData.SEA_LEVEL,
+		clampf(p.z, 0.0, extent))
+
+
+## White confirmation ring around ordered trees (no-op without the renderer).
+func _flash_trees(trees: Array) -> void:
+	if tree_mark != null:
+		tree_mark.flash(trees)
+
+
 func _draw() -> void:
 	# Armed airship unload: gold drop marker + label at the cursor.
 	if unload_arm_active:
@@ -292,13 +406,23 @@ func _draw() -> void:
 		draw_string(get_theme_default_font(), mouse + Vector2(26, -10),
 			"Angriff", HORIZONTAL_ALIGNMENT_LEFT, -1,
 			get_theme_default_font_size(), red)
+	# Armed harvest rectangle: green crosshair marker + label at the cursor.
+	if harvest_arm_active:
+		var mouse: Vector2 = get_global_mouse_position()
+		var green: Color = Color(0.35, 0.9, 0.4, 0.9)
+		draw_arc(mouse + Vector2(14, -14), 8.0, 0.0, TAU, 20, green, 2.0)
+		draw_line(mouse + Vector2(14, -22), mouse + Vector2(14, -6), green, 2.0)
+		draw_line(mouse + Vector2(6, -14), mouse + Vector2(22, -14), green, 2.0)
+		draw_string(get_theme_default_font(), mouse + Vector2(26, -10),
+			"Holz fällen", HORIZONTAL_ALIGNMENT_LEFT, -1,
+			get_theme_default_font_size(), green)
 	if not _dragging:
 		return
 	if _drag_start.distance_to(_drag_current) < DRAG_THRESHOLD_PX:
 		return
 	var rect: Rect2 = _drag_rect(_drag_current)
-	draw_rect(rect, Color(0.4, 0.8, 1.0, 0.15), true)
-	draw_rect(rect, Color(0.4, 0.8, 1.0, 0.9), false, 1.5)
+	draw_rect(rect, HARVEST_FILL if harvest_arm_active else BOX_FILL, true)
+	draw_rect(rect, HARVEST_LINE if harvest_arm_active else BOX_LINE, false, 1.5)
 
 
 func _drag_rect(end_pos: Vector2) -> Rect2:
@@ -928,8 +1052,10 @@ func _dispatch_context_command(hit: Dictionary, queue_up: bool = false) -> bool:
 		if queue_up:
 			_queue_route_action(tree.position,
 				func(u: Unit) -> void: _tribe_commands.order_chop([u] as Array[Unit], tree))
-		else:
-			_tribe_commands.order_chop(selected, tree)
+			if _selection_has_brave():
+				_flash_trees([tree])   # queued: acknowledge the target right away
+		elif _tribe_commands.order_chop(selected, tree) > 0:
+			_flash_trees([tree])
 		return true
 	if node.has_meta("building"):
 		var building: Building = node.get_meta("building") as Building

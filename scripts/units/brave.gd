@@ -57,6 +57,14 @@ const SEEK_FAIL_QUIT_STREAK: int = 6
 const PILE_PREFER_RADIUS: float = 24.0
 const WOOD_ENEMY_RADIUS: float = 8.0
 
+## Area orders (key B, phase 10e) fill the load before delivering — a grove 50 m
+## away with one-piece trips would be unplayable. The single-tree order keeps its
+## one-piece-per-trip behaviour.
+const DEPOT_PREFER_RADIUS: float = Balance.HARVEST_DEPOT_PREFER_RADIUS
+## Nothing claimable in the area right now (crewmates hold every slot): the order
+## is HELD for TASK_RETRY and retried this often before the brave gives up.
+const AREA_RETRY_MAX: int = 5
+
 ## Injected by UnitManager.spawn_unit() (or directly by tests).
 var tree_manager: TreeManager = null
 var wood_pile_manager: WoodPileManager = null
@@ -112,6 +120,18 @@ var _loose_deliver_building: Building = null
 ## `_haul_source` additionally set for the depot->depot pendulum loop.
 var _haul_source: WoodDepot = null
 var _haul_target: WoodDepot = null
+
+## Standing area-harvest order (phase 10e, key B and the AI wood crews): while
+## set, the brave keeps claiming trees inside this world-XZ rectangle, fills
+## CARRY_CAPACITY and delivers, until the area is worked out. Any other order
+## clears it through _interrupt_tasks -> one order at a time, for free.
+var chop_area: Rect2 = Rect2()
+## Optional convex quad (world XZ) narrowing the rectangle — the four raycast
+## drag corners under a rotated camera. Empty = plain rectangle.
+var chop_area_poly: PackedVector2Array = PackedVector2Array()
+## Hold timer / attempt counter while the area has no free claim slot.
+var _area_retry: float = 0.0
+var _area_retries: int = 0
 
 
 func _init() -> void:
@@ -203,12 +223,13 @@ func order_depot_haul(depot: WoodDepot) -> void:
 
 ## Manual chop order (right-click on a tree): harvest it unit by unit, drop
 ## the wood on the spot, then continue with nearby trees. Player orders always
-## count, even when the tree's harvest slots are full.
-func order_chop(tree: TreeResource) -> void:
+## count, even when the tree's harvest slots are full. Returns whether the order
+## was taken — the UI only blinks its confirmation ring for an accepted one.
+func order_chop(tree: TreeResource) -> bool:
 	if not can_take_orders():
-		return
+		return false
 	if tree == null or not is_instance_valid(tree) or tree.felled_flag:
-		return
+		return false
 	_interrupt_tasks()
 	task_tree = tree
 	tree.add_claimer(self)
@@ -216,6 +237,69 @@ func order_chop(tree: TreeResource) -> void:
 	task = Task.CHOP
 	_loose_return_pos = Vector3.INF
 	_set_state(State.GATHER)
+	return true
+
+
+## True while a standing area-harvest order is set.
+func has_chop_area() -> bool:
+	return chop_area.size.x > 0.0 and chop_area.size.y > 0.0
+
+
+## Standing area order (key B / AI wood crew): keep felling trees inside `area`
+## and deliver full loads until it is worked out. Accepted even when nothing is
+## claimable right now — the area is a JOB, not a single target, and crewmates
+## free claim slots as they deliver (see _area_retry_hold). Returns whether the
+## order was taken.
+func order_chop_area(area: Rect2,
+		poly: PackedVector2Array = PackedVector2Array()) -> bool:
+	if not can_take_orders():
+		return false
+	if area.size.x <= 0.0 or area.size.y <= 0.0:
+		return false
+	# Order matters: _interrupt_tasks CLEARS chop_area, so it has to run first.
+	_interrupt_tasks()
+	chop_area = area
+	chop_area_poly = poly
+	task = Task.CHOP
+	_loose_return_pos = Vector3.INF
+	_set_state(State.GATHER)
+	if not _next_area_tree() and not _area_retry_hold():
+		_stop_all()
+		return false
+	return true
+
+
+## Next claimable tree inside the standing area (path-verified, island-checked —
+## see TreeManager.claim_area_tree).
+func _next_area_tree() -> bool:
+	if tree_manager == null or not has_chop_area():
+		return false
+	var tree: TreeResource = tree_manager.claim_area_tree(
+		chop_area, chop_area_poly, self, position)
+	if tree == null:
+		return false
+	task_tree = tree
+	task = Task.CHOP
+	_chop_timer = tree.chop_time()
+	_area_retry = 0.0
+	_area_retries = 0
+	_reset_seek()
+	return true
+
+
+## Area order with nothing claimable at this moment: hold the order and retry
+## after TASK_RETRY instead of running the (pooled, but not free) search every
+## sim tick. False once the area counts as worked out — the caller stops then.
+## Without this hold a whole crew goes idle at the tail of a grove, while its
+## members still hold the last claim slots.
+func _area_retry_hold() -> bool:
+	if not has_chop_area():
+		return false
+	_area_retries += 1
+	if _area_retries > AREA_RETRY_MAX:
+		return false
+	_area_retry = TASK_RETRY
+	return true
 
 
 ## True while this brave can still take a worker slot at `building`. Checked
@@ -886,14 +970,22 @@ func _end_subtask(retry: float = 0.0) -> void:
 ## Chop ONE piece of wood, carry it to the nearest own building (preferring an
 ## existing pile there), then return to the chopping spot and take the next
 ## piece — one at a time, not a full load.
+## An AREA order (has_chop_area, phase 10e) instead fills CARRY_CAPACITY before
+## delivering; every deviating branch below is guarded by has_chop_area(), so
+## the single-tree path stays exactly as it was.
 
 func _tick_loose_chop(delta: float) -> void:
 	if not _tree_valid(task_tree):
 		task_tree = null
+		if _area_retry > 0.0:
+			# Holding an area order: wait out the retry delay without searching.
+			_area_retry -= delta
+			_set_working(false)
+			return
 		if not _next_loose_tree():
 			if carried_wood > 0:
 				_start_loose_deliver()
-			else:
+			elif not _area_retry_hold():
 				_stop_all()
 			return
 	if not _seek(task_tree.position, CHOP_RANGE, delta):
@@ -905,12 +997,23 @@ func _tick_loose_chop(delta: float) -> void:
 		var got: int = tree_manager.harvest_tree(task_tree) if tree_manager != null else 0
 		carried_wood += got
 		_loose_return_pos = position
+		# Area order: keep filling the load, and prefer staying on the SAME tree
+		# (harvest_tree only ever takes one piece and the claim is already ours,
+		# so the next piece costs zero walking).
+		if has_chop_area() and carried_wood < CARRY_CAPACITY \
+				and _tree_valid(task_tree) and task_tree.wood_yield() > 0:
+			_chop_timer = task_tree.chop_time()
+			return
 		# One piece per trip: release the tree and carry this single wood back
 		# to the drop-off, then come back for the next piece.
 		if tree_manager != null and _tree_valid(task_tree):
 			tree_manager.release_claim(task_tree, self)
 		task_tree = null
 		_set_working(false)
+		# Load not full yet and the tree is spent: chain to the next area tree
+		# instead of walking a half-empty load home.
+		if has_chop_area() and carried_wood < CARRY_CAPACITY and _next_area_tree():
+			return
 		if carried_wood > 0:
 			_start_loose_deliver()
 		elif not _next_loose_tree():
@@ -929,7 +1032,7 @@ func _start_loose_deliver() -> void:
 func _tick_loose_deliver(delta: float) -> void:
 	if carried_wood <= 0:
 		task = Task.CHOP
-		if not _next_loose_tree():
+		if not _next_loose_tree() and not _area_retry_hold():
 			_stop_all()
 		return
 	# The drop target is picked ONCE per delivery and only re-evaluated on a
@@ -952,14 +1055,25 @@ func _tick_loose_deliver(delta: float) -> void:
 				_haul_target = null
 				_haul_source = null
 				_loose_deliver_goal = Vector3.INF
-			var building: Building = _nearest_own_building()
+			var building: Building = null
+			if has_chop_area():
+				# Area harvest: a rack within DEPOT_PREFER_RADIUS beats a merely
+				# nearer hut — the wood should end up in storage, and the crew
+				# keeps hauling to one spot instead of scattering piles across
+				# the whole village.
+				var depot: WoodDepot = _nearest_depot(position)
+				if depot != null and _flat_dist(position, depot.delivery_point()) \
+						<= DEPOT_PREFER_RADIUS:
+					building = depot
+			if building == null:
+				building = _nearest_own_building()
 			if building == null:
 				# No building anywhere: drop the wood on the spot (old behaviour).
 				if wood_pile_manager != null:
 					wood_pile_manager.deposit(position, carried_wood)
 					carried_wood = 0
 				task = Task.CHOP
-				if not _next_loose_tree():
+				if not _next_loose_tree() and not _area_retry_hold():
 					_stop_all()
 				return
 			var goal: Vector3 = _loose_drop_target(building)
@@ -992,7 +1106,9 @@ func _tick_loose_deliver(delta: float) -> void:
 		return
 	_haul_target = null
 	task = Task.CHOP
-	if not _next_loose_tree():
+	# _area_retry_hold keeps a standing area order alive when every remaining
+	# claim slot is held by a crewmate that is still walking home.
+	if not _next_loose_tree() and not _area_retry_hold():
 		_stop_all()
 
 
@@ -1076,8 +1192,11 @@ func _pile_near_friendly_building(pos: Vector3) -> bool:
 
 
 ## Next tree near the current chopping spot (after a delivery the brave
-## returns to where it was working).
+## returns to where it was working). A standing area order overrides the
+## chain radius and searches its rectangle instead.
 func _next_loose_tree() -> bool:
+	if has_chop_area():
+		return _next_area_tree()
 	if tree_manager == null:
 		return false
 	var search_from: Vector3 = _loose_return_pos if _loose_return_pos != Vector3.INF else position
@@ -1170,6 +1289,13 @@ func _interrupt_tasks() -> void:
 	task_tree = null
 	task_pile = null
 	target_building = null
+	# One-order principle for the standing area harvest (10e): clearing it here
+	# means EVERY other order (move, build, train, pray, ...) cancels it, and the
+	# AI's crew bookkeeping sees the brave leave the crew for free.
+	chop_area = Rect2()
+	chop_area_poly = PackedVector2Array()
+	_area_retry = 0.0
+	_area_retries = 0
 	route_end_action = Callable()   # a fresh task cancels a queued follow-up order
 	train_target = null
 	train_slot_pos = Vector3.INF

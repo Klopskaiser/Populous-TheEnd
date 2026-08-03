@@ -222,6 +222,70 @@ func count_trees_near(pos: Vector3, radius: float) -> int:
 	return count
 
 
+# --- Harvest areas (phase 10e) ---------------------------------------------------
+
+## Slack for the quad tests: sub-millimetre cross products are "on the edge".
+const QUAD_EPS: float = 0.001
+
+## Point (world XZ) inside a harvest area: the Rect2 hull first (cheap reject),
+## then — with a usable convex quad — four half-plane tests. Boundary points
+## count as inside (a tree exactly on the drag edge belongs to the order).
+## Winding-agnostic, so the caller need not normalise the corner order.
+static func point_in_area(p: Vector2, area: Rect2, poly: PackedVector2Array) -> bool:
+	if not area.has_point(p):
+		return false
+	if poly.size() != 4:
+		return true
+	var pos_side: bool = false
+	var neg_side: bool = false
+	for i in range(4):
+		var a: Vector2 = poly[i]
+		var side: float = (poly[(i + 1) % 4] - a).cross(p - a)
+		if side > QUAD_EPS:
+			pos_side = true
+		elif side < -QUAD_EPS:
+			neg_side = true
+	return not (pos_side and neg_side)   # mixed sides = outside
+
+
+## True when `poly` is a usable convex quad. The four drag corners are raycast
+## onto UNEVEN terrain, so a hill can push one corner past the others and yield
+## a concave or self-crossing quad — the half-plane test would then reject good
+## trees. Callers drop such a quad and fall back to the Rect2 hull, which is a
+## superset: the player gets slightly more than drawn, never less.
+static func is_convex_quad(poly: PackedVector2Array) -> bool:
+	if poly.size() != 4:
+		return false
+	var pos_turn: bool = false
+	var neg_turn: bool = false
+	for i in range(4):
+		var turn: float = (poly[(i + 1) % 4] - poly[i]).cross(
+			poly[(i + 2) % 4] - poly[(i + 1) % 4])
+		if turn > QUAD_EPS:
+			pos_turn = true
+		elif turn < -QUAD_EPS:
+			neg_turn = true
+	return not (pos_turn and neg_turn)
+
+
+## Standing trees whose position lies inside the harvest area (Rect2 hull plus
+## optional convex quad). Bucket-indexed via _pos_buckets: a 20 m rectangle
+## touches ~9 buckets instead of the whole registry.
+func area_trees(area: Rect2,
+		poly: PackedVector2Array = PackedVector2Array()) -> Array[TreeResource]:
+	var out: Array[TreeResource] = []
+	var lo: Vector2i = _pos_bucket(Vector3(area.position.x, 0.0, area.position.y))
+	var hi: Vector2i = _pos_bucket(Vector3(area.end.x, 0.0, area.end.y))
+	for bz in range(lo.y, hi.y + 1):
+		for bx in range(lo.x, hi.x + 1):
+			for tree in _pos_buckets.get(Vector2i(bx, bz), []):
+				if not is_instance_valid(tree) or tree.felled_flag:
+					continue
+				if point_in_area(Vector2(tree.position.x, tree.position.z), area, poly):
+					out.append(tree)
+	return out
+
+
 # --- Reproduction ----------------------------------------------------------------
 
 func _reproduce() -> void:
@@ -326,6 +390,39 @@ func release_claim(tree: TreeResource, claimer: Object) -> void:
 		tree.remove_claimer(claimer)
 
 
+## Lower bound for the area walk budget so a tree one metre away is not
+## rejected over a three-metre detour (mirrors Brave.CHOP_CHAIN_RADIUS).
+const AREA_MIN_SEARCH_RADIUS: float = 8.0
+
+## Claims the cheapest-to-reach claimable tree INSIDE the harvest area for
+## `claimer`, walking from `walker`. Reuses best_tree wholesale — island check,
+## real path verification and the negative-verdict caches all apply unchanged.
+##
+## The search ORIGIN is the walker, not the area centre: best_tree derives its
+## walk budget from `radius` (radius x PATH_RADIUS_FACTOR), so a radius taken
+## from the area's own diagonal would cap the walk at a few metres and reject
+## every grove that is not already under the worker's feet. With origin ==
+## walker the radius spans exactly the distance that has to be walked, and area
+## containment is handled by the pre-filtered candidate pool instead. Ranking
+## therefore reads "cheapest to reach from here", which also means the worker
+## eats into the grove from its own side and re-ranks from the drop-off point
+## after every load.
+func claim_area_tree(area: Rect2, poly: PackedVector2Array, claimer: Object,
+		walker: Vector3) -> TreeResource:
+	var pool: Array[TreeResource] = area_trees(area, poly)
+	if pool.is_empty():
+		return null
+	var flat: Vector2 = Vector2(walker.x, walker.z)
+	var reach: float = 0.0
+	for tree in pool:
+		reach = maxf(reach, Vector2(tree.position.x, tree.position.z).distance_to(flat))
+	var radius: float = maxf(reach + 1.0, AREA_MIN_SEARCH_RADIUS)
+	var tree: TreeResource = best_tree(walker, walker, radius, true, Callable(), pool)
+	if tree != null:
+		tree.add_claimer(claimer)
+	return tree
+
+
 # --- Path-verified tree pick (bug backlog #4) ---------------------------------
 
 ## Beeline is only the RANKING of a tree pick — the actual WALK distance
@@ -372,21 +469,30 @@ static var dbg_best_tree_us: int = 0
 
 ## Best tree around `origin` (site/search centre) for a walker standing at
 ## `walker`. `filter` (optional) may veto candidates (e.g. enemies nearby).
+## `candidates` (optional) is a pre-filtered pool searched INSTEAD of the whole
+## registry — area orders hand in the bucket-indexed trees inside their
+## rectangle, which keeps the per-pick cost proportional to the area rather
+## than to the tree count.
 func best_tree(origin: Vector3, walker: Vector3, radius: float,
-		claimable_only: bool, filter: Callable = Callable()) -> TreeResource:
+		claimable_only: bool, filter: Callable = Callable(),
+		candidates: Array[TreeResource] = []) -> TreeResource:
 	var t0: int = Time.get_ticks_usec()
 	var result: TreeResource = _best_tree_inner(origin, walker, radius,
-		claimable_only, filter)
+		claimable_only, filter, candidates)
 	dbg_best_tree_calls += 1
 	dbg_best_tree_us += Time.get_ticks_usec() - t0
 	return result
 
 
 func _best_tree_inner(origin: Vector3, walker: Vector3, radius: float,
-		claimable_only: bool, filter: Callable = Callable()) -> TreeResource:
+		claimable_only: bool, filter: Callable = Callable(),
+		candidates: Array[TreeResource] = []) -> TreeResource:
 	var flat_origin: Vector2 = Vector2(origin.x, origin.z)
 	var scored: Array = []   # [score, tree] pairs
-	for tree in trees:
+	# An empty pool means "the whole registry" — the default for every caller
+	# that does not restrict the search to an area.
+	var pool: Array[TreeResource] = candidates if not candidates.is_empty() else trees
+	for tree in pool:
 		if not is_instance_valid(tree) or tree.felled_flag:
 			continue
 		if claimable_only and not tree.can_claim():

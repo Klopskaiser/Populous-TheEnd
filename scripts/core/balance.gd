@@ -653,3 +653,15 @@ const TREE_GROVES_PER_STANDARD_MAP: int = 3   # Haine je 128er-Fläche (skaliert
 const TREE_GROVE_TREES_MIN: int = 8
 const TREE_GROVE_TREES_MAX: int = 14
 const TREE_GROVE_RADIUS: int = 6
+
+# --- Flächen-Holzernte (Taste B) ---
+## Kleinere Ziehflächen gelten als Fehlklick; größere werden um ihren
+## Mittelpunkt geklemmt (ein Ganzkarten-Zug darf keinen absurden Dauerauftrag
+## erzeugen).
+const HARVEST_AREA_MIN_SIDE: float = 2.0
+const HARVEST_AREA_MAX_SIDE: float = 80.0
+## Bestätigungs-Blinken um beauftragte Bäume: zweimal an/aus.
+const TREE_MARK_BLINKS: int = 2
+const TREE_MARK_BLINK_TIME: float = 0.18
+## Innerhalb dieses Radius wird ein Holzlager dem nächsten Gebäude vorgezogen.
+const HARVEST_DEPOT_PREFER_RADIUS: float = 40.0
