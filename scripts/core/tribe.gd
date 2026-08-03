@@ -11,8 +11,8 @@ class_name Tribe extends RefCounted
 
 ## Mana per second per population member.
 const MANA_BASE_RATE: float = Balance.MANA_BASE_RATE
-## Extra mana per second per praying brave.
-const MANA_PRAY_BONUS: float = Balance.MANA_PRAY_BONUS
+## Float slack for the charge arithmetic.
+const MANA_EPS: float = 0.0001
 
 ## Hard unit cap per tribe (phase 7i): no hut spawn / training beyond this, on
 ## top of the housing capacity — whichever limits first.
@@ -64,9 +64,11 @@ var shaman: Unit = null
 var preachers: Array[Unit] = []
 ## Spell set (charge system), installed via set_spells (cost-sorted).
 var spells: Array[Spell] = []
-## Round-robin pointer into `spells`: the pointed spell is the next to
-## receive a charge once enough mana has accumulated.
-var _charge_index: int = 0
+## Unpaid forester upkeep (phase 10c: there is no mana pool to draw it from,
+## so it is a debt the following income settles before anything charges).
+var _upkeep_debt: float = 0.0
+## Income share (mana/s) already reserved by upkeep this tick; cleared in tick().
+var _upkeep_rate_claimed: float = 0.0
 
 var _events: Node = null
 var _events_resolved: bool = false
@@ -140,39 +142,43 @@ func set_growth_mode(mode: GrowthMode) -> void:
 			building.clear_manual_override()
 
 
-func praying_braves() -> int:
-	var count: int = 0
-	for unit in units:
-		if unit.is_praying():
-			count += 1
-	return count
-
-
-## Current mana income per second (phase 7i display): the same term the tick
-## adds, i.e. population base rate + praying-brave bonus. Forester upkeep drains
-## the pool separately (consume_mana) and is not netted here.
+## Current mana income per second: purely the population base rate since
+## phase 10c (praying at the reincarnation site was dropped as a feature).
+## Forester upkeep is booked as a debt against this income (consume_mana) and
+## is not netted here.
 func mana_rate() -> float:
-	return float(population()) * MANA_BASE_RATE + float(praying_braves()) * MANA_PRAY_BONUS
+	return float(population()) * MANA_BASE_RATE
 
 
 # --- Tick (mana economy) ------------------------------------------------------
 
+## Mana is NOT banked (phase 10c): the income of this tick is spread over the
+## active, not-yet-full spells right away, and whatever finds no taker is
+## discarded. `mana` therefore only carries what a pending upkeep debt has not
+## eaten yet — it is a flow, not a stock.
 func tick(delta: float) -> void:
-	mana += (float(population()) * MANA_BASE_RATE
-		+ float(praying_braves()) * MANA_PRAY_BONUS) * delta
-	_convert_mana_to_charges()
+	# New round of upkeep claims: the foresters re-book their share every tick.
+	_upkeep_rate_claimed = 0.0
+	var income: float = mana_rate() * delta
+	# Forester upkeep is a debt against the income, not against a pool: the
+	# foresters have to be paid before anything charges (their intended cost).
+	if _upkeep_debt > 0.0:
+		var pay: float = minf(_upkeep_debt, income)
+		_upkeep_debt -= pay
+		income -= pay
+	_distribute_mana(income)   # the remainder overflows and is lost
 	_emit_mana()
 
 
 # --- Spell charges (phase 6) ---------------------------------------------------
 
-## Installs the spell set, cost-sorted so the round-robin serves the cheapest
-## spell first within each round.
+## Installs the spell set, cost-sorted (cheapest first) — that is the order the
+## sidebar shows and it keeps the tab readable; the charging itself no longer
+## depends on the order (every active spell is fed at once).
 func set_spells(p_spells: Array[Spell]) -> void:
 	spells = p_spells.duplicate()
 	spells.sort_custom(func(a: Spell, b: Spell) -> bool:
 		return a.charge_cost < b.charge_cost)
-	_charge_index = 0
 
 
 func get_spell(spell_id: StringName) -> Spell:
@@ -182,8 +188,9 @@ func get_spell(spell_id: StringName) -> Spell:
 	return null
 
 
-## Total mana the charge stores can hold (sum over all spells); basis of the
-## 15% shaman-kill bonus.
+## Total mana the charge stores can hold (sum over all spells). Informational
+## since phase 10c (the shaman-kill bonus is derived from the victim tribe's
+## production now, not from this).
 func charge_capacity_mana() -> float:
 	var total: float = 0.0
 	for spell in spells:
@@ -191,64 +198,101 @@ func charge_capacity_mana() -> float:
 	return total
 
 
-## Spends up to `amount` mana from the pool (forester worker upkeep, phase 7d);
-## returns how much was actually taken. Competes with the charge conversion —
-## running foresters slow charge build-up (their intended cost).
+## Books forester worker upkeep (phase 7d). With mana no longer banked
+## (phase 10c) there is no pool to take it from: the amount becomes a DEBT that
+## the next ticks' income pays off before any spell charges. Returns the amount
+## booked, which is always the full amount — the cost cannot be dodged, it can
+## only delay the charging.
 func consume_mana(amount: float) -> float:
 	if amount <= 0.0:
 		return 0.0
-	var take: float = minf(amount, mana)
-	mana -= take
-	if take > 0.0:
-		_emit_mana()
-	return take
+	_upkeep_debt += amount
+	return amount
 
 
-## One-time mana injection (e.g. the shaman-kill bonus), converted into spell
-## charges immediately through the regular charging path.
+## How much of the current income (mana/s) is still free for upkeep this tick.
+func free_upkeep_rate() -> float:
+	return maxf(mana_rate() - _upkeep_rate_claimed, 0.0)
+
+
+## Reserves a slice of the income for a continuous upkeep (forester workers)
+## and returns what was granted — less than asked for when the tribe simply
+## does not earn that much, or when other foresters already claimed it. The
+## claim is per tick; Tribe.tick() clears it. Since phase 10c upkeep is paid
+## from the INCOME, not from a hoard: a tribe cannot bank mana and then run
+## more foresters than it can sustain.
+func claim_upkeep_rate(rate: float) -> float:
+	var granted: float = minf(maxf(rate, 0.0), free_upkeep_rate())
+	_upkeep_rate_claimed += granted
+	return granted
+
+
+## One-time mana injection (the shaman-kill bonus), spread over the active
+## spells exactly like ordinary income. Whatever finds no taker is lost.
 func grant_bonus_mana(amount: float) -> void:
 	if amount <= 0.0:
 		return
-	mana += amount
-	_convert_mana_to_charges()
+	_distribute_mana(amount)
 	_emit_mana()
 
 
-## Converts available mana into stored charges: round-robin over the
-## (cost-sorted) spells, one charge per turn. A spell that is not affordable
-## yet blocks its turn until the mana accumulated (fairness — cheap spells
-## cannot starve expensive ones). All spells full -> mana keeps accumulating.
-func _convert_mana_to_charges() -> void:
-	if spells.is_empty():
-		return
-	var converted: bool = false
-	while true:
-		var skipped: int = 0
-		while skipped < spells.size() and spells[_charge_index].is_full():
-			_charge_index = (_charge_index + 1) % spells.size()
-			skipped += 1
-		if skipped >= spells.size():
-			break   # all full
-		var spell: Spell = spells[_charge_index]
-		if mana < spell.charge_cost:
-			break   # this spell is served next, once the mana is there
-		mana -= spell.charge_cost
-		spell.charges += 1
-		converted = true
-		_charge_index = (_charge_index + 1) % spells.size()
-	_update_charge_progress()
-	if converted:
+## Spreads `amount` mana over ALL spells that want it (active and not full),
+## in equal shares. Returns how much was actually placed — the rest had nowhere
+## to go and is DISCARDED by the caller (no mana banking, user spec).
+##
+## Repeats in rounds because a share can overfill a nearly-complete spell; the
+## leftover then goes to the others. Each round fills at least one spell to the
+## brim, so the round count is bounded by the number of spells.
+func _distribute_mana(amount: float) -> float:
+	if amount <= 0.0 or spells.is_empty():
+		return 0.0
+	var before_charges: int = _total_charges()
+	var remaining: float = amount
+	var rounds: int = 0
+	while remaining > MANA_EPS and rounds <= spells.size():
+		rounds += 1
+		var takers: int = 0
+		for spell in spells:
+			if spell.wants_mana():
+				takers += 1
+		if takers == 0:
+			break
+		var share: float = remaining / float(takers)
+		var used: float = 0.0
+		for spell in spells:
+			if spell.wants_mana():
+				used += spell.add_charge_mana(share)
+		if used <= MANA_EPS:
+			break
+		remaining -= used
+	if _total_charges() != before_charges:
 		_emit_spell_charges()
+	return amount - remaining
 
 
-## The pips show one charge filling at a time: the round-robin spell currently
-## waiting for mana; every other spell shows no partial fill.
-func _update_charge_progress() -> void:
+func _total_charges() -> int:
+	var total: int = 0
 	for spell in spells:
-		spell.charge_progress = 0.0
-	var current: Spell = spells[_charge_index]
-	if not current.is_full():
-		current.charge_progress = clampf(mana / current.charge_cost, 0.0, 1.0)
+		total += spell.charges
+	return total
+
+
+## Switches a spell's charging on or off (right-click on its button). Stored
+## charges and the partial fill are untouched — only the income stops.
+func set_spell_active(spell_id: StringName, value: bool) -> void:
+	var spell: Spell = get_spell(spell_id)
+	if spell == null or spell.active == value:
+		return
+	spell.active = value
+	_emit_spell_charges()
+
+
+func active_spell_count() -> int:
+	var count: int = 0
+	for spell in spells:
+		if spell.wants_mana():
+			count += 1
+	return count
 
 
 # --- Unit / building registry ---------------------------------------------------

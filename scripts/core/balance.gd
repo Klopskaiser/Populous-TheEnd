@@ -62,7 +62,10 @@ const SHAMAN_MELEE_STRENGTH: float = 2.0   # 2 x Brave-Schaden
 ## Zauberformel spricht (Phase 10b). Für alle Zauber gleich.
 const SHAMAN_CAST_TIME: float = 1.0
 ## Mana-Bonus (Anteil der Ladungskapazität) für den Stamm, der sie tötet.
-const SHAMAN_KILL_BONUS_SHARE: float = 0.15
+## Schamanentötung: Der Töter bekommt diesen Anteil der MINÜTLICHEN
+## Manaproduktion des getöteten Stammes einmalig auf seine aktiven
+## Aufladeraten verteilt (Phase 10c; vorher 15 % der eigenen Ladungskapazität).
+const SHAMAN_KILL_MANA_MINUTE_SHARE: float = 0.10
 ## Wartezeit bis zum Respawn am Reinkarnationsplatz.
 const SHAMAN_RESPAWN_TIME: float = 20.0
 
@@ -581,8 +584,6 @@ const REINCARNATION_SITE_HP: int = 500
 
 ## Mana/s je Bevölkerungsmitglied.
 const MANA_BASE_RATE: float = 0.1
-## Zusätzliches Mana/s je betendem Brave.
-const MANA_PRAY_BONUS: float = 0.3
 ## Hardcap Einheiten pro Stamm (zusätzlich zum Hütten-Bevölkerungslimit).
 const TRIBE_MAX_UNITS: int = 1000
 

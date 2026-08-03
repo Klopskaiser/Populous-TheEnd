@@ -7137,3 +7137,72 @@ Aus dem zweiten Nutzertest.
 Teppich umgestellt.
 **Offen:** Sichtprüfung des Clippings und des Erdbebenteppichs im Spiel — die
 Netzgeometrie ist headless nicht prüfbar.
+
+### Nachtrag 10c (3) — Neues Aufladesystem, Beten entfällt (2026-08-03)
+
+Nutzervorgabe: Round-Robin raus, alle aktiven Zauber laden parallel, Zauber
+per Rechtsklick abschaltbar, kein Mana-Banking, Beten entfällt.
+
+**Gebaut:**
+
+1. **`Spell`**: neue Felder `active` (Standard **an**) und `charge_mana`
+   (bereits eingezahltes Mana für die nächste Ladung, **überlebt** das
+   Abschalten). Neue API `wants_mana()` (= aktiv und nicht voll) und
+   `add_charge_mana(amount) -> float` (nimmt bis zur eigenen Kapazität, wandelt
+   volle `charge_cost` in Ladungen, gibt das tatsächlich Genommene zurück).
+2. **`Tribe`**: `_convert_mana_to_charges()` (Round-Robin) ersetzt durch
+   **`_distribute_mana(amount)`** — verteilt in gleichen Anteilen auf alle
+   Zauber, die Mana wollen, in Runden (eine überlaufende Portion wandert an die
+   übrigen; die Rundenzahl ist durch die Zauberzahl beschränkt). Was keinen
+   Abnehmer findet, **verfällt**. Dazu `set_spell_active()`,
+   `active_spell_count()`; `_charge_index` entfällt.
+3. **Kein Mana-Vorrat mehr.** `Tribe.tick()` verteilt das Einkommen des Ticks
+   sofort; `tribe.mana` ist damit faktisch immer 0. Konsequenz für den
+   **Förster**: sein Unterhalt kann nicht mehr aus einem Topf bezahlt werden.
+   Er beansprucht jetzt über `Tribe.claim_upkeep_rate()` einen Anteil des
+   **Einkommens** (pro Tick neu, mehrere Förster konkurrieren korrekt) und
+   bucht ihn per `consume_mana()` als Schuld, die das nächste Einkommen **vor**
+   dem Aufladen tilgt. Ein Stamm kann also nicht mehr Mana horten und dann mehr
+   Förster betreiben, als er trägt.
+4. **Schamanenkill-Bonus** ist jetzt **10 % der minütlichen Manaproduktion des
+   getöteten Stammes** (`SHAMAN_KILL_MANA_MINUTE_SHARE`), verteilt über den
+   normalen Ladeweg. Vorher: 15 % der *eigenen* Ladungskapazität — das sagte
+   nichts über den Wert des Kills aus; jetzt ist die Schamanin eines großen
+   Stammes die wertvollere Beute.
+5. **Beten ist als Feature entfernt**: `State.PRAY` (Enum-Eintrag entfällt
+   ganz), `Brave.order_pray/_tick_pray/is_praying`, `Unit.is_praying`,
+   `TribeCommands.order_pray`, das Rechtsklick-Mapping auf den
+   Reinkarnationsplatz, `AIController._keep_praying`/`PRAY_BRAVES`,
+   `Tribe.praying_braves()`, `Balance.MANA_PRAY_BONUS` und
+   `ReincarnationSite.PRAY_RADIUS`. Der Reinkarnationsplatz bleibt als
+   Respawn-Ort.
+6. **UI (`Sidebar`)**: unter jedem Zauber ein **Ladebalken** (Fortschritt zur
+   nächsten Ladung — mit parallelem Laden braucht das jeder Zauber einzeln);
+   **Rechtsklick** auf die Zelle schaltet das Laden an/aus, die Zelle wird dann
+   gedimmt. Der Handler hängt an der **Zelle**, nicht am Button: ein
+   deaktivierter Button nimmt gar keine Eingaben und ein aktiver akzeptiert nur
+   Linksklicks — so landet der Rechtsklick in beiden Zuständen richtig.
+   Die Mana-Anzeige zeigt jetzt das **Einkommen** statt eines Vorrats
+   (`+X.X/s auf N Zauber`; Balken gegen `MANA_RATE_DISPLAY_CAP`), weil ein
+   Vorrat konstruktionsbedingt immer 0 wäre.
+7. **`TribeCommands.set_spell_active()`** als Mutations-API (Architekturregel:
+   die UI mutiert den Stamm nicht direkt).
+8. **`CLAUDE.md` §4/§6 nachgezogen** (Spec beschrieb noch Round-Robin, Beten
+   und den 15-%-Bonus).
+
+**Erkenntnis — der „hängende" Testlauf ist geklärt.** Zweimal lief die Suite in
+einen 10-Minuten-Timeout, ohne dass die Tests langsam waren. Ursache: eine
+Testdatei mit **Parse-Fehler** lädt zwar als `GDScript`, aber `script.new()`
+gibt `null` zurück — der Runner iterierte danach über eine Null-Instanz und
+kam nicht mehr weiter. `run_tests.gd` bricht diesen Fall jetzt sauber als
+Fehlschlag ab (zusätzlich zu den Laufzeitwächtern aus Nachtrag 1).
+
+**Spielverhalten (Ziel der Änderung):** billige Zauber sind deutlich schneller
+einsatzbereit, der Spieler steuert über die Aktivierung, welche Zauber er
+überhaupt haben will, und Mana lässt sich nicht mehr für einen Schlag horten.
+
+**Verifikation:** Ladecheck sauber, Suite **3180/3180 grün** in 30 s. Neue
+Tests: paralleles Laden, Abschalten behält Ladungen und Fortschritt, alle
+Zauber starten aktiv, Einkommen ohne Abnehmer verfällt, Killbonus skaliert mit
+dem Opferstamm; Förster-Unterhalt-Test auf Einkommensdeckung umgestellt.
+**Offen:** Sichtprüfung von Ladebalken und Rechtsklick-Toggle im Spiel.

@@ -179,7 +179,7 @@ func test_symmetry_no_cheat() -> void:
 
 # --- BUILD tick -----------------------------------------------------------------------
 
-func test_build_tick_places_and_prays() -> void:
+func test_build_tick_places_construction_site() -> void:
 	var w: Dictionary = _make_world()
 	var ai_tribe: Tribe = w.tribes[1]
 	var anchor: Vector2i = Vector2i(64, 64)
@@ -200,13 +200,6 @@ func test_build_tick_places_and_prays() -> void:
 	var site: Building = ai_tribe.buildings[ai_tribe.buildings.size() - 1]
 	check(site.under_construction, "the new building is a construction site")
 	check(site is Hut, "the first building is a hut")
-
-	var praying: int = 0
-	for unit in ai_tribe.units:
-		if unit.state == Unit.State.PRAY:
-			praying += 1
-	check(praying == AIController.PRAY_BRAVES,
-		"BUILD tick sends %d braves to pray" % AIController.PRAY_BRAVES)
 
 	ai.tick_ai()
 	check(ai_tribe.buildings.size() == buildings_before + 1,

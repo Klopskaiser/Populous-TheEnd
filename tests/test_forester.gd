@@ -52,12 +52,24 @@ func _free_world(w: Dictionary) -> void:
 ## units, tree growth/burning, unit manager). Registered units change as the
 ## forester houses/dispatches workers, so we tick the live list each step.
 func _tick_world(w: Dictionary) -> void:
+	# The tribe tick opens a new round of forester upkeep claims (phase 10c) —
+	# without it the foresters keep their first claim forever and stall.
+	w.tribe.tick(TICK)
 	w.building_manager.tick(TICK)
 	for u in w.unit_manager.units.duplicate():
 		if is_instance_valid(u):
 			u.tick(TICK)
 	w.tree_manager.tick(TICK)
 	w.unit_manager.tick(TICK)
+
+
+## Gives the tribe enough population that its mana INCOME pays a full forester
+## crew (phase 10c: upkeep comes out of the income, there is no hoard).
+func _fund_upkeep(tribe: Tribe) -> void:
+	var need: float = float(Forester.WORKER_SLOTS) * Forester.MANA_PER_WORKER
+	while tribe.mana_rate() <= need:
+		tribe.add_unit(Brave.new())
+	tribe.tick(0.0)
 
 
 # --- Forester: planting ---------------------------------------------------------
@@ -67,7 +79,7 @@ func test_forester_plants_sapling() -> void:
 	var f: Forester = w.building_manager.place(
 		FORESTER_SCENE, w.tribe, Vector2i(60, 60), 0, true) as Forester
 	check(f != null and f.is_usable(), "pre-built forester is usable")
-	w.tribe.mana = 100000.0   # plenty for the worker upkeep
+	_fund_upkeep(w.tribe)   # population whose income pays the workers
 
 	var brave: Brave = w.unit_manager.spawn_unit(
 		BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(57, 60))) as Brave
@@ -106,22 +118,39 @@ func test_forester_mana_upkeep() -> void:
 		f.occupants.append(b)
 		braves.append(b)
 
-	w.tribe.mana = 10.0
+	# Phase 10c: upkeep is paid from the mana INCOME, not from a hoard. Give the
+	# tribe a population that earns more than the four workers cost.
+	var payers: Array[Brave] = []
+	var need: float = 4.0 * Forester.MANA_PER_WORKER
+	while w.tribe.mana_rate() <= need:
+		var payer: Brave = Brave.new()
+		payers.append(payer)
+		w.tribe.add_unit(payer)
+	w.tribe.tick(0.0)   # clear the per-tick upkeep claims
 	f._tick_active(1.0)
-	check(f._active_workers == 4, "all four workers active while mana lasts")
-	check_near(w.tribe.mana, 10.0 - 4.0 * Forester.MANA_PER_WORKER,
-		"4 workers drain their per-second upkeep")
+	check(f._active_workers == 4, "all four workers active while the income covers them")
+	check_near(w.tribe.free_upkeep_rate(), w.tribe.mana_rate() - need,
+		"their upkeep is booked against the income")
 
-	# Mana for exactly one upkeep left: just one worker can be paid this second.
-	w.tribe.mana = Forester.MANA_PER_WORKER
+	# Income for exactly one upkeep: only one worker can be paid.
+	for payer in payers.duplicate():
+		w.tribe.remove_unit(payer)
+		payers.erase(payer)
+		payer.free()
+		if w.tribe.mana_rate() < 2.0 * Forester.MANA_PER_WORKER:
+			break
+	w.tribe.tick(0.0)
 	f._tick_active(1.0)
-	check(f._active_workers == 1, "scarce mana staffs only one worker")
-	check_near(w.tribe.mana, 0.0, "the affordable worker's upkeep is spent")
+	check(f._active_workers == 1, "a scarce income staffs only one worker")
 
-	# No mana: no active workers, no planting.
-	w.tribe.mana = 0.0
+	# No income at all: no active workers, no planting.
+	for payer in payers:
+		w.tribe.remove_unit(payer)
+		payer.free()
+	payers.clear()
+	w.tribe.tick(0.0)
 	f._tick_active(1.0)
-	check(f._active_workers == 0, "no mana -> no active workers")
+	check(f._active_workers == 0, "no income -> no active workers")
 
 	for b in braves:
 		w.tribe.remove_unit(b)
@@ -146,7 +175,7 @@ func test_forester_eject_worker() -> void:
 	var w: Dictionary = _make_world()
 	var f: Forester = w.building_manager.place(
 		FORESTER_SCENE, w.tribe, Vector2i(60, 60), 0, true) as Forester
-	w.tribe.mana = 100000.0
+	_fund_upkeep(w.tribe)
 	var brave: Brave = _house_one_worker(w, f)
 	check(brave.forester_inside, "the worker is housed inside")
 	check(not (brave in w.unit_manager.units), "a housed worker is out of the live world")
@@ -164,7 +193,7 @@ func test_forester_destroy_releases_workers() -> void:
 	var w: Dictionary = _make_world()
 	var f: Forester = w.building_manager.place(
 		FORESTER_SCENE, w.tribe, Vector2i(60, 60), 0, true) as Forester
-	w.tribe.mana = 100000.0
+	_fund_upkeep(w.tribe)
 	var brave: Brave = _house_one_worker(w, f)
 	check(brave.forester_inside, "worker housed before destruction")
 
@@ -180,7 +209,7 @@ func test_forester_damaged_releases_workers() -> void:
 	var w: Dictionary = _make_world()
 	var f: Forester = w.building_manager.place(
 		FORESTER_SCENE, w.tribe, Vector2i(60, 60), 0, true) as Forester
-	w.tribe.mana = 100000.0
+	_fund_upkeep(w.tribe)
 	var brave: Brave = _house_one_worker(w, f)
 	# Damage past stage 1 (>= 30%): the forester becomes unusable and ejects.
 	f.take_damage(int(float(f.max_health) * 0.4))

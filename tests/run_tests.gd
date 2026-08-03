@@ -54,7 +54,16 @@ func _initialize() -> void:
 			all_errors.append("%s: Datei konnte nicht geladen werden (Parse-Fehler?)" % path)
 			total_failed += 1
 			continue
+		# A script that FAILED to compile still loads as a GDScript object, but
+		# new() returns null — and iterating a null instance used to send the
+		# runner into a hang that looked like "the suite got slow" (it cost two
+		# ten-minute timeouts before it was tracked down). Fail it loudly.
 		var instance: Object = script.new()
+		if instance == null:
+			all_errors.append("%s: konnte nicht instanziiert werden (Parse-Fehler)" % path)
+			total_failed += 1
+			print("  [FAIL] %s  (Parse-Fehler — Datei uebersprungen)" % path)
+			continue
 		var file_passed: int = 0
 		var file_failed: int = 0
 		var file_start: int = Time.get_ticks_msec()

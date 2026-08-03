@@ -13,7 +13,7 @@ class_name Unit extends Node3D
 ## UnitRenderer (one MultiMesh draw call). The unit only keeps its animation
 ## state (anim_base_name + anim_start_ms) and render cache fields.
 
-## Later phases fill in the behaviour for GATHER/PRAY/BUILD/PANIC/CAST/THROWN.
+## Later phases fill in the behaviour for GATHER/BUILD/PANIC/CAST/THROWN.
 ## SIT = pacified by an enemy preacher (conversion, 5c); ROLL = tumbling
 ## downhill / knocked over (5d).
 ## FORESTER = assigned to a forester (housed inside, or briefly out planting a
@@ -26,7 +26,7 @@ class_name Unit extends Node3D
 ## GARRISON = walking to / stationed inside an own watchtower (phase 7h):
 ## while approaching the unit is a normal walker; once admitted it is removed
 ## from the world (protected reserve), driven by the tower.
-enum State {IDLE, MOVE, GATHER, PRAY, BUILD, ATTACK, TRAIN, PANIC, CAST, THROWN, DEAD, SIT, ROLL, FORESTER, CREW, RAID, GARRISON}
+enum State {IDLE, MOVE, GATHER, BUILD, ATTACK, TRAIN, PANIC, CAST, THROWN, DEAD, SIT, ROLL, FORESTER, CREW, RAID, GARRISON}
 
 signal died(unit: Unit)
 ## Fired after this unit switched tribes (preacher conversion) — the
@@ -1343,11 +1343,6 @@ func get_remaining_path() -> PackedVector3Array:
 	return points
 
 
-## True while this unit generates the prayer mana bonus (Brave overrides).
-func is_praying() -> bool:
-	return false
-
-
 # --- Combat (phase 5b) --------------------------------------------------------
 
 ## Applies damage. `attacker` (untyped: may be a freed instance) drives brave
@@ -1819,7 +1814,7 @@ func _resume_after_stumble(prev: int) -> void:
 		State.IDLE, State.DEAD, State.ROLL, State.THROWN, State.SIT:
 			_set_state(State.IDLE)
 		_:
-			# Worker/pray/train/crew/garrison/panic sub-states: their fields
+			# Worker/train/crew/garrison/panic sub-states: their fields
 			# were preserved, the state tick carries on where it left off.
 			_set_state(prev as State)
 

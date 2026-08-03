@@ -66,8 +66,8 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
 
 | Einheit | Rolle |
 |---|---|
-| **Schamanin** | Wichtigste Einheit, einzige Zauberwirkerin. **HP = 4 × Brave**, **Nahkampfschaden = 2 × Brave**. Stirbt sie, **respawnt** sie nach einer Wartezeit am **Reinkarnationsplatz** (Reincarnation Site); der Stamm des Tötenden erhält einen **einmaligen 15-%-Manaboost in Ladungen**. Pro Stamm genau eine. |
-| **Brave (Gefolgsmann)** | Basis-Einheit. Sammelt **passiv Holz**, baut Gebäude aus, generiert durch **Beten Mana**. Wird von Hütten gespawnt. |
+| **Schamanin** | Wichtigste Einheit, einzige Zauberwirkerin. **HP = 4 × Brave**, **Nahkampfschaden = 2 × Brave**. Stirbt sie, **respawnt** sie nach einer Wartezeit am **Reinkarnationsplatz** (Reincarnation Site); der Stamm des Tötenden bekommt einmalig **10 % der minütlichen Manaproduktion ihres Stammes** auf seine aktiven Aufladeraten verteilt. Pro Stamm genau eine. |
+| **Brave (Gefolgsmann)** | Basis-Einheit. Sammelt **passiv Holz** und baut Gebäude aus. Wird von Hütten gespawnt. |
 | **Krieger** | Nahkampf-Einheit. Ausbildung in der **Kaserne** (Krieger-Trainingslager). |
 | **Feuerkrieger** | Fernkampf-Einheit (Feuerbälle). Ausbildung im **Feuertempel** (Feuerkrieger-Trainingslager). |
 | **Prediger** | **Konvertiert** feindliche Einheiten zum eigenen Stamm. Ausbildung im **Tempel**. Mehrere Prediger verteilen sich auf verschiedene Ziele; **Einheiten in Bekehrung sind kein gültiges Ziel** für Nah-/Fernkampf (Katapult ausgenommen). |
@@ -116,11 +116,21 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
 
 ## 6. Magiesystem
 
-- **Mana** wird **passiv** generiert; die Rate skaliert mit der **eigenen Bevölkerungszahl**
-  (je mehr Leute, desto schneller lädt Mana; betende Braves tragen zusätzlich bei).
-- **Ladungssystem (wie im Original):** Mana wird automatisch in **Zauber-Ladungen**
-  umgewandelt (je Zauber `charge_cost` und `max_charges`); Casts verbrauchen gespeicherte
-  Ladungen, es gibt keinen separaten Cooldown. Anzeige als Ladungs-Pips in der Zauberleiste.
+- **Mana** wird **passiv** generiert; die Rate skaliert allein mit der **eigenen
+  Bevölkerungszahl** (je mehr Leute, desto schneller lädt Mana).
+- **Ladungssystem:** Mana wird automatisch in **Zauber-Ladungen** umgewandelt (je Zauber
+  `charge_cost` und `max_charges`); Casts verbrauchen gespeicherte Ladungen, es gibt
+  keinen separaten Cooldown. Anzeige als Ladungs-Pips **plus Ladebalken** je Zauber.
+- **Alle aktiven Zauber laden gleichzeitig** und teilen sich das Einkommen zu gleichen
+  Teilen. Da die Zauber unterschiedlich viel pro Ladung kosten, ergeben sich daraus
+  von selbst individuelle Aufladezeiten — **billige Zauber sind schneller wieder da**.
+- **Zauber sind per Rechtsklick abschaltbar.** Ein abgeschalteter Zauber wird nicht mehr
+  geladen (sein Anteil geht an die übrigen), seine **gespeicherten Ladungen bleiben
+  nutzbar** und sein angefangener Ladebalken bleibt erhalten. Zu Spielbeginn sind alle
+  Zauber aktiv. Ein **voller** Zauber wird ebenfalls nicht mehr geladen und kostet nichts.
+- **Kein Mana-Banking:** Einkommen, das keinen Abnehmer findet (alles voll oder
+  abgeschaltet), **verfällt**. Der Förster-Unterhalt wird vom Einkommen abgezogen,
+  bevor geladen wird.
 - **Zauberzeit 1,0 s für alle Zauber** (`Balance.SHAMAN_CAST_TIME`): In diesem Wind-up
   spricht die Schamanin die **Zauberformel** (`spell_voice_<id>`). Der Sound des Zaubers
   selbst (`spell_<id>`) kommt getrennt davon, erst **wenn der Effekt eintritt**

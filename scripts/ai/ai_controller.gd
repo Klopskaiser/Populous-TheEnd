@@ -23,8 +23,6 @@ const TICK_INTERVAL: float = 1.0
 const TARGET_WATCHTOWERS: int = 2
 ## Idle firewarriors kept mobile before any get garrisoned into a tower.
 const WATCHTOWER_MIN_MOBILE_FW: int = 2
-## Braves kept praying at the reincarnation site (mana income).
-const PRAY_BRAVES: int = 4
 ## Braves sent into training per tick (at most), spread over the camps by
 ## deficit so all three unit kinds get trained.
 const TRAIN_BATCH: int = 3
@@ -190,9 +188,8 @@ func tick_ai() -> void:
 		state = next
 	if _rebuild_ticks > 0:
 		_rebuild_ticks -= 1
-	# Economy and magic run in EVERY state: pray, keep building toward the
+	# Economy and magic run in EVERY state: keep building toward the
 	# full base, cast spells whenever enemies are near the shaman.
-	_keep_praying()
 	_tick_build(snap)
 	_staff_foresters()
 	_staff_workshops()
@@ -577,7 +574,7 @@ func _detect_threat() -> Dictionary:
 
 
 ## Defends the village when there is a fighting chance: army + shaman move in
-## (attack-move engages), and when they alone are outnumbered, praying/idle
+## (attack-move engages), and when they alone are outnumbered, idle
 ## braves join as militia (explicit attack order — braves have no aggro).
 ## Hopeless odds: no suicide charge, the shaman keeps casting from the base.
 func _tick_defend(threat: Dictionary) -> void:
@@ -606,14 +603,14 @@ func _tick_defend(threat: Dictionary) -> void:
 			commands.order_attack(braves, enemy)
 
 
-## Braves available as militia: idle or praying (never pulls workers off
+## Braves available as militia: idle only (never pulls workers off
 ## construction sites or trainees out of the queue).
 func _militia_braves() -> Array[Unit]:
 	var militia: Array[Unit] = []
 	for unit in tribe.units:
 		if not is_instance_valid(unit) or not (unit is Brave):
 			continue
-		if unit.state == Unit.State.IDLE or unit.state == Unit.State.PRAY:
+		if unit.state == Unit.State.IDLE:
 			militia.append(unit)
 	return militia
 
@@ -785,32 +782,6 @@ func _densest_cluster(enemies: Array[Unit]) -> Vector3:
 
 
 # --- Shared helpers ------------------------------------------------------------------
-
-## Keeps PRAY_BRAVES braves praying at the reincarnation site (mana income).
-func _keep_praying() -> void:
-	var site: Building = null
-	for building in tribe.buildings:
-		if is_instance_valid(building) and building is ReincarnationSite \
-				and building.is_usable():
-			site = building
-			break
-	if site == null:
-		return
-	var praying: int = 0
-	for unit in tribe.units:
-		if is_instance_valid(unit) and unit.state == Unit.State.PRAY:
-			praying += 1
-	if praying >= PRAY_BRAVES:
-		return
-	var idle: Array[Unit] = _idle_braves()
-	var batch: Array[Unit] = []
-	for unit in idle:
-		if batch.size() >= PRAY_BRAVES - praying:
-			break
-		batch.append(unit)
-	if not batch.is_empty():
-		commands.order_pray(batch, site)
-
 
 func _idle_braves() -> Array[Unit]:
 	var idle: Array[Unit] = []

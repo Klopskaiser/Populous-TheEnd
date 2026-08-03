@@ -71,16 +71,9 @@ func test_mana_formula() -> void:
 		var brave: Brave = Brave.new()
 		braves.append(brave)
 		tribe.add_unit(brave)
-	# Two of them are praying (state + arrived flag as set by _tick_pray).
-	for i in range(2):
-		braves[i].state = Unit.State.PRAY
-		braves[i]._working = true
-	check(tribe.praying_braves() == 2, "praying_braves counts working PRAY braves")
-
-	tribe.tick(1.0)
-	check_near(tribe.mana,
-		5.0 * Tribe.MANA_BASE_RATE + 2.0 * Tribe.MANA_PRAY_BONUS,
-		"mana after tick(1.0) matches population * base + praying * bonus")
+	# Phase 10c: praying is gone; the rate is purely population-driven.
+	check_near(tribe.mana_rate(), 5.0 * Tribe.MANA_BASE_RATE,
+		"the income is population x base rate")
 
 	var big_tribe: Tribe = Tribe.new(1)
 	var extra: Array[Brave] = []
@@ -88,11 +81,10 @@ func test_mana_formula() -> void:
 		var brave: Brave = Brave.new()
 		extra.append(brave)
 		big_tribe.add_unit(brave)
-	big_tribe.tick(1.0)
-	check_near(big_tribe.mana, 10.0 * Tribe.MANA_BASE_RATE,
-		"10 units without praying yield exactly the base rate")
-	check(big_tribe.mana > 5.0 * Tribe.MANA_BASE_RATE,
-		"more population means more base mana")
+	check_near(big_tribe.mana_rate(), 10.0 * Tribe.MANA_BASE_RATE,
+		"10 units yield exactly the base rate")
+	check(big_tribe.mana_rate() > tribe.mana_rate(),
+		"more population means more mana income")
 
 	for brave in braves:
 		brave.free()
@@ -711,15 +703,15 @@ func test_idle_braves_are_recruited() -> void:
 	var hut: Hut = w.commands.place_building(w.tribe, HUT_SCENE, Vector2i(60, 60)) as Hut
 	var idle_brave: Brave = w.unit_manager.spawn_unit(
 		BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(55, 60))) as Brave
-	var praying: Brave = w.unit_manager.spawn_unit(
+	var busy: Brave = w.unit_manager.spawn_unit(
 		BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(56, 60))) as Brave
-	praying.state = Unit.State.PRAY   # busy braves must not be drafted
+	busy.state = Unit.State.TRAIN   # busy braves must not be drafted
 	w.unit_manager.tick(TICK)         # refresh the spatial hash
 
 	bm.tick(BuildingManager.RECRUIT_INTERVAL + 0.1)
 	check(idle_brave.state == Unit.State.BUILD, "idle brave is recruited to the site")
 	check(idle_brave.job == hut, "recruited brave points at the job")
-	check(praying.state == Unit.State.PRAY, "busy braves are left alone")
+	check(busy.state == Unit.State.TRAIN, "busy braves are left alone")
 	_free_world(w)
 
 

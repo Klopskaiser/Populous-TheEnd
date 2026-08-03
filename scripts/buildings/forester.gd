@@ -188,14 +188,17 @@ func _tick_active(delta: float) -> void:
 	if filled == 0:
 		_active_workers = 0
 		return
-	# Mana upkeep: staff as many workers as the tribe can pay for this tick.
+	# Mana upkeep: staff as many workers as the tribe's INCOME can sustain.
+	# Since phase 10c there is no mana hoard to burn through — the upkeep is a
+	# claim on the income stream, so it competes directly with spell charging
+	# (their intended cost) and several foresters cannot all claim the same
+	# mana. A tribe that earns too little simply runs fewer workers.
 	var active: int = filled
 	if tribe == null:
 		active = 0
 	elif delta > 0.0:
-		var full_cost: float = MANA_PER_WORKER * float(filled) * delta
-		if tribe.mana < full_cost:
-			active = clampi(int(tribe.mana / (MANA_PER_WORKER * delta)), 0, filled)
+		var granted: float = tribe.claim_upkeep_rate(MANA_PER_WORKER * float(filled))
+		active = clampi(int(granted / MANA_PER_WORKER + 0.0001), 0, filled)
 		tribe.consume_mana(MANA_PER_WORKER * float(active) * delta)
 	_active_workers = active
 	if active <= 0:

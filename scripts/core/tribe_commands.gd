@@ -199,20 +199,6 @@ func order_build(units: Array[Unit], building: Building) -> void:
 		order_move(movers, building.center_world())
 
 
-## Braves pray at the site (mana bonus); non-braves just walk there.
-func order_pray(units: Array[Unit], site: Building) -> void:
-	var movers: Array[Unit] = []
-	for unit in units:
-		if unit.state == Unit.State.DEAD:
-			continue
-		if unit is Brave:
-			(unit as Brave).order_pray(site)
-		else:
-			movers.append(unit)
-	if not movers.is_empty():
-		order_move(movers, site.center_world())
-
-
 ## Braves repair the damaged (finished) building; non-braves just walk there.
 ## The wood cost — floor(damage fraction * wood_cost) — is fetched/absorbed by
 ## the same pipeline as construction wood.
@@ -260,6 +246,19 @@ func order_train(building: TrainingBuilding, units: Array[Unit]) -> void:
 		if unit is Brave and unit.state != Unit.State.DEAD \
 				and unit.tribe_id == building.tribe_id:
 			(unit as Brave).order_train(building)
+
+
+## Switches a spell's charging on or off (right-click on its button in the
+## spell bar). Stored charges stay castable and the partial fill is kept — only
+## the mana income stops flowing into it, freeing that share for the others.
+func set_spell_active(tribe: Tribe, spell_id: StringName, value: bool) -> bool:
+	if tribe == null:
+		return false
+	var spell: Spell = tribe.get_spell(spell_id)
+	if spell == null:
+		return false
+	tribe.set_spell_active(spell_id, value)
+	return true
 
 
 ## Orders the tribe's shaman to cast `spell_id` at the target position. Fails

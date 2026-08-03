@@ -14,7 +14,7 @@ const SHAMAN_MELEE_STRENGTH: float = Balance.SHAMAN_MELEE_STRENGTH
 const CAST_TIME: float = Balance.SHAMAN_CAST_TIME
 ## Killing an enemy shaman grants the killer's tribe bonus mana worth this
 ## share of its total charge capacity, paid straight into spell charges.
-const KILL_BONUS_SHARE: float = Balance.SHAMAN_KILL_BONUS_SHARE
+const KILL_BONUS_SHARE: float = Balance.SHAMAN_KILL_MANA_MINUTE_SHARE
 
 var pending_spell: Spell = null
 var pending_target: Vector3 = Vector3.ZERO
@@ -232,14 +232,17 @@ func _die() -> void:
 	super._die()
 
 
-## Pays the one-time mana boost to the killer's tribe (15% of ITS total charge
-## capacity, converted straight into charges). No bonus without a (living)
-## attacker — e.g. drowning after a self-inflicted roll.
+## Pays the one-time mana boost to the killer's tribe: 10 % of the MINUTE
+## production of the tribe that just lost its shaman, spread over the killer's
+## active charge rates (phase 10c — it used to be 15 % of the killer's own
+## charge capacity, which said nothing about the value of the kill). Killing
+## the shaman of a big tribe is worth accordingly more. No bonus without a
+## (living) attacker — e.g. drowning after a self-inflicted roll.
 func _grant_kill_bonus() -> void:
 	var killer = last_attacker
 	if killer == null or not is_instance_valid(killer):
 		return
 	var killer_tribe: Tribe = killer.tribe
-	if killer_tribe == null or killer_tribe == tribe:
+	if killer_tribe == null or killer_tribe == tribe or tribe == null:
 		return
-	killer_tribe.grant_bonus_mana(killer_tribe.charge_capacity_mana() * KILL_BONUS_SHARE)
+	killer_tribe.grant_bonus_mana(tribe.mana_rate() * 60.0 * KILL_BONUS_SHARE)

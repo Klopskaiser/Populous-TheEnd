@@ -28,7 +28,9 @@ const TAB_CONTENT_HEIGHT: float = 160.0
 const TAB_CREW: int = 3
 const MANA_SEGMENTS: int = 20
 ## Mana value that fills the whole segmented bar (display only).
-const MANA_DISPLAY_CAP: float = 1000.0
+## Full mana bar at this INCOME (mana/s) — with MANA_BASE_RATE 0.1 that is a
+## population of 300. There is no stored mana to show any more (phase 10c).
+const MANA_RATE_DISPLAY_CAP: float = 30.0
 const FOLLOWER_INTERVAL: float = 0.3
 ## "Holz" counts wood in piles within this radius of any of the player's own
 ## buildings (delivered/stacked wood at the base), not the whole map.
@@ -582,7 +584,8 @@ func _make_spell_cell(entry: Dictionary) -> Control:
 
 	var b: Button = Button.new()
 	b.icon = UiTheme.icon(entry["icon"])
-	b.tooltip_text = "%s  [%s]" % [entry["name"], entry.get("hotkey", "")]
+	b.tooltip_text = "%s  [%s]\nRechtsklick: Aufladen an/aus" \
+		% [entry["name"], entry.get("hotkey", "")]
 	b.disabled = true   # enabled by set_spell_state once a charge is stored
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	UiTheme.style_button(b)
@@ -590,8 +593,54 @@ func _make_spell_cell(entry: Dictionary) -> Control:
 	b.pressed.connect(func() -> void: _on_spell_pressed(spell_id))
 	cell.add_child(b)
 
-	_spell_ui[entry["id"]] = {"button": b, "pips": pips}
+	# Charge bar (phase 10c): the fill toward the NEXT charge. Every active
+	# spell charges at once now, so each one needs its own progress — a single
+	# shared pip could no longer show it.
+	var bar_bg: ColorRect = ColorRect.new()
+	bar_bg.custom_minimum_size = Vector2(0, 3)
+	bar_bg.color = _pip_empty_color()
+	bar_bg.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var bar_fill: ColorRect = ColorRect.new()
+	bar_fill.color = UiTheme.GOLD
+	bar_fill.anchor_left = 0.0
+	bar_fill.anchor_top = 0.0
+	bar_fill.anchor_right = 0.0
+	bar_fill.anchor_bottom = 1.0
+	bar_fill.offset_left = 0.0
+	bar_fill.offset_top = 0.0
+	bar_fill.offset_right = 0.0
+	bar_fill.offset_bottom = 0.0
+	bar_bg.add_child(bar_fill)
+	cell.add_child(bar_bg)
+
+	# Right-click anywhere on the cell toggles the spell's charging. It sits on
+	# the CELL, not the button: a disabled button (no charge stored yet) takes
+	# no input at all, and an enabled one only accepts left-clicks — either way
+	# the right-click lands here.
+	cell.gui_input.connect(func(event: InputEvent) -> void:
+		_on_spell_cell_input(event, spell_id))
+
+	_spell_ui[entry["id"]] = {"button": b, "pips": pips, "bar": bar_fill,
+		"cell": cell}
 	return cell
+
+
+## Right-click on a spell cell: stop/resume paying mana into it. Stored charges
+## stay castable and the partial fill is kept (Tribe.set_spell_active).
+func _on_spell_cell_input(event: InputEvent, spell_id: StringName) -> void:
+	if not (event is InputEventMouseButton):
+		return
+	var mb: InputEventMouseButton = event
+	if mb.button_index != MOUSE_BUTTON_RIGHT or not mb.pressed:
+		return
+	var player: Tribe = _player_tribe()
+	if player == null or _tribe_commands == null:
+		return
+	var spell: Spell = player.get_spell(spell_id)
+	if spell == null:
+		return
+	_tribe_commands.set_spell_active(player, spell_id, not spell.active)
+	_refresh_spells()
 
 
 func _build_followers_tab() -> Control:
@@ -1172,13 +1221,21 @@ func _set_wood(amount: int) -> void:
 		_wood_label.text = "Holz: %d" % amount
 
 
-func _set_mana(amount: float) -> void:
-	var filled: int = mana_segments(amount, MANA_DISPLAY_CAP, MANA_SEGMENTS)
+## Mana is no longer banked (phase 10c) — a stored amount would always read 0.
+## The bar and the label therefore show the INCOME and where it goes: the rate
+## per second and how many spells are currently sharing it.
+func _set_mana(_amount: float) -> void:
+	var player: Tribe = _player_tribe()
+	var rate: float = player.mana_rate() if player != null else 0.0
+	var takers: int = player.active_spell_count() if player != null else 0
+	var filled: int = mana_segments(rate, MANA_RATE_DISPLAY_CAP, MANA_SEGMENTS)
 	for i in range(_mana_segments.size()):
 		_mana_segments[i].color = _mana_fill_color() if i < filled else _mana_empty_color()
 	if _mana_label != null:
-		var rate: float = _tribes[_player_id].mana_rate() if _player_id < _tribes.size() else 0.0
-		_mana_label.text = "Mana: %d  (+%.1f/s)" % [int(amount), rate]
+		if takers > 0:
+			_mana_label.text = "Mana: +%.1f/s  auf %d Zauber" % [rate, takers]
+		else:
+			_mana_label.text = "Mana: +%.1f/s  (verfällt)" % rate
 
 
 func _refresh_tribe_bars() -> void:
@@ -1248,7 +1305,7 @@ func _refresh_spells() -> void:
 	var alive: bool = _player_shaman_alive()
 	for spell in player.spells:
 		set_spell_state(spell.id, spell.charges, spell.max_charges,
-			spell.charge_progress, alive and spell.charges > 0)
+			spell.charge_progress, alive and spell.charges > 0, spell.active)
 
 
 func _on_spell_pressed(spell_id: StringName) -> void:
@@ -1318,7 +1375,7 @@ func _set_portrait_anim(anim: StringName) -> void:
 # --- Spell display API ---------------------------------------------------------
 
 func set_spell_state(id: StringName, charges: int, max_charges: int,
-		charge_progress: float, castable: bool) -> void:
+		charge_progress: float, castable: bool, active: bool = true) -> void:
 	if not _spell_ui.has(id):
 		return
 	var ui: Dictionary = _spell_ui[id]
@@ -1335,6 +1392,14 @@ func set_spell_state(id: StringName, charges: int, max_charges: int,
 		else:
 			pip.color = _pip_empty_color()
 	(ui["button"] as Button).disabled = not castable
+	# Charge bar: how far the NEXT charge has filled. A switched-off spell
+	# keeps its bar (the progress is preserved) but the cell is dimmed, so it
+	# reads as "paused", not as "empty".
+	var bar: ColorRect = ui["bar"]
+	bar.anchor_right = progress
+	bar.offset_right = 0.0
+	bar.color = UiTheme.GOLD if active else _pip_empty_color().lerp(UiTheme.GOLD, 0.4)
+	(ui["cell"] as Control).modulate = Color.WHITE if active else Color(0.55, 0.55, 0.55)
 
 
 # --- Button actions ---------------------------------------------------------

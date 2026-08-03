@@ -9,8 +9,6 @@ class_name Brave extends Unit
 ##   gathered when a construction site needs it.
 ## - Loose chopping (State.GATHER, right-click on a tree): fell the tree,
 ##   drop the wood as a pile on the spot, continue with nearby trees.
-## - PRAY (State.PRAY): walk to the reincarnation site; while nearby,
-##   is_praying() is true and the tribe's mana tick gets the prayer bonus.
 ##
 ## All logic runs in tick(delta) and works without the scene tree. References
 ## to trees/piles are kept untyped because they may be freed by other workers.
@@ -69,7 +67,7 @@ var carried_wood: int = 0
 var task_cell: Vector2i = Vector2i(-1, -1)
 var task_tree: Object = null   # untyped: may be freed by another worker
 var task_pile: Object = null   # untyped: may be freed
-var target_building: Building = null   # pray site
+var target_building: Building = null   # forester / training site
 ## Training building this brave queues at (State.TRAIN). The building assigns a
 ## queue slot each tick; train_reached_slot flips true once the brave stands in
 ## it, and the building admits the front brave when its bay is free.
@@ -128,7 +126,7 @@ func unit_kind() -> StringName:
 ## Before the brave starts fighting (retaliation or an explicit attack order),
 ## release its worker claims / drop carried wood so nothing is left stranded.
 func _on_combat_interrupt() -> void:
-	if state == State.GATHER or state == State.BUILD or state == State.PRAY \
+	if state == State.GATHER or state == State.BUILD \
 			or state == State.TRAIN or state == State.FORESTER:
 		_interrupt_tasks()
 
@@ -140,10 +138,6 @@ func _on_stumble() -> void:
 	if carried_wood > 0 and wood_pile_manager != null:
 		wood_pile_manager.deposit(position, carried_wood)
 		carried_wood = 0
-
-
-func is_praying() -> bool:
-	return state == State.PRAY and _working
 
 
 ## Wood this worker expects to take from its claimed tree, counted by the
@@ -159,7 +153,7 @@ func claimed_tree_yield() -> int:
 ## Move orders interrupt any running task (claims are released, carried wood
 ## is dropped as a pile).
 func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = false) -> void:
-	if state == State.GATHER or state == State.BUILD or state == State.PRAY:
+	if state == State.GATHER or state == State.BUILD:
 		_interrupt_tasks()
 	super.order_move(target, queue_up, aggressive)
 
@@ -300,14 +294,6 @@ func leave_workshop() -> void:
 	_stop_all()
 
 
-func order_pray(site: Building) -> void:
-	if not can_take_orders():
-		return
-	_interrupt_tasks()
-	target_building = site
-	_set_state(State.PRAY)
-
-
 ## Queue up at a training building to be trained into a combat unit. The building
 ## assigns a slot each tick and admits the front brave when its bay is free.
 func order_train(building: TrainingBuilding) -> void:
@@ -405,8 +391,6 @@ func _tick_state(delta: float) -> void:
 				_tick_loose_chop(delta)
 		State.BUILD:
 			_tick_job(delta)
-		State.PRAY:
-			_tick_pray(delta)
 		State.TRAIN:
 			_tick_train(delta)
 		State.FORESTER:
@@ -1019,19 +1003,6 @@ func _next_loose_tree() -> bool:
 	return true
 
 
-# --- Praying ---------------------------------------------------------------------------
-
-func _tick_pray(delta: float) -> void:
-	if not is_instance_valid(target_building):
-		_stop_all()
-		return
-	if not _seek(target_building.center_world(), ReincarnationSite.PRAY_RADIUS, delta):
-		return
-	_set_working(true)
-	_face_toward(target_building.center_world())
-	# Praying itself is passive: Tribe.tick() counts is_praying() braves.
-
-
 # --- Training ----------------------------------------------------------------------------
 
 ## Walks to the queue slot the building assigned; flags train_reached_slot while
@@ -1257,7 +1228,7 @@ func _face_toward(target_pos: Vector3) -> void:
 
 ## Sub-state animations: chopping/building use the attack frames, flattening
 ## uses the hop-driven jump frames (arms up in the air, down on landing),
-## praying stands (idle), walking phases use walk.
+## walking phases use walk.
 func _anim_base() -> StringName:
 	match state:
 		State.BUILD:
@@ -1270,8 +1241,6 @@ func _anim_base() -> StringName:
 			if _working:
 				return &"attack"
 			return _carry_or(&"walk" if _has_path() else &"idle")
-		State.PRAY:
-			return &"idle" if _working else (&"walk" if _has_path() else &"idle")
 		State.FORESTER:
 			if _forester_phase == ForesterPhase.KNEEL:
 				return &"attack"   # kneel/plant placeholder (crouch action)

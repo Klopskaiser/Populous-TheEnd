@@ -8,7 +8,7 @@ class_name SelectionManager extends Control
 ## - Left drag: box select via rect.has_point(unproject) + is_position_behind
 ##   guard. The drag rect is drawn in _draw().
 ## - Right click: raycast -> context command via TribeCommands: tree = gather,
-##   own construction site = build, own reincarnation site = pray, otherwise
+##   own construction site = build, otherwise
 ##   move (scattered formation offsets so units do not stack).
 ##   Shift+right-click appends a waypoint. Key P toggles patrol.
 ## - While the BuildMenu is in placement mode, all mouse input is ignored here.
@@ -640,7 +640,7 @@ func _command_move(screen_pos: Vector2, queue_up: bool, aggressive: bool = false
 		return
 
 	# An armed attack-move is always a march order — context commands
-	# (chop/build/pray/train) would be surprising with the attack cursor up.
+	# (chop/build/train) would be surprising with the attack cursor up.
 	# Shift+right-click QUEUES the context command after the waypoint route.
 	if not aggressive and _tribe_commands != null and _dispatch_context_command(hit, queue_up):
 		return
@@ -832,7 +832,7 @@ func _dispatch_own_raided_building(building: Building) -> bool:
 
 
 ## Tree -> gather, own construction site -> build, own reincarnation site ->
-## pray, forester/workshop/watchtower -> staff/garrison. `queue_up` (Shift)
+## forester/workshop/watchtower -> staff/garrison. `queue_up` (Shift)
 ## QUEUES the command after the current waypoint route instead of running it now
 ## (the unit walks its waypoints, then enters). Returns false when the click
 ## should be a plain move order.
@@ -904,16 +904,14 @@ func _building_is_actionable(building: Building) -> bool:
 
 
 ## Issues the context command for `units` on an own building (construction site
-## -> build, reincarnation site -> pray, forester/workshop -> staff, watchtower
-## -> garrison, training building -> train, otherwise damaged -> repair).
+## -> build, forester/workshop -> staff, watchtower -> garrison, training
+## building -> train, otherwise damaged -> repair).
 func _apply_building_command(units: Array[Unit], building: Building) -> void:
 	if building.under_construction:
 		_tribe_commands.order_build(units, building)
 		return
 	if building.is_usable():
-		if building is ReincarnationSite:
-			_tribe_commands.order_pray(units, building)
-		elif building is Forester:
+		if building is Forester:
 			_tribe_commands.order_forester(units, building)
 			building.flash_ring()
 		elif building is Workshop:

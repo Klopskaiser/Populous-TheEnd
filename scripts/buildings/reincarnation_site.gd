@@ -1,16 +1,13 @@
 class_name ReincarnationSite extends Building
 
-## Reincarnation Site: prayer place for Braves (they count as praying_braves
-## for the mana bonus while nearby) and the shaman's respawn location. Exactly
-## one per tribe, pre-placed at match start. While the tribe's shaman is dead,
+## Reincarnation Site: the shaman's respawn location (praying was dropped as
+## a feature in phase 10c). Exactly one per tribe, pre-placed at match start. While the tribe's shaman is dead,
 ## the site counts down respawn_timer and then spawns exactly one new shaman
 ## at its edge. No site (destroyed) or a damaged site (not usable) -> no
 ## respawn: losing it is a real risk.
 
 const WOOD_COST: int = 0
 const FOOTPRINT: Vector2i = Balance.REINCARNATION_SITE_FOOTPRINT
-## Radius around the centre in which a brave counts as praying.
-const PRAY_RADIUS: float = 5.0
 ## Seconds between the shaman's death and her reincarnation.
 const RESPAWN_TIME: float = Balance.SHAMAN_RESPAWN_TIME
 

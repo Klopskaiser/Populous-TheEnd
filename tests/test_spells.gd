@@ -1,7 +1,7 @@
 extends TestBase
 
-## Headless tests for phase 6: the spell framework (charge system, round-robin
-## mana conversion, cast flow via the shaman) and the shaman kill bonus.
+## Headless tests for phase 6: the spell framework (charge system, parallel
+## mana distribution, cast flow via the shaman) and the shaman kill bonus.
 ## Spell-effect tests (landbridge, fireball, ...) are added per spell.
 
 const TICK: float = 0.1
@@ -95,58 +95,101 @@ func test_lava_surge_ignites_trees() -> void:
 
 # --- Charge system -------------------------------------------------------------
 
-func test_no_charge_without_enough_mana() -> void:
+func test_partial_fill_is_shown_before_the_first_charge() -> void:
 	var tribe: Tribe = Tribe.new(0)
 	var spell: DummySpell = DummySpell.new(&"dummy", 10.0, 4)
 	tribe.set_spells([spell] as Array[Spell])
-	tribe.mana = 5.0
-	tribe.tick(0.0)
-	check(spell.charges == 0, "not enough mana -> no charge")
-	check_near(tribe.mana, 5.0, "mana untouched below the charge cost")
-	check_near(spell.charge_progress, 0.5, "partial fill shown on the pip")
+	tribe.grant_bonus_mana(5.0)
+	check(spell.charges == 0, "half the cost is not a charge yet")
+	check_near(spell.charge_progress, 0.5, "...but the bar shows the half fill")
 	check(not spell.cast(tribe, Vector3.ZERO, null), "cast without charge fails")
 	check(spell.executed == 0, "failed cast has no side effect")
 
 
-func test_charging_over_ticks_until_full() -> void:
+## Phase 10c: mana is a FLOW. A full spell takes nothing more, and income with
+## no taker left is discarded instead of piling up in a bank.
+func test_charging_stops_at_full_and_overflow_is_lost() -> void:
 	var tribe: Tribe = Tribe.new(0)
 	var spell: DummySpell = DummySpell.new(&"dummy", 10.0, 2)
 	tribe.set_spells([spell] as Array[Spell])
-	tribe.mana = 25.0
-	tribe.tick(0.0)
-	check(spell.charges == 2, "mana converts into charges up to max_charges")
-	check_near(tribe.mana, 5.0, "each conversion costs charge_cost")
-	tribe.mana += 20.0
-	tribe.tick(0.0)
-	check(spell.charges == 2, "full spell takes no more charges")
-	check_near(tribe.mana, 25.0, "surplus mana accumulates unused")
+	tribe.grant_bonus_mana(25.0)
+	check(spell.charges == 2, "mana fills the spell up to max_charges")
+	check_near(spell.charge_mana, 0.0, "a full spell carries no partial fill")
+	check_near(tribe.mana, 0.0, "the 5 that no longer fitted is gone, not banked")
+	tribe.grant_bonus_mana(20.0)
+	check(spell.charges == 2, "a full spell takes nothing more at all")
+	check_near(tribe.mana, 0.0, "and still nothing is banked")
 
 
-func test_round_robin_serves_spells_fairly() -> void:
+## The round-robin is gone: every active spell is fed AT THE SAME TIME with an
+## equal share, so the cheap one comes back sooner purely through its cost.
+func test_all_active_spells_charge_in_parallel() -> void:
 	var tribe: Tribe = Tribe.new(0)
 	var cheap: DummySpell = DummySpell.new(&"cheap", 10.0, 4)
-	var pricey: DummySpell = DummySpell.new(&"pricey", 20.0, 4)
-	# Install in reverse order: set_spells sorts cheapest first.
+	var pricey: DummySpell = DummySpell.new(&"pricey", 30.0, 4)
 	tribe.set_spells([pricey, cheap] as Array[Spell])
-	tribe.mana = 30.0
-	tribe.tick(0.0)
-	check(cheap.charges == 1 and pricey.charges == 1,
-		"one round serves both spells, cheapest first")
-	check_near(tribe.mana, 0.0, "all mana converted")
-	# Next round starts at the cheapest again...
-	tribe.mana = 10.0
-	tribe.tick(0.0)
-	check(cheap.charges == 2 and pricey.charges == 1,
-		"next round serves the cheap spell first")
-	# ...but the expensive spell is NOT starved: the pointer now waits on it
-	# until its cost has accumulated, instead of feeding the cheap one again.
-	tribe.mana += 10.0
-	tribe.tick(0.0)
-	check(cheap.charges == 2 and pricey.charges == 1,
-		"pointer waits on the expensive spell while mana is short")
-	tribe.mana += 10.0
-	tribe.tick(0.0)
-	check(pricey.charges == 2, "expensive spell gets its turn once affordable")
+	tribe.grant_bonus_mana(20.0)   # 10 each
+	check(cheap.charges == 1, "the cheap spell already has its first charge")
+	check(pricey.charges == 0, "the expensive one is only a third of the way")
+	check_near(pricey.charge_progress, 1.0 / 3.0, "...and shows exactly that")
+	tribe.grant_bonus_mana(40.0)   # 20 each -> cheap +2, pricey reaches 30
+	check(cheap.charges == 3, "cheap: three charges from 60 mana of income")
+	check(pricey.charges == 1, "expensive: one - same income, higher cost")
+
+
+## Switching a spell off frees its share for the others; its stored charges
+## stay castable and its partial fill is kept for when it is switched back on.
+func test_inactive_spell_stops_charging_but_keeps_progress() -> void:
+	var tribe: Tribe = Tribe.new(0)
+	var a: DummySpell = DummySpell.new(&"a", 10.0, 4)
+	var b: DummySpell = DummySpell.new(&"b", 10.0, 4)
+	tribe.set_spells([a, b] as Array[Spell])
+	tribe.grant_bonus_mana(10.0)   # 5 each
+	check_near(a.charge_progress, 0.5, "both are half full")
+	a.charges = 1                  # a stored charge to prove it survives
+	tribe.set_spell_active(&"a", false)
+	check(tribe.active_spell_count() == 1, "only one spell still takes mana")
+	tribe.grant_bonus_mana(10.0)   # all of it goes to b
+	check_near(a.charge_progress, 0.5, "the paused spell keeps its partial fill")
+	check(a.charges == 1, "...and its stored charge")
+	check(b.charges == 1, "the whole income went to the active spell")
+	check(a.cast(tribe, Vector3.ZERO, null), "a paused spell is still castable")
+	check(a.charges == 0, "the cast spent it")
+	check_near(a.charge_progress, 0.5, "the kept fill survives the cast too")
+	tribe.set_spell_active(&"a", true)
+	tribe.grant_bonus_mana(10.0)   # 5 each again
+	check(a.charges == 1,
+		"resumed where it left off: the kept 0.5 plus 0.5 completed a charge")
+
+
+## Every spell starts switched on (user spec).
+func test_spells_start_active() -> void:
+	var tribe: Tribe = Tribe.new(0)
+	tribe.set_spells(Spell.create_default_set())
+	for spell in tribe.spells:
+		check(spell.active, "%s starts active" % spell.id)
+	check(tribe.active_spell_count() == tribe.spells.size(), "all of them take mana")
+
+
+## With everything switched off the income has nowhere to go and is dropped -
+## there is no mana banking any more.
+func test_income_without_takers_is_discarded() -> void:
+	var tribe: Tribe = Tribe.new(0)
+	var spell: DummySpell = DummySpell.new(&"dummy", 10.0, 4)
+	tribe.set_spells([spell] as Array[Spell])
+	tribe.set_spell_active(&"dummy", false)
+	var braves: Array[Brave] = []
+	for i in range(10):
+		var brave: Brave = Brave.new()
+		braves.append(brave)
+		tribe.add_unit(brave)
+	check(tribe.mana_rate() > 0.0, "the tribe does produce mana")
+	for i in range(100):
+		tribe.tick(1.0)
+	check_near(tribe.mana, 0.0, "100 s of income with no taker leaves nothing")
+	check(spell.charges == 0, "and charges nothing")
+	for brave in braves:
+		brave.free()
 
 
 func test_cast_consumes_exactly_one_charge() -> void:
@@ -311,18 +354,43 @@ func test_spell_audio_names() -> void:
 
 # --- Shaman kill bonus ----------------------------------------------------------------
 
+## Phase 10c: the bonus is 10 % of the MINUTE production of the tribe that
+## lost its shaman, spread over the killer's active charge rates. Killing the
+## shaman of a big tribe is worth more than of a small one.
 func test_shaman_kill_grants_charge_bonus() -> void:
 	var w: Dictionary = _make_world()
 	var shaman: Unit = w.unit_manager.spawn_unit(SHAMAN_SCENE, 0, Vector3(30, 0, 30))
 	var killer: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 1, Vector3(31, 0, 30))
-	# Killer tribe capacity: 20 * 10 = 200 -> bonus 15% = 30 -> 1 charge + 10 mana.
-	var spell: DummySpell = DummySpell.new(&"dummy", 20.0, 10)
+	# Victim tribe: the shaman alone. Its minute production x 10 % is the bonus.
+	var expected: float = w.tribe0.mana_rate() * 60.0 \
+		* Balance.SHAMAN_KILL_MANA_MINUTE_SHARE
+	check(expected > 0.0, "the victim tribe does produce mana")
+	var spell: DummySpell = DummySpell.new(&"dummy", expected, 10)
 	w.tribe1.set_spells([spell] as Array[Spell])
 	shaman.take_damage(9999, killer)
 	check(shaman.state == Unit.State.DEAD, "shaman died")
-	check(spell.charges == 1, "kill bonus converted into a stored charge")
-	check_near(w.tribe1.mana, 10.0, "bonus remainder stays as mana")
+	check(spell.charges == 1, "the bonus is worth exactly one charge of that size")
+	check_near(w.tribe1.mana, 0.0, "nothing is banked")
 	_free_world(w)
+
+
+## The bigger the victim tribe, the fatter the reward.
+func test_shaman_kill_bonus_scales_with_the_victim_tribe() -> void:
+	var small: Tribe = Tribe.new(0)
+	var big: Tribe = Tribe.new(1)
+	var braves: Array[Brave] = []
+	for i in range(20):
+		var brave: Brave = Brave.new()
+		braves.append(brave)
+		big.add_unit(brave)
+	check(big.mana_rate() > small.mana_rate(), "the big tribe produces more")
+	var from_small: float = small.mana_rate() * 60.0 \
+		* Balance.SHAMAN_KILL_MANA_MINUTE_SHARE
+	var from_big: float = big.mana_rate() * 60.0 \
+		* Balance.SHAMAN_KILL_MANA_MINUTE_SHARE
+	check(from_big > from_small, "so its shaman is the more valuable kill")
+	for brave in braves:
+		brave.free()
 
 
 func test_shaman_death_without_attacker_grants_nothing() -> void:
