@@ -252,7 +252,16 @@ sowie `tests/test_siege.gd:685/702/1132` und `tests/test_airship.gd:369/408`
 
 ## Definition of Done
 
-- [ ] Testsuite grün, `--headless --quit` fehlerfrei
-- [ ] Perf-Kriterien erfüllt und Zahlen in PROGRESS.md dokumentiert
-- [ ] Manuelle Prüfung durch den Nutzer bestanden
-- [ ] Checkbox 10c in [00_overview.md](00_overview.md) abgehakt, Commit/Push
+- [x] Testsuite grün (3229), `--headless --quit` fehlerfrei
+- [x] Perf-Kriterien erfüllt und Zahlen in PROGRESS.md dokumentiert
+      (`proj` Ø ≤ 1,0 ms ✔; Gesamtlaufzeit im **verschränkten** A/B auf Parität —
+      die anfangs gemeldeten „+65 %" waren Maschinenlast, siehe PROGRESS.md)
+- [x] Manuelle Prüfung durch den Nutzer bestanden (2026-08-03)
+- [x] Checkbox 10c in [00_overview.md](00_overview.md) abgehakt, Commit/Push
+
+**Nachträglich hinzugekommen** (aus Nutzertests, alle in PROGRESS.md dokumentiert):
+Flughöhen-Deckel 8 m + Seitwärtsübertrag, Luftbonus 2× → +20 %, Ragdoll für in
+der Luft tödlich Getroffene, Feuerball-Beschleunigung gegen Luftziele,
+Weltgrenze als unsichtbare Mauer, Cast-Immunität der Schamanin, neues
+Zauber-Aufladesystem (parallel, abschaltbar, kein Banking, Beten entfällt),
+Zustands-Overlays ohne Schatten.
