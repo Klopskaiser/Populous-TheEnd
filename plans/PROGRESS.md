@@ -6642,9 +6642,9 @@ umgesetzter Block der Phase-10-Reihe (10b–10e liegen als Plandokumente bereit)
 Suite **2979/2979 grün** (davon 90 neu: `tests/test_drowning.gd` mit 12 Tests,
 Atlas-/Cast-Regressionen in `test_combat.gd`, `_drowning`-Zusicherungen an beiden
 Flutungstoden in `test_spells.gd`).
-**Offen:** manuelle Prüfung durch den Nutzer (Wasseroptik/Küstenlinie,
-Ertrinkanimation ohne treibende Leiche, `airborne`-Pose beim Tornado,
-Feuerrammen-Flamme, FPS-Vergleich).
+**Manuelle Prüfung am 2026-08-05 durch den Nutzer bestanden** („Ertrinken klappt")
+— damit ist Phase 10a abgeschlossen und die Checkbox in
+[00_overview.md](00_overview.md) abgehakt.
 
 ### Phase 10a — Nachbesserung Wasser nach Nutzertest (2026-08-02)
 
@@ -6871,11 +6871,17 @@ Warnungen), Suite **3068/3068 grün**, Output frei von `SCRIPT ERROR`. Neu:
 in `test_spells.gd` und 2 Sofort-Cast-Tests in `test_watchtower.gd`. Referenzlauf
 des unveränderten Stands (HEAD, eigener Worktree) lag bei 3024 — die Differenz
 deckt sich mit den 41 neuen Zusicherungen (± Drift aus Punkt 4).
-**Offen:** manuelle Prüfung durch den Nutzer. Sie ist **nur eingeschränkt
-möglich**, weil es weiterhin **keine Audiodateien** im Projekt gibt (`assets/audio/**`
-ist leer) — hörbar wird das Ganze erst mit eingelegten `spell_voice_<id>.ogg` /
-`spell_<id>.ogg`. Prüfbar ist bereits, dass sich die Zauberzeit von 1,0 s spürbar,
-aber nicht zäh anfühlt.
+**Manuelle Prüfung am 2026-08-05 durch den Nutzer bestanden** („Sound-Prio klappt")
+— Phase 10b ist abgeschlossen und in [00_overview.md](00_overview.md) abgehakt.
+
+**Die Einschränkung bleibt bestehen und ist kein erledigter Punkt:** es gibt
+weiterhin **keine Audiodateien** im Projekt (`assets/audio/**` ist leer, ebenso
+`assets/models/**`). Bestätigt ist damit das **Prioritäts- und Slot-Verhalten**
+(inkl. des behobenen Slot-Verwurf-Bugs) und dass sich die Zauberzeit von 1,0 s
+spürbar, aber nicht zäh anfühlt — **nicht** der Klang. Sobald echte
+`spell_voice_<id>.ogg` / `spell_<id>.ogg` eingelegt sind, ist ein Hör-Test
+nachzuholen (Zauberformel beim Cast-Beginn, Effektsound erst beim Einschlag,
+Verdrängung leiser Sounds durch Priorität 1).
 
 ---
 
