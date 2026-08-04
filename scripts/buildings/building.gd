@@ -654,13 +654,21 @@ func _eject_unit(u, killed: bool) -> void:
 		u.take_damage(EJECT_RANGED_DAMAGE)
 
 
-# --- Melee raiders / storm (phase 7g) --------------------------------------------
+# --- Attack targeting (phase 7g, generalised in 10g) ------------------------------
 
-## Whether ground units may assault this building (melee storm + firewarrior
-## fireballs). False for the reincarnation site: only SPELLS and CATAPULTS may
-## damage it — those go through apply_destruction_stages()/take_damage() and are
-## NOT gated by this flag.
-func is_assailable_by_units() -> bool:
+## Whether this building may be TARGETED by an attack at all — the one truth for
+## every path that picks a building to hit: ground units (melee storm +
+## firewarrior fire), crewed vehicles (catapult/fire-ram bombardment, both the
+## explicit order and the auto-scan), the airship deck crew, and the AI's spell
+## and attack-wave target choice. False only for the reincarnation site.
+##
+## Renamed from is_assailable_by_units() in 10g, because the old name invited
+## exactly the bug it was meant to prevent: it read as "units only", so the
+## vehicle and airship paths were never gated by it and happily bombarded the
+## invulnerable circle forever. DAMAGE is a separate, independent matter — the
+## circle no-ops take_damage()/apply_destruction_stages()/add_lava_contact()
+## itself (10d), so a spell landing on it is harmless regardless of this flag.
+func is_attackable() -> bool:
 	return true
 
 

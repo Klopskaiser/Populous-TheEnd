@@ -912,8 +912,16 @@ func _tick_defend(cache: TickCache, threat: Dictionary) -> void:
 			commands.order_attack(braves, enemy)
 
 
-## Nearest enemy building (to the base anchor); no buildings left -> nearest
+## Nearest ATTACKABLE enemy building (to the base anchor); none left -> nearest
 ## enemy unit; nothing -> INF.
+##
+## The is_attackable() filter is what makes the AI pursue the actual win
+## condition (10g): the enemy reincarnation circle stands on its base anchor and
+## was usually the nearest building, so the whole attack wave marched at an
+## invulnerable ring while the tribe's FOLLOWERS lived on. Filtered out, the
+## existing "nearest enemy unit" fallback takes over — and that is exactly the
+## 10d defeat chain: last follower dies -> the circle sinks itself -> the shaman
+## dies -> the tribe is out.
 func _attack_target_position() -> Vector3:
 	var anchor_world: Vector3 = nav_grid.cell_to_world(base_anchor) \
 		if nav_grid != null else Vector3.ZERO
@@ -922,6 +930,8 @@ func _attack_target_position() -> Vector3:
 	if building_manager != null:
 		for building in building_manager.buildings:
 			if not is_instance_valid(building) or building.tribe_id == tribe.id:
+				continue
+			if not building.is_attackable():
 				continue
 			var pos: Vector3 = building.center_world()
 			var d: float = pos.distance_to(anchor_world)
@@ -1015,7 +1025,9 @@ func _cast_spells() -> void:
 		commands.cast_spell(tribe, &"fireball", cluster)
 
 
-## Nearest enemy building whose centre is within `radius` of `pos`.
+## Nearest ATTACKABLE enemy building whose centre is within `radius` of `pos`.
+## Feeds the spell heuristic (lightning / volcano / sink / flatten), so the filter
+## stops the AI from burning charges on the invulnerable reincarnation circle.
 func _nearest_enemy_building(pos: Vector3, radius: float) -> Building:
 	if building_manager == null:
 		return null
@@ -1024,7 +1036,7 @@ func _nearest_enemy_building(pos: Vector3, radius: float) -> Building:
 	for building in building_manager.buildings:
 		if not is_instance_valid(building) or building.tribe_id == tribe.id:
 			continue
-		if building.health <= 0:
+		if building.health <= 0 or not building.is_attackable():
 			continue
 		var d: float = building.center_world().distance_to(pos)
 		if d <= best_dist:
@@ -1033,14 +1045,16 @@ func _nearest_enemy_building(pos: Vector3, radius: float) -> Building:
 	return best
 
 
-## Number of enemy buildings whose centre lies within `radius` of `pos`.
+## Number of ATTACKABLE enemy buildings whose centre lies within `radius` of
+## `pos` — the volcano's "is this cluster worth a charge" count must not be
+## inflated by the reincarnation circle, which the lava cannot touch.
 func _enemy_buildings_near(pos: Vector3, radius: float) -> int:
 	if building_manager == null:
 		return 0
 	var count: int = 0
 	for building in building_manager.buildings:
 		if not is_instance_valid(building) or building.tribe_id == tribe.id \
-				or building.health <= 0:
+				or building.health <= 0 or not building.is_attackable():
 			continue
 		if building.center_world().distance_to(pos) <= radius:
 			count += 1

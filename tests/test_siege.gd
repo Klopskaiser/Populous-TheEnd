@@ -1633,3 +1633,89 @@ func test_vehicles_never_join_idle_groups() -> void:
 	check(Vector2(ram.position.x - start.x, ram.position.z - start.z).length() < 0.5,
 		"the parked ram stays put (no formation-slot drive-off)")
 	_free_world(w)
+
+
+# --- Reincarnation circle is no vehicle target (10g) ---------------------------------
+# Until 10g the vehicle paths never consulted Building.is_attackable(): a catapult
+# took an explicit order on the enemy circle, and worse, _scan_enemy_building
+# picked it automatically because it sits on the base anchor and was usually the
+# NEAREST enemy building — so an engine parked and shelled an invulnerable target
+# for the rest of the match. The old is_assailable_by_units() name is why nobody
+# noticed: it read as "units only".
+
+const SITE_SCENE_10G: PackedScene = preload("res://scenes/buildings/reincarnation_site.tscn")
+
+
+func test_catapult_refuses_an_order_on_the_reincarnation_site() -> void:
+	var w: Dictionary = _make_world()
+	var site: Building = w.building_manager.place(SITE_SCENE_10G, w.tribe1,
+		Vector2i(50, 50), 0, true)
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, Vector3(40, 0, 40)) as SiegeEngine
+	engine.order_attack_building(site)
+	check(engine.attack_building == null, "Katapult nimmt den Kreis nicht als Ziel")
+	# Control: a normal enemy building IS accepted, so the guard is not too wide.
+	var hut: Building = w.building_manager.place(HUT_SCENE, w.tribe1,
+		Vector2i(60, 60), 0, true)
+	engine.order_attack_building(hut)
+	check(engine.attack_building == hut, "eine normale Huette bleibt ein gueltiges Ziel")
+	_free_world(w)
+
+
+func test_catapult_auto_scan_skips_the_reincarnation_site() -> void:
+	var w: Dictionary = _make_world()
+	# The circle is the NEAREST enemy building — exactly the reported situation.
+	var site: Building = w.building_manager.place(SITE_SCENE_10G, w.tribe1,
+		Vector2i(42, 42), 0, true)
+	var hut: Building = w.building_manager.place(HUT_SCENE, w.tribe1,
+		Vector2i(56, 56), 0, true)
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, Vector3(40, 0, 40)) as SiegeEngine
+	var found = engine._scan_enemy_building(60.0)
+	check(found != site, "die Auto-Zielsuche waehlt den Kreis nicht")
+	check(found == hut, "sie waehlt stattdessen das naechste ANGREIFBARE Gebaeude")
+	_free_world(w)
+
+
+func test_fire_ram_refuses_an_order_on_the_reincarnation_site() -> void:
+	var w: Dictionary = _make_world()
+	var site: Building = w.building_manager.place(SITE_SCENE_10G, w.tribe1,
+		Vector2i(50, 50), 0, true)
+	var ram = w.unit_manager.spawn_unit(FIRE_RAM_SCENE, 0, Vector3(40, 0, 40))
+	ram.order_attack_building(site)
+	check(ram.attack_building == null, "Feuerramme nimmt den Kreis nicht als Ziel")
+	_free_world(w)
+
+
+func test_airship_refuses_an_order_on_the_reincarnation_site() -> void:
+	var w: Dictionary = _make_world()
+	var site: Building = w.building_manager.place(SITE_SCENE_10G, w.tribe1,
+		Vector2i(50, 50), 0, true)
+	var ship = w.unit_manager.spawn_unit(AIRSHIP_SCENE, 0, Vector3(40, 0, 40))
+	var fw: Unit = w.unit_manager.spawn_unit(
+		preload("res://scenes/units/firewarrior.tscn"), 0, Vector3(40.5, 0, 40.5))
+	ship.add_crew(fw)
+	ship.order_attack_building(site)
+	check(ship.attack_building == null, "Zeppelin-Feuerkrieger beschiessen den Kreis nicht")
+	_free_world(w)
+
+
+func test_vehicle_drops_an_unattackable_building_target() -> void:
+	var w: Dictionary = _make_world()
+	var site: Building = w.building_manager.place(SITE_SCENE_10G, w.tribe1,
+		Vector2i(50, 50), 0, true)
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, Vector3(46, 0, 46)) as SiegeEngine
+	# Force the focus past order_attack_building's guard, as an older save state or
+	# a future code path could: _building_target_valid must ALSO reject it, so the
+	# engine cannot stay pinned on the circle for the rest of the match.
+	engine._set_building_target(site, false)
+	check(engine.attack_building == site, "Ziel kuenstlich gesetzt")
+	check(not engine._building_target_valid(),
+		"ein nicht angreifbares Ziel gilt nicht als gueltig")
+	# Control: a normal enemy building stays valid.
+	var hut: Building = w.building_manager.place(HUT_SCENE, w.tribe1,
+		Vector2i(60, 60), 0, true)
+	engine._set_building_target(hut, false)
+	check(engine._building_target_valid(), "normales Feindgebaeude bleibt gueltig")
+	_free_world(w)

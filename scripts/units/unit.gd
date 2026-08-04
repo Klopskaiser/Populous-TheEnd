@@ -2892,7 +2892,7 @@ func order_attack_building(building) -> void:
 		return
 	if building.tribe_id == tribe_id or not can_take_orders():
 		return
-	if not building.is_assailable_by_units():
+	if not building.is_attackable():
 		return   # e.g. the reincarnation site — units cannot assault it
 	_on_combat_interrupt()
 	_end_attack()
@@ -2939,7 +2939,7 @@ func _scan_for_enemy_building(radius: float):
 	for b in building_manager.buildings:
 		if not is_instance_valid(b) or b.tribe_id == tribe_id or b.health <= 0:
 			continue
-		if not b.is_assailable_by_units():
+		if not b.is_attackable():
 			continue   # e.g. the reincarnation site — only spells/catapults harm it
 		# Melee raiders skip a building with no room left (all raider slots taken)
 		# so overflow units do not keep re-targeting a full building; firewarriors
@@ -3046,7 +3046,7 @@ func exit_building_as_raider(pos: Vector3, building = null) -> void:
 	position = pos
 	_snap_to_ground()
 	if building != null and is_instance_valid(building) and building.health > 0 \
-			and building.tribe_id != tribe_id and building.is_assailable_by_units():
+			and building.tribe_id != tribe_id and building.is_attackable():
 		attack_building = building
 		_set_state(State.ATTACK)
 	else:

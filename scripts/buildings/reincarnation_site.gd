@@ -33,9 +33,12 @@ func display_name() -> String:
 	return "Reinkarnationsplatz"
 
 
-## The reincarnation circle cannot be attacked by ground units (melee storm /
-## firewarrior fire).
-func is_assailable_by_units() -> bool:
+## The reincarnation circle is not a valid attack TARGET for anything: melee
+## storm, firewarrior fire, catapult / fire-ram bombardment, the airship deck
+## crew and the AI's spell and attack-wave target choice all skip it. Attacking
+## it never was a way to win — the tribe falls when its last FOLLOWER dies and
+## the circle then sinks itself (see _tribe_has_no_followers below).
+func is_attackable() -> bool:
 	return false
 
 

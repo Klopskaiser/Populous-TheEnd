@@ -1328,3 +1328,61 @@ func test_ai_prioritises_enemy_preachers_with_spells() -> void:
 		"and it aims at the enemy PREACHER, not at the building")
 	ai.free()
 	_free_world(w)
+
+
+# --- Reincarnation circle is no AI target (10g) --------------------------------------
+# Before 10g the three AI target functions took every enemy building, so the circle
+# — sitting on the base anchor, usually the nearest — absorbed both the spell
+# heuristic (lightning/volcano/sink burn charges on an invulnerable ring) and the
+# whole attack wave, while the enemy FOLLOWERS lived on undisturbed.
+
+func test_ai_attack_target_skips_the_reincarnation_site() -> void:
+	var w: Dictionary = _make_world()
+	var ai_tribe: Tribe = w.tribes[1]
+	var anchor: Vector2i = Vector2i(20, 20)
+	var ai: AIController = _make_ai(w, ai_tribe, anchor)
+	# Enemy circle NEAR the AI, a normal enemy hut far away.
+	var site: Building = w.building_manager.place(SITE_SCENE, w.tribes[0],
+		Vector2i(30, 30), 0, true)
+	var hut: Building = w.building_manager.place(HUT_SCENE, w.tribes[0],
+		Vector2i(70, 70), 0, true)
+	var target: Vector3 = ai._attack_target_position()
+	check(target.distance_to(site.center_world()) > 1.0,
+		"die Angriffswelle marschiert nicht auf den Kreis")
+	check(target.distance_to(hut.center_world()) < 1.0,
+		"sie nimmt das naechste ANGREIFBARE Gebaeude")
+	ai.free()
+	_free_world(w)
+
+
+func test_ai_marches_at_enemy_units_when_only_the_circle_is_left() -> void:
+	var w: Dictionary = _make_world()
+	var ai_tribe: Tribe = w.tribes[1]
+	var ai: AIController = _make_ai(w, ai_tribe, Vector2i(20, 20))
+	w.building_manager.place(SITE_SCENE, w.tribes[0], Vector2i(30, 30), 0, true)
+	var follower: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 0, Vector3(60, 5, 60))
+	var target: Vector3 = ai._attack_target_position()
+	check(target.distance_to(follower.position) < 1.0,
+		"nur noch der Kreis steht -> die KI geht auf die ANHAENGER los (10d-Siegkette)")
+	ai.free()
+	_free_world(w)
+
+
+func test_ai_spell_heuristic_ignores_the_reincarnation_site() -> void:
+	var w: Dictionary = _make_world()
+	var ai: AIController = _make_ai(w, w.tribes[1], Vector2i(20, 20))
+	var site: Building = w.building_manager.place(SITE_SCENE, w.tribes[0],
+		Vector2i(30, 30), 0, true)
+	check(ai._nearest_enemy_building(site.center_world(), 40.0) == null,
+		"der Kreis ist kein Zauberziel")
+	check(ai._enemy_buildings_near(site.center_world(), 40.0) == 0,
+		"der Kreis zaehlt nicht in die Vulkan-Ballung")
+	# Control: a normal building is found again.
+	var hut: Building = w.building_manager.place(HUT_SCENE, w.tribes[0],
+		Vector2i(34, 34), 0, true)
+	check(ai._nearest_enemy_building(site.center_world(), 40.0) == hut,
+		"eine normale Huette bleibt Zauberziel")
+	check(ai._enemy_buildings_near(site.center_world(), 40.0) == 1,
+		"und zaehlt in die Ballung")
+	ai.free()
+	_free_world(w)

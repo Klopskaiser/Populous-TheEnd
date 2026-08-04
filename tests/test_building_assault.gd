@@ -380,12 +380,12 @@ func test_shaman_attackable_by_units() -> void:
 	_free_world(w)
 
 
-# --- Reincarnation site: un-assailable by units (spells/catapults only) --------
+# --- Reincarnation site: not an attack target for ANYTHING (10g) ---------------
 
-func test_reincarnation_site_not_assailable_by_units() -> void:
+func test_reincarnation_site_is_not_attackable() -> void:
 	var w: Dictionary = _make_world()
 	var site: Building = w.bm.place(SITE_SCENE, w.tribe1, Vector2i(40, 40), 0, true)
-	check(not site.is_assailable_by_units(), "reincarnation site is not assailable by units")
+	check(not site.is_attackable(), "reincarnation site is not an attack target")
 	# Idle-scan skips it; explicit order rejects it.
 	var warrior: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, Vector3(41, 0, 44))
 	warrior._engage_on_sight(0.3)

@@ -592,6 +592,11 @@ func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = fals
 func order_attack_building(building) -> void:
 	if building == null or not is_instance_valid(building) or building.health <= 0:
 		return
+	# 10g: the reincarnation circle is no target for anyone. Checked BEFORE the
+	# anti-raider exception — an own circle can never hold raiders (nobody can
+	# enter it), so the order would be pointless there too.
+	if not building.is_attackable():
+		return
 	if building.tribe_id == tribe_id and not building.has_raiders():
 		return
 	_set_building_target(building, false)
@@ -604,6 +609,8 @@ func _building_target_valid() -> bool:
 	if attack_building == null or not is_instance_valid(attack_building) \
 			or attack_building.health <= 0:
 		return false
+	if not attack_building.is_attackable():
+		return false   # 10g: also drops a target that only NOW became off-limits
 	if attack_building.tribe_id != tribe_id:
 		return true
 	return attack_building.has_raiders()
@@ -621,8 +628,12 @@ func _set_building_target(building, keep_route: bool) -> void:
 	_set_state(State.ATTACK)
 
 
-## Nearest living enemy building within `radius`; null without a manager
-## (bare tests) or when none is in range.
+## Nearest living, ATTACKABLE enemy building within `radius`; null without a
+## manager (bare tests) or when none is in range. The is_attackable() filter is
+## what stopped the auto-scan from parking on the enemy reincarnation circle
+## (10g): the circle sits on the base anchor and was therefore usually the
+## NEAREST building, so a passing catapult bombarded an invulnerable target for
+## the rest of the match.
 func _scan_enemy_building(radius: float):
 	if building_manager == null:
 		return null
@@ -630,6 +641,8 @@ func _scan_enemy_building(radius: float):
 	var best_d: float = radius
 	for b in building_manager.buildings:
 		if not is_instance_valid(b) or b.tribe_id == tribe_id or b.health <= 0:
+			continue
+		if not b.is_attackable():
 			continue
 		var d: float = _flat_dist(b.center_world(), position)
 		if d <= best_d:

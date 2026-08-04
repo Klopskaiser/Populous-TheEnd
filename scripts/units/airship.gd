@@ -367,6 +367,8 @@ func order_attack_building(building) -> void:
 	if building == null or not is_instance_valid(building) or building.health <= 0 \
 			or building.tribe_id == tribe_id:
 		return
+	if not building.is_attackable():
+		return   # 10g: the deck firewarriors do not shell the reincarnation circle
 	if active_crew_count() < MIN_MOVE_CREW:
 		return
 	_ordered_unit = null

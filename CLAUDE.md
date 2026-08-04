@@ -239,6 +239,12 @@ ist pro Karte variabel.
 
 - Der **Reinkarnationsplatz ist unverwundbar** — kein Schaden von Einheiten, Zaubern,
   Katapulten, Lava oder Terrainverformung, und er ist nicht abreißbar.
+- Er ist außerdem **kein gültiges Angriffsziel** (Phase 10g, `Building.is_attackable()`):
+  weder Einheiten noch Katapulte/Feuerrammen (auch nicht über deren automatische
+  Zielsuche), noch die Feuerkrieger auf dem Luftschiffdeck nehmen ihn an, und die KI
+  wählt ihn weder für Zauber noch als Ziel ihrer Angriffswelle. Das gilt **auch für den
+  Spieler** — ein Rechtsklick darauf bleibt ein Bewegungsbefehl. Ihn zu beschießen war
+  nie ein Weg zum Sieg; der Stamm fällt über seine **Anhänger** (siehe unten).
 - Er **zerstört sich selbst**, sobald der Stamm außer der Schamanin **keinen Anhänger**
   mehr hat. Danach ist kein Respawn mehr möglich.
 - Ein Stamm ist **besiegt, wenn er keine lebende Einheit mehr hat** — Gebäude retten ihn

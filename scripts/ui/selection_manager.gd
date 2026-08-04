@@ -1019,9 +1019,11 @@ func _dispatch_enemy_building(hit: Dictionary) -> bool:
 		return false
 	if building.tribe_id == player_tribe_id:
 		return _dispatch_own_raided_building(building)
-	if not building.is_assailable_by_units():
-		# e.g. reincarnation site: units cannot storm it. Fall through to a plain
-		# move order (a selected catapult auto-bombards it once in range).
+	if not building.is_attackable():
+		# The reincarnation circle: nothing may target it (10g). Falls through to a
+		# plain move order. Until 10g a selected CATAPULT still auto-bombarded it
+		# from here — the vehicle paths ignored this flag — which pinned engines on
+		# an invulnerable target; they honour it now.
 		return false
 	_tribe_commands.order_attack_building(selected, building)
 	building.flash_ring(Building.ATTACK_FLASH_COLOR)
