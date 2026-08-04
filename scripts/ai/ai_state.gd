@@ -118,6 +118,58 @@ static func min_economy_braves(population: int) -> int:
 		int(float(population) * Balance.AI_ECONOMY_BRAVE_SHARE))
 
 
+## Workers ONE construction site should get (10g). Two regimes, because the two
+## construction phases are bottlenecked on different things:
+##  * FLATTEN is CELL work — Building.claim_flatten_cell hands out one footprint
+##    cell per worker at Brave.FLATTEN_RATE each, so an 8x8 camp (64 cells) wants
+##    many hands and a 1x1 wood rack does not.
+##  * After foundation_done the site only needs enough hands to keep the WOOD
+##    coming: Brave.BUILD_RATE 0.2/s means five worker-seconds finish the
+##    building, while one trip carries at most CARRY_CAPACITY 3 wood.
+## The result stays BELOW Building.MAX_WORKERS (10) on purpose: the remaining
+## slots are left to the passive BuildingManager._recruit_workers, so the two
+## systems never crowd each other out.
+static func site_worker_target(footprint_cells: int, needs_flatten: bool,
+		wood_missing: int) -> int:
+	if needs_flatten:
+		var per: int = maxi(Balance.AI_FLATTEN_CELLS_PER_WORKER, 1)
+		return clampi((footprint_cells + per - 1) / per,
+			Balance.AI_SITE_WORKERS_MIN, Balance.AI_SITE_WORKERS_MAX)
+	return clampi(Balance.AI_SITE_WORKERS_MIN
+			+ maxi(wood_missing, 0) / maxi(Balance.AI_WOOD_PER_EXTRA_BUILDER, 1),
+		Balance.AI_SITE_WORKERS_MIN, Balance.AI_SITE_WORKERS_BUILD_MAX)
+
+
+## Braves the AI binds to construction this tick — claimed BEFORE training, wood
+## crews and workshop staffing touch the idle pool (10g). `site_demand` is the
+## summed deficit over the own sites.
+##
+## The budget lives INSIDE the economy crew that min_economy_braves() already
+## keeps out of training: construction does not eat into the army share, it only
+## decides what the economy does FIRST. Without that ceiling a wall of eight
+## parallel sites could freeze army production entirely.
+## braves 10 / pop 12 -> 4 | 40 / 60 -> 16 | 200 / 400 -> 80
+static func builder_budget(braves: int, population: int, site_demand: int) -> int:
+	var share: int = maxi(Balance.AI_MIN_BUILDER_BRAVES,
+		int(float(braves) * Balance.AI_BUILDER_BRAVE_SHARE))
+	return clampi(mini(maxi(site_demand, 0), share), 0, min_economy_braves(population))
+
+
+## Whether an existing site counts as supplied, i.e. may stop blocking a NEW one.
+## Pure so the deadlock guard is testable without a world.
+##
+## Clause 2 hands a wood-starved site to the wood logistics instead of the build
+## crews — putting workers on a site with no reachable wood just makes them set
+## wood_stalled again and quit. Clause 3 is the deadlock guard: a site that can
+## NEVER be supplied must not block construction forever (the 120-s construction
+## decay clears it either way).
+static func site_is_supplied(workers: int, wood_stalled: bool,
+		waited_ticks: int) -> bool:
+	return workers >= Balance.AI_SITE_SUPPLIED_WORKERS \
+		or wood_stalled \
+		or waited_ticks >= Balance.AI_SITE_SUPPLY_GRACE_TICKS
+
+
 ## Parallel construction sites. 8 -> 1 | 20 -> 2 | 64 -> 8 (cap).
 static func parallel_site_count(braves: int) -> int:
 	return clampi(braves / Balance.AI_BRAVES_PER_SITE, 1, Balance.AI_MAX_PARALLEL_SITES)

@@ -726,6 +726,41 @@ const AI_MAX_FORESTERS: int = 4
 ## Ab so vielen Braves füllt die KI ihre Förstereien über die alten 2 hinaus auf.
 const AI_FORESTER_WORKER_STEP: int = 30
 
+# --- Bautrupps (10g Teil 1) ---
+## Vor 10g wies die KI Baustellen NIE Arbeiter zu: sie verliess sich ganz auf
+## BuildingManager._recruit_workers (nur idle Braves im 30-m-Umkreis), waehrend
+## Bauplaetze bis AI_PLOT_SEARCH_RADIUS Zellen draussen liegen und Training,
+## Faell-Trupps und Werkstaetten den Idle-Pool vorher leerten.
+## Eine Hand je so vielen Planierzellen: Planieren ist Zellarbeit
+## (Building.claim_flatten_cell), Aufbauen nicht (BUILD_RATE 0.2/s = 5 Arbeitersek.).
+const AI_FLATTEN_CELLS_PER_WORKER: int = 6
+## Trupp-Grenzen je Baustelle. AI_SITE_WORKERS_MAX liegt BEWUSST unter
+## Building.MAX_WORKERS (10): die freien Plaetze bleiben dem passiven
+## Rekrutierer, damit sich beide Systeme nicht verdraengen.
+const AI_SITE_WORKERS_MIN: int = 2
+const AI_SITE_WORKERS_MAX: int = 8
+## Nach dem Fundament zaehlt nur Holznachschub: ein Traeger mehr je so vielen
+## fehlenden Holz (Brave.CARRY_CAPACITY 3 je Fuhre).
+const AI_WOOD_PER_EXTRA_BUILDER: int = 6
+const AI_SITE_WORKERS_BUILD_MAX: int = 5
+## Ab so vielen Arbeitern gilt eine Baustelle als versorgt (Tor fuer eine NEUE).
+const AI_SITE_SUPPLIED_WORKERS: int = 2
+## Anteil der Braves, der maximal ans Bauen gebunden wird, plus Bodensatz.
+## Geklemmt auf AIState.min_economy_braves(population) — Bauen teilt die
+## Wirtschaftsmannschaft auf, es frisst nicht den Armee-Anteil.
+const AI_BUILDER_BRAVE_SHARE: float = 0.40
+const AI_MIN_BUILDER_BRAVES: int = 4
+## Baustellen, die pro Tick neu bestueckt werden (Befehls-Churn + take_idle_for).
+const AI_SITES_STAFFED_PER_TICK: int = 3
+## Braves werden nur aus diesem Umkreis einer Baustelle gezogen. AUSNAHME: eine
+## Baustelle mit NULL Arbeitern bekommt ihre Mindestbesatzung aus beliebiger
+## Entfernung — "gar niemand" ist der gemeldete Fehler.
+const AI_BUILDER_WALK_RADIUS: float = 80.0
+## Ticks, die eine unversorgte Baustelle das Tor blockieren darf
+## (Verklemmungsschutz), und Sperrfrist nach einem order_build ohne Zuweisung.
+const AI_SITE_SUPPLY_GRACE_TICKS: int = 30
+const AI_SITE_RETRY_TICKS: int = 10
+
 # --- Bau / Skalierung ---
 ## Eine parallele Baustelle je AI_BRAVES_PER_SITE Braves, gedeckelt.
 ## ACHTUNG: der Divisor ist in test_build_tick_places_construction_site

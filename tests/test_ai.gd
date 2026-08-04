@@ -1594,3 +1594,211 @@ func test_set_rally_point_rejects_a_foreign_building() -> void:
 	check(not w.commands.set_rally_point(w.tribes[1], enemy_hut, Vector3(40, 5, 40)),
 		"fremde Gebaeude nimmt der Befehl nicht an")
 	_free_world(w)
+
+
+# --- Teil 1: aktive Bauarbeiter-Zuweisung + Budget (10g) ------------------------------
+# Vor 10g rief der AIController order_build NIE auf: Bauarbeiter kamen allein aus
+# BuildingManager._recruit_workers (30 m, nur idle), waehrend Bauplaetze bis 40 Zellen
+# draussen liegen und Training/Faell-Trupps/Werkstaetten den Idle-Pool vorher leerten.
+
+func test_site_worker_target_scales_with_footprint_while_grading() -> void:
+	var small: int = AIState.site_worker_target(1, true, 0)
+	var hut: int = AIState.site_worker_target(16, true, 8)
+	var camp: int = AIState.site_worker_target(64, true, 20)
+	check(small == Balance.AI_SITE_WORKERS_MIN, "1x1 bekommt die Mindestbesatzung")
+	check(hut > small, "der groessere Grundriss bekommt mehr Haende")
+	check(camp > hut, "und der 8x8 noch mehr")
+	check(camp <= Balance.AI_SITE_WORKERS_MAX, "gedeckelt auf AI_SITE_WORKERS_MAX")
+
+
+func test_site_worker_target_drops_after_the_foundation() -> void:
+	var grading: int = AIState.site_worker_target(64, true, 20)
+	var building: int = AIState.site_worker_target(64, false, 20)
+	check(building < grading, "nach dem Fundament braucht es weniger Haende")
+	check(building <= Balance.AI_SITE_WORKERS_BUILD_MAX, "eigener, kleinerer Deckel")
+
+
+func test_site_worker_target_leaves_room_for_the_passive_recruiter() -> void:
+	for cells in [1, 16, 25, 36, 64]:
+		for flat in [true, false]:
+			check(AIState.site_worker_target(cells, flat, 100) <= Building.MAX_WORKERS - 2,
+				"laesst dem passiven Rekrutierer zwei Plaetze (%d, %s)" % [cells, str(flat)])
+
+
+func test_builder_budget_is_capped_by_the_actual_demand() -> void:
+	check(AIState.builder_budget(200, 400, 3) == 3, "Budget folgt dem Bedarf")
+	check(AIState.builder_budget(200, 400, 0) == 0, "kein Bedarf, kein Budget")
+
+
+func test_builder_budget_never_exceeds_the_economy_crew() -> void:
+	for pop in [10, 50, 200, 600]:
+		var eco: int = AIState.min_economy_braves(pop)
+		check(AIState.builder_budget(pop * 2, pop, 9999) <= eco,
+			"Budget bleibt in der Wirtschaftsmannschaft (pop %d)" % pop)
+
+
+func test_builder_budget_leaves_the_early_game_a_wood_crew() -> void:
+	var b: int = AIState.builder_budget(10, 12, 9999)
+	check(b == Balance.AI_MIN_BUILDER_BRAVES, "Bodensatz greift im Fruehspiel")
+	check(10 - b >= Balance.AI_WOOD_CREW_SIZE, "ein Faell-Trupp bleibt moeglich")
+
+
+func test_site_is_supplied_accepts_a_wood_starved_site() -> void:
+	check(AIState.site_is_supplied(0, true, 0),
+		"holzlose Baustelle gehoert der Holzlogistik, nicht dem Bautrupp-Tor")
+	check(not AIState.site_is_supplied(0, false, 0), "handlose Baustelle blockiert das Tor")
+	check(AIState.site_is_supplied(Balance.AI_SITE_SUPPLIED_WORKERS, false, 0),
+		"ab AI_SITE_SUPPLIED_WORKERS gilt sie als versorgt")
+
+
+func test_site_is_supplied_releases_the_gate_after_the_grace_period() -> void:
+	check(not AIState.site_is_supplied(0, false, Balance.AI_SITE_SUPPLY_GRACE_TICKS - 1),
+		"innerhalb der Gnadenfrist blockiert sie noch")
+	check(AIState.site_is_supplied(0, false, Balance.AI_SITE_SUPPLY_GRACE_TICKS),
+		"danach gibt sie das Tor frei - Verklemmungsschutz")
+
+
+func test_ai_puts_workers_on_its_own_construction_site() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var anchor: Vector2i = Vector2i(40, 40)
+	var ai: AIController = _make_ai(w, tribe, anchor)
+	var site: Building = w.building_manager.place(WARRIOR_CAMP_SCENE, tribe,
+		Vector2i(46, 40), 0, false)
+	check(site.under_construction, "Baustelle steht")
+	for i in range(6):
+		w.unit_manager.spawn_unit(BRAVE_SCENE, 1, w.nav.cell_to_world(anchor + Vector2i(i, 2)))
+	ai._tick_build_crews(ai.build_tick_cache())
+	check(site.workers.size() >= Balance.AI_SITE_SUPPLIED_WORKERS,
+		"die KI setzt Arbeiter auf die eigene Baustelle (war strukturell nie der Fall)")
+	for worker in site.workers:
+		check(worker.job == site, "und sie haengen wirklich an dieser Baustelle")
+	ai.free()
+	_free_world(w)
+
+
+func test_ai_staffs_a_site_the_recruiter_cannot_reach() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var anchor: Vector2i = Vector2i(30, 30)
+	var ai: AIController = _make_ai(w, tribe, anchor)
+	var site: Building = w.building_manager.place(WARRIOR_CAMP_SCENE, tribe,
+		Vector2i(75, 30), 0, false)
+	var far: float = w.nav.cell_to_world(anchor).distance_to(site.center_world())
+	check(far > BuildingManager.RECRUIT_RADIUS,
+		"Baustelle liegt ausserhalb des Rekrutierungsradius (%.0f m)" % far)
+	for i in range(6):
+		w.unit_manager.spawn_unit(BRAVE_SCENE, 1, w.nav.cell_to_world(anchor + Vector2i(i, 2)))
+	ai._tick_build_crews(ai.build_tick_cache())
+	check(site.workers.size() > 0, "die KI schickt trotzdem Arbeiter hin")
+	ai.free()
+	_free_world(w)
+
+
+func test_ai_skips_wood_stalled_sites_when_staffing() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var ai: AIController = _make_ai(w, tribe, Vector2i(40, 40))
+	var site: Building = w.building_manager.place(WARRIOR_CAMP_SCENE, tribe,
+		Vector2i(46, 40), 0, false)
+	site.mark_wood_stalled()
+	for i in range(6):
+		w.unit_manager.spawn_unit(BRAVE_SCENE, 1, w.nav.cell_to_world(Vector2i(40 + i, 42)))
+	ai._tick_build_crews(ai.build_tick_cache())
+	check(site.workers.is_empty(),
+		"holzlose Baustelle wird nicht bestueckt (Arbeiter gingen sofort wieder)")
+	check(ai._site_worker_want(site) == 0, "sie ist kein Bestueckungsziel")
+	ai.free()
+	_free_world(w)
+
+
+func test_ai_skips_a_site_being_demolished() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var ai: AIController = _make_ai(w, tribe, Vector2i(40, 40))
+	var site: Building = w.building_manager.place(WARRIOR_CAMP_SCENE, tribe,
+		Vector2i(46, 40), 0, false)
+	site.build_progress = 0.5
+	site.begin_demolish()
+	check(site.demolishing and site.under_construction,
+		"Abriss mit Baustufe bleibt under_construction - steht also in cache.sites")
+	check(ai._site_worker_want(site) == 0, "der Abriss ist kein Bestueckungsziel")
+	ai.free()
+	_free_world(w)
+
+
+func test_ai_does_not_reorder_braves_already_on_a_site() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var ai: AIController = _make_ai(w, tribe, Vector2i(40, 40))
+	var site: Building = w.building_manager.place(WARRIOR_CAMP_SCENE, tribe,
+		Vector2i(46, 40), 0, false)
+	for i in range(8):
+		w.unit_manager.spawn_unit(BRAVE_SCENE, 1, w.nav.cell_to_world(Vector2i(40 + i, 42)))
+	ai._tick_build_crews(ai.build_tick_cache())
+	var first: Array = []
+	for worker in site.workers:
+		first.append(worker)
+	check(not first.is_empty(), "erste Zuweisung erfolgt")
+	ai._tick_count += 1
+	ai._tick_build_crews(ai.build_tick_cache())
+	for worker in first:
+		check(worker.job == site, "bestehender Arbeiter bleibt an seiner Baustelle")
+	ai.free()
+	_free_world(w)
+
+
+func test_ai_opens_no_second_site_while_the_first_has_no_workers() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var anchor: Vector2i = Vector2i(40, 40)
+	var ai: AIController = _make_ai(w, tribe, anchor)
+	w.building_manager.place(SITE_SCENE, tribe, anchor, 0, true)
+	var site: Building = w.building_manager.place(WARRIOR_CAMP_SCENE, tribe,
+		Vector2i(46, 40), 0, false)
+	check(site.workers.is_empty(), "Baustelle ohne Arbeiter")
+	var cache: AIController.TickCache = ai.build_tick_cache()
+	ai._prune_site_notes(cache)
+	check(not ai._all_sites_supplied(cache), "Tor ist zu")
+	ai._tick_count += Balance.AI_SITE_SUPPLY_GRACE_TICKS
+	check(ai._all_sites_supplied(ai.build_tick_cache()),
+		"nach AI_SITE_SUPPLY_GRACE_TICKS baut die KI wieder")
+	ai.free()
+	_free_world(w)
+
+
+func test_site_notes_do_not_leak() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var ai: AIController = _make_ai(w, tribe, Vector2i(40, 40))
+	var site: Building = w.building_manager.place(WARRIOR_CAMP_SCENE, tribe,
+		Vector2i(46, 40), 0, false)
+	ai._prune_site_notes(ai.build_tick_cache())
+	check(ai._site_notes.size() == 1, "eine Notiz je Baustelle")
+	site.finish_construction()
+	ai._prune_site_notes(ai.build_tick_cache())
+	check(ai._site_notes.is_empty(),
+		"fertige Baustelle -> Notiz weg (die Buchfuehrung kann nicht lecken)")
+	ai.free()
+	_free_world(w)
+
+
+func test_potential_growth_ignores_the_housing_cap() -> void:
+	# Der Fehler, den die Diagnose aufdeckte: growth_per_minute() liefert am
+	# Wohnraumdeckel 0, wodurch der Bravestrom genau dann kollabierte, wenn der
+	# Stamm die meisten Braves hatte - die Lagerziele fielen auf eines je Art
+	# zurueck und die KI baute stattdessen Werkstaetten.
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var hut: Hut = w.building_manager.place(HUT_SCENE, tribe, Vector2i(50, 50), 0, true) as Hut
+	for i in range(hut.crew_capacity()):
+		var b: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, hut.center_world())
+		hut.admit_crew(b)
+	check(hut.potential_growth_per_minute() > 0.0, "mit Besatzung ist das Potenzial > 0")
+	# Bevoelkerung ueber die Kapazitaet druecken.
+	while tribe.population() < tribe.housing_capacity() + 2:
+		w.unit_manager.spawn_unit(BRAVE_SCENE, 1, w.nav.cell_to_world(Vector2i(60, 60)))
+	check(hut.growth_per_minute() == 0.0, "die AKTUELLE Rate ist am Deckel korrekt 0")
+	check(hut.potential_growth_per_minute() > 0.0,
+		"das Potenzial bleibt - darauf plant die KI ihre Lager")
+	_free_world(w)

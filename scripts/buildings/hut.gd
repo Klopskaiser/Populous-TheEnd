@@ -284,11 +284,28 @@ func production_progress() -> float:
 	return clampf(1.0 - spawn_timer / Balance.HUT_SPAWN_SECONDS_PER_WORKER, 0.0, 1.0)
 
 
-## Estimated growth this hut contributes, in braves per minute (sidebar readout).
+## Estimated growth this hut contributes, in braves per minute (sidebar readout):
+## the CURRENT rate, so it correctly reads 0 while the tribe sits at its housing
+## or unit cap and nothing is actually being produced.
 func growth_per_minute() -> float:
-	if not is_usable() or tribe == null or crew.is_empty() or paused:
+	if tribe == null:
 		return 0.0
 	if tribe.population() >= tribe.housing_capacity() or tribe.at_unit_cap():
+		return 0.0
+	return potential_growth_per_minute()
+
+
+## What this hut WOULD deliver with its current crew, ignoring the tribe-wide
+## housing and unit caps (10g).
+##
+## The AI plans its training camps from this, not from growth_per_minute(): the
+## caps are a temporary state — the tribe is about to build more huts — but they
+## made the current rate read 0 exactly when the tribe had the MOST braves, so the
+## camp targets collapsed to one per kind and the build order went on stamping out
+## workshops instead. Measured on bergpass: a 205-population AI held 1/1/1 camps
+## and SEVEN workshops.
+func potential_growth_per_minute() -> float:
+	if not is_usable() or crew.is_empty() or paused:
 		return 0.0
 	return _spawn_rate_factor() / Balance.HUT_SPAWN_SECONDS_PER_WORKER * 60.0
 

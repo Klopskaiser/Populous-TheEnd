@@ -19,6 +19,18 @@ class_name AIController extends Node
 ## (foresters, workshops, towers, depots — their slot counts are still read live
 ## off the cached object); only values that cannot change within one tick are
 ## cached as scalars.
+## Per-site bookkeeping for the build crews (10g). Keyed by INSTANCE ID, never by
+## reference — a scrapped site must not be kept alive by this dictionary — and
+## rebuilt from cache.sites on every tick, so it cannot leak: at most
+## AI_MAX_PARALLEL_SITES entries exist at any time.
+class SiteNote extends RefCounted:
+	## Tick from which the site first looked hand-starved; -1 while it is staffed.
+	var unsupplied_since: int = -1
+	## Tick until which staffing skips this site (an order_build that assigned
+	## nobody means the braves we had cannot serve it — do not retry every second).
+	var retry_until: int = -1
+
+
 class TickCache extends RefCounted:
 	# --- units ---
 	var population: int = 0
@@ -33,11 +45,14 @@ class TickCache extends RefCounted:
 	# --- buildings ---
 	var usable_huts: int = 0
 	var huts: Array[Building] = []
-	## Braves per minute the usable huts deliver — read straight off
-	## Hut.growth_per_minute(), which already accounts for crew size, upgrade stage,
-	## damage, pause and the housing/unit caps. The camp targets come from THIS,
-	## not from the hut count: a camp trains one unit at a time, so throughput is
-	## what decides how many camps are needed (10g).
+	## Braves per minute the usable huts COULD deliver with their current crew —
+	## Hut.potential_growth_per_minute(), i.e. crew size and upgrade stage but
+	## deliberately NOT the tribe-wide housing/unit caps. Those caps are temporary,
+	## and counting them made the stream read 0 exactly when the tribe had the most
+	## braves: the camp targets then collapsed to one per kind and the build order
+	## kept stamping out workshops (measured: pop 205 with 1/1/1 camps and SEVEN
+	## workshops). The camp targets come from THIS, not from the hut count — a camp
+	## trains one unit at a time, so throughput is the limit (10g).
 	var brave_stream: float = 0.0
 	## Kind identifier -> planned count (construction sites INCLUDED).
 	var planned: Dictionary = {}
@@ -83,6 +98,45 @@ class TickCache extends RefCounted:
 
 	func idle_left() -> int:
 		return _left(_idle_braves)
+
+	## Pops up to `count` still-idle braves NEAREST to `site`, skipping any the
+	## site's approach island does not accept (10g).
+	##
+	## Nearest-first matters: the old expansion escort handed out whatever
+	## pop_back() returned, and a brave 80 m away spends 20 s walking at
+	## BRAVE_SPEED before it touches the plot. The island prefilter keeps
+	## TribeCommands.order_build from silently dropping braves we already consumed.
+	##
+	## The `job == null` check is a documented invariant, not a real filter: an
+	## IDLE brave always has job == null, because both Brave._tick_job and
+	## _stop_all() call _interrupt_tasks() BEFORE going idle. It costs one
+	## comparison and states at the point of use why this cannot steal a worker
+	## off another site.
+	func take_idle_for(site: Building, count: int, max_dist: float) -> Array[Unit]:
+		var out: Array[Unit] = []
+		if count <= 0 or site == null or not is_instance_valid(site):
+			return out
+		var target: Vector3 = site.delivery_point()
+		var max_sq: float = max_dist * max_dist
+		var ranked: Array = []
+		for unit in _idle_braves:
+			if not is_instance_valid(unit) or unit.state != Unit.State.IDLE:
+				continue
+			if (unit as Brave).job != null:
+				continue
+			var d: float = unit.position.distance_squared_to(target)
+			if d > max_sq or not site.worker_can_reach(unit.position):
+				continue
+			ranked.append([d, unit])
+		ranked.sort_custom(func(a: Array, b: Array) -> bool:
+			return float(a[0]) < float(b[0]))
+		for entry in ranked:
+			if out.size() >= count:
+				break
+			var unit: Unit = entry[1]
+			_idle_braves.erase(unit)
+			out.append(unit)
+		return out
 
 	## Same for firewarriors. One shared pool for towers AND airships: they used
 	## to build separate lists and could order the same firewarrior twice (the
@@ -215,6 +269,8 @@ var state: AIState.State = AIState.State.BUILD
 ## (Bergpass: walkable-but-isolated plateau tops are valid plots per
 ## can_place_at, but no worker can ever reach them).
 var _unreachable_plots: Dictionary = {}
+## Bau-Buchfuehrung je Baustelle (10g Teil 1), instanz-id -> SiteNote.
+var _site_notes: Dictionary = {}
 ## Plot cells proven reachable, valid as long as walkability is unchanged
 ## (value = NavGrid.change_version at proof time) — exact, no TTL guessing.
 var _reachable_plots: Dictionary[Vector2i, int] = {}
@@ -278,6 +334,9 @@ static var dbg_building_passes: int = 0
 ## Huts currently routed into a training queue (10g) — the one number to watch in
 ## a play test, because too high starves the whole economy.
 static var dbg_hut_rallies: int = 0
+## Braves, die die KI insgesamt auf Baustellen gesetzt hat (10g Teil 1). Vorher war
+## dieser Wert strukturell 0 — die KI rief order_build nie auf.
+static var dbg_builders_assigned: int = 0
 
 
 ## One AI decision tick (1x/s in game; tests call it directly).
@@ -319,6 +378,9 @@ func tick_ai() -> void:
 	# Economy and magic run in EVERY state: keep building toward the
 	# full base, cast spells whenever enemies are near the shaman.
 	_tick_build(cache)
+	# Bauarbeiter ZUERST aus dem Idle-Pool: Holztrupps, Foerstereien, Werkstaetten
+	# und Training lesen denselben Pool danach. Laeuft auch unter Bedrohung.
+	_tick_build_crews(cache)
 	if threat.is_empty():
 		# Under attack the wood crews must not grab the braves the militia needs.
 		_tick_wood_logistics(cache)
@@ -438,7 +500,7 @@ func build_tick_cache() -> TickCache:
 				cache.planned[&"hut_sites"] += 1
 			if usable:
 				cache.usable_huts += 1
-				cache.brave_stream += (building as Hut).growth_per_minute()
+				cache.brave_stream += (building as Hut).potential_growth_per_minute()
 		elif building is WarriorCamp:
 			cache.planned[&"warrior_camp"] += 1
 			_note_camp(cache, building, &"warrior_camp", usable)
@@ -486,6 +548,12 @@ func _tick_build(cache: TickCache) -> void:
 	var max_sites: int = AIState.parallel_site_count(cache.brave_count)
 	if cache.sites.size() >= max_sites:
 		return
+	# 10g: do not open a site nobody can staff. Judged on the PREVIOUS tick's
+	# state, because _tick_build_crews runs after this — one tick of evidence,
+	# which is what we want. The grace period inside AIState.site_is_supplied is
+	# the deadlock guard.
+	if not _all_sites_supplied(cache):
+		return
 	var kind: StringName = next_building_kind(cache)
 	if kind == &"":
 		return
@@ -501,9 +569,150 @@ func _tick_build(cache: TickCache) -> void:
 		# search every second changes nothing, so back off for a few ticks.
 		_plot_fail_ticks = PLOT_FAIL_COOLDOWN_TICKS
 		return
+	# The expansion escort is gone: it was a plain order_move that hoped
+	# _recruit_workers would pick the braves up within 30 m. _tick_build_crews
+	# puts them on the job directly, which is strictly better. The escort call for
+	# WOOD-STALLED sites stays in _tick_wood_logistics — those need wood, not hands.
 	var site: Building = commands.place_building(tribe, scene, cell, _plot_orientation)
-	if site != null and _accept_or_scrap_site(site, cell):
-		_send_escort_if_remote(cache, cell)
+	if site != null:
+		_accept_or_scrap_site(site, cell)
+
+
+## Every own site either has hands on it, waits on WOOD (then the wood logistics
+## owns it, not the build crews) or has been waiting past the grace period.
+func _all_sites_supplied(cache: TickCache) -> bool:
+	for site in cache.sites:
+		if not is_instance_valid(site) or site.health <= 0 or site.demolishing:
+			continue
+		var note: SiteNote = _site_notes.get(site.get_instance_id())
+		var waited: int = 0
+		if note != null and note.unsupplied_since >= 0:
+			waited = _tick_count - note.unsupplied_since
+		if not AIState.site_is_supplied(site.workers.size(), site.wood_stalled, waited):
+			return false
+	return true
+
+
+## Explicit worker assignment for own construction sites (10g). Before this the
+## AI never called order_build at all: it relied entirely on
+## BuildingManager._recruit_workers, whose RECRUIT_RADIUS is 30 m around the site
+## while plots are placed up to AI_PLOT_SEARCH_RADIUS CELLS away from a settlement
+## anchor — and by the time it ran, training, wood crews, foresters and workshops
+## had consumed the idle pool. That mismatch IS the "sites without workers" report.
+##
+## Runs even under threat, unlike the wood crews: a build crew is 2-8 braves at
+## the village, a wood crew 6-24 across the map, and the militia only mobilises
+## when the army alone is outnumbered.
+##
+## Returns the number of braves put on jobs (telemetry + tests).
+func _tick_build_crews(cache: TickCache) -> int:
+	if commands == null:
+		return 0
+	_prune_site_notes(cache)
+	if cache.sites.is_empty():
+		return 0
+	# Rank by deficit, biggest first; ties go to the site nearer the base.
+	# NOT nearest-first: the passive recruiter already covers the near sites, so
+	# spending a limited budget nearest-first would burn it exactly where it is not
+	# needed and leave the distant sites — the actual bug — empty.
+	var ranked: Array = []
+	for site in cache.sites:
+		var want: int = _site_worker_want(site)
+		if want <= 0:
+			continue
+		ranked.append([want - site.workers.size(),
+			-Vector2(site.cell - base_anchor).length_squared(), site])
+	if ranked.is_empty():
+		return 0
+	ranked.sort_custom(func(a: Array, b: Array) -> bool:
+		if int(a[0]) != int(b[0]):
+			return int(a[0]) > int(b[0])
+		return float(a[1]) > float(b[1]))
+	var budget: int = AIState.builder_budget(cache.brave_count, cache.population,
+		_site_demand(cache))
+	var assigned: int = 0
+	var staffed: int = 0
+	for entry in ranked:
+		if budget <= 0 or staffed >= Balance.AI_SITES_STAFFED_PER_TICK:
+			break
+		var deficit: int = int(entry[0])
+		if deficit <= 0:
+			continue
+		var site: Building = entry[2]
+		var note: SiteNote = _note_for(site)
+		if note.retry_until > _tick_count:
+			continue
+		# A site with NOBODY on it gets its minimum from any distance — "not a
+		# single worker" is the reported failure and beats any walk optimisation.
+		var dist: float = Balance.AI_BUILDER_WALK_RADIUS
+		var want: int = mini(mini(deficit, Building.MAX_WORKERS - site.workers.size()), budget)
+		if site.workers.is_empty():
+			dist = INF
+			want = mini(maxi(want, Balance.AI_SITE_WORKERS_MIN), budget)
+		var crew: Array[Unit] = cache.take_idle_for(site, want, dist)
+		if crew.is_empty():
+			continue
+		staffed += 1
+		budget -= crew.size()
+		var got: int = commands.order_build(crew, site)
+		assigned += got
+		if got == 0:
+			# The braves we had cannot serve this plot — back off instead of
+			# re-ordering the same hopeless pairing every second.
+			note.retry_until = _tick_count + Balance.AI_SITE_RETRY_TICKS
+	dbg_builders_assigned += assigned
+	return assigned
+
+
+## Worker target of a site, or 0 when it must not be staffed at all.
+func _site_worker_want(site: Building) -> int:
+	if not is_instance_valid(site) or site.health <= 0 or site.demolishing:
+		return 0
+	# A wood-stalled site is skipped exactly as the passive recruiter skips it: a
+	# worker with no reachable wood sets mark_wood_stalled() again on its next tick
+	# and quits, dropping any carried wood — a one-tick thrash cycle. Those sites
+	# belong to the wood logistics, and Building._absorb_piles clears the flag as
+	# soon as wood arrives (WOOD_RECHECK_INTERVAL 30 s at the latest).
+	if site.wood_stalled or site.approach_island() < 0 or not site.has_worker_room():
+		return 0
+	return AIState.site_worker_target(site.footprint.x * site.footprint.y,
+		site.needs_flatten(), site.wood_needed_total() - site.wood_incoming())
+
+
+## Summed worker deficit over the own sites — the demand side of builder_budget.
+func _site_demand(cache: TickCache) -> int:
+	var total: int = 0
+	for site in cache.sites:
+		total += maxi(0, _site_worker_want(site) - site.workers.size())
+	return total
+
+
+func _note_for(site: Building) -> SiteNote:
+	var id: int = site.get_instance_id()
+	var note: SiteNote = _site_notes.get(id)
+	if note == null:
+		note = SiteNote.new()
+		_site_notes[id] = note
+	return note
+
+
+## Rebuilt every tick from cache.sites, so the dictionary cannot leak, and the
+## "unsupplied since" stamp is refreshed while we are at it.
+func _prune_site_notes(cache: TickCache) -> void:
+	var kept: Dictionary = {}
+	for site in cache.sites:
+		if not is_instance_valid(site) or site.health <= 0:
+			continue
+		var id: int = site.get_instance_id()
+		var note: SiteNote = _site_notes.get(id)
+		if note == null:
+			note = SiteNote.new()
+		if site.workers.size() >= Balance.AI_SITE_SUPPLIED_WORKERS:
+			note.unsupplied_since = -1
+		elif note.unsupplied_since < 0:
+			note.unsupplied_since = _tick_count
+		kept[id] = note
+	_site_notes = kept
 
 
 ## Decides what to place next. The ORDER itself lives in AIState as a pure

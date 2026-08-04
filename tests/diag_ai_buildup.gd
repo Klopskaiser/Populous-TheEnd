@@ -63,11 +63,50 @@ func _initialize() -> void:
 		ais.append(ai)
 	var steps: int = int(sim * 30.0)
 	for s in range(steps):
+		# tick_units ZUERST: UnitManager._physics_process macht genau das, und ohne
+		# den Aufruf tickt keine einzige Einheit (der Fehler in der ersten Fassung
+		# dieser Diagnose — sie sah einen voellig stillstehenden Stamm).
+		um.tick_units(1.0 / 30.0)
 		um.tick(1.0 / 30.0); bm.tick(1.0 / 30.0); tm.tick(1.0 / 30.0)
 		for t in tribes: t.tick(1.0 / 30.0)
 		for ai in ais: ai._process(1.0 / 30.0)
 	print("Karte %s, %.0f s, 4 KIs | Baeume gesamt %d" % [map_id, sim, tm.trees.size()])
+	print("  Bauarbeiter insgesamt zugewiesen: %d" % AIController.dbg_builders_assigned)
 	for i in range(4):
+		var idle: int = 0
+		for u in tribes[i].units:
+			if is_instance_valid(u) and u.state == Unit.State.IDLE and u is Brave:
+				idle += 1
+		var st: Dictionary = {}
+		for u in tribes[i].units:
+			if not is_instance_valid(u) or not (u is Brave): continue
+			var k: String = Unit.State.keys()[u.state]
+			st[k] = int(st.get(k, 0)) + 1
+		if i == 0:
+			var seen: Dictionary = {}
+			for u in tribes[i].units:
+				if not is_instance_valid(u) or not (u is Brave): continue
+				if u.state != Unit.State.BUILD: continue
+				var j = (u as Brave).job
+				var key: String = "job=%s under_constr=%s upgrading=%s dem=%s hp=%d/%d task=%s" % [
+					("null" if not is_instance_valid(j) else j.get_script().resource_path.get_file().get_basename()),
+					("-" if not is_instance_valid(j) else str(j.under_construction)),
+					("-" if not is_instance_valid(j) else str(j.upgrading)),
+					("-" if not is_instance_valid(j) else str(j.demolishing)),
+					(0 if not is_instance_valid(j) else j.health),
+					(0 if not is_instance_valid(j) else j.max_health),
+					Brave.Task.keys()[(u as Brave).task]]
+				seen[key] = int(seen.get(key, 0)) + 1
+			for k in seen:
+				print("     BUILD-Brave x%d: %s" % [seen[k], k])
+		print("  KI %d: idle Braves %d, Bravestrom %.1f/min, Zustaende %s" % [i, idle,
+			ais[i].build_tick_cache().brave_stream, str(st)])
+		for b in tribes[i].buildings:
+			if is_instance_valid(b) and b.under_construction:
+				print("     Baustelle %s @%s: Arbeiter %d, Holz %d/%d, stalled %s, Fortschritt %.2f" % [
+					b.get_script().resource_path.get_file().get_basename(), str(b.cell),
+					b.workers.size(), b.wood_delivered, b.wood_cost,
+					str(b.wood_stalled), b.build_progress])
 		print("  Anker %d: Baeume im Umkreis 22: %d | Baustellen: %d" % [i,
 			tm.count_trees_near(nav.cell_to_world(anchors[i]), 22.0),
 			ais[i].build_tick_cache().sites.size()])
