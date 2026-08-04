@@ -438,6 +438,37 @@ func test_max_stage_hut_never_upgrades_again() -> void:
 	_free_world(w)
 
 
+## Regression guard (user report): an upgraded hut must not grow its hitbox or its
+## ground silhouette. Braves stop at interact_range() from the CENTRE and walk on
+## the cells right next to the footprint, so anything that reaches further out than
+## the stage-0 body puts them inside a wall. The first 10f version widened the body
+## per stage AND added a side annex 1.6 m OUTSIDE the footprint — braves working at
+## or passing an upgraded hut stood in it. The stage may only grow UPWARDS.
+func test_upgrade_stages_do_not_grow_the_hitbox_or_footprint() -> void:
+	var w: Dictionary = _make_world()
+	var hut: Hut = _place_hut(w, Vector2i(60, 60))
+	var base_click: float = hut._click_body_height()
+	var half_footprint: float = float(hut.footprint.x) * 0.5 * TerrainData.CELL_SIZE
+	var body_half: float = float(hut.footprint.x) * Hut.BODY_WIDE * 0.5
+	for stage in range(Balance.HUT_MAX_UPGRADE_STAGE + 1):
+		hut.upgrade_stage = stage
+		check(hut._click_body_height() == base_click,
+			"stage %d keeps the click-body height" % stage)
+		check(hut.footprint == Balance.HUT_FOOTPRINT,
+			"stage %d keeps the 4x4 footprint" % stage)
+	check(body_half < half_footprint,
+		"the placeholder body stays inside the footprint (%.2f < %.2f)"
+			% [body_half, half_footprint])
+	check(half_footprint - body_half >= 0.25,
+		"and leaves clearance for a brave standing on the boundary cell")
+	# Height is the ONLY thing that may grow, and stage 0 is the pre-10f hut.
+	check(Hut.BODY_HEIGHT_PER_STAGE[0] == 1.6, "stage 0 keeps the old wall height")
+	for stage in range(1, Balance.HUT_MAX_UPGRADE_STAGE + 1):
+		check(Hut.BODY_HEIGHT_PER_STAGE[stage] > Hut.BODY_HEIGHT_PER_STAGE[stage - 1],
+			"stage %d is taller than the one before" % stage)
+	_free_world(w)
+
+
 func test_upgrade_refund_counts_toward_the_demolition_payout() -> void:
 	var w: Dictionary = _make_world()
 	w.tribe.growth_mode = Tribe.GrowthMode.NONE

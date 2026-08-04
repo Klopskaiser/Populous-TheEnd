@@ -574,27 +574,40 @@ func asset_kind() -> StringName:
 	return &"hut" if upgrade_stage == 0 else StringName("hut%d" % upgrade_stage)
 
 
-## Grows with the stage, like the placeholder does (walls 1.6..3.0 m plus roof).
-func _click_body_height() -> float:
-	return 2.5 + 0.5 * float(upgrade_stage)
+## Footprint fraction the placeholder body occupies. CONSTANT across all upgrade
+## stages (user report): the ground silhouette must not grow.
+##
+## Braves stop at interact_range() from the CENTRE, which lets them stand right on
+## the footprint boundary — 2.0 m out on a 4x4 hut. At 0.85 the wall face sits at
+## 1.7 m, so there is a 0.3 m gap. The first 10f version widened this to 0.98 per
+## stage (wall at 1.96 m => 4 cm gap) and added a side annex reaching 1.6 m BEYOND
+## the footprint, i.e. straight into walkable cells: braves working at or walking
+## past an upgraded hut stood inside its wall. Grow UPWARDS only — height cannot
+## collide with anybody standing on the ground.
+const BODY_WIDE: float = 0.85
+## Wall height per upgrade stage. Stage 0 is exactly the pre-10f hut.
+const BODY_HEIGHT_PER_STAGE: Array[float] = [1.6, 1.8, 2.0, 2.2, 2.4]
+## Roof tint per stage — the stages stay tellable apart without extra bulk.
+const ROOF_TINTS: Array[Color] = [
+	Color(0.42, 0.26, 0.12), Color(0.40, 0.28, 0.14), Color(0.38, 0.30, 0.17),
+	Color(0.36, 0.32, 0.20), Color(0.34, 0.34, 0.24)]
 
 
 ## Authored with the entrance facing south (+z); the mesh root is rotated by
 ## the Building base according to `orientation`.
 ##
-## The placeholder GROWS with the upgrade stage (10f): the body gets taller and
-## wider, the roof rides higher, and from stage 3 on there is a side annex. The
-## footprint stays 4x4 — the hut gains height and bulk, not ground. Without this
-## the five stages would be visually identical as long as no .glb models exist.
+## The placeholder grows only in HEIGHT with the upgrade stage (10f), plus a roof
+## tint — the ground silhouette and the click body stay exactly as they were, so
+## nothing reaches into the cells braves walk on. Stage 0 is pixel-identical to
+## the pre-10f hut.
 func _create_visuals() -> void:
 	super._create_visuals()
 	if _has_custom_model:
 		return
-	var stage: float = float(upgrade_stage)
-	var wide: float = 0.78 + 0.05 * stage          # 0.78 .. 0.98 of the footprint
-	var tall: float = 1.6 + 0.35 * stage           # 1.6 .. 3.0 m walls
-	var w: float = float(footprint.x) * wide
-	var d: float = float(footprint.y) * wide
+	var stage: int = clampi(upgrade_stage, 0, BODY_HEIGHT_PER_STAGE.size() - 1)
+	var tall: float = BODY_HEIGHT_PER_STAGE[stage]
+	var w: float = float(footprint.x) * BODY_WIDE
+	var d: float = float(footprint.y) * BODY_WIDE
 
 	var body: MeshInstance3D = MeshInstance3D.new()
 	var box: BoxMesh = BoxMesh.new()
@@ -608,25 +621,13 @@ func _create_visuals() -> void:
 	var prism: PrismMesh = PrismMesh.new()
 	# Flush with the walls (no overhang) so it does not clip the heads of
 	# braves standing right at the hut.
-	prism.size = Vector3(w, 1.2 + 0.15 * stage, d)
+	prism.size = Vector3(w, 1.2, d)
 	roof.mesh = prism
-	roof.material_override = _make_material(Color(0.42, 0.26, 0.12))
-	roof.position.y = tall + 0.6 + 0.075 * stage
+	roof.material_override = _make_material(ROOF_TINTS[stage])
+	roof.position.y = tall + 0.6
 	_mesh_root.add_child(roof)
 
-	# From stage 3 on: a lower annex on the west side, so the late stages read as
-	# a compound rather than just a taller box.
-	if upgrade_stage >= 3:
-		var annex: MeshInstance3D = MeshInstance3D.new()
-		var annex_box: BoxMesh = BoxMesh.new()
-		annex_box.size = Vector3(w * 0.45, tall * 0.6, d * 0.7)
-		annex.mesh = annex_box
-		annex.material_override = _make_material(Color(0.48, 0.33, 0.18))
-		annex.position = Vector3(-(w * 0.5 + w * 0.2), tall * 0.3, 0.0)
-		_mesh_root.add_child(annex)
-
-	# Entrance door on the south side — on the wall face, which moves outward with
-	# the stage.
+	# Entrance door on the south side (wall face, same for every stage).
 	var door: MeshInstance3D = MeshInstance3D.new()
 	var door_box: BoxMesh = BoxMesh.new()
 	door_box.size = Vector3(0.8, 1.2, 0.15)

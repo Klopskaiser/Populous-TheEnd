@@ -1801,8 +1801,10 @@ func _rebuild_visuals() -> void:
 	_create_visuals()
 	if _mesh_root != null:
 		_mesh_root.rotation.y = float(orientation) * PI * 0.5
-	# The click box is sized from _click_body_height(), which grows with the hut
-	# stage — without this, clicks on the upper half of a Wohnpalast would miss.
+	# The click box is rebuilt too, in case a subclass sizes it from state that
+	# just changed. No hut stage does — its hitbox is deliberately constant (user
+	# report: a growing hitbox is wrong) — but a rebuilt model with a stale click
+	# body would be a trap for the next subclass that varies one of them.
 	var old_body: Node = get_node_or_null("ClickBody")
 	if old_body != null:
 		remove_child(old_body)
