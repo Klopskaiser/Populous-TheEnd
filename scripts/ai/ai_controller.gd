@@ -33,6 +33,12 @@ class TickCache extends RefCounted:
 	# --- buildings ---
 	var usable_huts: int = 0
 	var huts: Array[Building] = []
+	## Braves per minute the usable huts deliver — read straight off
+	## Hut.growth_per_minute(), which already accounts for crew size, upgrade stage,
+	## damage, pause and the housing/unit caps. The camp targets come from THIS,
+	## not from the hut count: a camp trains one unit at a time, so throughput is
+	## what decides how many camps are needed (10g).
+	var brave_stream: float = 0.0
 	## Kind identifier -> planned count (construction sites INCLUDED).
 	var planned: Dictionary = {}
 	var housing_capacity: int = 0
@@ -269,6 +275,9 @@ func _process(delta: float) -> void:
 static var dbg_cache_builds: int = 0
 static var dbg_unit_passes: int = 0
 static var dbg_building_passes: int = 0
+## Huts currently routed into a training queue (10g) — the one number to watch in
+## a play test, because too high starves the whole economy.
+static var dbg_hut_rallies: int = 0
 
 
 ## One AI decision tick (1x/s in game; tests call it directly).
@@ -315,6 +324,12 @@ func tick_ai() -> void:
 		_tick_wood_logistics(cache)
 	_staff_foresters(cache)
 	_staff_workshops(cache)
+	# Routes part of the brave stream into training at the source, so _tick_train
+	# has fewer per-brave orders to give. Runs in EVERY state (a BUILD-state tribe
+	# still wants its first warriors) but is skipped under threat: re-pointing huts
+	# while the militia mobilises would only fight _tick_defend for the same braves.
+	if threat.is_empty():
+		_tick_hut_rallies(cache)
 	_man_watchtowers(cache)
 	_man_airships(cache)
 	_cast_spells()
@@ -423,6 +438,7 @@ func build_tick_cache() -> TickCache:
 				cache.planned[&"hut_sites"] += 1
 			if usable:
 				cache.usable_huts += 1
+				cache.brave_stream += (building as Hut).growth_per_minute()
 		elif building is WarriorCamp:
 			cache.planned[&"warrior_camp"] += 1
 			_note_camp(cache, building, &"warrior_camp", usable)
@@ -501,6 +517,7 @@ func next_building_kind(cache: TickCache) -> StringName:
 	counts["forward_depot"] = cache.forward_depots.size()
 	counts["wood_thin"] = _wood_thin_near_base()
 	counts["grove_far"] = _best_grove_is_remote()
+	counts["brave_stream"] = cache.brave_stream
 	return AIState.next_building_kind(counts)
 
 
@@ -1440,6 +1457,59 @@ func _staff_workshops(cache: TickCache) -> void:
 			if brave.is_empty():
 				return
 			commands.order_workshop(brave, ws)
+
+
+## Routes part of the brave stream into training AT THE SOURCE (10g): a hut whose
+## rally point lies on a usable training building sends every fresh brave straight
+## into that camp's queue (Hut._spawn_brave -> Building.rally_training_building,
+## engine behaviour since 5d that the AI never used — it set no rally point on ANY
+## building).
+##
+## Two things this buys beyond saving commands: the brave never becomes IDLE, so it
+## cannot be grabbed by the wood crews / workshop staffing that read the same idle
+## pool, and _tick_train no longer needs one order per brave.
+##
+## Deliberately throttled and hysteretic: a rally point that moves every tick would
+## send the stream ping-ponging between camps. Only re-assigned every
+## AI_HUT_RALLY_TICK_INTERVAL ticks.
+func _tick_hut_rallies(cache: TickCache) -> void:
+	if commands == null or cache.huts.is_empty():
+		return
+	if _tick_count % Balance.AI_HUT_RALLY_TICK_INTERVAL != 0:
+		return
+	# Camps that can actually take a queue, in army-mix deficit order — the same
+	# truth _tick_train uses, so the routing and the batch cannot disagree.
+	var order: Array[StringName] = AIState.training_kind_order(
+		cache.kind_counts[&"warrior"], cache.kind_counts[&"firewarrior"],
+		cache.kind_counts[&"preacher"])
+	var camps: Array[Building] = []
+	for kind in order:
+		var camp: TrainingBuilding = _camp_for(cache, kind)
+		if camp != null:
+			camps.append(camp)
+	var share: float = AIState.training_hut_share(state, cache.army_count,
+		attack_wave_size)
+	# floori, never ceil: rounding UP would route every hut of a one-hut tribe and
+	# leave it without a single free brave.
+	var wanted: int = clampi(int(floor(float(cache.usable_huts) * share)),
+		0, maxi(cache.usable_huts - 1, 0))
+	if camps.is_empty():
+		wanted = 0
+	var assigned: int = 0
+	for i in range(cache.huts.size()):
+		var hut: Building = cache.huts[i]
+		if not is_instance_valid(hut) or not hut.is_usable():
+			continue
+		if assigned < wanted:
+			var camp: Building = camps[assigned % camps.size()]
+			# Already pointing at the right camp: leave it alone (hysteresis).
+			if hut.rally_training_building() != camp:
+				commands.set_rally_point(tribe, hut, camp.center_world())
+			assigned += 1
+		elif hut.rally_training_building() != null:
+			# Over the share: hand the hut back to free-brave production.
+			commands.set_rally_point(tribe, hut, hut.edge_spawn_position())
+	dbg_hut_rallies = assigned
 
 
 ## Boards idle firewarriors onto own under-crewed airships (first AI stage:

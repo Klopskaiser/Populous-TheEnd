@@ -205,11 +205,18 @@ static func next_building_kind(counts: Dictionary) -> StringName:
 	# (population >= 0) and the AI would build nothing but huts and never a
 	# warrior camp; without the hut-site cap it would fill every parallel site
 	# with huts.
+	# 10g: TWO triggers, because a pure percentage fails with the small 10f huts —
+	# 80 % of 10 places is 8, i.e. the hut is nearly full before anything is even
+	# planned, and the upgrade stages let capacity run ahead of the population so
+	# the percentage branch often never fires at all (user report: "should have
+	# built huts, wood was in reach"). The absolute headroom catches that.
 	var housing: int = int(counts.get("housing_capacity", 0))
+	var population: int = int(counts.get("population", 0))
 	var pressure: int = int(float(housing) * Balance.AI_HOUSING_PRESSURE)
-	if housing > 0 and int(counts.get("population", 0)) >= pressure \
-			and huts < Balance.AI_MAX_HUTS \
-			and int(counts.get("hut_sites", 0)) < Balance.AI_MAX_HUT_SITES:
+	var headroom: int = housing - population
+	if housing > 0 and huts < Balance.AI_MAX_HUTS \
+			and int(counts.get("hut_sites", 0)) < Balance.AI_MAX_HUT_SITES \
+			and (population >= pressure or headroom < Balance.AI_MIN_HOUSING_HEADROOM):
 		return &"hut"
 	if huts < TARGET_HUTS:
 		return &"hut"
@@ -217,36 +224,111 @@ static func next_building_kind(counts: Dictionary) -> StringName:
 		return &"firewarrior_camp"
 	if int(counts.get("temple", 0)) < 1:
 		return &"temple"
+	# 10g: extra training camps moved from the very END of the ladder to HERE.
+	# They used to sit behind up to twelve workshops, and workshop_target grows
+	# with the braves while the hut count grows far more slowly — so the AI never
+	# reached this branch and fielded exactly one camp of each kind forever (user
+	# report). The target now comes from the BRAVE STREAM, not the hut count: a
+	# camp trains ONE unit at a time, so throughput is the limit.
+	var camp_kind: StringName = missing_camp_kind(counts)
+	if camp_kind != &"":
+		return camp_kind
 	# Scaling foresters (see the first-forester note above): behind housing, so
 	# they grow the wood supply without ever blocking population growth.
 	if bool(counts.get("wood_thin", false)) \
 			and int(counts.get("forester", 0)) < forester_target(braves):
 		return &"forester"
 	# Production shops scale with the tribe (7f): together with the vehicle caps
-	# this is the actual fix for "the AI hardly ever fields vehicles".
+	# this is the actual fix for "the AI hardly ever fields vehicles". The FIRST
+	# shop of a kind is never gated — only the second and later, so a tribe that
+	# cannot keep its camps saturated still gets vehicles at all.
 	var shops: int = workshop_target(braves)
-	if int(counts.get("workshop", 0)) < shops:
+	if int(counts.get("workshop", 0)) < shops \
+			and _may_add_shop(counts, int(counts.get("workshop", 0))):
 		return &"workshop"
-	if int(counts.get("fireram_workshop", 0)) < shops:
+	if int(counts.get("fireram_workshop", 0)) < shops \
+			and _may_add_shop(counts, int(counts.get("fireram_workshop", 0))):
 		return &"fireram_workshop"
 	if int(counts.get("watchtower", 0)) < Balance.AI_TARGET_WATCHTOWERS:
 		return &"watchtower"
-	if int(counts.get("airship_wharf", 0)) < shops:
+	if int(counts.get("airship_wharf", 0)) < shops \
+			and _may_add_shop(counts, int(counts.get("airship_wharf", 0))):
 		return &"airship_wharf"
-	var camp_total: int = int(counts.get("warrior_camp", 0)) \
-		+ int(counts.get("firewarrior_camp", 0)) + int(counts.get("temple", 0))
-	var camp_target: int = TARGET_CAMPS \
-		+ maxi(0, huts - TARGET_HUTS) / Balance.AI_HUTS_PER_EXTRA_CAMP
-	if camp_total < camp_target:
-		return fewest_camp_kind(counts)
 	return &""
 
 
-## Camp kind with the fewest standing/planned buildings (ties: warrior ->
-## firewarrior -> temple, mirroring the army mix priority).
-static func fewest_camp_kind(counts: Dictionary) -> StringName:
-	var best: StringName = &"warrior_camp"
-	for kind in [&"firewarrior_camp", &"temple"]:
-		if int(counts.get(kind, 0)) < int(counts.get(best, 0)):
+## Whether another production shop of a kind that already has `have` of them may
+## be planned. The first one always may; from the second on the training camps
+## must have caught up with the brave stream — building vehicle shops while the
+## army production lags was the user's "6 workshops, few vehicles, should have
+## been huts".
+static func _may_add_shop(counts: Dictionary, have: int) -> bool:
+	return have < 1 or missing_camp_kind(counts) == &""
+
+
+## Camp kind that is short of its stream target, or &"" when all three are met.
+## Picks the kind with the biggest ABSOLUTE shortfall so a tribe that needs three
+## more barracks does not build one of each first.
+static func missing_camp_kind(counts: Dictionary) -> StringName:
+	var targets: Dictionary = camp_targets(float(counts.get("brave_stream", 0.0)))
+	var best: StringName = &""
+	var worst: int = 0
+	for kind in [&"warrior_camp", &"firewarrior_camp", &"temple"]:
+		var short: int = int(targets[kind]) - int(counts.get(kind, 0))
+		if short > worst:
+			worst = short
 			best = kind
 	return best
+
+
+## Camp count per kind from the BRAVE STREAM (braves per minute the huts deliver)
+## instead of the hut count. A camp trains ONE unit at a time — barracks 3 s =
+## 20/min, fire temple 4 s = 15/min, temple 5 s = 12/min — so throughput is what
+## decides how many are needed. The stream is split by the army mix
+## (Balance.AI_ARMY_SHARE_*), and every kind keeps at least the one camp the old
+## TARGET_CAMPS guaranteed.
+##
+## The per-camp throughput is DERIVED from the training times, not a second set
+## of constants: a balance change to WARRIOR_CAMP_TRAINING_TIME must not silently
+## leave the AI planning for the old rate.
+static func camp_targets(brave_stream: float) -> Dictionary:
+	return {
+		&"warrior_camp": _camp_count(brave_stream, Balance.AI_ARMY_SHARE_WARRIOR,
+			Balance.WARRIOR_CAMP_TRAINING_TIME),
+		&"firewarrior_camp": _camp_count(brave_stream,
+			Balance.AI_ARMY_SHARE_FIREWARRIOR, Balance.FIREWARRIOR_CAMP_TRAINING_TIME),
+		&"temple": _camp_count(brave_stream, Balance.AI_ARMY_SHARE_PREACHER,
+			Balance.TEMPLE_TRAINING_TIME),
+	}
+
+
+static func _camp_count(brave_stream: float, share: float, training_time: float) -> int:
+	if training_time <= 0.0:
+		return 1
+	var per_camp: float = 60.0 / training_time      # units per minute, one camp
+	var wanted: float = brave_stream * share / per_camp
+	return clampi(int(ceil(wanted)), 1, Balance.AI_MAX_CAMPS_PER_KIND)
+
+
+## Share of the tribe's huts whose rally point is put ON a training building, so
+## their fresh braves walk straight into the training queue
+## (Hut._spawn_brave -> Building.rally_training_building, engine behaviour since
+## phase 5d that the AI never used).
+##
+## MUST stay below 1.0: with every hut routed into a camp the tribe gets no free
+## braves at all — no builders, no wood crews, no workshop staff — and the
+## economy dies without a single error message. In BUILD the share is low; it
+## rises with how far the army is below its wave target.
+static func training_hut_share(state: State, army: int, army_target: int) -> float:
+	if state == State.BUILD:
+		return Balance.AI_TRAINING_HUT_SHARE_BUILD
+	var target: float = maxf(float(army_target), 1.0)
+	var lag: float = clampf(1.0 - float(army) / target, 0.0, 1.0)
+	return lerpf(Balance.AI_TRAINING_HUT_SHARE_BUILD,
+		Balance.AI_TRAINING_HUT_SHARE_ARMY, lag)
+
+
+## fewest_camp_kind() was removed in 10g: missing_camp_kind() replaces it and picks
+## by SHORTFALL against the stream target instead of by raw count. Keeping both
+## would have left two nearly identical camp choosers side by side — exactly the
+## kind of duplication that let the is_attackable() targeting bug survive.

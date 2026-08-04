@@ -764,9 +764,31 @@ const AI_TRAIN_BATCH_MAX: int = 12
 const AI_BRAVES_PER_TRAIN_BATCH: int = 20
 ## Bauordnung (in AIState.next_building_kind gebraucht, deshalb hier statt im
 ## Controller — AIState darf nicht auf den Controller zurückgreifen).
-const AI_HOUSING_PRESSURE: float = 0.8
+## 10g: 0,8 -> 0,7, plus der ABSOLUTE Zweitauslöser darunter. Eine reine
+## Prozentschwelle versagt bei den kleinen 10f-Hütten (80 % von 10 Plätzen = 8),
+## und die Ausbaustufen lassen die Kapazität der Bevölkerung vorauslaufen — dann
+## feuerte der Zweig gar nicht und die KI baute Werkstätten statt Hütten.
+const AI_HOUSING_PRESSURE: float = 0.7
+## Freie Wohnplätze, unter denen die KI unabhängig vom Prozentdruck eine Hütte
+## plant.
+const AI_MIN_HOUSING_HEADROOM: int = 12
 const AI_TARGET_WATCHTOWERS: int = 2
-const AI_HUTS_PER_EXTRA_CAMP: int = 2
+## AI_HUTS_PER_EXTRA_CAMP ist in 10g entfallen: die Lagerzahl kommt jetzt aus dem
+## BRAVESTROM (AIState.camp_targets), nicht aus der Hüttenzahl — ein Lager bildet
+## eine Einheit auf einmal aus, der Durchsatz ist also das Maß.
+const AI_MAX_CAMPS_PER_KIND: int = 4
+
+# --- Ausbildungs-Routing über Hütten-Rally-Points (10g) ---
+## Anteil der Hütten, deren Rally Point auf einem Ausbildungszentrum liegt: deren
+## frische Braves gehen direkt in die Warteschlange, ohne Idle-Umweg und ohne
+## Kommando pro Brave. MUSS unter 1,0 bleiben — zeigen ALLE Hütten auf Lager, hat
+## der Stamm keine freien Braves mehr (keine Bauarbeiter, keine Holztrupps, keine
+## Werkstattbesatzung) und die Wirtschaft stirbt ohne Fehlermeldung.
+const AI_TRAINING_HUT_SHARE_BUILD: float = 0.25
+const AI_TRAINING_HUT_SHARE_ARMY: float = 0.60
+## Die Zuordnung ist träge: ein wandernder Rally Point schickt den Bravestrom
+## zwischen den Lagern hin und her.
+const AI_HUT_RALLY_TICK_INTERVAL: int = 10
 
 # --- Armee-Mix ---
 ## Mehr Prediger (0,20 -> 0,30); die gleichzeitige Anhebung der Feuerkrieger ist

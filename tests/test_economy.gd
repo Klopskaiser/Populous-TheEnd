@@ -1066,3 +1066,49 @@ func test_order_pickup_fetches_pile_and_delivers() -> void:
 	check(delivered, "wood ends up on a pile at the hut's drop spot")
 	check(brave.carried_wood == 0, "brave dropped everything")
 	_free_world(w)
+
+
+# --- Rally point on a training building routes the brave stream (5d contract) --------
+# Phase 10g Teil 7 builds the AI's training routing entirely on this engine
+# behaviour, so it gets its own guard: it existed since 5d but nothing pinned it,
+# and the AI is the first caller.
+
+func test_hut_rally_on_a_camp_sends_the_fresh_brave_into_training() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribe
+	tribe.upgrades_allowed = false
+	# MAXIMUM, NICHT NONE: NONE leert alle Huetten (_tick_growth wirft die Besatzung
+	# raus) und eine unbemannte Huette produziert nichts.
+	tribe.growth_mode = Tribe.GrowthMode.MAXIMUM
+	var camp: Building = w.building_manager.place(
+		preload("res://scenes/buildings/warrior_camp.tscn"), tribe, Vector2i(70, 60), 0, true)
+	var hut: Hut = w.building_manager.place(
+		HUT_SCENE, tribe, Vector2i(60, 60), 0, true) as Hut
+	_man_hut(w, hut, hut.crew_capacity())
+	check(w.commands.set_rally_point(tribe, hut, camp.center_world()),
+		"Rally Point der Huette auf das Kriegerlager")
+	check(hut.rally_training_building() == camp, "und er liegt im Grundriss des Lagers")
+	var before: int = camp.incoming.size()
+	# Den naechsten Brave sofort faellig machen und einmal ticken.
+	hut.spawn_timer = 0.0
+	hut.tick(0.05)
+	check(camp.incoming.size() > before,
+		"der frische Brave geht DIREKT in die Ausbildungs-Warteschlange")
+	_free_world(w)
+
+
+func test_hut_without_a_camp_rally_keeps_producing_free_braves() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribe
+	tribe.upgrades_allowed = false
+	tribe.growth_mode = Tribe.GrowthMode.MAXIMUM
+	var camp: Building = w.building_manager.place(
+		preload("res://scenes/buildings/warrior_camp.tscn"), tribe, Vector2i(70, 60), 0, true)
+	var hut: Hut = w.building_manager.place(
+		HUT_SCENE, tribe, Vector2i(60, 60), 0, true) as Hut
+	_man_hut(w, hut, hut.crew_capacity())
+	hut.spawn_timer = 0.0
+	hut.tick(0.05)
+	check(camp.incoming.is_empty(),
+		"ohne Lager-Rally-Point bleibt der frische Brave frei (Gegenkontrolle)")
+	_free_world(w)

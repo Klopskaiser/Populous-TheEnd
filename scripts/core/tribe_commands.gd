@@ -554,6 +554,48 @@ func order_depot_haul(units: Array[Unit], depot: WoodDepot) -> void:
 		order_move(movers, depot.center_world())
 
 
+## Sets an own building's rally point, snapped to a walkable cell (phase 10g).
+##
+## The AI needs this because writing building.rally_point directly would bypass
+## the only-mutation-API rule. Two callers: the hut rallies that route fresh
+## braves into a training queue (Hut._spawn_brave -> rally_training_building) and
+## the workshop muster point for finished vehicles.
+##
+## The UI still assigns rally points directly in SelectionManager._set_rally —
+## it already has a terrain raycast hit, so it needs no snapping. Migrating it
+## onto this command is a UI change and deliberately out of scope here.
+##
+## A target ON one of the tribe's own buildings is kept EXACTLY. That is not a
+## nicety, it is the whole point of the hut rallies: rally_training_building()
+## matches the rally cell against the camp's footprint_rect, and a footprint is
+## SOLID in the NavGrid — snapping to the nearest walkable cell would push the
+## point just outside the camp and silently break the routing.
+func set_rally_point(tribe: Tribe, building: Building, target: Vector3) -> bool:
+	if not _tribe_active(tribe) or building == null or not is_instance_valid(building):
+		return false
+	if building.tribe_id != tribe.id or building.health <= 0:
+		return false
+	var point: Vector3 = target
+	if nav_grid != null and not _on_own_building(tribe, target):
+		var cell: Vector2i = nav_grid.nearest_walkable_cell(nav_grid.world_to_cell(target))
+		if cell.x < 0:
+			return false
+		point = nav_grid.cell_to_world(cell)
+	building.rally_point = point
+	return true
+
+
+## True when `pos` lies on an own building's footprint (see set_rally_point).
+func _on_own_building(tribe: Tribe, pos: Vector3) -> bool:
+	var c: Vector2i = Vector2i(
+		int(floor(pos.x / TerrainData.CELL_SIZE)),
+		int(floor(pos.z / TerrainData.CELL_SIZE)))
+	for b in tribe.buildings:
+		if is_instance_valid(b) and Rect2i(b.cell, b.footprint).has_point(c):
+			return true
+	return false
+
+
 ## Garrisons an own watchtower with the selected combat units / shaman (phase
 ## 7h): each walks to the entrance and enters up to the 2 crew slots; braves and
 ## overflow units are ignored. The tower validates tribe/capacity/usability.

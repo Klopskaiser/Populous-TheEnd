@@ -483,11 +483,13 @@ func test_endless_building_scaling() -> void:
 	check(ai._next_building_scene(ai.build_tick_cache()) == null,
 		"full base without housing pressure: nothing to build")
 
-	# Two more huts -> the camp target grows -> another camp (fewest kind).
+	# 10g: extra camps no longer follow the HUT COUNT but the BRAVE STREAM — an
+	# unmanned hut delivers nothing, so two more empty huts must NOT raise the camp
+	# target. Manning them does, because growth_per_minute() then rises.
 	w.building_manager.place(HUT_SCENE, tribe, Vector2i(40, 58), 0, true)
 	w.building_manager.place(HUT_SCENE, tribe, Vector2i(48, 58), 0, true)
-	check(ai._next_building_scene(ai.build_tick_cache()) == AIController.WARRIOR_CAMP_SCENE,
-		"extra huts raise the camp target (warrior camp first)")
+	check(ai._next_building_scene(ai.build_tick_cache()) == null,
+		"unbemannte Zusatzhuetten heben das Lagerziel NICHT (Strom statt Huettenzahl)")
 
 	# Housing pressure: population at 80% capacity -> a new hut, forever.
 	var braves: Array[Brave] = []
@@ -1385,4 +1387,210 @@ func test_ai_spell_heuristic_ignores_the_reincarnation_site() -> void:
 	check(ai._enemy_buildings_near(site.center_world(), 40.0) == 1,
 		"und zaehlt in die Ballung")
 	ai.free()
+	_free_world(w)
+
+
+# --- Teil 7: Wohnraum und Ausbildung vor Werkstaetten (10g) --------------------------
+# Nutzerreport: "6 Werkstaetten aber wenig Fahrzeuge und haette besser Huetten bauen
+# sollen" und "nie mehr als 1 Trainingsgebaeude von jedem". Ursache war die
+# REIHENFOLGE: der Zusatz-Lager-Zweig stand als LETZTER hinter bis zu 12
+# Werkstaetten, und kein Lagerziel hing am Bravestrom.
+
+func test_camp_targets_scale_with_the_brave_stream() -> void:
+	var low: Dictionary = AIState.camp_targets(0.0)
+	check(int(low[&"warrior_camp"]) == 1 and int(low[&"temple"]) == 1,
+		"ohne Strom bleibt je Art ein Lager")
+	# 100 Braves/min, Mix 40/30/30: Kaserne 40/min bei 20/min Durchsatz -> 2,
+	# Feuertempel 30/min bei 15 -> 2, Tempel 30/min bei 12 -> 3 (aufgerundet).
+	var high: Dictionary = AIState.camp_targets(100.0)
+	check(int(high[&"warrior_camp"]) == 2, "Kaserne skaliert mit dem Strom")
+	check(int(high[&"firewarrior_camp"]) == 2, "Feuertempel skaliert mit dem Strom")
+	check(int(high[&"temple"]) == 3, "der langsame Tempel braucht am meisten")
+
+
+func test_camp_targets_are_capped_per_kind() -> void:
+	var huge: Dictionary = AIState.camp_targets(10000.0)
+	for kind in [&"warrior_camp", &"firewarrior_camp", &"temple"]:
+		check(int(huge[kind]) == Balance.AI_MAX_CAMPS_PER_KIND,
+			"%s auf AI_MAX_CAMPS_PER_KIND gedeckelt" % kind)
+
+
+func test_camp_targets_derive_from_the_training_times() -> void:
+	# Nicht aus eigenen Konstanten: eine Balance-Aenderung an der Trainingszeit darf
+	# die KI nicht auf die alte Rate planen lassen.
+	var slowest: float = maxf(maxf(Balance.WARRIOR_CAMP_TRAINING_TIME,
+		Balance.FIREWARRIOR_CAMP_TRAINING_TIME), Balance.TEMPLE_TRAINING_TIME)
+	check(is_equal_approx(Balance.TEMPLE_TRAINING_TIME, slowest),
+		"der Tempel ist das langsamste Lager - Grundlage der Erwartung oben")
+
+
+func test_training_hut_share_stays_below_one() -> void:
+	# Der gefaehrlichste Wert des Plans: bei 1,0 hat der Stamm keine freien Braves
+	# mehr - keine Bauarbeiter, keine Holztrupps, keine Werkstattbesatzung.
+	for army in [0, 1, 5, 50, 500]:
+		var s: float = AIState.training_hut_share(AIState.State.ATTACK, army, 12)
+		check(s < 1.0, "Anteil bleibt unter 1,0 (Armee %d)" % army)
+	check(AIState.training_hut_share(AIState.State.BUILD, 0, 12) \
+		== Balance.AI_TRAINING_HUT_SHARE_BUILD, "im Aufbau der niedrige Anteil")
+
+
+func test_training_hut_share_rises_when_the_army_lags() -> void:
+	var lagging: float = AIState.training_hut_share(AIState.State.TRAIN, 0, 12)
+	var ready: float = AIState.training_hut_share(AIState.State.TRAIN, 12, 12)
+	check(lagging > ready, "je weiter die Armee zurueckliegt, desto mehr Huetten")
+
+
+func test_build_order_puts_extra_camps_before_workshops() -> void:
+	# Ein grosser Bravestrom bei nur einem Lager je Art: die Bauordnung muss ein
+	# LAGER liefern, nicht eine Werkstatt.
+	var counts: Dictionary = {
+		"hut": 6, "hut_sites": 0, "warrior_camp": 1, "firewarrior_camp": 1,
+		"temple": 1, "forester": 1, "workshop": 0, "fireram_workshop": 0,
+		"airship_wharf": 0, "watchtower": 0, "wood_depot": 1, "forward_depot": 0,
+		"braves": 120, "population": 40, "housing_capacity": 200,
+		"wood_thin": false, "grove_far": false, "brave_stream": 100.0,
+	}
+	var kind: StringName = AIState.next_building_kind(counts)
+	check(kind == &"warrior_camp" or kind == &"firewarrior_camp" or kind == &"temple",
+		"bei hohem Strom kommt ein Ausbildungslager, keine Werkstatt (war: %s)" % kind)
+
+
+func test_build_order_still_builds_the_first_workshop() -> void:
+	# Regressionswaechter: das Tor darf die Werkstaetten nicht ganz abschalten -
+	# die ERSTE je Art ist nie gegattert, auch wenn die Lager zurueckliegen.
+	var counts: Dictionary = {
+		"hut": 6, "hut_sites": 0, "warrior_camp": 4, "firewarrior_camp": 4,
+		"temple": 4, "forester": 1, "workshop": 0, "fireram_workshop": 0,
+		"airship_wharf": 0, "watchtower": 0, "wood_depot": 1, "forward_depot": 0,
+		"braves": 120, "population": 40, "housing_capacity": 200,
+		"wood_thin": false, "grove_far": false, "brave_stream": 100.0,
+	}
+	check(AIState.next_building_kind(counts) == &"workshop",
+		"bei gesaettigten Lagern kommt die Werkstatt")
+	# Und selbst mit zurueckliegenden Lagern: die erste Werkstatt geht durch.
+	counts["warrior_camp"] = 1
+	counts["firewarrior_camp"] = 1
+	counts["temple"] = 1
+	counts["brave_stream"] = 0.0
+	check(AIState.next_building_kind(counts) == &"workshop",
+		"die erste Werkstatt ist nie gegattert")
+
+
+func test_build_order_blocks_a_second_workshop_while_camps_lag() -> void:
+	var counts: Dictionary = {
+		"hut": 6, "hut_sites": 0, "warrior_camp": 1, "firewarrior_camp": 1,
+		"temple": 1, "forester": 1, "workshop": 1, "fireram_workshop": 0,
+		"airship_wharf": 0, "watchtower": 0, "wood_depot": 1, "forward_depot": 0,
+		"braves": 120, "population": 40, "housing_capacity": 200,
+		"wood_thin": false, "grove_far": false, "brave_stream": 100.0,
+	}
+	check(AIState.next_building_kind(counts) != &"workshop",
+		"keine zweite Werkstatt, solange die Ausbildung hinterherhinkt")
+
+
+func test_build_order_builds_a_hut_on_low_absolute_headroom() -> void:
+	# Der zweite Wohnraum-Auslöser: 190 von 200 Plaetzen belegt sind nur 95 %, aber
+	# der Prozentdruck (0,7) ist erfuellt - also ein Fall, der schon vorher zog.
+	# Entscheidend ist der umgekehrte: viel Luft in Prozent, wenig in Plaetzen.
+	var counts: Dictionary = {
+		"hut": 1, "hut_sites": 0, "warrior_camp": 1, "firewarrior_camp": 1,
+		"temple": 1, "forester": 1, "workshop": 0, "fireram_workshop": 0,
+		"airship_wharf": 0, "watchtower": 0, "wood_depot": 1, "forward_depot": 0,
+		"braves": 5, "population": 2, "housing_capacity": 10,
+		"wood_thin": false, "grove_far": false, "brave_stream": 0.0,
+	}
+	# 2 von 10 = 20 % (Prozentdruck NICHT erfuellt), aber nur 8 Plaetze frei.
+	check(counts["population"] < int(float(counts["housing_capacity"])
+		* Balance.AI_HOUSING_PRESSURE), "Prozentdruck ist hier bewusst NICHT erfuellt")
+	check(AIState.next_building_kind(counts) == &"hut",
+		"wenig freie Plaetze in absoluten Zahlen loesen trotzdem eine Huette aus")
+
+
+func test_ai_points_some_hut_rallies_at_training_buildings() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var anchor: Vector2i = Vector2i(40, 40)
+	var ai: AIController = _make_ai(w, tribe, anchor)
+	w.building_manager.place(SITE_SCENE, tribe, anchor, 0, true)
+	w.building_manager.place(WARRIOR_CAMP_SCENE, tribe, Vector2i(50, 40), 0, true)
+	var huts: Array[Building] = []
+	for i in range(4):
+		huts.append(w.building_manager.place(HUT_SCENE, tribe,
+			Vector2i(30 + i * 5, 50), 0, true))
+	ai.state = AIState.State.TRAIN
+	ai._tick_count = Balance.AI_HUT_RALLY_TICK_INTERVAL   # Drossel treffen
+	ai._tick_hut_rallies(ai.build_tick_cache())
+	var routed: int = 0
+	for hut in huts:
+		if hut.rally_training_building() != null:
+			routed += 1
+	check(routed > 0, "mindestens eine Huette leitet ihren Strom ins Lager")
+	check(routed < huts.size(), "aber NIE alle - sonst hat der Stamm keine freien Braves")
+	check(AIController.dbg_hut_rallies == routed, "Zaehler stimmt mit der Zuordnung")
+	ai.free()
+	_free_world(w)
+
+
+func test_ai_hut_rallies_need_a_usable_camp() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var ai: AIController = _make_ai(w, tribe, Vector2i(40, 40))
+	var hut: Building = w.building_manager.place(HUT_SCENE, tribe, Vector2i(30, 50), 0, true)
+	ai.state = AIState.State.TRAIN
+	ai._tick_count = Balance.AI_HUT_RALLY_TICK_INTERVAL
+	ai._tick_hut_rallies(ai.build_tick_cache())
+	check(hut.rally_training_building() == null,
+		"ohne Lager wird keine Huette umgeleitet")
+	ai.free()
+	_free_world(w)
+
+
+func test_ai_does_not_reassign_hut_rallies_every_tick() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var ai: AIController = _make_ai(w, tribe, Vector2i(40, 40))
+	w.building_manager.place(WARRIOR_CAMP_SCENE, tribe, Vector2i(50, 40), 0, true)
+	for i in range(4):
+		w.building_manager.place(HUT_SCENE, tribe, Vector2i(30 + i * 5, 50), 0, true)
+	ai.state = AIState.State.TRAIN
+	ai._tick_count = Balance.AI_HUT_RALLY_TICK_INTERVAL
+	ai._tick_hut_rallies(ai.build_tick_cache())
+	var before: int = AIController.dbg_hut_rallies
+	# Ein Tick, der die Drossel NICHT trifft, darf nichts anfassen.
+	AIController.dbg_hut_rallies = -1
+	ai._tick_count += 1
+	ai._tick_hut_rallies(ai.build_tick_cache())
+	check(AIController.dbg_hut_rallies == -1,
+		"zwischen den Drossel-Ticks wird nicht neu zugeordnet")
+	AIController.dbg_hut_rallies = before
+	ai.free()
+	_free_world(w)
+
+
+func test_set_rally_point_keeps_a_point_on_an_own_building() -> void:
+	# Die Kernfalle: rally_training_building() vergleicht die Rally-ZELLE mit dem
+	# Grundriss des Lagers, und ein Grundriss ist im NavGrid SOLID. Ein Snapping auf
+	# die naechste begehbare Zelle wuerde den Punkt aus dem Lager schieben und die
+	# ganze Umleitung lautlos kaputtmachen.
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var camp: Building = w.building_manager.place(WARRIOR_CAMP_SCENE, tribe,
+		Vector2i(50, 40), 0, true)
+	var hut: Building = w.building_manager.place(HUT_SCENE, tribe, Vector2i(30, 50), 0, true)
+	check(w.commands.set_rally_point(tribe, hut, camp.center_world()),
+		"Rally Point auf das Lager wird angenommen")
+	check(hut.rally_training_building() == camp,
+		"und liegt danach WIRKLICH im Grundriss des Lagers")
+	# Ein Punkt im freien Gelaende wird dagegen auf eine begehbare Zelle gesnappt.
+	check(w.commands.set_rally_point(tribe, hut, Vector3(60, 5, 60)), "freier Punkt ok")
+	check(hut.rally_training_building() == null, "und zeigt dann auf kein Lager mehr")
+	_free_world(w)
+
+
+func test_set_rally_point_rejects_a_foreign_building() -> void:
+	var w: Dictionary = _make_world()
+	var enemy_hut: Building = w.building_manager.place(HUT_SCENE, w.tribes[0],
+		Vector2i(30, 50), 0, true)
+	check(not w.commands.set_rally_point(w.tribes[1], enemy_hut, Vector3(40, 5, 40)),
+		"fremde Gebaeude nimmt der Befehl nicht an")
 	_free_world(w)

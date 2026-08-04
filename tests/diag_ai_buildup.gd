@@ -1,0 +1,81 @@
+extends SceneTree
+
+## Diagnose des KI-Aufbaus: Gebaeude-Zusammensetzung, offene Baustellen und
+## Baumangebot nach N Sekunden, vier KIs auf einer echten Karte. KEIN test_-Praefix,
+## laeuft also nicht in der Suite.
+##
+##   godot --headless -s res://tests/diag_ai_buildup.gd -- map=bergpass sim=600
+##
+## Startbedingungen wie main.gd._setup_skirmish_base (1 Huette, 20 Braves, Baeume um
+## den Anker), damit der Befund uebertragbar ist.
+##
+## Stand 2026-08-05 (vor 10g Teil 1): jede KI haelt 2 Baustellen offen und stellt in
+## 600 s KEINE davon fertig — die headless Reproduktion des Nutzerreports "die KI
+## macht etliche Baustellen auf, ohne dort Leute zum Bauen hinzuschicken". Nach dem
+## ersten Schwung (alle 20 Braves noch idle) sind die Braves in Faell-Trupps
+## gebunden, und BuildingManager._recruit_workers findet niemanden mehr.
+
+const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
+const SHAMAN_SCENE: PackedScene = preload("res://scenes/units/shaman.tscn")
+const HUT_SCENE: PackedScene = preload("res://scenes/buildings/hut.tscn")
+const SITE_SCENE: PackedScene = preload("res://scenes/buildings/reincarnation_site.tscn")
+
+func _initialize() -> void:
+	var map_id: String = "bergpass"
+	var sim: float = 600.0
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("map="): map_id = a.trim_prefix("map=")
+		elif a.begins_with("sim="): sim = float(a.trim_prefix("sim="))
+	var td: TerrainData = MapGenerator.create_terrain(map_id, 12345)
+	var nav: NavGrid = NavGrid.new(td)
+	var tribes: Array[Tribe] = []
+	for i in range(4): tribes.append(Tribe.new(i))
+	var tm: TreeManager = TreeManager.new(); tm.setup(td, nav)
+	var wpm: WoodPileManager = WoodPileManager.new(); wpm.setup(td)
+	var um: UnitManager = UnitManager.new(); um.setup(td, nav, tribes, tm, wpm)
+	var bm: BuildingManager = BuildingManager.new(); bm.setup(td, nav, um, wpm)
+	um.building_manager = bm
+	var tc: TribeCommands = TribeCommands.new(); tc.setup(nav, bm, um, tm)
+	root.add_child(tm); root.add_child(wpm); root.add_child(um); root.add_child(bm)
+	tm.spawn_trees(240 * (td.size * td.size) / (128 * 128), 999)
+	var anchors: Array[Vector2i] = MapGenerator.spawn_anchors(td, map_id, 4)
+	var ais: Array = []
+	for i in range(4):
+		bm.place(SITE_SCENE, tribes[i], anchors[i], 0, true)
+		bm.place(HUT_SCENE, tribes[i], anchors[i] + Vector2i(6, 0), 0, true)
+		# Baeume um den Anker, wie main.gd._ensure_trees_near: ohne die scheitert
+		# MIN_TREES_NEAR_PLOT und die KI findet ueberhaupt keinen Bauplatz.
+		var planted: int = 0
+		for r in range(8, 26):
+			for cell in AIController.ring_cells(anchors[i], r):
+				if planted >= 60: break
+				if not nav.is_cell_walkable(cell) or tm.has_tree_at(cell): continue
+				if (cell.x + cell.y) % 3 != 0: continue
+				tm.spawn_tree(cell, TreeResource.MAX_STAGE)
+				planted += 1
+		for j in range(20):
+			um.spawn_unit(BRAVE_SCENE, i, nav.cell_to_world(anchors[i] + Vector2i(j % 5 - 2, 3)))
+		um.spawn_unit(SHAMAN_SCENE, i, nav.cell_to_world(anchors[i] + Vector2i(0, -3)))
+		var ai: AIController = AIController.new()
+		ai.setup(tribes[i], tc, um, bm, tm, nav, anchors[i])
+		ai.stagger_offset(float(i) / 4.0)
+		root.add_child(ai)
+		ais.append(ai)
+	var steps: int = int(sim * 30.0)
+	for s in range(steps):
+		um.tick(1.0 / 30.0); bm.tick(1.0 / 30.0); tm.tick(1.0 / 30.0)
+		for t in tribes: t.tick(1.0 / 30.0)
+		for ai in ais: ai._process(1.0 / 30.0)
+	print("Karte %s, %.0f s, 4 KIs | Baeume gesamt %d" % [map_id, sim, tm.trees.size()])
+	for i in range(4):
+		print("  Anker %d: Baeume im Umkreis 22: %d | Baustellen: %d" % [i,
+			tm.count_trees_near(nav.cell_to_world(anchors[i]), 22.0),
+			ais[i].build_tick_cache().sites.size()])
+	for i in range(4):
+		var c: Dictionary = {}
+		for b in tribes[i].buildings:
+			if not is_instance_valid(b) or b.health <= 0: continue
+			var k: String = b.get_script().resource_path.get_file().get_basename()
+			c[k] = int(c.get(k, 0)) + 1
+		print("  KI %d: pop %4d | %s" % [i, tribes[i].population(), str(c)])
+	quit(0)
