@@ -20,6 +20,8 @@ const RING_HEIGHT: float = 0.1
 ## Ring radius = the tree's stage scale times this (so the circle clears the crown).
 const RADIUS_PER_SCALE: float = 1.6
 const MIN_RADIUS: float = 0.5
+## Wood piles have no growth stage — one radius, just clearing the log sprite.
+const PILE_RADIUS: float = 0.8
 const BLINKS: int = Balance.TREE_MARK_BLINKS
 const BLINK_TIME: float = Balance.TREE_MARK_BLINK_TIME
 const TOTAL_TIME: float = float(BLINKS) * 2.0 * BLINK_TIME
@@ -60,6 +62,19 @@ func flash(trees: Array) -> void:
 		if t == null or t.felled_flag:
 			continue
 		add_mark(t.position, mark_radius(t))
+
+
+## Same receipt for lying wood (10g): the fell rectangle and a right-click on a
+## pile treat it as a wood source, so it gets the same white ring. Piles have no
+## growth stage, hence one fixed radius.
+func flash_piles(piles: Array) -> void:
+	for pile in piles:
+		if pile == null or not is_instance_valid(pile):
+			continue
+		var p: WoodPile = pile as WoodPile
+		if p == null or p.amount <= 0:
+			continue
+		add_mark(p.position, PILE_RADIUS)
 
 
 ## Re-flashing the same spot RESTARTS its blink instead of stacking a second

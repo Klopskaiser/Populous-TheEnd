@@ -60,6 +60,23 @@ func piles_in_radius(pos: Vector3, radius: float) -> Array[WoodPile]:
 	return result
 
 
+## Piles inside a harvest area (rectangle + optional quad — the same shape the
+## fell order uses, see TreeManager.point_in_area). Burning and empty piles are
+## skipped; a burning pile is about to be gone.
+##
+## Added in 10g: the fell rectangle (key B) treats lying wood as a wood source
+## too, so a cleared battlefield can be swept up in one order.
+func area_piles(area: Rect2,
+		poly: PackedVector2Array = PackedVector2Array()) -> Array[WoodPile]:
+	var result: Array[WoodPile] = []
+	for pile in piles:
+		if not is_instance_valid(pile) or pile.amount <= 0 or pile.is_burning():
+			continue
+		if TreeManager.point_in_area(Vector2(pile.position.x, pile.position.z), area, poly):
+			result.append(pile)
+	return result
+
+
 ## Removes a pile from the registry and frees it (does not emit on its own —
 ## callers batch the emit).
 func remove_pile(pile: WoodPile) -> void:

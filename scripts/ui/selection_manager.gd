@@ -348,11 +348,16 @@ func _fire_harvest(screen_rect: Rect2, drag_dist: float) -> void:
 		area = Rect2(p, Vector2.ZERO) if i == 0 else area.expand(p)
 	if _tribe_commands.order_chop_area(braves, area, corners) <= 0:
 		return
-	# Confirmation blink on the SAME shape the braves were given (one truth).
+	# Confirmation blink on the SAME shape the braves were given (one truth) —
+	# for trees AND for lying wood, which the order also collects now (10g).
 	var tm: TreeManager = _tribe_commands.tree_manager
-	if tree_mark != null and tm != null:
+	if tree_mark != null:
 		var shape: Array = TribeCommands.harvest_job_shape(area, corners)
-		tree_mark.flash(tm.area_trees(shape[0], shape[1]))
+		if tm != null:
+			tree_mark.flash(tm.area_trees(shape[0], shape[1]))
+		var wpm: WoodPileManager = _pile_manager()
+		if wpm != null:
+			tree_mark.flash_piles(wpm.area_piles(shape[0], shape[1]))
 
 
 ## Ground point under a screen position. Terrain raycast first; a ray that leaves
@@ -384,6 +389,18 @@ func _screen_to_ground(screen_pos: Vector2) -> Vector3:
 func _flash_trees(trees: Array) -> void:
 	if tree_mark != null:
 		tree_mark.flash(trees)
+
+
+## Same receipt for ordered wood piles (10g).
+func _flash_piles(piles: Array) -> void:
+	if tree_mark != null:
+		tree_mark.flash_piles(piles)
+
+
+## The pile registry lives on the UnitManager (the SelectionManager is only
+## handed the managers it owns).
+func _pile_manager() -> WoodPileManager:
+	return _unit_manager.wood_pile_manager if _unit_manager != null else null
 
 
 func _draw() -> void:
@@ -1053,8 +1070,10 @@ func _dispatch_context_command(hit: Dictionary, queue_up: bool = false) -> bool:
 		if queue_up:
 			_queue_route_action(pile.position,
 				func(u: Unit) -> void: _tribe_commands.order_pickup([u] as Array[Unit], pile))
-		else:
-			_tribe_commands.order_pickup(selected, pile)
+			if _selection_has_brave():
+				_flash_piles([pile])   # queued: acknowledge the target right away
+		elif _tribe_commands.order_pickup(selected, pile) > 0:
+			_flash_piles([pile])
 		return true
 	if node.has_meta("tree_resource"):
 		var tree: TreeResource = node.get_meta("tree_resource") as TreeResource

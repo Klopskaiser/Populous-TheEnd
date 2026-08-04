@@ -434,3 +434,160 @@ func test_mark_radius_follows_tree_stage() -> void:
 		TreeMarkRenderer.RADIUS_PER_SCALE),
 		"the full-grown standard tree uses stage scale 1.0")
 	_free_world(w)
+
+
+# --- Lying wood as an area source (10g) ---------------------------------------
+# The fell rectangle treats wood piles as a wood source too: they are picked up
+# and hauled to the drop-off like felled wood. Two guards prevent the order from
+# eating its own delivery: piles at a friendly building count as DELIVERED wood,
+# and with no own building there is no drop-off, so nothing is collected.
+
+func test_area_piles_lists_only_piles_inside_the_shape() -> void:
+	var w: Dictionary = _make_world()
+	w.wpm.deposit(w.nav.cell_to_world(Vector2i(20, 20)), 3)   # inside
+	w.wpm.deposit(w.nav.cell_to_world(Vector2i(60, 60)), 3)   # outside
+	var area: Rect2 = _cell_rect(w, Vector2i(18, 18), Vector2i(22, 22))
+	var inside: Array[WoodPile] = w.wpm.area_piles(area)
+	check(inside.size() == 1, "only the pile inside the rectangle is listed")
+	if inside.size() == 1:
+		check(inside[0].amount == 3, "and it still holds its wood")
+	# An emptied pile is no source any more.
+	w.wpm.take_from_radius(w.nav.cell_to_world(Vector2i(20, 20)), 2.0, 99)
+	check(w.wpm.area_piles(area).is_empty(), "an emptied pile is not a source")
+	_free_world(w)
+
+
+func test_area_order_collects_a_lying_pile() -> void:
+	var w: Dictionary = _make_world()
+	# Drop-off well outside the harvest area, so the collected wood leaves it.
+	w.bm.place(HUT_SCENE, w.tribe, Vector2i(40, 40), 0, true)
+	w.wpm.deposit(w.nav.cell_to_world(Vector2i(20, 20)), 3)
+	var area: Rect2 = _cell_rect(w, Vector2i(18, 18), Vector2i(22, 22))
+	var brave: Brave = _brave_at(w, Vector2i(21, 21))
+	var units: Array[Unit] = [brave] as Array[Unit]
+	check(w.commands.order_chop_area(units, area) == 1,
+		"an area with only lying wood is still an accepted order")
+	check(brave.task == Brave.Task.PICKUP, "the brave goes for the pile")
+	check(brave.task_pile != null, "and has it as its target")
+	var got: bool = false
+	for i in range(int(30.0 / TICK)):
+		brave.tick(TICK)
+		w.um.tick(TICK)
+		if brave.carried_wood > 0:
+			got = true
+			break
+	check(got, "the lying wood is picked up")
+	check(w.wpm.total_wood() == 0, "and is gone from the ground")
+	_free_world(w)
+
+
+func test_area_order_hauls_collected_wood_to_the_depot() -> void:
+	var w: Dictionary = _make_world()
+	var depot: WoodDepot = w.bm.place(
+		DEPOT_SCENE, w.tribe, Vector2i(30, 20), 0, true) as WoodDepot
+	w.wpm.deposit(w.nav.cell_to_world(Vector2i(20, 20)), 3)
+	var area: Rect2 = _cell_rect(w, Vector2i(18, 18), Vector2i(22, 22))
+	var brave: Brave = _brave_at(w, Vector2i(21, 21))
+	var units: Array[Unit] = [brave] as Array[Unit]
+	w.commands.order_chop_area(units, area)
+	var stored: bool = false
+	for i in range(int(60.0 / TICK)):
+		brave.tick(TICK)
+		w.um.tick(TICK)
+		w.bm.tick(TICK)
+		if depot.stored_wood() > 0:
+			stored = true
+			break
+	check(stored, "the collected wood ends up in the depot rack")
+	brave._interrupt_tasks()
+	_free_world(w)
+
+
+## The order's OWN drop-off lies inside the area: the delivered wood must not be
+## picked up again (that would be an endless loop).
+func test_area_order_does_not_re_collect_its_own_delivery() -> void:
+	var w: Dictionary = _make_world()
+	var hut: Building = w.bm.place(HUT_SCENE, w.tribe, Vector2i(20, 20), 0, true)
+	# Wood lying right at the hut = delivered wood.
+	w.wpm.deposit(hut.delivery_point(), 3)
+	var area: Rect2 = _cell_rect(w, Vector2i(16, 16), Vector2i(26, 26))
+	var brave: Brave = _brave_at(w, Vector2i(24, 24))
+	check(w.wpm.area_piles(area).size() == 1, "the pile IS inside the area")
+	brave.chop_area = area
+	brave.chop_area_poly = PackedVector2Array()
+	check(not brave._next_area_pile(),
+		"wood at a friendly building is delivered wood, not a source")
+	_free_world(w)
+
+
+## No own building anywhere = no drop-off: collecting would only drop the load on
+## the spot and pick it up again.
+func test_area_order_ignores_piles_without_a_drop_off() -> void:
+	var w: Dictionary = _make_world()
+	w.wpm.deposit(w.nav.cell_to_world(Vector2i(20, 20)), 3)
+	var area: Rect2 = _cell_rect(w, Vector2i(18, 18), Vector2i(22, 22))
+	var brave: Brave = _brave_at(w, Vector2i(21, 21))
+	brave.chop_area = area
+	brave.chop_area_poly = PackedVector2Array()
+	check(not brave._next_area_pile(),
+		"without any own building no pile is collected")
+	_free_world(w)
+
+
+## Trees stay the primary source — their claim slots are what spreads a crew out.
+func test_area_order_takes_trees_before_lying_wood() -> void:
+	var w: Dictionary = _make_world()
+	w.bm.place(HUT_SCENE, w.tribe, Vector2i(40, 40), 0, true)
+	w.tm.spawn_tree(Vector2i(20, 20), 3)
+	w.wpm.deposit(w.nav.cell_to_world(Vector2i(21, 21)), 3)
+	var area: Rect2 = _cell_rect(w, Vector2i(18, 18), Vector2i(23, 23))
+	var brave: Brave = _brave_at(w, Vector2i(22, 22))
+	var units: Array[Unit] = [brave] as Array[Unit]
+	w.commands.order_chop_area(units, area)
+	check(brave.task == Brave.Task.CHOP and brave.task_tree != null,
+		"the tree is taken first, the pile waits")
+	brave._interrupt_tasks()
+	_free_world(w)
+
+
+# --- White confirmation ring on piles (10g) -----------------------------------
+
+func test_pile_gets_the_same_white_confirmation_mark() -> void:
+	var w: Dictionary = _make_world()
+	w.wpm.deposit(w.nav.cell_to_world(Vector2i(20, 20)), 2)
+	var piles: Array[WoodPile] = w.wpm.piles_in_radius(
+		w.nav.cell_to_world(Vector2i(20, 20)), 3.0)
+	check(piles.size() == 1, "one pile to mark")
+	var marks: TreeMarkRenderer = TreeMarkRenderer.new()
+	marks._ready()
+	marks.flash_piles(piles)
+	check(marks.active_marks() == 1, "the pile got a confirmation mark")
+	# The MultiMesh is packed in advance(), so it takes one frame to be drawn.
+	marks.advance(0.02)
+	check(marks.visible_marks() == 1, "and it is drawn in its ON phase")
+	# Same blink lifetime as a tree mark.
+	var elapsed: float = 0.0
+	while elapsed < TreeMarkRenderer.TOTAL_TIME + 0.1:
+		marks.advance(0.02)
+		elapsed += 0.02
+	check(marks.active_marks() == 0, "and it expires like a tree mark")
+	# An emptied pile is not marked at all.
+	piles[0].set_amount(0)
+	marks.flash_piles(piles)
+	check(marks.active_marks() == 0, "an empty pile gets no mark")
+	marks.free()
+	_free_world(w)
+
+
+func test_pile_and_tree_marks_share_one_renderer() -> void:
+	var w: Dictionary = _make_world()
+	var tree: TreeResource = w.tm.spawn_tree(Vector2i(20, 20), 3)
+	w.wpm.deposit(w.nav.cell_to_world(Vector2i(26, 20)), 2)
+	var marks: TreeMarkRenderer = TreeMarkRenderer.new()
+	marks._ready()
+	marks.flash([tree])
+	marks.flash_piles(w.wpm.piles_in_radius(w.nav.cell_to_world(Vector2i(26, 20)), 3.0))
+	check(marks.active_marks() == 2,
+		"one area order marks its trees AND its lying wood")
+	marks.free()
+	_free_world(w)

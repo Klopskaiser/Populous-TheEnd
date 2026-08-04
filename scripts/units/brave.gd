@@ -273,7 +273,7 @@ func order_chop_area(area: Rect2,
 	task = Task.CHOP
 	_loose_return_pos = Vector3.INF
 	_set_state(State.GATHER)
-	if not _next_area_tree() and not _area_retry_hold():
+	if not _next_area_source() and not _area_retry_hold():
 		_stop_all()
 		return false
 	return true
@@ -295,6 +295,50 @@ func _next_area_tree() -> bool:
 	_area_retries = 0
 	_reset_seek()
 	return true
+
+
+## Next collectable wood pile inside the standing area (10g): lying wood counts
+## as a wood source, gets picked up and goes to the drop-off like felled wood.
+##
+## Two guards keep this from becoming a loop, because the area order's own
+## drop-off can lie inside the area:
+##   * piles at a friendly building are DELIVERED wood, not loose wood (the same
+##     test the manual pile relay uses) — that is exactly where this order drops
+##     its own load;
+##   * without any own building there is no drop-off at all, so nothing is
+##     collected (the fallback would drop the load on the spot and re-collect it).
+func _next_area_pile() -> bool:
+	if wood_pile_manager == null or not has_chop_area():
+		return false
+	if carried_wood >= CARRY_CAPACITY:
+		return false
+	if _nearest_own_building() == null:
+		return false
+	var best: WoodPile = null
+	var best_dist: float = INF
+	for pile: WoodPile in wood_pile_manager.area_piles(chop_area, chop_area_poly):
+		if _pile_near_friendly_building(pile.position):
+			continue
+		if nav_grid != null and not nav_grid.same_island(position, pile.position):
+			continue
+		var d: float = _flat_dist(position, pile.position)
+		if d < best_dist:
+			best_dist = d
+			best = pile
+	if best == null:
+		return false
+	task_pile = best
+	task = Task.PICKUP
+	_area_retry = 0.0
+	_area_retries = 0
+	_reset_seek()
+	return true
+
+
+## Next source inside the area, trees first (they are the primary job and their
+## claim slots keep a crew spread out), lying wood second.
+func _next_area_source() -> bool:
+	return _next_area_tree() or _next_area_pile()
 
 
 ## Area order with nothing claimable at this moment: hold the order and retry
@@ -890,6 +934,10 @@ func _tick_pickup(delta: float) -> void:
 			_haul_target = depot
 			_start_loose_deliver()
 			return
+	# Standing area order (10g): fill the load from the next source in the area
+	# before hauling, exactly like the tree path does.
+	if has_chop_area() and carried_wood < CARRY_CAPACITY and _next_area_source():
+		return
 	task = Task.DELIVER if carried_wood > 0 else Task.NONE
 	_reset_seek()
 
@@ -1060,12 +1108,15 @@ func _tick_loose_chop(delta: float) -> void:
 			_area_retry -= delta
 			_set_working(false)
 			return
-		if not _next_loose_tree():
+		# No tree left: lying wood inside the area is the second source (10g).
+		if not _next_loose_tree() and not _next_area_pile():
 			if carried_wood > 0:
 				_start_loose_deliver()
 			elif not _area_retry_hold():
 				_stop_all()
 			return
+		if task == Task.PICKUP:
+			return   # switched to a pile: the PICKUP branch takes over next tick
 	if not _seek(task_tree.position, CHOP_RANGE, delta):
 		return
 	_set_working(true)
@@ -1088,9 +1139,9 @@ func _tick_loose_chop(delta: float) -> void:
 			tree_manager.release_claim(task_tree, self)
 		task_tree = null
 		_set_working(false)
-		# Load not full yet and the tree is spent: chain to the next area tree
-		# instead of walking a half-empty load home.
-		if has_chop_area() and carried_wood < CARRY_CAPACITY and _next_area_tree():
+		# Load not full yet and the tree is spent: chain to the next area source
+		# (tree, else lying wood) instead of walking a half-empty load home.
+		if has_chop_area() and carried_wood < CARRY_CAPACITY and _next_area_source():
 			return
 		if carried_wood > 0:
 			_start_loose_deliver()

@@ -197,17 +197,23 @@ func any_unreachable(units: Array[Unit], target: Vector3) -> bool:
 ## there. The wood is dropped as piles on the spot.
 ## Braves fetch the wood pile and deliver it to the nearest own building's
 ## drop spot (like loose-chopped wood); non-braves just walk there.
-func order_pickup(units: Array[Unit], pile: WoodPile) -> void:
+## Returns the number of braves put on the pile — like order_chop, so the UI can
+## blink its white confirmation ring only for an ACCEPTED order (10g).
+func order_pickup(units: Array[Unit], pile: WoodPile) -> int:
+	var assigned: int = 0
 	var movers: Array[Unit] = []
 	for unit in units:
 		if unit.state == Unit.State.DEAD or not _unit_active(unit):
 			continue
 		if unit is Brave:
 			(unit as Brave).order_pickup(pile)
+			if (unit as Brave).task_pile == pile:
+				assigned += 1
 		else:
 			movers.append(unit)
 	if not movers.is_empty() and is_instance_valid(pile):
 		order_move(movers, pile.position)
+	return assigned
 
 
 ## Returns the number of braves put on the job — the UI only blinks its white
