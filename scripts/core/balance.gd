@@ -538,13 +538,35 @@ const WATCHTOWER_FOOTPRINT: Vector2i = Vector2i(2, 2)
 const WOOD_DEPOT_FOOTPRINT: Vector2i = Vector2i(1, 1)
 const REINCARNATION_SITE_FOOTPRINT: Vector2i = Vector2i(3, 3)
 
-# --- Hütte ---
-const HUT_WOOD_COST: int = 12
-const HUT_HP: int = 300
-const HUT_CAPACITY: int = 40               # Bevölkerungsplatz
-const HUT_SPAWN_INTERVAL: float = 10.0     # s pro Brave bei voller Besatzung
-const HUT_CREW_CAPACITY: int = 4
-const HUT_FULL_CREW_BONUS: float = 1.1     # volle Hütte ~10 % schneller
+# --- Hütte (Phase 10f: klein und billig, in vier Stufen zum Wohnpalast) ---
+const HUT_WOOD_COST: int = 8               # war 12
+const HUT_HP: int = 300                    # == HUT_HP_PER_STAGE[0]
+## Plätze/Arbeiter/Leben je Ausbaustufe (Index = Stufe 0..4). Stufe 4 bringt
+## bewusst +11 statt +8 Plätze — der Wohnpalast ist der Lohn für den Vollausbau.
+## Ein Platz kostet damit 0,8 Holz auf Stufe 0 (8/10) und 0,62 im Vollausbau
+## (28/45) — vorher waren es 0,3 (12/40), Wohnraum ist also doppelt so teuer.
+const HUT_CAPACITY_PER_STAGE: Array[int] = [10, 18, 26, 34, 45]
+const HUT_CREW_PER_STAGE: Array[int] = [2, 3, 4, 5, 6]
+const HUT_HP_PER_STAGE: Array[int] = [300, 340, 380, 420, 480]
+const HUT_MAX_UPGRADE_STAGE: int = 4
+## Sekunden je Brave und ARBEITER: die Rate ist linear in der Besatzung, es gibt
+## keinen Voll-Besatzungs-Bonus mehr. Stufe 0 (2 Arbeiter) 15 s/Brave,
+## Stufe 4 (6 Arbeiter) 5 s/Brave.
+const HUT_SPAWN_SECONDS_PER_WORKER: float = 30.0
+## Wartezeit nach Fertigstellung bzw. nach dem letzten Ausbau, bis das nächste
+## Upgrade fällig wird.
+const HUT_UPGRADE_DELAY: float = 90.0
+const HUT_UPGRADE_WOOD_COST: int = 5
+## Bauzeit-Faktor des Ausbaus auf Brave.BUILD_RATE.
+const HUT_UPGRADE_RATE_FACTOR: float = 1.0
+## Ein Ausbau STARTET nur, wenn in diesem Radius überhaupt Holz erreichbar ist
+## (Bäume, Bodenstapel oder ein Holzlager mit Bestand) — sonst würde die Hütte
+## ihre Besatzung in eine aussichtslose Holzsuche auswerfen.
+const HUT_UPGRADE_WOOD_RADIUS: float = 40.0
+## Kein Fortschritt so lange -> Ausbau abbrechen und das gelieferte Holz am
+## Bauplatz zurückgeben (Muster CONSTRUCTION_STALL_TIMEOUT). Fängt den Fall,
+## dass die ausgeworfene Besatzung unterwegs stirbt oder abgezogen wird.
+const HUT_UPGRADE_STALL_TIMEOUT: float = 120.0
 
 # --- Kaserne (Krieger) ---
 const WARRIOR_CAMP_WOOD_COST: int = 10
