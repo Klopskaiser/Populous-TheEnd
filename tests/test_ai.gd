@@ -10,6 +10,11 @@ const GameStateScript: GDScript = preload("res://scripts/core/game_state.gd")
 const HUT_SCENE: PackedScene = preload("res://scenes/buildings/hut.tscn")
 const SITE_SCENE: PackedScene = preload("res://scenes/buildings/reincarnation_site.tscn")
 const WARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/warrior_camp.tscn")
+const FIREWARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/firewarrior_camp.tscn")
+const TEMPLE_SCENE: PackedScene = preload("res://scenes/buildings/temple.tscn")
+const FORESTER_SCENE: PackedScene = preload("res://scenes/buildings/forester.tscn")
+const WORKSHOP_SCENE: PackedScene = preload("res://scenes/buildings/workshop.tscn")
+const WATCHTOWER_SCENE: PackedScene = preload("res://scenes/buildings/watchtower.tscn")
 const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
 const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
 const SHAMAN_SCENE: PackedScene = preload("res://scenes/units/shaman.tscn")
@@ -439,9 +444,13 @@ func test_endless_building_scaling() -> void:
 	var w: Dictionary = _make_world()
 	var tribe: Tribe = w.tribes[1]
 	var ai: AIController = _make_ai(w, tribe, Vector2i(64, 64))
-	# Full base: 3 huts + one camp of each kind, all pre-built.
-	for i in range(3):
+	# Full base: TARGET_HUTS huts + one camp of each kind, all pre-built.
+	for i in range(AIState.TARGET_HUTS):
 		w.building_manager.place(HUT_SCENE, tribe, Vector2i(40 + 6 * i, 40), 0, true)
+	# The base wood rack is new in 10e and comes right after the first camp —
+	# without it every check below would just ask for the rack.
+	w.building_manager.place(preload("res://scenes/buildings/wood_depot.tscn"),
+		tribe, Vector2i(36, 44), 0, true)
 	w.building_manager.place(WARRIOR_CAMP_SCENE, tribe, Vector2i(40, 50), 0, true)
 	w.building_manager.place(preload("res://scenes/buildings/firewarrior_camp.tscn"),
 		tribe, Vector2i(48, 50), 0, true)
@@ -458,36 +467,36 @@ func test_endless_building_scaling() -> void:
 	# pressure vehicle), then the two defensive watchtowers (phase 7h) and the
 	# expensive airship wharf — the full base includes all of them before the
 	# endless scaling kicks in.
-	check(ai._next_building_scene({}) == AIController.FIRERAM_WORKSHOP_SCENE,
+	check(ai._next_building_scene(ai.build_tick_cache()) == AIController.FIRERAM_WORKSHOP_SCENE,
 		"after the workshop the AI builds a fire-ram workshop")
 	w.building_manager.place(preload("res://scenes/buildings/fire_ram_workshop.tscn"),
 		tribe, Vector2i(72, 50), 0, true)
-	check(ai._next_building_scene({}) == AIController.WATCHTOWER_SCENE,
+	check(ai._next_building_scene(ai.build_tick_cache()) == AIController.WATCHTOWER_SCENE,
 		"after the fire-ram workshop the AI builds a watchtower")
-	for i in range(AIController.TARGET_WATCHTOWERS):
+	for i in range(Balance.AI_TARGET_WATCHTOWERS):
 		w.building_manager.place(preload("res://scenes/buildings/watchtower.tscn"),
 			tribe, Vector2i(40 + 4 * i, 64), 0, true)
-	check(ai._next_building_scene({}) == AIController.AIRSHIP_WHARF_SCENE,
+	check(ai._next_building_scene(ai.build_tick_cache()) == AIController.AIRSHIP_WHARF_SCENE,
 		"after the towers the AI builds the airship wharf")
 	w.building_manager.place(preload("res://scenes/buildings/airship_wharf.tscn"),
 		tribe, Vector2i(72, 60), 0, true)
-	check(ai._next_building_scene({}) == null,
+	check(ai._next_building_scene(ai.build_tick_cache()) == null,
 		"full base without housing pressure: nothing to build")
 
 	# Two more huts -> the camp target grows -> another camp (fewest kind).
 	w.building_manager.place(HUT_SCENE, tribe, Vector2i(40, 58), 0, true)
 	w.building_manager.place(HUT_SCENE, tribe, Vector2i(48, 58), 0, true)
-	check(ai._next_building_scene({}) == AIController.WARRIOR_CAMP_SCENE,
+	check(ai._next_building_scene(ai.build_tick_cache()) == AIController.WARRIOR_CAMP_SCENE,
 		"extra huts raise the camp target (warrior camp first)")
 
 	# Housing pressure: population at 80% capacity -> a new hut, forever.
 	var braves: Array[Brave] = []
-	var need: int = int(float(tribe.housing_capacity()) * AIController.HOUSING_PRESSURE)
+	var need: int = int(float(tribe.housing_capacity()) * Balance.AI_HOUSING_PRESSURE)
 	for i in range(need):
 		var brave: Brave = Brave.new()
 		braves.append(brave)
 		tribe.add_unit(brave)
-	check(ai._next_building_scene({}) == AIController.HUT_SCENE,
+	check(ai._next_building_scene(ai.build_tick_cache()) == AIController.HUT_SCENE,
 		"housing pressure always asks for another hut")
 
 	for brave in braves:
@@ -526,21 +535,21 @@ func test_train_tick_enrolls_braves() -> void:
 			w.nav.cell_to_world(anchor + Vector2i(8, i - 6)))
 	var ai: AIController = _make_ai(w, ai_tribe, anchor)
 
-	ai._tick_train(ai.make_snapshot())
-	check(camp.incoming.size() == AIController.TRAIN_BATCH,
+	ai._tick_train(ai.build_tick_cache())
+	check(camp.incoming.size() == AIState.train_batch(12),
 		"TRAIN tick enrols a batch of braves at the camp")
 	var training: int = 0
 	for unit in ai_tribe.units:
 		if unit.state == Unit.State.TRAIN:
 			training += 1
-	check(training == AIController.TRAIN_BATCH, "enrolled braves are in TRAIN state")
+	check(training == AIState.train_batch(12), "enrolled braves are in TRAIN state")
 
 	# The economy floor is respected: never train below MIN_ECONOMY_BRAVES.
 	var braves_left: int = 0
 	for unit in ai_tribe.units:
 		if unit is Brave and unit.state != Unit.State.TRAIN:
 			braves_left += 1
-	check(braves_left >= AIState.MIN_ECONOMY_BRAVES - AIController.TRAIN_BATCH,
+	check(braves_left >= AIState.min_economy_braves(12) - AIState.train_batch(12),
 		"a minimum economy crew stays out of training")
 
 	ai.free()
@@ -845,5 +854,477 @@ func test_eliminated_ai_stops_ticking() -> void:
 		ai.tick_ai()
 	check(tribe.buildings.size() == while_alive,
 		"an eliminated AI issues no further orders")
+	ai.free()
+	_free_world(w)
+
+
+# --- Tick cache (phase 10e, 2.0) -------------------------------------------------
+
+## The scaling guarantee: one pass over tribe.units and one over tribe.buildings
+## per tick_ai(), no matter how many subsystems run. The world below is built so
+## that NO branch returns early — otherwise a non-migrated list rebuild could
+## hide behind a skipped subsystem.
+func test_ai_tick_cache_walks_units_once_per_tick() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var anchor: Vector2i = Vector2i(64, 64)
+	w.building_manager.place(SITE_SCENE, tribe, anchor, 0, true)
+	# Covered branches: build, forester staffing, workshop staffing, watchtower
+	# manning, training (all three camp kinds) and defence.
+	w.building_manager.place(HUT_SCENE, tribe, anchor + Vector2i(4, 0), 0, true)
+	w.building_manager.place(WARRIOR_CAMP_SCENE, tribe, anchor + Vector2i(-6, 0), 0, true)
+	w.building_manager.place(FIREWARRIOR_CAMP_SCENE, tribe, anchor + Vector2i(0, 8), 0, true)
+	w.building_manager.place(TEMPLE_SCENE, tribe, anchor + Vector2i(0, -8), 0, true)
+	w.building_manager.place(FORESTER_SCENE, tribe, anchor + Vector2i(8, 8), 0, true)
+	w.building_manager.place(WORKSHOP_SCENE, tribe, anchor + Vector2i(-12, 8), 0, true)
+	w.building_manager.place(WATCHTOWER_SCENE, tribe, anchor + Vector2i(8, -8), 0, true)
+	for i in range(20):
+		w.unit_manager.spawn_unit(BRAVE_SCENE, 1,
+			w.nav.cell_to_world(anchor + Vector2i(6, i - 10)))
+	for i in range(4):
+		w.unit_manager.spawn_unit(WARRIOR_SCENE, 1,
+			w.nav.cell_to_world(anchor + Vector2i(-4, i)))
+	w.unit_manager.spawn_unit(SHAMAN_SCENE, 1, w.nav.cell_to_world(anchor))
+	for i in range(4):
+		w.tree_manager.spawn_tree(anchor + Vector2i(10 + 3 * i, 10), TreeResource.MAX_STAGE)
+	# An enemy inside DEFEND_RADIUS so the defence branch runs too.
+	w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, w.nav.cell_to_world(anchor + Vector2i(8, 0)))
+	var ai: AIController = _make_ai(w, tribe, anchor)
+	ai.state = AIState.State.ATTACK
+
+	AIController.dbg_unit_passes = 0
+	AIController.dbg_building_passes = 0
+	AIController.dbg_cache_builds = 0
+	ai.tick_ai()
+	check(AIController.dbg_cache_builds == 1, "exactly one cache per tick")
+	check(AIController.dbg_unit_passes == 1,
+		"tribe.units is walked ONCE per tick (war: %d)" % AIController.dbg_unit_passes)
+	check(AIController.dbg_building_passes == 1,
+		"tribe.buildings is walked ONCE per tick (war: %d)"
+			% AIController.dbg_building_passes)
+	ai.free()
+	_free_world(w)
+
+
+## The consuming idle pool: a brave handed to the foresters must not be handed
+## to the training camps in the same tick as well.
+func test_tick_cache_hands_out_each_idle_brave_once() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var anchor: Vector2i = Vector2i(64, 64)
+	var braves: Array[Unit] = []
+	for i in range(6):
+		braves.append(w.unit_manager.spawn_unit(BRAVE_SCENE, 1,
+			w.nav.cell_to_world(anchor + Vector2i(6, i - 3))))
+	var ai: AIController = _make_ai(w, tribe, anchor)
+	var cache: AIController.TickCache = ai.build_tick_cache()
+	check(cache.idle_left() == 6, "all six braves start idle in the pool")
+	var first: Array[Unit] = cache.take_idle(4)
+	check(first.size() == 4, "four are handed out")
+	check(cache.idle_left() == 2, "the pool shrank accordingly")
+	var second: Array[Unit] = cache.take_idle(4)
+	check(second.size() == 2, "only the remaining two are left")
+	for unit in second:
+		check(not (unit in first), "no brave is handed out twice")
+	check(cache.take_idle(1).is_empty(), "the drained pool stays empty")
+	ai.free()
+	_free_world(w)
+
+
+## A brave that left IDLE between cache build and read (recruited onto a site by
+## the BuildingManager, pulled into a hut) is skipped instead of being ordered.
+func test_tick_cache_skips_braves_that_left_idle() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var anchor: Vector2i = Vector2i(64, 64)
+	var braves: Array[Unit] = []
+	for i in range(3):
+		braves.append(w.unit_manager.spawn_unit(BRAVE_SCENE, 1,
+			w.nav.cell_to_world(anchor + Vector2i(6, i))))
+	var ai: AIController = _make_ai(w, tribe, anchor)
+	var cache: AIController.TickCache = ai.build_tick_cache()
+	braves[0].state = Unit.State.BUILD   # taken by another system meanwhile
+	check(cache.idle_left() == 2, "the busy brave no longer counts as available")
+	var taken: Array[Unit] = cache.take_idle(3)
+	check(taken.size() == 2, "only the two still-idle braves are handed out")
+	check(not (braves[0] in taken), "the busy brave is skipped")
+	ai.free()
+	_free_world(w)
+
+
+# --- Scaling rules (pure, phase 10e 2.1) -----------------------------------------
+
+func test_min_economy_braves_scales_with_population() -> void:
+	check(AIState.min_economy_braves(10) == Balance.AI_MIN_ECONOMY_BRAVES,
+		"a small tribe keeps the floor")
+	check(AIState.min_economy_braves(200) == 70, "200 pop -> 35 percent = 70 workers")
+	check(AIState.min_economy_braves(400) > AIState.min_economy_braves(200),
+		"the workforce keeps growing with the tribe")
+
+
+func test_parallel_site_count_scales_with_braves() -> void:
+	check(AIState.parallel_site_count(0) == 1, "there is always at least one site")
+	check(AIState.parallel_site_count(8) == 1, "8 braves -> 1 site (unchanged)")
+	check(AIState.parallel_site_count(20) == 2, "20 braves -> 2 sites (unchanged)")
+	check(AIState.parallel_site_count(5000) == Balance.AI_MAX_PARALLEL_SITES,
+		"the cap holds")
+
+
+func test_wood_crew_count_leaves_the_early_game_alone() -> void:
+	check(AIState.wood_crew_count(11) == 0,
+		"below AI_BRAVES_PER_WOOD_CREW braves there is NO crew: the early game "
+		+ "behaves exactly as before")
+	check(AIState.wood_crew_count(12) == 1, "the first crew forms at 12 braves")
+	check(AIState.wood_crew_count(500) == Balance.AI_MAX_WOOD_CREWS, "the cap holds")
+
+
+func test_train_batch_scales_with_braves() -> void:
+	check(AIState.train_batch(20) == Balance.AI_TRAIN_BATCH_MIN,
+		"the early batch stays at the old value")
+	check(AIState.train_batch(500) == Balance.AI_TRAIN_BATCH_MAX, "the cap holds")
+	check(AIState.train_batch(120) > AIState.train_batch(40), "and it grows between")
+
+
+func test_army_mix_favours_preachers() -> void:
+	# 100 assignments with running counters: the resulting mix must approach the
+	# configured shares, and preachers must clearly beat their old 20 percent.
+	var counts: Dictionary = {&"warrior": 0, &"firewarrior": 0, &"preacher": 0}
+	for i in range(100):
+		counts[AIState.next_training_kind(counts[&"warrior"],
+			counts[&"firewarrior"], counts[&"preacher"])] += 1
+	var preacher_share: float = float(counts[&"preacher"]) / 100.0
+	check(absf(preacher_share - Balance.AI_ARMY_SHARE_PREACHER) < 0.05,
+		"the preacher share matches the target mix (ist %.2f)" % preacher_share)
+	check(counts[&"warrior"] > counts[&"preacher"], "warriors still lead the mix")
+	check(counts[&"preacher"] > 20, "clearly more preachers than the old 20 percent")
+
+
+## sort_custom is not stable in Godot and the 30/30 mix produces exact deficit
+## ties: without the explicit tiebreak the order (and the army mix) would jitter.
+func test_army_mix_order_is_deterministic() -> void:
+	var first: Array[StringName] = AIState.training_kind_order(6, 0, 0)
+	for i in range(20):
+		check(AIState.training_kind_order(6, 0, 0) == first,
+			"a tied deficit resolves the same way every time")
+
+
+func test_attack_wave_scales_to_late_game() -> void:
+	var wave: int = AIState.ARMY_ATTACK_SIZE
+	for i in range(50):
+		wave = mini(wave + AIState.ATTACK_WAVE_GROWTH, AIState.ATTACK_WAVE_MAX)
+	check(wave == AIState.ATTACK_WAVE_MAX, "the wave grows into the cap")
+	check(AIState.ATTACK_WAVE_MAX >= 100, "late-game waves are three digits")
+
+
+func test_first_attack_comes_later() -> void:
+	var snap: Dictionary = AIState.make_snapshot(30, 15,
+		AIState.ARMY_ATTACK_SIZE - 1, 3, 3, true)
+	check(AIState.next_state(AIState.State.TRAIN, snap) == AIState.State.TRAIN,
+		"one unit short of the wave size the AI keeps training")
+	var ready: Dictionary = AIState.make_snapshot(30, 15,
+		AIState.ARMY_ATTACK_SIZE, 3, 3, true)
+	check(AIState.next_state(AIState.State.TRAIN, ready) == AIState.State.ATTACK,
+		"at the wave size it attacks")
+	check(AIState.ARMY_ATTACK_SIZE >= 12, "and that size is higher than before")
+
+
+func test_vehicle_caps_scale_with_population() -> void:
+	var base: Dictionary = AIState.vehicle_caps(0)
+	check(int(base[&"catapults"]) == Tribe.MAX_CATAPULTS_DEFAULT,
+		"without braves the tribe defaults hold")
+	var big: Dictionary = AIState.vehicle_caps(400)
+	check(int(big[&"catapults"]) > Tribe.MAX_CATAPULTS_DEFAULT,
+		"a big tribe may field more catapults")
+	check(int(big[&"fire_rams"]) > Tribe.MAX_FIRE_RAMS_DEFAULT, "and more fire rams")
+	check(int(big[&"airships"]) > Tribe.MAX_AIRSHIPS_DEFAULT, "and more airships")
+
+
+## The caps only take effect once the controller writes them onto the tribe,
+## and it must clamp against the tribe's own hard limits.
+func test_ai_raises_the_tribe_vehicle_caps() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var anchor: Vector2i = Vector2i(64, 64)
+	check(tribe.max_catapults == Tribe.MAX_CATAPULTS_DEFAULT, "starts at the default")
+	for i in range(60):
+		w.unit_manager.spawn_unit(BRAVE_SCENE, 1,
+			w.nav.cell_to_world(anchor + Vector2i(10, i - 30)))
+	var ai: AIController = _make_ai(w, tribe, anchor)
+	ai.tick_ai()
+	check(tribe.max_catapults > Tribe.MAX_CATAPULTS_DEFAULT,
+		"the AI raises its catapult cap with the tribe size")
+	check(tribe.max_catapults <= Tribe.MAX_CATAPULTS_LIMIT, "but never past the limit")
+	check(tribe.max_airships <= Tribe.MAX_AIRSHIPS_LIMIT, "airships stay in bounds too")
+	ai.free()
+	_free_world(w)
+
+
+# --- Build order (pure) ------------------------------------------------------------
+
+## Minimal counts dictionary for the pure build order.
+func _counts(over: Dictionary = {}) -> Dictionary:
+	var base: Dictionary = {
+		"hut": 0, "hut_sites": 0, "warrior_camp": 0, "firewarrior_camp": 0,
+		"temple": 0, "forester": 0, "workshop": 0, "fireram_workshop": 0,
+		"airship_wharf": 0, "watchtower": 0, "wood_depot": 0, "forward_depot": 0,
+		"braves": 0, "population": 0, "housing_capacity": 0,
+		"wood_thin": false, "grove_far": false,
+	}
+	for key in over:
+		base[key] = over[key]
+	return base
+
+
+func test_build_order_places_wood_depot_after_first_camp() -> void:
+	check(AIState.next_building_kind(_counts()) == &"hut", "the first hut comes first")
+	check(AIState.next_building_kind(_counts({"hut": 1})) == &"warrior_camp",
+		"then the first training camp")
+	check(AIState.next_building_kind(_counts({"hut": 1, "warrior_camp": 1}))
+		== &"wood_depot",
+		"then the base wood rack (new in 10e: the AI never built one before)")
+
+
+func test_build_order_prioritises_housing_under_pressure() -> void:
+	var pressed: Dictionary = _counts({
+		"hut": AIState.TARGET_HUTS, "warrior_camp": 1, "wood_depot": 1,
+		"firewarrior_camp": 1, "temple": 1,
+		"population": 34, "housing_capacity": 40,
+	})
+	check(AIState.next_building_kind(pressed) == &"hut",
+		"under housing pressure the AI builds another hut")
+	# Regression guard for the trap: Hut.housing_capacity() is 0 while the hut is
+	# still a construction site. Without the "housing_capacity > 0" guard the
+	# branch would be TRUE from the very first tick (population >= 0) and the AI
+	# would build ONLY huts and never a warrior camp.
+	var no_capacity: Dictionary = pressed.duplicate()
+	no_capacity["housing_capacity"] = 0
+	check(AIState.next_building_kind(no_capacity) != &"hut",
+		"capacity 0 must NOT trigger the housing branch")
+	# And the site cap keeps it from filling every parallel slot with huts.
+	var capped: Dictionary = pressed.duplicate()
+	capped["hut_sites"] = Balance.AI_MAX_HUT_SITES
+	check(AIState.next_building_kind(capped) != &"hut",
+		"with AI_MAX_HUT_SITES sites open the housing branch stands down")
+
+
+func test_build_order_scales_workshops_with_braves() -> void:
+	var full: Dictionary = _counts({
+		"hut": AIState.TARGET_HUTS, "warrior_camp": 1, "firewarrior_camp": 1,
+		"temple": 1, "wood_depot": 1, "workshop": 1, "fireram_workshop": 1,
+		"airship_wharf": 1, "watchtower": Balance.AI_TARGET_WATCHTOWERS,
+		"braves": 0,
+	})
+	check(AIState.next_building_kind(full) == &"",
+		"a small full base has nothing left to build")
+	full["braves"] = 120
+	check(AIState.next_building_kind(full) == &"workshop",
+		"a big tribe wants a second catapult workshop")
+
+
+func test_build_order_asks_for_a_forward_depot_at_a_remote_grove() -> void:
+	var remote: Dictionary = _counts({
+		"hut": 1, "warrior_camp": 1, "wood_depot": 1, "grove_far": true,
+	})
+	check(AIState.next_building_kind(remote) == &"wood_depot",
+		"a distant grove earns a forward rack")
+	remote["forward_depot"] = 1
+	check(AIState.next_building_kind(remote) != &"wood_depot",
+		"one forward rack is enough")
+
+
+# --- Wood logistics (phase 10e 2.2) -----------------------------------------------
+
+## The core fix: before 10e the AI issued NO gathering orders at all. Wood only
+## arrived through BuildingManager._recruit_workers within 30 m of a site, so a
+## grove 60 m away was simply never touched.
+func test_ai_sends_wood_crew_to_remote_grove() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var anchor: Vector2i = Vector2i(40, 40)
+	w.building_manager.place(SITE_SCENE, tribe, anchor, 0, true)
+	for i in range(20):
+		w.unit_manager.spawn_unit(BRAVE_SCENE, 1,
+			w.nav.cell_to_world(anchor + Vector2i(4, i - 10)))
+	# The ONLY trees stand 60 m away.
+	for z in range(4):
+		for x in range(4):
+			w.tree_manager.spawn_tree(anchor + Vector2i(58 + x * 2, z * 2),
+				TreeResource.MAX_STAGE)
+	# An unfunded construction site creates the wood demand.
+	w.building_manager.place(HUT_SCENE, tribe, anchor + Vector2i(-8, 0), 0, false)
+	var ai: AIController = _make_ai(w, tribe, anchor)
+	# The logistics tick is throttled to every AI_WOOD_TICK_INTERVAL-th tick.
+	for i in range(Balance.AI_WOOD_TICK_INTERVAL + 1):
+		ai._tick_count += 1
+		ai._tick_wood_logistics(ai.build_tick_cache())
+	var tasked: int = 0
+	for unit in tribe.units:
+		if unit is Brave and (unit as Brave).has_chop_area():
+			tasked += 1
+	check(tasked >= Balance.AI_WOOD_CREW_SIZE,
+		"a full crew got an area order for the remote grove (ist %d)" % tasked)
+	for unit in tribe.units:
+		if unit is Brave and (unit as Brave).has_chop_area():
+			var area: Rect2 = (unit as Brave).chop_area
+			check(area.get_center().x > w.nav.cell_to_world(anchor).x + 30.0,
+				"the assigned area lies out at the remote grove")
+			break
+	for unit in tribe.units:
+		if unit is Brave:
+			(unit as Brave)._interrupt_tasks()
+	ai.free()
+	_free_world(w)
+
+
+## Crew membership is derived from has_chop_area(), never from State.IDLE:
+## right after order_chop_area the brave has not ticked yet and is still IDLE.
+func test_wood_crew_survives_the_tick_it_was_created_in() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var anchor: Vector2i = Vector2i(40, 40)
+	w.building_manager.place(SITE_SCENE, tribe, anchor, 0, true)
+	for i in range(20):
+		w.unit_manager.spawn_unit(BRAVE_SCENE, 1,
+			w.nav.cell_to_world(anchor + Vector2i(4, i - 10)))
+	for z in range(4):
+		for x in range(4):
+			w.tree_manager.spawn_tree(anchor + Vector2i(58 + x * 2, z * 2),
+				TreeResource.MAX_STAGE)
+	w.building_manager.place(HUT_SCENE, tribe, anchor + Vector2i(-8, 0), 0, false)
+	var ai: AIController = _make_ai(w, tribe, anchor)
+	for i in range(Balance.AI_WOOD_TICK_INTERVAL + 1):
+		ai._tick_count += 1
+		ai._tick_wood_logistics(ai.build_tick_cache())
+	var crews: int = ai._wood_crews.size()
+	check(crews > 0, "a crew was formed")
+	# Immediately another logistics tick: the crew must NOT be discarded.
+	for i in range(Balance.AI_WOOD_TICK_INTERVAL):
+		ai._tick_count += 1
+		ai._tick_wood_logistics(ai.build_tick_cache())
+	check(ai._wood_crews.size() >= crews,
+		"the fresh crew survives the next prune (IDLE would have dropped it)")
+	for unit in tribe.units:
+		if unit is Brave:
+			(unit as Brave)._interrupt_tasks()
+	ai.free()
+	_free_world(w)
+
+
+func test_grove_candidates_prefer_dense_and_near() -> void:
+	var w: Dictionary = _make_world()
+	var from: Vector3 = w.nav.cell_to_world(Vector2i(20, 20))
+	# A dense grove nearby and a single lonely tree far away.
+	for z in range(4):
+		for x in range(4):
+			w.tree_manager.spawn_tree(Vector2i(30 + x * 2, 20 + z * 2),
+				TreeResource.MAX_STAGE)
+	w.tree_manager.spawn_tree(Vector2i(100, 100), TreeResource.MAX_STAGE)
+	var groves: Array[Rect2] = w.tree_manager.grove_candidates(from, 4)
+	check(not groves.is_empty(), "at least one grove is found")
+	var best: Vector2 = groves[0].get_center()
+	check(best.distance_to(Vector2(from.x, from.z)) < 40.0,
+		"the dense nearby grove ranks first")
+	check(groves[0].size.x <= Balance.HARVEST_AREA_MAX_SIDE,
+		"a grove rect fits inside the area-order clamp")
+	_free_world(w)
+
+
+# --- Plot layout (phase 10e 2.3) --------------------------------------------------
+
+func test_ai_plot_keeps_spacing_between_buildings() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var anchor: Vector2i = Vector2i(64, 64)
+	w.building_manager.place(SITE_SCENE, tribe, anchor, 0, true)
+	w.building_manager.place(HUT_SCENE, tribe, anchor + Vector2i(6, 0), 0, true)
+	for i in range(20):
+		w.tree_manager.spawn_tree(anchor + Vector2i(-12 + (i % 5) * 2, -12 + (i / 5) * 2),
+			TreeResource.MAX_STAGE)
+	var ai: AIController = _make_ai(w, tribe, anchor)
+	var cell: Vector2i = ai._find_plot(Balance.HUT_FOOTPRINT, ai.build_tick_cache())
+	check(cell.x >= 0, "a plot was found")
+	var fp: Vector2i = Balance.HUT_FOOTPRINT
+	if ai._plot_orientation % 2 == 1:
+		fp = Vector2i(fp.y, fp.x)
+	var r: Rect2i = Rect2i(cell, fp).grow(Balance.AI_PLOT_SPACING)
+	var blocked: int = 0
+	for z in range(r.position.y, r.position.y + r.size.y):
+		for x in range(r.position.x, r.position.x + r.size.x):
+			if w.nav.is_cell_blocked_by_building(Vector2i(x, z)):
+				blocked += 1
+	check(blocked == 0,
+		"no other building stands inside the spacing ring (%d Zellen belegt)" % blocked)
+	ai.free()
+	_free_world(w)
+
+
+func test_ai_plot_entrance_faces_the_base() -> void:
+	# Pure geometry: orientation 0..3 = S/E/N/W, cell.y IS the z axis.
+	var fp: Vector2i = Vector2i(4, 4)
+	check(AIController._orientation_toward(Vector2i(20, 10), fp, Vector2i(20, 40)) == 0,
+		"anchor to the south -> entrance south")
+	check(AIController._orientation_toward(Vector2i(20, 10), fp, Vector2i(60, 12)) == 1,
+		"anchor to the east -> entrance east")
+	check(AIController._orientation_toward(Vector2i(20, 40), fp, Vector2i(20, 10)) == 2,
+		"anchor to the north -> entrance north")
+	check(AIController._orientation_toward(Vector2i(60, 10), fp, Vector2i(20, 12)) == 3,
+		"anchor to the west -> entrance west")
+
+
+## Self-healing (10d + 10e): a site whose approach lies on another island is
+## scrapped instantly (build_progress 0 = full refund) AND its cell is banned,
+## because without the ban the AI would re-place and re-scrap it every tick.
+func test_ai_discards_a_site_with_no_walkable_approach() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var anchor: Vector2i = Vector2i(20, 20)
+	# An island far away, cut off by water (height below sea level everywhere
+	# between): place a site there and let the AI judge it.
+	for vz in range(w.td.size + 1):
+		for vx in range(w.td.size + 1):
+			# Ring-shaped moat around a dry patch at (75..85): the patch stays
+			# walkable but is cut off from the mainland.
+			var inner: bool = vx >= 74 and vx <= 86 and vz >= 74 and vz <= 86
+			var outer: bool = vx >= 70 and vx <= 90 and vz >= 70 and vz <= 90
+			if outer and not inner:
+				w.td.set_vertex_height(vx, vz, 1.0)   # below sea level
+	w.nav.update_region(Rect2i(Vector2i(68, 68), Vector2i(24, 24)))
+	var far_cell: Vector2i = Vector2i(78, 78)
+	var site: Building = w.building_manager.place(HUT_SCENE, tribe, far_cell, 0, false)
+	var ai: AIController = _make_ai(w, tribe, anchor)
+	check(site != null, "the isolated site was placed (test precondition)")
+	check(w.nav.island_at(far_cell) != w.nav.island_at(anchor),
+		"the moat really separates the patch from the base (test precondition)")
+	var kept: bool = ai._accept_or_scrap_site(site, far_cell)
+	check(not kept, "a site with no walkable approach is not accepted")
+	check(ai._unreachable_plots.has(far_cell),
+		"and its cell is banned (otherwise place/scrap loops forever)")
+	ai.free()
+	_free_world(w)
+
+
+# --- Spells (phase 10e 2.4) --------------------------------------------------------
+
+## Enemy preachers convert the AI's army away and cannot even be attacked in
+## melee while converting: they now outrank the building ladder.
+func test_ai_prioritises_enemy_preachers_with_spells() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var anchor: Vector2i = Vector2i(64, 64)
+	var shaman: Unit = w.unit_manager.spawn_unit(SHAMAN_SCENE, 1,
+		w.nav.cell_to_world(anchor))
+	var preacher: Unit = w.unit_manager.spawn_unit(
+		preload("res://scenes/units/preacher.tscn"), 0,
+		w.nav.cell_to_world(anchor + Vector2i(5, 0)))
+	# An enemy building in range too — the preacher must still win.
+	w.building_manager.place(HUT_SCENE, w.tribes[0], anchor + Vector2i(0, 8), 0, true)
+	var ai: AIController = _make_ai(w, tribe, anchor)
+	_arm_only(tribe, &"lightning")
+	ai._cast_spells()
+	check(_pending_spell_id(tribe) == &"lightning",
+		"the AI casts lightning")
+	var target: Vector3 = (shaman as Shaman).pending_target
+	check(target.distance_to(preacher.position) < 1.0,
+		"and it aims at the enemy PREACHER, not at the building")
 	ai.free()
 	_free_world(w)

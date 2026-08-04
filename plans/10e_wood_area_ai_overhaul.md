@@ -72,11 +72,12 @@ die Selbstheilung bei unerreichbaren Bauplätzen gebraucht.
   Markierung — sie sagt „dieser Baum / diese Bäume sind beauftragt" und
   verschwindet danach wieder.
 - **Das 1000-Bevölkerungs-Ziel muss nicht getestet werden** (Laufzeit), aber
-  die Mechanik darf es nicht strukturell verhindern. Hinweis:
-  `CLAUDE.md` §4 nennt 1500 Einheiten pro Stamm, `Balance.TRIBE_MAX_UNITS`
-  steht auf 1000 — **dieser Widerspruch ist in diesem Plan zu klären**
-  (Vorschlag: Code auf 1500 anheben oder CLAUDE.md auf 1000 korrigieren, nach
-  Rückfrage beim Nutzer).
+  die Mechanik darf es nicht strukturell verhindern.
+  **Geklärt (Nutzerentscheidung 2026-08-04):** `Balance.TRIBE_MAX_UNITS` bleibt
+  bei **1000**, `CLAUDE.md` §4 wurde von 1500 auf 1000 korrigiert. Da der Cap
+  *alle* Einheiten zählt (Armee, Schamanin, Fahrzeuge, Hütten-Besatzung), ist das
+  Ziel realistisch als **~700 Zivilbevölkerung** zu lesen — die Mechanik darf
+  dorthin skalieren, der harte Deckel bleibt 1000.
 
 ---
 

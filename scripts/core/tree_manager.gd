@@ -286,6 +286,62 @@ func area_trees(area: Rect2,
 	return out
 
 
+## Grove radius scored around a bucket centre (bucket + its 8 neighbours, so a
+## grove straddling a bucket border is not cut in half).
+const GROVE_SCORE_RADIUS: float = POS_BUCKET_SIZE * 1.5
+## Returned rect edge: the 3x3 bucket block, comfortably below
+## Balance.HARVEST_AREA_MAX_SIDE.
+const GROVE_RECT_SIDE: float = POS_BUCKET_SIZE * 3.0
+
+## Best tree groves around `from`, strongest first, as world-space XZ rects —
+## exactly the shape TribeCommands.order_chop_area takes (phase 10e, AI wood
+## logistics). Opens up the existing 8 m position-bucket index: every non-empty
+## bucket is one candidate, scored trees / (1 + beeline), island-filtered via one
+## representative tree per bucket. Overlapping candidates are dropped so the
+## caller gets distinct groves rather than three views of the same one.
+func grove_candidates(from: Vector3, max_results: int = 4) -> Array[Rect2]:
+	var scored: Array = []   # [score, centre] pairs
+	var flat_from: Vector2 = Vector2(from.x, from.z)
+	for bucket in _pos_buckets:
+		var entry: Array = _pos_buckets[bucket]
+		var rep: TreeResource = null
+		for tree in entry:
+			if is_instance_valid(tree) and not tree.felled_flag:
+				rep = tree
+				break
+		if rep == null:
+			continue
+		if nav_grid != null and not nav_grid.same_island(from, rep.position):
+			continue
+		var centre: Vector3 = Vector3(
+			(float(bucket.x) + 0.5) * POS_BUCKET_SIZE, rep.position.y,
+			(float(bucket.y) + 0.5) * POS_BUCKET_SIZE)
+		var count: int = count_trees_near(centre, GROVE_SCORE_RADIUS)
+		if count <= 0:
+			continue
+		var d: float = Vector2(centre.x, centre.z).distance_to(flat_from)
+		scored.append([float(count) / (1.0 + d), centre])
+	if scored.is_empty():
+		return []
+	scored.sort_custom(func(a: Array, b: Array) -> bool: return a[0] > b[0])
+	var out: Array[Rect2] = []
+	for entry in scored:
+		if out.size() >= max_results:
+			break
+		var centre: Vector3 = entry[1]
+		var flat: Vector2 = Vector2(centre.x, centre.z)
+		var overlaps: bool = false
+		for rect in out:
+			if rect.has_point(flat):
+				overlaps = true
+				break
+		if overlaps:
+			continue
+		out.append(Rect2(flat - Vector2(GROVE_RECT_SIDE, GROVE_RECT_SIDE) * 0.5,
+			Vector2(GROVE_RECT_SIDE, GROVE_RECT_SIDE)))
+	return out
+
+
 # --- Reproduction ----------------------------------------------------------------
 
 func _reproduce() -> void:

@@ -73,8 +73,12 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
 | **Prediger** | **Konvertiert** feindliche Einheiten zum eigenen Stamm. Ausbildung im **Tempel**. Mehrere Prediger verteilen sich auf verschiedene Ziele; **Einheiten in Bekehrung sind kein gültiges Ziel** für Nah-/Fernkampf (Katapult ausgenommen). |
 | **Belagerungswaffe (Katapult)** | Fernkampf-Fahrzeug mit Crew, gebaut in der **Werkstatt** (Phase 7f). |
 
-> **Einheiten-Hardcap:** max. **1500 Einheiten pro Stamm** (zusätzlich zum
-> Bevölkerungslimit der Hütten).
+> **Einheiten-Hardcap:** max. **1000 Einheiten pro Stamm** (`Balance.TRIBE_MAX_UNITS`,
+> zusätzlich zum Bevölkerungslimit der Hütten). *(In Phase 10e von 1500 auf 1000
+> korrigiert — der Code stand immer auf 1000; Nutzerentscheidung 2026-08-04.)*
+> Der Cap zählt **alle** Einheiten, also auch Armee, Schamanin, Fahrzeuge und
+> Hütten-Besatzung — als reine Zivilbevölkerung sind damit realistisch ~700
+> erreichbar, nicht 1000.
 
 **Steuerung:**
 - **Rechtsklick** bewegt selektierte Einheiten (Standard-RTS-Selektion: Klick + Box-Select).

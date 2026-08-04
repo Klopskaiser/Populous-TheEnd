@@ -1385,10 +1385,13 @@ func test_ai_builds_workshop_after_temple() -> void:
 	for i in range(8):
 		w.tree_manager.spawn_tree(Vector2i(58 + 3 * (i % 4), 66 + 3 * (i / 4)),
 			TreeResource.MAX_STAGE)
-	# Full essential base: huts, all three camps — the workshop is next.
-	w.building_manager.place(HUT_SCENE, w.tribe, Vector2i(50, 50), 0, true)
-	w.building_manager.place(HUT_SCENE, w.tribe, Vector2i(50, 56), 0, true)
-	w.building_manager.place(HUT_SCENE, w.tribe, Vector2i(50, 62), 0, true)
+	# Full essential base: huts (AIState.TARGET_HUTS), the base wood rack (10e:
+	# it comes right after the first camp) and all three camps — workshop next.
+	for i in range(AIState.TARGET_HUTS):
+		w.building_manager.place(HUT_SCENE, w.tribe, Vector2i(50, 44 + 6 * i), 0, true)
+	w.building_manager.place(
+		preload("res://scenes/buildings/wood_depot.tscn"), w.tribe,
+		Vector2i(46, 50), 0, true)
 	w.building_manager.place(WARRIOR_CAMP_SCENE, w.tribe, Vector2i(56, 50), 0, true)
 	w.building_manager.place(
 		preload("res://scenes/buildings/firewarrior_camp.tscn"), w.tribe,
@@ -1396,7 +1399,7 @@ func test_ai_builds_workshop_after_temple() -> void:
 	w.building_manager.place(
 		preload("res://scenes/buildings/temple.tscn"), w.tribe,
 		Vector2i(56, 62), 0, true)
-	var next: PackedScene = ai._next_building_scene({})
+	var next: PackedScene = ai._next_building_scene(ai.build_tick_cache())
 	check(next != null and next.resource_path.ends_with("workshop.tscn"),
 		"the AI plans the workshop right after the temple")
 	# Staffing: idle braves are sent in as workers.
@@ -1404,7 +1407,7 @@ func test_ai_builds_workshop_after_temple() -> void:
 	for i in range(12):
 		w.unit_manager.spawn_unit(BRAVE_SCENE, 0,
 			w.nav.cell_to_world(Vector2i(62, 48 + i)))
-	ai._staff_workshops()
+	ai._staff_workshops(ai.build_tick_cache())
 	check(ws.occupants.size() == 3, "the AI staffs the workshop with 3 braves")
 	ai.free()
 	_free_world(w)

@@ -245,6 +245,13 @@ func has_chop_area() -> bool:
 	return chop_area.size.x > 0.0 and chop_area.size.y > 0.0
 
 
+## True while this brave runs a depot->depot haul loop. The AI's crew
+## bookkeeping needs an exact predicate here — State.IDLE would misfire on the
+## tick the order was given (the brave has not ticked yet).
+func has_depot_haul() -> bool:
+	return _haul_source != null and is_instance_valid(_haul_source)
+
+
 ## Standing area order (key B / AI wood crew): keep felling trees inside `area`
 ## and deliver full loads until it is worked out. Accepted even when nothing is
 ## claimable right now — the area is a JOB, not a single target, and crewmates

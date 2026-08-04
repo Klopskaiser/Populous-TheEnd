@@ -665,3 +665,76 @@ const TREE_MARK_BLINKS: int = 2
 const TREE_MARK_BLINK_TIME: float = 0.18
 ## Innerhalb dieses Radius wird ein Holzlager dem nächsten Gebäude vorgezogen.
 const HARVEST_DEPOT_PREFER_RADIUS: float = 40.0
+
+# =============================================================================
+# KI (Skirmish-Gegner, Phase 10e)
+# =============================================================================
+# Nur Balance-Werte. Rein mechanische Zahlen (Tickrate, Zauber-Heuristik,
+# Cache-Lebensdauern) bleiben als lokale Konstanten im AIController.
+
+# --- Wirtschaft / Holzlogistik ---
+## Bodensatz an Braves, die nie ins Training gehen, plus ein Anteil des Stammes:
+## ein 300-Seelen-Stamm braucht mehr als die alten fixen 8 Arbeiter.
+const AI_MIN_ECONOMY_BRAVES: int = 8
+const AI_ECONOMY_BRAVE_SHARE: float = 0.35
+## Fäll-Trupps: Größe, Braves je Trupp und Deckel. Unter AI_BRAVES_PER_WOOD_CREW
+## Braves gibt es GAR keinen Trupp — das Frühspiel bleibt damit unverändert.
+const AI_WOOD_CREW_SIZE: int = 6
+const AI_BRAVES_PER_WOOD_CREW: int = 12
+const AI_MAX_WOOD_CREWS: int = 4
+## Die Holzlogistik läuft nur auf jedem n-ten KI-Tick (Hain-Suche ist teuer).
+const AI_WOOD_TICK_INTERVAL: int = 3
+const AI_WOOD_GROVE_TTL_TICKS: int = 30
+## Ab dieser Entfernung des Hains von der Basis lohnt ein vorgeschobenes Lager.
+const AI_FORWARD_DEPOT_DISTANCE: float = 35.0
+## Eskorten für blockierte Baustellen je Holz-Tick (jede kostet eine Hain-Suche).
+const AI_STALLED_ESCORTS_PER_TICK: int = 2
+const AI_BRAVES_PER_FORESTER: int = 25
+const AI_MAX_FORESTERS: int = 4
+## Ab so vielen Braves füllt die KI ihre Förstereien über die alten 2 hinaus auf.
+const AI_FORESTER_WORKER_STEP: int = 30
+
+# --- Bau / Skalierung ---
+## Eine parallele Baustelle je AI_BRAVES_PER_SITE Braves, gedeckelt.
+## ACHTUNG: der Divisor ist in test_build_tick_places_construction_site
+## festgenagelt (10 Braves = 1 Baustelle, 20 = 2).
+const AI_BRAVES_PER_SITE: int = 8
+const AI_MAX_PARALLEL_SITES: int = 8
+## Ringsuche für Bauplätze: Mindestabstand zum Anker (Gebäude kleben nicht mehr
+## am Anker) bis Suchradius, plus Freihaltung um jeden Grundriss.
+const AI_PLOT_MIN_RADIUS: int = 3
+const AI_PLOT_SEARCH_RADIUS: int = 40
+const AI_PLOT_SPACING: int = 2
+## Gemeinsames Zellbudget für EINEN _find_plot-Aufruf (alle Anker + Relax-Pass).
+## Vor 10e galten 800 Zellen PRO Sweep bei zwei Sweeps (theoretisch 1600); jetzt
+## sind 800 die harte Obergrenze für die ganze Suche. Auf Seekarten laufen die
+## Sweeps durch viele Wasserzellen, die `can_place_at` verwerfen ohne den
+## Aufgabe-Zähler zu erhöhen — dort ist dieses Budget das einzige, was greift.
+const AI_MAX_PLOT_SCAN_CELLS: int = 800
+const AI_MAX_HUTS: int = 30
+## Der Wohnraumdruck-Zweig darf nicht alle Baustellen-Slots mit Hütten füllen.
+const AI_MAX_HUT_SITES: int = 2
+const AI_BRAVES_PER_WORKSHOP: int = 30
+const AI_MAX_SHOPS_PER_KIND: int = 4
+## Zusätzlicher Fahrzeug-Slot je so vielen Braves.
+const AI_BRAVES_PER_VEHICLE_SLOT: int = 40
+## Siedlungsanker (Basis + Hüttencluster + vorgeschobene Lager).
+const AI_SETTLEMENT_TTL_TICKS: int = 60
+const AI_SETTLEMENT_CLUSTER_RADIUS: int = 16
+const AI_MAX_SETTLEMENT_ANCHORS: int = 4
+## Trainingsschub: skaliert mit der Bravezahl.
+const AI_TRAIN_BATCH_MIN: int = 3
+const AI_TRAIN_BATCH_MAX: int = 12
+const AI_BRAVES_PER_TRAIN_BATCH: int = 20
+## Bauordnung (in AIState.next_building_kind gebraucht, deshalb hier statt im
+## Controller — AIState darf nicht auf den Controller zurückgreifen).
+const AI_HOUSING_PRESSURE: float = 0.8
+const AI_TARGET_WATCHTOWERS: int = 2
+const AI_HUTS_PER_EXTRA_CAMP: int = 2
+
+# --- Armee-Mix ---
+## Mehr Prediger (0,20 -> 0,30); die gleichzeitige Anhebung der Feuerkrieger ist
+## beabsichtigt — sie sind der Konter gegen eine gegnerische Prediger-Masse.
+const AI_ARMY_SHARE_WARRIOR: float = 0.40
+const AI_ARMY_SHARE_FIREWARRIOR: float = 0.30
+const AI_ARMY_SHARE_PREACHER: float = 0.30

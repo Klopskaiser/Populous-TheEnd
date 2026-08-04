@@ -7539,3 +7539,283 @@ auf eigenes Gebäude = Rally/Kontextbefehl, Box-Select) steht **nirgends im Spie
 Ein reiner Info-Abschnitt „Maus" auf der Steuerungsseite (nicht belegbar) wäre die
 naheliegende Ergänzung — bisher nicht gebaut, weil das eine UI-Erweiterung über
 den gemeldeten Fehler hinaus ist.
+
+
+## Phase 10e — Holzfäll-Rechteck & KI-Überarbeitung (2026-08-04)
+
+**Plan:** [10e_wood_area_ai_overhaul.md](10e_wood_area_ai_overhaul.md) —
+vollständig umgesetzt, in **zwei Commits** (Teil 1 eigenständig spielbar).
+
+**Nutzerentscheidungen dieser Sitzung:**
+
+| Thema | Entscheidung |
+|---|---|
+| `TRIBE_MAX_UNITS` 1000 vs. CLAUDE.md 1500 | Code bleibt bei **1000**, **CLAUDE.md §4 auf 1000 korrigiert**. Der Cap zählt alle Einheiten (Armee, Schamanin, Fahrzeuge, Hütten-Besatzung) → das „1000-Bevölkerungs-Ziel" ist realistisch als **~700 Zivilbevölkerung** zu lesen. |
+| Lieferung | Beide Teile in einer Sitzung, aber **zwei Commits**. |
+
+### Vier Abweichungen vom Phasenplan (alle vorab am Code verifiziert)
+
+**A1 — `claim_area_tree` sucht vom WALKER, nicht vom Flächenmittelpunkt.**
+`tree_manager.gd`: `max_walk = radius * PATH_RADIUS_FACTOR`. Der `radius`-Parameter
+steuert **zwei** Dinge — den Kandidatenfilter *und* das Gehbudget. Mit der
+Planvorgabe („Radius = halbe Flächendiagonale") hätte ein 60 m entfernter Brave
+bei 10 m Flächendiagonale ein Gehbudget von 9 m bekommen → jeder Kandidat
+`VERDICT_TOO_FAR` (5 s im Cache) → der Auftrag wäre sofort gestorben. Genau das
+Kernszenario des Plans. **Lösung:** Suchursprung = der Brave, Flächenzugehörigkeit
+über einen **vorgefilterten Kandidaten-Pool** (neuer optionaler
+`candidates`-Parameter an `best_tree`). Nebeneffekt: kein `filter`-Callable pro
+Baum, und Plan-Risiko 2 (Vollscan je Neuziel) entfällt ganz.
+Abgesichert durch `test_area_job_reaches_a_remote_grove` +
+`test_area_job_skips_trees_on_another_island`.
+
+**A2 — `Shift+B` braucht `exact_match`.**
+`InputEvent.is_action_pressed(action, allow_echo, exact_match)` hat
+`exact_match = false`, und `InputEventKey::action_match` vergleicht Modifier
+**nur** bei `exact_match == true`. Die im Plan vorgeschlagene `elif`-Reihenfolge
+allein hätte plain `B` **und** `Shift+B` beide auf „alle Hütten wählen" gelegt.
+Zusätzlich musste `InputSettings` eine `_SHIFT_ACTIONS`-Liste bekommen: der
+Rebind-Pfad (`_apply_to_map`) legt ein `InputEventKey` **ohne** Modifier an, ein
+„Zurücksetzen" hätte `Shift+B` dauerhaft zu blankem `B` gemacht und mit
+`harvest_area_arm` kollidiert. Auch `action_using_keycode` (Scheinkonflikt) und
+`key_display_name` („Umschalt+B") kennen die Liste.
+Abgesichert durch `test_shift_b_and_b_are_distinct_actions` +
+`test_reset_keeps_the_shift_modifier_on_select_all_huts`.
+
+**A3 — Wohnraumdruck-Zweig braucht zwei Guards.**
+`hut.gd:52` liefert `housing_capacity() == 0`, solange die Hütte nicht
+`is_usable()` ist — Baustellen zählen also nicht. Der vom Plan nach vorn gezogene
+Zweig wäre damit ab dem ersten Tick **immer** wahr gewesen (`population >= 0`) und
+die KI hätte ausschließlich Hütten gebaut, nie ein Kriegerlager. Guards:
+`housing_capacity > 0` **und** `hut_sites < AI_MAX_HUT_SITES`.
+Regressionswächter in `test_build_order_prioritises_housing_under_pressure`.
+
+**A4 — Armee-Mix 40/30/30 machte `training_kind_order` nichtdeterministisch.**
+30/30 erzeugt exakte Defizit-Gleichstände, und `Array.sort_custom` ist in Godot
+**nicht stabil**. Ohne Tiebreak hätte der Armee-Mix gezittert und
+`test_training_mix` wäre flaky geworden. Fix: Tiebreak-Index, bei
+`is_equal_approx` feste Priorität warrior → firewarrior → preacher.
+Abgesichert durch `test_army_mix_order_is_deterministic`.
+
+### Eine Abweichung, die erst der Test aufdeckte
+
+**Skalierende Förstereien hungerten den Wohnraum aus.** Die Plan-Bauordnung hat
+den Förster-Zweig (`forester < forester_target(braves)`) **vor** dem Wohnraumdruck.
+`forester_target` wächst mit der Bravezahl (192 Braves → Ziel 4), sodass ein großer
+Stamm mit dünnem Holz nie wieder eine Hütte gebaut hätte — genau die Skalierungs-
+bremse, die 10e beseitigen soll. **Gelöst:** nur die **erste** Försterei
+(`forester < 1`) hat Vorrang vor dem Wohnraum (wie vor 10e); die skalierenden
+Förstereien stehen hinter Wohnraum/Hütten/Lagern.
+
+---
+
+### Teil 1 — Holzfäll-Rechteck (Commit `87fd939`)
+
+1. **`balance.gd`**: neuer Abschnitt `# --- Flächen-Holzernte (Taste B) ---`
+   (`HARVEST_AREA_MIN_SIDE/MAX_SIDE`, `TREE_MARK_BLINKS/BLINK_TIME`,
+   `HARVEST_DEPOT_PREFER_RADIUS`).
+2. **`tree_manager.gd`**: `static point_in_area(p, area, poly)` (Rect2-Grobfilter +
+   vier Kreuzprodukt-Halbebenentests, windungs-agnostisch, Rand = innen — **kein**
+   `Geometry2D.is_point_in_polygon`: Engine-Call pro Baum, Crossing-Rule für
+   konkave Polygone, undefinierter Rand), `static is_convex_quad(poly)`,
+   `area_trees(area, poly)` (bucket-indiziert über `_pos_buckets`; **neuer Name**,
+   weil `trees_in_area(center, radius) -> int` bereits vergeben ist),
+   `candidates`-Parameter an `best_tree`, `claim_area_tree(...)` (A1).
+3. **`brave.gd`**: `chop_area`/`chop_area_poly` + `_area_retry`/`_area_retries`,
+   `has_chop_area()`, `order_chop_area(area, poly) -> bool`, `_next_area_tree()`,
+   `_area_retry_hold()` (hält den Auftrag, wenn Kollegen gerade alle Claim-Slots
+   halten — sonst geht ein Trupp am Hain-Ende reihenweise fälschlich idle).
+   `_tick_loose_chop` füllt bei Flächenauftrag die `CARRY_CAPACITY` und bleibt
+   bevorzugt am **selben** Baum; `_tick_loose_deliver` bevorzugt ein Depot
+   innerhalb `DEPOT_PREFER_RADIUS`. **Alle neuen Zweige sind mit
+   `has_chop_area()` bewacht** → der Einzelbaum-Befehl behält sein Stück pro
+   Fuhre (`test_single_tree_order_still_delivers_one_piece_per_trip`).
+   `_interrupt_tasks()` löscht die Fläche → jeder andere Befehl bricht ab.
+   `order_chop(tree) -> bool` statt `void`.
+4. **`tribe_commands.gd`**: `order_chop_area(units, area, polygon) -> int`
+   (**ignoriert Nicht-Braves vollständig** — Krieger in einen Hain zu marschieren
+   strandet sie nur; bewusster Unterschied zu `order_chop`),
+   `static clamp_harvest_area()` (Klemmung um den Mittelpunkt; unter der
+   Mindestseite auf **beiden** Achsen = Fehlklick → abgelehnt),
+   `static harvest_job_shape()` (Kommando **und** Blinken rufen sie → eine
+   Wahrheit), `order_chop(units, tree) -> int`.
+5. **Input**: neue Action `harvest_area_arm` (Taste 66), `select_all_huts` auf
+   `shift_pressed: true`, `InputSettings.ACTIONS`-Eintrag „Holzfäll-Rechteck",
+   `_SHIFT_ACTIONS` (A2).
+6. **`selection_manager.gd`**: `static harvest_arm_active`, Armieren nur mit
+   selektierten Braves und mit `cancel_armed_modes()` vorweg (Exklusivität — die
+   gleiche Ergänzung im `attack_move_arm`-Zweig, wo F-nach-„Absetzen" bisher zwei
+   Cursor stehen ließ). **Der kritische UI-Punkt:** der Linksklick-Press ruft
+   sonst *immer* `cancel_armed_modes()`, und die Freigabe darf **nicht**
+   zusätzlich selektieren — sonst ersetzt der Box-Select genau die eben
+   beauftragten Braves. Beides an **zwei** Stellen behandelt (Release-Zweig *und*
+   Freigabe-Sicherung im `_process`). `_fire_harvest()`, `_screen_to_ground()`
+   (Terrain-Raycast, sonst analytischer Meeresebenen-Treffer in die Karte
+   geklemmt — eine Ecke über dem Kartenrand liefert weiter eine brauchbare
+   Rechteckkante), grüne Box + grünes Fadenkreuz „Holz fällen".
+7. **`tree_mark_renderer.gd`** (neu, `class_name TreeMarkRenderer`): eine
+   MultiMesh flach liegender weißer Ringe, Sichtbarkeit über
+   `visible_instance_count` statt Alpha (ein transparentes Material verlässt den
+   Opaque-Pass und sortiert pro Instanz gegen Terrain und Einheiten; ein
+   MultiMesh-Material kann ohne `INSTANCE_COLOR` + eigenen Shader gar kein Alpha
+   pro Marke tragen). `flash(trees)`, `add_mark()` (erneutes Blinken am selben Ort
+   **startet neu** statt zu stapeln), `static mark_radius()` (aus
+   `Balance.TREE_TYPE_PARAMS[...].stage_scales`, **nicht** aus `node.scale` — das
+   ist headless undefiniert), `static mark_visible(age)`, `advance(delta)` (aus
+   `_process` herausgezogen → headless testbar). **Positionen werden kopiert**,
+   der Baum nicht referenziert. Verdrahtung in `main.gd` per `add_child` (Muster
+   der anderen Code-erzeugten Renderer, keine `main.tscn`-Änderung).
+
+### Teil 2 — KI-Überarbeitung
+
+**2.0 Tick-Cache.** Innere Klasse `AIController.TickCache extends RefCounted` (kein
+neues `class_name` → kein `--headless --import`-Zwang), **als Parameter** an alle
+Unterroutinen — damit ist die Lebensdauer strukturell auf einen `tick_ai()`
+begrenzt. Zwei Durchläufe (units, buildings) füllen 22 Felder. Alle Prädikate sind
+1:1 aus den ersetzten Routinen übernommen (`_army_units` überspringt `State.CREW`
+und verlangt bei Fahrzeugen `boarded_count() >= min_move_crew`;
+`_usable_camp_kinds` wählt je Kennung das Gebäude mit **kürzester** `incoming`-
+Queue; Unterklassen `FireRamWorkshop`/`AirshipWharf` **vor** `Workshop`).
+
+Der Kern ist der **verbrauchende Idle-Pool** (`take_idle`/`idle_left`,
+`take_idle_fw`/`idle_fw_left`): `_staff_foresters` schickt Braves weg, danach liest
+`_tick_train` denselben Cache. Jede Entnahme prüft `State.IDLE` erneut (O(1)), also
+werden Braves, die ein anderes System zwischenzeitlich gezogen hat, übersprungen.
+**Nebenbei behoben:** `_man_watchtowers` und `_man_airships` bauten je eine eigene
+Idle-Feuerkrieger-Liste und konnten denselben Feuerkrieger doppelt beauftragen (der
+Bordbefehl überschrieb den Garnisonsmarsch).
+
+Gelöscht: `_idle_braves`, `_army_units`, `_count_kind`, `_construction_site_count`,
+`_usable_hut_count`, `_usable_camp_kinds`, `_usable_camp_kind_count`,
+`_usable_camp_for`, `_militia_braves`. `_detect_threat()` wanderte nach vorn (eine
+Spatial-Query), damit die Holzlogistik unter Angriff keine Braves vor der Miliz
+abgreift.
+
+**2.1** `balance.gd` bekam einen `# === KI (Skirmish-Gegner) ===`-Abschnitt (34
+Konstanten); die Controller-Konstantennamen bleiben und zeigen jetzt auf `Balance`,
+damit bestehende Tests weiter kompilieren. `ai_state.gd`: `TARGET_HUTS 3→4`,
+`POP_FOR_TRAIN 12→16`, `ARMY_ATTACK_SIZE 8→12`, `ATTACK_WAVE_GROWTH 4→6`,
+`ATTACK_WAVE_MAX 40→120`, Armee-Mix 40/30/30 mit Tiebreak (A4). Neue reine Statics:
+`min_economy_braves`, `parallel_site_count`, `wood_crew_count`, `train_batch`,
+`forester_target`, `forester_workers`, `workshop_target`, `vehicle_caps`,
+`next_building_kind(counts)` (die **komplette** Bauordnung, szenenfrei),
+`fewest_camp_kind`. Controller-Mapping über `BUILD_SCENES` + `BUILD_FOOTPRINTS`
+(Footprints aus `Balance` → die Probe-Instanziierung pro Bau-Tick entfällt).
+
+**2.2 Holzlogistik** (`_tick_wood_logistics`, gedrosselt, nur ohne Bedrohung):
+Trupp-Mitgliedschaft über **`Brave.has_chop_area()`, nie `State.IDLE`** — direkt
+nach `order_chop_area` hat der Brave noch nicht getickt und ist noch IDLE, eine
+IDLE-Prüfung hätte den Trupp im Tick nach seiner Gründung verworfen
+(`test_wood_crew_survives_the_tick_it_was_created_in`). Bedarf aus `cache.sites`
+(`wood_needed_total() - wood_incoming()`), Haine über die neue
+`TreeManager.grove_candidates(from, max_results) -> Array[Rect2]` (legt den
+8-m-Bucket-Index offen, Score `Baumzahl / (1 + Luftlinie)` über Bucket + 8
+Nachbarn, Inselfilter, Dedup), Trupps per **`commands.order_chop_area`** — dem
+Spieler-Kommando aus Teil 1. Dazu Eskorten für `wood_stalled`-Baustellen,
+vorgeschobenes Lager am Hain (`_forward_depot_anchor`) und zwei Pendel-Braves
+(`order_depot_haul`, Buchführung über das neue `Brave.has_depot_haul()`).
+
+**2.3 Bauplatz/Layout**: Ring `AI_PLOT_MIN_RADIUS 3 .. AI_PLOT_SEARCH_RADIUS 40`,
+`_plot_has_clearance` mit **zwingender Rückfallebene** (zwei Durchgänge: erst alle
+Anker mit Abstandspflicht, dann ohne — eine harte Abstandspflicht kann die Suche
+auf engen Karten aushungern und die KI komplett stilllegen), `_orientation_toward`
+(Eingang zur Basis; das Henne-Ei-Problem — `place_building` dreht bei
+`orientation % 2 == 1` den Grundriss — ist **innerhalb** der Ringsuche gelöst:
+erst Orientierung, dann gedrehter Grundriss gegen `can_place_at` und Clearance),
+`_settlement_anchors` (Basis + Hüttencluster + vorgeschobene Lager, TTL-gecacht),
+**gemeinsames Zell- UND Kandidatenbudget pro `_find_plot`-Aufruf** (vorher beides
+pro Sweep — das war die Regression, siehe Messabschnitt), Anker-Round-Robin statt
+„alle Anker jeden Tick", Relax-Pass nur über die Basis, Prüfungen strikt nach
+Kosten sortiert, Selbstheilung `_accept_or_scrap_site` (Sofort-Abriss aus 10d
+**plus** `_unreachable_plots`-Eintrag — ohne den Bann würde die KI dieselbe Zelle
+in jedem Tick neu setzen und abreißen).
+
+**2.4**: Fahrzeuglimits aus `AIState.vehicle_caps(braves)`, geklemmt auf die
+`Tribe.MAX_*_LIMIT`-Konstanten (die KI hat die Defaults **nie** angehoben — das war
+zusammen mit den skalierenden Werkstattzahlen der eigentliche Grund für „zu selten
+Fahrzeuge"). `_tick_train` auf `min_economy_braves`/`train_batch`, Braves erst
+**nach** gefundenem Lager aus dem Pool genommen. Prediger-Vorrangzweig in
+`_cast_spells` (Blitz, sonst Feuerball) direkt nach dem Schamanin-Zweig, gefiltert
+auf der bereits gesammelten `enemies`-Liste → kein zusätzlicher Scan.
+
+### Zwei Fallen, die erst der Testlauf zeigte
+
+1. **`_base_island()` war immer −1.** Die Anker-Zelle ist normalerweise vom
+   Reinkarnationsplatz **überbaut** und damit unbegehbar, `island_at(base_anchor)`
+   also −1 → `_accept_or_scrap_site` riss **jede** frische Baustelle sofort wieder
+   ab („a living AI builds" schlug fehl). Fix: `nearest_walkable_cell()` davor,
+   plus „bei −1 niemals abreißen" als zweite Sicherung.
+2. **`_find_supplied_plot` direkt gerufen scannte nichts.** Das gemeinsame
+   Zellbudget wird in `_find_plot` gesetzt; ein Direktaufruf (Tests,
+   Einzelanker-Proben) startete mit Budget 0. Fix: `_plot_sweep`-Flag — innerhalb
+   eines Sweeps bleibt das Budget geteilt, außerhalb füllt sich der Einzelaufruf
+   selbst auf.
+
+### Verifikationsstand
+
+- **Testsuite 3438 Zusicherungen grün** (vorher 3273; Teil 1 +74, Teil 2 +91),
+  Exit-Code 0, Output frei von `SCRIPT ERROR`. Projekt-Ladecheck
+  (`--headless --quit`) sauber.
+- **Warnung:** der Ladecheck fängt Parse-Fehler im `AIController` **nicht** — der
+  wird auf dem Menü-Pfad nie instanziiert. Maßgeblich ist dort die Suite.
+- **Manuelle Prüfung durch den Nutzer steht aus** (Rechteck-Bedienung, Blinken,
+  langes Skirmish).
+
+### Messung — was ging, was nicht, und eine gefundene Regression
+
+**Der Wall-Clock-Vergleich für 2.0 ist nicht aussagekräftig** und wird hier
+bewusst *nicht* als Gewinn verkauft:
+
+- Die 4-Wege-KI-Schlacht divergiert chaotisch. Vorher/Nachher laufen 90 s lang
+  **identisch** (pop 96 / 111 / 139) und driften danach auseinander (t=600 s:
+  pop 217 vs. 100). Ein `ai ms`-Vergleich bei unterschiedlicher Bevölkerung misst
+  nichts.
+- Das Maschinenrauschen ist groß: zwei Läufe auf **identischem** Code lieferten
+  „schlimmster KI-Tick" 8,90 ms und 18,72 ms.
+
+**Maßgeblich für 2.0 ist deshalb der deterministische Zähler:** die Volldurchläufe
+über `tribe.units`/`tribe.buildings` gingen von **bis zu 17 pro Tick auf exakt 2**
+(`_tick_train` allein multiplizierte `_usable_camp_for` auf bis zu 9
+Buildings-Scans). Festgenagelt durch `test_ai_tick_cache_walks_units_once_per_tick`
+mit einer Welt, in der **kein** Zweig früh zurückspringt.
+
+**Nebenbefund aus der Baseline:** bei den Bevölkerungen, die der Benchmark
+erreicht (~230), ist nicht das Listenbauen der dominierende KI-Kostenpunkt,
+sondern die **Bauplatzsuche**. Die Cache-Ersparnis skaliert erst mit der
+Einheitenzahl — das Ziel des Plans war die 1000-Einheiten-Größenordnung, nicht 230.
+
+#### Regression in 2.3 — gefunden und behoben
+
+Die erste Fassung von 2.3 machte die Bauplatzsuche **3–4× teurer** und den
+schlimmsten KI-Tick mehr als doppelt so schlecht. Ursachenkette und Gegenmaßnahmen
+(je einzeln gemessen):
+
+| Ursache | Maßnahme |
+|---|---|
+| `MAX_PLOT_CANDIDATES` (40 teure `_plot_reachable`-A\*) galt **pro Sweep**, und aus 2 Sweeps wurden bis zu 10 → bis 400 A\* pro Tick | `_plot_candidates_left` als **gemeinsame** Obergrenze über die ganze Suche (2 Sweeps' Wert), plus Pro-Sweep-Anteil, damit ein hoffnungsloser Basis-Sweep den Expansionsanker nicht aushungert |
+| Die Freihaltungsprüfung (`(Grundriss+4)²` Lookups, 144 beim 8×8-Feuertempel) lief **vor** der billigen Baum-Zählung | Prüfungen strikt nach Kosten: `can_place_at` → Baumzahl (bucket-indiziert) → Freihaltung → A\* |
+| Alle Siedlungsanker in **beiden** Durchgängen (bis 10 Sweeps) | Basis + **ein rotierender** Hüttencluster (Round-Robin über die Ticks) + Expansionsanker; der Relax-Durchgang läuft nur noch über die **Basis** |
+| Zellbudget 1200 wurde auf Seekarten voll ausgeschöpft (Wasserzellen scheitern an `can_place_at`, ohne den Aufgabe-Zähler zu erhöhen) | `AI_MAX_PLOT_SCAN_CELLS` auf **800** — vor 10e waren es 800 *pro* Sweep bei zwei Sweeps, jetzt sind 800 die harte Grenze der ganzen Suche |
+
+Messreihe (`benchmark_earlygame ... sim=600`, teuerstes 30-s-Fenster):
+
+| Stand | Bergpass Plot-Fenster | Seenland Plot-Fenster | schlimmster KI-Tick |
+|---|---|---|---|
+| vor 10e | 63,5 ms (269 Zellen/Scan) | 122,5 ms (269 Z/Scan) | 53,8 / 12,5 ms |
+| 2.3 erste Fassung | 231–251 ms (535–1065 Z/Scan) | 354,9 ms (982 Z/Scan) | 116–130 / 98,6 ms |
+| nach allen vier Maßnahmen | 154,5 ms (594 Z/Scan) | **127,3 ms (800 Z/Scan)** | 72,2 / 76,2 ms |
+
+**Ehrlicher Reststand:** Seenland ist bei der Bauplatzsuche wieder auf
+Baseline-Niveau, Bergpass liegt pro Scan noch etwa beim Doppelten (die
+Gebirgskarte hat viele unbegehbare Zellen, die Sweeps also lange laufen, bevor
+sie aufgeben). In absoluten Zahlen sind das ~155 ms pro 30-s-Fenster **über alle
+vier KI-Stämme zusammen**, also ~5 ms/s — unkritisch.
+
+**Der verbleibende „schlimmster KI-Tick" von ~72–76 ms ist nach den Zahlen kein
+KI-Kostenpunkt, sondern ein Insel-Rebuild:** `NavGrid._ensure_islands()` kostet in
+**beiden** Ständen ~42–52 ms je Fill (vorher 6 Fills / 250,1 ms, nachher 5 Fills /
+258,7 ms — Häufigkeit und Preis unverändert). Ein solcher Fill landet jetzt
+häufiger *innerhalb* des KI-Ticks, weil die KI mit `same_island` (Hain-Suche) und
+`island_at` (`_base_island`, `approach_island`) neue Auslöser hat. Das ist eine
+**Zuordnungs-Verschiebung, keine neue Arbeit** — die Baseline hatte auf Bergpass
+schon 53,8 ms. Als eigenständige Optimierung (Insel-Labels inkrementell statt
+vollständig neu) bleibt das offen und ist **nicht** Teil dieser Phase.

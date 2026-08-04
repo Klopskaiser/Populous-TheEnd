@@ -120,7 +120,7 @@ func test_shaman_bridges_to_unreachable_target() -> void:
 	# machine would immediately leave ATTACK (covered by its own tests).
 	var joined: bool = false
 	for second in range(120):
-		ai._tick_attack()
+		ai._tick_attack(ai.build_tick_cache())
 		for i in range(10):
 			if shaman.state != Unit.State.DEAD:
 				shaman.tick(TICK)
