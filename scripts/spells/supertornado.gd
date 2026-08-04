@@ -25,7 +25,7 @@ func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:
 	main.sfx_id = id   # only the main funnel roars; the satellites stay silent
 	ctx.unit_manager.register_projectile(main)
 	# Two normal-sized satellite tornados around it.
-	var limit: float = float(TerrainData.SIZE) * TerrainData.CELL_SIZE - 1.0
+	var limit: float = TerrainData.world_clamp_limit(ctx.terrain_data)
 	for i in range(Balance.SUPERTORNADO_SATELLITE_COUNT):
 		var angle: float = randf() * TAU
 		var at: Vector3 = target + Vector3(cos(angle), 0.0, sin(angle)) \

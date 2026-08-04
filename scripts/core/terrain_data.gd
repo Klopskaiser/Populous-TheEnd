@@ -38,6 +38,27 @@ func _init(p_size: int = SIZE) -> void:
 	heights.resize(verts * verts)
 
 
+## Highest valid world coordinate on the X/Z axes, one metre inside the map edge
+## — the clamp bound for anything that wanders on its own (tornado, swarm,
+## debris). STATIC with a null fallback because the callers hold an OPTIONAL
+## terrain reference: written out by hand, that fallback is easy to get wrong,
+## and `TerrainData.SIZE` is the DEFAULT 128, not this map's size. Exactly that
+## mistake pinned tornadoes on the 256-cell maps (Seenland/Bergpass) to the
+## 127-line — a cast past it teleported the funnel up to 100 m and it then
+## jittered against the invisible wall (user report: Tornados am See).
+static func world_clamp_limit(td: TerrainData) -> float:
+	return float(td.size if td != null else SIZE) * CELL_SIZE - 1.0
+
+
+## Centre CELL of the map. Same trap as world_clamp_limit: a hand-written
+## `TerrainData.SIZE / 2` is the DEFAULT 128er centre (64, 64) and lands in the
+## north-west quarter of a 256-cell map. Used by the debug/test setups, which
+## place their armies relative to the map centre.
+static func center_cell(td: TerrainData) -> Vector2i:
+	var s: int = td.size if td != null else SIZE
+	return Vector2i(s / 2, s / 2)
+
+
 # --- Vertex access -----------------------------------------------------------
 
 func vertex_height(x: int, z: int) -> float:

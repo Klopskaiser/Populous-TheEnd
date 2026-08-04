@@ -263,8 +263,8 @@ func _ready() -> void:
 	GameState.match_ended.connect(func(id: int) -> void:
 		print("Match beendet — Sieger: Stamm %d" % id))
 
-	var center_cell: Vector2i = Vector2i(td.size / 2, td.size / 2)
-	var camera_anchor: Vector2i = center_cell
+	var map_center: Vector2i = TerrainData.center_cell(td)
+	var camera_anchor: Vector2i = map_center
 	# Scale the wild-tree count with the map area (128 -> TREE_COUNT, 256 -> 4x).
 	var tree_count: int = TREE_COUNT * (td.size * td.size) / (TerrainData.SIZE * TerrainData.SIZE)
 	_tree_manager.spawn_trees(tree_count, GameState.ISLAND_SEED)
@@ -418,7 +418,7 @@ func _tree_too_close(cell: Vector2i) -> bool:
 ## preachers. The red BUILDINGS face the player base; site, vehicles and army
 ## sit behind them. No AIController — a static firing range.
 func _setup_test_chamber(tribes: Array[Tribe], nav: NavGrid) -> Vector2i:
-	var center: Vector2i = Vector2i(TerrainData.SIZE / 2, TerrainData.SIZE / 2)
+	var center: Vector2i = TerrainData.center_cell(nav.terrain if nav != null else null)
 	var blue_anchor: Vector2i = center + Vector2i(-22, 0)
 	_setup_chamber_blue(tribes[GameState.PLAYER_TRIBE], blue_anchor, nav)
 	if tribes.size() > 1:
@@ -555,7 +555,7 @@ func _spawn_chamber_army(tribe_id: int, center: Vector2i, count: int, nav: NavGr
 ## red = tribe 1) spawn left/right of the island centre and march at each
 ## other's anchor — the aggro system takes over on contact.
 func _setup_debug_battle(nav: NavGrid) -> void:
-	var center: Vector2i = Vector2i(TerrainData.SIZE / 2, TerrainData.SIZE / 2)
+	var center: Vector2i = TerrainData.center_cell(nav.terrain if nav != null else null)
 	var blue_anchor: Vector2i = center + Vector2i(-DEBUG_ARMY_OFFSET, 0)
 	var red_anchor: Vector2i = center + Vector2i(DEBUG_ARMY_OFFSET, 0)
 	_spawn_debug_army(0, blue_anchor, nav)

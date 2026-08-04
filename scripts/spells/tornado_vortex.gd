@@ -89,8 +89,14 @@ func setup(p_tribe_id: int, at: Vector3, p_unit_manager: UnitManager,
 	# form up in the air on the hull and only drop later. Snapping to the terrain
 	# here forms it where the ship's shadow is (right under it), so it destroys
 	# the airship from the ground up.
+	# Clamp the spawn to the map BEFORE the first drift tick. _tick_drift clamps
+	# too, but only after IDLE_TIME — an out-of-bounds cast point would otherwise
+	# sit still for a second and then jump to the border in one frame.
+	var limit: float = TerrainData.world_clamp_limit(terrain_data)
+	position.x = clampf(position.x, 1.0, limit)
+	position.z = clampf(position.z, 1.0, limit)
 	if terrain_data != null:
-		position.y = terrain_data.get_height(at.x, at.z)
+		position.y = terrain_data.get_height(position.x, position.z)
 
 
 func tick(delta: float) -> void:
@@ -130,7 +136,7 @@ func _tick_drift(delta: float) -> void:
 	var speed: float = lerpf(MIN_SPEED, MAX_SPEED,
 		clampf((age - IDLE_TIME) / ACCEL_TIME, 0.0, 1.0))
 	position += _drift * speed * delta
-	var limit: float = float(TerrainData.SIZE) * TerrainData.CELL_SIZE - 1.0
+	var limit: float = TerrainData.world_clamp_limit(terrain_data)
 	position.x = clampf(position.x, 1.0, limit)
 	position.z = clampf(position.z, 1.0, limit)
 	if terrain_data != null:

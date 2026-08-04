@@ -1702,3 +1702,72 @@ func test_sink_floods_coastal_building_and_units() -> void:
 	check(victim._drowning, "the flood death is an animated drowning (phase 10a)")
 	check(dry.state != Unit.State.DEAD, "distant follower survives")
 	_free_world_with_buildings(w)
+
+
+# --- Kartenausdehnung: Wirbel auf den 256er-Karten (Nutzerreport) --------------------
+
+## Flat TerrainData of an arbitrary size — the wandering spell effects clamp
+## themselves to the map, and the 256er maps (Seenland/Bergpass) are exactly
+## where the DEFAULT-size constant was the wrong bound.
+func _flat_terrain_sized(cells: int, h: float = 5.0) -> TerrainData:
+	var td: TerrainData = TerrainData.new(cells)
+	for i in range(td.heights.size()):
+		td.heights[i] = h
+	return td
+
+
+func test_world_clamp_limit_follows_the_map_size() -> void:
+	check(is_equal_approx(TerrainData.world_clamp_limit(_flat_terrain_sized(128)), 127.0),
+		"128er Karte: Grenze 127")
+	check(is_equal_approx(TerrainData.world_clamp_limit(_flat_terrain_sized(256)), 255.0),
+		"256er Karte: Grenze 255 (vorher fest 127)")
+	check(is_equal_approx(TerrainData.world_clamp_limit(null), 127.0),
+		"ohne Terrain: Rückfall auf die Standardgröße")
+
+
+func test_tornado_does_not_teleport_on_a_large_map() -> void:
+	var td: TerrainData = _flat_terrain_sized(256)
+	# Past the OLD hard-coded 127-line: on Seenland the lake is centred at
+	# (128, 128), so this is a perfectly normal "cast at the lake" point.
+	var at: Vector3 = Vector3(150.0, 5.0, 150.0)
+	var vortex: TornadoVortex = TornadoVortex.new()
+	vortex.setup(0, at, null, td, null)
+	check(vortex.position.x > 140.0 and vortex.position.z > 140.0,
+		"Wirbel entsteht am Zielpunkt, nicht an der Kartenmitte")
+	var last: Vector3 = vortex.position
+	var max_step: float = 0.0
+	for i in range(120):   # 4 s at 30 Hz — well past IDLE_TIME
+		vortex.tick(1.0 / 30.0)
+		max_step = maxf(max_step, Vector2(vortex.position.x - last.x,
+			vortex.position.z - last.z).length())
+		last = vortex.position
+	# MAX_SPEED 2.0 m/s at 1/30 s is ~0.07 m per tick; the bug jumped ~32 m in one.
+	check(max_step < 0.5, "kein Sprung pro Tick (war ~32 m an der 127-Linie)")
+	check(vortex.position.x > 127.5 or vortex.position.z > 127.5,
+		"Wirbel bleibt jenseits der alten 127-Grenze frei beweglich")
+	vortex.free()
+
+
+func test_tornado_spawn_is_clamped_into_the_map() -> void:
+	var td: TerrainData = _flat_terrain_sized(128)
+	var vortex: TornadoVortex = TornadoVortex.new()
+	vortex.setup(0, Vector3(400.0, 5.0, -50.0), null, td, null)
+	check(vortex.position.x <= 127.0 and vortex.position.x >= 1.0,
+		"x beim Spawn in die Karte geklemmt")
+	check(vortex.position.z <= 127.0 and vortex.position.z >= 1.0,
+		"z beim Spawn in die Karte geklemmt")
+	var before: Vector3 = vortex.position
+	for i in range(60):
+		vortex.tick(1.0 / 30.0)
+	check(Vector2(vortex.position.x - before.x, vortex.position.z - before.z).length() < 5.0,
+		"kein verzögerter Sprung nach IDLE_TIME")
+	vortex.free()
+
+
+func test_center_cell_follows_the_map_size() -> void:
+	check(TerrainData.center_cell(_flat_terrain_sized(128)) == Vector2i(64, 64),
+		"128er Karte: Mitte (64, 64)")
+	check(TerrainData.center_cell(_flat_terrain_sized(256)) == Vector2i(128, 128),
+		"256er Karte: Mitte (128, 128) - vorher fest (64, 64)")
+	check(TerrainData.center_cell(null) == Vector2i(64, 64),
+		"ohne Terrain: Rueckfall auf die Standardgroesse")
