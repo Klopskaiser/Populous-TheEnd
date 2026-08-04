@@ -1122,6 +1122,17 @@ func _snap_to_ground() -> void:
 	# each) — this is the hottest per-mover call.
 	var p: Vector3 = position
 	if terrain_data != null:
+		# HARD world-border invariant (user report 2026-08-04: the shaman ended up
+		# outside the map on Plateau). Every movement writer funnels through here
+		# — _advance_path, _step_toward, knockback, roll, throw landing, crew
+		# glide — so clamping here is what makes the border inescapable no matter
+		# HOW a unit reaches it. The elastic bounce-back lives at the individual
+		# movement sites (_bounce_off_world_edge for throws, roll_dir reflection
+		# in _tick_roll); this is the backstop that cannot be bypassed.
+		var extent: float = float(terrain_data.size) * TerrainData.CELL_SIZE \
+			- WORLD_EDGE_MARGIN
+		p.x = clampf(p.x, WORLD_EDGE_MARGIN, extent)
+		p.z = clampf(p.z, WORLD_EDGE_MARGIN, extent)
 		p.y = terrain_data.get_height(p.x, p.z)
 		position = p
 	# SoA double-write, inlined (hot path: every mover, every tick). Covers all
@@ -1743,6 +1754,27 @@ func _tick_roll(delta: float) -> void:
 	var step: float = speed_now * (1.0 + slope * 0.4) * delta
 	var nx: float = position.x + roll_dir.x * step
 	var nz: float = position.z + roll_dir.z * step
+	# The world border is a wall for a ROLL too, not just for a throw: reflect the
+	# roll direction on the axis that hit and keep tumbling back inland. Without
+	# this a unit rolling down a cliff at the map edge left the map (user report).
+	if terrain_data != null:
+		var wall: float = float(terrain_data.size) * TerrainData.CELL_SIZE \
+			- WORLD_EDGE_MARGIN
+		var reflected: bool = false
+		if (nx < WORLD_EDGE_MARGIN and roll_dir.x < 0.0) \
+				or (nx > wall and roll_dir.x > 0.0):
+			roll_dir.x = -roll_dir.x
+			nx = clampf(nx, WORLD_EDGE_MARGIN, wall)
+			reflected = true
+		if (nz < WORLD_EDGE_MARGIN and roll_dir.z < 0.0) \
+				or (nz > wall and roll_dir.z > 0.0):
+			roll_dir.z = -roll_dir.z
+			nz = clampf(nz, WORLD_EDGE_MARGIN, wall)
+			reflected = true
+		if reflected:
+			roll_dir = roll_dir.normalized()
+			if _roll_init_speed > 0.0:
+				_roll_init_speed *= WORLD_BOUNCE_RESTITUTION
 	# Buildings stop the roll; steep/unwalkable open ground is rolled across.
 	if nav_grid != null and nav_grid.is_cell_blocked_by_building(
 			nav_grid.world_to_cell(Vector3(nx, 0.0, nz))):
@@ -1896,6 +1928,18 @@ func apply_lift(dir: Vector3, horizontal: float, vertical: float,
 	throw_airborne(flat * h + Vector3.UP * v, fall_damage)
 
 
+## `p` with its X/Z pulled inside the world border. Used wherever a target point
+## is COMPUTED rather than stepped toward (drown drag), so the invisible wall also
+## holds for movement that does not go through _snap_to_ground.
+func _clamp_world_xz(p: Vector3) -> Vector3:
+	if terrain_data == null:
+		return p
+	var extent: float = float(terrain_data.size) * TerrainData.CELL_SIZE \
+		- WORLD_EDGE_MARGIN
+	return Vector3(clampf(p.x, WORLD_EDGE_MARGIN, extent), p.y,
+		clampf(p.z, WORLD_EDGE_MARGIN, extent))
+
+
 ## Invisible wall at the world border (phase 10c, user spec): a unit hurled
 ## past the map edge does NOT sail off into nothing — it smacks into the wall
 ## in mid-air and is thrown back with part of its speed. Only the axis that
@@ -1908,18 +1952,26 @@ func _bounce_off_world_edge() -> void:
 	var high: float = float(terrain_data.size) * TerrainData.CELL_SIZE \
 		- WORLD_EDGE_MARGIN
 	var low: float = WORLD_EDGE_MARGIN
-	if position.x < low and _throw_velocity.x < 0.0:
+	# The position is pulled back UNCONDITIONALLY; only the velocity reflection
+	# depends on the direction. A body that is outside must come back in even if
+	# its velocity happens to point inward already (a lift or a second hit landing
+	# in the same frame can flip it) — otherwise it drifts on outside the map.
+	if position.x < low:
 		position.x = low
-		_throw_velocity.x = -_throw_velocity.x * WORLD_BOUNCE_RESTITUTION
-	elif position.x > high and _throw_velocity.x > 0.0:
+		if _throw_velocity.x < 0.0:
+			_throw_velocity.x = -_throw_velocity.x * WORLD_BOUNCE_RESTITUTION
+	elif position.x > high:
 		position.x = high
-		_throw_velocity.x = -_throw_velocity.x * WORLD_BOUNCE_RESTITUTION
-	if position.z < low and _throw_velocity.z < 0.0:
+		if _throw_velocity.x > 0.0:
+			_throw_velocity.x = -_throw_velocity.x * WORLD_BOUNCE_RESTITUTION
+	if position.z < low:
 		position.z = low
-		_throw_velocity.z = -_throw_velocity.z * WORLD_BOUNCE_RESTITUTION
-	elif position.z > high and _throw_velocity.z > 0.0:
+		if _throw_velocity.z < 0.0:
+			_throw_velocity.z = -_throw_velocity.z * WORLD_BOUNCE_RESTITUTION
+	elif position.z > high:
 		position.z = high
-		_throw_velocity.z = -_throw_velocity.z * WORLD_BOUNCE_RESTITUTION
+		if _throw_velocity.z > 0.0:
+			_throw_velocity.z = -_throw_velocity.z * WORLD_BOUNCE_RESTITUTION
 
 
 ## Vertical speed whose ballistic apex lands exactly on the throw ceiling,
@@ -2042,7 +2094,7 @@ func drown() -> void:
 		# MUST be set before _die(): _die() locks the corpse pose exactly once
 		# and the per-tick dead path never refreshes the animation again.
 		_drowning = true
-		_drown_target = _water_entry_target(position)
+		_drown_target = _clamp_world_xz(_water_entry_target(position))
 		position.y = TerrainData.SEA_LEVEL - DROWN_FLOAT_DEPTH
 		_sync_soa_pos()
 	health = 0

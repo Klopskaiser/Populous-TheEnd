@@ -1382,3 +1382,86 @@ func test_unreachable_cache_evicts_instead_of_clearing() -> void:
 	check(unit._unreach_targets.has(last.get_instance_id()),
 		"the most recent target is remembered")
 	_free_world(w)
+
+
+## User report 2026-08-04 (Plateau): the shaman ended up OUTSIDE the map, probably
+## after falling off a cliff. The border was a throw-only rule; a roll, a
+## knockback shove and a drowning corpse drag all moved the position freely.
+## It is now an invariant of every movement path.
+##
+## The loops below collect a violation flag and assert ONCE afterwards — a check()
+## per iteration would make the suite's assertion count depend on how many ticks
+## the roll happens to last.
+func test_rolling_unit_bounces_off_the_world_edge() -> void:
+	var w: Dictionary = _make_world()
+	var edge: float = float(w.td.size) * TerrainData.CELL_SIZE - Balance.WORLD_EDGE_MARGIN
+	var victim: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(edge - 1.0, 30))
+	victim.max_health = 100000
+	victim.health = 100000
+	victim.start_roll(Vector3(1, 0, 0), 3.0, 8.0)   # straight at the wall, with momentum
+	var worst: float = victim.position.x
+	var turned: bool = false
+	for i in range(200):
+		if victim.state != Unit.State.ROLL:
+			break
+		victim.tick(TICK)
+		worst = maxf(worst, victim.position.x)
+		if victim.roll_dir.x < 0.0:
+			turned = true
+	check(worst <= edge + 0.001,
+		"a rolling unit never leaves the map (max x=%.2f, Wand %.2f)" % [worst, edge])
+	check(turned, "the roll direction was reflected off the wall")
+	_free_world(w)
+
+
+func test_rolling_unit_bounces_out_of_a_world_corner() -> void:
+	var w: Dictionary = _make_world()
+	var low: float = Balance.WORLD_EDGE_MARGIN
+	var victim: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(low + 1.0, low + 1.0))
+	victim.max_health = 100000
+	victim.health = 100000
+	victim.start_roll(Vector3(-1, 0, -1).normalized(), 3.0, 8.0)
+	var worst: Vector2 = Vector2(victim.position.x, victim.position.z)
+	for i in range(200):
+		if victim.state != Unit.State.ROLL:
+			break
+		victim.tick(TICK)
+		worst.x = minf(worst.x, victim.position.x)
+		worst.y = minf(worst.y, victim.position.z)
+	check(worst.x >= low - 0.001 and worst.y >= low - 0.001,
+		"the roll stays inside both walls (min %.2f, %.2f)" % [worst.x, worst.y])
+	_free_world(w)
+
+
+## _snap_to_ground is the choke point every movement writer funnels through, so
+## the clamp there is the backstop that cannot be bypassed — even if a future
+## movement path forgets its own bounce.
+func test_snap_to_ground_pulls_a_unit_back_into_the_world() -> void:
+	var w: Dictionary = _make_world()
+	var unit: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
+	var extent: float = float(w.td.size) * TerrainData.CELL_SIZE - Balance.WORLD_EDGE_MARGIN
+	# Force the position outside the way a rogue movement writer would.
+	unit.position = Vector3(extent + 25.0, 5.0, -12.0)
+	unit._snap_to_ground()
+	check(unit.position.x <= extent + 0.001 and unit.position.x >= Balance.WORLD_EDGE_MARGIN,
+		"X was pulled back inside (%.2f)" % unit.position.x)
+	check(unit.position.z >= Balance.WORLD_EDGE_MARGIN - 0.001,
+		"Z was pulled back inside (%.2f)" % unit.position.z)
+	_free_world(w)
+
+
+## A shove at the map edge is the other way a unit used to be pushed out.
+func test_knockback_cannot_shove_a_unit_out_of_the_world() -> void:
+	var w: Dictionary = _make_world()
+	var edge: float = float(w.td.size) * TerrainData.CELL_SIZE - Balance.WORLD_EDGE_MARGIN
+	var victim: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(edge - 0.5, 30))
+	victim.max_health = 100000
+	victim.health = 100000
+	victim.apply_knockback(Vector3(1, 0, 0) * 20.0)
+	var worst: float = victim.position.x
+	for i in range(120):
+		victim.tick(TICK)
+		worst = maxf(worst, victim.position.x)
+	check(worst <= edge + 0.001,
+		"a shoved unit stays on the map (max x=%.2f)" % worst)
+	_free_world(w)

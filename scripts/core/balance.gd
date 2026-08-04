@@ -514,7 +514,9 @@ const DEMOLISH_REFUND_UNBUILT: float = 1.0
 ## Erstattung ab Baustufe 1 und bei fertigen Gebäuden: drei Viertel.
 const DEMOLISH_REFUND_BUILT: float = 0.75
 ## Abrissrate als Faktor auf Brave.BUILD_RATE (1.0 = gleich schnell wie Bauen).
-const DEMOLISH_RATE_FACTOR: float = 1.0
+## 0.5 = doppelt so lange wie Bauen: der Abriss lief mit 1.0 praktisch
+## augenblicklich durch (Nutzerbefund 2026-08-04).
+const DEMOLISH_RATE_FACTOR: float = 0.5
 ## Sekunden ohne jeden Baufortschritt (kein Holz, keine Planierung, kein
 ## Aufbau), nach denen eine Baustelle von selbst verfällt.
 const CONSTRUCTION_STALL_TIMEOUT: float = 120.0
