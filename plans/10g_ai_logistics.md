@@ -23,9 +23,15 @@ Engine-Mechanik, die nur im Umkreis der Basis greift.
 eigene Layoutfehler selbst auf und passt ihr Verhalten an die Enge der Karte an. Kein neues
 Spielsystem — durchweg vorhandene `TribeCommands`-Befehle und vorhandene Brave-Muster.
 
-Die sechs Teile sind **unabhängig lieferbar**. Reihenfolge nach Wirkung pro Aufwand:
-**Teil 6** (reiner Bugfix, keine neuen Konstanten), dann **Teil 1** (Bautrupps), dann **Teil 5**
-für kleine Karten, dann 2–4.
+Die sieben Teile sind **unabhängig lieferbar**. Reihenfolge nach Wirkung pro Aufwand:
+~~**Teil 6**~~ ✅, dann **Teil 1** (Bautrupps), **Teil 7** (Bauordnung) und **Teil 5**
+(kleine Karten), danach 2–4.
+
+> **Teil 6 ist umgesetzt** (Commit `3dd9572`, 2026-08-05): `is_assailable_by_units` →
+> `is_attackable`, sieben Zielpfade gefiltert, 8 neue Tests / 16 Zusicherungen, Suite grün,
+> Ladecheck sauber, Regel in `CLAUDE.md` §7 festgehalten. Eine Planaussage war falsch: die
+> 7g-Formulierung „nur per Zauber/Katapult zerstörbar" steht **nicht** in `CLAUDE.md`, sondern
+> in der historischen 7g-Zeile von `00_overview.md` — die bleibt als Phasenprotokoll stehen.
 
 ## Nutzer-Festlegungen (2026-08-04)
 
@@ -37,6 +43,12 @@ für kleine Karten, dann 2–4.
   genommen werden, wenn eh zu viele da sind oder Militäreinheiten Mangelware sind."
 - **Kleine Karten:** die KI darf dort nicht sofort mit Braves angreifen; nach Nutzervorschlag
   **unterschiedliche Baumuster für kleine und große Karten** (Teil 5).
+- **Bauordnung (Nachtrag 2026-08-05, Teil 7):** „es muss der Hüttenbau und der Ausbildungsbau
+  priorisiert werden. Öfter hatte die KI 6 Werkstätten aber wenig Fahrzeuge und hätte besser
+  Hütten bauen sollen, denn Holz in relativer Nähe war da. Außerdem hat die KI nie mehr als 1
+  Trainingsgebäude von jedem gebaut, aber das ist nötig, sobald der Bravestrom wächst.
+  Vielleicht kann die KI Wegpunkte auf die Ausbildungszentren von den Hütten aus setzen, damit
+  sie nicht so viele Kommandos setzen muss."
 - **Reinkarnationsplatz: kein angreifbares Ziel — „auch für den Spieler nicht"** (Teil 6).
   Katapulte und Zeppelin-Feuerkrieger dürfen ihn also weder per Befehl noch per Auto-Zielsuche
   annehmen, und die KI-Zauberheuristik darf ihn nicht wählen.
@@ -905,7 +917,160 @@ weiterlebte — der Nutzerreport in einem Satz. **Kein weiterer Eingriff nötig*
 allein schaltet die Zielwahl um.
 
 **Keine neuen `Balance`-Konstanten.** Teil 6 ist reiner Bugfix und **völlig unabhängig** von den
-Teilen 1–5 — er kann als Erster geliefert werden.
+Teilen 1–5 — er kann als Erster geliefert werden. **✅ Umgesetzt in `3dd9572`.**
+
+---
+
+## Teil 7 — Bauordnung: Wohnraum und Ausbildung vor Werkstätten
+
+### 7.1 Bestandsaufnahme (verifiziert)
+
+Beide Fehlbilder stecken in der **Reihenfolge** von `AIState.next_building_kind`. Die Leiter
+nach den Grundlagen (Hütte, Kriegerlager, Basislager, erste Försterei):
+
+| Position | Zweig | Bedingung |
+|---|---|---|
+| … | Wohnraumdruck-Hütte | `population >= AI_HOUSING_PRESSURE (0,8) × housing_capacity` **und** `hut_sites < AI_MAX_HUT_SITES (3)` |
+| … | Hütten bis `TARGET_HUTS` | `huts < 4` |
+| … | **erstes** Feuerkriegerlager, **erster** Tempel | `< 1` |
+| … | skalierende Förstereien | |
+| … | **Werkstatt / Feuerrammwerkstatt** | `< workshop_target(braves) = 1 + braves/30`, bis **4 je Art** |
+| … | Wachtürme, Luftschiffwerft | |
+| **letzter** | **Zusatz-Lager** (`fewest_camp_kind`) | `camp_total < TARGET_CAMPS (3) + (huts − 4) / AI_HUTS_PER_EXTRA_CAMP (2)` |
+
+1. **Der Zusatz-Lager-Zweig steht ganz am Ende — hinter bis zu 12 Werkstätten.** Er skaliert
+   zwar mit der Hüttenzahl, wird aber erst erreicht, wenn **alle** Werkstattzweige gesättigt
+   sind. `workshop_target` wächst mit den Braves (90 Braves ⇒ 4 je Art ⇒ 12 Werkstätten), die
+   Hüttenzahl viel langsamer — die KI kommt dort praktisch nie an. **Das ist genau „6
+   Werkstätten, aber nie mehr als 1 Trainingsgebäude von jedem".**
+2. **Kein Trainingsgebäude-Ziel hängt am Bravestrom.** Ein Lager bildet **eine** Einheit auf
+   einmal aus (`TrainingBuilding._train_timer`; `incoming` ist eine **unbegrenzte**
+   Warteschlange): Kaserne 3 s ⇒ 20/min, Feuertempel 4 s ⇒ 15/min, Tempel 5 s ⇒ 12/min.
+   Liefern die Hütten mehr, wächst nur die Schlange. Das richtige Maß ist der **Durchsatz**,
+   nicht die Hüttenzahl.
+3. **Wohnraum:** der Druck-Zweig steht zwar vor den Werkstätten, feuert aber erst bei **80 %**
+   Auslastung. Nach 10f wächst der Wohnraum zusätzlich über **Ausbaustufen**, die Kapazität
+   läuft der Bevölkerung also häufig voraus — dann greift der Zweig nicht und die KI baut
+   Werkstätten, obwohl Holz in Reichweite liegt. Genau der Nutzerbefund.
+
+### 7.2 Reihenfolge: Ausbildung vor Produktion
+
+- **Zusatz-Lager-Zweig nach vorn**, direkt hinter „erster Tempel" — also **vor** Förstereien,
+  Werkstätten und Wachtürme.
+- **Werkstätten hinter eine Ausbildungs-Sättigung:** eine Werkstatt erst, wenn die Lagerzahl
+  ihr Ziel aus 7.3 erreicht hat. Zusammen mit dem Produktivitäts-Tor aus **Teil 3.3**
+  (`shops_unproductive == 0`) heißt das: die zweite Werkstatt nur, wenn die erste **liefert**
+  *und* die Ausbildung nicht hinterherhinkt.
+- **Wohnraum früher:** `AI_HOUSING_PRESSURE` 0,8 → **0,7**, plus ein **zweiter, absoluter**
+  Auslöser: freier Wohnraum unter `AI_MIN_HOUSING_HEADROOM` Plätzen löst ebenfalls eine Hütte
+  aus. Eine reine Prozentschwelle versagt bei den kleinen 10f-Hütten — 80 % von 10 Plätzen sind
+  8, die Hütte ist also fast voll, bevor überhaupt geplant wird.
+
+### 7.3 Trainingsgebäude skalieren mit dem Bravestrom
+
+```gdscript
+## Lager-Ziele aus dem BRAVESTROM (Braves pro Minute), nicht aus der Huettenzahl:
+## ein Lager setzt nur EINE Einheit auf einmal durch (Kaserne 3 s = 20/min,
+## Feuertempel 4 s = 15/min, Tempel 5 s = 12/min), also ist der Durchsatz das Mass.
+## Verteilt nach dem vorhandenen Armee-Mix (AI_ARMY_SHARE_*), gedeckelt auf
+## AI_MAX_CAMPS_PER_KIND.
+static func camp_targets(braves_per_minute: float) -> Dictionary
+```
+
+Den Strom schätzt der Controller aus der **Besatzung der nutzbaren Hütten** (Stufe → Rate;
+`Hut` liefert beides, und der Tick-Cache läuft ohnehin über die Hütten) — **keine** Zeitmessung
+und kein Verlauf, damit es headless deterministisch bleibt. `camp_targets` ersetzt die
+`camp_target`-Formel im letzten Leiterzweig.
+
+### 7.4 Rally Points von den Hütten auf die Ausbildungszentren
+
+**Die Engine kann das schon — die KI nutzt es nur nicht.** `grep rally_point
+scripts/ai/ai_controller.gd` liefert **0 Treffer**: sie setzt an *keinem* Gebäude einen Rally
+Point. Und `Hut._spawn_brave()` fragt `Building.rally_training_building()`: liegt der Rally
+Point der Hütte im Grundriss eines eigenen, **fertigen** Trainingsgebäudes, geht der frische
+Brave **direkt** in dessen Warteschlange (`order_train`), sonst zum Rally Point. Genau der
+Nutzervorschlag, seit Phase 5d vorhanden.
+
+Gewinn:
+
+- `_tick_train` gibt **kein Kommando pro Brave** mehr — der Strom wird an der **Quelle**
+  geroutet, ohne Idle-Umweg.
+- Ein zum Training bestimmter Brave wird **nie idle** und kann damit nicht mehr versehentlich
+  von den Bautrupps (`take_idle_for`, Teil 1), den Fäll-Trupps oder dem Nachschub abgegriffen
+  werden. Das entschärft die Prioritätenliste aus Teil 1.2 an ihrer Wurzel.
+
+Umsetzung: neues `_tick_hut_rallies(cache)`, gedrosselt auf `AI_HUT_RALLY_TICK_INTERVAL`.
+
+- Es belegt **einen Anteil** der Hütten mit einem Lager-Rally-Point, der Rest produziert weiter
+  freie Braves: `AIState.training_hut_share(state, army, army_target)` — im BUILD-Zustand wenig,
+  in TRAIN/ATTACK mehr, und mehr, je weiter die Armee unter ihrem Ziel liegt.
+- Zielverteilung nach **Armee-Mix-Defizit**, also dieselbe Wahrheit wie `training_kind_order`.
+- Geschrieben über **`TribeCommands.set_rally_point`** — den Befehl führt **Teil 3.2** für die
+  Werkstatt-Sammelpunkte ein; hier ist er der zweite Abnehmer und damit endgültig gerechtfertigt.
+- **Nicht jeden Tick neu zuordnen:** ein wandernder Rally Point schickt den Strom zwischen den
+  Lagern hin und her. Neu bewertet nur bei Zustandswechsel, bei neuem/verlorenem Lager oder
+  wenn das Mix-Defizit die Reihenfolge kippt.
+
+**Der Deckel ist Pflicht:** zeigen *alle* Hütten auf Lager, hat der Stamm **keine** freien
+Braves mehr — keine Bauarbeiter, keine Holztrupps, keine Werkstattbesatzung, und die Wirtschaft
+stirbt lautlos. `training_hut_share` bleibt hart unter 1.0, und `min_economy_braves` bleibt als
+zweite, unabhängige Sicherung in `_tick_train`.
+
+### Neue `Balance`-Konstanten (Teil 7)
+
+```gdscript
+# --- KI: Ausbildung und Wohnraum vor Produktion (10g Teil 7) ---
+## Zweiter, ABSOLUTER Wohnraum-Auslöser neben dem Prozentdruck: eine reine
+## Prozentschwelle versagt bei den kleinen 10f-Huetten (80 % von 10 Plaetzen = 8).
+const AI_MIN_HOUSING_HEADROOM: int = 12
+const AI_MAX_CAMPS_PER_KIND: int = 4
+## Ausbildungsdurchsatz EINES Lagers je Art, in Einheiten pro Minute (Kaserne 3 s,
+## Feuertempel 4 s, Tempel 5 s). Ein Lager je so viel Bravestrom.
+const AI_STREAM_PER_CAMP_WARRIOR: float = 20.0
+const AI_STREAM_PER_CAMP_FIREWARRIOR: float = 15.0
+const AI_STREAM_PER_CAMP_PREACHER: float = 12.0
+## Anteil der Huetten, deren Rally Point auf ein Ausbildungszentrum zeigt. MUSS
+## unter 1.0 bleiben, sonst hat der Stamm keine freien Braves mehr.
+const AI_TRAINING_HUT_SHARE_BUILD: float = 0.25
+const AI_TRAINING_HUT_SHARE_ARMY: float = 0.60
+const AI_HUT_RALLY_TICK_INTERVAL: int = 10
+```
+
+Geändert: `AI_HOUSING_PRESSURE` 0,8 → **0,7**.
+
+### Tests (Teil 7)
+
+Reine Statics: `test_camp_targets_scale_with_the_brave_stream`,
+`test_camp_targets_follow_the_army_mix`, `test_camp_targets_are_capped_per_kind`,
+`test_training_hut_share_stays_below_one`, `test_training_hut_share_rises_when_the_army_lags`.
+
+Bauordnung: `test_build_order_puts_extra_camps_before_workshops`,
+`test_build_order_blocks_a_workshop_while_camps_lag`,
+`test_build_order_builds_a_hut_on_low_absolute_headroom` (der zweite Auslöser),
+`test_build_order_still_builds_the_first_workshop` (Regressionswächter — das Tor darf die
+Werkstätten nicht ganz abschalten).
+
+Rally Points: `test_ai_points_some_hut_rallies_at_training_buildings`,
+`test_ai_keeps_hut_rallies_below_the_share_cap` (Wirtschaft überlebt),
+`test_ai_does_not_reassign_hut_rallies_every_tick`,
+`test_hut_rally_on_a_camp_sends_the_fresh_brave_into_training` (Engine-Vertrag aus 5d, in
+`tests\test_economy.gd`), `test_ai_hut_rallies_follow_the_army_mix_deficit`.
+
+### Risiken (Teil 7)
+
+1. **Zu viele Trainingsgebäude fressen das Holz**, das nach dem Nutzerbefund gerade für Hütten
+   gebraucht wird. `camp_targets` hängt deshalb am Durchsatz und nicht an den Braves, und der
+   Wohnraum-Zweig steht weiter **davor**.
+2. **Der Hütten-Rally-Anteil ist die riskanteste Zahl des ganzen Plans:** zu hoch, und die
+   Wirtschaft verhungert ohne eine einzige Fehlermeldung. `test_ai_keeps_hut_rallies_below_the_share_cap`
+   ist Pflicht, und im Spieltest zuerst darauf schauen.
+3. **Werkstätten könnten nie gebaut werden**, wenn die Ausbildungs-Sättigung dauerhaft
+   unerreicht bleibt (z. B. bei Holzmangel). Deshalb gattert das Tor nur die **zweite und
+   folgende** Werkstatt je Art, nie die erste.
+4. **Wechselwirkung mit Teil 1:** weniger idle Braves durch das Quellen-Routing heißt auch
+   weniger Kandidaten für `take_idle_for`. Beide Teile ziehen am selben Pool, aber aus
+   entgegengesetzten Richtungen — nach dem Spieltest gemeinsam nachjustieren
+   (`AI_TRAINING_HUT_SHARE_*` gegen `AI_BUILDER_BRAVE_SHARE`).
 
 ---
 
@@ -1041,9 +1206,14 @@ vorhandene `grow`-Grenze in `edge_spawn_position()` und muss mit ihr an **einer*
 
 **Voraussetzung: 10f ist committet.**
 
-0. **Teil 6 zuerst** (unabhängig, kein neuer Zustand, keine Konstanten): Umbenennung
-   `is_assailable_by_units` → `is_attackable`, die vier fehlenden Filter, beide veralteten
-   Kommentare. → **Commit 1**, sofort spielbar und sofort prüfbar.
+0. ~~**Teil 6 zuerst**: Umbenennung `is_assailable_by_units` → `is_attackable`, die fehlenden
+   Filter, die veralteten Kommentare.~~ → **✅ erledigt, Commit `3dd9572`.**
+0b. **Teil 7 als Nächstes** (Nachtrag, klein und sofort sichtbar): Bauordnung umstellen
+   (Zusatz-Lager vor die Werkstätten, Wohnraum-Schwelle + absoluter Auslöser),
+   `camp_targets` aus dem Bravestrom, dann `_tick_hut_rallies`. Die Rally Points brauchen
+   `TribeCommands.set_rally_point` aus Schritt 8 — **entweder** den Befehl vorziehen
+   **oder** Teil 7 nach Schritt 8 legen. Empfehlung: Befehl vorziehen, er ist zehn Zeilen.
+   → **Commit 2.**
 1. `ai_state.gd` + `balance.gd`: alle vier Statics und alle Konstanten. Rein, headless,
    schnell — deckt die weltfreien Tests sofort ab.
 2. `building.gd`: `entrance_cell_for` / `approach_cell_for` extrahieren, `entrance_cell()` /
@@ -1072,9 +1242,15 @@ vorhandene `grow`-Grenze in `edge_spawn_position()` und muss mit ihr an **einer*
     für kleine Karten der wichtigste Fix.**
 12. Teil 5.3: die sieben reinen Profil-Statics + `"cramped"`/`"watchtower_target"` in der
     Bauordnung + `_expansion_anchor`-Territoriumstest. → **Commit 6.**
-13. `CLAUDE.md` §5 korrigieren („Reinkarnationsplatz nur per Zauber/Katapult zerstörbar" ist
-    7g-Stand und widerspricht §7) und §7 um „ist kein Angriffsziel" ergänzen.
-14. Messung dokumentieren, PROGRESS.md (Abweichungen + Messtabelle im 10e-Format), Checkbox in
+13. ~~`CLAUDE.md` §5/§7 korrigieren.~~ → **✅ erledigt in `3dd9572`**: §7 hat die Regel „kein
+    gültiges Angriffsziel" bekommen. Die vermutete Falschaussage in §5 gab es **nicht** — die
+    7g-Formulierung „nur per Zauber/Katapult zerstörbar" steht in der historischen 7g-Zeile von
+    `00_overview.md` und bleibt dort als Phasenprotokoll stehen.
+14. `CLAUDE.md` §5/§7 um die Bauordnung aus Teil 7 ergänzen, sobald sie steht (Trainingsgebäude
+    skalieren mit dem Bravestrom; Rally Point einer Hütte auf ein Ausbildungszentrum schickt
+    frische Braves direkt in die Warteschlange — das ist schon Engine-Verhalten seit 5d und
+    nirgends in der Spezifikation dokumentiert).
+15. Messung dokumentieren, PROGRESS.md (Abweichungen + Messtabelle im 10e-Format), Checkbox in
     `00_overview.md`, Push.
 
 ---
@@ -1349,9 +1525,13 @@ läuft (`dbg_supply_runs`/Fäll-Trupps > 0 statt dauerhaft 0).
 - [ ] Insel-Messreihe (4 Stämme) erhoben: `dbg_militia_orders` früh gegen 0, Holzlogistik läuft
 - [ ] Ersetzter Test (`test_plot_reachable_success_cache`) als Abweichung dokumentiert
 - [ ] Manuelle Prüfung durch den Nutzer bestanden — **auf Insel und auf Bergpass**
-- [ ] PROGRESS.md ergänzt, Checkbox 10g in `00_overview.md` abgehakt, `CLAUDE.md` §5/§7
-      korrigiert
-- [ ] `is_attackable()` an **allen** Zielwahl-Pfaden respektiert (Einheiten, Fahrzeuge,
-      Luftschiff, KI-Zauber, KI-Zielwahl); beide veralteten Kommentare ersetzt
-- [ ] Sechs Commits gepusht (Reinkarnationsplatz · Bautrupps · Erreichbarkeit · Fahrzeuge ·
-      Holzverteilung · Arena)
+- [ ] KI baut **mehr als ein** Trainingsgebäude je Art, sobald der Bravestrom es verlangt, und
+      **keine** zweite Werkstatt, während die Ausbildung hinterherhinkt
+- [ ] Hütten-Rally-Anteil unter dem Deckel: der Stamm hat weiterhin freie Braves für Bau, Holz
+      und Werkstattbesatzung (der gefährlichste Wert des Plans)
+- [ ] PROGRESS.md ergänzt, Checkbox 10g in `00_overview.md` abgehakt, `CLAUDE.md` §5/§7 um die
+      Bauordnung aus Teil 7 ergänzt
+- [x] `is_attackable()` an **allen** Zielwahl-Pfaden respektiert (Einheiten, Fahrzeuge,
+      Luftschiff, KI-Zauber, KI-Zielwahl); beide veralteten Kommentare ersetzt — `3dd9572`
+- [ ] Sieben Commits gepusht (~~Reinkarnationsplatz~~ ✅ · Bauordnung · Bautrupps ·
+      Erreichbarkeit · Fahrzeuge · Holzverteilung · Arena)
