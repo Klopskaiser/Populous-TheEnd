@@ -83,11 +83,12 @@ func test_fresh_site_has_minimal_hp() -> void:
 func test_site_hp_scales_with_delivered_wood() -> void:
 	var w: Dictionary = _make_world()
 	var site: Building = _site(w)
-	_deliver_wood(w, site, 6)
-	check(site.wood_delivered == 6, "6 of 12 wood delivered (got %d)" % site.wood_delivered)
+	# 10f: the hut costs 8 wood (was 12), so "half" is 4.
+	_deliver_wood(w, site, 4)
+	check(site.wood_delivered == 4, "4 of 8 wood delivered (got %d)" % site.wood_delivered)
 	check(site.health == 150, "half the wood -> half the full HP (got %d)" % site.health)
-	_deliver_wood(w, site, 6)
-	check(site.wood_delivered == 12, "all wood delivered")
+	_deliver_wood(w, site, 4)
+	check(site.wood_delivered == 8, "all wood delivered")
 	check(site.health == 225, "site HP capped at 3/4 of the full HP (got %d)" % site.health)
 	_free_world(w)
 
@@ -95,7 +96,7 @@ func test_site_hp_scales_with_delivered_wood() -> void:
 func test_finish_restores_full_hp_minus_damage() -> void:
 	var w: Dictionary = _make_world()
 	var site: Building = _site(w)
-	_deliver_wood(w, site, 12)
+	_deliver_wood(w, site, 8)   # full price (10f: 8 wood)
 	site.take_damage(100)
 	check(site.health == 125, "damaged site at 225 - 100 HP (got %d)" % site.health)
 	site.finish_construction()
@@ -118,7 +119,7 @@ func test_prebuilt_building_keeps_full_hp() -> void:
 func test_melee_raiders_demolish_site() -> void:
 	var w: Dictionary = _make_world()
 	var site: Building = _site(w)
-	_deliver_wood(w, site, 6)   # 150 HP — demolition must tick it down
+	_deliver_wood(w, site, 4)   # 150 HP — demolition must tick it down
 	for i in range(3):
 		site.admit_raider(w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, Vector3(41 + i, 0, 41)))
 	check(site.raiders.size() == 3, "3 raiders inside the site")
@@ -148,7 +149,7 @@ func test_ordered_warriors_raze_site() -> void:
 func test_firewarrior_bombards_site() -> void:
 	var w: Dictionary = _make_world()
 	var site: Building = _site(w)
-	_deliver_wood(w, site, 6)   # 150 HP
+	_deliver_wood(w, site, 4)   # 150 HP
 	var fw: Unit = w.unit_manager.spawn_unit(FIREWARRIOR_SCENE, 0, Vector3(35, 0, 35))
 	fw.order_attack_building(site)
 	var razed: int = _run(w, [fw], func() -> bool: return site.health <= 0)

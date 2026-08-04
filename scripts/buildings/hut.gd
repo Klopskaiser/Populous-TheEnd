@@ -1,30 +1,34 @@
 class_name Hut extends Building
 
 ## Hut: houses population and spawns new Braves over time. Phase 7i: a hut only
-## produces while it is MANNED — up to 4 brave crew (hidden inside, still counted
-## in the population, no mana cost). Production rate scales with crew; a full hut
-## is ~10% faster than the old flat rate, an empty hut produces nothing. Crew are
-## pulled in automatically from nearby idle braves according to the tribe's
-## growth mode (NONE / MINIMAL / MAXIMUM), or manned manually by right-clicking
-## the hut with braves selected. Built by braves: foundation flattening first,
-## then construction with delivered wood.
+## produces while it is MANNED — brave crew hidden inside, still counted in the
+## population, no mana cost. Production rate scales LINEARLY with crew, an empty
+## hut produces nothing. Crew are pulled in automatically from nearby idle braves
+## according to the tribe's growth mode (NONE / MINIMAL / MAXIMUM), or manned
+## manually by right-clicking the hut with braves selected. Built by braves:
+## foundation flattening first, then construction with delivered wood.
+##
+## Phase 10f: the hut GROWS. It starts small and cheap (8 wood, 10 places,
+## 2 workers) and is upgraded in four stages to the Wohnpalast (28 wood
+## cumulative, 45 places, 6 workers). Capacity, crew size and HP are therefore
+## per-stage methods, not constants. An upgrade becomes due on a timer; the whole
+## crew then leaves, fetches wood and builds — see the upgrade section below.
 
 const WOOD_COST: int = Balance.HUT_WOOD_COST
 const FOOTPRINT: Vector2i = Balance.HUT_FOOTPRINT
-const CAPACITY: int = Balance.HUT_CAPACITY
-const SPAWN_INTERVAL: float = Balance.HUT_SPAWN_INTERVAL   # s per brave at full crew
-## Crew slots (production workers, braves only).
-const CREW_CAPACITY: int = Balance.HUT_CREW_CAPACITY
-## A full hut produces this much faster than the old flat SPAWN_INTERVAL rate.
-const FULL_CREW_BONUS: float = Balance.HUT_FULL_CREW_BONUS
 ## Idle braves within this radius are auto-pulled to man the hut.
 const MAN_RADIUS: float = 16.0
 ## Growth maintenance throttle.
 const GROWTH_INTERVAL: float = 1.0
+## Building name per upgrade stage (UI is German, see CLAUDE.md §8).
+const STAGE_NAMES: Array[String] = ["Hütte", "Große Hütte", "Langhaus",
+	"Wohnhaus", "Wohnpalast"]
 
 const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
 
-var spawn_timer: float = SPAWN_INTERVAL
+## Counts down from HUT_SPAWN_SECONDS_PER_WORKER at `crew.size()` per second, so
+## the seconds per brave are that constant divided by the crew size.
+var spawn_timer: float = Balance.HUT_SPAWN_SECONDS_PER_WORKER
 var _spawn_counter: int = 0
 ## Brave crew removed from the world (hidden). Untyped like other occupant
 ## registries (entries may be freed).
@@ -36,21 +40,38 @@ var _growth_timer: float = 0.0
 ## (Tribe.set_growth_mode clears all overrides).
 var manual_crew_override: int = -1
 
+## Upgrade stage 0..HUT_MAX_UPGRADE_STAGE — drives capacity, crew size, HP,
+## display name and model.
+var upgrade_stage: int = 0
+
 
 func _init() -> void:
 	wood_cost = WOOD_COST
 	footprint = FOOTPRINT
-	max_health = Balance.HUT_HP
+	max_health = Balance.HUT_HP_PER_STAGE[0]
 	health = max_health
 
 
 func display_name() -> String:
-	return "Hütte"
+	return STAGE_NAMES[upgrade_stage]
 
 
-## Damaged huts (stage >= 1) house nobody until repaired.
+## Population places of this stage.
+func capacity() -> int:
+	return Balance.HUT_CAPACITY_PER_STAGE[upgrade_stage]
+
+
+## Crew slots (production workers, braves only) of this stage.
+func crew_capacity() -> int:
+	return Balance.HUT_CREW_PER_STAGE[upgrade_stage]
+
+
+## Damaged huts (stage >= 1) house nobody until repaired. A hut BEING UPGRADED
+## keeps its housing on purpose (`upgrading` deliberately does not touch
+## is_usable) — otherwise the tribe's population cap would collapse during every
+## single upgrade. It only loses its production, because its crew is out.
 func housing_capacity() -> int:
-	return CAPACITY if is_usable() else 0
+	return capacity() if is_usable() else 0
 
 
 # --- Crew (production workers, phase 7i) ---------------------------------------
@@ -62,7 +83,7 @@ func crew_count() -> int:
 
 func has_crew_room() -> bool:
 	_prune_crew()
-	return is_usable() and crew.size() < CREW_CAPACITY
+	return is_usable() and not upgrading and crew.size() < crew_capacity()
 
 
 ## Only own living braves may man a hut.
@@ -77,7 +98,8 @@ func admit_crew(unit) -> bool:
 	_prune_crew()
 	if unit in crew:
 		return true
-	if not is_usable() or crew.size() >= CREW_CAPACITY or not _crew_eligible(unit):
+	if not is_usable() or upgrading or crew.size() >= crew_capacity() \
+			or not _crew_eligible(unit):
 		return false
 	crew.append(unit)
 	# A manually sent brave pins the crew at the new size (override holds until
@@ -166,10 +188,10 @@ func _prune_crew() -> void:
 ## Done in the building tick so removing them from the world does not mutate the
 ## live units list mid-iteration.
 func _admit_arrived_crew() -> void:
-	if unit_manager == null or crew.size() >= CREW_CAPACITY:
+	if unit_manager == null or upgrading or crew.size() >= crew_capacity():
 		return
 	for u in unit_manager.get_units_in_radius(center_world(), interact_range() + 0.5):
-		if crew.size() >= CREW_CAPACITY:
+		if crew.size() >= crew_capacity():
 			break
 		if u.state == Unit.State.GARRISON and u.garrison_target == self \
 				and u.garrison_reached and not u.garrison_housed:
@@ -181,13 +203,15 @@ func _admit_arrived_crew() -> void:
 ## Target crew size: the manual override when set, else the owning tribe's
 ## growth mode.
 func _crew_target() -> int:
+	if upgrading:
+		return 0   # the whole crew is out on the upgrade
 	if manual_crew_override >= 0:
-		return clampi(manual_crew_override, 0, CREW_CAPACITY)
+		return clampi(manual_crew_override, 0, crew_capacity())
 	if tribe == null:
 		return 0
 	match tribe.growth_mode:
 		Tribe.GrowthMode.MINIMAL: return 1
-		Tribe.GrowthMode.MAXIMUM: return CREW_CAPACITY
+		Tribe.GrowthMode.MAXIMUM: return crew_capacity()
 		_: return 0   # NONE
 
 
@@ -243,19 +267,21 @@ func _find_idle_brave_near() -> Unit:
 
 # --- Production ----------------------------------------------------------------
 
-## Spawn speed factor from the crew count: 0 (empty) .. FULL_CREW_BONUS (full).
+## Spawn speed factor = crew count (10f: linear, no full-crew bonus). One worker
+## needs HUT_SPAWN_SECONDS_PER_WORKER seconds per brave, six need a sixth of that.
 func _spawn_rate_factor() -> float:
-	return FULL_CREW_BONUS * float(crew.size()) / float(CREW_CAPACITY)
+	return float(crew.size())
 
 
 ## Progress toward the next brave (drives the bar above the hut); -1 while under
 ## construction/damaged, unmanned, or when the tribe is at its population cap.
+## While upgrading the bar shows the upgrade instead (Building._update_overlay).
 func production_progress() -> float:
 	if not is_usable() or tribe == null or crew.is_empty() or paused:
 		return -1.0
 	if tribe.population() >= tribe.housing_capacity() or tribe.at_unit_cap():
 		return -1.0
-	return clampf(1.0 - spawn_timer / SPAWN_INTERVAL, 0.0, 1.0)
+	return clampf(1.0 - spawn_timer / Balance.HUT_SPAWN_SECONDS_PER_WORKER, 0.0, 1.0)
 
 
 ## Estimated growth this hut contributes, in braves per minute (sidebar readout).
@@ -264,7 +290,7 @@ func growth_per_minute() -> float:
 		return 0.0
 	if tribe.population() >= tribe.housing_capacity() or tribe.at_unit_cap():
 		return 0.0
-	return _spawn_rate_factor() / SPAWN_INTERVAL * 60.0
+	return _spawn_rate_factor() / Balance.HUT_SPAWN_SECONDS_PER_WORKER * 60.0
 
 
 ## Spawns braves while manned and below the housing / hard cap. The timer only
@@ -274,19 +300,22 @@ func _tick_active(delta: float) -> void:
 		return
 	_prune_crew()
 	_admit_arrived_crew()
+	# Upgrade bookkeeping runs BEFORE the crew early-outs: the due timer must keep
+	# filling in an empty hut, and a due upgrade must be able to start there.
+	_tick_upgrade_timer(delta)
 	_growth_timer -= delta
 	if _growth_timer <= 0.0:
 		_growth_timer = GROWTH_INTERVAL
 		_tick_growth()
 	if crew.is_empty() or paused:
-		spawn_timer = SPAWN_INTERVAL
+		spawn_timer = Balance.HUT_SPAWN_SECONDS_PER_WORKER
 		return
 	if tribe.population() >= tribe.housing_capacity() or tribe.at_unit_cap():
-		spawn_timer = SPAWN_INTERVAL
+		spawn_timer = Balance.HUT_SPAWN_SECONDS_PER_WORKER
 		return
 	spawn_timer -= delta * _spawn_rate_factor()
 	if spawn_timer <= 0.0:
-		spawn_timer += SPAWN_INTERVAL
+		spawn_timer += Balance.HUT_SPAWN_SECONDS_PER_WORKER
 		_spawn_brave()
 
 
@@ -308,53 +337,261 @@ func _spawn_brave() -> void:
 	_spawn_counter += 1
 
 
+# --- Upgrade (phase 10f) -------------------------------------------------------
+# The hut grows in four stages. A timer makes an upgrade DUE; once it is allowed
+# and wood is in reach, the whole crew leaves the hut, fetches
+# HUT_UPGRADE_WOOD_COST wood and builds — the hut then produces nothing (its crew
+# is out) but keeps its housing, because `upgrading` deliberately does NOT flip
+# is_usable().
+#
+# The work itself reuses the repair pipeline: Brave.Task.UPGRADE is structurally
+# the same as Task.REPAIR, and the delivered wood is absorbed from ground piles
+# at the entrance by Building._tick_upgrade_absorb.
+
+## Seconds since completion / since the last upgrade, capped at HUT_UPGRADE_DELAY
+## — the "progress" visibly stops at 100 % while an upgrade is due but blocked.
+var _upgrade_timer: float = 0.0
+## Work done on the running upgrade, 0..1.
+var _upgrade_work: float = 0.0
+
+
+## True when the next stage is due: the timer is full and there IS a next stage.
+## Stays true while the upgrade is blocked (tribe lock, pause, no wood).
+func upgrade_ready() -> bool:
+	return upgrade_stage < Balance.HUT_MAX_UPGRADE_STAGE \
+		and _upgrade_timer >= Balance.HUT_UPGRADE_DELAY
+
+
+## All conditions for STARTING the building work. Repair has priority (a damaged
+## hut is not `is_usable()` anyway, but the full-health test also keeps an
+## almost-repaired hut from jumping the queue); `paused` gives the player a
+## per-hut lock on top of the tribe-wide one.
+func can_begin_upgrade() -> bool:
+	return upgrade_ready() and not upgrading and not demolishing and is_usable() \
+		and not paused and health >= max_health \
+		and tribe != null and tribe.upgrades_allowed \
+		and _upgrade_wood_reachable()
+
+
+## Fills the due timer and starts the work when everything lines up. Called from
+## _tick_active BEFORE the crew early-outs, so an empty hut still upgrades.
+func _tick_upgrade_timer(delta: float) -> void:
+	if upgrading or upgrade_stage >= Balance.HUT_MAX_UPGRADE_STAGE:
+		return
+	_upgrade_timer = minf(_upgrade_timer + delta, Balance.HUT_UPGRADE_DELAY)
+	if can_begin_upgrade():
+		begin_upgrade()
+
+
+## Is there any wood the crew could actually fetch nearby? Without this the hut
+## would eject its crew into a hopeless search. Headless (no managers at all) is
+## permissive so tests stay stable.
+func _upgrade_wood_reachable() -> bool:
+	var tm: TreeManager = unit_manager.tree_manager if unit_manager != null else null
+	if tm != null and tm.count_trees_near(center_world(),
+			Balance.HUT_UPGRADE_WOOD_RADIUS) > 0:
+		return true
+	if wood_pile_manager != null and wood_pile_manager.wood_in_radius(
+			center_world(), Balance.HUT_UPGRADE_WOOD_RADIUS) > 0:
+		return true
+	if tribe != null:
+		for b: Building in tribe.buildings:
+			if not is_instance_valid(b) or not (b is WoodDepot) or not b.is_usable():
+				continue
+			if (b as WoodDepot).stored_wood() <= 0:
+				continue
+			if b.center_world().distance_to(center_world()) \
+					<= Balance.HUT_UPGRADE_WOOD_RADIUS:
+				return true
+	if tm == null and wood_pile_manager == null:
+		return true   # headless: nothing to judge by
+	return false
+
+
+## Starts the building work: the WHOLE crew leaves and goes on the job. Released
+## gently via _release_crew_member (not eject_occupants — that shoves and rolls
+## them, which is for storms and damage, not for a construction detail).
+func begin_upgrade() -> void:
+	if upgrading or upgrade_stage >= Balance.HUT_MAX_UPGRADE_STAGE:
+		return
+	upgrading = true
+	upgrade_wood = 0
+	_upgrade_work = 0.0
+	_upgrade_stall_timer = 0.0
+	# A wood-stalled hut would keep its own workers away; the upgrade re-checks.
+	wood_stalled = false
+	_prune_crew()
+	var released: Array = crew.duplicate()
+	crew.clear()
+	for u in released:
+		_release_crew_member(u, Vector3.INF)
+		if u is Brave:
+			(u as Brave).order_upgrade(self)
+
+
+func upgrade_wood_missing() -> int:
+	if not upgrading:
+		return 0
+	return maxi(0, Balance.HUT_UPGRADE_WOOD_COST - upgrade_wood)
+
+
+func wants_upgrade_wood() -> bool:
+	return upgrading and upgrade_wood_missing() > wood_incoming()
+
+
+func upgrade_progress() -> float:
+	return _upgrade_work if upgrading else -1.0
+
+
+## Cap on the work, proportional to the wood delivered so far (mirrors
+## progress_cap() for construction) — the bar cannot outrun the material.
+func _upgrade_progress_cap() -> float:
+	if Balance.HUT_UPGRADE_WOOD_COST <= 0:
+		return 1.0
+	return float(upgrade_wood) / float(Balance.HUT_UPGRADE_WOOD_COST)
+
+
+## Applies `amount` of upgrade work. False = blocked by missing wood, the worker
+## then fetches more.
+func work_upgrade(amount: float) -> bool:
+	if not upgrading or demolishing or _destroyed:
+		return false
+	var cap: float = _upgrade_progress_cap()
+	if _upgrade_work >= cap - 0.0001:
+		return false
+	_upgrade_work = clampf(_upgrade_work + amount, 0.0, cap)
+	_upgrade_stall_timer = 0.0
+	if _upgrade_work >= 1.0:
+		_finish_upgrade()
+	return true
+
+
+## Next stage reached: bigger, tougher, and worth more on demolition. The workers
+## release themselves on the next tick (Brave._job_active goes false) and the
+## growth control pulls them back in as crew, because crew_capacity() has grown.
+func _finish_upgrade() -> void:
+	upgrade_stage = mini(upgrade_stage + 1, Balance.HUT_MAX_UPGRADE_STAGE)
+	max_health = Balance.HUT_HP_PER_STAGE[upgrade_stage]
+	health = max_health
+	# The upgrade wood becomes part of the building's price: the demolition refund
+	# (_demolish_refund_base) reads wood_cost, so without this the player would
+	# lose up to 20 wood per fully upgraded hut. It also raises the repair cost.
+	wood_cost += Balance.HUT_UPGRADE_WOOD_COST
+	upgrade_wood = 0
+	_upgrade_work = 0.0
+	_upgrade_timer = 0.0
+	_upgrade_stall_timer = 0.0
+	upgrading = false
+	# A manual override from a smaller stage must not survive as a wrong number.
+	if manual_crew_override >= 0:
+		manual_crew_override = clampi(manual_crew_override, 0, crew_capacity())
+	_rebuild_visuals()
+	if tribe != null:
+		tribe.notify_housing_changed()
+
+
+## Aborts the running upgrade and drops the delivered wood at the site. The
+## upgrade stays DUE (timer full), so it retries once the cause is gone.
+func cancel_upgrade(restart_delay: bool = false) -> void:
+	if not upgrading:
+		return
+	var back: int = upgrade_wood
+	abandon_upgrade()
+	if restart_delay:
+		# Stall case: the wood going back on the ground would otherwise satisfy
+		# _upgrade_wood_reachable() again right away and restart the upgrade on the
+		# next tick, forever. Wait the full delay before trying again.
+		_upgrade_timer = 0.0
+	_refund_wood(back)
+
+
+## Drops the upgrade without paying the wood back (demolition folds it into its
+## own refund, destruction loses it).
+func abandon_upgrade() -> void:
+	upgrading = false
+	upgrade_wood = 0
+	_upgrade_work = 0.0
+	_upgrade_stall_timer = 0.0
+	_upgrade_timer = Balance.HUT_UPGRADE_DELAY
+
+
 # --- Crew overlay (world-space pips) -------------------------------------------
 # The pip overlay itself lives in Building (all crew buildings share it); the
 # hut just reports its manning to it.
 
 func crew_display_capacity() -> int:
-	return CREW_CAPACITY
+	return crew_capacity()
 
 
 func crew_display_filled() -> int:
 	return crew_count()
 
 
+## Stage 0 keeps the plain "hut" kind (existing assets/textures stay valid); the
+## upgraded stages get their own model and damage/build texture set.
 func asset_kind() -> StringName:
-	return &"hut"
+	return &"hut" if upgrade_stage == 0 else StringName("hut%d" % upgrade_stage)
+
+
+## Grows with the stage, like the placeholder does (walls 1.6..3.0 m plus roof).
+func _click_body_height() -> float:
+	return 2.5 + 0.5 * float(upgrade_stage)
 
 
 ## Authored with the entrance facing south (+z); the mesh root is rotated by
 ## the Building base according to `orientation`.
+##
+## The placeholder GROWS with the upgrade stage (10f): the body gets taller and
+## wider, the roof rides higher, and from stage 3 on there is a side annex. The
+## footprint stays 4x4 — the hut gains height and bulk, not ground. Without this
+## the five stages would be visually identical as long as no .glb models exist.
 func _create_visuals() -> void:
 	super._create_visuals()
 	if _has_custom_model:
 		return
+	var stage: float = float(upgrade_stage)
+	var wide: float = 0.78 + 0.05 * stage          # 0.78 .. 0.98 of the footprint
+	var tall: float = 1.6 + 0.35 * stage           # 1.6 .. 3.0 m walls
+	var w: float = float(footprint.x) * wide
+	var d: float = float(footprint.y) * wide
+
 	var body: MeshInstance3D = MeshInstance3D.new()
 	var box: BoxMesh = BoxMesh.new()
-	box.size = Vector3(float(footprint.x) * 0.85, 1.6, float(footprint.y) * 0.85)
+	box.size = Vector3(w, tall, d)
 	body.mesh = box
 	body.material_override = _make_material(Color(0.52, 0.36, 0.2))
-	body.position.y = 0.8
+	body.position.y = tall * 0.5
 	_mesh_root.add_child(body)
 
 	var roof: MeshInstance3D = MeshInstance3D.new()
 	var prism: PrismMesh = PrismMesh.new()
 	# Flush with the walls (no overhang) so it does not clip the heads of
 	# braves standing right at the hut.
-	prism.size = Vector3(float(footprint.x) * 0.85, 1.2, float(footprint.y) * 0.85)
+	prism.size = Vector3(w, 1.2 + 0.15 * stage, d)
 	roof.mesh = prism
 	roof.material_override = _make_material(Color(0.42, 0.26, 0.12))
-	roof.position.y = 2.2
+	roof.position.y = tall + 0.6 + 0.075 * stage
 	_mesh_root.add_child(roof)
 
-	# Entrance door on the south side.
+	# From stage 3 on: a lower annex on the west side, so the late stages read as
+	# a compound rather than just a taller box.
+	if upgrade_stage >= 3:
+		var annex: MeshInstance3D = MeshInstance3D.new()
+		var annex_box: BoxMesh = BoxMesh.new()
+		annex_box.size = Vector3(w * 0.45, tall * 0.6, d * 0.7)
+		annex.mesh = annex_box
+		annex.material_override = _make_material(Color(0.48, 0.33, 0.18))
+		annex.position = Vector3(-(w * 0.5 + w * 0.2), tall * 0.3, 0.0)
+		_mesh_root.add_child(annex)
+
+	# Entrance door on the south side — on the wall face, which moves outward with
+	# the stage.
 	var door: MeshInstance3D = MeshInstance3D.new()
 	var door_box: BoxMesh = BoxMesh.new()
 	door_box.size = Vector3(0.8, 1.2, 0.15)
 	door.mesh = door_box
 	door.material_override = _make_material(Color(0.2, 0.13, 0.07))
-	door.position = Vector3(0.0, 0.6, float(footprint.y) * 0.425)
+	door.position = Vector3(0.0, 0.6, d * 0.5)
 	_mesh_root.add_child(door)
 
 	_add_flag()

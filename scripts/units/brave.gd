@@ -13,7 +13,10 @@ class_name Brave extends Unit
 ## All logic runs in tick(delta) and works without the scene tree. References
 ## to trees/piles are kept untyped because they may be freed by other workers.
 
-enum Task {NONE, FLATTEN, CHOP, PICKUP, DELIVER, CONSTRUCT, REPAIR, PRODUCE, DEMOLISH}
+## UPGRADE (10f) is appended on purpose — new entries go at the end so the
+## existing ordinals stay stable.
+enum Task {NONE, FLATTEN, CHOP, PICKUP, DELIVER, CONSTRUCT, REPAIR, PRODUCE,
+	DEMOLISH, UPGRADE}
 ## Sub-phase of the forester job (State.FORESTER, phase 7d): walking in to be
 ## housed, walking out to a plant spot, kneeling to plant, walking back in.
 enum ForesterPhase {JOIN, PLANT_GO, KNEEL, RETURN}
@@ -372,6 +375,25 @@ func order_demolish(building: Building) -> void:
 	_set_state(State.BUILD)
 
 
+## Upgrade a finished building (phase 10f, hut stages): join it as a worker. The
+## upgrade is started by the building itself (Hut.begin_upgrade), which puts its
+## own ejected crew on the job; the player can send more braves via right-click.
+## Wood is fetched with the same CHOP/PICKUP/DELIVER pipeline as a repair.
+func order_upgrade(building: Building) -> void:
+	if not can_take_orders():
+		return
+	if building == null or not is_instance_valid(building) or not building.upgrading:
+		return
+	if not _can_take_worker_slot(building):
+		return
+	_interrupt_tasks()
+	if not building.join(self):
+		return
+	job = building
+	_retry_timer = 0.0
+	_set_state(State.BUILD)
+
+
 ## Take a worker slot in a finished workshop (forester pattern, max
 ## Workshop.WORKER_SLOTS — ignored when no slot is free, no queue). The brave
 ## walks in and is housed inside; it only steps out to fetch stock wood
@@ -566,6 +588,8 @@ func _tick_job(delta: float) -> void:
 			_tick_produce(delta)
 		Task.DEMOLISH:
 			_tick_demolish(delta)
+		Task.UPGRADE:
+			_tick_upgrade(delta)
 
 
 ## A job binds its workers while the building is under construction or (for
@@ -573,9 +597,13 @@ func _tick_job(delta: float) -> void:
 ## Workshop workers (7f) stay bound only while they HOLD one of the three
 ## slots — construction workers are released when the workshop finishes and
 ## never slide into production duty without an explicit order.
+## An UPGRADE (10f) has to be listed explicitly: the building it runs on is
+## finished, undamaged and not being torn down, so without this clause every
+## upgrade worker would drop the job on its very next tick.
 func _job_active() -> bool:
 	return job.under_construction \
 		or job.demolishing \
+		or job.upgrading \
 		or (job.health > 0 and job.health < job.max_health) \
 		or (job is Workshop and job.is_usable() and self in (job as Workshop).occupants)
 
@@ -598,6 +626,11 @@ func _choose_job_task() -> void:
 		_reset_seek()
 		return
 	if not job.under_construction:
+		# An upgrade (10f) only ever runs on a fully healthy building, so it never
+		# competes with the repair below — repair keeps its priority by definition.
+		if job.upgrading:
+			_choose_upgrade_task()
+			return
 		# A healthy workshop is production duty; a damaged one falls through
 		# to the repair pipeline (and back once fixed).
 		if job is Workshop and job.health >= job.max_health:
@@ -670,6 +703,24 @@ func _choose_repair_task() -> void:
 	# absorption, deadlocking a lightly damaged workshop that still holds stock.
 	# wood_incoming() and the absorb source share delivery_point()/ABSORB_RADIUS,
 	# so counted wood is always bankable (no endless wait).
+	if job.wood_incoming() > 0:
+		_end_subtask(TASK_RETRY)
+		return
+	job.mark_wood_stalled()
+	_stop_all()
+
+
+## Upgrade job (10f): structurally the repair job — fetch wood while the upgrade
+## still owes some, build otherwise. Unlike a repair this cannot deadlock on a
+## protected stock, but the wood_incoming() wait is kept for the same reason:
+## wood already lying at the entrance is about to be absorbed.
+func _choose_upgrade_task() -> void:
+	if job.wants_upgrade_wood() and _try_fetch_wood():
+		return
+	if job.upgrade_wood > 0 or job.upgrade_wood_missing() == 0:
+		task = Task.UPGRADE
+		_reset_seek()
+		return
 	if job.wood_incoming() > 0:
 		_end_subtask(TASK_RETRY)
 		return
@@ -930,12 +981,32 @@ func _tick_repair(delta: float) -> void:
 		_end_subtask()
 
 
-## Wood demand of the current job (construction vs. repair vs. workshop stock).
+## Builds the next stage of the (finished, healthy) job building (phase 10f).
+## Building.work_upgrade returns false when it runs dry of delivered wood — then
+## re-choose (fetch more or stall). A finished upgrade clears `upgrading`, which
+## releases the worker via the _job_active guard.
+func _tick_upgrade(delta: float) -> void:
+	if not job.upgrading:
+		_end_subtask()
+		return
+	if not _seek(job.center_world(), job.interact_range(), delta):
+		return
+	_set_working(true)
+	_face_toward(job.center_world())
+	if not job.work_upgrade(BUILD_RATE * Balance.HUT_UPGRADE_RATE_FACTOR * delta):
+		_end_subtask()
+
+
+## Wood demand of the current job (construction vs. upgrade vs. repair vs.
+## workshop stock). Without the upgrade branch a chopper would stop after its
+## FIRST log, because a healthy building owes no repair wood.
 func _job_wants_wood() -> bool:
 	if job == null or not is_instance_valid(job):
 		return false
 	if job.under_construction:
 		return job.wants_more_wood()
+	if job.upgrading:
+		return job.wants_upgrade_wood()
 	if job is Workshop and job.health >= job.max_health:
 		return (job as Workshop).wants_more_stock_wood()
 	return job.wants_more_repair_wood()

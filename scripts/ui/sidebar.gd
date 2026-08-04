@@ -82,6 +82,8 @@ var _mana_segments: Array[ColorRect] = []
 var _mana_label: Label = null   # numeric mana + income per second (phase 7i)
 var _growth_slider: HSlider = null   # hut growth control (phase 7i)
 var _growth_label: Label = null
+## Tribe-wide hut-upgrade lock (phase 10f), header row under the growth control.
+var _upgrades_check: CheckButton = null
 var _tab_buttons: Array[Button] = []
 var _tab_panels: Array[Control] = []
 var _tab_content: Control = null
@@ -270,6 +272,8 @@ func setup(p_tribes: Array[Tribe], p_player_id: int, p_unit_manager: UnitManager
 		_set_mana(player.mana)
 		if _growth_slider != null:
 			_growth_slider.set_value_no_signal(float(int(player.growth_mode)))
+		if _upgrades_check != null:
+			_upgrades_check.set_pressed_no_signal(player.upgrades_allowed)
 	_update_growth_label()
 	_refresh_wood_near_base()
 	_refresh_spells()
@@ -470,6 +474,25 @@ func _build_header(root: Control) -> void:
 	_growth_label.add_theme_color_override("font_color", UiTheme.GOLD)
 	_growth_label.text = "Maximum  (+0/min)"
 	vb.add_child(_growth_label)
+
+	# Tribe-wide hut-upgrade lock (phase 10f), right below the growth control it
+	# belongs with. The long label must NOT dictate the panel width — wrap and clip
+	# it, or its minimum width pushes the whole header past the panel edge (same
+	# lesson as the auto-recrew toggle in the followers tab).
+	_upgrades_check = CheckButton.new()
+	_upgrades_check.text = "Ausbau erlauben"
+	_upgrades_check.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_upgrades_check.clip_text = true
+	_upgrades_check.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_upgrades_check.tooltip_text = "Hütten bauen sich selbst in vier Stufen zum" \
+		+ " Wohnpalast aus (je 5 Holz). Aus: fällige Ausbauten warten, die" \
+		+ " Besatzung bleibt in der Hütte und produziert weiter. Gilt für den" \
+		+ " ganzen Stamm; eine einzelne Hütte lässt sich über ihren Pause-Knopf" \
+		+ " sperren."
+	UiTheme.style_button(_upgrades_check)
+	_upgrades_check.set_pressed_no_signal(true)
+	_upgrades_check.toggled.connect(_on_upgrades_toggled)
+	vb.add_child(_upgrades_check)
 
 
 func _make_tribe_bar(color: Color) -> ProgressBar:
@@ -896,9 +919,19 @@ func _selected_crew_target() -> Object:
 func _crew_view(target: Object) -> Dictionary:
 	if target is Hut:
 		var hut: Hut = target as Hut
-		return {"members": hut.crew, "cap": Hut.CREW_CAPACITY,
-			"info": "Besatzung: %d/%d   Wachstum: +%.1f/min" % [
-				hut.crew_count(), Hut.CREW_CAPACITY, hut.growth_per_minute()]}
+		# 10f: capacity is per upgrade stage, so `cap` (which drives how many slot
+		# buttons show) has to come from the instance, not a class constant.
+		var stage: String = "Stufe %d/%d" % [hut.upgrade_stage,
+			Balance.HUT_MAX_UPGRADE_STAGE]
+		var info: String = ""
+		if hut.upgrading:
+			info = "%s   Ausbau: %.0f %%   Holz: %d/%d" % [stage,
+				hut.upgrade_progress() * 100.0, hut.upgrade_wood,
+				Balance.HUT_UPGRADE_WOOD_COST]
+		else:
+			info = "%s   Besatzung: %d/%d   Wachstum: +%.1f/min" % [stage,
+				hut.crew_count(), hut.crew_capacity(), hut.growth_per_minute()]
+		return {"members": hut.crew, "cap": hut.crew_capacity(), "info": info}
 	if target is Forester:
 		var f: Forester = target as Forester
 		return {"members": f.occupants, "cap": Forester.WORKER_SLOTS,
@@ -1211,7 +1244,20 @@ func _on_growth_changed(value: float) -> void:
 	_update_growth_label()
 
 
+## Hut-upgrade lock toggled (phase 10f): tribe-wide, routed through TribeCommands
+## like every other tribe mutation (see 00_overview.md §4).
+func _on_upgrades_toggled(pressed: bool) -> void:
+	var player: Tribe = _player_tribe()
+	if player != null and _tribe_commands != null:
+		_tribe_commands.set_upgrades_allowed(player, pressed)
+
+
 func _update_growth_label() -> void:
+	# The upgrade lock rides along on the same refresh: it can also be changed
+	# from outside the sidebar (elimination resets, tests), so mirror the tribe.
+	var player: Tribe = _player_tribe()
+	if _upgrades_check != null and player != null:
+		_upgrades_check.set_pressed_no_signal(player.upgrades_allowed)
 	if _growth_label == null:
 		return
 	var names: Array[String] = ["Kein", "Minimal", "Maximum"]

@@ -9,7 +9,10 @@ class_name AIState extends RefCounted
 enum State { BUILD, TRAIN, ATTACK }
 
 ## Full base the AI keeps building toward (in the background, in EVERY state).
-const TARGET_HUTS: int = 4
+## 10f: raised from 4 because a stage-0 hut only houses 10 (was 40) — six huts are
+## 60 base places. The rest of the housing comes from upgrades, which run by
+## themselves (Tribe.upgrades_allowed defaults to true).
+const TARGET_HUTS: int = 6
 const TARGET_CAMPS: int = 3
 ## BUILD -> TRAIN already when the essentials stand (training starts early,
 ## the remaining buildings go up in parallel).

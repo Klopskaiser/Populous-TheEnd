@@ -96,15 +96,34 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
 
 - **Holz** ist die **einzige physische Ressource**. Braves sammeln es von **wilden Bäumen**;
   es wird für Bau und Ausbau von Gebäuden benötigt.
-- **Hütten (Huts):** **12 Holz**, Platz für **40** Bevölkerung (bewusste Abweichung vom
-  Original — dort wenige).
-  - **Bemannung (Phase 7i):** Eine Hütte produziert nur **mit Besatzung** (bis zu **4**
-    Braves, im Gebäude versteckt, zählen weiter zur Bevölkerung, **kein Mana**). Leere
-    Hütte = keine Produktion; die Rate skaliert mit der Besatzung (volle Hütte ~10 %
-    schneller als die alte Rate). Bemannung manuell (Braves + Rechtsklick auf die Hütte)
-    oder automatisch per **Wachstumsregler** (pro Stamm, UI bei Bevölkerung/Mana):
-    **Kein** (leert alle Hütten), **Minimal** (1 Besatzung je Hütte), **Maximum**
-    (füllt Hütten auf 4). Automatisch werden nur **nahe idle** Braves eingezogen.
+- **Hütten (Huts):** **8 Holz**, Platz für **10** Bevölkerung — und **ausbaubar in vier
+  Stufen bis zum Wohnpalast** (Phase 10f):
+
+  | | Stufe 0 „Hütte" | Stufe 1 | Stufe 2 | Stufe 3 | Stufe 4 „Wohnpalast" |
+  |---|---|---|---|---|---|
+  | Holz (kumuliert) | **8** | 13 | 18 | 23 | **28** |
+  | Bevölkerungsplätze | **10** | 18 | 26 | 34 | **45** |
+  | Arbeiterplätze | **2** | 3 | 4 | 5 | **6** |
+
+  - **Ausbau:** Ein Timer (90 s nach Fertigstellung bzw. nach dem letzten Ausbau) macht
+    die nächste Stufe **fällig**; ist sie erlaubt und liegt Holz in Reichweite, verlässt
+    die **gesamte Besatzung** die Hütte, holt **5 Holz** und baut aus. Eine ausbauende
+    Hütte produziert deshalb **nichts**, **behält aber ihren Wohnraum**. Der Fortschritt
+    läuft über den vorhandenen Balken, beim Ausbau **blau** (Produktion gold, Abriss rot).
+    Gesperrt wird der Ausbau stammweit über die Schaltfläche **„Ausbau erlauben"** beim
+    Wachstumsregler oder pro Hütte über deren **Pause-Knopf**; ein fälliger Ausbau wartet
+    dann sichtbar. Reparatur hat Vorrang — Schaden bricht einen laufenden Ausbau ab und
+    gibt sein Holz zurück, ebenso ein Ausbau, der **2 min** keinen Fortschritt macht
+    (etwa weil die Bauarbeiter getötet wurden). Das Ausbauholz zählt zur
+    **Abriss-Erstattung**.
+  - **Bemannung (Phase 7i):** Eine Hütte produziert nur **mit Besatzung** (Braves, im
+    Gebäude versteckt, zählen weiter zur Bevölkerung, **kein Mana**). Leere Hütte = keine
+    Produktion; die Rate ist **linear in der Besatzung** (30 s je Brave und Arbeiter, also
+    15 s auf Stufe 0 und 5 s im Wohnpalast). Bemannung manuell (Braves + Rechtsklick auf
+    die Hütte) oder automatisch per **Wachstumsregler** (pro Stamm, UI bei Bevölkerung/
+    Mana): **Kein** (leert alle Hütten), **Minimal** (1 Besatzung je Hütte), **Maximum**
+    (füllt Hütten bis zur Stufen-Kapazität). Automatisch werden nur **nahe idle** Braves
+    eingezogen.
 - **Trainingsgebäude:** **Kaserne** (Krieger, 5 Holz/3 s), **Feuertempel** (Feuerkrieger,
   **20 Holz**/4 s, großer vieleckiger Bau, 8×8), **Tempel** (Prediger, **15 Holz**/5 s,
   doppelt so groß, 6×6). Ablauf: Brave betritt das Gebäude → kommt nach Ausbildungszeit als

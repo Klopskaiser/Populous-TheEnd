@@ -34,6 +34,12 @@ var growth_mode: GrowthMode = GrowthMode.MAXIMUM
 ## excluded; the shaman and braves are never pulled in.
 var auto_recrew_vehicles: bool = true
 
+## Tribe-wide hut-upgrade lock (phase 10f): while off, huts whose upgrade is due
+## simply wait (the due "progress" holds at 100 %) instead of sending their crew
+## out for wood. Default on, so the AI upgrades without needing any own logic.
+## Player toggles it in the sidebar header, next to the growth control.
+var upgrades_allowed: bool = true
+
 ## Per-tribe catapult cap: every workshop of the tribe stops producing once
 ## owned_catapult_count() reaches it. Player adjusts it in the sidebar
 ## (followers tab); AI keeps the default.

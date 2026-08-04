@@ -814,41 +814,49 @@ func test_hut_spawns_braves_until_capacity() -> void:
 	var hut: Hut = w.building_manager.place(
 		HUT_SCENE, tribe, Vector2i(60, 60), 0, true) as Hut
 	check(hut != null, "hut placed")
-	check(tribe.housing_capacity() == Hut.CAPACITY, "capacity of one hut is %d" % Hut.CAPACITY)
+	# 10f: no upgrades here — this test is about production, and an upgrade would
+	# empty the hut mid-test. (There is no wood in this world anyway, so nothing
+	# could start; the flag states the intent.)
+	tribe.upgrades_allowed = false
+	var cap: int = hut.capacity()
+	var crew_cap: int = hut.crew_capacity()
+	# Seconds per brave at full stage-0 crew (10f: linear in the crew).
+	var per_brave: float = Balance.HUT_SPAWN_SECONDS_PER_WORKER / float(crew_cap)
+	check(tribe.housing_capacity() == cap, "capacity of one hut is %d" % cap)
 
 	# An unmanned hut produces nothing (phase 7i). NONE prevents auto-manning.
 	tribe.growth_mode = Tribe.GrowthMode.NONE
-	for i in range(int(Hut.SPAWN_INTERVAL / TICK) + 5):
+	for i in range(int(Balance.HUT_SPAWN_SECONDS_PER_WORKER / TICK) + 5):
 		hut.tick(TICK)
 	check(tribe.population() == 0, "an unmanned hut produces no braves")
 
 	# Man it fully -> it produces again. Crew counts toward population.
 	tribe.growth_mode = Tribe.GrowthMode.MAXIMUM
-	_man_hut(w, hut, Hut.CREW_CAPACITY)
+	_man_hut(w, hut, crew_cap)
 	var base: int = tribe.population()
-	check(base == Hut.CREW_CAPACITY, "crew counts toward population")
+	check(base == crew_cap, "crew counts toward population")
 
 	var t: float = 0.0
-	while t < Hut.SPAWN_INTERVAL + 1.0 and tribe.population() == base:
+	while t < per_brave + 1.0 and tribe.population() == base:
 		hut.tick(TICK)
 		t += TICK
 	check(tribe.population() == base + 1, "a manned hut spawns a brave")
 
 	var dummies: Array[Unit] = []
-	while tribe.population() < Hut.CAPACITY:
+	while tribe.population() < cap:
 		var u: Unit = Unit.new()
 		dummies.append(u)
 		tribe.add_unit(u)
-	for i in range(int(Hut.SPAWN_INTERVAL / TICK) * 3):
+	for i in range(int(per_brave / TICK) * 4):
 		hut.tick(TICK)
-	check(tribe.population() == Hut.CAPACITY, "no spawns above the housing capacity")
+	check(tribe.population() == cap, "no spawns above the housing capacity")
 
 	var hut2: Hut = w.building_manager.place(
 		HUT_SCENE, tribe, Vector2i(70, 60), 0, true) as Hut
-	check(tribe.housing_capacity() == 2 * Hut.CAPACITY, "second hut doubles the capacity")
-	for i in range(int(Hut.SPAWN_INTERVAL / TICK) + 10):
+	check(tribe.housing_capacity() == 2 * cap, "second hut doubles the capacity")
+	for i in range(int(per_brave / TICK) + 10):
 		hut.tick(TICK)
-	check(tribe.population() == Hut.CAPACITY + 1, "spawning continues with more capacity")
+	check(tribe.population() == cap + 1, "spawning continues with more capacity")
 	check(hut2 != null, "second hut placed")
 
 	for u in dummies:
@@ -954,10 +962,10 @@ func test_hut_production_progress() -> void:
 	var w: Dictionary = _make_world()
 	var hut: Hut = w.building_manager.place(
 		HUT_SCENE, w.tribe, Vector2i(60, 60), 0, true) as Hut   # prebuilt, producing
-	_man_hut(w, hut, Hut.CREW_CAPACITY)   # a hut only shows a bar while manned (phase 7i)
-	hut.spawn_timer = Hut.SPAWN_INTERVAL
+	_man_hut(w, hut, hut.crew_capacity())   # a hut only shows a bar while manned (7i)
+	hut.spawn_timer = Balance.HUT_SPAWN_SECONDS_PER_WORKER
 	check_near(hut.production_progress(), 0.0, "fresh spawn timer -> 0 progress")
-	hut.spawn_timer = Hut.SPAWN_INTERVAL * 0.5
+	hut.spawn_timer = Balance.HUT_SPAWN_SECONDS_PER_WORKER * 0.5
 	check_near(hut.production_progress(), 0.5, "half-elapsed timer -> 0.5 progress")
 	hut.spawn_timer = 0.0
 	check_near(hut.production_progress(), 1.0, "timer done -> full progress")

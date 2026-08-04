@@ -205,12 +205,12 @@ func test_hut_rally_on_camp_trains_brave() -> void:
 		"the rally point resolves to the warrior camp")
 
 	# A hut only produces while manned (phase 7i); the crew counts as population.
-	for i in range(Hut.CREW_CAPACITY):
+	for i in range(hut.crew_capacity()):
 		hut.admit_crew(_spawn_brave(w, Vector2i(28, 28)))
 	var base: int = w.tribe.population()
 
 	# Tick the hut until it spawns a fresh (non-crew) brave.
-	for i in range(int(Hut.SPAWN_INTERVAL / TICK) * 2 + 5):
+	for i in range(int(Balance.HUT_SPAWN_SECONDS_PER_WORKER / TICK) * 2 + 5):
 		hut.tick(TICK)
 		if w.tribe.population() > base:
 			break

@@ -1091,6 +1091,8 @@ func _dispatch_context_command(hit: Dictionary, queue_up: bool = false) -> bool:
 func _building_is_actionable(building: Building) -> bool:
 	if building.demolishing:
 		return true   # right-click puts more hands on the teardown (10d)
+	if building.upgrading:
+		return true   # ... or on the upgrade (10f)
 	if building.under_construction:
 		return true
 	if building.is_usable():
@@ -1109,6 +1111,13 @@ func _apply_building_command(units: Array[Unit], building: Building) -> void:
 	# under_construction and would otherwise be sent back to work (10d).
 	if building.demolishing:
 		_tribe_commands.order_demolish(units, building)
+		return
+	# The upgrade branch must come before the is_usable() block below: an upgrading
+	# hut deliberately STAYS usable (10f), so the manning branch would grab it and
+	# the player could never send extra hands to the upgrade.
+	if building.upgrading:
+		_tribe_commands.order_upgrade(units, building)
+		building.flash_ring()
 		return
 	if building.under_construction:
 		_tribe_commands.order_build(units, building)

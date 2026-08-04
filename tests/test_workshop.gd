@@ -105,8 +105,8 @@ func test_occupied_workshop_wood_is_protected_from_neighbour() -> void:
 
 func test_crew_display_capacities() -> void:
 	var hut: Hut = HUT_SCENE.instantiate() as Hut
-	check(hut.crew_display_capacity() == Hut.CREW_CAPACITY,
-		"the hut shows its manning as pips")
+	check(hut.crew_display_capacity() == hut.crew_capacity(),
+		"the hut shows its (stage-dependent) manning as pips")
 	var ws: Workshop = WORKSHOP_SCENE.instantiate() as Workshop
 	check(ws.crew_display_capacity() == ws.worker_slots(),
 		"the workshop shows its worker slots as pips")

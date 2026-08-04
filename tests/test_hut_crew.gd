@@ -4,8 +4,15 @@ extends TestBase
 ## (braves hidden inside, still counted in population, no mana cost); the rate
 ## scales with crew, an empty hut produces nothing. Nearby idle braves are
 ## auto-manned per the tribe's growth mode; the hard unit cap is enforced.
+##
+## Phase 10f: crew capacity is per upgrade stage (2 at stage 0), so the tests read
+## `hut.crew_capacity()` instead of a class constant, and the rate is LINEAR in
+## the crew (no full-crew bonus any more). The worlds built here hold neither
+## trees nor wood piles, so no upgrade can start (_upgrade_wood_reachable) and the
+## crew tests stay unaffected by it.
 
 const TICK: float = 0.05
+const SPAWN_SECONDS: float = Balance.HUT_SPAWN_SECONDS_PER_WORKER
 const HUT_SCENE: PackedScene = preload("res://scenes/buildings/hut.tscn")
 const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
 
@@ -57,13 +64,14 @@ func test_crew_admit_limit_and_eligibility() -> void:
 	var w: Dictionary = _make_world()
 	w.tribe.growth_mode = Tribe.GrowthMode.NONE   # no auto-manning interference
 	var hut: Hut = _place_hut(w, Vector2i(60, 60))
-	for i in range(Hut.CREW_CAPACITY):
+	var cap: int = hut.crew_capacity()
+	for i in range(cap):
 		var b: Unit = w.um.spawn_unit(BRAVE_SCENE, 0, hut.center_world())
 		check(hut.admit_crew(b), "brave %d admitted as crew" % i)
-	check(hut.crew_count() == Hut.CREW_CAPACITY, "hut is full at CREW_CAPACITY")
-	var fifth: Unit = w.um.spawn_unit(BRAVE_SCENE, 0, hut.center_world())
-	check(not hut.admit_crew(fifth), "a fifth brave is refused")
-	check(w.tribe.population() == Hut.CREW_CAPACITY + 1,
+	check(hut.crew_count() == cap, "hut is full at its stage crew capacity")
+	var extra: Unit = w.um.spawn_unit(BRAVE_SCENE, 0, hut.center_world())
+	check(not hut.admit_crew(extra), "one brave past the capacity is refused")
+	check(w.tribe.population() == cap + 1,
 		"crew + the rejected brave all count toward population")
 	_free_world(w)
 
@@ -72,7 +80,7 @@ func test_empty_hut_produces_nothing() -> void:
 	var w: Dictionary = _make_world()
 	w.tribe.growth_mode = Tribe.GrowthMode.NONE
 	var hut: Hut = _place_hut(w, Vector2i(60, 60))
-	for i in range(int(Hut.SPAWN_INTERVAL / TICK) * 2):
+	for i in range(int(SPAWN_SECONDS / TICK) * 2):
 		hut.tick(TICK)
 	check(w.tribe.population() == 0, "an unmanned hut never spawns")
 	check(hut.production_progress() < 0.0, "no production bar without crew")
@@ -80,19 +88,21 @@ func test_empty_hut_produces_nothing() -> void:
 	_free_world(w)
 
 
+## 10f: the rate is linear in the crew — n workers make n braves in the time one
+## worker needs for one. No full-crew bonus any more.
 func test_rate_scales_with_crew() -> void:
 	var w: Dictionary = _make_world()
 	var hut: Hut = _place_hut(w, Vector2i(60, 60))
-	# Manually set crew size and read the rate factor (0 .. FULL_CREW_BONUS).
-	for i in range(Hut.CREW_CAPACITY):
+	var cap: int = hut.crew_capacity()
+	for i in range(cap):
 		hut.admit_crew(w.um.spawn_unit(BRAVE_SCENE, 0, hut.center_world()))
-	check_near(hut._spawn_rate_factor(), Hut.FULL_CREW_BONUS, "full crew ~10% faster")
-	hut.eject_crew(0)
-	hut.eject_crew(0)
-	hut.eject_crew(0)   # down to 1 crew
+	check_near(hut._spawn_rate_factor(), float(cap), "full crew = one unit of rate per worker")
+	while hut.crew_count() > 1:
+		hut.eject_crew(0)
 	check(hut.crew_count() == 1, "one crew left after ejects")
-	check_near(hut._spawn_rate_factor(), Hut.FULL_CREW_BONUS / float(Hut.CREW_CAPACITY),
-		"one crew produces at a quarter of the full bonus")
+	check_near(hut._spawn_rate_factor(), 1.0, "one worker produces at a rate of 1")
+	check_near(hut.growth_per_minute(), 60.0 / SPAWN_SECONDS,
+		"one worker's growth per minute is 60 / seconds-per-worker")
 	_free_world(w)
 
 
@@ -115,9 +125,9 @@ func test_growth_none_empties_huts() -> void:
 	var w: Dictionary = _make_world()
 	w.tribe.growth_mode = Tribe.GrowthMode.MAXIMUM
 	var hut: Hut = _place_hut(w, Vector2i(60, 60))
-	for i in range(Hut.CREW_CAPACITY):
+	for i in range(hut.crew_capacity()):
 		hut.admit_crew(w.um.spawn_unit(BRAVE_SCENE, 0, hut.center_world()))
-	check(hut.crew_count() == Hut.CREW_CAPACITY, "manned before switching mode")
+	check(hut.crew_count() == hut.crew_capacity(), "manned before switching mode")
 	w.tribe.growth_mode = Tribe.GrowthMode.NONE
 	for i in range(int(Hut.GROWTH_INTERVAL / TICK) + 2):
 		hut.tick(TICK)
@@ -129,13 +139,13 @@ func test_growth_maximum_auto_fills_from_nearby() -> void:
 	var w: Dictionary = _make_world()
 	w.tribe.growth_mode = Tribe.GrowthMode.MAXIMUM
 	var hut: Hut = _place_hut(w, Vector2i(60, 60))
-	# Four idle braves standing right next to the hut.
-	for i in range(Hut.CREW_CAPACITY):
+	# One idle brave per crew slot standing right next to the hut.
+	for i in range(hut.crew_capacity()):
 		w.um.spawn_unit(BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(57 + i, 57)))
 	var ok: bool = false
 	for i in range(int(20.0 / TICK)):   # up to 20 s of sim
 		_step(w, hut, TICK)
-		if hut.crew_count() >= Hut.CREW_CAPACITY:
+		if hut.crew_count() >= hut.crew_capacity():
 			ok = true
 			break
 	check(ok, "MAXIMUM pulls nearby idle braves up to full crew")
@@ -160,16 +170,17 @@ func test_manual_eject_holds() -> void:
 	var w: Dictionary = _make_world()
 	w.tribe.growth_mode = Tribe.GrowthMode.MAXIMUM
 	var hut: Hut = _place_hut(w, Vector2i(60, 60))
-	for i in range(Hut.CREW_CAPACITY):
+	var cap: int = hut.crew_capacity()
+	for i in range(cap):
 		hut.admit_crew(w.um.spawn_unit(BRAVE_SCENE, 0, hut.center_world()))
 	# Manual eject (crew tab): the ejected brave idles right at the hut, but the
 	# override pins the crew below the MAXIMUM target — no auto-refill.
-	hut.eject_crew(Hut.CREW_CAPACITY - 1, true)
-	check(hut.manual_crew_override == Hut.CREW_CAPACITY - 1,
+	hut.eject_crew(cap - 1, true)
+	check(hut.manual_crew_override == cap - 1,
 		"manual eject pins the crew at the reduced size")
 	for i in range(int(4.0 / TICK)):
 		_step(w, hut, TICK)
-	check(hut.crew_count() == Hut.CREW_CAPACITY - 1,
+	check(hut.crew_count() == cap - 1,
 		"MAXIMUM does not refill past a manual eject")
 	_free_world(w)
 
@@ -198,16 +209,16 @@ func test_slider_change_clears_overrides() -> void:
 	var w: Dictionary = _make_world()
 	w.tribe.growth_mode = Tribe.GrowthMode.MAXIMUM
 	var hut: Hut = _place_hut(w, Vector2i(60, 60))
-	for i in range(Hut.CREW_CAPACITY):
+	for i in range(hut.crew_capacity()):
 		hut.admit_crew(w.um.spawn_unit(BRAVE_SCENE, 0, hut.center_world()))
-	hut.eject_crew(Hut.CREW_CAPACITY - 1, true)
+	hut.eject_crew(hut.crew_capacity() - 1, true)
 	check(hut.manual_crew_override >= 0, "override set before the slider moves")
 	w.tribe.set_growth_mode(Tribe.GrowthMode.MAXIMUM)
 	check(hut.manual_crew_override == -1, "moving the slider clears the override")
 	var ok: bool = false
 	for i in range(int(10.0 / TICK)):
 		_step(w, hut, TICK)
-		if hut.crew_count() >= Hut.CREW_CAPACITY:
+		if hut.crew_count() >= hut.crew_capacity():
 			ok = true
 			break
 	check(ok, "after the slider move the hut follows MAXIMUM again")
@@ -219,15 +230,16 @@ func test_paused_hut_produces_nothing() -> void:
 	# MAXIMUM so the growth tick does not eject the crew (pause must not).
 	w.tribe.growth_mode = Tribe.GrowthMode.MAXIMUM
 	var hut: Hut = _place_hut(w, Vector2i(60, 60))
-	for i in range(Hut.CREW_CAPACITY):
+	var cap: int = hut.crew_capacity()
+	for i in range(cap):
 		hut.admit_crew(w.um.spawn_unit(BRAVE_SCENE, 0, hut.center_world()))
 	hut.paused = true
 	var pop: int = w.tribe.population()
-	for i in range(int(Hut.SPAWN_INTERVAL / TICK) * 2):
+	for i in range(int(SPAWN_SECONDS / TICK) * 2):
 		hut.tick(TICK)
 	check(w.tribe.population() == pop, "a paused hut never spawns")
 	check(hut.production_progress() < 0.0, "no production bar while paused")
-	check(hut.crew_count() == Hut.CREW_CAPACITY, "the crew stays housed while paused")
+	check(hut.crew_count() == cap, "the crew stays housed while paused")
 	_free_world(w)
 
 

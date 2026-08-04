@@ -735,9 +735,13 @@ const AI_PLOT_SPACING: int = 2
 ## Sweeps durch viele Wasserzellen, die `can_place_at` verwerfen ohne den
 ## Aufgabe-Zähler zu erhöhen — dort ist dieses Budget das einzige, was greift.
 const AI_MAX_PLOT_SCAN_CELLS: int = 800
-const AI_MAX_HUTS: int = 30
+## 10f: Hütten sind viel kleiner (10 statt 40 Plätze), der alte Deckel von 30
+## hätte den Stamm bei 300 Plätzen abgeschnürt. 60 Hütten sind im Vollausbau
+## 2700 Plätze, ohne jeden Ausbau immer noch 600.
+const AI_MAX_HUTS: int = 60
 ## Der Wohnraumdruck-Zweig darf nicht alle Baustellen-Slots mit Hütten füllen.
-const AI_MAX_HUT_SITES: int = 2
+## 10f: eine Baustelle mehr, weil die kleinen Hütten schneller nachwachsen müssen.
+const AI_MAX_HUT_SITES: int = 3
 const AI_BRAVES_PER_WORKSHOP: int = 30
 const AI_MAX_SHOPS_PER_KIND: int = 4
 ## Zusätzlicher Fahrzeug-Slot je so vielen Braves.

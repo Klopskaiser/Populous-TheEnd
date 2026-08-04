@@ -365,6 +365,32 @@ func order_demolish(units: Array[Unit], building: Building) -> int:
 	return assigned
 
 
+## Braves help with a running upgrade (phase 10f); non-braves just walk there.
+## The building puts its OWN ejected crew on the job — this is the manual
+## reinforcement path (right-click on an upgrading hut). Returns the number of
+## braves actually put on the upgrade.
+func order_upgrade(units: Array[Unit], building: Building) -> int:
+	if building == null or not is_instance_valid(building) or not building.upgrading:
+		return 0
+	var assigned: int = 0
+	var movers: Array[Unit] = []
+	for unit in units:
+		if unit.state == Unit.State.DEAD or not _unit_active(unit):
+			continue
+		if unit is Brave and unit.tribe_id == building.tribe_id \
+				and building.worker_can_reach(unit.position):
+			(unit as Brave).order_upgrade(building)
+			if (unit as Brave).job == building:
+				assigned += 1
+			else:
+				movers.append(unit)
+		elif building.worker_can_reach(unit.position):
+			movers.append(unit)
+	if not movers.is_empty():
+		order_move(movers, building.center_world())
+	return assigned
+
+
 ## Assigns braves to a forester's worker slots; non-braves just walk there.
 ## The forester ignores braves when all slots are taken (no queue).
 func order_forester(units: Array[Unit], forester: Forester) -> void:
@@ -404,6 +430,16 @@ func set_spell_active(tribe: Tribe, spell_id: StringName, value: bool) -> bool:
 	if spell == null:
 		return false
 	tribe.set_spell_active(spell_id, value)
+	return true
+
+
+## Tribe-wide hut-upgrade lock (phase 10f, sidebar check button). Off = huts with
+## a due upgrade wait instead of sending their crew out for wood; running upgrades
+## are NOT cancelled (their wood is already on site).
+func set_upgrades_allowed(tribe: Tribe, value: bool) -> bool:
+	if not _tribe_active(tribe):
+		return false
+	tribe.upgrades_allowed = value
 	return true
 
 

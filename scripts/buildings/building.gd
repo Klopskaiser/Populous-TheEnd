@@ -172,13 +172,14 @@ var _selection_ring: MeshInstance3D = null
 var _rally_marker: Node3D = null
 var _overlay_sprite: Sprite3D = null
 var _overlay_progress: float = -1.0
-## Whether the currently drawn bar is the (red) demolition variant.
-var _overlay_demolish: bool = false
+## Which variant of the bar is currently drawn (BAR_* below), -1 = none.
+var _overlay_mode: int = -1
 ## Crew-pip overlay (world-space, below the production bar), shown on
 ## select/hover for every building that reports a crew capacity (all except the
 ## watchtower — see crew_display_capacity).
 var _crew_sprite: Sprite3D = null
 var _crew_shown: int = -1
+var _crew_shown_cap: int = -1
 var _flatten_remaining: Dictionary[Vector2i, bool] = {}
 var _flatten_claims: Dictionary[Vector2i, int] = {}
 var _dirty: Rect2i = Rect2i()
@@ -196,6 +197,23 @@ var demolishing: bool = false
 var _demolish_start_progress: float = 0.0
 var _demolish_refund_total: int = 0
 var _demolish_refund_paid: int = 0
+
+# --- Upgrade (phase 10f) ------------------------------------------------------
+# Only the hut upgrades today, but the flag lives in the base class for the same
+# reason `demolishing` does: Brave._job_active/_job_wants_wood, tick()'s wood
+# absorption, the overlay bar and the SelectionManager all have to ask about it
+# without knowing the subclass. The behaviour itself is subclass-supplied through
+# the virtuals below.
+#
+## True while an upgrade is being worked off: the crew is out (so the building
+## produces nothing) but it deliberately stays `is_usable()` — see Hut.
+var upgrading: bool = false
+## Upgrade wood delivered and not yet built in (absorbed from piles near the
+## entrance, exactly like repair_wood).
+var upgrade_wood: int = 0
+## Seconds without any upgrade progress: the whole crew can die on the way to a
+## tree, and nobody else is recruited for upgrades. Times out into a cancel.
+var _upgrade_stall_timer: float = 0.0
 
 # --- Construction decay (phase 10d) -------------------------------------------
 ## Last observed progress signature (build_progress, wood_delivered, open
@@ -426,6 +444,12 @@ func tick(delta: float) -> void:
 		if health > 0 and health < max_health and _absorbs_repair_wood() \
 				and not demolishing:
 			_tick_repair_absorb(delta)
+		# The upgrade needs its OWN absorption: _tick_repair_absorb only runs on a
+		# DAMAGED building, so delivered upgrade wood would never be booked in.
+		if upgrading:
+			_tick_upgrade_absorb(delta)
+			if _destroyed:
+				return
 		# A building being stormed from the inside stops producing (the stage
 		# gate also disables it once the demolition passes 30 %).
 		if is_usable() and raiders.is_empty():
@@ -545,6 +569,50 @@ func repair(amount: float) -> bool:
 			_repair_hp_frac = 0.0
 		_update_damage_visual()
 	return true
+
+
+# --- Upgrade API (phase 10f, overridden by Hut) -------------------------------
+# Deliberately shaped like the repair API above — the upgrade IS "fetch wood for
+# a FINISHED building", so the Brave reuses the same CHOP/PICKUP/DELIVER pipeline
+# and only the work step differs.
+
+## Upgrade wood still owed beyond what was already delivered.
+func upgrade_wood_missing() -> int:
+	return 0
+
+
+## True while upgrade workers should still fetch more wood.
+func wants_upgrade_wood() -> bool:
+	return false
+
+
+## Applies `amount` of upgrade work (a worker's build rate). Returns false when
+## the upgrade stalls for wood — the worker then fetches more (or it stalls).
+func work_upgrade(_amount: float) -> bool:
+	return false
+
+
+## Progress of the running upgrade (0..1), -1 when none is running. Feeds the
+## (blue) info bar above the building.
+func upgrade_progress() -> float:
+	return -1.0
+
+
+## Aborts a running upgrade and hands the delivered wood back as ground piles.
+## `restart_delay` also resets the due timer: without it the refunded wood would
+## instantly satisfy the "wood in reach" start condition again and the upgrade
+## would restart on the very next tick — a cancel/restart loop. Damage and
+## demolition pass false, because there the upgrade SHOULD resume once the cause
+## is gone; the stall timeout passes true.
+func cancel_upgrade(_restart_delay: bool = false) -> void:
+	pass
+
+
+## Drops a running upgrade WITHOUT paying the wood back — for the demolition,
+## which folds `upgrade_wood` into its own (portion-wise) payout instead, and for
+## destruction, where it is lost with the building like repair_wood is.
+func abandon_upgrade() -> void:
+	pass
 
 
 ## The building just crossed into stage >= 1 (unusable): eject occupants alive
@@ -828,6 +896,36 @@ func _tick_repair_absorb(delta: float) -> void:
 		wood_stalled = false
 
 
+## While upgrading (10f): absorb wood piles near the entrance into the upgrade
+## buffer, run the wood-stall re-check and watch the stall timer. Nobody but the
+## hut's own (ejected) crew works an upgrade, so if those braves die on the way
+## the upgrade would hang forever — after HUT_UPGRADE_STALL_TIMEOUT without any
+## progress it is cancelled and the delivered wood goes back on the ground.
+func _tick_upgrade_absorb(delta: float) -> void:
+	if wood_stalled:
+		_wood_recheck_timer -= delta
+		if _wood_recheck_timer <= 0.0:
+			wood_stalled = false
+	_upgrade_stall_timer += delta
+	if _upgrade_stall_timer >= Balance.HUT_UPGRADE_STALL_TIMEOUT:
+		cancel_upgrade(true)   # true = wait the full delay before retrying
+		return
+	_absorb_timer -= delta
+	if _absorb_timer > 0.0:
+		return
+	_absorb_timer = ABSORB_INTERVAL
+	if wood_pile_manager == null:
+		return
+	var need: int = upgrade_wood_missing()
+	if need <= 0:
+		return
+	var taken: int = wood_pile_manager.take_from_radius(delivery_point(), ABSORB_RADIUS, need)
+	if taken > 0:
+		upgrade_wood += taken
+		wood_stalled = false
+		_upgrade_stall_timer = 0.0   # fresh wood on site: progress is being made
+
+
 ## 0..1 progress toward the next produced/trained unit, or -1 when the building
 ## is not currently producing (base: none). Drives the bar above the building.
 func production_progress() -> float:
@@ -968,26 +1066,39 @@ func _create_overlay() -> void:
 
 ## Shows a progress bar above the building — only while it is selected or
 ## hovered (and actually producing). Texture is only rebuilt when the value
-## moves. During a demolition the bar shows the teardown instead: this cannot go
+## moves. A demolition or an upgrade shows ITS progress instead: neither can go
 ## through a production_progress() override, because every producing subclass
-## returns -1.0 as soon as the building is not usable.
+## returns -1.0 as soon as the building is not usable (demolition) or has no crew
+## left inside (upgrade).
 func _update_overlay() -> void:
 	if _overlay_sprite == null:
 		return
 	var p: float = -1.0
+	var mode: int = BAR_PRODUCTION
 	if selected or hovered:
-		p = demolish_progress() if demolishing else production_progress()
+		if demolishing:
+			p = demolish_progress()
+			mode = BAR_DEMOLISH
+		elif upgrading:
+			p = upgrade_progress()
+			mode = BAR_UPGRADE
+		else:
+			p = production_progress()
 	if p < 0.0:
 		if _overlay_sprite.visible:
 			_overlay_sprite.visible = false
 		_overlay_progress = -1.0
+		_overlay_mode = -1
 		return
 	_overlay_sprite.visible = true
-	if absf(p - _overlay_progress) < 0.02 and demolishing == _overlay_demolish:
+	# The mode is part of the cache key: without it the bar would keep the old
+	# colour when production switches to a demolition or an upgrade at a
+	# near-identical progress value.
+	if absf(p - _overlay_progress) < 0.02 and mode == _overlay_mode:
 		return
 	_overlay_progress = p
-	_overlay_demolish = demolishing
-	_overlay_sprite.texture = _make_bar_texture(p, demolishing)
+	_overlay_mode = mode
+	_overlay_sprite.texture = _make_bar_texture(p, mode)
 
 
 ## Crew occupancy shown as pips on select/hover (hut pattern, generalised to
@@ -1000,12 +1111,17 @@ func _update_crew_overlay() -> void:
 		if _crew_sprite.visible:
 			_crew_sprite.visible = false
 		_crew_shown = -1
+		_crew_shown_cap = -1
 		return
 	_crew_sprite.visible = true
 	var n: int = crew_display_filled()
-	if n == _crew_shown:
+	# The CAPACITY is part of the cache key since 10f: a hut upgrade raises the
+	# slot count without changing the filled count, and a pips-only comparison
+	# would keep drawing the old, too-short row.
+	if n == _crew_shown and cap == _crew_shown_cap:
 		return
 	_crew_shown = n
+	_crew_shown_cap = cap
 	_crew_sprite.texture = _make_crew_texture(n, cap)
 
 
@@ -1034,17 +1150,26 @@ static func _make_crew_texture(filled: int, capacity: int) -> ImageTexture:
 	return ImageTexture.create_from_image(img)
 
 
-## Dark bar background with a gold fill proportional to progress. A demolition
-## (10d) fills RED instead — the same bar, but unmistakably not production.
-static func _make_bar_texture(progress: float, demolish: bool = false) -> ImageTexture:
+## Variants of the one info bar above a building: gold = production (the normal
+## case), red = demolition (10d), blue = upgrade (10f). One bar, three meanings —
+## the colour is what tells them apart.
+const BAR_PRODUCTION: int = 0
+const BAR_DEMOLISH: int = 1
+const BAR_UPGRADE: int = 2
+
+
+## Dark bar background with a fill proportional to progress, coloured by `mode`.
+static func _make_bar_texture(progress: float, mode: int = BAR_PRODUCTION) -> ImageTexture:
 	var w: int = 32
 	var h: int = 6
 	var img: Image = Image.create_empty(w, h, false, Image.FORMAT_RGBA8)
 	img.fill(Color(0.09, 0.06, 0.03, 0.9))
 	var fill: int = clampi(int(round(clampf(progress, 0.0, 1.0) * float(w - 2))), 0, w - 2)
 	if fill > 0:
-		var color: Color = Color(0.90, 0.28, 0.18) if demolish \
-			else Color(0.85, 0.68, 0.30)
+		var color: Color = Color(0.85, 0.68, 0.30)
+		match mode:
+			BAR_DEMOLISH: color = Color(0.90, 0.28, 0.18)
+			BAR_UPGRADE: color = Color(0.35, 0.62, 0.95)
 		img.fill_rect(Rect2i(1, 1, fill, h - 2), color)
 	return ImageTexture.create_from_image(img)
 
@@ -1119,10 +1244,12 @@ func has_build_stage() -> bool:
 ## Wood physically sitting in this building. NOT wood_delivered alone: a
 ## pre_built building (match start, tests) never ran a delivery, so its
 ## wood_delivered is 0 while it still cost its full price. _repair_hp_pool is
-## excluded — that wood is already converted into HP.
+## excluded — that wood is already converted into HP. `upgrade_wood` (10f) is
+## wood lying in a half-finished upgrade; a FINISHED upgrade is already part of
+## wood_cost (Hut._finish_upgrade adds it).
 func _demolish_refund_base() -> int:
 	var built: int = wood_delivered if under_construction else wood_cost
-	return maxi(0, built) + repair_wood
+	return maxi(0, built) + repair_wood + upgrade_wood
 
 
 ## Wood the player gets back for scrapping this building.
@@ -1143,12 +1270,17 @@ func begin_demolish() -> bool:
 	if not has_build_stage():
 		_flush_deformation()
 		_refund_wood(demolish_refund_total())
+		abandon_upgrade()   # its wood is already part of the payout above
 		destroy()
 		return true
 	demolishing = true
 	_demolish_start_progress = build_progress
 	_demolish_refund_total = demolish_refund_total()
 	_demolish_refund_paid = 0
+	# The refund total above already counts the wood of a half-finished upgrade
+	# (10f), so drop the upgrade WITHOUT a second payout. Its workers are sent
+	# back through the task choice by the switch_to_demolish loop below.
+	abandon_upgrade()
 	# A wood-stalled site is skipped by the recruiter — clear it, or the
 	# demolition would never get any hands.
 	wood_stalled = false
@@ -1489,6 +1621,9 @@ func take_damage(amount: int, source: int = DMG_GENERIC) -> void:
 			eject_occupants(true)
 		else:
 			_on_disabled()
+		# A damaged building is repaired first (10f): the upgrade gives its wood
+		# back and stays due, so it restarts once the hut is whole again.
+		cancel_upgrade()
 	_update_damage_visual()
 
 
@@ -1507,8 +1642,10 @@ func destroy() -> void:
 	under_construction = false
 	# Same reason for the demolition flag: the wreck lives on for SINK_DURATION,
 	# and _job_active() honours `demolishing` — the crew would keep hammering at
-	# a building that is already gone.
+	# a building that is already gone. `upgrading` (10f) is honoured there too,
+	# and its wood is lost with the building (like repair_wood).
 	demolishing = false
+	abandon_upgrade()
 	if nav_grid != null:
 		nav_grid.fill_solid_region(footprint_rect(), false)
 	# The footprint is walkable again: the demolishers step out alive (IDLE).
@@ -1631,6 +1768,39 @@ func _create_visuals() -> void:
 	_mesh_root.name = "MeshRoot"
 	add_child(_mesh_root)
 	_try_load_custom_model()
+
+
+## Throws the model away and builds it again — for a building whose asset_kind()
+## or placeholder geometry changed at runtime (10f: the hut grows a stage). All
+## caches that describe the OLD model have to be dropped with it, or the texture
+## swaps and damage holes would keep pointing at freed nodes. Does nothing
+## outside the scene tree (headless tests never built visuals in the first place).
+func _rebuild_visuals() -> void:
+	if _mesh_root == null:
+		return
+	# Detached before queue_free so the new "MeshRoot" cannot collide with the old
+	# one (queue_free is deferred to the end of the frame).
+	remove_child(_mesh_root)
+	_mesh_root.queue_free()
+	_mesh_root = null
+	_has_custom_model = false
+	_model_surfaces.clear()
+	_damage_holes.clear()
+	_stage_tex_cache.clear()
+	_visual_stage = -1
+	_build_visual_stage = -1
+	_create_visuals()
+	if _mesh_root != null:
+		_mesh_root.rotation.y = float(orientation) * PI * 0.5
+	# The click box is sized from _click_body_height(), which grows with the hut
+	# stage — without this, clicks on the upper half of a Wohnpalast would miss.
+	var old_body: Node = get_node_or_null("ClickBody")
+	if old_body != null:
+		remove_child(old_body)
+		old_body.queue_free()
+		_create_click_body()
+	_update_construction_visual()
+	_update_damage_visual()
 
 
 func _try_load_custom_model() -> void:

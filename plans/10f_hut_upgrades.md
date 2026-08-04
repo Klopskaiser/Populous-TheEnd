@@ -303,11 +303,15 @@ Hütte erstattet 75 % von 23, nicht von 8),
 
 ## Definition of Done
 
-- [ ] Alle fünf Stufen erreichbar, Werte exakt 10/18/26/34/45 und 2/3/4/5/6
-- [ ] Ausbau-Sperre stammweit wirksam, Fortschritt hält bei 100 %
-- [ ] Kein Ausbau ohne erreichbares Holz, ohne die Besatzung auszuwerfen
-- [ ] Wohnraum bricht während des Ausbaus nicht ein (Wächter-Test)
-- [ ] Abriss-Erstattung enthält das Ausbauholz
-- [ ] Testsuite grün, `--headless --quit` fehlerfrei
-- [ ] Manuelle Prüfung durch den Nutzer bestanden
-- [ ] PROGRESS.md ergänzt, Checkbox in [00_overview.md](00_overview.md), Commit/Push
+- [x] Alle fünf Stufen erreichbar, Werte exakt 10/18/26/34/45 und 2/3/4/5/6
+- [x] Ausbau-Sperre stammweit wirksam, Fortschritt hält bei 100 %
+      (zusätzlich: `paused` sperrt pro Hütte — Nutzerentscheidung)
+- [x] Kein Ausbau ohne erreichbares Holz, ohne die Besatzung auszuwerfen
+- [x] Stillstand > 2 min bricht den Ausbau ab und gibt das Holz zurück
+      (Nutzerentscheidung; `cancel_upgrade(restart_delay)` gegen die im Test
+      gefundene Abbruch/Neustart-Schleife)
+- [x] Wohnraum bricht während des Ausbaus nicht ein (Wächter-Test)
+- [x] Abriss-Erstattung enthält das Ausbauholz (fertig **und** mitten im Ausbau)
+- [x] Testsuite grün (3546 Zusicherungen), `--headless --quit` fehlerfrei
+- [ ] Manuelle Prüfung durch den Nutzer bestanden — **ausstehend**
+- [x] PROGRESS.md ergänzt, Checkbox in [00_overview.md](00_overview.md), Commit/Push

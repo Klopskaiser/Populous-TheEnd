@@ -7819,3 +7819,170 @@ häufiger *innerhalb* des KI-Ticks, weil die KI mit `same_island` (Hain-Suche) u
 **Zuordnungs-Verschiebung, keine neue Arbeit** — die Baseline hatte auf Bergpass
 schon 53,8 ms. Als eigenständige Optimierung (Insel-Labels inkrementell statt
 vollständig neu) bleibt das offen und ist **nicht** Teil dieser Phase.
+
+## Phase 10f — Hüttenüberarbeitung: kleinere Hütten mit vier Ausbaustufen (2026-08-04)
+
+**Plan:** [10f_hut_upgrades.md](10f_hut_upgrades.md) — vollständig umgesetzt.
+
+Die Hütte ist von einem festen Wohnblock (12 Holz, 40 Plätze, 4 Arbeiter) zu einem
+**wachsenden Gebäude** geworden: 8 Holz / 10 Plätze / 2 Arbeiter am Anfang, über
+vier Ausbaustufen à 5 Holz zum **Wohnpalast** (28 Holz kumuliert, 45 Plätze,
+6 Arbeiter). Ein Bevölkerungsplatz kostet damit 0,8 Holz (Stufe 0) bzw. 0,62
+(Vollausbau) statt bisher 0,3 — **Wohnraum ist rund doppelt so teuer**, und die
+Bevölkerung wächst nur noch, wenn in Ausbau investiert wird.
+
+**Nutzerentscheidungen dieser Sitzung:**
+
+| Thema | Entscheidung |
+|---|---|
+| Wer baut aus | **Nur die eigene (ausgeworfene) Besatzung**; Rechtsklick kann nachhelfen. Der Recruiter wirbt **keine** fremden Braves für Ausbauten an. Dafür bricht ein Ausbau ohne Fortschritt nach **2 min** ab und gibt das Holz am Platz zurück. |
+| Pause-Knopf | **Sperrt den Ausbau** — der Spieler hat damit zusätzlich zur stammweiten Sperre eine Sperre pro Hütte, ohne neues UI. |
+| Auslöser | **Reiner Timer** (90 s), kein Bevölkerungsdruck-Gate. Steuerung allein über die beiden Sperren. |
+
+### Gebaut
+
+**Werte** (`scripts/core/balance.gd`, Block `# --- Hütte ---`): `HUT_WOOD_COST` 12
+→ **8**; neu `HUT_CAPACITY_PER_STAGE [10,18,26,34,45]`, `HUT_CREW_PER_STAGE
+[2,3,4,5,6]`, `HUT_HP_PER_STAGE [300,340,380,420,480]`, `HUT_MAX_UPGRADE_STAGE 4`,
+`HUT_SPAWN_SECONDS_PER_WORKER 30.0`, `HUT_UPGRADE_DELAY 90.0`,
+`HUT_UPGRADE_WOOD_COST 5`, `HUT_UPGRADE_RATE_FACTOR 1.0`,
+`HUT_UPGRADE_WOOD_RADIUS 40.0`, `HUT_UPGRADE_STALL_TIMEOUT 120.0`.
+**Entfallen:** `HUT_CAPACITY`, `HUT_SPAWN_INTERVAL`, `HUT_CREW_CAPACITY`,
+`HUT_FULL_CREW_BONUS` — die Produktionsrate ist jetzt **linear in der Besatzung**
+(ein Arbeiter = 30 s/Brave, sechs = 5 s/Brave), der Voll-Besatzungs-Bonus ist damit
+gegenstandslos.
+
+**`Hut`** (`scripts/buildings/hut.gd`): `upgrade_stage`, `capacity()`,
+`crew_capacity()`, `display_name()` (Hütte / Große Hütte / Langhaus / Wohnhaus /
+Wohnpalast), `upgrade_ready()`, `can_begin_upgrade()`, `_tick_upgrade_timer()`,
+`_upgrade_wood_reachable()`, `begin_upgrade()`, `work_upgrade()`,
+`_finish_upgrade()`, `cancel_upgrade(restart_delay)`, `abandon_upgrade()`,
+stufenabhängige `asset_kind()` (`hut`, `hut1`…`hut4`) und `_click_body_height()`.
+Alle neun früheren Konstanten-Lesestellen umgestellt.
+
+**`Building`** (Basisklasse, Muster `demolishing`): `upgrading`, `upgrade_wood`,
+`_upgrade_stall_timer` + Virtuals `upgrade_wood_missing()`, `wants_upgrade_wood()`,
+`work_upgrade()`, `upgrade_progress()`, `cancel_upgrade()`, `abandon_upgrade()`;
+`_tick_upgrade_absorb()` (eigene Holz-Absorption + Stillstands-Wächter);
+`_rebuild_visuals()` (Modell **und** Klick-Körper neu, alle Modell-Caches
+zurückgesetzt, null-safe für Headless).
+
+**`Brave`**: `Task.UPGRADE` (angehängt), `order_upgrade()`,
+`_choose_upgrade_task()`, `_tick_upgrade()`. **`TribeCommands`**:
+`order_upgrade()`, `set_upgrades_allowed()`. **`Tribe`**: `upgrades_allowed`
+(Default true → die KI baut ohne eigene Logik aus).
+
+**UI:** CheckButton „Ausbau erlauben" im Sidebar-Header unter dem Wachstumsregler
+(Styling nach dem `_auto_recrew_check`-Vorbild: `clip_text` + `autowrap` sind
+Pflicht, sonst schiebt der Text die 260-px-Spalte über die Panelkante); Crew-Tab
+zeigt Stufe und während des Ausbaus Fortschritt + Holzstand; der vorhandene
+Info-Balken hat einen **dritten Modus** (gold = Produktion, rot = Abriss,
+**blau = Ausbau**); Rechtsklick auf eine ausbauende Hütte schickt Braves auf den
+Ausbau. Die prozeduralen Platzhalter **wachsen mit der Stufe** (höhere Wände,
+höheres Dach, ab Stufe 3 ein Anbau), damit die Stufen ohne `.glb` unterscheidbar
+sind.
+
+**KI:** `AIState.TARGET_HUTS` 4 → **6**, `Balance.AI_MAX_HUTS` 30 → **60**,
+`Balance.AI_MAX_HUT_SITES` 2 → **3**.
+
+### Fünf Stellen, an denen ein naiv gebautes UPGRADE stillschweigend gebrochen wäre
+
+Vorab am Code gefunden, alle vom Phasenplan **nicht** genannt:
+
+1. **`Brave._job_active()`** — eine gesunde, fertige, nicht abgerissene Hütte fällt
+   durch alle Zweige; jeder Ausbau-Arbeiter hätte den Job im nächsten Tick fallen
+   gelassen. → `or job.upgrading`.
+2. **`Brave._job_wants_wood()`** — liefert für die gesunde Hütte `false`; der
+   Holzfäller hätte nach dem **ersten** Stück abgebrochen und geliefert.
+3. **`Building.tick()`** — `_tick_repair_absorb` läuft nur bei
+   `health < max_health`; geliefertes Ausbauholz wäre nie gebucht worden.
+   → eigenes `_tick_upgrade_absorb`.
+4. **`Building._update_overlay()`** — der Balken-Cache verglich nur
+   `demolishing == _overlay_demolish`; ein dritter Modus hätte die Textur beim
+   Moduswechsel eingefroren. → `_overlay_mode: int` als Cache-Schlüssel.
+5. **`Building._update_crew_overlay()`** — `_crew_shown` cachte nur den *gefüllten*
+   Stand; die gestiegene Arbeiterzahl wäre bei gleichem Füllstand nicht angezeigt
+   worden. → zusätzliches `_crew_shown_cap`.
+
+Dazu zwei **externe** Lesestellen von `Hut.CREW_CAPACITY` in `sidebar.gd`
+(`_crew_view`, wo `cap` die Sichtbarkeit der Slot-Buttons steuert). Die Slot-Reihe
+ist auf `SiegeEngine.MAX_CREW = 6` dimensioniert — genau die 6 Arbeiter des
+Wohnpalasts, also kein UI-Umbau nötig. Und es gab **keinen Rebuild-Einsprung für
+Visuals**: `_create_visuals()` lief genau einmal aus `_ready()`.
+
+### Abweichung/Nachtrag: Cancel-Restart-Schleife (im Test gefunden)
+
+Der Stillstands-Abbruch legt das Holz als Bodenstapel am Bauplatz ab — womit
+`_upgrade_wood_reachable()` sofort wieder wahr ist und der Ausbau im **nächsten
+Tick** neu startete: eine endlose Abbruch/Neustart-Schleife, die im Debug-Lauf
+sichtbar wurde (der Stillstands-Zähler sprang bei t≈121 s zurück auf 0, `upgrading`
+blieb true). `cancel_upgrade()` hat deshalb einen Parameter `restart_delay`
+bekommen: der Stillstand setzt den Fälligkeits-Timer zurück (volle 90 s Pause),
+Schaden und Abriss lassen den Ausbau dagegen **fällig** stehen, damit er nach der
+Reparatur weiterläuft. Abgesichert durch
+`test_stalled_upgrade_is_cancelled_and_refunded`.
+
+Zweiter Nachtrag: `_demolish_refund_base()` zählt `upgrade_wood` mit, aber
+`begin_demolish()`/`destroy()` rufen `abandon_upgrade()` (Drop **ohne** Auszahlung)
+statt `cancel_upgrade()` — sonst wäre das Holz doppelt erstattet worden.
+
+### Verifikation
+
+- **Testsuite: 3546 Zusicherungen grün**, Exit-Code 0, Output frei von
+  `SCRIPT ERROR`. Neu: `tests/test_hut_upgrades.gd` (**103 Zusicherungen**,
+  19 Testmethoden). Angepasst: `test_hut_crew` (Besatzung stufenabhängig, lineares
+  Ratenmodell), `test_economy` (Wohnraum-/Spawnrechnung),
+  `test_building_destruction` (`repair_wood_missing` 10 → **7**, weil 90 % Schaden
+  an einer 8-Holz-Hütte `floor(7,2)` kostet), `test_construction_assault`
+  (Baustellen-HP-Modell auf 8 Holz), `test_training`, `test_workshop`.
+- **Projekt-Ladecheck `--headless --quit` fehlerfrei.** Die `--check-only`-Läufe
+  melden für `sidebar.gd`/`selection_manager.gd` „Identifier not found: GameState"
+  — die bekannte Autoload-Blindheit von `--check-only` (CLAUDE.md §9), kein Fehler.
+- Der `get_node()`-ERROR aus `status_fx_renderer._ready()` in `test_ui_logic` ist
+  **vorbestehend** (beide Dateien unverändert), der Test läuft grün.
+
+**Wichtigster Wächter-Test:** `test_hut_keeps_its_housing_while_upgrading` —
+`housing_capacity()` liefert 0, sobald die Hütte nicht `is_usable()` ist. Zöge der
+Ausbau `is_usable()` auf false, bräche der Bevölkerungsdeckel des **ganzen Stammes**
+bei jedem Ausbau ein. Deshalb ein eigenes `upgrading`-Flag.
+
+### Perf-/Balance-Messung (`benchmark_earlygame`, Bergpass, 4 KIs, 150 s)
+
+Verschränktes A/B über einen Worktree auf `95b0e73` (Projektpraxis: Maschinenrauschen
+bis 40 %, deterministische Zähler schlagen Millisekunden), zwei Runden je Seite —
+die Zähler waren rundenstabil:
+
+| Metrik | vor 10f | mit 10f |
+|---|---|---|
+| Bevölkerung bei t=150 s | 242 | **153** (−37 %) |
+| Bauplatz-Scans / Zellen | 57 / 11 034 | **38 / 4 904** (−56 % Zellen) |
+| Pfad-Aufrufe (Fehlschläge) | 2 712 (0) | **1 844 (0)** |
+| Insel-Füllungen | 13–14 | 12 |
+| `best_tree`-Aufrufe | 549 | **2 438** (4,4 ×) |
+| schlimmster Frame | 132–173 ms | 109–113 ms |
+
+**Zwei ehrliche Befunde:**
+
+1. **Plan-Risiko „mehr Hütten = mehr Bauplatzsuche" ist nicht eingetreten — im
+   Gegenteil.** Die KI ist holzgebremst und plant in den ersten 150 s *weniger*
+   Gebäude (Scans −33 %, Zellen −56 %); alle Subsystem-Kosten und der schlimmste
+   Frame liegen darunter, weil die Bevölkerung kleiner ist.
+2. **`best_tree` steigt auf das 4,4-fache** (139 → 599 im t=120-s-Fenster, 161 →
+   1 644 bei t=150 s): die ausgeworfenen Ausbau-Besatzungen suchen im
+   `TASK_RETRY`-Takt Holz. Die *A\*-Läufe* darin steigen **nicht** (72 → 66 bzw.
+   68 → 42), die Zusatzaufrufe sind also die billigen Bucket-Lookups. Absolut sind
+   es 681 ms je 30-s-Fenster **über alle vier KI-Stämme zusammen** (~23 ms/s,
+   ~6 ms/s je Stamm) — unkritisch, aber es wächst mit der Zahl gleichzeitig
+   ausbauender Hütten und ist die erste Stelle, an der man bei Spätspiel-Rucklern
+   nachsehen sollte.
+
+**Balance-Konsequenz, die im Spieltest bewusst zu beobachten ist:** die KI erreicht
+in derselben Zeit nur noch ~63 % ihrer früheren Bevölkerung. Das ist die gewollte
+Wirkung des doppelt so teuren Wohnraums, fühlt sich beim ersten Start aber wie ein
+Rückschritt an (Plan-Risiko 2/3). Zusätzlich kostet der reine Timer bei 20 Hütten
+dauerhaft ~100 Holz je 90 s; wenn sich das falsch anfühlt, ist das
+Bevölkerungsdruck-Gate der naheliegende Nachtrag.
+
+**Manuelle Prüfung durch den Nutzer steht aus** (Prüfliste im Phasenplan): Ausbau
+sichtbar wachsen sehen, blauer Balken, Sperre/Pause, Ausbau ohne Holz, Ausbau-Braves
+töten (2-min-Abbruch), Vollausbau, Abriss-Erstattung, langes Skirmish.
