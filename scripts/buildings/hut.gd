@@ -353,6 +353,10 @@ func _spawn_brave() -> void:
 var _upgrade_timer: float = 0.0
 ## Work done on the running upgrade, 0..1.
 var _upgrade_work: float = 0.0
+## Re-check throttle for the (bucket-walking) wood availability test.
+const WOOD_CHECK_INTERVAL: float = 2.0
+var _wood_check_timer: float = 0.0
+var _wood_check_result: bool = false
 
 
 ## True when the next stage is due: the timer is full and there IS a next stage.
@@ -376,6 +380,7 @@ func can_begin_upgrade() -> bool:
 ## Fills the due timer and starts the work when everything lines up. Called from
 ## _tick_active BEFORE the crew early-outs, so an empty hut still upgrades.
 func _tick_upgrade_timer(delta: float) -> void:
+	_wood_check_timer = maxf(_wood_check_timer - delta, 0.0)
 	if upgrading or upgrade_stage >= Balance.HUT_MAX_UPGRADE_STAGE:
 		return
 	_upgrade_timer = minf(_upgrade_timer + delta, Balance.HUT_UPGRADE_DELAY)
@@ -383,29 +388,65 @@ func _tick_upgrade_timer(delta: float) -> void:
 		begin_upgrade()
 
 
-## Is there any wood the crew could actually fetch nearby? Without this the hut
-## would eject its crew into a hopeless search. Headless (no managers at all) is
-## permissive so tests stay stable.
-func _upgrade_wood_reachable() -> bool:
+## Wood the crew could actually fetch nearby, counted in WOOD UNITS and only on
+## this navigation island: standing trees (per-stage yield), ground piles and the
+## stock of own wood depots.
+##
+## Bugfix after the first playtest: this used to ask "is there ANY wood in reach"
+## via count_trees_near, which counts TREES (a sapling counted as wood) and
+## ignores islands. With a 40 m radius that is true almost everywhere, so a hut
+## would eject its whole crew for a single log — or for a grove across the water —
+## and they then stood around outside instead of producing. The upgrade now needs
+## its FULL price in reach before anybody leaves the hut.
+func _upgrade_wood_available() -> int:
+	var here: Vector3 = center_world()
+	var radius: float = Balance.HUT_UPGRADE_WOOD_RADIUS
 	var tm: TreeManager = unit_manager.tree_manager if unit_manager != null else null
-	if tm != null and tm.count_trees_near(center_world(),
-			Balance.HUT_UPGRADE_WOOD_RADIUS) > 0:
-		return true
-	if wood_pile_manager != null and wood_pile_manager.wood_in_radius(
-			center_world(), Balance.HUT_UPGRADE_WOOD_RADIUS) > 0:
-		return true
+	if tm == null and wood_pile_manager == null:
+		# Headless with no wood managers at all: nothing to judge by, stay permissive
+		# so data-level tests can drive the upgrade.
+		return Balance.HUT_UPGRADE_WOOD_COST
+	# The hut's island once, then an O(1) label compare per source (same_island()
+	# would redo the hut side for every pile).
+	var island: int = -1
+	if nav_grid != null:
+		island = nav_grid.island_at(nav_grid.nearest_walkable_cell(
+			nav_grid.world_to_cell(here)))
+	var total: int = 0
+	if tm != null:
+		total += tm.wood_yield_near(here, radius)
+	if wood_pile_manager != null:
+		for pile: WoodPile in wood_pile_manager.piles_in_radius(here, radius):
+			if _on_island(pile.position, island):
+				total += pile.amount
 	if tribe != null:
 		for b: Building in tribe.buildings:
 			if not is_instance_valid(b) or not (b is WoodDepot) or not b.is_usable():
 				continue
-			if (b as WoodDepot).stored_wood() <= 0:
+			if b.center_world().distance_to(here) > radius:
 				continue
-			if b.center_world().distance_to(center_world()) \
-					<= Balance.HUT_UPGRADE_WOOD_RADIUS:
-				return true
-	if tm == null and wood_pile_manager == null:
-		return true   # headless: nothing to judge by
-	return false
+			if _on_island(b.delivery_point(), island):
+				total += (b as WoodDepot).stored_wood()
+	return total
+
+
+## Is `pos` on island `island`? Permissive when islands are unknown (headless).
+func _on_island(pos: Vector3, island: int) -> bool:
+	if nav_grid == null or island < 0:
+		return true
+	return nav_grid.island_at(nav_grid.nearest_walkable_cell(
+		nav_grid.world_to_cell(pos))) == island
+
+
+## Throttled `_upgrade_wood_available() >= cost`. A due-but-blocked hut asks this
+## every tick, and the answer walks tree buckets and piles — so it is re-checked
+## on an interval and cached in between.
+func _upgrade_wood_reachable() -> bool:
+	if _wood_check_timer > 0.0:
+		return _wood_check_result
+	_wood_check_timer = WOOD_CHECK_INTERVAL
+	_wood_check_result = _upgrade_wood_available() >= Balance.HUT_UPGRADE_WOOD_COST
+	return _wood_check_result
 
 
 ## Starts the building work: the WHOLE crew leaves and goes on the job. Released

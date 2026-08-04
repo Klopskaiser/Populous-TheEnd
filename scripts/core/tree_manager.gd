@@ -222,6 +222,41 @@ func count_trees_near(pos: Vector3, radius: float) -> int:
 	return count
 
 
+## Harvestable WOOD (not trees) within `radius` of `pos` — the sum of the
+## per-stage yields, saplings and felled trees excluded. Unlike count_trees_near
+## this also skips trees on another navigation island, so the answer is wood a
+## walker at `pos` could actually fetch. Same bucket walk, so the cost is the
+## same; the island lookup is O(1) against the cached labels.
+##
+## Added in 10f: "are there trees nearby" is NOT the same question as "is there
+## enough wood to pay for something", and a hut must not send its crew out for a
+## grove across the water (see Hut._upgrade_wood_available).
+func wood_yield_near(pos: Vector3, radius: float, same_island: bool = true) -> int:
+	var lo: Vector2i = _pos_bucket(Vector3(pos.x - radius, 0.0, pos.z - radius))
+	var hi: Vector2i = _pos_bucket(Vector3(pos.x + radius, 0.0, pos.z + radius))
+	var island: int = -1
+	if same_island and nav_grid != null:
+		island = nav_grid.island_at(nav_grid.nearest_walkable_cell(
+			nav_grid.world_to_cell(pos)))
+	var total: int = 0
+	for bz in range(lo.y, hi.y + 1):
+		for bx in range(lo.x, hi.x + 1):
+			var bucket: Array = _pos_buckets.get(Vector2i(bx, bz), [])
+			for tree in bucket:
+				if not is_instance_valid(tree) or tree.felled_flag:
+					continue
+				var yield_left: int = tree.wood_yield()
+				if yield_left <= 0:
+					continue
+				if tree.position.distance_to(pos) > radius:
+					continue
+				if island >= 0 and nav_grid.island_at(nav_grid.nearest_walkable_cell(
+						nav_grid.world_to_cell(tree.position))) != island:
+					continue
+				total += yield_left
+	return total
+
+
 # --- Harvest areas (phase 10e) ---------------------------------------------------
 
 ## Slack for the quad tests: sub-millimetre cross products are "on the edge".

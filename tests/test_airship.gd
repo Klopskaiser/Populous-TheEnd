@@ -1057,3 +1057,100 @@ func test_empty_ship_drifts_toward_the_start_island() -> void:
 	check(ship.position.x < start_x - 5.0,
 		"the empty airship drifts back toward the start-base island")
 	_free_world(w)
+
+
+# --- Phantom crew: recruits that never board (Bugfix Nutzertest 2026-08-04) ---
+# An enemy zeppelin had six INVISIBLE firewarriors aboard: it could neither be
+# attacked nor crewed although a (gold) ring was drawn around it; eventually two
+# own units got in, six passengers showed up, and ejecting one revealed an enemy.
+#
+# Cause: a recruit that is registered as crew but has not boarded held its slot
+# forever — the leash only governs BOARDED members, and there was no deadline. So
+# boarded_count() stayed 0 (= "unmanned/neutral" for every system that asks) while
+# all max_crew slots were taken, and after a takeover the previous owner's
+# recruits stayed in the crew list of the now-own ship.
+
+func test_recruit_that_never_boards_frees_its_slot() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 1, w.nav.cell_to_world(Vector2i(60, 60)))
+	# A recruit far away that cannot reach the ship in time.
+	var stuck: Unit = w.unit_manager.spawn_unit(
+		FIREWARRIOR_SCENE, 1, w.nav.cell_to_world(Vector2i(20, 20)))
+	stuck.order_crew(ship)
+	check(ship.crew_count() == 1, "the recruit holds a crew slot while walking")
+	check(ship.boarded_count() == 0, "but nobody is aboard")
+	# Freeze it in place so it can never arrive, then wait out the deadline.
+	var deadline: int = int(Balance.VEHICLE_CREW_BOARD_TIMEOUT / TICK) + 40
+	for i in range(deadline):
+		stuck.position = w.nav.cell_to_world(Vector2i(20, 20))
+		_tick_world(w)
+		if ship.crew_count() == 0:
+			break
+	check(not stuck.siege_boarded, "the recruit never boarded")
+	check(ship.crew_count() == 0,
+		"a recruit that never boards is dropped and frees its slot")
+	check(stuck.siege_engine != ship, "and is released from the vehicle")
+	_free_world(w)
+
+
+func test_phantom_recruits_do_not_block_all_slots() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 1, w.nav.cell_to_world(Vector2i(60, 60)))
+	# Fill EVERY slot with unreachable recruits — the reported situation.
+	var ghosts: Array[Unit] = []
+	for i in range(Airship.MAX_CREW):
+		var g: Unit = w.unit_manager.spawn_unit(
+			FIREWARRIOR_SCENE, 1, w.nav.cell_to_world(Vector2i(20, 20 + i)))
+		g.order_crew(ship)
+		ghosts.append(g)
+	check(ship.crew_count() == Airship.MAX_CREW, "all slots claimed by ghosts")
+	check(ship.boarded_count() == 0,
+		"and the ship reads as unmanned — that is the trap")
+	var deadline: int = int(Balance.VEHICLE_CREW_BOARD_TIMEOUT / TICK) + 40
+	for i in range(deadline):
+		for g: Unit in ghosts:
+			if is_instance_valid(g):
+				g.position = w.nav.cell_to_world(Vector2i(20, 20 + ghosts.find(g)))
+		_tick_world(w)
+		if ship.crew_count() == 0:
+			break
+	check(ship.crew_count() == 0, "all phantom recruits timed out")
+	# Now the ship is genuinely capturable again.
+	var raider: Unit = _board(w, ship, BRAVE_SCENE, 0)
+	check(raider.siege_boarded and ship.tribe_id == 0,
+		"the freed-up ship can be captured")
+	_free_world(w)
+
+
+func test_takeover_drops_the_previous_owners_inbound_recruits() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 1, w.nav.cell_to_world(Vector2i(60, 60)))
+	# Enemy recruit on its way (slot held, not aboard).
+	var inbound: Unit = w.unit_manager.spawn_unit(
+		FIREWARRIOR_SCENE, 1, w.nav.cell_to_world(Vector2i(30, 30)))
+	inbound.order_crew(ship)
+	check(inbound in ship.crew, "the enemy recruit is registered as crew")
+	# The player boards the (still unmanned) ship and takes it over.
+	var raider: Unit = _board(w, ship, BRAVE_SCENE, 0)
+	check(ship.tribe_id == 0 and raider.siege_boarded, "the ship changed hands")
+	check(not (inbound in ship.crew),
+		"the previous owner's inbound recruit is dropped on takeover")
+	check(inbound.siege_engine != ship, "and is released")
+	check(ship.crew_count() == 1, "only the new owner's crew is left")
+	_free_world(w)
+
+
+func test_enemy_ship_with_inbound_crew_is_not_capturable() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 1, w.nav.cell_to_world(Vector2i(60, 60)))
+	var inbound: Unit = w.unit_manager.spawn_unit(
+		FIREWARRIOR_SCENE, 1, w.nav.cell_to_world(Vector2i(30, 30)))
+	inbound.order_crew(ship)
+	check(ship.boarded_count() == 0 and ship.crew_count() > 0,
+		"unmanned but claimed — exactly the state the UI misread")
+	# crew_count() is what the crew-assignment pick uses now (like auto-recrew):
+	# a claimed enemy vehicle is NOT a takeover candidate, so the right-click
+	# falls through to the attack path instead of being swallowed.
+	check(ship.crew_count() > 0,
+		"a claimed enemy ship counts as taken for the capture test")
+	_free_world(w)

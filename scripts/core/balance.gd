@@ -85,6 +85,14 @@ const SIEGE_MIN_FIRE_CREW: int = 2
 const SIEGE_BOARD_RANGE: float = 2.5
 ## Leine der Crew: weiter entfernte Mitglieder (Kampf) laufen zurück/steigen ab.
 const SIEGE_CREW_LEASH: float = 8.0
+## Zeitlimit für einen NOCH NICHT eingestiegenen Rekruten (alle Fahrzeuge).
+## Bugfix nach Nutzertest: die Leine oben gilt nur für eingestiegene Mitglieder,
+## ein Rekrut hatte also weder Leine noch Frist. Ein Zeppelin, dessen Bodenpunkt
+## unerreichbar ist (über Wasser, andere Insel) oder der wegfliegt, sammelte so
+## bis zu 6 „Geister-Rekruten" an: Plätze belegt, `boarded_count()` = 0 — das
+## Fahrzeug galt überall als unbemannt/neutral und war weder angreifbar noch
+## bemannbar. Wer es in dieser Zeit nicht an Bord schafft, kommt gar nicht.
+const VEHICLE_CREW_BOARD_TIMEOUT: float = 45.0
 ## Brenndauer des Fahrzeugs nach Feuerzauber-Treffer, dann versinkt das Wrack.
 const SIEGE_VEHICLE_BURN_TIME: float = 3.0
 const SIEGE_FIRE_RANGE: float = 15.0

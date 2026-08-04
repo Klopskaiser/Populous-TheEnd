@@ -906,6 +906,15 @@ func _tick_upgrade_absorb(delta: float) -> void:
 		_wood_recheck_timer -= delta
 		if _wood_recheck_timer <= 0.0:
 			wood_stalled = false
+	# Hopeless right now: a worker reported "no wood source anywhere" AND nobody is
+	# left on the job with nothing banked. Waiting out the full timeout would leave
+	# the ex-crew standing around outside for two minutes while the hut produces
+	# nothing — give up at once so the growth control pulls them back inside.
+	# (Not on wood_stalled alone: with one free tree the second worker reports a
+	# stall while the first is legitimately chopping.)
+	if wood_stalled and workers.is_empty() and upgrade_wood == 0:
+		cancel_upgrade(true)
+		return
 	_upgrade_stall_timer += delta
 	if _upgrade_stall_timer >= Balance.HUT_UPGRADE_STALL_TIMEOUT:
 		cancel_upgrade(true)   # true = wait the full delay before retrying

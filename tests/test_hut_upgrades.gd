@@ -24,8 +24,15 @@ func _flat_terrain(h: float = 5.0) -> TerrainData:
 	return td
 
 
-func _make_world() -> Dictionary:
+## `channel` digs a water strip at x = 68..73 BEFORE the NavGrid is built, which
+## splits the map into two navigation islands (the island labels are cached, so
+## carving the terrain afterwards would not be seen).
+func _make_world(channel: bool = false) -> Dictionary:
 	var td: TerrainData = _flat_terrain()
+	if channel:
+		for vz in range(TerrainData.VERTS):
+			for vx in range(68, 74):
+				td.heights[vz * TerrainData.VERTS + vx] = 0.0
 	var nav: NavGrid = NavGrid.new(td)
 	var tribe: Tribe = Tribe.new(0)
 	var tm: TreeManager = TreeManager.new()
@@ -190,10 +197,122 @@ func test_upgrade_waits_for_reachable_wood() -> void:
 	check(not hut.upgrading, "no wood in reach: the upgrade waits")
 	check(hut.crew_count() == crew_before,
 		"and the crew is NOT ejected into a hopeless search")
-	# A tree well inside HUT_UPGRADE_WOOD_RADIUS is enough to start.
-	w.tm.spawn_tree(Vector2i(66, 60))
+	# Two full-grown trees well inside HUT_UPGRADE_WOOD_RADIUS carry 8 wood — more
+	# than the price, so the upgrade may start (after the re-check throttle).
+	w.tm.spawn_tree(Vector2i(66, 60), 4)
+	w.tm.spawn_tree(Vector2i(67, 62), 4)
+	for i in range(int(Hut.WOOD_CHECK_INTERVAL / TICK) + 4):
+		hut.tick(TICK)
+		if hut.upgrading:
+			break
+	check(hut.upgrading, "enough wood in reach starts the upgrade")
+	_free_world(w)
+
+
+## Bugfix (Nutzertest 2026-08-04): the start test used to be "is there ANY wood in
+## reach", counting TREES (a sapling counted) and ignoring islands. With a 40 m
+## radius that is true nearly everywhere, so a hut ejected its whole crew for a
+## single log and they then idled outside instead of producing. The upgrade now
+## needs its FULL price in reach.
+func test_upgrade_needs_the_full_price_in_reach() -> void:
+	var w: Dictionary = _make_world()
+	w.tribe.growth_mode = Tribe.GrowthMode.MAXIMUM
+	var hut: Hut = _place_hut(w, Vector2i(60, 60))
+	_man_hut(w, hut)
+	var crew_before: int = hut.crew_count()
+	check(crew_before > 0, "hut is manned")
+	# One wood short of the price.
+	_wood_near(w, hut, Balance.HUT_UPGRADE_WOOD_COST - 1)
+	_make_due(hut)
+	for i in range(80):
+		hut.tick(TICK)
+	check(not hut.upgrading, "one wood short: the upgrade does not start")
+	check(hut.crew_count() == crew_before,
+		"and the crew stays INSIDE the hut, producing")
+	check(hut.upgrade_ready(), "the upgrade stays due")
+	# The missing wood arrives -> it starts (after the re-check throttle).
+	_wood_near(w, hut, 1)
+	for i in range(int(Hut.WOOD_CHECK_INTERVAL / TICK) + 4):
+		hut.tick(TICK)
+		if hut.upgrading:
+			break
+	check(hut.upgrading, "with the full price in reach it starts")
+	_free_world(w)
+
+
+## A sapling is not wood: count_trees_near() counted it, wood_yield_near() does not.
+func test_saplings_do_not_count_as_upgrade_wood() -> void:
+	var w: Dictionary = _make_world()
+	w.tribe.growth_mode = Tribe.GrowthMode.MAXIMUM
+	var hut: Hut = _place_hut(w, Vector2i(60, 60))
+	_man_hut(w, hut)
+	for i in range(8):
+		w.tm.spawn_tree(Vector2i(66 + i, 60), 0)   # stage 0 = sapling, 0 wood
+	check(w.tm.count_trees_near(hut.center_world(), 40.0) >= 8,
+		"the saplings ARE trees near the hut")
+	check(w.tm.wood_yield_near(hut.center_world(), 40.0) == 0,
+		"but they hold no harvestable wood")
+	_make_due(hut)
+	for i in range(80):
+		hut.tick(TICK)
+	check(not hut.upgrading, "saplings alone do not start an upgrade")
+	check(hut.crew_count() > 0, "the crew stays inside")
+	_free_world(w)
+
+
+## Wood across the water is not reachable wood.
+func test_wood_on_another_island_does_not_count() -> void:
+	var w: Dictionary = _make_world(true)   # water channel at x = 68..73
+	w.tribe.growth_mode = Tribe.GrowthMode.MAXIMUM
+	var hut: Hut = _place_hut(w, Vector2i(60, 60))
+	check(not w.nav.same_island(hut.center_world(), w.nav.cell_to_world(Vector2i(78, 60))),
+		"the channel really separates the two sides")
+	_man_hut(w, hut)
+	# Plenty of big trees — but all of them beyond the channel.
+	for i in range(6):
+		w.tm.spawn_tree(Vector2i(76 + i, 60), 4)
+	check(w.tm.wood_yield_near(hut.center_world(), 40.0, false)
+		>= Balance.HUT_UPGRADE_WOOD_COST,
+		"ignoring islands there would be more than enough wood")
+	check(w.tm.wood_yield_near(hut.center_world(), 40.0) == 0,
+		"island-aware, none of it is reachable")
+	_make_due(hut)
+	for i in range(80):
+		hut.tick(TICK)
+	check(not hut.upgrading, "wood across the water does not start an upgrade")
+	check(hut.crew_count() > 0, "the crew stays inside")
+	_free_world(w)
+
+
+## The wood vanishes after the start (another job took it): the ex-crew must not
+## stand around for the full stall timeout — the upgrade gives up at once and the
+## growth control pulls them back in as crew.
+func test_hopeless_upgrade_returns_the_crew_at_once() -> void:
+	var w: Dictionary = _make_world()
+	w.tribe.growth_mode = Tribe.GrowthMode.MAXIMUM
+	var hut: Hut = _place_hut(w, Vector2i(60, 60))
+	_man_hut(w, hut)
+	_wood_near(w, hut, Balance.HUT_UPGRADE_WOOD_COST)
+	_make_due(hut)
 	hut.tick(TICK)
-	check(hut.upgrading, "a tree in reach starts the upgrade")
+	check(hut.upgrading, "upgrade started")
+	# Wood gone before it was absorbed, and no workers left on the job.
+	w.wpm.take_from_radius(hut.delivery_point(), 99.0, 99)
+	for worker in hut.workers.duplicate():
+		hut.leave(worker)
+	hut.mark_wood_stalled()
+	check(hut.upgrade_wood == 0 and hut.workers.is_empty(), "hopeless situation set up")
+	hut.tick(TICK)
+	check(not hut.upgrading,
+		"the hut gives up immediately instead of waiting out the 2-min timeout")
+	# And the crew comes back (growth mode MAXIMUM, braves are right at the hut).
+	var back: bool = false
+	for i in range(int(20.0 / TICK)):
+		_step(w, hut, TICK)
+		if hut.crew_count() > 0:
+			back = true
+			break
+	check(back, "the ex-crew is admitted back into the hut")
 	_free_world(w)
 
 
@@ -366,12 +485,18 @@ func test_stalled_upgrade_is_cancelled_and_refunded() -> void:
 	var w: Dictionary = _make_world()
 	w.tribe.growth_mode = Tribe.GrowthMode.NONE
 	var hut: Hut = _place_hut(w, Vector2i(60, 60))
-	# Only part of the wood: the upgrade can never finish, and with no workers
-	# left nothing ever moves — exactly the "crew died on the way" case.
-	_wood_near(w, hut, 2)
+	# Full price in reach so the upgrade starts, then most of it disappears (another
+	# job took it) before it could be absorbed: 2 wood get banked, the upgrade can
+	# never finish, and with no workers left nothing ever moves — exactly the
+	# "crew died on the way" case. Wood IS banked, so the immediate give-up path
+	# (see test_hopeless_upgrade_returns_the_crew_at_once) does not apply and the
+	# 2-min timeout is what has to fire.
+	_wood_near(w, hut, Balance.HUT_UPGRADE_WOOD_COST)
 	_make_due(hut)
 	hut.tick(TICK)
 	check(hut.upgrading, "upgrade started")
+	w.wpm.take_from_radius(hut.delivery_point(), 99.0,
+		Balance.HUT_UPGRADE_WOOD_COST - 2)   # 2 wood left on the ground
 	var steps: int = int(Balance.HUT_UPGRADE_STALL_TIMEOUT / TICK) + 20
 	for i in range(steps):
 		hut.tick(TICK)

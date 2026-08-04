@@ -410,6 +410,7 @@ func add_crew(unit) -> bool:
 
 func remove_crew(unit) -> void:
 	crew.erase(unit)
+	_recruit_wait.erase(unit)
 
 
 ## Crew members currently serving the vehicle (boarded and within the leash).
@@ -456,6 +457,9 @@ func on_crew_boarded(unit) -> void:
 	unit.siege_boarded = true
 	unit._sync_soa_flags()   # seated: excluded from the separation kernel
 	_unblock_nav()   # now manned — stop being a nav obstacle for other vehicles
+	# The vehicle is served now: drop the previous owner's inbound recruits right
+	# away instead of leaving them to block slots until the next prune tick.
+	_prune_crew()
 
 
 ## Ownership follows the crew (spec: vehicles can change hands when the crew
@@ -498,30 +502,69 @@ func crew_slot_position(unit) -> Vector3:
 	return slot
 
 
+## Seconds each NOT-yet-boarded recruit has been on its way. Boarded members are
+## governed by CREW_LEASH instead and hold no entry.
+var _recruit_wait: Dictionary = {}
+
+
+## Ages the inbound recruits so _prune_crew can time them out. Must run per tick
+## (not inside _prune_crew — that is called from add_crew/crew_count too and
+## would age by an arbitrary multiple).
+func _age_recruits(delta: float) -> void:
+	for m in crew:
+		if not is_instance_valid(m):
+			continue
+		if m.siege_boarded:
+			_recruit_wait.erase(m)
+		else:
+			_recruit_wait[m] = float(_recruit_wait.get(m, 0.0)) + delta
+
+
 ## Drops freed/dead members, deserters (new orders cleared siege_engine),
-## foreign members after an ownership switch and boarded members beyond the
-## leash. Recruits still walking over are kept regardless of distance.
+## foreign members after an ownership switch, boarded members beyond the leash
+## and recruits that never made it aboard.
 ## Detached members are released AFTER the list swap — leave_crew mutates
 ## `crew` via remove_crew, which must not run mid-iteration.
 func _prune_crew() -> void:
 	var kept: Array = []
 	var dropped: Array = []
+	# Once ANYBODY is aboard the vehicle is served, so foreign recruits still
+	# walking over are no longer legitimate takeover candidates (below).
+	var served: bool = boarded_count() > 0
 	for m in crew:
 		if not is_instance_valid(m) or m.state == State.DEAD or m.siege_engine != self:
 			continue
-		if m.tribe_id != tribe_id and m.siege_boarded:
+		# A foreign member is dropped whether or not it boarded. Only dropping
+		# BOARDED ones left the enemy's inbound recruits sitting in the crew of a
+		# vehicle that had just changed hands — holding slots forever and pinning
+		# boarded_count() to 0, so the ship read as "unmanned/neutral" everywhere
+		# (user report: 6 invisible enemy firewarriors on a captured zeppelin).
+		if m.tribe_id != tribe_id and (m.siege_boarded or served):
 			dropped.append(m)   # converted away / vehicle changed hands
 			continue
-		# NOTE: foreign members that have NOT boarded yet are legitimate
-		# takeover recruits walking over (an unmanned vehicle accepts any
-		# tribe) — on_crew_boarded settles who wins on arrival.
+		# Foreign members that have NOT boarded an UNSERVED vehicle are legitimate
+		# takeover recruits walking over — on_crew_boarded settles who wins.
 		if m.siege_boarded and _flat_dist(m.position, position) > CREW_LEASH:
+			dropped.append(m)
+			continue
+		# Never boarded within the time limit: unreachable ground point (airship
+		# over water / another island), or the vehicle simply flew away. Without
+		# this a recruit had neither leash nor deadline and blocked its slot
+		# forever — the core of the phantom-crew bug.
+		if not m.siege_boarded \
+				and float(_recruit_wait.get(m, 0.0)) >= Balance.VEHICLE_CREW_BOARD_TIMEOUT:
 			dropped.append(m)
 			continue
 		kept.append(m)
 	crew = kept
 	for m in dropped:
+		_recruit_wait.erase(m)
 		m.leave_crew()
+	# Keep the wait table from growing over members that left by other routes.
+	if _recruit_wait.size() > crew.size():
+		for m: Variant in _recruit_wait.keys():
+			if not (m in crew):
+				_recruit_wait.erase(m)
 
 
 ## Re-summons boarded members that finished a self-defence fight (state fell
@@ -639,6 +682,7 @@ func tick(delta: float) -> void:
 		_vehicle_burn -= delta
 		if _vehicle_burn <= 0.0:
 			_destroy_vehicle(false)
+	_age_recruits(delta)
 	_crew_prune_timer -= delta
 	if _crew_prune_timer <= 0.0:
 		_crew_prune_timer = 0.5

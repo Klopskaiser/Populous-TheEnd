@@ -817,7 +817,11 @@ func _command_move(screen_pos: Vector2, queue_up: bool, aggressive: bool = false
 	var ship: Unit = _enemy_airship_under_cursor(screen_pos, camera)
 	if ship != null and _tribe_commands != null:
 		_tribe_commands.order_attack(selected, ship)
-		(ship as Airship).flash_ring()
+		# RED target ring, like any other attack target. This used to call
+		# flash_ring(), which is the GOLD crew-order feedback — an attack on an
+		# enemy zeppelin looked exactly like "I am manning a neutral vehicle"
+		# (user report).
+		ship.flash_target_ring()
 		return
 	var from: Vector3 = camera.project_ray_origin(screen_pos)
 	var dir: Vector3 = camera.project_ray_normal(screen_pos)
@@ -946,9 +950,16 @@ func _try_crew_assignment(screen_pos: Vector2, camera: Camera3D, queue_up: bool 
 	for unit in _unit_manager.units:
 		if unit.state == Unit.State.DEAD or not (unit is CrewedVehicle):
 			continue
+		# A foreign vehicle may only be taken when it is GENUINELY abandoned —
+		# nobody aboard AND nobody inbound. crew_count() (which prunes first) is
+		# the right test; boarded_count() ignores occupied slots, so an enemy ship
+		# with inbound recruits read as capturable, the click was swallowed as a
+		# crew order that then failed silently on the full slot list, and the
+		# attack order below never ran (user report: enemy zeppelin could neither
+		# be attacked nor crewed). Same test the auto-recrew already uses.
 		if unit.tribe_id != player_tribe_id \
-				and (unit as CrewedVehicle).boarded_count() > 0:
-			continue   # a manned enemy vehicle cannot be taken
+				and (unit as CrewedVehicle).crew_count() > 0:
+			continue   # a manned or claimed enemy vehicle cannot be taken
 		var sprite: Rect2 = _unit_screen_rect(unit, camera)
 		if sprite.size.y <= 0.0 or not sprite.grow(PICK_MARGIN_PX).has_point(screen_pos):
 			continue
