@@ -4,237 +4,281 @@ class_name TerrainRim extends Node3D
 ##
 ## The terrain chunks stop at the disc, which on its own leaves a paper-thin sheet:
 ## from a low camera angle you would look straight through the world. This node
-## closes it with three static meshes and no `tick()` at all:
+## closes it with three static meshes and no `tick()`:
 ##
-##   * ROCK    — a vertical band from the rim height down to the disc's underside.
-##               This is the "nackte Felskante" the user asked for and it does all
-##               the visible work.
-##   * BOTTOM  — a downward-facing cap that closes the slab (user decision: a finite
-##               disc with an underside, not a bottomless wall). With the camera
-##               pitch fixed at -55 degrees and the rig floored at sea level it is
-##               effectively never in shot; it exists so the mesh is closed if the
-##               pitch is ever made adjustable, and it costs one fan of triangles.
-##   * WATERFALL — only across the stretches where the rim lies below the waterline
-##               (today that is the island, all the way round). Scrolled UVs, one
-##               draw call, in front of the rock so the two never z-fight.
+##   * ROCK      — a vertical wall along the whole rim, from the terrain surface down
+##                 to the disc's underside. The "nackte Felskante"; it does all the
+##                 visible work.
+##   * BOTTOM    — a downward-facing cap that closes the slab (user decision: a finite
+##                 disc with an underside, not a bottomless wall).
+##   * WATERFALL — wherever the rim is under water, a band from the waterline down,
+##                 with scrolled UVs so the sea pours off continuously.
 ##
-## All three are rebuilt together from `rebuild()`, which `Terrain.apply_deformation`
-## calls when a deformation reaches the rim — a Sink at the edge can create new water
-## and with it a new stretch of waterfall.
+## ## Built from the mesh's own EXPOSED CELL EDGES, not from a circle
+##
+## The first version sampled the rim at ~1 m of arc and joined those samples into a
+## smooth ring. That was wrong, and visibly so: `Terrain._build_chunk_mesh` culls whole
+## CELLS, so the terrain's edge is a staircase that oscillates around the ideal circle
+## by up to a cell diagonal. A smooth ring cannot follow it — wherever the staircase
+## stuck out past the ring, the cell's cross-section stood open (user report: "Ränder
+## von Erhebungen haben keinen Abschluss, sie sind einfach beschnitten").
+##
+## So the rim is now derived from exactly the same rule the mesh uses: every in-disc
+## cell that has a non-disc neighbour contributes one wall quad per exposed side,
+## spanning its two real terrain vertex heights. Mesh edge and wall are the same line
+## by construction, so there is nothing left to line up.
 
-## Metres of rock below the rim, i.e. the thickness of the slab.
+## Metres of rock below the waterline, i.e. the thickness of the slab.
 const SKIRT_DEPTH: float = Balance.WORLD_RIM_SKIRT_DEPTH
 ## How far the waterfall band hangs below the waterline.
 const WATERFALL_HEIGHT: float = Balance.WATERFALL_HEIGHT
-## Target arc length of one rim segment, in metres. ~1 m gives 452 segments on a 144
-## map and 905 on a 288 one — under 2k triangles for the whole rim.
-const SEGMENT_ARC: float = 1.0
-## The rock band sits a hair inside the disc radius so its top samples real terrain;
-## the waterfall sits a hair outside it so it never fights the rock for depth.
-const ROCK_INSET: float = 0.01
-const WATERFALL_OFFSET: float = 0.02
 ## Vertical UV tiling of the waterfall, in metres (matches the shader's `tile`).
 const WATERFALL_TILE: float = 8.0
-## The rock darkens toward the bottom: this is the multiplier at the very bottom.
+## The rock darkens toward the bottom: multiplier at the very bottom.
 const BOTTOM_SHADE: float = 0.35
+## The wall is pushed this far OUTWARD along its normal, and each edge is extended by
+## the same amount at both ends.
+##
+## Both halves matter. The offset puts the wall unambiguously in FRONT of the sea's cut
+## edge, which is otherwise exactly coplanar with it — that hairline was the middle
+## layer of the reported "Torte" (land on top, a strip of water below it, then rock).
+## The lengthwise extension closes the notches the offset would otherwise open at
+## convex corners of the staircase.
+const WALL_OUT: float = 0.06
+## The waterfall sits this far outside the wall so the two never fight for depth.
+const WATERFALL_OUT: float = 0.05
+## A cell counts as submerged (and therefore pours) when its surface is at or below
+## this. Slightly above SEA_LEVEL so a cell lapping exactly at the waterline still
+## produces a fall instead of a dry gap.
+const SUBMERGED_EPS: float = 0.05
 
 var _rock: MeshInstance3D = null
 var _bottom: MeshInstance3D = null
 var _waterfall: MeshInstance3D = null
 
 
-## True when the rim lies below the waterline at this angular sample — i.e. water
-## pours off here. STATIC and pure so it is testable without a scene.
-static func segment_is_submerged(td: TerrainData, angle: float) -> bool:
-	if td == null:
-		return false
-	var c: float = td.disc_center()
-	var r: float = td.disc_radius() - ROCK_INSET
-	var x: float = c + cos(angle) * r
-	var z: float = c + sin(angle) * r
-	return td.get_height(x, z) <= TerrainData.SEA_LEVEL
+# --- Pure geometry (headless-testable) ----------------------------------------------
+
+## The four neighbour offsets, paired with the cell-local edge they expose.
+## Each entry is [neighbour offset, edge vertex A, edge vertex B] in cell-vertex space.
+const _SIDES: Array = [
+	[Vector2i(1, 0), Vector2i(1, 0), Vector2i(1, 1)],    # +x
+	[Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, 0)],   # -x
+	[Vector2i(0, 1), Vector2i(1, 1), Vector2i(0, 1)],    # +z
+	[Vector2i(0, -1), Vector2i(0, 0), Vector2i(1, 0)],   # -z
+]
 
 
-## How many angular samples the rim of this map is built from.
-static func segment_count(td: TerrainData) -> int:
-	if td == null:
-		return 0
-	return maxi(int(ceil(TAU * td.disc_radius() / SEGMENT_ARC)), 8)
-
-
-## Indices of the samples where water pours off — the waterfall's extent. Pure, so
-## the "island has a full ring, the land maps have none" rule is headless-testable.
-static func waterfall_segments(td: TerrainData) -> PackedInt32Array:
-	var out: PackedInt32Array = PackedInt32Array()
+## Every exposed side of the disc: the boundary of the meshed cell set. Returns an
+## array of [cell: Vector2i, side_index: int]. STATIC and pure, so the rim's extent is
+## testable without a scene — and it is the SAME predicate the chunk mesh culls on.
+static func exposed_sides(td: TerrainData) -> Array:
+	var out: Array = []
 	if td == null:
 		return out
-	var n: int = segment_count(td)
-	for i in range(n):
-		if segment_is_submerged(td, TAU * float(i) / float(n)):
-			out.append(i)
+	for z in range(td.size):
+		for x in range(td.size):
+			var cell: Vector2i = Vector2i(x, z)
+			if not td.in_disc(cell):
+				continue
+			for i in range(_SIDES.size()):
+				if not td.in_disc(cell + _SIDES[i][0]):
+					out.append([cell, i])
 	return out
+
+
+## True when this cell's surface lies at or below the waterline — i.e. water pours off
+## here. Used for the waterfall's extent.
+static func cell_is_submerged(td: TerrainData, cell: Vector2i) -> bool:
+	if td == null or not td.in_disc(cell):
+		return false
+	return td.cell_height(cell) <= TerrainData.SEA_LEVEL + SUBMERGED_EPS
+
+
+## How many of the exposed sides carry a waterfall. Pure, so "the island pours off all
+## the way round, the land maps not at all" is headless-testable.
+static func waterfall_side_count(td: TerrainData) -> int:
+	var n: int = 0
+	for entry in exposed_sides(td):
+		if cell_is_submerged(td, entry[0]):
+			n += 1
+	return n
 
 
 ## True when a deformed cell rectangle comes close enough to the rim to change it.
 static func touches_rim(td: TerrainData, rect: Rect2i) -> bool:
 	if td == null:
 		return false
-	var c: float = td.disc_center()
-	var r: float = td.disc_radius()
-	# Nearest and farthest corner distances of the rect from the disc centre: the
-	# rect matters when the rim ring passes between them.
-	var near_x: float = maxf(0.0, maxf(float(rect.position.x) - c,
-		c - float(rect.position.x + rect.size.x)))
-	var near_z: float = maxf(0.0, maxf(float(rect.position.y) - c,
-		c - float(rect.position.y + rect.size.y)))
-	var near: float = sqrt(near_x * near_x + near_z * near_z)
-	var far_x: float = maxf(absf(float(rect.position.x) - c),
-		absf(float(rect.position.x + rect.size.x) - c))
-	var far_z: float = maxf(absf(float(rect.position.y) - c),
-		absf(float(rect.position.y + rect.size.y) - c))
-	var far: float = sqrt(far_x * far_x + far_z * far_z)
-	return near <= r + 2.0 and far >= r - 2.0
+	# Grown by one cell, because a deformation just INSIDE the boundary still moves the
+	# vertices the wall is built from.
+	var grown: Rect2i = Rect2i(rect.position - Vector2i.ONE, rect.size + Vector2i.ONE * 2)
+	for z in range(grown.position.y, grown.position.y + grown.size.y):
+		for x in range(grown.position.x, grown.position.x + grown.size.x):
+			var cell: Vector2i = Vector2i(x, z)
+			if not td.in_disc(cell):
+				continue
+			for side in _SIDES:
+				if not td.in_disc(cell + side[0]):
+					return true
+	return false
 
 
-## The Y the rock band starts at for a given rim height. Lifted to the waterline
-## where the rim is submerged: without this there would be a visible GAP between the
-## cut edge of the water plane and the top of the rock.
-static func rock_top_y(rim_height: float) -> float:
-	return maxf(rim_height, TerrainData.SEA_LEVEL)
+## Y the rock wall reaches down to.
+static func bottom_y() -> float:
+	return TerrainData.SEA_LEVEL - SKIRT_DEPTH
 
+
+# --- Build --------------------------------------------------------------------------
 
 func rebuild(td: TerrainData) -> void:
 	if td == null:
 		return
 	_ensure_nodes()
-	var n: int = segment_count(td)
-	var c: float = td.disc_center()
-	var rock_r: float = td.disc_radius() - ROCK_INSET
-	var fall_r: float = td.disc_radius() + WATERFALL_OFFSET
-
-	# Sample the rim once; both bands and the cap reuse it.
-	var dirs: PackedVector2Array = PackedVector2Array()
-	var tops: PackedFloat32Array = PackedFloat32Array()
-	var wet: PackedByteArray = PackedByteArray()
-	dirs.resize(n)
-	tops.resize(n)
-	wet.resize(n)
-	for i in range(n):
-		var a: float = TAU * float(i) / float(n)
-		var dir: Vector2 = Vector2(cos(a), sin(a))
-		dirs[i] = dir
-		var h: float = td.get_height(c + dir.x * rock_r, c + dir.y * rock_r)
-		tops[i] = rock_top_y(h)
-		wet[i] = 1 if h <= TerrainData.SEA_LEVEL else 0
-
-	var bottom_y: float = TerrainData.SEA_LEVEL - SKIRT_DEPTH
-	_rock.mesh = _build_band(dirs, tops, c, rock_r, bottom_y, true)
-	_bottom.mesh = _build_cap(dirs, c, rock_r, bottom_y)
-	_waterfall.mesh = _build_waterfall(dirs, wet, c, fall_r)
+	var sides: Array = exposed_sides(td)
+	_rock.mesh = _build_wall(td, sides)
+	_bottom.mesh = _build_cap(td, sides)
+	_waterfall.mesh = _build_waterfall(td, sides)
 	_waterfall.visible = _waterfall.mesh != null
 
 
-# --- Mesh construction --------------------------------------------------------------
+## Horizontal UV along the rim: arc length from the map centre's angle, in tiles.
+func _rim_u(p: Vector3, center: float) -> float:
+	var r: float = Vector2(p.x - center, p.z - center).length()
+	return atan2(p.z - center, p.x - center) * r / WATERFALL_TILE
 
-## Vertical band around the rim, from `tops[i]` down to `bottom_y`. Wraps closed.
-## `shade` darkens the lower edge so the drop reads as depth for free.
-func _build_band(dirs: PackedVector2Array, tops: PackedFloat32Array,
-		c: float, radius: float, bottom_y: float, shade: bool) -> ArrayMesh:
-	var n: int = dirs.size()
-	if n < 3:
+
+## World position of a cell-vertex, plus its terrain height.
+func _vertex_world(td: TerrainData, cell: Vector2i, local: Vector2i) -> Vector3:
+	var vx: int = cell.x + local.x
+	var vz: int = cell.y + local.y
+	return Vector3(float(vx) * TerrainData.CELL_SIZE,
+		td.vertex_height(vx, vz), float(vz) * TerrainData.CELL_SIZE)
+
+
+## The vertical rock wall: one quad per exposed cell side, from the two REAL terrain
+## vertex heights of that side down to the slab's bottom.
+func _build_wall(td: TerrainData, sides: Array) -> ArrayMesh:
+	if sides.is_empty():
 		return null
 	var verts: PackedVector3Array = PackedVector3Array()
 	var normals: PackedVector3Array = PackedVector3Array()
 	var colors: PackedColorArray = PackedColorArray()
 	var indices: PackedInt32Array = PackedInt32Array()
-	var rock_top: Color = Terrain.COLOR_ROCK
-	var rock_bottom: Color = Terrain.COLOR_ROCK * BOTTOM_SHADE if shade \
-		else Terrain.COLOR_ROCK
-	rock_bottom.a = 1.0
-	for i in range(n):
-		var dir: Vector2 = dirs[i]
-		var outward: Vector3 = Vector3(dir.x, 0.0, dir.y)
-		verts.append(Vector3(c + dir.x * radius, tops[i], c + dir.y * radius))
-		verts.append(Vector3(c + dir.x * radius, bottom_y, c + dir.y * radius))
-		normals.append(outward)
-		normals.append(outward)
-		colors.append(rock_top)
-		colors.append(rock_bottom)
-	for i in range(n):
-		var a0: int = i * 2
-		var a1: int = a0 + 1
-		var b0: int = ((i + 1) % n) * 2
-		var b1: int = b0 + 1
-		# Clockwise seen from outside (+outward), matching Godot's front faces.
-		indices.append(a0); indices.append(b0); indices.append(a1)
-		indices.append(b0); indices.append(b1); indices.append(a1)
+	var top_col: Color = Terrain.COLOR_ROCK
+	var bottom_col: Color = Terrain.COLOR_ROCK * BOTTOM_SHADE
+	bottom_col.a = 1.0
+	var floor_y: float = bottom_y()
+	for entry in sides:
+		var cell: Vector2i = entry[0]
+		var side: Array = _SIDES[entry[1]]
+		var a: Vector3 = _vertex_world(td, cell, side[1])
+		var b: Vector3 = _vertex_world(td, cell, side[2])
+		var outward: Vector3 = Vector3(float(side[0].x), 0.0, float(side[0].y))
+		var along: Vector3 = (b - a)
+		along.y = 0.0
+		if along.length_squared() > 0.000001:
+			along = along.normalized()
+		# Pushed out, and stretched at both ends so convex corners stay closed.
+		var push: Vector3 = outward * WALL_OUT
+		var a_top: Vector3 = a + push - along * WALL_OUT
+		var b_top: Vector3 = b + push + along * WALL_OUT
+		var base: int = verts.size()
+		verts.append(a_top)
+		verts.append(b_top)
+		verts.append(Vector3(a_top.x, floor_y, a_top.z))
+		verts.append(Vector3(b_top.x, floor_y, b_top.z))
+		for i in range(4):
+			normals.append(outward)
+		colors.append(top_col)
+		colors.append(top_col)
+		colors.append(bottom_col)
+		colors.append(bottom_col)
+		indices.append(base); indices.append(base + 1); indices.append(base + 2)
+		indices.append(base + 1); indices.append(base + 3); indices.append(base + 2)
 	return _assemble(verts, normals, colors, indices)
 
 
-## Downward-facing disc that closes the slab (the user's "endliche Scheibe mit
-## geschlossener Unterseite"). A triangle fan around a centre vertex.
-func _build_cap(dirs: PackedVector2Array, c: float, radius: float,
-		bottom_y: float) -> ArrayMesh:
-	var n: int = dirs.size()
-	if n < 3:
+## Downward-facing cap that closes the slab. One triangle per exposed side, fanned to
+## the map centre — the staircase boundary is radially monotone around the centre, so a
+## fan covers it exactly without needing the edges sorted into a ring.
+func _build_cap(td: TerrainData, sides: Array) -> ArrayMesh:
+	if sides.is_empty():
 		return null
 	var verts: PackedVector3Array = PackedVector3Array()
 	var normals: PackedVector3Array = PackedVector3Array()
 	var colors: PackedColorArray = PackedColorArray()
 	var indices: PackedInt32Array = PackedInt32Array()
-	var under: Color = Terrain.COLOR_ROCK * BOTTOM_SHADE
-	under.a = 1.0
-	verts.append(Vector3(c, bottom_y, c))
-	normals.append(Vector3.DOWN)
-	colors.append(under)
-	for i in range(n):
-		var dir: Vector2 = dirs[i]
-		verts.append(Vector3(c + dir.x * radius, bottom_y, c + dir.y * radius))
-		normals.append(Vector3.DOWN)
-		colors.append(under)
-	for i in range(n):
-		var a: int = 1 + i
-		var b: int = 1 + (i + 1) % n
-		# Wound so the face points DOWN (seen from below it is clockwise).
-		indices.append(0); indices.append(a); indices.append(b)
+	var col: Color = Terrain.COLOR_ROCK * BOTTOM_SHADE
+	col.a = 1.0
+	var floor_y: float = bottom_y()
+	var c: float = td.disc_center()
+	for entry in sides:
+		var cell: Vector2i = entry[0]
+		var side: Array = _SIDES[entry[1]]
+		var a: Vector3 = _vertex_world(td, cell, side[1])
+		var b: Vector3 = _vertex_world(td, cell, side[2])
+		var base: int = verts.size()
+		verts.append(Vector3(c, floor_y, c))
+		verts.append(Vector3(a.x, floor_y, a.z))
+		verts.append(Vector3(b.x, floor_y, b.z))
+		for i in range(3):
+			normals.append(Vector3.DOWN)
+			colors.append(col)
+		indices.append(base); indices.append(base + 1); indices.append(base + 2)
 	return _assemble(verts, normals, colors, indices)
 
 
-## The waterfall band: only the runs of submerged samples become geometry, so a map
-## with a dry rim produces no mesh at all (and no draw call).
-func _build_waterfall(dirs: PackedVector2Array, wet: PackedByteArray,
-		c: float, radius: float) -> ArrayMesh:
-	var n: int = dirs.size()
-	if n < 3:
-		return null
-	var top_y: float = TerrainData.SEA_LEVEL + Terrain.WATER_SURFACE_LIFT
-	var bottom_y: float = TerrainData.SEA_LEVEL - WATERFALL_HEIGHT
+## The waterfall: one quad per exposed side whose cell is under water, from the
+## waterline down. Aligned to the very same edge as the sea's cut, so the surface flows
+## over the lip instead of stopping short of it.
+func _build_waterfall(td: TerrainData, sides: Array) -> ArrayMesh:
 	var verts: PackedVector3Array = PackedVector3Array()
 	var normals: PackedVector3Array = PackedVector3Array()
 	var uvs: PackedVector2Array = PackedVector2Array()
 	var indices: PackedInt32Array = PackedInt32Array()
-	var arc: float = TAU * radius / float(n)
+	# Starts a hair ABOVE the sea surface so the lip tucks under the waves instead of
+	# leaving a seam at the waterline.
+	var top_y: float = TerrainData.SEA_LEVEL + Terrain.WATER_SURFACE_LIFT + 0.05
+	var floor_y: float = TerrainData.SEA_LEVEL - WATERFALL_HEIGHT
 	var v_max: float = WATERFALL_HEIGHT / WATERFALL_TILE
-	var any: bool = false
-	for i in range(n):
-		var j: int = (i + 1) % n
-		if wet[i] == 0 or wet[j] == 0:
-			continue   # only spans whose BOTH ends are under water get a quad
-		any = true
+	var c: float = td.disc_center()
+	for entry in sides:
+		var cell: Vector2i = entry[0]
+		if not cell_is_submerged(td, cell):
+			continue
+		var side: Array = _SIDES[entry[1]]
+		var a: Vector3 = _vertex_world(td, cell, side[1])
+		var b: Vector3 = _vertex_world(td, cell, side[2])
+		var outward: Vector3 = Vector3(float(side[0].x), 0.0, float(side[0].y))
+		var along: Vector3 = (b - a)
+		along.y = 0.0
+		if along.length_squared() > 0.000001:
+			along = along.normalized()
+		var push: Vector3 = outward * (WALL_OUT + WATERFALL_OUT)
+		var pa: Vector3 = a + push - along * WALL_OUT
+		var pb: Vector3 = b + push + along * WALL_OUT
+		# U comes from the ANGLE around the map centre, not from a running total over the
+		# sides. `sides` is in cell-scan order, not ring order, so an accumulated run
+		# would hand neighbouring quads unrelated streak phases and draw a seam at every
+		# cell. The angle is continuous around the whole rim (bar the one quad at ±pi).
+		var u0: float = _rim_u(pa, c)
+		var u1: float = _rim_u(pb, c)
+		if absf(u1 - u0) > TAU * 0.5 * td.disc_radius() / WATERFALL_TILE:
+			u1 = u0 + TerrainData.CELL_SIZE / WATERFALL_TILE   # the wrap-around quad
 		var base: int = verts.size()
-		for k in [i, j]:
-			var dir: Vector2 = dirs[k]
-			var outward: Vector3 = Vector3(dir.x, 0.0, dir.y)
-			verts.append(Vector3(c + dir.x * radius, top_y, c + dir.y * radius))
-			verts.append(Vector3(c + dir.x * radius, bottom_y, c + dir.y * radius))
+		verts.append(Vector3(pa.x, top_y, pa.z))
+		verts.append(Vector3(pb.x, top_y, pb.z))
+		verts.append(Vector3(pa.x, floor_y, pa.z))
+		verts.append(Vector3(pb.x, floor_y, pb.z))
+		for i in range(4):
 			normals.append(outward)
-			normals.append(outward)
-			var u: float = float(k) * arc / WATERFALL_TILE
-			uvs.append(Vector2(u, 0.0))
-			uvs.append(Vector2(u, v_max))
-		indices.append(base); indices.append(base + 2); indices.append(base + 1)
-		indices.append(base + 2); indices.append(base + 3); indices.append(base + 1)
-	if not any:
+		uvs.append(Vector2(u0, 0.0))
+		uvs.append(Vector2(u1, 0.0))
+		uvs.append(Vector2(u0, v_max))
+		uvs.append(Vector2(u1, v_max))
+		indices.append(base); indices.append(base + 1); indices.append(base + 2)
+		indices.append(base + 1); indices.append(base + 3); indices.append(base + 2)
+	if indices.is_empty():
 		return null
 	var arrays: Array = []
 	arrays.resize(Mesh.ARRAY_MAX)
@@ -249,6 +293,8 @@ func _build_waterfall(dirs: PackedVector2Array, wet: PackedByteArray,
 
 func _assemble(verts: PackedVector3Array, normals: PackedVector3Array,
 		colors: PackedColorArray, indices: PackedInt32Array) -> ArrayMesh:
+	if indices.is_empty():
+		return null
 	var arrays: Array = []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = verts
@@ -273,8 +319,8 @@ func _make_instance(node_name: String, mat: Material) -> MeshInstance3D:
 	var mi: MeshInstance3D = MeshInstance3D.new()
 	mi.name = node_name
 	mi.material_override = mat
-	# A 40 m band around the whole map casting through every shadow cascade is pure
-	# waste — and the sun never lights the underside anyway.
+	# A wall around the whole map casting through every shadow cascade is pure waste,
+	# and the sun never lights the underside anyway.
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mi)
 	return mi
@@ -284,6 +330,10 @@ func _rock_material() -> Material:
 	var mat: StandardMaterial3D = StandardMaterial3D.new()
 	mat.vertex_color_use_as_albedo = true
 	mat.roughness = 1.0
+	# Two-sided: the wall and the cap are a per-edge patchwork rather than one closed
+	# hull, so a winding slip must not turn a stretch of rim invisible. A few thousand
+	# triangles make the saved culling irrelevant.
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	return mat
 
 

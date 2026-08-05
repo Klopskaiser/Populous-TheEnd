@@ -8643,3 +8643,58 @@ Zellen — der Void-Vorfilter wirkt.
   ein **divergierter Kampfverlauf** auf der größeren Karte — beobachten, ob im
   Nutzertest auffällt, dass die absoluten KI-Radien (`AI_BUILDER_WALK_RADIUS` 80,
   `AI_FORWARD_DEPOT_DISTANCE` 35) nicht mit den 12,8 % längeren Wegen mitgewachsen sind.
+
+### Nachtrag 1 — drei Randfehler aus dem Nutzertest (2026-08-05)
+
+Nutzerreport nach der ersten Sichtprüfung: (1) am Rand liegt unter dem Land noch
+Wasser, „sieht wie eine Torte aus" — oben Land, darunter Wasser, dann der Felsblock;
+(2) Ränder von Erhebungen haben keinen Abschluss, sie sind einfach beschnitten
+(Bergpass, Plateau); (3) Wasser am Rand fließt nicht über, es hört einfach auf.
+
+**Eine gemeinsame Ursache, zwei Fehler.** Der Rand wurde aus einem **glatten Kreis**
+von Winkelstichproben gebaut (~1 m Bogen), das Terrain-Mesh endet aber auf einer
+**Zellen-Treppe** (`_build_chunk_mesh` cullt ganze Zellen). Beide Kanten konnten nicht
+zusammenpassen: wo die Treppe über den Kreis hinausragte, stand der Querschnitt der
+Zelle offen — das ist (2). Und die Wasserfläche wurde bei `disc_radius + 0,5`
+abgeschnitten, während die Felswand bei `−0,01` und der Wasserfall bei `+0,02` saß:
+das Meer **überhing die Wand um 51 cm**. Das ist der Wasserstreifen aus (1), und auf
+der Insel verdeckte derselbe Überhang den Wasserfall, sodass das Wasser scheinbar
+einfach aufhört — (3).
+
+**Behoben:**
+
+- `TerrainRim` baut jetzt aus den **exponierten Zellkanten** statt aus einem Kreis:
+  jede Scheibenzelle mit einem Nicht-Scheiben-Nachbarn liefert pro offener Seite ein
+  Wandquad von ihren **echten Vertexhöhen** bis zur Unterseite. Mesh-Kante und Wand
+  sind damit konstruktionsbedingt dieselbe Linie — eine abgeschnittene Bergflanke wird
+  in ihrer vollen Höhe geschlossen. Die Bodenplatte ist ein Dreiecksfächer über
+  denselben Kanten (die Treppe ist radial monoton, ein Fächer deckt sie exakt).
+- Die Wand wird 6 cm **nach außen** geschoben und an beiden Enden um denselben Betrag
+  verlängert. Der Versatz legt sie eindeutig **vor** die Schnittkante des Meeres, die
+  sonst exakt koplanar mit ihr liegt (die Haarlinie war die Mittelschicht der „Torte");
+  die Verlängerung schließt die Kerben, die der Versatz an konvexen Treppenecken sonst
+  aufreißt.
+- Die **Wasserfläche wird mit derselben Zellmaske** geschnitten statt mit einem Radius:
+  `water.gdshader` bekommt eine `R8`-Maskentextur (`Terrain._build_disc_mask()`, size²
+  Bytes, ändert sich nie) und verwirft Fragmente außerhalb. Meereskante = Landkante,
+  überall.
+- Der Wasserfall sitzt 5 cm vor der Wand, beginnt 5 cm **über** der Oberfläche (die
+  Lippe steckt unter den Wellen, kein Naht an der Wasserlinie) und läuft die volle
+  `WATERFALL_HEIGHT` nach unten aus.
+- Das Felsmaterial ist **zweiseitig** (`CULL_DISABLED`): Wand und Platte sind ein
+  Flickwerk aus Einzelkanten, kein geschlossener Hüllkörper, und ein Wicklungsfehler
+  darf keine Randstrecke unsichtbar machen. Bei wenigen tausend Dreiecken ist das
+  gesparte Culling irrelevant.
+- Die horizontale Wasserfall-UV kommt aus dem **Winkel** um die Kartenmitte, nicht aus
+  einer laufenden Summe über die Seiten: `exposed_sides()` liefert Zell-Scan-Reihenfolge,
+  keine Ringreihenfolge, eine Summe hätte Nachbarquads unzusammenhängende
+  Streifenphasen gegeben und an jeder Zelle eine Naht gezeichnet.
+
+Ersetzte Statics: `segment_is_submerged`/`segment_count`/`waterfall_segments`/
+`rock_top_y` → `exposed_sides`/`cell_is_submerged`/`waterfall_side_count`/`bottom_y`.
+`tests/test_disc_optics.gd` prüft jetzt, dass jede exponierte Mesh-Kante eine Wand
+bekommt, dass die Wand einen bis an den Rand laufenden Grat in **seiner** Höhe
+schließt, dass die Wasserfall-Lippe an der Oberfläche beginnt und dass Meeresmaske und
+begehbare Scheibe texelweise übereinstimmen. Suite **4158 grün**, Ladecheck sauber.
+
+**Weiterhin offen:** erneute Sichtprüfung durch den Nutzer.

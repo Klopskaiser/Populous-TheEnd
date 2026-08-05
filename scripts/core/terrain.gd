@@ -154,10 +154,8 @@ func _ensure_water() -> void:
 		COLOR_WATER.r, COLOR_WATER.g, COLOR_WATER.b))
 	smat.set_shader_parameter("crest", Vector3(
 		COLOR_WATER_HIGHLIGHT.r, COLOR_WATER_HIGHLIGHT.g, COLOR_WATER_HIGHLIGHT.b))
-	smat.set_shader_parameter("disc_center",
-		Vector2(data.disc_center(), data.disc_center()))
-	# A hair PAST the walkable rim so the sea meets the rock band without a seam.
-	smat.set_shader_parameter("disc_radius", data.disc_radius() + 0.5)
+	smat.set_shader_parameter("disc_mask", _build_disc_mask())
+	smat.set_shader_parameter("map_size", float(data.size))
 	var water_tex: Texture2D = AssetLibrary.texture("textures/terrain/water.png")
 	if water_tex != null:
 		smat.set_shader_parameter("albedo_tex", water_tex)
@@ -165,6 +163,19 @@ func _ensure_water() -> void:
 		smat.set_shader_parameter("uv_scale", float(data.size) * 0.05)
 	water.material_override = smat
 	add_child(water)
+
+
+## One-byte-per-cell mask of the disc, for the water shader. Exactly the cells the
+## chunk mesh keeps, so the sea ends on the same staircase the land does instead of on
+## a circle that overhangs it. Cheap (size² bytes) and never needs updating — the disc
+## depends only on the map size, which is fixed after TerrainData._init.
+func _build_disc_mask() -> ImageTexture:
+	var img: Image = Image.create(data.size, data.size, false, Image.FORMAT_R8)
+	for z in range(data.size):
+		for x in range(data.size):
+			var v: float = 1.0 if data.in_disc(Vector2i(x, z)) else 0.0
+			img.set_pixel(x, z, Color(v, v, v))
+	return ImageTexture.create_from_image(img)
 
 
 # --- Mesh building -----------------------------------------------------------

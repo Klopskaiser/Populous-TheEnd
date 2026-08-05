@@ -68,27 +68,59 @@ func test_no_triangle_lies_outside_the_disc() -> void:
 	terrain.free()
 
 
-# --- Rim skirt ---------------------------------------------------------------------
+# --- Rim wall ----------------------------------------------------------------------
 
-func test_rim_skirt_top_never_dips_below_the_water_line() -> void:
-	# The no-hole rule: where the rim is submerged, the rock band's top is lifted to
-	# the waterline. Without it there is a visible gap between the cut edge of the sea
-	# and the top of the rock.
-	var below: int = 0
-	for h in [-3.0, 0.0, TerrainData.SEA_LEVEL - 0.1, TerrainData.SEA_LEVEL,
-			TerrainData.SEA_LEVEL + 4.0, 30.0]:
-		if TerrainRim.rock_top_y(h) < TerrainData.SEA_LEVEL:
-			below += 1
-	check(below == 0, "the rock band always reaches at least the waterline")
-	check(is_equal_approx(TerrainRim.rock_top_y(30.0), 30.0),
-		"and follows the terrain where the rim is high and dry")
+## The regression the per-edge rewrite fixes: the rim was built from a smooth ring of
+## angular samples while the terrain mesh ends on a CELL staircase, so wherever the
+## staircase stuck out past the ring an elevation's cross-section stood open (user
+## report: "Ränder von Erhebungen haben keinen Abschluss, sie sind einfach beschnitten").
+## Wall and mesh edge now come from the same predicate, so this pins that they agree.
+func test_every_exposed_mesh_edge_gets_a_wall() -> void:
+	var td: TerrainData = _flat()
+	var sides: Array = TerrainRim.exposed_sides(td)
+	check(sides.size() > 300,
+		"the rim of a 128 disc has a few hundred exposed sides (%d)" % sides.size())
+	var wrong: int = 0
+	for entry in sides:
+		var cell: Vector2i = entry[0]
+		# Every listed side must be a real boundary: cell inside, neighbour outside.
+		if not td.in_disc(cell):
+			wrong += 1
+	check(wrong == 0, "every exposed side belongs to a cell that is actually meshed")
+	# And the count matches a boundary, not an area: a disc of radius r has a cell
+	# boundary on the order of the circumference, not of r squared.
+	check(sides.size() < td.size * td.size / 8,
+		"the wall follows the boundary, not the interior (%d sides)" % sides.size())
 
 
-func test_rim_is_sampled_finely_enough_to_look_round() -> void:
-	var small: int = TerrainRim.segment_count(_flat(MapGenerator.STANDARD_SIZE))
-	var large: int = TerrainRim.segment_count(_flat(MapGenerator.LARGE_SIZE))
-	check(small > 300 and small < 700, "standard map: ~1 m per segment (%d)" % small)
-	check(large > small, "the large map gets proportionally more segments (%d)" % large)
+func test_wall_spans_from_the_real_terrain_height_down_to_the_slab() -> void:
+	# A wall built from the true vertex heights is what closes a cut-off ridge; a wall
+	# built from one averaged sample per arc metre is what left it open.
+	var td: TerrainData = _flat()
+	# A ridge crossing the rim, like bergpass has.
+	var mid: int = td.size / 2
+	for vz in range(mid - 3, mid + 4):
+		for vx in range(td.verts):
+			td.set_vertex_height(vx, vz, 26.0)
+	var terrain: Terrain = Terrain.new()
+	terrain.build(td)
+	var rim: TerrainRim = terrain.get_node_or_null("Rim") as TerrainRim
+	check(rim != null, "the rim node exists")
+	var rock: MeshInstance3D = rim.get_node_or_null("Rock") as MeshInstance3D
+	check(rock != null and rock.mesh != null, "the rock wall is meshed")
+	var arrays: Array = (rock.mesh as ArrayMesh).surface_get_arrays(0)
+	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var highest: float = -INF
+	var lowest: float = INF
+	for v in verts:
+		highest = maxf(highest, v.y)
+		lowest = minf(lowest, v.y)
+	check(highest > 20.0,
+		"the wall reaches the ridge's own height where the ridge meets the rim (%.1f)"
+			% highest)
+	check(is_equal_approx(lowest, TerrainRim.bottom_y()),
+		"and it reaches down to the slab's underside (%.1f)" % lowest)
+	terrain.free()
 
 
 func test_waterfall_covers_the_island_rim_and_nothing_on_the_land_maps() -> void:
@@ -96,14 +128,65 @@ func test_waterfall_covers_the_island_rim_and_nothing_on_the_land_maps() -> void
 	# water at its rim, so only the island has a waterfall. Three of four maps read as
 	# bare rock — a deliberate trade for playable area.
 	var island: TerrainData = MapGenerator.create_terrain("island", SEED)
-	var wet: PackedInt32Array = TerrainRim.waterfall_segments(island)
-	check(wet.size() == TerrainRim.segment_count(island),
-		"the island pours off all the way round (%d of %d segments)"
-			% [wet.size(), TerrainRim.segment_count(island)])
+	var total: int = TerrainRim.exposed_sides(island).size()
+	var wet: int = TerrainRim.waterfall_side_count(island)
+	check(wet == total,
+		"the island pours off all the way round (%d of %d sides)" % [wet, total])
 	for map_id in ["bergpass", "plateau"]:
 		var td: TerrainData = MapGenerator.create_terrain(map_id, SEED)
-		check(TerrainRim.waterfall_segments(td).is_empty(),
+		check(TerrainRim.waterfall_side_count(td) == 0,
 			"%s has a dry rim: bare rock, no waterfall" % map_id)
+
+
+func test_waterfall_hangs_from_the_waterline_downward() -> void:
+	# "Es hört einfach auf" was the sea overhanging the fall. The band has to start AT
+	# the surface and run continuously down past it.
+	var td: TerrainData = MapGenerator.create_terrain("island", SEED)
+	var terrain: Terrain = Terrain.new()
+	terrain.build(td)
+	var rim: TerrainRim = terrain.get_node_or_null("Rim") as TerrainRim
+	var fall: MeshInstance3D = rim.get_node_or_null("Waterfall") as MeshInstance3D
+	check(fall != null and fall.mesh != null and fall.visible,
+		"the island has a visible waterfall mesh")
+	var arrays: Array = (fall.mesh as ArrayMesh).surface_get_arrays(0)
+	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var top: float = -INF
+	var bottom: float = INF
+	for v in verts:
+		top = maxf(top, v.y)
+		bottom = minf(bottom, v.y)
+	check(top >= TerrainData.SEA_LEVEL,
+		"the lip starts at or above the waterline (%.2f)" % top)
+	check(bottom <= TerrainData.SEA_LEVEL - Balance.WATERFALL_HEIGHT + 0.01,
+		"and it falls the full WATERFALL_HEIGHT (%.1f)" % bottom)
+	terrain.free()
+
+
+func test_the_sea_is_cut_on_the_same_staircase_as_the_land() -> void:
+	# The "Torte": a circular water cut overhung the rock wall by up to half a metre,
+	# so at the rim you saw land, then a strip of water below it, then rock. The sea now
+	# uses the CELL mask, so its edge is the land's edge.
+	var td: TerrainData = _flat()
+	var terrain: Terrain = Terrain.new()
+	terrain.build(td)
+	var water: MeshInstance3D = terrain.get_node_or_null("Water") as MeshInstance3D
+	check(water != null, "the sea plane exists")
+	var mat: ShaderMaterial = water.material_override as ShaderMaterial
+	check(mat != null, "and it is the shader material (the only path since 10j)")
+	var mask = mat.get_shader_parameter("disc_mask")
+	check(mask != null and mask is Texture2D, "the disc mask is fed to the shader")
+	check(is_equal_approx(float(mat.get_shader_parameter("map_size")), float(td.size)),
+		"with the map size for the UV mapping")
+	# The mask must be the same answer as in_disc, texel for texel.
+	var img: Image = (mask as Texture2D).get_image()
+	var mismatch: int = 0
+	for z in range(0, td.size, 5):
+		for x in range(0, td.size, 5):
+			var wet: bool = img.get_pixel(x, z).r >= 0.5
+			if wet != td.in_disc(Vector2i(x, z)):
+				mismatch += 1
+	check(mismatch == 0, "sea mask and walkable disc agree everywhere sampled")
+	terrain.free()
 
 
 func test_touches_rim_only_fires_for_deformations_at_the_edge() -> void:
