@@ -547,7 +547,7 @@ const WOOD_DEPOT_FOOTPRINT: Vector2i = Vector2i(1, 1)
 const REINCARNATION_SITE_FOOTPRINT: Vector2i = Vector2i(3, 3)
 
 # --- Hütte (Phase 10f: klein und billig, in vier Stufen zum Wohnpalast) ---
-const HUT_WOOD_COST: int = 8               # war 12
+const HUT_WOOD_COST: int = 7               # war 12, dann 8 (10h)
 const HUT_HP: int = 300                    # == HUT_HP_PER_STAGE[0]
 ## Plätze/Arbeiter/Leben je Ausbaustufe (Index = Stufe 0..4). Stufe 4 bringt
 ## bewusst +11 statt +8 Plätze — der Wohnpalast ist der Lohn für den Vollausbau.
@@ -564,7 +564,7 @@ const HUT_SPAWN_SECONDS_PER_WORKER: float = 30.0
 ## Wartezeit nach Fertigstellung bzw. nach dem letzten Ausbau, bis das nächste
 ## Upgrade fällig wird.
 const HUT_UPGRADE_DELAY: float = 90.0
-const HUT_UPGRADE_WOOD_COST: int = 5
+const HUT_UPGRADE_WOOD_COST: int = 4       # war 5 (10h)
 ## Bauzeit-Faktor des Ausbaus auf Brave.BUILD_RATE.
 const HUT_UPGRADE_RATE_FACTOR: float = 1.0
 ## Ein Ausbau STARTET nur, wenn in diesem Radius überhaupt Holz erreichbar ist
@@ -587,7 +587,7 @@ const TEMPLE_HP: int = 440
 const TEMPLE_TRAINING_TIME: float = 5.0
 
 # --- Feuertempel (Feuerkrieger) ---
-const FIREWARRIOR_CAMP_WOOD_COST: int = 20
+const FIREWARRIOR_CAMP_WOOD_COST: int = 18  # war 20 (10h)
 const FIREWARRIOR_CAMP_HP: int = 600
 const FIREWARRIOR_CAMP_TRAINING_TIME: float = 4.0
 
@@ -600,7 +600,7 @@ const FORESTER_MANA_PER_WORKER: float = 1.5
 const FORESTER_PLANT_WORK_PER_TREE: float = 50.0
 
 # --- Katapultwerkstatt ---
-const WORKSHOP_WOOD_COST: int = 13
+const WORKSHOP_WOOD_COST: int = 12          # war 13 (10h)
 const WORKSHOP_HP: int = 350
 ## Arbeiter-Sekunden pro Katapult (3 Arbeiter -> 20 s).
 ## Regel: Produktionsaufwand = Holzkosten des Fahrzeugs x 10 Arbeiter-Sekunden.
@@ -608,7 +608,7 @@ const WORKSHOP_WORK_PER_CATAPULT: float = 60.0
 const WORKSHOP_CATAPULT_WOOD: int = 6
 
 # --- Feuerrammenwerkstatt ---
-const FIRERAM_WORKSHOP_WOOD_COST: int = 11
+const FIRERAM_WORKSHOP_WOOD_COST: int = 10  # war 11 (10h)
 const FIRERAM_WORKSHOP_HP: int = 350
 ## Arbeiter-Sekunden pro Feuerramme (3 Arbeiter -> ~13 s); 4 Holz x 10.
 const FIRERAM_WORK_PER_RAM: float = 40.0

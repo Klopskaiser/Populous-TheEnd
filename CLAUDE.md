@@ -96,18 +96,18 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
 
 - **Holz** ist die **einzige physische Ressource**. Braves sammeln es von **wilden Bäumen**;
   es wird für Bau und Ausbau von Gebäuden benötigt.
-- **Hütten (Huts):** **8 Holz**, Platz für **10** Bevölkerung — und **ausbaubar in vier
+- **Hütten (Huts):** **7 Holz**, Platz für **10** Bevölkerung — und **ausbaubar in vier
   Stufen bis zum Wohnpalast** (Phase 10f):
 
   | | Stufe 0 „Hütte" | Stufe 1 | Stufe 2 | Stufe 3 | Stufe 4 „Wohnpalast" |
   |---|---|---|---|---|---|
-  | Holz (kumuliert) | **8** | 13 | 18 | 23 | **28** |
+  | Holz (kumuliert) | **7** | 11 | 15 | 19 | **23** |
   | Bevölkerungsplätze | **10** | 18 | 26 | 34 | **45** |
   | Arbeiterplätze | **2** | 3 | 4 | 5 | **6** |
 
   - **Ausbau:** Ein Timer (90 s nach Fertigstellung bzw. nach dem letzten Ausbau) macht
     die nächste Stufe **fällig**; ist sie erlaubt und liegt Holz in Reichweite, verlässt
-    die **gesamte Besatzung** die Hütte, holt **5 Holz** und baut aus. Eine ausbauende
+    die **gesamte Besatzung** die Hütte, holt **4 Holz** und baut aus. Eine ausbauende
     Hütte produziert deshalb **nichts**, **behält aber ihren Wohnraum**. Der Fortschritt
     läuft über den vorhandenen Balken, beim Ausbau **blau** (Produktion gold, Abriss rot).
     Gesperrt wird der Ausbau stammweit über die Schaltfläche **„Ausbau erlauben"** beim
@@ -125,12 +125,13 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
     (füllt Hütten bis zur Stufen-Kapazität). Automatisch werden nur **nahe idle** Braves
     eingezogen.
 - **Trainingsgebäude:** **Kaserne** (Krieger, 5 Holz/3 s), **Feuertempel** (Feuerkrieger,
-  **20 Holz**/4 s, großer vieleckiger Bau, 8×8), **Tempel** (Prediger, **15 Holz**/5 s,
+  **18 Holz**/4 s, großer vieleckiger Bau, 8×8), **Tempel** (Prediger, **15 Holz**/5 s,
   doppelt so groß, 6×6). Ablauf: Brave betritt das Gebäude → kommt nach Ausbildungszeit als
   entsprechende Kampfeinheit heraus → läuft zum Rally Point.
-- **Weitere Gebäude:** **Förster** (Setzlinge/Holzwirtschaft, Phase 7d), **Werkstatt**
-  (baut Belagerungswaffen, Phase 7f), **Wachturm** (4 Holz, 2 Besatzungsplätze mit
-  Reichweitenbonus, Phase 7h).
+- **Weitere Gebäude:** **Förster** (Setzlinge/Holzwirtschaft, Phase 7d),
+  **Katapultwerkstatt** (**12 Holz**) und **Feuerrammenwerkstatt** (**10 Holz**, beide
+  Phase 7f), **Luftschiffwerft** (20 Holz), **Wachturm** (4 Holz, 2 Besatzungsplätze mit
+  Reichweitenbonus, Phase 7h), **Holzstation** (1 Holz, 1×1, Lager für 20 Holz).
 - **Reinkarnationsplatz:** Respawn-Ort der Schamanin (siehe §4).
 - **Gebäudezerstörung (4 Zerstörungsstufen):** Stufe 0 = intakt. Stufen 1–3 (ab 30 % /
   60 % / 90 % Schaden): Gebäude **nicht nutzbar (keinerlei Produktion)**, per Rechtsklick

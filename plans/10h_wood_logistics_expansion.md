@@ -77,6 +77,26 @@ sie gilt die **automatische** Ablieferung.
 
 ---
 
+## Teil 1b — Baukosten gesenkt (Nutzervorgabe 2026-08-05)
+
+| Gebäude | vorher | jetzt |
+|---|---|---|
+| Hütte (Stufe 0) | 8 | **7** |
+| Hütten-Ausbaustufe (je) | 5 | **4** |
+| Feuertempel | 20 | **18** |
+| Katapultwerkstatt | 13 | **12** |
+| Feuerrammenwerkstatt | 11 | **10** |
+
+Kumulierter Hüttenpreis damit **7 / 11 / 15 / 19 / 23** (vorher 8/13/18/23/28), der
+Wohnpalast also 23 statt 28 Holz. `CLAUDE.md` §5 ist mitgezogen.
+
+**Sechs Tests hingen an den alten Zahlen** (Reparaturkosten, Baustellen-HP-Anteil,
+Abriss-Erstattung). Sie rechnen jetzt aus `Balance.HUT_WOOD_COST` /
+`HUT_UPGRADE_WOOD_COST` statt aus festen Werten — die Hüttenkosten sind inzwischen
+dreimal gesunken (12 → 8 → 7), und jede feste Zahl brach dabei erneut.
+
+---
+
 ## Teil 2 — Regale an den Hütten (Ausbau-Depots)
 
 Analog zum Werkstatt-Regal aus 10g Teil 4, dieselbe Mechanik, anderer Anlass.

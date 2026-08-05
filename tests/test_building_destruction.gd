@@ -146,9 +146,11 @@ func test_repair_stalls_without_wood() -> void:
 	var w: Dictionary = _make_world()
 	var hut: Building = w.bm.place(HUT_SCENE, w.tribe0, Vector2i(30, 30), 0, true)
 	hut.take_damage(270)   # 90% damage, health 30
-	# 10f: the hut costs 8 wood, so 90 % damage owes floor(0.9 * 8) = 7 (was 10).
-	check(hut.repair_wood_missing() == 7,
-		"90% damage on an 8-wood hut owes floor(7.2) = 7 wood")
+	# Aus Balance abgeleitet statt hart: die Huettenkosten sind mehrfach gesunken
+	# (12 -> 8 -> 7), und jede feste Zahl hier brach beim naechsten Balancing.
+	var owed: int = int(floor(0.9 * float(Balance.HUT_WOOD_COST)))
+	check(hut.repair_wood_missing() == owed,
+		"90 %% Schaden schulden floor(0.9 * %d) = %d Holz" % [Balance.HUT_WOOD_COST, owed])
 	var brave: Brave = w.unit_manager.spawn_unit(BRAVE_SCENE, 0, Vector3(28, 0, 28))
 	brave.order_repair(hut)
 	_run(w, [brave], func() -> bool: return brave.state == Unit.State.IDLE)
@@ -161,12 +163,14 @@ func test_repair_stalls_without_wood() -> void:
 func test_repair_consumes_floored_wood_and_restores_usability() -> void:
 	var w: Dictionary = _make_world()
 	var hut: Building = w.bm.place(HUT_SCENE, w.tribe0, Vector2i(30, 30), 0, true)
-	hut.take_damage(270)   # 90% damage -> owes 7 wood (8-wood hut, 10f)
-	# Deliver exactly 7 wood as piles inside the absorb radius of the entrance.
+	hut.take_damage(270)   # 90 % Schaden
+	# Genau die geschuldete Menge als Stapel im Absorptionsradius des Eingangs
+	# ablegen, aus Balance abgeleitet (die Huettenkosten sind mehrfach gesunken).
+	var owed: int = int(floor(0.9 * float(Balance.HUT_WOOD_COST)))
 	var entrance: Vector3 = hut.entrance_world()
-	w.wpm.deposit(entrance, 4)
-	w.wpm.deposit(entrance + Vector3(2.8, 0, 0), 3)
-	var absorb_ticks: int = _run(w, [], func() -> bool: return hut.repair_wood >= 7)
+	w.wpm.deposit(entrance, owed - owed / 2)
+	w.wpm.deposit(entrance + Vector3(2.8, 0, 0), owed / 2)
+	var absorb_ticks: int = _run(w, [], func() -> bool: return hut.repair_wood >= owed)
 	check(absorb_ticks < MAX_TICKS, "delivered piles absorbed into the repair buffer")
 	check(hut.repair_wood_missing() == 0, "all owed wood delivered")
 	var brave: Brave = w.unit_manager.spawn_unit(BRAVE_SCENE, 0, Vector3(28, 0, 28))

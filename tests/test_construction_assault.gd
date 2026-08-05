@@ -83,20 +83,31 @@ func test_fresh_site_has_minimal_hp() -> void:
 func test_site_hp_scales_with_delivered_wood() -> void:
 	var w: Dictionary = _make_world()
 	var site: Building = _site(w)
-	# 10f: the hut costs 8 wood (was 12), so "half" is 4.
-	_deliver_wood(w, site, 4)
-	check(site.wood_delivered == 4, "4 of 8 wood delivered (got %d)" % site.wood_delivered)
-	check(site.health == 150, "half the wood -> half the full HP (got %d)" % site.health)
-	_deliver_wood(w, site, 4)
-	check(site.wood_delivered == 8, "all wood delivered")
-	check(site.health == 225, "site HP capped at 3/4 of the full HP (got %d)" % site.health)
+	# Aus Balance abgeleitet: die Huettenkosten sind mehrfach gesunken (12 -> 8 -> 7),
+	# und feste Zahlen brachen hier jedes Mal.
+	var full: int = Balance.HUT_WOOD_COST
+	var half: int = full / 2
+	_deliver_wood(w, site, half)
+	check(site.wood_delivered == half,
+		"%d von %d Holz geliefert (got %d)" % [half, full, site.wood_delivered])
+	var expect_half: int = maxi(1, int(round(float(site.max_health)
+		* minf(float(half) / float(full), Building.SITE_HP_CAP_FRACTION))))
+	check(site.health == expect_half,
+		"HP folgen dem gelieferten Holzanteil (erwartet %d, got %d)"
+			% [expect_half, site.health])
+	_deliver_wood(w, site, full - half)
+	check(site.wood_delivered == full, "all wood delivered")
+	var expect_cap: int = int(round(float(site.max_health) * Building.SITE_HP_CAP_FRACTION))
+	check(site.health == expect_cap,
+		"site HP capped at 3/4 of the full HP (erwartet %d, got %d)"
+			% [expect_cap, site.health])
 	_free_world(w)
 
 
 func test_finish_restores_full_hp_minus_damage() -> void:
 	var w: Dictionary = _make_world()
 	var site: Building = _site(w)
-	_deliver_wood(w, site, 8)   # full price (10f: 8 wood)
+	_deliver_wood(w, site, Balance.HUT_WOOD_COST)   # voller Preis
 	site.take_damage(100)
 	check(site.health == 125, "damaged site at 225 - 100 HP (got %d)" % site.health)
 	site.finish_construction()

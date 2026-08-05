@@ -91,7 +91,7 @@ func _man_hut(w: Dictionary, hut: Hut) -> void:
 func test_stage_zero_hut_has_the_new_small_values() -> void:
 	var w: Dictionary = _make_world()
 	var hut: Hut = _place_hut(w, Vector2i(60, 60))
-	check(hut.wood_cost == 8, "a fresh hut costs 8 wood (was 12)")
+	check(hut.wood_cost == 7, "a fresh hut costs 7 wood (12 -> 8 -> 7 in 10h)")
 	check(hut.upgrade_stage == 0, "a fresh hut starts at stage 0")
 	check(hut.capacity() == 10, "stage 0 houses 10 (was 40)")
 	check(hut.crew_capacity() == 2, "stage 0 has 2 worker slots (was 4)")
@@ -395,7 +395,7 @@ func test_finished_upgrade_raises_stage_capacity_crew_and_hp() -> void:
 	check(hut.crew_capacity() == 3, "stage 1 has 3 worker slots")
 	check(hut.max_health == Balance.HUT_HP_PER_STAGE[1], "stage 1 max HP applied")
 	check(hut.health == hut.max_health, "and the hut is at full health")
-	check(hut.wood_cost == 8 + Balance.HUT_UPGRADE_WOOD_COST,
+	check(hut.wood_cost == Balance.HUT_WOOD_COST + Balance.HUT_UPGRADE_WOOD_COST,
 		"the upgrade wood became part of the hut's price")
 	check(hut.upgrade_wood == 0, "the upgrade buffer is spent")
 	check(not hut.upgrade_ready(), "the next upgrade is not due yet")
@@ -418,7 +418,7 @@ func test_full_ladder_reaches_the_wohnpalast() -> void:
 	check(hut.upgrade_stage == Balance.HUT_MAX_UPGRADE_STAGE, "stage 4 reached")
 	check(hut.capacity() == 45, "the Wohnpalast houses 45")
 	check(hut.crew_capacity() == 6, "the Wohnpalast has 6 worker slots")
-	check(hut.wood_cost == 8 + 4 * Balance.HUT_UPGRADE_WOOD_COST,
+	check(hut.wood_cost == Balance.HUT_WOOD_COST + 4 * Balance.HUT_UPGRADE_WOOD_COST,
 		"a fully upgraded hut cost 28 wood in total")
 	_free_world(w)
 
@@ -473,7 +473,7 @@ func test_upgrade_refund_counts_toward_the_demolition_payout() -> void:
 	var w: Dictionary = _make_world()
 	w.tribe.growth_mode = Tribe.GrowthMode.NONE
 	var hut: Hut = _place_hut(w, Vector2i(60, 60))
-	# Straight to stage 3: 8 + 3 * 5 = 23 wood invested.
+	# Straight to stage 3: HUT_WOOD_COST + 3 * HUT_UPGRADE_WOOD_COST invested.
 	for stage in range(3):
 		_wood_near(w, hut, Balance.HUT_UPGRADE_WOOD_COST)
 		_make_due(hut)
@@ -482,10 +482,14 @@ func test_upgrade_refund_counts_toward_the_demolition_payout() -> void:
 			hut.tick(TICK)
 		hut.work_upgrade(1.0)
 	check(hut.upgrade_stage == 3, "stage 3 reached")
-	check(hut.wood_cost == 23, "8 + 3 x 5 = 23 wood invested")
-	var expected: int = int(floor(23.0 * Balance.DEMOLISH_REFUND_BUILT))
+	var invested: int = Balance.HUT_WOOD_COST + 3 * Balance.HUT_UPGRADE_WOOD_COST
+	check(hut.wood_cost == invested,
+		"%d + 3 x %d = %d Holz investiert" % [Balance.HUT_WOOD_COST,
+			Balance.HUT_UPGRADE_WOOD_COST, invested])
+	var expected: int = int(floor(float(invested) * Balance.DEMOLISH_REFUND_BUILT))
 	check(hut.demolish_refund_total() == expected,
-		"the refund is 75 %% of 23 (not of the base 8): %d" % expected)
+		"die Erstattung sind 75 %% des INVESTIERTEN (%d), nicht des Grundpreises: %d"
+			% [invested, expected])
 	_free_world(w)
 
 
@@ -557,9 +561,9 @@ func test_demolition_of_an_upgrading_hut_keeps_the_wood_in_the_payout() -> void:
 		hut.tick(TICK)
 	check(hut.upgrading and hut.upgrade_wood == Balance.HUT_UPGRADE_WOOD_COST,
 		"upgrade running, its wood banked")
-	# 8 (hut) + 5 (banked upgrade wood) at 75 %.
-	var expected: int = int(floor(float(8 + Balance.HUT_UPGRADE_WOOD_COST)
-		* Balance.DEMOLISH_REFUND_BUILT))
+	# Huettenpreis + zurueckgelegtes Ausbauholz, zu 75 %.
+	var expected: int = int(floor(float(Balance.HUT_WOOD_COST
+		+ Balance.HUT_UPGRADE_WOOD_COST) * Balance.DEMOLISH_REFUND_BUILT))
 	check(hut.demolish_refund_total() == expected,
 		"the banked upgrade wood is part of the demolition payout")
 	hut.begin_demolish()

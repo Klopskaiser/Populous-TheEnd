@@ -101,7 +101,7 @@ func test_fire_ram_workshop_produces_a_ram() -> void:
 	var ws: FireRamWorkshop = w.building_manager.place(
 		RAM_WORKSHOP_SCENE, w.tribe, Vector2i(60, 60), 0, true) as FireRamWorkshop
 	check(ws != null, "fire-ram workshop placed")
-	check(ws.wood_cost == 11, "fire-ram workshop costs 11 wood")
+	check(ws.wood_cost == 10, "fire-ram workshop costs 10 wood (10h: war 11)")
 	check(ws.footprint == Vector2i(6, 4), "6x4 footprint")
 	check(ws.worker_slots() == 3, "3 worker slots")
 	check(ws.display_name() == "Feuerrammenwerkstatt", "display name")
