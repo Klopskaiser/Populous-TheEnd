@@ -295,6 +295,13 @@ static func next_building_kind(counts: Dictionary) -> StringName:
 	if bool(counts.get("wood_thin", false)) \
 			and int(counts.get("forester", 0)) < forester_target(braves):
 		return &"forester"
+	# A rack for a shop that has none: 1 wood, 1x1, and it turns the shop's fetch
+	# cycle into a standing feed — a rack inside the shop's ABSORB_RADIUS is counted
+	# by Workshop.stock_wood() as its own stock, so the housed workers stop being
+	# dispatched out at all. Deliberately BEFORE the next workshop: feeding the shops
+	# that stand is worth more than adding an idle one (10g Teil 4).
+	if int(counts.get("shops_without_rack", 0)) > 0 			and int(counts.get("shop_rack", 0)) < Balance.AI_MAX_SHOP_RACKS:
+		return &"shop_rack"
 	# Production shops scale with the tribe (7f): together with the vehicle caps
 	# this is the actual fix for "the AI hardly ever fields vehicles". The FIRST
 	# shop of a kind is never gated — only the second and later, so a tribe that

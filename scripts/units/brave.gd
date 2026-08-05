@@ -123,6 +123,16 @@ var _loose_deliver_building: Building = null
 ## `_haul_source` additionally set for the depot->depot pendulum loop.
 var _haul_source: WoodDepot = null
 var _haul_target: WoodDepot = null
+## Pinned SUPPLY target (10g Teil 4): a specific own building this brave carries
+## wood to. Deliberately a SECOND field next to _haul_target instead of widening
+## that one: _haul_target is not merely typed as a depot, its semantics ARE depot
+## semantics (_haul_valid and the fixed-target branch both gate on
+## storage_left() > 0). A site or workshop has no storage_left(); its "full"
+## predicate is wants_more_wood() / wants_more_stock_wood(). Widening the type
+## would spread the depot-haul invariants across type tests inside the hot
+## delivery path — the same number of branches, but with a regression risk in a
+## feature the tests already pin down.
+var _supply_target: Building = null
 
 ## Standing area-harvest order (phase 10e, key B and the AI wood crews): while
 ## set, the brave keeps claiming trees inside this world-XZ rectangle, fills
@@ -251,8 +261,127 @@ func has_chop_area() -> bool:
 ## True while this brave runs a depot->depot haul loop. The AI's crew
 ## bookkeeping needs an exact predicate here — State.IDLE would misfire on the
 ## tick the order was given (the brave has not ticked yet).
+##
+## The _supply_target clause keeps the two predicates DISJOINT: a supply job may
+## source its wood from a rack and therefore also sets _haul_source, and
+## AIController._tick_forward_haul prunes its crew with this predicate.
 func has_depot_haul() -> bool:
-	return _haul_source != null and is_instance_valid(_haul_source)
+	return _supply_target == null and _haul_source != null 		and is_instance_valid(_haul_source)
+
+
+## True while a standing supply job is set (10g Teil 4). Exact predicate for the
+## AI bookkeeping, NEVER State.IDLE — same trap as has_chop_area().
+func has_supply_job() -> bool:
+	return _supply_target != null and is_instance_valid(_supply_target)
+
+
+## Standing supply order (AI wood logistics): carry wood to ONE specific own
+## building until it no longer wants any. Source is picked per trip: the nearest
+## rack, else a ground pile, else a tree.
+func order_supply_wood(target: Building) -> bool:
+	if not can_take_orders():
+		return false
+	if target == null or not is_instance_valid(target) or target.health <= 0:
+		return false
+	if not _target_wants_wood(target):
+		return false
+	# Order matters: _interrupt_tasks CLEARS _supply_target.
+	_interrupt_tasks()
+	_supply_target = target
+	_loose_return_pos = Vector3.INF
+	_set_state(State.GATHER)
+	if not _choose_supply_task():
+		_stop_all()
+		return false
+	return true
+
+
+## Whether a pinned delivery target can still take wood. THE one place that knows
+## the per-kind predicate.
+func _target_wants_wood(target: Building) -> bool:
+	if target == null or not is_instance_valid(target) or target.health <= 0:
+		return false
+	if target is WoodDepot:
+		return target.is_usable() and (target as WoodDepot).storage_left() > 0
+	if target is Workshop:
+		return target.is_usable() and (target as Workshop).wants_more_stock_wood()
+	if target.under_construction:
+		return target.wants_more_wood()
+	if target.upgrading:
+		return target.wants_upgrade_wood()
+	return target.wants_more_repair_wood()
+
+
+## Picks the wood source for the current supply trip. Mirrors _try_fetch_wood, but
+## measured around the TARGET instead of a job.
+##
+## Explicitly does NOT call target.mark_wood_stalled() on failure: that would make
+## BuildingManager._recruit_workers skip a construction target for 30 s and
+## suppress a workshop's own fetch cycle — punishing the TARGET for the SUPPLIER's
+## failure. The AI notices via has_supply_job() == false instead.
+func _choose_supply_task() -> bool:
+	if not _target_wants_wood(_supply_target):
+		return false
+	var drop: Vector3 = _supply_target.delivery_point()
+	# 1) A rack with stock that does not already feed the target itself.
+	var depot: WoodDepot = _nearest_depot_with_stock(drop)
+	if depot != null:
+		_haul_source = depot
+		task = Task.PICKUP
+		_reset_seek()
+		return true
+	# 2) A ground pile, outside the target's own absorb radius (that wood counts as
+	#    delivered already).
+	if wood_pile_manager != null:
+		var pile: WoodPile = wood_pile_manager.nearest_pile(position, drop,
+			Building.ABSORB_RADIUS)
+		if pile != null and (nav_grid == null
+				or nav_grid.same_island(position, pile.position)):
+			task_pile = pile
+			task = Task.PICKUP
+			_reset_seek()
+			return true
+	# 3) Chop. 10e lesson A1: best_tree's `radius` steers the candidate filter AND
+	#    the walk budget, so a tight radius kills every distant job.
+	if tree_manager != null:
+		var tree: TreeResource = tree_manager.best_tree(drop, position,
+			JOB_TREE_RADIUS, true)
+		if tree != null:
+			tree.add_claimer(self)
+			task_tree = tree
+			_chop_timer = tree.chop_time()
+			task = Task.CHOP
+			_reset_seek()
+			return true
+	return false
+
+
+## Nearest own usable rack with stock, same island, that is not the target and does
+## not already sit inside the target's absorb radius (relaying a rack onto itself
+## would be a pointless walk).
+func _nearest_depot_with_stock(drop: Vector3) -> WoodDepot:
+	if tribe == null:
+		return null
+	var best: WoodDepot = null
+	var best_d: float = INF
+	for building in tribe.buildings:
+		if building == _supply_target or not is_instance_valid(building):
+			continue
+		if not (building is WoodDepot) or not building.is_usable():
+			continue
+		var depot: WoodDepot = building as WoodDepot
+		if depot.stored_wood() <= 0:
+			continue
+		if depot.footprint_distance_to(Vector2(drop.x, drop.z)) <= Building.ABSORB_RADIUS:
+			continue
+		var d: float = _flat_dist(position, depot.delivery_point())
+		if d >= best_d:
+			continue
+		if nav_grid != null and not nav_grid.same_island(position, depot.delivery_point()):
+			continue
+		best_d = d
+		best = depot
+	return best
 
 
 ## Standing area order (key B / AI wood crew): keep felling trees inside `area`
@@ -927,8 +1056,12 @@ func _tick_pickup(delta: float) -> void:
 	# Manual pickup of a pile that already lies at a friendly building: relay
 	# the wood to the nearest wood depot instead (skipping depots that already
 	# "own" this spot), if one exists — otherwise deliver as before.
+	# The `_supply_target == null` guard is mandatory: without it a supply job turns
+	# SILENTLY into a depot->depot relay as soon as its source pile lies at a
+	# friendly building — and a rack's own stock pile always does. This is the
+	# nastiest interaction of the whole change.
 	if state == State.GATHER and job == null and carried_wood > 0 \
-			and _pile_near_friendly_building(pile_pos):
+			and _supply_target == null and _pile_near_friendly_building(pile_pos):
 		var depot: WoodDepot = _nearest_depot(pile_pos, null, pile_pos)
 		if depot != null:
 			_haul_target = depot
@@ -936,7 +1069,7 @@ func _tick_pickup(delta: float) -> void:
 			return
 	# Standing area order (10g): fill the load from the next source in the area
 	# before hauling, exactly like the tree path does.
-	if has_chop_area() and carried_wood < CARRY_CAPACITY and _next_area_source():
+	if _fills_full_load() and carried_wood < CARRY_CAPACITY and _next_area_source():
 		return
 	task = Task.DELIVER if carried_wood > 0 else Task.NONE
 	_reset_seek()
@@ -1129,7 +1262,7 @@ func _tick_loose_chop(delta: float) -> void:
 		# Area order: keep filling the load, and prefer staying on the SAME tree
 		# (harvest_tree only ever takes one piece and the claim is already ours,
 		# so the next piece costs zero walking).
-		if has_chop_area() and carried_wood < CARRY_CAPACITY \
+		if _fills_full_load() and carried_wood < CARRY_CAPACITY \
 				and _tree_valid(task_tree) and task_tree.wood_yield() > 0:
 			_chop_timer = task_tree.chop_time()
 			return
@@ -1141,7 +1274,7 @@ func _tick_loose_chop(delta: float) -> void:
 		_set_working(false)
 		# Load not full yet and the tree is spent: chain to the next area source
 		# (tree, else lying wood) instead of walking a half-empty load home.
-		if has_chop_area() and carried_wood < CARRY_CAPACITY and _next_area_source():
+		if _fills_full_load() and carried_wood < CARRY_CAPACITY and _next_area_source():
 			return
 		if carried_wood > 0:
 			_start_loose_deliver()
@@ -1224,6 +1357,12 @@ func _tick_loose_deliver(delta: float) -> void:
 		carried_wood = 0
 	_loose_deliver_goal = Vector3.INF
 	_loose_deliver_building = null
+	if has_supply_job():
+		# Standing supply job (10g): next trip, or done once the target is funded.
+		_haul_source = null
+		if not _choose_supply_task():
+			_stop_all()
+		return
 	if _haul_source != null:
 		# Depot->depot pendulum: keep hauling until the source runs dry or the
 		# target fills up, then rest at the target.
@@ -1437,6 +1576,8 @@ func _interrupt_tasks() -> void:
 	_loose_deliver_building = null
 	_haul_source = null
 	_haul_target = null
+	# Any other order cancels the supply job — the one-order principle, for free.
+	_supply_target = null
 	_set_working(false)
 	if carried_wood > 0 and wood_pile_manager != null:
 		wood_pile_manager.deposit(position, carried_wood)
@@ -1599,3 +1740,10 @@ func _carry_or(base: StringName) -> StringName:
 	if carried_wood <= 0:
 		return base
 	return &"carry_walk" if base == &"walk" else &"carry"
+
+
+## Whether this brave fills its whole CARRY_CAPACITY before hauling. True for the
+## standing area order (10e) and for a supply job (10g): one wood per 40-m trip is
+## worthless. The single-tree right-click keeps its one-piece-per-trip behaviour.
+func _fills_full_load() -> bool:
+	return has_chop_area() or has_supply_job()

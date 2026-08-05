@@ -554,6 +554,35 @@ func order_depot_haul(units: Array[Unit], depot: WoodDepot) -> void:
 		order_move(movers, depot.center_world())
 
 
+## Braves carry wood to ONE specific own building (AI wood logistics, 10g Teil 4):
+## they source it from the nearest rack, else a ground pile, else a tree, and drop it
+## at the target's delivery point, where the target absorbs it.
+##
+## NON-BRAVES ARE IGNORED ENTIRELY — marching a warrior to a rack only strands it
+## (same rule as order_chop_area, deliberately different from order_build).
+##
+## AI-INTERNAL: no UI caller, by explicit user decision. The architecture rule is
+## still satisfied because the AI goes through this command; nothing in scripts/ui/
+## may call it.
+## Returns the number of braves put on the job.
+func order_supply_wood(units: Array[Unit], target: Building) -> int:
+	if target == null or not is_instance_valid(target) or target.health <= 0:
+		return 0
+	var assigned: int = 0
+	for unit in units:
+		if unit == null or not is_instance_valid(unit) or unit.state == Unit.State.DEAD:
+			continue
+		if not _unit_active(unit) or not (unit is Brave):
+			continue
+		if unit.tribe_id != target.tribe_id:
+			continue
+		if not target.worker_can_reach(unit.position):
+			continue
+		if (unit as Brave).order_supply_wood(target):
+			assigned += 1
+	return assigned
+
+
 ## Sets an own building's rally point, snapped to a walkable cell (phase 10g).
 ##
 ## The AI needs this because writing building.rally_point directly would bypass

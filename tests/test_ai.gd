@@ -492,16 +492,24 @@ func test_endless_building_scaling() -> void:
 	w.building_manager.place(preload("res://scenes/buildings/forester.tscn"),
 		tribe, Vector2i(56, 58), 0, true)
 	# And the workshop (phase 7f): it follows right after the temple.
-	w.building_manager.place(preload("res://scenes/buildings/workshop.tscn"),
-		tribe, Vector2i(64, 50), 0, true)
+	var shop: Building = w.building_manager.place(
+		preload("res://scenes/buildings/workshop.tscn"), tribe, Vector2i(64, 50), 0, true)
+	# 10g Teil 4: eine Werkstatt OHNE Holzregal bekommt zuerst eines — ein Regal im
+	# Absorptionsradius zaehlt als ihr Bestand (Workshop.stock_wood) und beendet ihren
+	# Holzhol-Zyklus. Das steht bewusst VOR der naechsten Werkstatt.
+	check(ai._next_building_scene(ai.build_tick_cache()) == AIController.WOOD_DEPOT_SCENE,
+		"nach der Werkstatt kommt ihr Holzregal (10g Teil 4)")
+	_place_rack_for(w, tribe, shop)
 	# The catapult workshop is followed by the fire-ram workshop (cheap
 	# pressure vehicle), then the two defensive watchtowers (phase 7h) and the
 	# expensive airship wharf — the full base includes all of them before the
 	# endless scaling kicks in.
 	check(ai._next_building_scene(ai.build_tick_cache()) == AIController.FIRERAM_WORKSHOP_SCENE,
 		"after the workshop the AI builds a fire-ram workshop")
-	w.building_manager.place(preload("res://scenes/buildings/fire_ram_workshop.tscn"),
-		tribe, Vector2i(72, 50), 0, true)
+	var ram: Building = w.building_manager.place(
+		preload("res://scenes/buildings/fire_ram_workshop.tscn"), tribe,
+		Vector2i(72, 50), 0, true)
+	_place_rack_for(w, tribe, ram)
 	check(ai._next_building_scene(ai.build_tick_cache()) == AIController.WATCHTOWER_SCENE,
 		"after the fire-ram workshop the AI builds a watchtower")
 	for i in range(Balance.AI_TARGET_WATCHTOWERS):
@@ -509,8 +517,9 @@ func test_endless_building_scaling() -> void:
 			tribe, Vector2i(40 + 4 * i, 64), 0, true)
 	check(ai._next_building_scene(ai.build_tick_cache()) == AIController.AIRSHIP_WHARF_SCENE,
 		"after the towers the AI builds the airship wharf")
-	w.building_manager.place(preload("res://scenes/buildings/airship_wharf.tscn"),
-		tribe, Vector2i(72, 60), 0, true)
+	var wharf: Building = w.building_manager.place(
+		preload("res://scenes/buildings/airship_wharf.tscn"), tribe, Vector2i(72, 60), 0, true)
+	_place_rack_for(w, tribe, wharf)
 	check(ai._next_building_scene(ai.build_tick_cache()) == null,
 		"full base without housing pressure: nothing to build")
 
@@ -2214,3 +2223,18 @@ func test_tick_cache_hands_out_each_idle_warrior_once() -> void:
 		check(not (u in first), "kein Krieger wird zweimal ausgegeben")
 	ai.free()
 	_free_world(w)
+
+
+## Places a wood rack inside `shop`'s ABSORB_RADIUS, i.e. a rack that counts as that
+## shop's stock (10g Teil 4). Used by the build-ladder test to satisfy the
+## "a shop without a rack gets one first" branch.
+func _place_rack_for(w: Dictionary, tribe: Tribe, shop: Building) -> Building:
+	var drop: Vector3 = shop.delivery_point()
+	var cell: Vector2i = w.nav.world_to_cell(drop)
+	for offset in [Vector2i(2, 0), Vector2i(-2, 0), Vector2i(0, 2), Vector2i(0, -2),
+			Vector2i(3, 0), Vector2i(0, 3)]:
+		var rack: Building = w.building_manager.place(AIController.WOOD_DEPOT_SCENE,
+			tribe, cell + offset, 0, true)
+		if rack != null:
+			return rack
+	return null

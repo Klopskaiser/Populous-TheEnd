@@ -192,6 +192,9 @@ const BUILD_SCENES: Dictionary = {
 	&"airship_wharf": AIRSHIP_WHARF_SCENE,
 	&"watchtower": WATCHTOWER_SCENE,
 	&"wood_depot": WOOD_DEPOT_SCENE,
+	# Zweiter Schluessel auf dieselbe Szene: das Werkstatt-Regal IST eine
+	# Holzstation, bekommt aber einen eigenen Bauplatz-Scan (10g Teil 4).
+	&"shop_rack": WOOD_DEPOT_SCENE,
 }
 
 ## Footprints straight from Balance — saves instantiating and freeing a probe
@@ -207,6 +210,7 @@ const BUILD_FOOTPRINTS: Dictionary = {
 	&"airship_wharf": Balance.AIRSHIP_WHARF_FOOTPRINT,
 	&"watchtower": Balance.WATCHTOWER_FOOTPRINT,
 	&"wood_depot": Balance.WOOD_DEPOT_FOOTPRINT,
+	&"shop_rack": Balance.WOOD_DEPOT_FOOTPRINT,
 }
 
 const TICK_INTERVAL: float = 1.0
@@ -380,6 +384,8 @@ static var dbg_site_scraps: int = 0
 ## Einheiten, die die KI auf Fahrzeuge geschickt hat (10g Teil 3). Vorher rief sie
 ## order_crew NUR fuer Luftschiffe.
 static var dbg_vehicles_crewed: int = 0
+## Nachschub-Trupps, die die KI losgeschickt hat (10g Teil 4).
+static var dbg_supply_runs: int = 0
 
 
 ## One AI decision tick (1x/s in game; tests call it directly).
@@ -631,7 +637,18 @@ func _tick_build(cache: TickCache) -> void:
 	var prefer: Vector2i = Vector2i(-1, -1)
 	if kind == &"wood_depot" and cache.planned[&"wood_depot"] > 0:
 		prefer = _forward_depot_anchor()
-	var cell: Vector2i = _find_plot(footprint, cache, prefer)
+	var cell: Vector2i = Vector2i(-1, -1)
+	if kind == &"shop_rack":
+		# Eigener, begrenzter Scan — NICHT _find_plot: dessen Sweep verlangt
+		# MIN_TREES_NEAR_PLOT Baeume unabhaengig von der Gebaeudeart, und eine
+		# Werkstatt in einer abgeholzten Basis haette dort nie drei. Ein Lager
+		# braucht per Definition keine Baeume. Ausserdem bleibt das geteilte
+		# Zell-/Kandidatenbudget der Bauplatzsuche unberuehrt (10e-Regression).
+		var shop: Workshop = _shop_needing_rack(cache)
+		if shop != null:
+			cell = _find_shop_rack_plot(shop, cache)
+	else:
+		cell = _find_plot(footprint, cache, prefer)
 	if cell.x < 0:
 		# Nothing buildable right now — repeating the expensive double ring
 		# search every second changes nothing, so back off for a few ticks.
@@ -802,6 +819,12 @@ func next_building_kind(cache: TickCache) -> StringName:
 	counts["brave_stream"] = cache.brave_stream
 	var arena: float = _arena_span()
 	counts["cramped"] = AIState.is_cramped(arena)
+	var racks: int = 0
+	for depot in cache.depots:
+		if _rack_serves_any_shop(cache, depot):
+			racks += 1
+	counts["shop_rack"] = racks
+	counts["shops_without_rack"] = 1 if _shop_needing_rack(cache) != null else 0
 	counts["watchtower_target"] = AIState.target_watchtowers(arena)
 	return AIState.next_building_kind(counts)
 
@@ -846,9 +869,19 @@ func _tick_wood_logistics(cache: TickCache) -> void:
 	# Demand: unfunded wood on own sites (cache.sites is a short list — no extra
 	# full pass). wood_incoming() does a pile radius query per site, which is why
 	# this only runs on the throttled tick.
+	_tick_supply_runs(cache)
 	var need: int = 0
 	for site in cache.sites:
-		need += maxi(0, site.wood_needed_total() - site.wood_incoming())
+		if site.demolishing:
+			continue
+		# _supply_inbound abziehen: ein Nachschub-Brave steht NICHT in site.workers,
+		# wood_incoming() sieht ihn also nicht — ohne das legte jeder Tick einen
+		# weiteren Faell-Trupp fuer Holz an, das schon unterwegs ist.
+		need += maxi(0, site.wood_needed_total() - site.wood_incoming()
+			- _supply_inbound(site))
+	for shop in cache.workshops:
+		if (shop as Workshop).wood_stalled:
+			need += (shop as Workshop).product_wood()
 	if need <= 0 and cache.stalled_sites.is_empty():
 		return
 	# Escort the blocked sites first: a stalled site has workers waiting on wood
@@ -2246,3 +2279,230 @@ func _set_workshop_musters(cache: TickCache) -> void:
 			dir = Vector3(0.0, 0.0, 1.0)
 		commands.set_rally_point(tribe, shop,
 			ent + dir.normalized() * Balance.AI_VEHICLE_MUSTER_DISTANCE)
+
+
+# --- Holznachschub und Werkstatt-Regal (10g Teil 4) ---------------------------------
+
+## Supply crews: {"target": Building, "units": Array[Unit]}. Membership from
+## Brave.has_supply_job(), NEVER State.IDLE — same trap as _wood_crews.
+var _supply_crews: Array[Dictionary] = []
+## Wood ticks a shop has looked short, keyed by instance id, plus a round-robin
+## cursor so at most AI_SHOP_SUPPLY_PER_TICK shops pay the exact check.
+var _shop_short_ticks: Dictionary = {}
+var _shop_supply_cursor: int = 0
+
+
+## Sends supply braves to the consumers that cannot help themselves (10g Teil 4).
+## Runs inside _tick_wood_logistics, i.e. inside the AI_WOOD_TICK_INTERVAL throttle
+## and the serious-threat guard.
+##
+## Priority: wood-stalled construction sites first — before 10g their ONLY rescue
+## was _send_escort_if_remote, an order_move hoping _recruit_workers would pick the
+## braves up, which CANNOT work while wood_stalled makes the recruiter skip the site
+## (building_manager.gd). Such a site simply died after CONSTRUCTION_STALL_TIMEOUT.
+## Then starved workshops, then upgrading huts (10f) that ran dry.
+func _tick_supply_runs(cache: TickCache) -> void:
+	_prune_supply_crews()
+	if _supply_crews.size() >= Balance.AI_MAX_SUPPLY_CREWS:
+		return
+	for target in _supply_targets(cache):
+		if _supply_crews.size() >= Balance.AI_MAX_SUPPLY_CREWS:
+			return
+		if not _supply_crew_for(target).is_empty():
+			continue
+		if cache.brave_count <= AIState.min_economy_braves(cache.population):
+			return
+		var crew: Array[Unit] = cache.take_idle_for(target,
+			Balance.AI_SUPPLY_BRAVES_PER_TARGET, Balance.AI_BUILDER_WALK_RADIUS)
+		if crew.is_empty():
+			return
+		if commands.order_supply_wood(crew, target) > 0:
+			_supply_crews.append({"target": target, "units": crew})
+			dbg_supply_runs += 1
+
+
+## Consumers worth a supply crew, most urgent first.
+func _supply_targets(cache: TickCache) -> Array[Building]:
+	var out: Array[Building] = []
+	for site in cache.stalled_sites:
+		if is_instance_valid(site) and not site.demolishing:
+			out.append(site)
+	for shop in _starved_shops(cache):
+		out.append(shop)
+	for hut in cache.huts:
+		if is_instance_valid(hut) and hut.upgrading and hut.wood_stalled:
+			out.append(hut)
+	return out
+
+
+## Starved workshops, found as cheaply as possible: Workshop.wants_more_stock_wood()
+## costs O(piles x buildings) (piles_in_radius plus _pile_reserved_by_peer per pile),
+## so the AI must NEVER call it. Cascade instead:
+##   1. shop.wood_stalled — a plain bool, free, and the RIGHT trigger: it is set
+##      exactly when the shop's own fetchers found nothing reachable, and they are
+##      then walked back INSIDE. can_start_production() does not check the flag, so
+##      production starts on the tick the wood lands.
+##   2. not producing and nobody inside — its workers are out and failing.
+##   3. only for those, and only AI_SHOP_SUPPLY_PER_TICK per wood tick, confirm with
+##      the cheap pile proxy, and only after AI_SHOP_SUPPLY_PATIENCE_TICKS. The
+##      patience is what stops the supply from fighting the shop's own fetch cycle.
+func _starved_shops(cache: TickCache) -> Array[Building]:
+	var out: Array[Building] = []
+	# Der AIController haelt keinen WoodPileManager — er kommt ueber den
+	# BuildingManager, der ihn fuer die Absorption ohnehin braucht.
+	var wpm: WoodPileManager = building_manager.wood_pile_manager 		if building_manager != null else null
+	if cache.workshops.is_empty() or wpm == null:
+		return out
+	var checked: int = 0
+	for i in range(cache.workshops.size()):
+		if checked >= Balance.AI_SHOP_SUPPLY_PER_TICK:
+			break
+		var idx: int = (_shop_supply_cursor + i) % cache.workshops.size()
+		var shop: Workshop = cache.workshops[idx] as Workshop
+		if shop == null or not is_instance_valid(shop):
+			continue
+		var id: int = shop.get_instance_id()
+		var short: bool = shop.wood_stalled \
+			or (not shop.production_active and shop.inside_count() == 0)
+		if not short:
+			_shop_short_ticks.erase(id)
+			continue
+		checked += 1
+		var have: int = wpm.wood_in_radius(shop.delivery_point(),
+			Building.ABSORB_RADIUS)
+		if have >= shop.product_wood():
+			_shop_short_ticks.erase(id)
+			continue
+		var ticks: int = int(_shop_short_ticks.get(id, 0)) + 1
+		_shop_short_ticks[id] = ticks
+		if ticks >= Balance.AI_SHOP_SUPPLY_PATIENCE_TICKS:
+			out.append(shop)
+	_shop_supply_cursor = (_shop_supply_cursor + 1) % maxi(cache.workshops.size(), 1)
+	return out
+
+
+## Empty Dictionary = no crew (typed return: GDScript cannot subscript a value it
+## infers as null).
+func _supply_crew_for(target: Building) -> Dictionary:
+	for crew in _supply_crews:
+		if crew["target"] == target:
+			return crew
+	return {}
+
+
+func _prune_supply_crews() -> void:
+	var kept: Array[Dictionary] = []
+	for crew in _supply_crews:
+		var target = crew["target"]
+		if not is_instance_valid(target) or target.health <= 0:
+			continue
+		var alive: Array[Unit] = []
+		for unit in crew["units"]:
+			if is_instance_valid(unit) and unit is Brave \
+					and (unit as Brave).has_supply_job():
+				alive.append(unit)
+		if alive.is_empty():
+			continue
+		crew["units"] = alive
+		kept.append(crew)
+	_supply_crews = kept
+
+
+## Wood already walking toward `target` in supply crews — without this the demand
+## calculation would order another felling crew every tick for wood that is on its
+## way (a supply brave is NOT in target.workers, so wood_incoming cannot see it).
+func _supply_inbound(target: Building) -> int:
+	var crew: Dictionary = _supply_crew_for(target)
+	if crew.is_empty():
+		return 0
+	return Brave.CARRY_CAPACITY * (crew["units"] as Array).size()
+
+
+## Usable workshop without a rack inside its absorb radius, or null. A rack THAT
+## close is counted by Workshop.stock_wood() as the shop's own stock, so the shop
+## stops sending its housed workers out at all.
+func _shop_needing_rack(cache: TickCache) -> Workshop:
+	for shop in cache.workshops:
+		if not is_instance_valid(shop):
+			continue
+		if _rack_serves(cache, shop) == null:
+			return shop as Workshop
+	return null
+
+
+## True while `depot` sits inside SOME own workshop's absorb radius, i.e. counts as
+## that shop's rack.
+func _rack_serves_any_shop(cache: TickCache, depot: Building) -> bool:
+	var flat: Vector2 = Vector2(depot.center_world().x, depot.center_world().z)
+	for shop in cache.workshops:
+		if not is_instance_valid(shop):
+			continue
+		var d: Vector3 = shop.delivery_point()
+		if Vector2(d.x, d.z).distance_to(flat) <= Building.ABSORB_RADIUS:
+			return true
+	return false
+
+
+func _rack_serves(cache: TickCache, shop: Building):
+	var drop: Vector2 = Vector2(shop.delivery_point().x, shop.delivery_point().z)
+	for depot in cache.depots:
+		if is_instance_valid(depot) \
+				and depot.footprint_distance_to(drop) <= Building.ABSORB_RADIUS:
+			return depot
+	return null
+
+
+## Rack plot for `shop` (10g Teil 4). A dedicated, bounded scan — NOT _find_plot,
+## for two reasons from the 10e measurements: every added sweep multiplies against
+## the shared _plot_budget/_plot_candidates_left, and _find_supplied_plot requires
+## MIN_TREES_NEAR_PLOT trees regardless of building kind, so a rack in a logged-out
+## late-game base would never pass. A rack needs no trees by definition.
+##
+## Conditions, all derived from code: inside the shop's ABSORB_RADIUS (else it is not
+## stock at all), never ON the entrance cell (edge_spawn_position would move), a
+## lateral offset from the entrance normal (a 1x1 nav-solid rack right in front of
+## the gate would trap the fresh vehicle and make exit_blocked permanent — it would
+## CAUSE the Teil-3 bug), and outside any other own delivery point's absorb radius
+## (Building._absorb_piles has no ownership concept, a neighbour site would eat it).
+func _find_shop_rack_plot(shop: Workshop, cache: TickCache) -> Vector2i:
+	if nav_grid == null or commands == null:
+		return Vector2i(-1, -1)
+	var ent_cell: Vector2i = shop.entrance_cell()
+	var ent: Vector3 = shop.delivery_point()
+	var centre: Vector3 = shop.center_world()
+	var normal: Vector2 = Vector2(ent.x - centre.x, ent.z - centre.z)
+	if normal.length_squared() < 0.001:
+		normal = Vector2(0.0, 1.0)
+	normal = normal.normalized()
+	for radius in range(2, Balance.AI_SHOP_RACK_SCAN_RINGS + 2):
+		for cell in ring_cells(ent_cell, radius):
+			if cell == ent_cell or not commands.can_place_at(cell, Vector2i.ONE):
+				continue
+			var pos: Vector3 = nav_grid.cell_to_world(cell)
+			var to: Vector2 = Vector2(pos.x - ent.x, pos.z - ent.z)
+			var dist: float = to.length()
+			if dist < Balance.AI_SHOP_RACK_MIN_DIST or dist > Balance.AI_SHOP_RACK_MAX_DIST:
+				continue
+			# Lateral distance from the exit corridor.
+			if absf(to.x * normal.y - to.y * normal.x) < Balance.AI_SHOP_RACK_SIDE_CLEAR:
+				continue
+			if _in_foreign_absorb_radius(cache, pos, shop):
+				continue
+			if not _plot_reachable(cell, Vector2i.ONE, 0):
+				continue
+			return cell
+	return Vector2i(-1, -1)
+
+
+## True while `pos` lies in the absorb radius of an own building other than `shop`.
+func _in_foreign_absorb_radius(cache: TickCache, pos: Vector3, shop: Building) -> bool:
+	var flat: Vector2 = Vector2(pos.x, pos.z)
+	for b in tribe.buildings:
+		if b == shop or not is_instance_valid(b) or b.health <= 0:
+			continue
+		if b is WoodDepot:
+			continue   # a rack next to a rack is harmless
+		var d: Vector3 = b.delivery_point()
+		if Vector2(d.x, d.z).distance_to(flat) <= Building.ABSORB_RADIUS:
+			return true
+	return false

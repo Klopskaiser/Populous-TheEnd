@@ -71,8 +71,9 @@ func _initialize() -> void:
 		for t in tribes: t.tick(1.0 / 30.0)
 		for ai in ais: ai._process(1.0 / 30.0)
 	print("Karte %s, %.0f s, 4 KIs | Baeume gesamt %d" % [map_id, sim, tm.trees.size()])
-	print("  Fahrzeuge bemannt: %d | Verworfene Baustellen: %d" % [
-		AIController.dbg_vehicles_crewed, AIController.dbg_site_scraps])
+	print("  Fahrzeuge bemannt: %d | Verworfene Baustellen: %d | Nachschub-Truppe: %d" % [
+		AIController.dbg_vehicles_crewed, AIController.dbg_site_scraps,
+		AIController.dbg_supply_runs])
 	print("  Bauarbeiter zugewiesen: %d | Miliz-Befehle: %d | Bedrohungs-Ticks: %d" % [
 		AIController.dbg_builders_assigned, AIController.dbg_militia_orders,
 		AIController.dbg_threat_ticks])

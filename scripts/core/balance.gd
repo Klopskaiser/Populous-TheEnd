@@ -889,3 +889,24 @@ const AI_VEHICLES_PER_TICK: int = 3
 ## Sammelpunkt-Abstand vor der Werkstatt; MUSS ueber Workshop.EXIT_CLEAR_RADIUS + 0.5
 ## liegen, sonst verwirft _dispatch_point ihn.
 const AI_VEHICLE_MUSTER_DISTANCE: float = 12.0
+
+# --- KI: Holznachschub und Werkstatt-Regal (10g Teil 4) ---
+const AI_SUPPLY_BRAVES_PER_TARGET: int = 3
+const AI_MAX_SUPPLY_CREWS: int = 3
+## Werkstaetten, die pro Holz-Tick die EXAKTE Pruefung bezahlen (ein Stapel-Scan) —
+## Round-Robin ueber die Ticks. Workshop.wants_more_stock_wood kostet
+## O(Stapel x Gebaeude) und darf von der KI NIE aufgerufen werden.
+const AI_SHOP_SUPPLY_PER_TICK: int = 2
+## So viele Holz-Ticks bleibt eine Werkstatt sich selbst ueberlassen, bevor die KI
+## Braves schickt: sonst kaempft der Nachschub gegen ihre eigenen Holzholer.
+const AI_SHOP_SUPPLY_PATIENCE_TICKS: int = 3
+## Holzregal an der Werkstatt. Die Obergrenze MUSS unter Building.ABSORB_RADIUS
+## (5,0) bleiben, sonst zaehlt das Regal nicht als Bestand der Werkstatt.
+const AI_SHOP_RACK_MIN_DIST: float = 2.0
+const AI_SHOP_RACK_MAX_DIST: float = 4.5
+## Seitlicher Mindestabstand zur Eingangsnormalen: ein 1x1-Regal direkt vor dem Tor
+## wuerde das fertige Fahrzeug einsperren und exit_blocked dauerhaft machen — es
+## wuerde also den Teil-3-Fehler VERURSACHEN.
+const AI_SHOP_RACK_SIDE_CLEAR: float = 2.5
+const AI_SHOP_RACK_SCAN_RINGS: int = 3
+const AI_MAX_SHOP_RACKS: int = 3
