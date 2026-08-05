@@ -682,6 +682,13 @@ const TREE_TYPE_PARAMS: Array[Dictionary] = [
 const TREE_LEAF_SHARE: float = 0.20
 const TREE_BAMBOO_SHARE: float = 0.10
 const TREE_GROVES_PER_STANDARD_MAP: int = 3   # Haine je 128er-Fläche (skaliert wie TREE_COUNT)
+## Holz-Zuschlag beim Start auf KLEINEN Karten (10h, Nutzervorgabe): dort liegen die
+## Basen eng zusammen, jeder Stamm hat also weniger Wald für sich. Der Zuschlag gilt
+## für Bäume UND Haine, damit sich das Verhältnis der Baumarten nicht verschiebt.
+const SMALL_MAP_WOOD_BONUS: float = 1.2
+## Bis zu dieser Kantenlänge gilt eine Karte als klein (Insel und Plateau: 128;
+## Seenland und Bergpass: 256).
+const SMALL_MAP_MAX_SIZE: int = TerrainData.SIZE
 const TREE_GROVE_TREES_MIN: int = 8
 const TREE_GROVE_TREES_MAX: int = 14
 const TREE_GROVE_RADIUS: int = 6

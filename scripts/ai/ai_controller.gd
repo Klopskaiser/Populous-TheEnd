@@ -1632,6 +1632,26 @@ func _find_plot(footprint: Vector2i, cache: TickCache = null,
 		# Pflicht; genau die war vorher die Luecke, weil der Relax-Pass nur die
 		# Plotmitte gegen die Basis prueste.
 		cell = _find_supplied_plot(anchors[0], footprint, Balance.AI_PLOT_SPACING_RELAXED)
+	if cell.x < 0 and not anchors.is_empty():
+		# 10h: LETZTE Rueckfallebene — Bauplatz ohne Baum-Anforderung.
+		#
+		# _find_supplied_plot verlangt MIN_TREES_NEAR_PLOT Baeume in PLOT_TREE_RADIUS.
+		# Eine abgeholzte Basis hatte damit KEINEN gueltigen Bauplatz mehr und die KI
+		# blieb komplett stehen (mit einer Sonde bestaetigt: mit Baeumen Bauplatz
+		# (47, 47), ohne Baeume (-1, -1)) — nicht weil der Platz voll war, sondern
+		# weil kein Baum daneben stand.
+		#
+		# Die Anforderung war richtig, SOLANGE Holz nur vor Ort geholt werden konnte.
+		# Seit 10g Teil 4 und 10h wird Holz aktiv herangetragen (order_supply_wood,
+		# Nachschub-Trupps, Regale im Absorptionsradius), also ist "Baum daneben"
+		# keine Voraussetzung mehr fuer eine baubare Baustelle. Sie bleibt die
+		# BEVORZUGTE Wahl — dieser Durchgang laeuft nur, wenn sonst gar nichts geht,
+		# kostet also keinen Tick, der vorher erfolgreich war.
+		for anchor in anchors:
+			cell = _find_supplied_plot(anchor, footprint,
+				Balance.AI_PLOT_SPACING_RELAXED, false)
+			if cell.x >= 0:
+				break
 	_plot_sweep = false
 	dbg_plot_us += Time.get_ticks_usec() - t0
 	return cell
@@ -1641,8 +1661,10 @@ func _find_plot(footprint: Vector2i, cache: TickCache = null,
 ## reachable from the base (phase 8.2). Gives up after MAX_PLOT_CANDIDATES
 ## unsupplied/unreachable candidates (then the next anchor takes over).
 ## The ring starts at AI_PLOT_MIN_RADIUS so buildings stop clinging to the anchor.
+## `require_trees` false = letzte Rueckfallebene (10h): Holz wird herangetragen.
 func _find_supplied_plot(anchor: Vector2i, footprint: Vector2i,
-		spacing: int = Balance.AI_PLOT_SPACING) -> Vector2i:
+		spacing: int = Balance.AI_PLOT_SPACING,
+		require_trees: bool = true) -> Vector2i:
 	if not _plot_sweep:
 		_plot_budget = Balance.AI_MAX_PLOT_SCAN_CELLS
 		_plot_candidates_left = MAX_PLOT_CANDIDATES * 2
@@ -1680,7 +1702,7 @@ func _find_supplied_plot(anchor: Vector2i, footprint: Vector2i,
 			# base) bails out early and leaves cell budget for the other anchors.
 			if checked >= per_sweep:
 				return Vector2i(-1, -1)
-			if _trees_near_cell(cell) < MIN_TREES_NEAR_PLOT:
+			if require_trees and _trees_near_cell(cell) < MIN_TREES_NEAR_PLOT:
 				checked += 1
 				continue
 			if spacing > 0 and not _plot_has_clearance(cell, fp, spacing):

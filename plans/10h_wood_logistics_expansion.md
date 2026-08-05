@@ -135,20 +135,44 @@ Analog zum Werkstatt-Regal aus 10g Teil 4, dieselbe Mechanik, anderer Anlass.
 
 ---
 
-## Teil 4 — Breitere Expansion auf offenen Karten
+## Teil 4 — ~~Breitere Expansion~~ → Bauplatz darf nie ausgehen
 
-10g Teil 5 hat das **enge** Muster eingeführt und dabei die offenen Karten unverändert
-gelassen — der Report zeigt, dass sie dort zu eng bleiben.
+**Vom Nutzer zurückgezogen und ersetzt (2026-08-05):** „die Expansion ist auch nicht
+zwingend. Es ist okay, wenn sie nahe dran Gebäude bauen. Es soll nur verhindert
+werden, dass die KI keine weiteren Gebäude baut, weil ihr Bauplatz schon voll ist."
 
-- `AIState.plot_search_radius` und `settlement_anchor_limit` bekommen eine **dritte
-  Stufe** für weite Arenen (`arena_span >= AI_OPEN_ARENA`): Suchradius
-  `AI_PLOT_SEARCH_RADIUS_OPEN` (60), Anker `AI_MAX_SETTLEMENT_ANCHORS_OPEN` (6).
-- `AI_SETTLEMENT_CLUSTER_RADIUS` 16 → 22 auf offenen Karten: größere Cluster heißt,
-  dass ein neuer Anker erst bei echter Entfernung entsteht — die Siedlung wächst in
-  die Breite statt in einen Klumpen.
-- **Erst messen, dann festziehen:** die Bauplatzsuche ist der historisch teuerste
-  KI-Posten (10e-Regression, 10g-Messung). Der A/B über `benchmark_earlygame` auf
-  Bergpass **und** Seenland ist Pflicht, `dbg_plot_us / dbg_plot_scans` das Kriterium.
+**Mit einer Sonde geprüft — und die Ursache war eine andere als „Platz voll":**
+`_find_supplied_plot` verlangt `MIN_TREES_NEAR_PLOT` Bäume innerhalb
+`PLOT_TREE_RADIUS`, ohne jede Rückfallebene. Eine abgeholzte Basis hat damit **keinen
+gültigen Bauplatz mehr** und die KI bleibt komplett stehen. Gemessen an derselben
+Welt: mit Bäumen Bauplatz `(47, 47)`, nach dem Abholzen `(-1, -1)`.
+
+Die Anforderung war richtig, **solange** Holz nur vor Ort geholt werden konnte. Seit
+10g Teil 4 und 10h Teil 2/3 wird Holz aktiv herangetragen (`order_supply_wood`,
+Nachschub-Trupps, Regale im Absorptionsradius) — „Baum daneben" ist also nur noch
+eine **Präferenz**, keine Voraussetzung.
+
+Umgesetzt als **dritter, letzter Durchgang** in `_find_plot`:
+`_find_supplied_plot(anchor, footprint, spacing, require_trees := false)`. Er läuft
+nur, wenn die beiden bestehenden Durchgänge nichts gefunden haben — kostet also
+keinen Tick, der vorher erfolgreich war, und lässt die bevorzugte Wahl unverändert.
+
+Breitere Expansion (Suchradius/Anker/Cluster nach Arena-Weite) ist damit **entfallen**
+— sie hätte die Bauplatzsuche angefasst, den historisch teuersten KI-Posten, für ein
+Ziel, das der Nutzer ausdrücklich nicht braucht.
+
+---
+
+## Teil 5 — Mehr Startholz auf kleinen Karten
+
+Nutzervorgabe: „auf kleinen Karten muss am Anfang 20 % mehr Holz spawnen."
+
+`Balance.SMALL_MAP_WOOD_BONUS = 1.2`, angewendet in `main.gd` auf **Bäume und Haine**
+gleichermaßen, damit sich das Verhältnis der Baumarten nicht verschiebt. Klein heißt
+`td.size <= SMALL_MAP_MAX_SIZE` (= `TerrainData.SIZE`, also Insel und Plateau mit 128;
+Seenland und Bergpass mit 256 bleiben unverändert). Begründung im Code: auf den
+kleinen Karten liegen die Basen eng zusammen, jeder Stamm hat also weniger Wald für
+sich — dieselbe Enge, die 10g Teil 5 über das Arena-Maß behandelt.
 
 ---
 

@@ -234,7 +234,13 @@ func test_build_tick_places_construction_site() -> void:
 func test_plot_search_cooldown_after_failure() -> void:
 	var w: Dictionary = _make_world()
 	var ai: AIController = _make_ai(w, w.tribes[1], Vector2i(64, 64))
-	# No trees anywhere -> no supplied plot, no expansion anchor -> failure.
+	# 10h: "keine Baeume" ist KEIN Fehlschlag mehr — die letzte Rueckfallebene baut
+	# auch auf kahlem Boden (Holz wird herangetragen). Fuer einen echten Fehlschlag
+	# muss can_place_at ueberall scheitern: alles unter die Wasserlinie.
+	for vz in range(w.td.size + 1):
+		for vx in range(w.td.size + 1):
+			w.td.set_vertex_height(vx, vz, 1.0)   # unter TerrainData.SEA_LEVEL
+	w.nav.update_region(Rect2i(0, 0, w.td.size, w.td.size))
 	AIController.dbg_plot_scans = 0
 	ai.tick_ai()
 	check(AIController.dbg_plot_scans == 1, "first tick runs the plot search")
@@ -2345,3 +2351,68 @@ func test_hut_rack_stock_is_exactly_one_upgrade() -> void:
 	check(Balance.AI_HUT_RACK_STOCK == Balance.HUT_UPGRADE_WOOD_COST,
 		"der Mindestbestand ist genau eine Ausbaustufe - aus Balance abgeleitet, "
 			+ "nicht als Zahl gepflegt")
+
+
+# --- Bauplatz ohne Baeume in Reichweite (10h, statt "breitere Expansion") -------------
+# Nutzervorgabe: "die Expansion ist nicht zwingend, es ist okay wenn sie nahe dran
+# Gebaeude bauen. Es soll nur verhindert werden, dass die KI keine weiteren Gebaeude
+# baut, weil ihr Bauplatz schon voll ist."
+#
+# Mit einer Sonde gemessen: die Ursache war NICHT ein voller Bauplatz, sondern die
+# Baum-Anforderung. _find_supplied_plot verlangt MIN_TREES_NEAR_PLOT Baeume in
+# PLOT_TREE_RADIUS — eine abgeholzte Basis hatte damit KEINEN gueltigen Bauplatz und
+# die KI blieb komplett stehen (mit Baeumen (47, 47), ohne Baeume (-1, -1)).
+#
+# Die Anforderung war richtig, solange Holz nur vor Ort geholt werden konnte. Seit
+# 10g Teil 4 / 10h wird es herangetragen, also ist sie nur noch eine PRAEFERENZ.
+
+func test_ai_still_finds_a_plot_without_trees_in_reach() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var anchor: Vector2i = Vector2i(40, 40)
+	var ai: AIController = _make_ai(w, tribe, anchor)
+	w.building_manager.place(SITE_SCENE, tribe, anchor, 0, true)
+	# Kein einziger Baum auf der Karte.
+	check(w.tree_manager.trees.is_empty(), "abgeholzte Welt (Testvoraussetzung)")
+	var cell: Vector2i = ai._find_plot(Vector2i(4, 4), ai.build_tick_cache(),
+		Vector2i(-1, -1))
+	check(cell.x >= 0,
+		"die KI findet trotzdem einen Bauplatz - sonst baut sie nie wieder etwas")
+	ai.free()
+	_free_world(w)
+
+
+func test_trees_near_the_plot_stay_the_preferred_choice() -> void:
+	# Gegenkontrolle: solange Baeume da sind, gewinnt der belaubte Bauplatz — die
+	# Rueckfallebene laeuft nur, wenn sonst GAR NICHTS geht.
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var anchor: Vector2i = Vector2i(40, 40)
+	var ai: AIController = _make_ai(w, tribe, anchor)
+	w.building_manager.place(SITE_SCENE, tribe, anchor, 0, true)
+	for i in range(6):
+		w.tree_manager.spawn_tree(anchor + Vector2i(8 + i, 6), TreeResource.MAX_STAGE)
+	var cell: Vector2i = ai._find_plot(Vector2i(4, 4), ai.build_tick_cache(),
+		Vector2i(-1, -1))
+	check(cell.x >= 0, "Bauplatz gefunden")
+	check(ai._trees_near_cell(cell) >= AIController.MIN_TREES_NEAR_PLOT,
+		"und er hat Baeume in Reichweite - die Praeferenz gilt weiter")
+	ai.free()
+	_free_world(w)
+
+
+func test_small_map_wood_bonus_is_a_real_bonus() -> void:
+	# Nutzervorgabe: "auf kleinen Karten muss am Anfang 20 % mehr Holz spawnen."
+	check(Balance.SMALL_MAP_WOOD_BONUS > 1.0, "der Zuschlag ist einer")
+	check(is_equal_approx(Balance.SMALL_MAP_WOOD_BONUS, 1.2), "und zwar 20 %")
+	check(Balance.SMALL_MAP_MAX_SIZE == TerrainData.SIZE,
+		"klein heisst bis zur Standard-Kantenlaenge (Insel/Plateau 128, "
+			+ "Seenland/Bergpass 256)")
+	check(MapGenerator.map_size("island") <= Balance.SMALL_MAP_MAX_SIZE,
+		"Insel gilt als klein")
+	check(MapGenerator.map_size("plateau") <= Balance.SMALL_MAP_MAX_SIZE,
+		"Plateau gilt als klein")
+	check(MapGenerator.map_size("seenland") > Balance.SMALL_MAP_MAX_SIZE,
+		"Seenland nicht")
+	check(MapGenerator.map_size("bergpass") > Balance.SMALL_MAP_MAX_SIZE,
+		"Bergpass nicht")
