@@ -2100,3 +2100,117 @@ func test_scrapping_a_dead_site_does_not_pause_construction() -> void:
 		"ein Selbstabriss pausiert den eigenen Bau nicht")
 	ai.free()
 	_free_world(w)
+
+
+# --- Teil 3: Fahrzeuge bemannen und Ausgang freimachen (10g) --------------------------
+# Nutzerreport: "es werden keine Fahrzeuge gebaut. Manchmal mehrere Werkstaetten aber
+# da kam nie was raus." Workshop._finish_catapult bemannt EINMALIG mit <= AUTO_CREW
+# idle BRAVES im 12-m-Radius, _tick_auto_recrew zieht Militaer nur aus 3 m. Steht
+# niemand da, sperrt das fertige Fahrzeug den Ausgang dauerhaft (exit_blocked gattert
+# can_start_production) — und die KI rief order_crew nur fuer Luftschiffe.
+
+const SIEGE_SCENE_T3: PackedScene = preload("res://scenes/units/siege_engine.tscn")
+
+
+func test_target_crew_is_enough_to_fire_plus_one() -> void:
+	var w: Dictionary = _make_world()
+	var ai: AIController = _make_ai(w, w.tribes[1], Vector2i(40, 40))
+	var engine: Unit = w.unit_manager.spawn_unit(SIEGE_SCENE_T3, 1, Vector3(50, 5, 50))
+	var target: int = ai._target_crew(engine as CrewedVehicle)
+	check(target == engine.min_fire_crew + Balance.AI_VEHICLE_EXTRA_CREW,
+		"Zielbesatzung = Feuerbesatzung + 1 (die Nachladezeit skaliert mit der Crew)")
+	check(target <= engine.max_crew, "aber nie ueber max_crew")
+	ai.free()
+	_free_world(w)
+
+
+func test_ai_crews_a_blocking_vehicle_with_military() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var ai: AIController = _make_ai(w, tribe, Vector2i(40, 40))
+	var engine: Unit = w.unit_manager.spawn_unit(SIEGE_SCENE_T3, 1, Vector3(50, 5, 50))
+	check(engine.boarded_count() < engine.min_move_crew, "Fahrzeug ist unbemannt")
+	# Krieger UND Braves in Reichweite: das Militaer muss gewinnen.
+	var warrior: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 1, Vector3(51, 5, 50))
+	for i in range(3):
+		w.unit_manager.spawn_unit(BRAVE_SCENE, 1, Vector3(51 + i, 5, 51))
+	ai._tick_vehicle_crews(ai.build_tick_cache(), false)
+	check(warrior.siege_engine == engine,
+		"der Krieger wird auf das Fahrzeug geschickt, nicht ein Brave")
+	check(AIController.dbg_vehicles_crewed > 0, "der Zaehler laeuft mit")
+	ai.free()
+	_free_world(w)
+
+
+func test_ai_never_crews_a_preacher() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var ai: AIController = _make_ai(w, tribe, Vector2i(40, 40))
+	var engine: Unit = w.unit_manager.spawn_unit(SIEGE_SCENE_T3, 1, Vector3(50, 5, 50))
+	var preacher: Unit = w.unit_manager.spawn_unit(
+		preload("res://scenes/units/preacher.tscn"), 1, Vector3(51, 5, 50))
+	ai._tick_vehicle_crews(ai.build_tick_cache(), false)
+	check(preacher.siege_engine == null,
+		"Prediger bleiben draussen - in State.CREW bekehren sie nichts, und die KI "
+			+ "zielt bewusst auf 30 % Prediger")
+	check(engine.boarded_count() == 0, "also bleibt das Fahrzeug unbemannt")
+	ai.free()
+	_free_world(w)
+
+
+func test_ai_uses_braves_for_vehicles_only_on_surplus() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var ai: AIController = _make_ai(w, tribe, Vector2i(40, 40))
+	w.unit_manager.spawn_unit(SIEGE_SCENE_T3, 1, Vector3(50, 5, 50))
+	# Wenige Braves, kein Militaer: army_count 0 liegt unter
+	# AI_VEHICLE_MILITARY_SCARCE, also DUERFEN Braves ran (Mangel-Regel).
+	for i in range(3):
+		w.unit_manager.spawn_unit(BRAVE_SCENE, 1, Vector3(51 + i, 5, 51))
+	check(ai._braves_may_crew(ai.build_tick_cache()),
+		"bei Militaer-Mangel duerfen Braves ans Fahrzeug")
+	# Genug Militaer, aber kein Brave-Ueberschuss: dann nicht.
+	for i in range(Balance.AI_VEHICLE_MILITARY_SCARCE + 2):
+		w.unit_manager.spawn_unit(WARRIOR_SCENE, 1, Vector3(60 + i, 5, 60))
+	check(not ai._braves_may_crew(ai.build_tick_cache()),
+		"mit Armee und ohne Brave-Ueberschuss bleiben die Braves in der Wirtschaft")
+	ai.free()
+	_free_world(w)
+
+
+func test_ai_sets_a_workshop_muster_point_off_the_pad() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var ai: AIController = _make_ai(w, tribe, Vector2i(40, 40))
+	var shop: Building = w.building_manager.place(WORKSHOP_SCENE, tribe,
+		Vector2i(50, 50), 0, true)
+	var ent: Vector3 = shop.entrance_world()
+	# BuildingManager setzt den Rally Point auf die EINGANGSZELLE, und
+	# Workshop._dispatch_point verwirft alles innerhalb EXIT_CLEAR_RADIUS + 0.5.
+	check(Vector2(shop.rally_point.x - ent.x, shop.rally_point.z - ent.z).length()
+			<= Workshop.EXIT_CLEAR_RADIUS + 0.5,
+		"der Standard-Rally-Point liegt auf dem Bauplatz (Testvoraussetzung)")
+	ai._set_workshop_musters(ai.build_tick_cache())
+	check(Vector2(shop.rally_point.x - ent.x, shop.rally_point.z - ent.z).length()
+			> Workshop.EXIT_CLEAR_RADIUS + 0.5,
+		"die KI setzt einen Sammelpunkt, den _dispatch_point auch benutzt")
+	ai.free()
+	_free_world(w)
+
+
+func test_tick_cache_hands_out_each_idle_warrior_once() -> void:
+	var w: Dictionary = _make_world()
+	var ai: AIController = _make_ai(w, w.tribes[1], Vector2i(40, 40))
+	for i in range(3):
+		w.unit_manager.spawn_unit(WARRIOR_SCENE, 1, Vector3(50 + i, 5, 50))
+	var cache: AIController.TickCache = ai.build_tick_cache()
+	check(cache.idle_warrior_left() == 3, "drei idle Krieger im Pool")
+	var first: Array[Unit] = cache.take_idle_warrior(2)
+	check(first.size() == 2, "zwei entnommen")
+	check(cache.idle_warrior_left() == 1, "einer bleibt")
+	var second: Array[Unit] = cache.take_idle_warrior(5)
+	check(second.size() == 1, "nur der letzte kommt noch")
+	for u in second:
+		check(not (u in first), "kein Krieger wird zweimal ausgegeben")
+	ai.free()
+	_free_world(w)

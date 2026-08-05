@@ -873,3 +873,19 @@ const AI_PLOT_SPACING_RELAXED: int = 1
 ## veralten, und eine wachsende Landbruecke braucht mehrere Ticks.
 const AI_SITE_GUARD_INTERVAL: int = 5
 const AI_SITE_GUARD_STRIKES: int = 2
+
+# --- KI: Fahrzeug-Besatzung (10g Teil 3) ---
+## Zielbesatzung = min_fire_crew + dieser Bonus (die Nachladezeit skaliert mit der
+## Besatzung), geklemmt auf min_move_crew..max_crew.
+const AI_VEHICLE_EXTRA_CREW: int = 1
+## Hoechstens dieser Anteil der Armee darf gleichzeitig in Fahrzeugen sitzen.
+const AI_VEHICLE_ARMY_CREW_SHARE: float = 0.25
+## Braves bemannen Fahrzeuge nur bei echtem Ueberschuss ueber die
+## Wirtschaftsreserve oder wenn es kaum Militaer gibt (Nutzerregel).
+const AI_VEHICLE_BRAVE_SURPLUS: int = 12
+const AI_VEHICLE_MILITARY_SCARCE: int = 6
+## Fahrzeuge, die pro Tick aufgefuellt werden (Blockierer haben immer Vorrang).
+const AI_VEHICLES_PER_TICK: int = 3
+## Sammelpunkt-Abstand vor der Werkstatt; MUSS ueber Workshop.EXIT_CLEAR_RADIUS + 0.5
+## liegen, sonst verwirft _dispatch_point ihn.
+const AI_VEHICLE_MUSTER_DISTANCE: float = 12.0

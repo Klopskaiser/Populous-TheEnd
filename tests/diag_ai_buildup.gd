@@ -71,6 +71,8 @@ func _initialize() -> void:
 		for t in tribes: t.tick(1.0 / 30.0)
 		for ai in ais: ai._process(1.0 / 30.0)
 	print("Karte %s, %.0f s, 4 KIs | Baeume gesamt %d" % [map_id, sim, tm.trees.size()])
+	print("  Fahrzeuge bemannt: %d | Verworfene Baustellen: %d" % [
+		AIController.dbg_vehicles_crewed, AIController.dbg_site_scraps])
 	print("  Bauarbeiter zugewiesen: %d | Miliz-Befehle: %d | Bedrohungs-Ticks: %d" % [
 		AIController.dbg_builders_assigned, AIController.dbg_militia_orders,
 		AIController.dbg_threat_ticks])
@@ -103,6 +105,14 @@ func _initialize() -> void:
 				print("     BUILD-Brave x%d: %s" % [seen[k], k])
 		print("  KI %d: idle Braves %d, Bravestrom %.1f/min, Zustaende %s" % [i, idle,
 			ais[i].build_tick_cache().brave_stream, str(st)])
+		var veh: Dictionary = {}
+		for u in tribes[i].units:
+			if not is_instance_valid(u) or u.state == Unit.State.DEAD: continue
+			var uk: String = str(u.unit_kind())
+			if uk in ["siege", "fireram", "airship"]:
+				veh[uk] = int(veh.get(uk, 0)) + 1
+		if not veh.is_empty():
+			print("     Fahrzeuge: %s" % str(veh))
 		for b in tribes[i].buildings:
 			if is_instance_valid(b) and b.under_construction:
 				print("     Baustelle %s @%s: Arbeiter %d, Holz %d/%d, stalled %s, Fortschritt %.2f" % [

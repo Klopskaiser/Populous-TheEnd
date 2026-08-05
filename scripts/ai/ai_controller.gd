@@ -46,6 +46,10 @@ class TickCache extends RefCounted:
 	var army: Array[Unit] = []
 	var total_firewarriors: int = 0
 	var understaffed_airships: Array[Unit] = []
+	## Own GROUND vehicles (siege / fire ram) — 10g Teil 3 fills their crews.
+	var ground_vehicles: Array[Unit] = []
+	## Usable workshops whose exit a finished vehicle blocks (Workshop.exit_blocked).
+	var blocked_shops: Array[Building] = []
 	# --- buildings ---
 	var usable_huts: int = 0
 	var huts: Array[Building] = []
@@ -80,6 +84,9 @@ class TickCache extends RefCounted:
 	## auto-manning — are skipped instead of being ordered around twice.
 	var _idle_braves: Array[Unit] = []
 	var _idle_fw: Array[Unit] = []
+	## Idle warriors (10g Teil 3): vehicle crews come from the military first, and
+	## there was no warrior pool at all before — only _idle_fw.
+	var _idle_warriors: Array[Unit] = []
 
 	static func _take(pool: Array[Unit], count: int) -> Array[Unit]:
 		var out: Array[Unit] = []
@@ -147,6 +154,15 @@ class TickCache extends RefCounted:
 	## boarding order then overwrote the garrison march).
 	func take_idle_fw(count: int) -> Array[Unit]:
 		return _take(_idle_fw, count)
+
+	## Same for warriors. Uses the shared _take, so every hand-out re-checks
+	## State.IDLE — the 10e bug where two subsystems ordered the same firewarrior
+	## twice cannot repeat here.
+	func take_idle_warrior(count: int) -> Array[Unit]:
+		return _take(_idle_warriors, count)
+
+	func idle_warrior_left() -> int:
+		return _left(_idle_warriors)
 
 	func idle_fw_left() -> int:
 		return _left(_idle_fw)
@@ -289,6 +305,8 @@ var _home_islands_tick: int = -100000
 ## True while the AI demolishes its OWN unreachable site (10g): the
 ## building_destroyed handler must not punish that with a 15-tick rebuild pause.
 var _self_scrap: bool = false
+## Round-robin cursor over the own ground vehicles (10g Teil 3).
+var _vehicle_cursor: int = 0
 var _plot_fail_ticks: int = 0
 var _expansion_anchor_cache: Vector2i = Vector2i(-1, -1)
 var _expansion_anchor_age: int = 0
@@ -359,6 +377,9 @@ static var dbg_militia_orders: int = 0
 static var dbg_threat_ticks: int = 0
 ## Baustellen, die die Nachkontrolle als abgeschnitten verworfen hat (10g Teil 2).
 static var dbg_site_scraps: int = 0
+## Einheiten, die die KI auf Fahrzeuge geschickt hat (10g Teil 3). Vorher rief sie
+## order_crew NUR fuer Luftschiffe.
+static var dbg_vehicles_crewed: int = 0
 
 
 ## One AI decision tick (1x/s in game; tests call it directly).
@@ -424,6 +445,9 @@ func tick_ai() -> void:
 	# for the same braves.
 	if not serious:
 		_tick_hut_rallies(cache)
+	# VOR den Tuermen: eine blockierte Werkstatt freizumachen ist mehr wert als eine
+	# Turmgarnison, und beide ziehen aus demselben Feuerkrieger-Pool.
+	_tick_vehicle_crews(cache, serious)
 	_man_watchtowers(cache)
 	_man_airships(cache)
 	_cast_spells()
@@ -465,6 +489,10 @@ func build_tick_cache() -> TickCache:
 			&"warrior", &"firewarrior", &"preacher":
 				cache.army_count += 1
 				cache.kind_counts[kind] += 1
+				# Idle warriors are the FIRST choice for a vehicle crew (10g Teil 3);
+				# there was no warrior pool at all before, only _idle_fw.
+				if kind == &"warrior" and unit.state == Unit.State.IDLE:
+					cache._idle_warriors.append(unit)
 				if kind == &"firewarrior":
 					cache.total_firewarriors += 1
 					if unit.state == Unit.State.IDLE:
@@ -480,6 +508,9 @@ func build_tick_cache() -> TickCache:
 				if kind == &"airship" \
 						and unit.crew_count() < (unit as Airship).max_crew:
 					cache.understaffed_airships.append(unit)
+				elif kind != &"airship":
+					# Ground vehicles (10g Teil 3): _tick_vehicle_crews fills them.
+					cache.ground_vehicles.append(unit)
 	cache.shaman_alive = _shaman_alive()
 
 	dbg_building_passes += 1
@@ -507,14 +538,17 @@ func build_tick_cache() -> TickCache:
 			cache.planned[&"fireram_workshop"] += 1
 			if usable:
 				cache.workshops.append(building)
+				_note_blocked_shop(cache, building)
 		elif building is AirshipWharf:
 			cache.planned[&"airship_wharf"] += 1
 			if usable:
 				cache.workshops.append(building)
+				_note_blocked_shop(cache, building)
 		elif building is Workshop:
 			cache.planned[&"workshop"] += 1
 			if usable:
 				cache.workshops.append(building)
+				_note_blocked_shop(cache, building)
 		elif building is Watchtower:
 			cache.planned[&"watchtower"] += 1
 			if usable and building.has_crew_room():
@@ -2078,3 +2112,137 @@ func _tick_site_guard(cache: TickCache) -> void:
 		cache.stalled_sites.erase(site)
 		scrapped = true
 		dbg_site_scraps += 1
+
+
+## A workshop whose exit a finished vehicle blocks (10g Teil 3). exit_blocked() is
+## an O(1) distance check, so this is free inside the existing buildings pass.
+func _note_blocked_shop(cache: TickCache, shop: Building) -> void:
+	if (shop as Workshop).exit_blocked():
+		cache.blocked_shops.append(shop)
+
+
+## Mans own ground vehicles (10g Teil 3). THE fix for "several workshops but nothing
+## ever came out": Workshop._finish_catapult auto-crews ONCE with at most AUTO_CREW
+## idle BRAVES within AUTO_CREW_RADIUS (12 m), and CrewedVehicle._tick_auto_recrew
+## only pulls military from RECREW_SCAN_RADIUS (3 m). With nobody there the finished
+## vehicle blocks the entrance FOREVER — exit_blocked() gates can_start_production —
+## and that shop never produces again. The AI called order_crew for airships only.
+##
+## Runs before _man_watchtowers / _man_airships, which share the idle firewarrior
+## pool: freeing a blocked workshop outranks a tower garrison.
+##
+## Pass 1 (unblock) is deliberately stingy and runs in EVERY state, even under
+## threat: ONE unit reaches min_move_crew and gets the vehicle off the pad.
+func _tick_vehicle_crews(cache: TickCache, serious_threat: bool) -> void:
+	if commands == null:
+		return
+	# --- Pass 1: free blocked workshop exits.
+	for shop in cache.blocked_shops:
+		var engine = (shop as Workshop).pending_engine
+		if engine == null or not is_instance_valid(engine):
+			continue
+		var vehicle: CrewedVehicle = engine as CrewedVehicle
+		if vehicle == null or vehicle.boarded_count() >= vehicle.min_move_crew:
+			continue
+		_crew_vehicle(cache, vehicle, vehicle.min_move_crew)
+	if serious_threat:
+		return
+	# --- Pass 2: top up to a FIRING crew, round-robin over the ticks.
+	if cache.ground_vehicles.is_empty():
+		return
+	var filled: int = 0
+	for i in range(cache.ground_vehicles.size()):
+		if filled >= Balance.AI_VEHICLES_PER_TICK:
+			break
+		var idx: int = (_vehicle_cursor + i) % cache.ground_vehicles.size()
+		var vehicle: CrewedVehicle = cache.ground_vehicles[idx] as CrewedVehicle
+		if vehicle == null or not is_instance_valid(vehicle):
+			continue
+		var target: int = _target_crew(vehicle)
+		if vehicle.crew_count() >= target:
+			continue
+		if _crew_vehicle(cache, vehicle, target) > 0:
+			filled += 1
+	_vehicle_cursor = (_vehicle_cursor + 1) % maxi(cache.ground_vehicles.size(), 1)
+	_set_workshop_musters(cache)
+
+
+## Crew the AI aims for: enough to FIRE plus one, because the reload speed scales
+## with the crew (SiegeEngine.fire_cooldown_for_crew). Catapult 3, fire ram 2.
+func _target_crew(vehicle: CrewedVehicle) -> int:
+	return clampi(vehicle.min_fire_crew + Balance.AI_VEHICLE_EXTRA_CREW,
+		vehicle.min_move_crew, vehicle.max_crew)
+
+
+## Fills `vehicle` toward `target`: idle warriors first, then idle firewarriors
+## (keeping the tower/airship mobile reserve), braves only on a real surplus.
+## PREACHERS ARE EXCLUDED — mechanically they may crew (can_crew_siege only bars
+## the shaman and vehicles), but a preacher in State.CREW converts nothing, and the
+## AI aims for 30 % preachers precisely because they are its win condition.
+## Returns how many units were sent.
+func _crew_vehicle(cache: TickCache, vehicle: CrewedVehicle, target: int) -> int:
+	var free: int = target - vehicle.crew_count()
+	if free <= 0:
+		return 0
+	# Never strip the marching squad bare: the state machine drops out of ATTACK
+	# below ARMY_RETREAT_SIZE anyway.
+	if cache.army.size() <= AIState.ARMY_RETREAT_SIZE and not _braves_may_crew(cache):
+		return 0
+	# army_count counts State.CREW units, army does not — the difference IS the
+	# number of army units already sitting in vehicles.
+	var in_vehicles: int = maxi(0, cache.army_count - cache.army.size())
+	# maxi(1, ...) is load-bearing: the share is meant to stop a LARGE army from
+	# being drained, but int(1 * 0.25) == 0 locked the military out entirely for a
+	# small army — and the brave fallback then fired, inverting the user's
+	# "military first" rule. At least one army unit may always crew.
+	var crew_ceiling: int = maxi(1,
+		int(float(cache.army_count) * Balance.AI_VEHICLE_ARMY_CREW_SHARE))
+	var sent: int = 0
+	while free > 0:
+		var picked: Array[Unit] = []
+		if in_vehicles + sent < crew_ceiling:
+			picked = cache.take_idle_warrior(1)
+			if picked.is_empty() and cache.idle_fw_left() > WATCHTOWER_MIN_MOBILE_FW:
+				picked = cache.take_idle_fw(1)
+		if picked.is_empty() and _braves_may_crew(cache):
+			picked = cache.take_idle(1)
+		if picked.is_empty():
+			break
+		commands.order_crew(picked, vehicle)
+		sent += 1
+		free -= 1
+	dbg_vehicles_crewed += sent
+	return sent
+
+
+## Braves crew a vehicle only on a real surplus over the economy reserve, or when
+## there is barely any military to draw on (early rushes, after a lost wave) —
+## the user's rule.
+func _braves_may_crew(cache: TickCache) -> bool:
+	var spare: int = cache.brave_count - AIState.min_economy_braves(cache.population)
+	return spare >= Balance.AI_VEHICLE_BRAVE_SURPLUS \
+		or cache.army_count < Balance.AI_VEHICLE_MILITARY_SCARCE
+
+
+## Muster point in front of each workshop, so fresh vehicles gather at one spot
+## instead of clogging the gate (unmanned vehicles are nav obstacles via
+## _refresh_nav_block). NOT the fix for the blockade — that is the crew — just order.
+##
+## BuildingManager._default_rally_point puts the rally point on the ENTRANCE cell,
+## and Workshop._dispatch_point rejects anything within EXIT_CLEAR_RADIUS + 0.5, so
+## the default is always ignored. Set once per shop and only refreshed when the
+## point became unwalkable — re-pointing every tick would re-target parked vehicles.
+func _set_workshop_musters(cache: TickCache) -> void:
+	if nav_grid == null:
+		return
+	for shop in cache.workshops:
+		var ent: Vector3 = shop.entrance_world()
+		if Vector2(shop.rally_point.x - ent.x, shop.rally_point.z - ent.z).length() \
+				> Workshop.EXIT_CLEAR_RADIUS + 0.5:
+			continue   # already off the pad
+		var toward: Vector3 = nav_grid.cell_to_world(base_anchor)
+		var dir: Vector3 = Vector3(toward.x - ent.x, 0.0, toward.z - ent.z)
+		if dir.length_squared() < 0.001:
+			dir = Vector3(0.0, 0.0, 1.0)
+		commands.set_rally_point(tribe, shop,
+			ent + dir.normalized() * Balance.AI_VEHICLE_MUSTER_DISTANCE)
