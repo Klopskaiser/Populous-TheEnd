@@ -75,16 +75,28 @@ func place_building(tribe: Tribe, building_scene: PackedScene, cell: Vector2i,
 	probe.free()
 	if orientation % 2 == 1:
 		fp = Vector2i(fp.y, fp.x)   # non-square footprints turn with the entrance
-	if not can_place_at(cell, fp):
+	if not can_place_at(cell, fp, orientation):
 		return null
 	return building_manager.place(building_scene, tribe, cell, orientation)
 
 
 ## A plot is valid when every footprint cell is on land, free of buildings and
-## trees, and the total height range stays below MAX_LEVEL_DIFF (workers
-## flatten the rest during construction).
-func can_place_at(cell: Vector2i, footprint: Vector2i) -> bool:
+## trees, the total height range stays below MAX_LEVEL_DIFF (workers flatten the
+## rest during construction) AND workers have a reachable spot to serve it from.
+##
+## The approach check (10i, F4) is what stops the reported dead site at the root:
+## a plot whose entrance cell sits in a neighbour's footprint and whose whole
+## perimeter is blocked can never be worked — no wood is booked, no progress is
+## made, and manual worker assignment fails silently. Deliberately NOT a blanket
+## minimum spacing for the player (the AI has AI_PLOT_SPACING): that would also
+## forbid all the tight villages that work fine.
+func can_place_at(cell: Vector2i, footprint: Vector2i, orientation: int = 0) -> bool:
 	if nav_grid == null:
+		return false
+	# Asked BEFORE the plot goes solid, so its own cells are still walkable; the
+	# ring search starts one cell outside the footprint and the entrance cell lies
+	# outside it, so no own cell can pass as the approach spot.
+	if Building.approach_cell_for(nav_grid, cell, footprint, orientation).x < 0:
 		return false
 	var terrain: TerrainData = nav_grid.terrain
 	var lo: float = INF

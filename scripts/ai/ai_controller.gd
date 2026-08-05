@@ -1695,7 +1695,7 @@ func _find_supplied_plot(anchor: Vector2i, footprint: Vector2i,
 			# ((footprint+4)^2 lookups — 144 for the 8x8 firewarrior camp), and
 			# only last the A* reachability. Measured: with clearance ahead of the
 			# tree count the plot search cost 3x as much per tick.
-			if not commands.can_place_at(cell, fp):
+			if not commands.can_place_at(cell, fp, orientation):
 				continue
 			# Every placeable-but-rejected candidate counts toward the per-sweep
 			# give-up counter, so a hopeless anchor (treeless ground around the
@@ -2513,6 +2513,10 @@ func _find_rack_plot(target: Building, cache: TickCache,
 		side_clear: float = Balance.AI_SHOP_RACK_SIDE_CLEAR) -> Vector2i:
 	if nav_grid == null or commands == null or target == null:
 		return Vector2i(-1, -1)
+	# A 1x1 rack has no meaningful entrance side, but the placement below reads
+	# _plot_orientation, which _find_plot leaves behind. Pin it to the value the
+	# can_place_at pre-filter checks (10i, F4), so filter and placement agree.
+	_plot_orientation = 0
 	var ent_cell: Vector2i = target.entrance_cell()
 	var ent: Vector3 = target.delivery_point()
 	var centre: Vector3 = target.center_world()

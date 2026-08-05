@@ -531,6 +531,17 @@ const CONSTRUCTION_STALL_TIMEOUT: float = 120.0
 ## Erstattung einer verfallenen Baustelle (Anteil des gelieferten Holzes).
 const CONSTRUCTION_STALL_REFUND: float = 1.0
 
+# --- Baustellen-Robustheit (Phase 10i) ---
+## Eine Planierzelle, die so lange von keinem Arbeiter erreicht wurde, fällt aus
+## der Pflichtliste — eine einzige unerreichbare Zelle darf keine Baustelle
+## dauerhaft blockieren (sonst wird `foundation_done` nie true und damit ist
+## `add_build_progress` für immer gesperrt).
+const FLATTEN_CELL_TIMEOUT: float = 25.0
+## Absolutes Limit für eine Baustelle, die NIE in die Bauphase kommt
+## (build_progress == 0). Fängt den Fall, in dem Teilbuchungen den
+## Signatur-Timer von CONSTRUCTION_STALL_TIMEOUT immer wieder zurückstellen.
+const CONSTRUCTION_NO_START_TIMEOUT: float = 180.0
+
 ## Bauplan-Größen (Footprint in Zellen, Breite x Tiefe; 1 Zelle = 1 m).
 ## Der Eingang liegt auf der Südseite; nicht-quadratische Footprints werden
 ## beim Drehen automatisch getauscht.

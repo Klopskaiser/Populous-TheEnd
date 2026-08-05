@@ -1734,11 +1734,37 @@ func _on_seek_failed() -> void:
 		if _seek_fail_streak >= SEEK_FAIL_QUIT_STREAK:
 			_seek_fail_streak = 0
 			_stop_all()
+			_escape_if_trapped()
 			return
 		_end_subtask(minf(TASK_RETRY * pow(2.0, float(_seek_fail_streak - 1)),
 			TASK_RETRY_MAX))
 	else:
 		_stop_all()
+		_escape_if_trapped()
+
+
+## Last resort for a brave that gave up its job while standing on ground it
+## cannot path out of (10i, F5): a grading trench around a freshly levelled
+## footprint, a plot that went solid under it, terrain a spell tore away. It gets
+## snapped onto the nearest walkable cell — the pattern Unit._end_roll uses.
+##
+## ORDER MATTERS: this runs only AFTER _stop_all(). Graders stand on the solid
+## footprint of their own site on purpose (see Building.worker_can_reach), so
+## snapping before the job is released would rip legitimate workers off their
+## cell. Once the job is gone, standing there is no longer legitimate.
+func _escape_if_trapped() -> void:
+	if nav_grid == null or state == State.DEAD:
+		return
+	var cell: Vector2i = nav_grid.world_to_cell(position)
+	if nav_grid.is_cell_walkable(cell):
+		return
+	var near: Vector2i = nav_grid.nearest_walkable_cell(cell)
+	if near.x < 0:
+		return
+	var w: Vector3 = nav_grid.cell_to_world(near)
+	position.x = w.x
+	position.z = w.z
+	_snap_to_ground()
 
 
 func _set_working(working: bool) -> void:
@@ -1796,6 +1822,13 @@ func _anim_base() -> StringName:
 			if _forester_phase == ForesterPhase.KNEEL:
 				return &"attack"   # kneel/plant placeholder (crouch action)
 			return &"walk" if _has_path() else &"idle"
+		State.TRAIN:
+			# Walking to the camp's queue slot; only the WAIT in the slot stands
+			# still. train_reached_slot is exactly what _tick_train computes each
+			# tick, so a reassigned slot makes the brave walk again on its own.
+			# Without this branch TRAIN fell through to the default and rendered
+			# idle while moving (phase 10i, F8).
+			return &"idle" if train_reached_slot else &"walk"
 		_:
 			return super._anim_base()
 

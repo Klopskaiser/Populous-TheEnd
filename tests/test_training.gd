@@ -330,3 +330,90 @@ func test_queue_fifo() -> void:
 	check(_warriors(w).size() == 3, "three warriors produced")
 	check(w.tribe.population() == 3, "population constant across all swaps")
 	_free_world(w)
+
+
+# --- Animation while heading for training (phase 10i, F8) ---------------------------
+
+## The reported bug: a brave ordered to train walked to the camp showing the
+## IDLE animation, because State.TRAIN was missing from both _anim_base()
+## implementations and fell through to the default.
+func test_brave_walking_to_the_camp_plays_the_walk_animation() -> void:
+	var w: Dictionary = _make_world()
+	var camp: WarriorCamp = w.building_manager.place(
+		WARRIOR_CAMP_SCENE, w.tribe, Vector2i(30, 30), 0, true) as WarriorCamp
+	# Far enough away that it is still walking after the first ticks.
+	var brave: Brave = _spawn_brave(w, Vector2i(30, 60))
+	w.commands.order_train(camp, [brave] as Array[Unit])
+	check(brave.state == Unit.State.TRAIN, "the brave is in TRAIN state")
+
+	var walked: bool = false
+	var idle_while_moving: bool = false
+	for i in range(200):
+		brave.tick(TICK)
+		camp.tick(TICK)
+		if brave.state != Unit.State.TRAIN or brave.train_reached_slot:
+			break
+		if brave._anim_base() == &"walk":
+			walked = true
+		elif brave._anim_base() == &"idle":
+			idle_while_moving = true
+	check(walked, "walking to the queue slot uses the walk animation")
+	check(not idle_while_moving, "it never renders idle while still on its way")
+	_free_world(w)
+
+
+## Standing in the assigned queue slot is the ONE moment the brave holds still.
+func test_brave_waiting_in_the_queue_slot_plays_idle() -> void:
+	var w: Dictionary = _make_world()
+	var camp: WarriorCamp = w.building_manager.place(
+		WARRIOR_CAMP_SCENE, w.tribe, Vector2i(30, 30), 0, true) as WarriorCamp
+	var braves: Array[Unit] = []
+	for i in range(3):
+		braves.append(_spawn_brave(w, Vector2i(28 + i, 38)))
+	w.commands.order_train(camp, braves)
+	# The two behind the front brave wait in their slots while it trains.
+	_run(w, camp, func() -> bool: return camp.trainee != null)
+	var waiter: Brave = null
+	for u: Unit in w.unit_manager.units:
+		if u is Brave and u.state == Unit.State.TRAIN and u.train_reached_slot:
+			waiter = u as Brave
+			break
+	check(waiter != null, "at least one brave reached its queue slot")
+	if waiter != null:
+		check(waiter._anim_base() == &"idle", "a brave parked in its slot renders idle")
+	_free_world(w)
+
+
+## Guard against the CLASS of the bug, not just this one state: every
+## Unit.State must either resolve to a moving animation while the unit is in
+## motion, or sit on the documented exception list. A new state added without
+## an _anim_base() branch fails here until someone decides which list it joins.
+func test_no_state_falls_through_to_idle_while_moving() -> void:
+	# IDLE is correct by definition; a RAID unit is removed from the world by
+	# the building before the state is set, so it is never rendered.
+	var deliberately_idle: Array[Unit.State] = [Unit.State.IDLE, Unit.State.RAID]
+	var td: TerrainData = _flat_terrain()
+	var covered: int = 0
+	for state: int in Unit.State.values():
+		var brave: Brave = Brave.new()
+		brave.terrain_data = td
+		brave.state = state as Unit.State
+		# "In motion" configuration: a path left to walk, no work animation, not
+		# parked in a queue slot, deck crew walking, not waiting in a second row.
+		brave._path = PackedVector3Array([Vector3(9.0, 0.0, 9.0)])
+		brave._path_index = 0
+		brave._working = false
+		brave.train_reached_slot = false
+		brave._crew_walking = true
+		brave._combat_waiting = false
+		brave._in_melee = false
+		var anim: StringName = brave._anim_base()
+		if state as Unit.State in deliberately_idle:
+			check(anim == &"idle", "%s is deliberately idle" % Unit.State.keys()[state])
+		else:
+			check(anim != &"idle",
+				"%s must not render idle while moving" % Unit.State.keys()[state])
+			covered += 1
+		brave.free()
+	check(covered == Unit.State.values().size() - deliberately_idle.size(),
+		"every state is either handled or on the exception list")

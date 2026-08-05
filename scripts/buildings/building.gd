@@ -182,6 +182,10 @@ var _crew_shown: int = -1
 var _crew_shown_cap: int = -1
 var _flatten_remaining: Dictionary[Vector2i, bool] = {}
 var _flatten_claims: Dictionary[Vector2i, int] = {}
+## Seconds each still-open flatten cell has gone without any grading progress
+## (10i, F3). Accounted once per second over the open cells, not per tick.
+var _flatten_stall: Dictionary[Vector2i, float] = {}
+var _flatten_stall_tick: float = 0.0
 var _dirty: Rect2i = Rect2i()
 var _flush_timer: float = FLUSH_INTERVAL
 var _absorb_timer: float = ABSORB_INTERVAL
@@ -221,11 +225,29 @@ var _upgrade_stall_timer: float = 0.0
 ## progress at all for Balance.CONSTRUCTION_STALL_TIMEOUT decays.
 var _decay_signature: Vector3 = Vector3(-1.0, -1.0, -1.0)
 var _decay_timer: float = 0.0
+## Seconds the site has spent at build_progress == 0 (10i, F7). Independent of
+## the signature timer above, which partial bookings keep resetting.
+var _no_start_timer: float = 0.0
 
 ## Island label of the worker approach point, cached against the NavGrid's
 ## change_version (see approach_island()).
 var _approach_island: int = -1
 var _approach_island_version: int = -1
+
+# --- Delivery anchor (phase 10i, F1) ------------------------------------------
+## PERSISTED worker approach point. It used to be recomputed on every call, and
+## because the ring search returns a perimeter cell, it JUMPED whenever anything
+## nearby changed walkability (every graded cell does). On a 4x4 footprint
+## opposite ring-1 corners are ~7 m apart, on an 8x8 ~14 m — far outside
+## ABSORB_RADIUS. Wood then landed outside the absorption radius, wood_delivered
+## stayed 0, wants_more_wood() stayed true forever and the workers hammered away
+## at a site whose progress_cap() was 0: the reported stuck site with the
+## ever-growing wood pile. Five consumers share this anchor (_absorb_piles,
+## wood_incoming, the braves' delivery target, _refund_wood, approach_island),
+## so it has to be ONE stable point.
+var _delivery_point: Vector3 = Vector3.INF
+## NavGrid.change_version the cached point was last validated against.
+var _delivery_point_version: int = -1
 
 
 ## German display name, overridden by subclasses (UI language is German).
@@ -310,13 +332,26 @@ static func approach_cell_for(nav: NavGrid, cell: Vector2i, footprint: Vector2i,
 	for grow in range(1, APPROACH_SEARCH_RINGS + 1):
 		var rect: Rect2i = base.grow(grow)
 		var inner: Rect2i = base.grow(grow - 1)
+		# The NEAREST candidate of this ring, not the first one the raster hits
+		# (10i, F2). The plain loop order is north-west biased, so two calls with
+		# slightly different walkability could pick cells on OPPOSITE sides of the
+		# footprint — ~14 m apart on an 8x8. Scoring by distance to the entrance
+		# also makes the point plausible: workers serve the door side.
+		var best: Vector2i = Vector2i(-1, -1)
+		var best_d: float = INF
 		for z in range(rect.position.y, rect.position.y + rect.size.y):
 			for x in range(rect.position.x, rect.position.x + rect.size.x):
 				var c: Vector2i = Vector2i(x, z)
 				if inner.has_point(c):
 					continue
-				if nav.is_cell_walkable(c):
-					return c
+				if not nav.is_cell_walkable(c):
+					continue
+				var d: float = Vector2(c - entrance).length_squared()
+				if d < best_d:
+					best_d = d
+					best = c
+		if best.x >= 0:
+			return best
 	return Vector2i(-1, -1)
 
 
@@ -366,8 +401,24 @@ func edge_spawn_position() -> Vector3:
 ## (water / slope / blocked), the nearest walkable perimeter cell — so wood
 ## delivery never gets stuck on an unreachable doorway (workers would otherwise
 ## stand around holding wood, or drop it back at the trees).
+##
+## PERSISTED (10i, F1): computed once and kept. It is only recomputed when the
+## remembered cell actually stopped being walkable — a changed neighbourhood on
+## its own must NOT move the anchor, or the wood already lying there falls out of
+## ABSORB_RADIUS. Deliberately lazy instead of initialised in init_construction():
+## pre-built buildings (every start site) skip that call entirely.
 func delivery_point() -> Vector3:
-	return edge_spawn_position()
+	if nav_grid == null:
+		return edge_spawn_position()   # headless tests without navigation
+	if _delivery_point_version == nav_grid.change_version and _delivery_point.x < INF:
+		return _delivery_point
+	if _delivery_point.x < INF \
+			and nav_grid.is_cell_walkable(nav_grid.world_to_cell(_delivery_point)):
+		_delivery_point_version = nav_grid.change_version   # still good: keep it
+		return _delivery_point
+	_delivery_point = edge_spawn_position()
+	_delivery_point_version = nav_grid.change_version
+	return _delivery_point
 
 
 # --- Worker reachability (phase 10d) ---------------------------------------------
@@ -404,9 +455,22 @@ func worker_can_reach(from: Vector3) -> bool:
 	return theirs == mine
 
 
-## True while another worker can still join this site/demolition.
+## True while another worker can still join this site/demolition. Freed workers
+## are filtered out (10i, F5): a stale entry would silently shrink the crew cap
+## and could starve a plot. wood_incoming() already guards this way.
 func has_worker_room() -> bool:
-	return workers.size() < MAX_WORKERS
+	return live_workers() < MAX_WORKERS
+
+
+## Number of workers that are still alive. `workers` is pruned by leave(), but a
+## unit freed without leaving (test teardown, edge cases in destruction) would
+## otherwise linger.
+func live_workers() -> int:
+	var count: int = 0
+	for w in workers:
+		if is_instance_valid(w):
+			count += 1
+	return count
 
 
 ## Drops `amount` wood as ground piles at the delivery point (there is no tribe
@@ -449,10 +513,17 @@ func init_construction() -> void:
 	for z in range(cell.y, cell.y + footprint.y):
 		for x in range(cell.x, cell.x + footprint.x):
 			_flatten_remaining[Vector2i(x, z)] = true
-	# The entrance cell is levelled too, so the doorway sits flush.
+	# The entrance cell is levelled too, so the doorway sits flush — but that is
+	# purely cosmetic, and it must never become a blocker (10i, F3). Inside a
+	# FOREIGN footprint it can never be graded, _flatten_remaining would never
+	# empty, foundation_done would stay false and add_build_progress stays gated
+	# forever. Grading it there would also deform the neighbour's foundation.
 	var entrance: Vector2i = entrance_cell()
-	if terrain_data != null and terrain_data.in_bounds(entrance):
+	if terrain_data != null and terrain_data.in_bounds(entrance) \
+			and not _cell_in_foreign_footprint(entrance):
 		_flatten_remaining[entrance] = true
+	_flatten_stall.clear()
+	_flatten_stall_tick = 0.0
 
 
 # --- Gameplay tick (driven by BuildingManager) -----------------------------------
@@ -1248,6 +1319,8 @@ func _tick_construction(delta: float) -> void:
 		_wood_recheck_timer -= delta
 		if _wood_recheck_timer <= 0.0:
 			wood_stalled = false  # workers may try again (30-s re-check)
+	if not foundation_done and not demolishing:
+		_tick_flatten_stall(delta)
 	# From the first delivered wood on, keep the footprint clear of units so the
 	# rising building does not bury (and hide) anyone standing on the plot.
 	# Only AFTER the plot is fully graded: the building starts rising with
@@ -1403,6 +1476,17 @@ func _finish_demolish() -> void:
 ## wood or build progress. Catches the unreachable plot (no worker ever arrives),
 ## the forgotten site and the one whose wood source dried up for good.
 func _tick_decay(delta: float) -> void:
+	# Absolute second criterion (10i, F7): a site that never even STARTS to rise
+	# gives up. The signature below is reset by every partial booking and every
+	# graded cell, so a site whose anchor occasionally drifted back within reach
+	# of its pile could live forever without ever building anything.
+	if build_progress <= 0.0:
+		_no_start_timer += delta
+		if _no_start_timer >= Balance.CONSTRUCTION_NO_START_TIMEOUT:
+			_decay_stalled_site()
+			return
+	else:
+		_no_start_timer = 0.0
 	var signature: Vector3 = Vector3(build_progress, float(wood_delivered),
 		float(_flatten_remaining.size()))
 	if signature != _decay_signature:
@@ -1433,7 +1517,7 @@ func _tick_active(_delta: float) -> void:
 func join(worker: Brave) -> bool:
 	if worker in workers:
 		return true
-	if workers.size() >= MAX_WORKERS:
+	if not has_worker_room():
 		return false
 	workers.append(worker)
 	return true
@@ -1447,6 +1531,56 @@ func leave(worker: Brave) -> void:
 
 func needs_flatten() -> bool:
 	return under_construction and not foundation_done and not _flatten_remaining.is_empty()
+
+
+## True when `c` lies inside the footprint of a building that is NOT this one.
+## Its own plot is solid too, so a plain is_cell_blocked_by_building() would
+## report every own cell as foreign.
+func _cell_in_foreign_footprint(c: Vector2i) -> bool:
+	if nav_grid == null or not nav_grid.is_cell_blocked_by_building(c):
+		return false
+	return not footprint_rect().has_point(c)
+
+
+## Drops flatten cells that no worker managed to grade for FLATTEN_CELL_TIMEOUT
+## (10i, F3). A single unreachable cell — in a neighbour's footprint, behind a
+## grading trench, on the far side of a torn-up plot — used to keep
+## _flatten_remaining non-empty forever, and with it foundation_done false and
+## add_build_progress gated: the site could never be built at all. A dent next
+## to the doorway is the better trade.
+##
+## Accounted once per SECOND over the open cells (an 8x8 has 65 of them), not
+## once per tick. The clock only runs while the site HAS workers: an unattended
+## plot (no wood, nobody recruited yet) must not quietly erode its own grading
+## duty and then rise out of untouched terrain.
+##
+## Dropping every cell is deliberately allowed. The blocking cell is by
+## definition the LAST one left — the reachable ones get graded and erased — so
+## a "keep the last one" rule would defeat the whole fix. A site whose ENTIRE
+## plot is unreachable is still caught: no worker arrives, build_progress stays
+## 0 and the decay (10d, plus F7 below) removes it.
+func _tick_flatten_stall(delta: float) -> void:
+	if _flatten_remaining.is_empty() or live_workers() == 0:
+		return
+	_flatten_stall_tick += delta
+	if _flatten_stall_tick < 1.0:
+		return
+	var elapsed: float = _flatten_stall_tick
+	_flatten_stall_tick = 0.0
+	var timed_out: Array[Vector2i] = []
+	for c: Vector2i in _flatten_remaining.keys():
+		var waited: float = _flatten_stall.get(c, 0.0) + elapsed
+		_flatten_stall[c] = waited
+		if waited >= Balance.FLATTEN_CELL_TIMEOUT:
+			timed_out.append(c)
+	for c in timed_out:
+		_flatten_remaining.erase(c)
+		_flatten_claims.erase(c)
+		_flatten_stall.erase(c)
+	if _flatten_remaining.is_empty():
+		foundation_done = true
+		position.y = flatten_target
+		_flush_deformation()
 
 
 func flatten_cell_pending(c: Vector2i) -> bool:
@@ -1505,8 +1639,10 @@ func work_flatten(c: Vector2i, amount: float) -> bool:
 			if absf(nh - flatten_target) > FLATTEN_EPS:
 				done = false
 	_mark_dirty(c)
+	_flatten_stall[c] = 0.0   # somebody reached it: its stall clock restarts
 	if done:
 		_flatten_remaining.erase(c)
+		_flatten_stall.erase(c)
 		if _flatten_remaining.is_empty():
 			foundation_done = true
 			position.y = flatten_target  # settle onto the levelled ground

@@ -176,7 +176,9 @@ func _process(_delta: float) -> void:
 	var fp: Vector2i = _effective_footprint()
 	var hit_cell: Vector2i = _nav_grid.world_to_cell(hit.position)
 	_ghost_cell = hit_cell - fp / 2
-	_ghost_valid = _tribe_commands.can_place_at(_ghost_cell, fp)
+	# With the ORIENTATION: the approach check (10i, F4) looks at the entrance
+	# side, so the ghost has to be judged for the side that will actually be built.
+	_ghost_valid = _tribe_commands.can_place_at(_ghost_cell, fp, _orientation)
 	_ghost_material.albedo_color = COLOR_VALID if _ghost_valid else COLOR_INVALID
 	var wx: float = (float(_ghost_cell.x) + float(fp.x) * 0.5) * TerrainData.CELL_SIZE
 	var wz: float = (float(_ghost_cell.y) + float(fp.y) * 0.5) * TerrainData.CELL_SIZE
