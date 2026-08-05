@@ -91,6 +91,18 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
 - **Beim Platzieren selektierte Braves bauen automatisch mit** — kein zusätzlicher
   Rechtsklick nötig. Braves auf einer **anderen Insel** werden nicht mitgeschickt
   (sie könnten den Bauplatz nie erreichen).
+- **`B` zieht ein Holzfäll-Rechteck** (`Shift+B` beauftragt alle Hütten): die Braves
+  fällen jeden Baum darin und sammeln **auch die Holzstapel** im Rechteck ein — für
+  diese Stapel gilt weiter die **automatische** Ablieferung (anders als beim
+  Einzel-Rechtsklick, der Holz aufnimmt und *hält*). Wohin geliefert wird, hängt
+  davon ab, wo der Stapel liegt:
+  - **an einem eigenen Gebäude** (also bereits „abgeliefertes" Holz): in die
+    **nächste Holzstation**. Gibt es keine, bleibt der Stapel liegen — ihn zum
+    Gebäude zu tragen, an dem er schon liegt, wäre ein Weg im Kreis.
+  - **frei im Gelände:** zum nächsten eigenen Gebäude, mit Vorrang für den größten
+    offenen Bedarf (siehe §5) bzw. eine Holzstation in Reichweite.
+  - Der **eigene Bestand einer Holzstation** ist nie Sammelziel, sonst würden zwei
+    Stationen ihren Bestand endlos hin- und herschaffen.
 
 ## 5. Gebäude & Wirtschaft
 

@@ -495,8 +495,24 @@ func _next_area_pile() -> bool:
 	var best: WoodPile = null
 	var best_dist: float = INF
 	for pile: WoodPile in wood_pile_manager.area_piles(chop_area, chop_area_poly):
-		if _pile_near_friendly_building(pile.position):
+		# A depot's own stock lies INSIDE its footprint and is not a collection
+		# target (`clickable` is the same flag that keeps the depot's click body in
+		# front of it). Without this filter two depots would relay their stock to
+		# each other for ever, because each one's stock counts as "at a friendly
+		# building" for the other.
+		if not pile.clickable:
 			continue
+		if _pile_near_friendly_building(pile.position):
+			# At a friendly building the wood already counts as delivered, so the
+			# only useful move is a relay into a wood depot — the very behaviour the
+			# single right-click had before 10h. `_tick_pickup` performs it; here we
+			# only take the pile when such a depot actually exists (excluding one
+			# that already "owns" this spot). WITHOUT a depot the pile is left
+			# alone: hauling it to the building it already lies at would be a walk
+			# in a circle. Re-checked at pickup time, so a depot that fills up in
+			# between falls back to the normal delivery.
+			if _nearest_depot(pile.position, null, pile.position) == null:
+				continue
 		if nav_grid != null and not nav_grid.same_island(position, pile.position):
 			continue
 		var d: float = _flat_dist(position, pile.position)

@@ -8180,6 +8180,11 @@ Luftschiffwerft und Holzstation gar nicht kannte.
    der Fall nie erreichbar (`_next_area_pile` überspringt Stapel an eigenen
    Gebäuden). Ersetzt durch den gezielten Regal-Ablage-Pfad: zwei Klicks statt
    Automatik, dafür deterministisch.
+   > **Nachtrag 2026-08-05 (Nutzerreport, nach 10i):** Das war die falsche
+   > Entscheidung — der Nutzer wollte das Relais auf dem **`B`-Rechteck** haben.
+   > `_next_area_pile` nimmt gebäudenahe Stapel jetzt auf, **wenn** es ein Holzlager
+   > gibt, das sie annehmen kann, und überlässt sie sonst sich selbst. Details im
+   > 10i-Abschnitt unten.
 2. **Die Anforderung „Baum neben dem Bauplatz" war eine echte Sackgasse.** Mit einer
    Sonde an derselben Welt gemessen: mit Bäumen Bauplatz `(47, 47)`, nach dem
    Abholzen `(-1, -1)`. Eine abgeholzte Basis hatte **keinen gültigen Bauplatz mehr**
@@ -8400,9 +8405,36 @@ Nutzererwartung. **Zwei Befunde bleiben offen:**
    Verhaltensaussage und betrifft Fahrzeug-gegen-Fahrzeug allgemein, nicht nur
    Luftschiffe.
 
+### Nachtrag — `B`-Rechteck liefert gebäudenahe Stapel ins Holzlager (Nutzerreport)
+
+Drittes Symptom aus demselben Spieltest: *„das `B`-Rechteck sollte so funktionieren wie
+damals der Rechtsklick — liegen die Stapel in der Nähe eigener Gebäude, sollen sie zum
+nächsten Holzlager gebracht werden; ansonsten zum nächsten befreundeten Gebäude. Gibt es
+kein Holzlager, soll nichts passieren."*
+
+Die Ablieferlogik dafür **existierte schon** (`Brave._tick_pickup`, Relais in die nächste
+Holzstation, eingeführt vor 10h) — sie war nur **unerreichbar**, weil `_next_area_pile`
+gebäudenahe Stapel pauschal übersprang. Genau das hält die 10h-Erkenntnis Nr. 1 oben als
+„Relais ersatzlos entfallen" fest; die Entscheidung war falsch, der Nutzer wollte es auf
+dem Flächenauftrag haben. Der Fix ist eine Zeile Bedingung statt einer Zeile `continue`:
+gebäudenahe Stapel werden aufgenommen, **wenn** `_nearest_depot(...)` eine Station mit
+Platz findet, die den Ort nicht schon selbst „besitzt" — sonst bleiben sie liegen.
+
+**Eine neue Falle kam dazu und ist mit abgedeckt:** der Bestand einer Holzstation liegt
+als echte `WoodPile` **in ihrem Grundriss**, ist also für jede *andere* Station
+„gebäudenahes Holz". Ohne Filter hätten zwei Stationen ihren Bestand endlos
+hin- und hergetragen. `WoodPile.clickable` (die Marke, die den Bestand schon vom
+Rechtsklick ausnimmt) ist der Filter.
+
+Vier Tests in `tests/test_harvest_area.gd`: Relais ins Regal (ohne Fix
+`the relayed wood lands in the depot rack (0)`), ohne Regal bleibt der Stapel liegen (der
+alte Test, präzisiert statt gelöscht — er prüft jetzt genau diesen Fall), kein
+Regal-Ping-Pong, und „frei im Gelände geht weiter ans Gebäude" als Wächter für die andere
+Hälfte des Reports.
+
 ### Verifikationsstand
 
-- **Suite 4010 Zusicherungen grün** (Start der Phase: 3874), Exit-Code 0, Output frei von
+- **Suite 4019 Zusicherungen grün** (Start der Phase: 3874), Exit-Code 0, Output frei von
   `SCRIPT ERROR`. Projekt-Ladecheck sauber. Neu: `tests/test_construction_stuck.gd` (16
   Tests, je einer pro Stufe der Ursachenkette), `tests/test_fireball_impact.gd`,
   `tests/test_preach_disturb.gd`.

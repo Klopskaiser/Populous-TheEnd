@@ -503,9 +503,10 @@ func test_area_order_hauls_collected_wood_to_the_depot() -> void:
 	_free_world(w)
 
 
-## The order's OWN drop-off lies inside the area: the delivered wood must not be
-## picked up again (that would be an endless loop).
-func test_area_order_does_not_re_collect_its_own_delivery() -> void:
+## Wood at a friendly building with NO wood depot anywhere: nothing happens. The
+## load would only be carried to the building it is already lying at — a walk in
+## a circle, and with the order's own drop-off inside the area an endless loop.
+func test_area_order_leaves_wood_at_a_building_when_there_is_no_depot() -> void:
 	var w: Dictionary = _make_world()
 	var hut: Building = w.bm.place(HUT_SCENE, w.tribe, Vector2i(20, 20), 0, true)
 	# Wood lying right at the hut = delivered wood.
@@ -516,7 +517,86 @@ func test_area_order_does_not_re_collect_its_own_delivery() -> void:
 	brave.chop_area = area
 	brave.chop_area_poly = PackedVector2Array()
 	check(not brave._next_area_pile(),
-		"wood at a friendly building is delivered wood, not a source")
+		"without a wood depot, wood at a friendly building is left alone")
+	_free_world(w)
+
+
+## Nutzerreport 2026-08-05: the B rectangle has to behave like the old single
+## right-click did — wood lying at an own building belongs in the nearest WOOD
+## DEPOT. Before this it was skipped outright, so the depot was never targeted.
+func test_area_order_relays_wood_at_a_building_into_the_depot() -> void:
+	var w: Dictionary = _make_world()
+	var hut: Building = w.bm.place(HUT_SCENE, w.tribe, Vector2i(20, 20), 0, true)
+	var depot: WoodDepot = w.bm.place(
+		DEPOT_SCENE, w.tribe, Vector2i(34, 20), 0, true) as WoodDepot
+	w.wpm.deposit(hut.delivery_point(), 3)
+	var area: Rect2 = _cell_rect(w, Vector2i(16, 16), Vector2i(26, 26))
+	var brave: Brave = _brave_at(w, Vector2i(24, 24))
+	brave.chop_area = area
+	brave.chop_area_poly = PackedVector2Array()
+	check(brave._next_area_pile(),
+		"with a depot in reach the pile IS a source (this is the reported bug)")
+	check(brave.task == Brave.Task.PICKUP and brave.task_pile != null,
+		"and the brave has it as its pickup target")
+
+	# End to end: the wood ends up in the depot's rack, not back at the hut.
+	var units: Array[Unit] = [brave] as Array[Unit]
+	w.commands.order_chop_area(units, area)
+	var stored: bool = false
+	for i in range(int(90.0 / TICK)):
+		brave.tick(TICK)
+		w.um.tick(TICK)
+		w.bm.tick(TICK)
+		if depot.stored_wood() > 0:
+			stored = true
+			break
+	check(stored, "the relayed wood lands in the depot rack (%d)" % depot.stored_wood())
+	brave._interrupt_tasks()
+	_free_world(w)
+
+
+## The depot's own stock lies inside its footprint. Two depots would otherwise
+## relay their stock to each other for ever, because each one's stock counts as
+## "at a friendly building" for the other.
+func test_area_order_never_collects_a_depots_own_stock() -> void:
+	var w: Dictionary = _make_world()
+	var depot_a: WoodDepot = w.bm.place(
+		DEPOT_SCENE, w.tribe, Vector2i(20, 20), 0, true) as WoodDepot
+	var depot_b: WoodDepot = w.bm.place(
+		DEPOT_SCENE, w.tribe, Vector2i(24, 20), 0, true) as WoodDepot
+	check(depot_a.store_wood(4) > 0, "depot A holds stock")
+	var area: Rect2 = _cell_rect(w, Vector2i(16, 16), Vector2i(30, 30))
+	check(not w.wpm.area_piles(area).is_empty(),
+		"the stock pile IS registered and inside the area")
+	var brave: Brave = _brave_at(w, Vector2i(28, 28))
+	brave.chop_area = area
+	brave.chop_area_poly = PackedVector2Array()
+	check(not brave._next_area_pile(),
+		"a depot's stock is never a collection target (no depot ping-pong)")
+	check(depot_b.stored_wood() == 0, "and nothing moved into the other depot")
+	_free_world(w)
+
+
+## Regression guard for the OTHER half of the report: wood out in the open still
+## goes to the nearest friendly building, exactly as before.
+func test_area_order_wood_in_the_open_still_goes_to_a_building() -> void:
+	var w: Dictionary = _make_world()
+	var hut: Building = w.bm.place(HUT_SCENE, w.tribe, Vector2i(40, 40), 0, true)
+	w.wpm.deposit(w.nav.cell_to_world(Vector2i(20, 20)), 3)
+	var area: Rect2 = _cell_rect(w, Vector2i(18, 18), Vector2i(22, 22))
+	var brave: Brave = _brave_at(w, Vector2i(21, 21))
+	var units: Array[Unit] = [brave] as Array[Unit]
+	check(w.commands.order_chop_area(units, area) == 1, "the order is accepted")
+	var delivered: bool = false
+	for i in range(int(90.0 / TICK)):
+		brave.tick(TICK)
+		w.um.tick(TICK)
+		w.bm.tick(TICK)
+		if w.wpm.wood_in_radius(hut.delivery_point(), Building.ABSORB_RADIUS) > 0:
+			delivered = true
+			break
+	check(delivered, "loose wood is hauled to the nearest own building")
+	brave._interrupt_tasks()
 	_free_world(w)
 
 
