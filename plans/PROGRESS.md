@@ -8755,3 +8755,45 @@ Kegelform mit runder Spitze und gleichmäßiger Bogenlänge; Wasserfall hängt s
 geschnitten.
 
 **Weiterhin offen:** erneute Sichtprüfung durch den Nutzer.
+
+### Nachtrag 3 — die Rundung wirkte gar nicht (2026-08-05)
+
+Dritter Nutzerreport: auf Landkarten **gar kein Kegel**, „gerade und kantige Ecken wie
+zuvor", dazu neu eine **blaue Zwischenschicht mit runden Ecken**; die Wasserfälle zeigen
+„nicht nach außen sondern zur Seite" und heben die Eckigkeit hervor.
+
+**Ein Denkfehler in Nachtrag 2, am Code nachgerechnet.** `vertex_mesh_xz()` schnappte nur
+Vertices, die **außerhalb** des Randkreises lagen. Gemessen liegt der Randvertex-Ring
+einer 144er-Karte aber bei **70,0 … 72,1 m** gegen `rim_radius` 72 — fast jeder
+Randvertex ist *innerhalb*, blieb also unangetastet, und die Treppe überlebte
+vollständig. Schlimmer: das Meer wurde bereits auf dem Kreis (72) geschnitten und ragte
+damit um bis zu **2 m** über die Landkante hinaus — genau die blaue Schicht, und sie war
+rund, weil sie die einzige Geometrie war, die dem Kreis folgte.
+
+**Behoben:** `vertex_mesh_xz()` projiziert Randvertices jetzt **in beide Richtungen** auf
+den Kreis (`is_boundary_vertex()` = gehört zu mindestens einer Scheiben- und einer
+Nicht-Scheiben-Zelle). Gemessen: **1144 von 1144** Randvertices auf Bergpass liegen exakt
+auf dem Kreis, maximale Abweichung 0,0000 m. Die Innenvertices bleiben unberührt, die
+Begehbarkeit ohnehin.
+
+**Zweiter Fehler, derselbe Report:** der Rand benutzte die **Zellflächennormale**
+(±x/±z, also vier mögliche Richtungen). Auf einem runden Rand ist die bis zu **45° daneben**
+— die Wasserfall-Vorhänge zeigten zur Seite statt nach außen und betonten damit genau die
+Kantigkeit, die der runde Rand beseitigen soll. Neu ist `_outward()`: die **radiale**
+Richtung von der Kartenmitte durch die Seitenmitte. Da nach der Projektion beide Endpunkte
+einer Seite auf dem Kreis liegen, ist die Seite eine Sehne und ihre radiale Normale die
+richtige — für die Beleuchtung des Felsens genauso wie für das Wasser. Gemessen:
+schlechtestes `dot(normal, radial)` = **1,0000** (vorher bis 0,707).
+
+**Der Kegel war die ganze Zeit da**, nur auf einem Treppen-Fundament mit falschen
+Normalen und damit unlesbar. Gemessen auf Bergpass: Fels von **+32,9 m** (der Grat!) bis
+−58 m (Spitze), Radius von 144 auf 56 verjüngt. Damit ist auch die Nutzervorgabe erfüllt,
+dass die Kegelform **für die Berge mitgilt**: der Körper beginnt an der echten Landhöhe,
+ein Grat am Rand ragt also weit über den Rand auf Bodenhöhe (~6 m) hinaus.
+
+Suite **4177 grün**, Ladecheck sauber. Neue Tests: Randvertices liegen *auf* dem Kreis
+(und die Mehrheit musste dafür nach **außen** — genau der Fall, den Nachtrag 2 verpasste),
+Innenvertices unbewegt, Kegel verjüngt sich auch auf einer **Landkarte** und beginnt über
+der Grathöhe, Wasserfall-Normalen radial.
+
+**Weiterhin offen:** erneute Sichtprüfung durch den Nutzer.

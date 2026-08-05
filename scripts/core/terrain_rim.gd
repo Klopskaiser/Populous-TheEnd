@@ -205,6 +205,24 @@ func rebuild(td: TerrainData) -> void:
 	_waterfall.visible = _waterfall.mesh != null
 
 
+## RADIAL outward direction of a rim side, from the map centre through the side's
+## midpoint.
+##
+## Not the cell-face normal (+/-x, +/-z), which is what it used to be. With only four
+## possible directions every quad on a round rim faced up to 45 degrees off true, so the
+## waterfall curtains pointed sideways instead of outward and re-emphasised exactly the
+## angularity the round rim was meant to remove (user report: "die Wasserfälle zeigen in
+## die falsche Richtung, nicht nach außen sondern zur Seite"). Both endpoints of a side
+## lie ON the rim circle after projection, so the side is a chord and its radial normal
+## is the correct one — for the rock's lighting just as much as for the water.
+func _outward(a: Vector3, b: Vector3, centre: float) -> Vector3:
+	var mid: Vector2 = Vector2((a.x + b.x) * 0.5 - centre, (a.z + b.z) * 0.5 - centre)
+	if mid.length_squared() < 0.000001:
+		return Vector3(1.0, 0.0, 0.0)
+	mid = mid.normalized()
+	return Vector3(mid.x, 0.0, mid.y)
+
+
 ## World position of a cell-vertex, at the SNAPPED XZ the mesh uses, with its height.
 func _vertex_world(td: TerrainData, cell: Vector2i, local: Vector2i) -> Vector3:
 	var vx: int = cell.x + local.x
@@ -237,7 +255,7 @@ func _build_rock(td: TerrainData, sides: Array) -> ArrayMesh:
 		var side: Array = _SIDES[entry[1]]
 		var a: Vector3 = _vertex_world(td, cell, side[1])
 		var b: Vector3 = _vertex_world(td, cell, side[2])
-		var outward: Vector3 = Vector3(float(side[0].x), 0.0, float(side[0].y))
+		var outward: Vector3 = _outward(a, b, td.disc_center())
 		var along: Vector3 = Vector3(b.x - a.x, 0.0, b.z - a.z)
 		if along.length_squared() > 0.000001:
 			along = along.normalized()
@@ -325,7 +343,7 @@ func _build_waterfall(td: TerrainData, sides: Array) -> ArrayMesh:
 		var side: Array = _SIDES[entry[1]]
 		var a: Vector3 = _vertex_world(td, cell, side[1])
 		var b: Vector3 = _vertex_world(td, cell, side[2])
-		var outward: Vector3 = Vector3(float(side[0].x), 0.0, float(side[0].y))
+		var outward: Vector3 = _outward(a, b, c)
 		var along: Vector3 = Vector3(b.x - a.x, 0.0, b.z - a.z)
 		if along.length_squared() > 0.000001:
 			along = along.normalized()

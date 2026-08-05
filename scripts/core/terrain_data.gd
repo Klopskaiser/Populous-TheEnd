@@ -113,23 +113,49 @@ func rim_radius() -> float:
 	return float(size) * 0.5 * DISC_RADIUS_FRAC * CELL_SIZE
 
 
-## World XZ of a mesh vertex, pulled RADIALLY onto the rim circle when it lies outside.
+## True for a vertex on the OUTER RING of the meshed cell set: it belongs to at least one
+## in-disc cell and at least one cell outside. Exactly the vertices that form the visible
+## silhouette.
+func is_boundary_vertex(vx: int, vz: int) -> bool:
+	var inside: int = 0
+	var outside: int = 0
+	for dz in [-1, 0]:
+		for dx in [-1, 0]:
+			if in_disc(Vector2i(vx + dx, vz + dz)):
+				inside += 1
+			else:
+				outside += 1
+	return inside > 0 and outside > 0
+
+
+## World XZ of a mesh vertex, projected onto the rim circle if it is a boundary vertex.
 ##
-## This is what makes the edge round. Cell culling alone leaves a staircase with
-## one-metre steps, which reads as coarse jags on a 144 m disc (user report: "die Zacken
-## sind extrem groß"). Snapping the outermost mesh vertices onto the circle turns that
-## staircase into a polygon inscribed in the rim — chords of about a metre, so the
-## silhouette is smooth — while WALKABILITY stays strictly cell-based and unchanged.
-## `TerrainRim` builds from these same snapped positions, so the mesh edge and the rock
+## This is what makes the edge round. Cell culling alone leaves a staircase with one-metre
+## steps, which reads as coarse jags on a 144 m disc (user report: "die Zacken sind extrem
+## groß"). Projecting the outer vertex ring onto the circle turns that staircase into a
+## polygon whose corners all sit ON the rim — chords of about a metre, so the silhouette is
+## smooth. WALKABILITY stays strictly cell-based and untouched; this is presentation only,
+## and since walkable cell centres reach at most `disc_radius()` (half a cell inside
+## `rim_radius()`), no unit can ever stand past the visible edge.
+##
+## It projects BOTH WAYS, and that is the whole point. A first attempt only pulled
+## vertices that lay OUTSIDE the circle inward — but measured against a 144 map the
+## boundary ring sits at 70.0 to 72.1 m, so almost every vertex is INSIDE and was left on
+## the grid. The staircase survived, and the sea (cut on the circle at 72) overhung the
+## land by up to 2 m, which is the blue layer that showed up under the land at the rim.
+##
+## `TerrainRim` builds from these same projected positions, so the mesh edge and the rock
 ## flank cannot drift apart.
 func vertex_mesh_xz(vx: int, vz: int) -> Vector2:
 	var p: Vector2 = Vector2(float(vx) * CELL_SIZE, float(vz) * CELL_SIZE)
-	var d: Vector2 = p - Vector2(_disc_center, _disc_center)
-	var dist: float = d.length()
-	var r: float = rim_radius()
-	if dist <= r or dist < 0.000001:
+	if not is_boundary_vertex(vx, vz):
 		return p
-	return Vector2(_disc_center, _disc_center) + d / dist * r
+	var centre: Vector2 = Vector2(_disc_center, _disc_center)
+	var d: Vector2 = p - centre
+	var dist: float = d.length()
+	if dist < 0.000001:
+		return p
+	return centre + d / dist * rim_radius()
 
 
 ## Vertex-side disc test — for the rim skirt mesh and `average_height()`. A vertex

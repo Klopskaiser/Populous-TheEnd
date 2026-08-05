@@ -182,28 +182,81 @@ func test_the_sea_is_cut_on_the_rim_circle() -> void:
 	terrain.free()
 
 
-## The roundness fix: the terrain's own boundary vertices are pulled onto the rim
-## circle, so the silhouette is an inscribed polygon with ~1 m chords instead of a
+## The roundness fix: the terrain's own boundary vertices are projected onto the rim
+## circle, so the silhouette is a polygon whose corners all sit ON the rim instead of a
 ## staircase with 1 m steps (user report: "die Zacken sind extrem groß").
-func test_mesh_boundary_is_round_not_a_staircase() -> void:
+##
+## It projects BOTH ways on purpose. A first attempt only pulled vertices lying OUTSIDE
+## the circle inward, but the boundary ring of a 144 map sits at 70.0..72.1 m — almost
+## every vertex is INSIDE, stayed on the grid, and the staircase survived. Worse, the sea
+## (cut on the circle) then overhung the land by up to 2 m, which is the blue layer that
+## appeared under the land at the rim. Hence: on the circle, not merely within it.
+func test_mesh_boundary_sits_exactly_on_the_rim_circle() -> void:
 	var td: TerrainData = _flat()
 	var c: float = td.disc_center()
 	var r: float = td.rim_radius()
-	# Any vertex that would stick out past the rim is snapped exactly onto it.
+	var boundary: int = 0
 	var off_circle: int = 0
-	var snapped: int = 0
-	for vz in range(0, td.verts, 3):
-		for vx in range(0, td.verts, 3):
+	var pulled_outward: int = 0
+	for vz in range(td.verts):
+		for vx in range(td.verts):
+			if not td.is_boundary_vertex(vx, vz):
+				continue
+			boundary += 1
 			var p: Vector2 = td.vertex_mesh_xz(vx, vz)
-			var d: float = Vector2(p.x - c, p.y - c).length()
-			if d > r + 0.001:
+			if absf(Vector2(p.x - c, p.y - c).length() - r) > 0.01:
 				off_circle += 1
-			var raw_d: float = Vector2(float(vx) - c, float(vz) - c).length()
-			if raw_d > r + 0.001 and absf(d - r) < 0.001:
-				snapped += 1
-	check(off_circle == 0, "no mesh vertex lies outside the rim circle (%d did)"
-		% off_circle)
-	check(snapped > 20, "and the outside ones were really snapped onto it (%d)" % snapped)
+			# The grid position was inside and had to be pushed OUT — the case the first
+			# attempt missed entirely.
+			if Vector2(float(vx) - c, float(vz) - c).length() < r - 0.01:
+				pulled_outward += 1
+	check(boundary > 300, "the boundary ring has a few hundred vertices (%d)" % boundary)
+	check(off_circle == 0,
+		"every boundary vertex lies ON the rim circle (%d did not)" % off_circle)
+	check(pulled_outward > boundary / 4,
+		"and most of them had to be pushed OUTWARD to get there (%d of %d)"
+			% [pulled_outward, boundary])
+	# Interior vertices must not move at all.
+	var mid: int = td.size / 2
+	var untouched: Vector2 = td.vertex_mesh_xz(mid, mid)
+	check(untouched.is_equal_approx(Vector2(float(mid), float(mid))),
+		"interior vertices are left exactly where they were")
+
+
+## The cone must start from the LAND's real height, so a ridge meeting the rim juts
+## further out into space than ground-level terrain does (user: "die Kegelform gilt auch
+## für die Berge, die ragen an den Kanten also etwas mehr in den Weltraum").
+func test_cone_starts_at_the_mountains_own_height_on_a_land_map() -> void:
+	var td: TerrainData = MapGenerator.create_terrain("bergpass", SEED)
+	var terrain: Terrain = Terrain.new()
+	terrain.build(td)
+	var rim: TerrainRim = terrain.get_node_or_null("Rim") as TerrainRim
+	var rock: MeshInstance3D = rim.get_node_or_null("Rock") as MeshInstance3D
+	check(rock != null and rock.mesh != null, "the land map has a rock body at all")
+	var arrays: Array = (rock.mesh as ArrayMesh).surface_get_arrays(0)
+	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var c: float = td.disc_center()
+	var highest: float = -INF
+	var lowest: float = INF
+	# Radius at the top of the body versus far below it: a cone tapers, a slab does not.
+	var r_top: float = 0.0
+	var r_deep: float = 0.0
+	for v in verts:
+		highest = maxf(highest, v.y)
+		lowest = minf(lowest, v.y)
+		var r: float = Vector2(v.x - c, v.z - c).length()
+		if v.y > TerrainData.SEA_LEVEL - 1.0:
+			r_top = maxf(r_top, r)
+		if v.y < TerrainRim.bottom_y() + 20.0:
+			r_deep = maxf(r_deep, r)
+	check(highest > MapGenerator.LAND + 10.0,
+		"the body reaches the ridge's own height where it meets the rim (%.1f)" % highest)
+	check(is_equal_approx(lowest, TerrainRim.bottom_y()),
+		"and runs down to the cone's tip (%.1f)" % lowest)
+	check(r_deep < r_top * 0.75,
+		"the body really tapers on a LAND map too (%.0f m at the top, %.0f m deep)"
+			% [r_top, r_deep])
+	terrain.free()
 
 
 ## The underside is an inverted cone with a ROUNDED tip, not a flat-bottomed slab
@@ -248,6 +301,34 @@ func _segment_slope(profile: Array, i: int, radius: float) -> float:
 	if dr < 0.0001:
 		return INF
 	return dy / dr
+
+
+## The curtains have to face OUTWARD. They used to take the cell-face normal, which on a
+## round rim is up to 45 degrees off — the falls pointed sideways and re-emphasised exactly
+## the angularity the round rim removes (user report: "die Wasserfälle zeigen in die
+## falsche Richtung, nicht nach außen sondern zur Seite").
+func test_waterfall_faces_radially_outward() -> void:
+	var td: TerrainData = MapGenerator.create_terrain("island", SEED)
+	var terrain: Terrain = Terrain.new()
+	terrain.build(td)
+	var rim: TerrainRim = terrain.get_node_or_null("Rim") as TerrainRim
+	var fall: MeshInstance3D = rim.get_node_or_null("Waterfall") as MeshInstance3D
+	check(fall != null and fall.mesh != null, "the island has a waterfall")
+	var arrays: Array = (fall.mesh as ArrayMesh).surface_get_arrays(0)
+	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var normals: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
+	var c: float = td.disc_center()
+	var worst: float = 1.0
+	for i in range(verts.size()):
+		var radial: Vector2 = Vector2(verts[i].x - c, verts[i].z - c)
+		if radial.length() < 0.001:
+			continue
+		worst = minf(worst, Vector2(normals[i].x, normals[i].z).normalized()
+			.dot(radial.normalized()))
+	# The cell-face normal would bottom out around 0.707 (45 degrees off).
+	check(worst > 0.99,
+		"every curtain faces outward (worst dot(normal, radial) = %.4f)" % worst)
+	terrain.free()
 
 
 ## The water falls STRAIGHT down while the cone tapers away behind it — that contrast is
