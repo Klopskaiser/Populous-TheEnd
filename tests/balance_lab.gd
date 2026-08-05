@@ -106,6 +106,19 @@ const SCENARIOS: Array = [
 	 "frage": "Gleiche AUSBILDUNGSZEIT (60 s): 20x3 s gegen 15x4 s"},
 	{"name": "krieger_vs_prediger", "a": [[&"krieger", 20]], "b": [[&"prediger", 20]],
 	 "frage": "Bricht Bekehrung den Nahkampf? (gleiche BÄ)"},
+
+	# --- Massenschlacht mit echtem Anmarsch (Nutzerfrage 2026-08-05) ---
+	# 20 gegen 20 auf 26 Zellen ist fast sofort Kontakt. Bei 200 je Seite und 60
+	# Zellen Startabstand bleiben zwischen den Klumpenraendern ~46 m: Krieger
+	# brauchen dafuer ~11 s (4 m/s), in denen Feuerkrieger (8 m Reichweite, alle
+	# 1,5 s) sieben Salven schiessen duerfen. Die zweite Zeile ist die Gegenprobe
+	# mit dem Standardabstand — die Differenz IST der Wert des Anmarschs.
+	{"name": "feuerkrieger_vs_krieger_200_anmarsch",
+	 "a": [[&"feuerkrieger", 200]], "b": [[&"krieger", 200]], "separation": 60,
+	 "frage": "200 gegen 200 mit ~46 m Anmarsch: was bringt die Fernkampf-Reichweite?"},
+	{"name": "feuerkrieger_vs_krieger_200_kontakt",
+	 "a": [[&"feuerkrieger", 200]], "b": [[&"krieger", 200]],
+	 "frage": "Dieselben 200 gegen 200 bei Sofortkontakt (Gegenprobe zum Anmarsch)"},
 	{"name": "feuerkrieger_vs_prediger", "a": [[&"feuerkrieger", 20]], "b": [[&"prediger", 20]],
 	 "frage": "Ist der Feuerkrieger wirklich der Prediger-Konter?"},
 
@@ -304,8 +317,11 @@ func _fight(scenario: Dictionary, rep_seed: int, seconds: float,
 	commands.setup(nav, null, um)
 
 	var mid: Vector2i = Vector2i(td.size / 2, td.size / 2)
+	# Startabstand je Paarung uebersteuerbar: bei 200 gegen 200 ist der Klumpen
+	# selbst schon ~7 Zellen breit, die Standard-26 lassen also kaum Anmarsch —
+	# und der Anmarsch ist genau das, was eine Fernkampfeinheit ausspielt.
 	@warning_ignore("integer_division")
-	var half: int = SEPARATION / 2
+	var half: int = int(scenario.get("separation", SEPARATION)) / 2
 	# Ursprungsseite je Einheit festhalten: Bekehrte wechseln tribe_id, für die
 	# Verlustrechnung zählt aber, wem sie ANFANGS gehörten.
 	var origin: Dictionary = {}
