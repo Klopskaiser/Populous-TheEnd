@@ -185,19 +185,23 @@ const BRAVE_CARRY_HOLD_TIMEOUT: float = 30.0
 
 # --- KI: Regale an den Huetten (10h Teil 2) ---
 const AI_MAX_HUT_RACKS: int = 4
-## Mindestbestand eines Huetten-Regals: genau ein Ausbau (HUT_UPGRADE_WOOD_COST).
-const AI_HUT_RACK_STOCK: int = 5
+## Mindestbestand eines Huetten-Regals: genau ein Ausbau.
+const AI_HUT_RACK_STOCK: int = HUT_UPGRADE_WOOD_COST
 
 # --- KI: mehr Holz (10h Teil 3) ---
-const AI_BRAVES_PER_WOOD_CREW_NEW: int = 9      # ersetzt 12
-const AI_MAX_WOOD_CREWS_NEW: int = 6            # ersetzt 4
+const AI_BRAVES_PER_WOOD_CREW: int = 9          # war 12
+const AI_MAX_WOOD_CREWS: int = 6                # war 4
 
-# --- KI: offene Karten (10h Teil 4) ---
-const AI_OPEN_ARENA: float = 120.0
-const AI_PLOT_SEARCH_RADIUS_OPEN: int = 60
-const AI_MAX_SETTLEMENT_ANCHORS_OPEN: int = 6
-const AI_SETTLEMENT_CLUSTER_RADIUS_OPEN: int = 22
+# --- Startholz auf kleinen Karten (10h Teil 5) ---
+const SMALL_MAP_WOOD_BONUS: float = 1.2
+const SMALL_MAP_MAX_SIZE: int = TerrainData.SIZE
 ```
+
+> **Ist-Stand.** Dieser Block ist nach der Umsetzung auf die tatsächlich
+> eingetragenen Namen und Werte gezogen. Die im Entwurf geplanten Konstanten des
+> alten Teil 4 (`AI_OPEN_ARENA`, `AI_PLOT_SEARCH_RADIUS_OPEN`,
+> `AI_MAX_SETTLEMENT_ANCHORS_OPEN`, `AI_SETTLEMENT_CLUSTER_RADIUS_OPEN`) gibt es
+> **nicht** — der Teil ist entfallen (siehe oben).
 
 ## Umsetzungsschritte
 
@@ -242,8 +246,12 @@ const AI_SETTLEMENT_CLUSTER_RADIUS_OPEN: int = 22
 
 ## Definition of Done
 
-- [ ] Suite grün, Output ohne `SCRIPT ERROR`, Ladecheck fehlerfrei
-- [ ] Bauplatzsuche ohne Regression (Bergpass **und** Seenland)
+- [x] Suite grün, Output ohne `SCRIPT ERROR`, Ladecheck fehlerfrei *(3874
+      Zusicherungen, Exit 0)*
+- [x] Bauplatzsuche ohne Regression — **eingeschränkt:** gemessen auf **Bergpass**
+      (Kosten pro Zelle im gleichen Band), **Seenland nicht gemessen**. Der
+      Gesamtwert „schlimmster KI-Tick" trägt hier kein Signal: auf identischem Code
+      162–227 ms, Spitze immer bei `t = 1 s` (einmaliger Insel-Aufbau).
 - [ ] Manuelle Prüfung: Trageverhalten, Hütten bauen sichtbar aus, keine
-      herumliegenden Riesenstapel, Siedlung wächst auf großen Karten in die Breite
-- [ ] PROGRESS.md ergänzt, Checkbox 10h in `00_overview.md`
+      herumliegenden Riesenstapel *(die Breitenexpansion entfällt — Teil 4 ersetzt)*
+- [x] PROGRESS.md ergänzt, Checkbox 10h in `00_overview.md`

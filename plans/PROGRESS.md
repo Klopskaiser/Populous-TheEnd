@@ -8085,3 +8085,164 @@ einer echten Karte, Startbedingungen wie `main.gd._setup_skirmish_base`.
 - **Manuelle Prüfung durch den Nutzer steht aus** — insbesondere Insel mit 4
   Stämmen (Teil 5), Werkstatt-Ausstoß (Teil 3) und ob die KI jetzt sichtbar
   Hütten statt Werkstätten baut (Teil 7).
+
+---
+
+## Phase 10h — Holzlogistik, Trageverhalten, Baukosten (2026-08-05)
+
+**Plan:** [10h_wood_logistics_expansion.md](10h_wood_logistics_expansion.md) — umgesetzt
+in **sechs Commits**. Wie 10g kam der ganze Inhalt aus einem Nutzertest, nicht aus
+einem Phasenplan-Entwurf; Teil 4 wurde auf Nutzeransage **im Lauf der Phase ersetzt**.
+
+| Commit | Teil | Inhalt |
+|---|---|---|
+| `43a3cad` | **1** | Holz aufnehmen und halten, Ablege-Countdown (Spieler + KI) |
+| `68d80cb` | **1b** | Baukosten gesenkt (Nutzervorgabe) |
+| `86676ec` | — | Tests: Holzkosten durchweg aus `Balance` ableiten (Nutzerauftrag) |
+| `f01b759` | **2** | Holzregale an den Hütten als Ausbau-Depots |
+| `7a963f0` | **3** | Mehr Fäll-Trupps, Ablieferung nach **Bedarf** statt nach Nähe |
+| `d699eb6` | **4→**, **5** | Bauplatz geht nie aus; 20 % mehr Startholz auf kleinen Karten |
+
+### Die entscheidende Frage der Phase wurde mit Belegen beantwortet
+
+Der Nutzer stellte die KI-Holzverteilung offen zur Wahl: *„schau mal, was einfacher
+umzusetzen ist und weniger Performance frisst"* — Just-in-time-Lieferung oder
+Holzlager als Hubs. Beantwortet nicht nach Gefühl, sondern am Code:
+`Building._tick_upgrade_absorb` zieht Holz per
+`take_from_radius(delivery_point(), ABSORB_RADIUS)` **selbst** ein. Ein Regal in
+dieser Reichweite finanziert damit jede Ausbaustufe mit **null KI-Befehlen**, während
+JIT pro 4-Holz-Stufe einen Befehl und eine Laufstrecke kostet — bei
+`HUT_UPGRADE_DELAY` 90 s x vier Stufen x bis zu `AI_MAX_HUTS` Hütten ein Dauerstrom.
+**Regale sind seither die Standardmechanik**, das JIT aus 10g Teil 4 bleibt der
+Notfallpfad für stehende Baustellen ohne Holzquelle.
+
+### Gebaut
+
+- **Teil 1 — Trageverhalten (`brave.gd`, `tribe_commands.gd`, `selection_manager.gd`):**
+  `order_pickup` setzt `carry_hold` (aufnehmen und **halten**),
+  `order_drop_wood(point, into)` ist der zweite Rechtsklick — ein eigenes Gebäude
+  absorbiert wie eine Arbeiterlieferung, ein `WoodDepot` bekommt das Holz per
+  `store_wood` direkt ins Regal. `_tick_carry_hold` mit
+  `BRAVE_CARRY_HOLD_TIMEOUT` (30 s) lässt es ohne Befehl fallen, Nahkampf
+  (`_on_combat_interrupt` → `_interrupt_tasks`) und Tod sofort. Der Vorrangzweig im
+  Rechtsklick-Dispatcher **muss vor** den Stapel-, Baum- und Gebäudezweigen stehen,
+  sonst nimmt ein Klick auf einen Stapel nur neues Holz auf und der Ablege-Befehl
+  wäre praktisch nicht auslösbar.
+- **Teil 2 — Hütten-Regale (`ai_controller.gd`):** `_find_shop_rack_plot`
+  **generalisiert** zu `_find_rack_plot(target, cache, side_clear)` statt einer
+  zweiten Kopie; Hütten übergeben `side_clear = 0`, weil die Ausfahrkorridor-Regel
+  nur die Fahrzeugausfahrt einer Werkstatt schützt. Dazu `_hut_needing_rack`
+  (nutzbar, `upgrade_stage < HUT_MAX_UPGRADE_STAGE`, kein Regal in Reichweite — ein
+  Wohnpalast bekommt keines mehr), Bauordnungs-Zweig `&"hut_rack"` **vor** den
+  Werkstatt-Zweigen, Bestückung über `_starved_hut_racks` am vorhandenen
+  `_tick_supply_runs` (kein neuer Transportmechanismus).
+- **Teil 3 — Bedarf vor Nähe (`brave.gd`):** `_neediest_target_in_reach()` wählt
+  innerhalb `DEPOT_PREFER_RADIUS` das Gebäude mit dem größten **offenen** Bedarf;
+  bei Gleichstand gewinnt die kürzere Strecke, ein Dorf gleich hungriger Hütten
+  behält also kurze Wege. `_delivery_demand()` ist die eine Stelle, die Bedarf je
+  Gebäudeart kennt (Baustelle, Ausbau, Reparatur, Werkstatt, Regal). Ein Regal
+  konkurriert nur bis zu **einem** Ausbau — es ist ein Puffer, kein Abnehmer. Eine
+  Werkstatt mit einem Produktwert an Bord hat Bedarf 0: genau der gemeldete Fall
+  „Holz liegt an der satten Werkstatt, während die Hütte wartet".
+- **Teil 4 ersetzt — Bauplatz geht nie aus (`ai_controller.gd`):** dritter, letzter
+  Durchgang in `_find_plot` mit `require_trees = false`. Er läuft nur, wenn die
+  beiden bestehenden Durchgänge nichts gefunden haben, kostet also keinen Tick, der
+  vorher erfolgreich war, und lässt die belaubte Wahl bevorzugt (Gegenkontrolle im
+  Test).
+- **Teil 5 — Startholz (`main.gd`, `balance.gd`):** `SMALL_MAP_WOOD_BONUS` 1,2 auf
+  Bäume **und** Haine, damit sich das Verhältnis der Baumarten nicht verschiebt.
+  Klein heißt `td.size <= SMALL_MAP_MAX_SIZE`, also Insel und Plateau.
+
+### Neue `Balance`-Konstanten (Ist-Werte)
+
+```gdscript
+const BRAVE_CARRY_HOLD_TIMEOUT: float = 30.0
+const AI_MAX_HUT_RACKS: int = 4
+const AI_HUT_RACK_STOCK: int = HUT_UPGRADE_WOOD_COST   # abgeleitet, nicht gepflegt
+const AI_BRAVES_PER_WOOD_CREW: int = 9                 # war 12
+const AI_MAX_WOOD_CREWS: int = 6                       # war 4
+const SMALL_MAP_WOOD_BONUS: float = 1.2
+const SMALL_MAP_MAX_SIZE: int = TerrainData.SIZE
+```
+
+Baukosten (Teil 1b): Hütte **8 → 7**, Ausbaustufe **5 → 4** (kumuliert
+7 / 11 / 15 / 19 / 23), Feuertempel **20 → 18**, Katapultwerkstatt **13 → 12**,
+Feuerrammenwerkstatt **11 → 10**. CLAUDE.md §5 mitgezogen — dabei fiel auf, dass die
+Zeile „Weitere Gebäude" die Werkstatt ohne Preis nannte und Feuerrammenwerkstatt,
+Luftschiffwerft und Holzstation gar nicht kannte.
+
+### Erkenntnisse und Stolpersteine
+
+1. **Das alte Stapel-Relais ist ersatzlos entfallen** — nicht aus Absicht, sondern
+   als Nebeneffekt, der nicht still bleiben durfte: „Stapel an einem eigenen Gebäude
+   wird selbstständig ins nächste Regal getragen" hatte **nur** den
+   Einzel-Rechtsklick als Auslöser, und der hält jetzt. Über den Flächenauftrag war
+   der Fall nie erreichbar (`_next_area_pile` überspringt Stapel an eigenen
+   Gebäuden). Ersetzt durch den gezielten Regal-Ablage-Pfad: zwei Klicks statt
+   Automatik, dafür deterministisch.
+2. **Die Anforderung „Baum neben dem Bauplatz" war eine echte Sackgasse.** Mit einer
+   Sonde an derselben Welt gemessen: mit Bäumen Bauplatz `(47, 47)`, nach dem
+   Abholzen `(-1, -1)`. Eine abgeholzte Basis hatte **keinen gültigen Bauplatz mehr**
+   und die KI baute nie wieder etwas. Die Regel war richtig, *solange* Holz nur vor
+   Ort geholt werden konnte; seit 10g Teil 4 und 10h Teil 2/3 wird es aktiv
+   herangetragen, also ist sie nur noch eine **Präferenz**.
+3. **Ein Test kann seinen eigenen Fehlschlag verlieren.**
+   `test_plot_search_cooldown_after_failure` erzeugte ihn über „keine Bäume" — was
+   nach Teil 4 kein Fehlschlag mehr *ist*. Er setzt die Welt jetzt unter die
+   Wasserlinie, sodass `can_place_at` überall scheitert; die geprüfte Absicht ist
+   unverändert.
+4. **Wieder ein falsch-grüner Lauf:** die erste Fassung des ersetzten Depot-Tests
+   griff auf `w.commands` zu, das diese Testwelt nicht hat — die Suite meldete
+   „0 failed", der `SCRIPT ERROR`-Filter fand es. Zweites Vorkommnis in zwei Phasen;
+   der Filter ist Pflicht, nicht Kür.
+5. **Feste Holzkosten in Tests sind eine Dauerbaustelle.** Die Hüttenkosten sind
+   inzwischen **dreimal** gesunken (12 → 8 → 7), und jedes Mal brachen dieselben
+   Stellen. Sechs Zusicherungen rechnen jetzt aus der **Formel**
+   (`floor(0,9 x Preis)`, `Building.SITE_HP_CAP_FRACTION`, Abriss-Erstattung), sieben
+   weitere prüfen die **Verdrahtung** (das Gebäude übernimmt seinen Preis wirklich
+   aus `Balance`, statt irgendwo eine eigene Zahl zu führen). Kein
+   `wood_cost == <Zahl>` mehr im Testbaum.
+6. **Bewusst *nicht* `Workshop.stock_wood()`** für den Werkstattbedarf in
+   `_delivery_demand` — das ist wegen `_pile_reserved_by_peer`
+   O(Stapel x Gebäude). Stattdessen derselbe billige `wood_in_radius`-Proxy, den auch
+   die KI benutzt. Kosten insgesamt: ein Durchlauf über `tribe.buildings` je
+   **Lieferfuhre** (eine Fuhre dauert viele Sekunden) — dieselbe Schleife, die
+   `_nearest_own_building` schon macht.
+7. **Drei Leiter-Tests kodierten wieder die alte Bauordnung** und wurden nachgezogen;
+   einer davon präziser gemacht (prüfte „gar nichts zu bauen", gemeint war „kein
+   zusätzliches *Lager*").
+8. Nebenbei repariert: eine zerbrochene Zeilenfortsetzung im
+   `shops_without_rack`-Zweig — Rest eines früheren Skript-Edits, syntaktisch gültig,
+   aber eine unlesbare Einzelzeile.
+
+### Messungen (Einzelstichproben, `tests/diag_ai_buildup.gd`, bergpass, 4 KIs, 900 s)
+
+| | vorher | nachher |
+|---|---|---|
+| Hütten-Ausbaustufen (Teil 2) | `{4: 6, 2: 1, 1: 1, 0: 10}` bei 18 Hütten, pop 376 | `{4: 6, 2: 3}` bei **9** Hütten, pop 348 |
+| Holz gesamt in der Wirtschaft (Teil 3) | 6 | **109**, davon 3,7 % frei liegend |
+| Unausgebaute Hütten (Teil 3) | 4 | **1** |
+| Bevölkerung (Teil 3) | 452 | **499** |
+
+Vor Teil 2 blieben **10 von 18** Hütten auf Stufe 0 stehen, danach keine einzige —
+die KI erreicht dieselbe Bevölkerung mit der halben Hüttenzahl, weil Ausbauen
+billiger ist als neu bauen (4 Holz für +8 Plätze gegen 7 Holz für +10).
+
+**Ehrlich zu zwei Zahlen:** die Quote „frei herumliegend" ist als A/B wertlos, weil
+im Vorher-Lauf überhaupt nur 6 Holz auf der Karte existierten — da *kann* nichts
+herumliegen. Aussagekräftig ist, dass die größeren Trupps 18x mehr Holz in die
+Wirtschaft holen und davon nur 3,7 % auf dem Boden liegt. Und der „schlimmste
+KI-Tick" las 187 ms gegen 123 ms nach Teil 2, aber zwei Wiederholungen auf
+**identischem** Code liefern 162 und 227 ms, alle Spitzen bei `t = 1 s`, also dem
+einmaligen Insel-Aufbau beim Start. **Die Metrik trägt in diesem Band kein Signal**
+(was PROGRESS.md für genau diesen Wert schon festhält: kein KI-Kostenpunkt, sondern
+ein Insel-Rebuild). Die Bauplatzsuche bleibt pro Zelle im gleichen Band.
+
+### Verifikationsstand
+
+- **Suite 3874 Zusicherungen grün** (Start der Phase: 3809), Exit-Code 0, Output frei
+  von `SCRIPT ERROR`. Projekt-Ladecheck sauber. Neu: `tests/test_wood_supply.gd`.
+- **Manuelle Prüfung durch den Nutzer steht aus** — insbesondere das Trageverhalten
+  (Rechtsklick auf Stapel → halten, zweiter Rechtsklick → ablegen, 30-s-Countdown),
+  ob Hütten sichtbar ausbauen statt sich zu vermehren, ob noch große Stapel
+  herumliegen, und die 20 % Startholz auf Insel/Plateau.
