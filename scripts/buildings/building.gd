@@ -263,6 +263,19 @@ func center_world() -> Vector3:
 
 ## Cell just outside the footprint in the middle of the entrance side.
 func entrance_cell() -> Vector2i:
+	return entrance_cell_for(cell, footprint, orientation)
+
+
+## Rings searched outward from the footprint for a walkable approach cell — the
+## bound edge_spawn_position() has always used.
+const APPROACH_SEARCH_RINGS: int = 3
+
+
+## Entrance cell of a footprint at `cell` with this `orientation` (0..3 = S/E/N/W;
+## cell.y IS the z axis). STATIC so the AI can ask it for a plot where no building
+## stands yet (10g).
+static func entrance_cell_for(cell: Vector2i, footprint: Vector2i,
+		orientation: int) -> Vector2i:
 	var half_x: int = footprint.x / 2
 	var half_y: int = footprint.y / 2
 	match orientation:
@@ -274,6 +287,37 @@ func entrance_cell() -> Vector2i:
 			return cell + Vector2i(half_x, -1)
 		_:
 			return cell + Vector2i(-1, half_y)
+
+
+## Cell workers actually stand on to serve a building with this footprint,
+## orientation and origin cell: the entrance cell when walkable, otherwise the
+## nearest walkable perimeter cell within APPROACH_SEARCH_RINGS.
+## (-1, -1) = nobody can ever serve this plot.
+##
+## STATIC on purpose (10g): the AI has to ask the question for a plot where no
+## building exists yet, and BOTH paths must agree on the cell. Before this, the
+## plot sweep judged reachability at the plot CENTRE (an A* from the base anchor)
+## while _accept_or_scrap_site judged the APPROACH point (approach_island) — two
+## different questions, so the AI placed sites it then demolished on the spot.
+static func approach_cell_for(nav: NavGrid, cell: Vector2i, footprint: Vector2i,
+		orientation: int) -> Vector2i:
+	if nav == null:
+		return entrance_cell_for(cell, footprint, orientation)
+	var entrance: Vector2i = entrance_cell_for(cell, footprint, orientation)
+	if nav.is_cell_walkable(entrance):
+		return entrance
+	var base: Rect2i = Rect2i(cell, footprint)
+	for grow in range(1, APPROACH_SEARCH_RINGS + 1):
+		var rect: Rect2i = base.grow(grow)
+		var inner: Rect2i = base.grow(grow - 1)
+		for z in range(rect.position.y, rect.position.y + rect.size.y):
+			for x in range(rect.position.x, rect.position.x + rect.size.x):
+				var c: Vector2i = Vector2i(x, z)
+				if inner.has_point(c):
+					continue
+				if nav.is_cell_walkable(c):
+					return c
+	return Vector2i(-1, -1)
 
 
 func entrance_world() -> Vector3:
@@ -309,18 +353,11 @@ func rally_training_building() -> TrainingBuilding:
 ## perimeter rings (the flattened footprint may leave a steep rim).
 func edge_spawn_position() -> Vector3:
 	if nav_grid != null:
-		if nav_grid.is_cell_walkable(entrance_cell()):
-			return nav_grid.cell_to_world(entrance_cell())
-		for grow in range(1, 4):
-			var rect: Rect2i = footprint_rect().grow(grow)
-			var inner: Rect2i = footprint_rect().grow(grow - 1)
-			for z in range(rect.position.y, rect.position.y + rect.size.y):
-				for x in range(rect.position.x, rect.position.x + rect.size.x):
-					var c: Vector2i = Vector2i(x, z)
-					if inner.has_point(c):
-						continue
-					if nav_grid.is_cell_walkable(c):
-						return nav_grid.cell_to_world(c)
+		# One truth with the AI's plot check (10g): approach_cell_for is the very
+		# same search, extracted so a plot without a building can be asked too.
+		var c: Vector2i = approach_cell_for(nav_grid, cell, footprint, orientation)
+		if c.x >= 0:
+			return nav_grid.cell_to_world(c)
 	return entrance_world()
 
 

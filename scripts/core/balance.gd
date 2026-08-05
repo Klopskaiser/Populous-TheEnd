@@ -859,3 +859,17 @@ const AI_MAX_SETTLEMENT_ANCHORS_CRAMPED: int = 2
 const AI_TARGET_WATCHTOWERS_CRAMPED: int = 3
 const AI_ARMY_ATTACK_SIZE_CRAMPED: int = 8
 const AI_POP_FOR_TRAIN_CRAMPED: int = 12
+
+# --- KI: Bauplatz-Absicherung (10g Teil 2) ---
+## Ticks, die eine als unerreichbar erkannte Zelle gesperrt bleibt. NICHT ewig wie
+## vor 10g: eine Landbruecke kann sie spaeter anschliessen, und ein Sitzungs-Bann
+## machte die KI dafuer blind.
+const AI_PLOT_BAN_TICKS: int = 300
+## Abstand im Anti-Aushunger-Durchgang: EIN Ring Luft statt gar keiner. Der
+## Unterschied zwischen "eng gebaut" und "Eingang zugemauert".
+const AI_PLOT_SPACING_RELAXED: int = 1
+## Intervall (Ticks) der Nachkontrolle bestehender Baustellen und Strikes, bis eine
+## als abgeschnitten gilt: Insel-Labels duerfen bis NavGrid.ISLAND_REFRESH_MS
+## veralten, und eine wachsende Landbruecke braucht mehrere Ticks.
+const AI_SITE_GUARD_INTERVAL: int = 5
+const AI_SITE_GUARD_STRIKES: int = 2

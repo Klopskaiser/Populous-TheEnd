@@ -29,6 +29,10 @@ class SiteNote extends RefCounted:
 	## Tick until which staffing skips this site (an order_build that assigned
 	## nobody means the braves we had cannot serve it — do not retry every second).
 	var retry_until: int = -1
+	## Consecutive guard runs that judged this site cut off (10g Teil 2).
+	var strikes: int = 0
+	## Cut off WITH a build stage: hands off, let the construction decay clear it.
+	var abandoned: bool = false
 
 
 class TickCache extends RefCounted:
@@ -264,10 +268,10 @@ var nav_grid: NavGrid = null
 var base_anchor: Vector2i = Vector2i.ZERO
 
 var state: AIState.State = AIState.State.BUILD
-## Plot cells proven UNREACHABLE from the base (phase 8.2): the expensive
-## failing A* runs once per candidate, then the cell is banned for the session
-## (Bergpass: walkable-but-isolated plateau tops are valid plots per
-## can_place_at, but no worker can ever reach them).
+## Plot cells proven UNREACHABLE (phase 8.2, 10g): cell -> tick until which the ban
+## holds. Bergpass has walkable-but-isolated plateau tops that pass can_place_at
+## while no worker can ever reach them. The ban EXPIRES since 10g — a landbridge
+## can connect that ground later.
 var _unreachable_plots: Dictionary = {}
 ## Bau-Buchfuehrung je Baustelle (10g Teil 1), instanz-id -> SiteNote.
 var _site_notes: Dictionary = {}
@@ -276,9 +280,15 @@ var _site_notes: Dictionary = {}
 var _arena_span_cache: float = -1.0
 var _arena_span_tick: int = -100000
 var _enemy_anchors: Dictionary = {}
-## Plot cells proven reachable, valid as long as walkability is unchanged
-## (value = NavGrid.change_version at proof time) — exact, no TTL guessing.
-var _reachable_plots: Dictionary[Vector2i, int] = {}
+## _reachable_plots entfiel in 10g: die Pruefung ist jetzt ein Insel-Lookup, und den
+## zu cachen ist teurer als der Lookup selbst.
+## Zwischenspeicher fuer _home_islands (gegen change_version UND Tick).
+var _home_islands_cache: Dictionary = {}
+var _home_islands_version: int = -1
+var _home_islands_tick: int = -100000
+## True while the AI demolishes its OWN unreachable site (10g): the
+## building_destroyed handler must not punish that with a 15-tick rebuild pause.
+var _self_scrap: bool = false
 var _plot_fail_ticks: int = 0
 var _expansion_anchor_cache: Vector2i = Vector2i(-1, -1)
 var _expansion_anchor_age: int = 0
@@ -347,6 +357,8 @@ static var dbg_builders_assigned: int = 0
 ## fixe 32-m-Radius machte die Nachbarbasis zur Dauerbedrohung.
 static var dbg_militia_orders: int = 0
 static var dbg_threat_ticks: int = 0
+## Baustellen, die die Nachkontrolle als abgeschnitten verworfen hat (10g Teil 2).
+static var dbg_site_scraps: int = 0
 
 
 ## One AI decision tick (1x/s in game; tests call it directly).
@@ -389,6 +401,9 @@ func tick_ai() -> void:
 	tribe.max_airships = mini(int(caps[&"airships"]), Tribe.MAX_AIRSHIPS_LIMIT)
 	# Economy and magic run in EVERY state: keep building toward the
 	# full base, cast spells whenever enemies are near the shaman.
+	# Zuerst tote Slots freigeben, DANN bauen — ein frei gewordener Slot wird noch
+	# im selben Tick nachbesetzt.
+	_tick_site_guard(cache)
 	_tick_build(cache)
 	# Bauarbeiter ZUERST aus dem Idle-Pool: Holztrupps, Foerstereien, Werkstaetten
 	# und Training lesen denselben Pool danach. Laeuft auch unter Bedrohung.
@@ -604,6 +619,8 @@ func _all_sites_supplied(cache: TickCache) -> bool:
 		if not is_instance_valid(site) or site.health <= 0 or site.demolishing:
 			continue
 		var note: SiteNote = _site_notes.get(site.get_instance_id())
+		if note != null and note.abandoned:
+			continue   # never blocks the gate
 		var waited: int = 0
 		if note != null and note.unsupplied_since >= 0:
 			waited = _tick_count - note.unsupplied_since
@@ -694,6 +711,9 @@ func _site_worker_want(site: Building) -> int:
 	# soon as wood arrives (WOOD_RECHECK_INTERVAL 30 s at the latest).
 	if site.wood_stalled or site.approach_island() < 0 or not site.has_worker_room():
 		return 0
+	var note: SiteNote = _site_notes.get(site.get_instance_id())
+	if note != null and note.abandoned:
+		return 0   # cut off with a build stage: the decay owns it now
 	return AIState.site_worker_target(site.footprint.x * site.footprint.y,
 		site.needs_flatten(), site.wood_needed_total() - site.wood_incoming())
 
@@ -1517,14 +1537,19 @@ func _find_plot(footprint: Vector2i, cache: TickCache = null,
 	var cell: Vector2i = Vector2i(-1, -1)
 	_plot_sweep = true
 	for anchor in anchors:
-		cell = _find_supplied_plot(anchor, footprint, true)
+		cell = _find_supplied_plot(anchor, footprint, Balance.AI_PLOT_SPACING)
 		if cell.x >= 0:
 			break
 	if cell.x < 0 and not anchors.is_empty():
 		# Anti-starvation relax pass, BASE ONLY: a hard spacing rule can starve
 		# the search on tight maps and stop the AI building at all, but relaxing
 		# every anchor would double the whole search.
-		cell = _find_supplied_plot(anchors[0], footprint, false)
+		# 10g: der Anti-Aushunger-Durchgang entspannt den Abstand auf EINEN Ring
+		# statt ihn ganz fallen zu lassen — der Unterschied zwischen "eng gebaut"
+		# und "Eingang zugemauert". Die ERREICHBARKEIT bleibt in beiden Durchgaengen
+		# Pflicht; genau die war vorher die Luecke, weil der Relax-Pass nur die
+		# Plotmitte gegen die Basis prueste.
+		cell = _find_supplied_plot(anchors[0], footprint, Balance.AI_PLOT_SPACING_RELAXED)
 	_plot_sweep = false
 	dbg_plot_us += Time.get_ticks_usec() - t0
 	return cell
@@ -1535,7 +1560,7 @@ func _find_plot(footprint: Vector2i, cache: TickCache = null,
 ## unsupplied/unreachable candidates (then the next anchor takes over).
 ## The ring starts at AI_PLOT_MIN_RADIUS so buildings stop clinging to the anchor.
 func _find_supplied_plot(anchor: Vector2i, footprint: Vector2i,
-		require_clearance: bool = true) -> Vector2i:
+		spacing: int = Balance.AI_PLOT_SPACING) -> Vector2i:
 	if not _plot_sweep:
 		_plot_budget = Balance.AI_MAX_PLOT_SCAN_CELLS
 		_plot_candidates_left = MAX_PLOT_CANDIDATES * 2
@@ -1576,13 +1601,13 @@ func _find_supplied_plot(anchor: Vector2i, footprint: Vector2i,
 			if _trees_near_cell(cell) < MIN_TREES_NEAR_PLOT:
 				checked += 1
 				continue
-			if require_clearance and not _plot_has_clearance(cell, fp):
+			if spacing > 0 and not _plot_has_clearance(cell, fp, spacing):
 				checked += 1
 				continue
 			# Only the A* consumes the SHARED expensive ceiling.
 			if _plot_candidates_left <= 0:
 				return Vector2i(-1, -1)
-			if not _plot_reachable(cell):
+			if not _plot_reachable(cell, fp, orientation):
 				_plot_candidates_left -= 1
 				checked += 1
 				continue
@@ -1595,10 +1620,11 @@ func _find_supplied_plot(anchor: Vector2i, footprint: Vector2i,
 ## ends the "building blocked / unreachable" symptom: the AI used to pack plots
 ## edge to edge around one anchor. Only ever called for candidates that already
 ## passed can_place_at, so its own footprint cells are known to be free.
-func _plot_has_clearance(cell: Vector2i, footprint: Vector2i) -> bool:
+func _plot_has_clearance(cell: Vector2i, footprint: Vector2i,
+		spacing: int = Balance.AI_PLOT_SPACING) -> bool:
 	if nav_grid == null:
 		return true   # headless AI tests without terrain wiring
-	var r: Rect2i = Rect2i(cell, footprint).grow(Balance.AI_PLOT_SPACING)
+	var r: Rect2i = Rect2i(cell, footprint).grow(spacing)
 	for z in range(r.position.y, r.position.y + r.size.y):
 		for x in range(r.position.x, r.position.x + r.size.x):
 			if nav_grid.is_cell_blocked_by_building(Vector2i(x, z)):
@@ -1673,6 +1699,15 @@ func _base_island() -> int:
 	# therefore unwalkable (island -1) — snap to the nearest walkable cell first,
 	# otherwise every fresh site would look unreachable and get scrapped.
 	_base_island_cache = nav_grid.island_at(nav_grid.nearest_walkable_cell(base_anchor))
+	# 10g: a fully enclosed base still returned -1, and _accept_or_scrap_site then
+	# had to accept EVERYTHING ("never scrap on a guess") — exactly when a bad plot
+	# hurts most. Fall back to the island the tribe's own reincarnation site stands
+	# on (walkable by construction).
+	if _base_island_cache < 0 and tribe != null:
+		for b in tribe.buildings:
+			if is_instance_valid(b) and b is ReincarnationSite and b.health > 0:
+				_base_island_cache = b.approach_island()
+				break
 	_base_island_version = nav_grid.change_version
 	return _base_island_cache
 
@@ -1686,45 +1721,105 @@ func _base_island() -> int:
 func _accept_or_scrap_site(site: Building, cell: Vector2i) -> bool:
 	if nav_grid == null or site == null or not is_instance_valid(site):
 		return true
-	var base: int = _base_island()
-	if base < 0:
+	# 10g: judged against _home_islands(), i.e. the SAME truth the plot sweep uses —
+	# pre-check, acceptance and the guard can no longer disagree.
+	var homes: Dictionary = _home_islands()
+	if homes.is_empty():
 		return true   # cannot tell — never scrap on a guess
 	var island: int = site.approach_island()
-	if island >= 0 and island == base:
+	if island >= 0 and homes.has(island):
 		return true
+	_self_scrap = true
 	commands.demolish_building(tribe, site)
-	_unreachable_plots[cell] = true
+	_self_scrap = false
+	_ban_plot(cell)
 	return false
 
 
-## True when a worker can actually WALK from the base anchor to the plot.
-## can_place_at only checks the plot itself (land/flat/free) — a walkable but
-## isolated plateau passes it, the workers never arrive and the dead
-## construction site blocks a build slot (Bergpass bug). The failing A*
-## is expensive (it explores the whole reachable component), so negatives go
-## into a session cache and are never re-tried.
-func _plot_reachable(cell: Vector2i) -> bool:
+## True when a worker can actually WALK to a plot with this footprint and
+## orientation (10g Teil 2).
+##
+## Phase 8.2 proved this with a find_path from base_anchor to the plot CENTRE. That
+## A* explored the whole reachable component on every FAILURE and was the single
+## expensive check in the sweep, AND it answered a different question than
+## _accept_or_scrap_site, which judges the APPROACH point — so the AI placed sites
+## it then demolished. Both now ask Building.approach_cell_for and compare islands.
+##
+## The island compare is not an approximation: NavGrid's islands are the connected
+## components of exactly the AStarGrid2D solidity find_path uses, and its
+## 4-connected fill is equivalent to DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES (a diagonal
+## step needs both orthogonal neighbours free, which already 4-connects the cells).
+## The APPROACH_SEARCH_RINGS bound replaces the old 3.0-m endpoint tolerance that
+## guarded against find_path snapping across a cliff.
+func _plot_reachable(cell: Vector2i, footprint: Vector2i = Vector2i.ONE,
+		orientation: int = 0) -> bool:
 	if nav_grid == null:
 		return true   # headless AI tests without terrain wiring
-	if _unreachable_plots.has(cell):
+	if _plot_banned(cell):
 		return false
-	# A proven-reachable plot stays proven while walkability is unchanged
-	# (exact — every walkability change bumps change_version).
-	if _reachable_plots.get(cell, -1) == nav_grid.change_version:
+	var approach: Vector2i = Building.approach_cell_for(nav_grid, cell, footprint,
+		orientation)
+	if approach.x < 0:
+		# Fully enclosed / island-less plot: nobody can ever serve it. This case is
+		# NEW — the old centre-based A* happily accepted a plot whose doorway was
+		# walled in.
+		_ban_plot(cell)
+		return false
+	var island: int = nav_grid.island_at(approach)
+	if island >= 0 and _home_islands().has(island):
 		return true
-	var to: Vector3 = nav_grid.cell_to_world(cell)
-	var path: PackedVector3Array = nav_grid.find_path(
-		nav_grid.cell_to_world(base_anchor), to)
-	if not path.is_empty():
-		# find_path snaps an unwalkable target to the nearest walkable cell —
-		# that snap can land ACROSS the cliff, so the path must really end at
-		# the plot to count.
-		var endp: Vector3 = path[path.size() - 1]
-		if Vector2(endp.x - to.x, endp.z - to.z).length() <= 3.0:
-			_reachable_plots[cell] = nav_grid.change_version
-			return true
-	_unreachable_plots[cell] = true
+	_ban_plot(cell)
 	return false
+
+
+## Bans a plot cell for AI_PLOT_BAN_TICKS. NOT forever as before 10g: a landbridge
+## can connect that ground later, and a session-long ban made the AI blind to it.
+func _ban_plot(cell: Vector2i) -> void:
+	_unreachable_plots[cell] = _tick_count + Balance.AI_PLOT_BAN_TICKS
+
+
+func _plot_banned(cell: Vector2i) -> bool:
+	var until: int = int(_unreachable_plots.get(cell, -1))
+	if until < 0:
+		return false
+	if _tick_count >= until:
+		_unreachable_plots.erase(cell)
+		return false
+	return true
+
+
+## Islands the tribe can actually put hands on: the base island plus the islands
+## its IDLE braves stand on (a crew that already crossed a landbridge counts).
+##
+## Computed at most once per tick and only LAZILY — the base island answers almost
+## every question, so the loop over the idle pool is paid only when a candidate
+## plot sits somewhere else. Deliberately NOT derived from the own buildings:
+## Building.approach_island() re-scans up to APPROACH_SEARCH_RINGS after every
+## walkability change, and the AI bumps NavGrid.change_version whenever it places
+## a building.
+func _home_islands() -> Dictionary:
+	if nav_grid == null:
+		return {}
+	if _home_islands_version == nav_grid.change_version \
+			and _home_islands_tick == _tick_count:
+		return _home_islands_cache
+	var out: Dictionary = {}
+	var base: int = _base_island()
+	if base >= 0:
+		out[base] = true
+	if tribe != null:
+		for unit in tribe.units:
+			if not is_instance_valid(unit) or unit.state != Unit.State.IDLE:
+				continue
+			if not (unit is Brave):
+				continue
+			var id: int = nav_grid.island_at(nav_grid.world_to_cell(unit.position))
+			if id >= 0:
+				out[id] = true
+	_home_islands_cache = out
+	_home_islands_version = nav_grid.change_version
+	_home_islands_tick = _tick_count
+	return out
 
 
 ## True when fewer than FORESTER_MIN_TREES trees stand within PLOT_TREE_RADIUS
@@ -1931,3 +2026,55 @@ func _nearest_enemy_tribe(pos: Vector3) -> int:
 			best_d = d
 			best = int(id)
 	return best
+
+
+## Re-checks EXISTING sites (10g Teil 2). Terrain spells (landbridge, earthquake,
+## sink, volcano), lava and the AI's own later buildings can cut a standing site
+## off — nothing looked at that after placement, so it sat there until the 120-s
+## construction decay removed it, blocking a build slot the whole time.
+##
+## Costs one comparison of two ints per site, both already cached against
+## NavGrid.change_version. No find_path, and no island trigger the AI did not
+## already have. Iterates cache.sites only — no extra buildings pass, which
+## test_ai_tick_cache_walks_units_once_per_tick pins down.
+func _tick_site_guard(cache: TickCache) -> void:
+	if nav_grid == null or commands == null:
+		return
+	if _tick_count % Balance.AI_SITE_GUARD_INTERVAL != 0:
+		return
+	var homes: Dictionary = _home_islands()
+	if homes.is_empty():
+		return   # cannot tell — never scrap on a guess
+	var scrapped: bool = false
+	for site in cache.sites.duplicate():
+		if not is_instance_valid(site) or site.health <= 0 or site.demolishing:
+			continue
+		var note: SiteNote = _note_for(site)
+		var island: int = site.approach_island()
+		if island >= 0 and homes.has(island):
+			note.strikes = 0
+			continue
+		note.strikes += 1
+		# TWO strikes are mandatory: island labels may be up to
+		# NavGrid.ISLAND_REFRESH_MS stale, and a landbridge grows over several ticks
+		# — a single miss means nothing.
+		if note.strikes < Balance.AI_SITE_GUARD_STRIKES or scrapped:
+			continue
+		if site.has_build_stage():
+			# Do NOT demolish: begin_demolish() turns it into a WORKER job and
+			# switches _tick_decay off (building.gd: "if not demolishing"). Without
+			# reachable workers that blocks the slot FOREVER — worse than the bug.
+			# Letting it decay also refunds 100 % instead of 75 %.
+			note.abandoned = true
+			_ban_plot(site.cell)
+			continue
+		# build_progress == 0: 10d scraps it instantly with a full refund, so the
+		# slot is free again in this very tick.
+		_self_scrap = true
+		commands.demolish_building(tribe, site)
+		_self_scrap = false
+		_ban_plot(site.cell)
+		cache.sites.erase(site)
+		cache.stalled_sites.erase(site)
+		scrapped = true
+		dbg_site_scraps += 1

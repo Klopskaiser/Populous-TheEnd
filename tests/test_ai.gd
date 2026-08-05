@@ -262,21 +262,52 @@ func test_plot_search_scan_cap() -> void:
 	_free_world(w)
 
 
-## Proven-reachable plots are cached while walkability is unchanged; any
-## walkability change invalidates the proof (change_version), never staleness.
-func test_plot_reachable_success_cache() -> void:
+## 10g ERSETZT test_plot_reachable_success_cache: der Positiv-Cache
+## (_reachable_plots) ist entfallen, weil die Pruefung jetzt ein Insel-Lookup ist
+## und den zu cachen teurer waere als der Lookup. Die beiden Tests hier pruefen
+## dafuer das WICHTIGERE: dass die Pruefung dieselbe Frage stellt wie die
+## Nachkontrolle, und dass ein Bann wieder ablaeuft.
+func test_plot_reachability_accepts_flat_ground() -> void:
 	var w: Dictionary = _make_world()
 	var ai: AIController = _make_ai(w, w.tribes[1], Vector2i(64, 64))
-	var cell: Vector2i = Vector2i(70, 64)
-	check(ai._plot_reachable(cell), "flat plot is reachable")
-	check(ai._reachable_plots.get(cell, -1) == w.nav.change_version,
-		"the proof is cached with the current grid version")
-	w.nav.update_region(Rect2i(100, 100, 2, 2))
-	check(ai._reachable_plots.get(cell, -1) != w.nav.change_version,
-		"a walkability change makes the cached proof stale")
-	check(ai._plot_reachable(cell), "the stale plot is re-proven on demand")
-	check(ai._reachable_plots.get(cell, -1) == w.nav.change_version,
-		"the re-proof refreshes the cache")
+	check(ai._plot_reachable(Vector2i(70, 64), Vector2i(2, 2), 0),
+		"flacher Bauplatz ist erreichbar")
+	ai.free()
+	_free_world(w)
+
+
+## WICHTIG fuer eigene Insel-Tests: NavGrid._ensure_islands ist gegen
+## ISLAND_REFRESH_MS gedrosselt. Wer vor der Terrainaenderung schon etwas
+## Insel-basiertes abfragt, bekommt danach VERALTETE Labels — deshalb hier eine
+## frische Welt und kein Aufruf vor dem Graben.
+func test_plot_reachability_rejects_a_cut_off_patch() -> void:
+	var w: Dictionary = _make_world()
+	var ai: AIController = _make_ai(w, w.tribes[1], Vector2i(20, 20))
+	for vz in range(w.td.size + 1):
+		for vx in range(w.td.size + 1):
+			var inner: bool = vx >= 74 and vx <= 86 and vz >= 74 and vz <= 86
+			var outer: bool = vx >= 70 and vx <= 90 and vz >= 70 and vz <= 90
+			if outer and not inner:
+				w.td.set_vertex_height(vx, vz, 1.0)   # unter der Wasserlinie
+	w.nav.update_region(Rect2i(Vector2i(68, 68), Vector2i(24, 24)))
+	check(w.nav.island_at(Vector2i(78, 78)) != w.nav.island_at(Vector2i(20, 20)),
+		"der Graben trennt wirklich (Testvoraussetzung)")
+	check(not ai._plot_reachable(Vector2i(78, 78), Vector2i(2, 2), 0),
+		"eine abgeschnittene Insel ist NICHT erreichbar")
+	ai.free()
+	_free_world(w)
+
+
+func test_plot_ban_expires_so_a_landbridge_reopens_the_ground() -> void:
+	var w: Dictionary = _make_world()
+	var ai: AIController = _make_ai(w, w.tribes[1], Vector2i(64, 64))
+	var cell: Vector2i = Vector2i(90, 90)
+	ai._ban_plot(cell)
+	check(ai._plot_banned(cell), "frisch gebannt")
+	ai._tick_count += Balance.AI_PLOT_BAN_TICKS
+	check(not ai._plot_banned(cell),
+		"der Bann laeuft ab - eine Landbruecke kann das Land anschliessen "
+			+ "(vor 10g galt er die ganze Sitzung)")
 	ai.free()
 	_free_world(w)
 
@@ -1925,5 +1956,147 @@ func test_expansion_anchor_avoids_enemy_territory() -> void:
 	w.tree_manager.spawn_tree(theirs + Vector2i(3, 0), TreeResource.MAX_STAGE)
 	check(ai._expansion_anchor().x < 0,
 		"die KI expandiert nicht in Feindgebiet, auch wenn dort das Holz steht")
+	ai.free()
+	_free_world(w)
+
+
+# --- Teil 2: Erreichbarkeit als EINE Wahrheit + Nachkontrolle (10g) -------------------
+# Vorher urteilte die Vorpruefung ueber die PLOTMITTE (A* ab base_anchor), die
+# Nachpruefung ueber den ANLAUFPUNKT (approach_island) — zwei verschiedene Fragen,
+# also setzte die KI Bauplaetze, die sie sofort wieder abriss. Und NACH der
+# Platzierung prueste nichts mehr.
+
+func test_approach_cell_for_matches_the_live_delivery_point() -> void:
+	var w: Dictionary = _make_world()
+	var hut: Building = w.building_manager.place(HUT_SCENE, w.tribes[1],
+		Vector2i(50, 50), 0, true)
+	var statik: Vector2i = Building.approach_cell_for(w.nav, hut.cell, hut.footprint,
+		hut.orientation)
+	var live: Vector2i = w.nav.world_to_cell(hut.delivery_point())
+	check(statik == live,
+		"die statische Anlaufzelle stimmt mit delivery_point() ueberein (%s vs %s)"
+			% [str(statik), str(live)])
+	_free_world(w)
+
+
+func test_approach_cell_for_reports_none_when_the_plot_is_enclosed() -> void:
+	var w: Dictionary = _make_world()
+	# Alles unter Wasser setzen: kein Ring findet mehr eine begehbare Zelle.
+	for vz in range(w.td.size + 1):
+		for vx in range(w.td.size + 1):
+			w.td.set_vertex_height(vx, vz, 1.0)
+	w.nav.update_region(Rect2i(0, 0, w.td.size, w.td.size))
+	check(Building.approach_cell_for(w.nav, Vector2i(50, 50), Vector2i(4, 4), 0).x < 0,
+		"ohne begehbare Anlaufzelle liefert sie (-1, -1) - diesen Fall liess die "
+			+ "alte Mitten-Pruefung durch")
+	_free_world(w)
+
+
+func test_relax_pass_uses_one_ring_of_spacing() -> void:
+	# Der Anti-Aushunger-Durchgang liess den Abstand vorher GANZ fallen und durfte
+	# damit die Tuerschwelle eines Nachbarn zubauen.
+	check(Balance.AI_PLOT_SPACING_RELAXED >= 1,
+		"der Relax-Durchgang laesst einen Ring Luft, nicht null")
+	check(Balance.AI_PLOT_SPACING_RELAXED < Balance.AI_PLOT_SPACING,
+		"aber weniger als der normale Abstand")
+
+
+func test_home_islands_include_the_base() -> void:
+	var w: Dictionary = _make_world()
+	var ai: AIController = _make_ai(w, w.tribes[1], Vector2i(40, 40))
+	var homes: Dictionary = ai._home_islands()
+	check(not homes.is_empty(), "die Basisinsel ist dabei")
+	check(homes.has(w.nav.island_at(Vector2i(40, 40))), "und zwar genau sie")
+	ai.free()
+	_free_world(w)
+
+
+func test_base_island_falls_back_to_the_reincarnation_site() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var ai: AIController = _make_ai(w, tribe, Vector2i(40, 40))
+	w.building_manager.place(SITE_SCENE, tribe, Vector2i(40, 40), 0, true)
+	check(ai._base_island() >= 0,
+		"mit Reinkarnationsplatz auf dem Anker gibt es eine Basisinsel")
+	ai.free()
+	_free_world(w)
+
+
+func test_site_guard_needs_two_strikes() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var ai: AIController = _make_ai(w, tribe, Vector2i(20, 20))
+	for vz in range(w.td.size + 1):
+		for vx in range(w.td.size + 1):
+			var inner: bool = vx >= 74 and vx <= 86 and vz >= 74 and vz <= 86
+			var outer: bool = vx >= 70 and vx <= 90 and vz >= 70 and vz <= 90
+			if outer and not inner:
+				w.td.set_vertex_height(vx, vz, 1.0)
+	w.nav.update_region(Rect2i(Vector2i(68, 68), Vector2i(24, 24)))
+	var site: Building = w.building_manager.place(HUT_SCENE, tribe,
+		Vector2i(78, 78), 0, false)
+	check(site != null and site.under_construction, "abgeschnittene Baustelle steht")
+	# Erster Guard-Lauf: nur ein Strike, noch kein Abriss.
+	ai._tick_count = Balance.AI_SITE_GUARD_INTERVAL
+	ai._tick_site_guard(ai.build_tick_cache())
+	check(is_instance_valid(site) and site.health > 0,
+		"ein einzelner Fehlschlag verwirft nichts (Insel-Labels duerfen veralten)")
+	ai._tick_count += Balance.AI_SITE_GUARD_INTERVAL
+	ai._tick_site_guard(ai.build_tick_cache())
+	check(not is_instance_valid(site) or site.health <= 0,
+		"beim zweiten Strike wird die Baustelle ohne Baufortschritt verworfen")
+	ai.free()
+	_free_world(w)
+
+
+func test_site_guard_abandons_instead_of_demolishing_a_half_built_site() -> void:
+	# F8/F9: begin_demolish() macht daraus einen ARBEITER-Job und schaltet
+	# _tick_decay ab. Ohne erreichbare Arbeiter blockiert das den Slot FUER IMMER —
+	# schlimmer als der Bug. Verfallen bringt zudem 100 % statt 75 % zurueck.
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var ai: AIController = _make_ai(w, tribe, Vector2i(20, 20))
+	for vz in range(w.td.size + 1):
+		for vx in range(w.td.size + 1):
+			var inner: bool = vx >= 74 and vx <= 86 and vz >= 74 and vz <= 86
+			var outer: bool = vx >= 70 and vx <= 90 and vz >= 70 and vz <= 90
+			if outer and not inner:
+				w.td.set_vertex_height(vx, vz, 1.0)
+	w.nav.update_region(Rect2i(Vector2i(68, 68), Vector2i(24, 24)))
+	var site: Building = w.building_manager.place(HUT_SCENE, tribe,
+		Vector2i(78, 78), 0, false)
+	site.build_progress = 0.4
+	check(site.has_build_stage(), "Baustelle MIT Baufortschritt")
+	for i in range(Balance.AI_SITE_GUARD_STRIKES):
+		ai._tick_count += Balance.AI_SITE_GUARD_INTERVAL
+		ai._tick_site_guard(ai.build_tick_cache())
+	check(is_instance_valid(site) and not site.demolishing,
+		"sie wird NICHT abgerissen - der Verfall raeumt sie ab")
+	check(ai._site_worker_want(site) == 0, "und sie wird nicht mehr bestueckt")
+	check(ai._all_sites_supplied(ai.build_tick_cache()),
+		"sie blockiert das Bau-Tor nicht mehr")
+	ai.free()
+	_free_world(w)
+
+
+func test_scrapping_a_dead_site_does_not_pause_construction() -> void:
+	# Latenter Fehler seit 10e: jeder Selbstabriss loeste den Rebuild-Cooldown aus
+	# und pausierte den eigenen Bau 15 Ticks.
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var ai: AIController = _make_ai(w, tribe, Vector2i(20, 20))
+	for vz in range(w.td.size + 1):
+		for vx in range(w.td.size + 1):
+			var inner: bool = vx >= 74 and vx <= 86 and vz >= 74 and vz <= 86
+			var outer: bool = vx >= 70 and vx <= 90 and vz >= 70 and vz <= 90
+			if outer and not inner:
+				w.td.set_vertex_height(vx, vz, 1.0)
+	w.nav.update_region(Rect2i(Vector2i(68, 68), Vector2i(24, 24)))
+	var site: Building = w.building_manager.place(HUT_SCENE, tribe,
+		Vector2i(78, 78), 0, false)
+	ai._rebuild_ticks = 0
+	ai._accept_or_scrap_site(site, Vector2i(78, 78))
+	check(ai._rebuild_ticks == 0,
+		"ein Selbstabriss pausiert den eigenen Bau nicht")
 	ai.free()
 	_free_world(w)
