@@ -780,3 +780,40 @@ func test_death_blast_only_on_ground_destruction() -> void:
 			and bystander2.state != Unit.State.THROWN,
 		"the tornado tip triggers no death blast")
 	_free_world(w)
+
+
+## Nutzerreport 2026-08-05: explodiert die Ramme MITTEN im Feuerstoss, blieb der
+## Feuerstrahl in der Luft haengen und verschwand erst mit der Leiche. Ursache:
+## tick() ueberspringt den ganzen Flammenblock bei State.DEAD — also auch das
+## _show_flame_cone(false), das einen Stoss beendet.
+func test_death_ends_the_flame_burst_at_once() -> void:
+	var w: Dictionary = _make_world()
+	var ram: FireRam = _armed_ram(w)
+	var victim: Unit = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, ram.position + Vector3(0, 0, 3.0))
+	ram.order_attack(victim)
+	var started: bool = false
+	for i in range(120):
+		victim.position = ram.position + Vector3(0, 0, 3.0)
+		victim._sync_soa_pos()
+		_tick_world(w)
+		if ram._flame_time > 0.0:
+			started = true
+			break
+	check(started, "a burst is running")
+
+	# The ram bursts apart mid-burst.
+	ram._destroy_vehicle(true)
+	check(ram.state == Unit.State.DEAD, "the ram is dead")
+	check(ram._flame_time <= 0.0, "the burst ended with it (no flame left hanging)")
+
+	# And the dead ram cannot burn anyone any more.
+	var hp_before: int = victim.health
+	for i in range(40):
+		victim.position = ram.position + Vector3(0, 0, 3.0)
+		victim._sync_soa_pos()
+		_tick_world(w)
+	check(victim.health == hp_before,
+		"a destroyed ram deals no further flame damage (%d -> %d)"
+			% [hp_before, victim.health])
+	_free_world(w)

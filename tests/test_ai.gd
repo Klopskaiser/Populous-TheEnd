@@ -15,6 +15,7 @@ const TEMPLE_SCENE: PackedScene = preload("res://scenes/buildings/temple.tscn")
 const FORESTER_SCENE: PackedScene = preload("res://scenes/buildings/forester.tscn")
 const WORKSHOP_SCENE: PackedScene = preload("res://scenes/buildings/workshop.tscn")
 const WATCHTOWER_SCENE: PackedScene = preload("res://scenes/buildings/watchtower.tscn")
+const WOOD_DEPOT_SCENE: PackedScene = preload("res://scenes/buildings/wood_depot.tscn")
 const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
 const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
 const SHAMAN_SCENE: PackedScene = preload("res://scenes/units/shaman.tscn")
@@ -2416,3 +2417,74 @@ func test_small_map_wood_bonus_is_a_real_bonus() -> void:
 		"Seenland nicht")
 	check(MapGenerator.map_size("bergpass") > Balance.SMALL_MAP_MAX_SIZE,
 		"Bergpass nicht")
+
+
+# --- Building assault: the refresh must not cancel it (Nutzerreport 2026-08-05) ------
+
+## Reported as "the AI cannot attack the wood depot". The cause is general:
+## Unit.order_move() clears attack_building on purpose, and _tick_attack re-issues
+## the attack-move to the whole army every ATTACK_ORDER_TICKS — so every assault
+## an AI unit began was cancelled seconds later and no building ever fell.
+func test_attack_refresh_keeps_units_on_their_building() -> void:
+	var w: Dictionary = _make_world()
+	var ai_tribe: Tribe = w.tribes[1]
+	var foe: Tribe = w.tribes[0]
+	var ai: AIController = _make_ai(w, ai_tribe, Vector2i(40, 40))
+	var depot: Building = w.building_manager.place(
+		WOOD_DEPOT_SCENE, foe, Vector2i(50, 50), 0, true)
+	check(depot != null and depot.is_attackable(),
+		"the enemy wood depot is an attackable building")
+	var warrior: Unit = w.unit_manager.spawn_unit(
+		WARRIOR_SCENE, ai_tribe.id, w.nav.cell_to_world(Vector2i(50, 53)))
+	warrior.order_attack_building(depot)
+	check(warrior.attack_building == depot, "the warrior is assaulting the depot")
+
+	# The AI is in ATTACK and refreshes its march order.
+	ai.state = AIState.State.ATTACK
+	var cache = ai.build_tick_cache()
+	ai._attack_order_countdown = 1
+	ai._tick_attack(cache)
+	check(warrior.attack_building == depot,
+		"the order refresh leaves a unit that is tearing a building down alone")
+
+	# A unit that is merely marching DOES get the refresh.
+	var marcher: Unit = w.unit_manager.spawn_unit(
+		WARRIOR_SCENE, ai_tribe.id, w.nav.cell_to_world(Vector2i(41, 41)))
+	check(marcher.attack_building == null, "the second warrior has no building target")
+	ai._attack_order_countdown = 1
+	ai._tick_attack(ai.build_tick_cache())
+	check(marcher.state == Unit.State.MOVE or marcher.state == Unit.State.ATTACK,
+		"the marching warrior received the attack-move")
+	ai.free()
+	_free_world(w)
+
+
+## End to end: an AI warrior next to an enemy wood depot brings it down while the
+## AI keeps ticking its attack orders.
+func test_ai_actually_destroys_a_wood_depot() -> void:
+	var w: Dictionary = _make_world()
+	var ai_tribe: Tribe = w.tribes[1]
+	var foe: Tribe = w.tribes[0]
+	var ai: AIController = _make_ai(w, ai_tribe, Vector2i(40, 40))
+	w.unit_manager.building_manager = w.building_manager
+	var depot: Building = w.building_manager.place(
+		WOOD_DEPOT_SCENE, foe, Vector2i(50, 50), 0, true)
+	var hp0: int = depot.health
+	for i in range(3):
+		w.unit_manager.spawn_unit(WARRIOR_SCENE, ai_tribe.id,
+			w.nav.cell_to_world(Vector2i(50 + i, 53)))
+	ai.state = AIState.State.ATTACK
+	var elapsed: float = 0.0
+	while elapsed < 60.0 and is_instance_valid(depot) and depot.health > 0:
+		for u in w.unit_manager.units.duplicate():
+			if is_instance_valid(u):
+				u.tick(0.05)
+		w.building_manager.tick(0.05)
+		ai._attack_order_countdown = 1
+		ai._tick_attack(ai.build_tick_cache())
+		elapsed += 0.05
+	check(not is_instance_valid(depot) or depot.health <= 0,
+		"the depot falls (hp %d -> %d after %.0f s)"
+			% [hp0, depot.health if is_instance_valid(depot) else 0, elapsed])
+	ai.free()
+	_free_world(w)

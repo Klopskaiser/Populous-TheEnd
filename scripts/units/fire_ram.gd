@@ -193,6 +193,21 @@ func tick(delta: float) -> void:
 	super.tick(delta)
 
 
+## Death takes the flame with it, on EVERY death path (burst, burn-out, water,
+## tornado tip). _die() is the one funnel all of them pass through.
+##
+## Without this the beam hung in the air: the cone is a child node, and tick()
+## skips the whole flame block once state is DEAD — so the burst that killed the
+## ram also skipped the _show_flame_cone(false) that ends a burst. The beam stayed
+## until the corpse faded (user report). Zeroing _flame_time makes it structurally
+## impossible for a dead ram to apply flame damage as well.
+func _die() -> void:
+	_flame_time = 0.0
+	_flame_check = 0.0
+	_show_flame_cone(false)
+	super._die()
+
+
 ## Crewed rams heal 1 fire life every LIFE_REGEN_TIME — even mid-combat (no
 ## out-of-combat delay, unlike Unit._tick_regen). An uncrewed ram does not heal.
 func _tick_fire_regen(delta: float) -> void:

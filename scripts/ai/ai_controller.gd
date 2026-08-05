@@ -1055,7 +1055,7 @@ func _tick_attack(cache: TickCache) -> void:
 	var target: Vector3 = _attack_target_position()
 	if target == Vector3.INF:
 		return
-	var squad: Array[Unit] = cache.army.duplicate()
+	var squad: Array[Unit] = _marching_only(cache.army)
 	var shaman: Unit = tribe.shaman
 	if _shaman_alive() and shaman.state != Unit.State.CAST \
 			and not _tick_unblock_path(target):
@@ -1318,7 +1318,7 @@ func _tick_defend(cache: TickCache, threat: Dictionary) -> void:
 	var full_power: float = core_power + float(cache.idle_left()) * BRAVE_POWER
 	if full_power < float(enemy_count) * DEFEND_CHANCE_FACTOR:
 		return   # hopeless — spells only
-	var defenders: Array[Unit] = army.duplicate()
+	var defenders: Array[Unit] = _marching_only(army)
 	var shaman: Unit = tribe.shaman
 	if _shaman_alive() and shaman.state != Unit.State.CAST:
 		defenders.append(shaman)
@@ -1336,6 +1336,29 @@ func _tick_defend(cache: TickCache, threat: Dictionary) -> void:
 		if not braves.is_empty() and enemy != null and is_instance_valid(enemy):
 			commands.order_attack(braves, enemy)
 			dbg_militia_orders += braves.size()
+
+
+## The squad members that still need a march order — everyone EXCEPT the ones
+## currently tearing down an enemy building.
+##
+## Why this filter exists (user report 2026-08-05: "the AI cannot attack the wood
+## depot"): Unit.order_move() clears attack_building on purpose ("a move order
+## also breaks off a building assault"), and _tick_attack/_tick_defend re-issue
+## the attack-move to the WHOLE army every ATTACK_ORDER_TICKS. So every assault
+## an AI unit started was cancelled a few seconds later — the AI could never
+## finish off ANY building. It shows up worst on the 1x1 wood depot, which should
+## fall in seconds. Units already on a building keep their target; the refresh
+## still herds everyone who is merely marching.
+func _marching_only(squad: Array[Unit]) -> Array[Unit]:
+	var out: Array[Unit] = []
+	for u in squad:
+		if not is_instance_valid(u):
+			continue
+		var target = u.attack_building
+		if target != null and is_instance_valid(target) and target.health > 0:
+			continue
+		out.append(u)
+	return out
 
 
 ## Nearest ATTACKABLE enemy building (to the base anchor); none left -> nearest
