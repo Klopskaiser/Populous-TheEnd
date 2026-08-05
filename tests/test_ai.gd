@@ -1802,3 +1802,128 @@ func test_potential_growth_ignores_the_housing_cap() -> void:
 	check(hut.potential_growth_per_minute() > 0.0,
 		"das Potenzial bleibt - darauf plant die KI ihre Lager")
 	_free_world(w)
+
+
+# --- Teil 5: Arena-Enge, Bedrohungserkennung, zwei Baumuster (10g) --------------------
+# Nutzerreport: "auf kleinen Karten greift sie sofort mit den Braves an".
+# Ursache: DEFEND_RADIUS war fix 32 m, die Basisabstaende sind es nicht.
+# MapGenerator._circle_anchors setzt die Anker auf einen Kreis mit Radius
+# 0,2 * size — Insel 128 mit 4 Staemmen: naechste Nachbarbasis 36,2 Zellen. Damit
+# war _detect_threat DAUERHAFT wahr: Holzlogistik nie, _tick_attack nie, und
+# _tick_defend warf alle idle Braves auf den Nachbarn.
+
+func test_is_cramped_matches_the_island_four_tribe_spacing() -> void:
+	check(AIState.is_cramped(36.2), "Insel/4 Staemme (36,2 Zellen) ist eng")
+	check(AIState.is_cramped(51.2), "Insel/2 Staemme (51,2) noch eng")
+	check(not AIState.is_cramped(82.0), "Plateau (82, Eckanker) ist offen")
+	check(not AIState.is_cramped(140.0), "Seenland/Bergpass offen")
+
+
+func test_defend_radius_shrinks_on_a_cramped_arena() -> void:
+	var island: float = AIState.defend_radius(36.2)
+	var plateau: float = AIState.defend_radius(82.0)
+	var big: float = AIState.defend_radius(200.0)
+	check(island < 36.2 * 0.5,
+		"auf der Insel reicht der Radius nicht mehr zur Nachbarbasis (%.1f)" % island)
+	check(island >= Balance.AI_DEFEND_RADIUS_MIN, "aber nicht unter das Minimum")
+	check(plateau > island, "je weiter die Basen, desto groesser der Radius")
+	check(is_equal_approx(big, Balance.AI_DEFEND_RADIUS_MAX),
+		"auf grossen Karten der alte Wert 32")
+
+
+func test_cramped_profile_keeps_the_base_compact() -> void:
+	check(AIState.plot_search_radius(36.2) < AIState.plot_search_radius(140.0),
+		"engere Arena, kleinerer Suchradius (40 Zellen reichen sonst an der "
+			+ "Nachbarbasis vorbei)")
+	check(AIState.settlement_anchor_limit(36.2) < AIState.settlement_anchor_limit(140.0),
+		"und weniger Siedlungsanker")
+	check(AIState.target_watchtowers(36.2) > AIState.target_watchtowers(140.0),
+		"dafuer mehr Wachtuerme - Kontakt kommt sofort")
+
+
+func test_cramped_profile_forbids_forward_depots() -> void:
+	check(not AIState.forward_depots_allowed(36.2),
+		"AI_FORWARD_DEPOT_DISTANCE ist 35 - bei 36 Zellen zur Nachbarbasis waere "
+			+ "das Lager vor deren Tuer")
+	check(AIState.forward_depots_allowed(140.0), "auf grossen Karten erlaubt")
+
+
+func test_cramped_profile_attacks_earlier_with_a_smaller_army() -> void:
+	check(AIState.army_attack_size(36.2) < AIState.army_attack_size(140.0),
+		"enge Arena: kleinere erste Welle, die KI braucht FRUEH echte Armee")
+	check(AIState.pop_for_train(36.2) < AIState.pop_for_train(140.0),
+		"und frueher Ausbildung statt weiter aufbauen")
+
+
+func test_militia_takes_at_most_half_the_idle_pool() -> void:
+	check(AIState.militia_count(20) <= 10, "hoechstens die Haelfte")
+	check(AIState.militia_count(0) == 0, "ohne idle Braves keine Miliz")
+	check(AIState.militia_count(1) == 1,
+		"aber ein Raeuber IM Dorf wird auch von einem Ein-Brave-Stamm beantwortet")
+
+
+func test_arena_span_uses_the_nearest_enemy_reincarnation_site() -> void:
+	var w: Dictionary = _make_world()
+	var ai: AIController = _make_ai(w, w.tribes[1], Vector2i(30, 30))
+	w.building_manager.place(SITE_SCENE, w.tribes[0], Vector2i(66, 30), 0, true)
+	var span: float = ai._arena_span()
+	check(span > 30.0 and span < 42.0, "Abstand zum Feindanker gemessen (%.1f)" % span)
+	check(AIState.is_cramped(span), "und als eng erkannt")
+	ai.free()
+	_free_world(w)
+
+
+func test_arena_span_falls_back_to_the_map_when_no_enemy_stands() -> void:
+	var w: Dictionary = _make_world()
+	var ai: AIController = _make_ai(w, w.tribes[1], Vector2i(30, 30))
+	check(not AIState.is_cramped(ai._arena_span()),
+		"ohne feindliches Gebaeude gilt die Arena als offen")
+	ai.free()
+	_free_world(w)
+
+
+func test_enemy_at_its_own_base_is_not_a_threat() -> void:
+	# DER Kernfix. Zwei Anker 36 Zellen auseinander, Feindeinheiten an DEREN Anker:
+	# vorher lag deren Basis im fixen 32-m-Radius und galt als Dauerbedrohung.
+	var w: Dictionary = _make_world()
+	var mine: Vector2i = Vector2i(30, 30)
+	var theirs: Vector2i = Vector2i(66, 30)
+	var ai: AIController = _make_ai(w, w.tribes[1], mine)
+	w.building_manager.place(SITE_SCENE, w.tribes[1], mine, 0, true)
+	w.building_manager.place(SITE_SCENE, w.tribes[0], theirs, 0, true)
+	for i in range(5):
+		w.unit_manager.spawn_unit(BRAVE_SCENE, 0, w.nav.cell_to_world(theirs + Vector2i(1, i)))
+	check(ai._detect_threat().is_empty(),
+		"Nachbarn an ihrem EIGENEN Anker sind keine Bedrohung")
+	ai.free()
+	_free_world(w)
+
+
+func test_enemy_inside_our_territory_is_a_threat() -> void:
+	# Gegenkontrolle zum vorigen Test.
+	var w: Dictionary = _make_world()
+	var mine: Vector2i = Vector2i(30, 30)
+	var theirs: Vector2i = Vector2i(66, 30)
+	var ai: AIController = _make_ai(w, w.tribes[1], mine)
+	w.building_manager.place(SITE_SCENE, w.tribes[1], mine, 0, true)
+	w.building_manager.place(SITE_SCENE, w.tribes[0], theirs, 0, true)
+	w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, w.nav.cell_to_world(mine + Vector2i(2, 2)))
+	check(not ai._detect_threat().is_empty(),
+		"ein Gegner IN unserem Gebiet ist sehr wohl eine Bedrohung")
+	ai.free()
+	_free_world(w)
+
+
+func test_expansion_anchor_avoids_enemy_territory() -> void:
+	var w: Dictionary = _make_world()
+	var mine: Vector2i = Vector2i(30, 30)
+	var theirs: Vector2i = Vector2i(66, 30)
+	var ai: AIController = _make_ai(w, w.tribes[1], mine)
+	w.building_manager.place(SITE_SCENE, w.tribes[0], theirs, 0, true)
+	ai._arena_span()   # fuellt _enemy_anchors
+	# Der einzige Baum steht beim Feind.
+	w.tree_manager.spawn_tree(theirs + Vector2i(3, 0), TreeResource.MAX_STAGE)
+	check(ai._expansion_anchor().x < 0,
+		"die KI expandiert nicht in Feindgebiet, auch wenn dort das Holz steht")
+	ai.free()
+	_free_world(w)

@@ -246,7 +246,12 @@ static func next_building_kind(counts: Dictionary) -> StringName:
 		return &"forester"
 	# The best grove is far off: a forward rack so the crews stop walking the
 	# whole way home with every load.
-	if bool(counts.get("grove_far", false)) and int(counts.get("forward_depot", 0)) < 1:
+	# In einer ENGEN Arena kein vorgeschobenes Lager: AI_FORWARD_DEPOT_DISTANCE ist
+	# 35, und bei 36 Zellen zur Nachbarbasis kann "ferner Hain" nur Feindgebiet
+	# heissen — die KI wuerde ihr Lager vor die feindliche Tuer setzen (10g Teil 5).
+	if bool(counts.get("grove_far", false)) \
+			and int(counts.get("forward_depot", 0)) < 1 \
+			and not bool(counts.get("cramped", false)):
 		return &"wood_depot"
 	# Housing pressure, pulled FORWARD from the end of the ladder — this is what
 	# unlocks the high population at all.
@@ -301,7 +306,8 @@ static func next_building_kind(counts: Dictionary) -> StringName:
 	if int(counts.get("fireram_workshop", 0)) < shops \
 			and _may_add_shop(counts, int(counts.get("fireram_workshop", 0))):
 		return &"fireram_workshop"
-	if int(counts.get("watchtower", 0)) < Balance.AI_TARGET_WATCHTOWERS:
+	if int(counts.get("watchtower", 0)) \
+			< int(counts.get("watchtower_target", Balance.AI_TARGET_WATCHTOWERS)):
 		return &"watchtower"
 	if int(counts.get("airship_wharf", 0)) < shops \
 			and _may_add_shop(counts, int(counts.get("airship_wharf", 0))):
@@ -384,3 +390,85 @@ static func training_hut_share(state: State, army: int, army_target: int) -> flo
 ## by SHORTFALL against the stream target instead of by raw count. Keeping both
 ## would have left two nearly identical camp choosers side by side — exactly the
 ## kind of duplication that let the is_attackable() targeting bug survive.
+
+
+# --- Arena-Enge: zwei Baumuster (10g Teil 5) -----------------------------------------
+# Die KARTENGROESSE allein reicht nicht: Insel (128) mit 4 Staemmen ist eng (die
+# naechste Nachbarbasis liegt 36,2 Zellen weg, MapGenerator._circle_anchors setzt
+# die Anker auf einen Kreis mit Radius 0,2 * size), Plateau (128) mit seinen
+# Eckankern dagegen nicht (82 Zellen). Maszgeblich ist der gemessene Basisabstand.
+
+## True while the nearest ENEMY base is so close that expanding outward means
+## expanding into enemy territory.
+static func is_cramped(arena_span: float) -> bool:
+	return arena_span < Balance.AI_CRAMPED_ARENA
+
+
+## Defence radius around the own base anchor. Relative to the arena instead of the
+## old fixed 32 m: on the island the neighbouring bases sat INSIDE that radius, so
+## _detect_threat fired permanently — the wood logistics never ran, _tick_attack
+## never ran at all, and every idle brave was thrown at the enemy as militia. That
+## is the reported "on small maps it immediately attacks with braves".
+## 36 -> 14 | 51 -> 17,9 | 82 -> 28,7 | 128+ -> 32 (the old value)
+static func defend_radius(arena_span: float) -> float:
+	return clampf(arena_span * Balance.AI_DEFEND_RADIUS_FACTOR,
+		Balance.AI_DEFEND_RADIUS_MIN, Balance.AI_DEFEND_RADIUS_MAX)
+
+
+## Ring search radius for build plots. 40 cells on a 128er map reaches PAST the
+## neighbour's base; a cramped tribe keeps its base compact (and the sweep cheaper).
+static func plot_search_radius(arena_span: float) -> int:
+	return Balance.AI_PLOT_SEARCH_RADIUS_CRAMPED if is_cramped(arena_span) \
+		else Balance.AI_PLOT_SEARCH_RADIUS
+
+
+## Settlement anchors the plot search sweeps. A cramped tribe builds one compact,
+## defensible village instead of a scattered one.
+static func settlement_anchor_limit(arena_span: float) -> int:
+	return Balance.AI_MAX_SETTLEMENT_ANCHORS_CRAMPED if is_cramped(arena_span) \
+		else Balance.AI_MAX_SETTLEMENT_ANCHORS
+
+
+## Forward wood racks are OFF in a cramped arena: AI_FORWARD_DEPOT_DISTANCE is 35,
+## and with the nearest enemy base 36 cells away a "far grove" can only mean enemy
+## ground — the AI would put its rack on the enemy's doorstep.
+static func forward_depots_allowed(arena_span: float) -> bool:
+	return not is_cramped(arena_span)
+
+
+## More watchtowers when contact comes immediately.
+static func target_watchtowers(arena_span: float) -> int:
+	return Balance.AI_TARGET_WATCHTOWERS_CRAMPED if is_cramped(arena_span) \
+		else Balance.AI_TARGET_WATCHTOWERS
+
+
+## First attack wave. SMALLER in a cramped arena: contact comes early, so the AI
+## needs a real army early instead of standing around with braves.
+static func army_attack_size(arena_span: float) -> int:
+	return Balance.AI_ARMY_ATTACK_SIZE_CRAMPED if is_cramped(arena_span) \
+		else ARMY_ATTACK_SIZE
+
+
+## Population at which BUILD hands over to TRAIN.
+static func pop_for_train(arena_span: float) -> int:
+	return Balance.AI_POP_FOR_TRAIN_CRAMPED if is_cramped(arena_span) \
+		else POP_FOR_TRAIN
+
+
+## Militia braves the defence may throw in: at most a share of the idle pool, but
+## always at least one while any brave is idle.
+##
+## _tick_defend used to take ALL idle braves. A brave is worth BRAVE_POWER 0.5, so
+## twenty die for ten combat power — and they are the tribe's whole economy at the
+## same time. Hence the share.
+##
+## The "at least one" floor is deliberate: a raider standing IN the village has to
+## be answered even by a five-brave tribe (test_defense_militia pins that). It is
+## not the reported bug — that was braves being thrown at a NEIGHBOUR'S BASE,
+## which the arena-relative defend_radius and the territory test fix instead.
+## A minimum-brave-count gate would have left small tribes defenceless.
+static func militia_count(idle_braves: int) -> int:
+	if idle_braves <= 0:
+		return 0
+	return clampi(int(float(idle_braves) * Balance.AI_MILITIA_MAX_SHARE),
+		1, idle_braves)

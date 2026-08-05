@@ -71,7 +71,9 @@ func _initialize() -> void:
 		for t in tribes: t.tick(1.0 / 30.0)
 		for ai in ais: ai._process(1.0 / 30.0)
 	print("Karte %s, %.0f s, 4 KIs | Baeume gesamt %d" % [map_id, sim, tm.trees.size()])
-	print("  Bauarbeiter insgesamt zugewiesen: %d" % AIController.dbg_builders_assigned)
+	print("  Bauarbeiter zugewiesen: %d | Miliz-Befehle: %d | Bedrohungs-Ticks: %d" % [
+		AIController.dbg_builders_assigned, AIController.dbg_militia_orders,
+		AIController.dbg_threat_ticks])
 	for i in range(4):
 		var idle: int = 0
 		for u in tribes[i].units:

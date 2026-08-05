@@ -831,3 +831,31 @@ const AI_HUT_RALLY_TICK_INTERVAL: int = 10
 const AI_ARMY_SHARE_WARRIOR: float = 0.40
 const AI_ARMY_SHARE_FIREWARRIOR: float = 0.30
 const AI_ARMY_SHARE_PREACHER: float = 0.30
+
+# --- KI: Arena-Enge und zwei Baumuster (10g Teil 5) ---
+## Neuberechnung des Basisabstands (ein Durchlauf ueber ALLE Gebaeude).
+const AI_ARENA_TTL_TICKS: int = 60
+## Unter diesem Abstand zur naechsten FEINDLICHEN Basis (Zellen = Meter) gilt die
+## Arena als ENG. MapGenerator._circle_anchors setzt die Anker auf einen Kreis mit
+## Radius 0,2 * size: Insel 128 mit 4 Staemmen 36,2 · mit 3 Staemmen 44,3 · mit 2
+## Staemmen 51,2 · Plateau 128 (Eckanker) 82 · Seenland/Bergpass 256 deutlich mehr.
+const AI_CRAMPED_ARENA: float = 60.0
+## Verteidigungsradius relativ zum Basisabstand statt fixer 32 m: auf der Insel
+## lagen die Nachbarbasen IM alten Radius, wodurch _detect_threat dauerhaft feuerte
+## — Holzwirtschaft aus, nie ein echter Angriff, alle Braves als Miliz.
+const AI_DEFEND_RADIUS_FACTOR: float = 0.35
+const AI_DEFEND_RADIUS_MIN: float = 14.0
+const AI_DEFEND_RADIUS_MAX: float = 32.0
+## So viele Gegner braucht es, damit die Wirtschaft aussetzt bzw. eine laufende
+## Angriffswelle zurueckgerufen wird. Ein einzelner Spaeher darf beides nicht.
+const AI_ECONOMY_HALT_ENEMIES: int = 3
+const AI_ATTACK_ABORT_ENEMIES: int = 5
+## Miliz: Anteil des Idle-Pools (mindestens aber einer, solange einer idle ist —
+## ein Raeuber IM Dorf muss auch von einem Fuenf-Brave-Stamm beantwortet werden).
+const AI_MILITIA_MAX_SHARE: float = 0.5
+## Kompaktes Baumuster (enge Arena) gegen die offenen Werte weiter oben.
+const AI_PLOT_SEARCH_RADIUS_CRAMPED: int = 18
+const AI_MAX_SETTLEMENT_ANCHORS_CRAMPED: int = 2
+const AI_TARGET_WATCHTOWERS_CRAMPED: int = 3
+const AI_ARMY_ATTACK_SIZE_CRAMPED: int = 8
+const AI_POP_FOR_TRAIN_CRAMPED: int = 12

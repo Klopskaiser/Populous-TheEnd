@@ -271,6 +271,11 @@ var state: AIState.State = AIState.State.BUILD
 var _unreachable_plots: Dictionary = {}
 ## Bau-Buchfuehrung je Baustelle (10g Teil 1), instanz-id -> SiteNote.
 var _site_notes: Dictionary = {}
+## Abstand zur naechsten feindlichen Basis in Zellen (10g Teil 5) und die
+## Ankerpositionen je fremdem Stamm, beides gegen AI_ARENA_TTL_TICKS gecacht.
+var _arena_span_cache: float = -1.0
+var _arena_span_tick: int = -100000
+var _enemy_anchors: Dictionary = {}
 ## Plot cells proven reachable, valid as long as walkability is unchanged
 ## (value = NavGrid.change_version at proof time) — exact, no TTL guessing.
 var _reachable_plots: Dictionary[Vector2i, int] = {}
@@ -337,6 +342,11 @@ static var dbg_hut_rallies: int = 0
 ## Braves, die die KI insgesamt auf Baustellen gesetzt hat (10g Teil 1). Vorher war
 ## dieser Wert strukturell 0 — die KI rief order_build nie auf.
 static var dbg_builders_assigned: int = 0
+## Braves, die als MILIZ einen Angriffsbefehl bekamen, und Ticks mit erkannter
+## Bedrohung (10g Teil 5). Beide waren auf kleinen Karten strukturell hoch: der
+## fixe 32-m-Radius machte die Nachbarbasis zur Dauerbedrohung.
+static var dbg_militia_orders: int = 0
+static var dbg_threat_ticks: int = 0
 
 
 ## One AI decision tick (1x/s in game; tests call it directly).
@@ -368,6 +378,8 @@ func tick_ai() -> void:
 	# Threat detection runs FIRST (one spatial query): under attack the economy
 	# subsystems must not grab the idle braves before the militia gets a look in.
 	var threat: Dictionary = _detect_threat()
+	if not threat.is_empty():
+		dbg_threat_ticks += 1
 	# Vehicle caps scale with the tribe (10e): together with the scaling
 	# workshop targets this is the actual fix for "the AI hardly ever fields
 	# catapults or fire rams" — before, it never raised the defaults at all.
@@ -381,16 +393,21 @@ func tick_ai() -> void:
 	# Bauarbeiter ZUERST aus dem Idle-Pool: Holztrupps, Foerstereien, Werkstaetten
 	# und Training lesen denselben Pool danach. Laeuft auch unter Bedrohung.
 	_tick_build_crews(cache)
-	if threat.is_empty():
+	# 10g Teil 5: nur eine ERNSTE Bedrohung haelt die Wirtschaft an. Vorher genuegte
+	# ein einzelner Gegner im Verteidigungsradius — auf der Insel also der Nachbar
+	# selbst, wodurch die Holzlogistik NIE lief.
+	var serious: bool = int(threat.get("count", 0)) >= Balance.AI_ECONOMY_HALT_ENEMIES
+	if not serious:
 		# Under attack the wood crews must not grab the braves the militia needs.
 		_tick_wood_logistics(cache)
 	_staff_foresters(cache)
 	_staff_workshops(cache)
 	# Routes part of the brave stream into training at the source, so _tick_train
 	# has fewer per-brave orders to give. Runs in EVERY state (a BUILD-state tribe
-	# still wants its first warriors) but is skipped under threat: re-pointing huts
-	# while the militia mobilises would only fight _tick_defend for the same braves.
-	if threat.is_empty():
+	# still wants its first warriors) but is skipped under a SERIOUS threat:
+	# re-pointing huts while the militia mobilises would only fight _tick_defend
+	# for the same braves.
+	if not serious:
 		_tick_hut_rallies(cache)
 	_man_watchtowers(cache)
 	_man_airships(cache)
@@ -403,7 +420,8 @@ func tick_ai() -> void:
 			_tick_train(cache)
 		AIState.State.ATTACK:
 			_tick_train(cache)   # keep reinforcements coming
-			if threat.is_empty():
+			# 10g: ein Spaeher am Dorfrand darf keine laufende Welle zurueckrufen.
+			if int(threat.get("count", 0)) < Balance.AI_ATTACK_ABORT_ENEMIES:
 				_tick_attack(cache)
 
 
@@ -530,6 +548,7 @@ func make_snapshot(cache: TickCache = null) -> Dictionary:
 	var snap: Dictionary = AIState.make_snapshot(c.population, c.brave_count,
 		c.army_count, c.usable_huts, c.camps_by_kind.size(), c.shaman_alive)
 	snap["army_target"] = attack_wave_size
+	snap["pop_for_train"] = AIState.pop_for_train(_arena_span())
 	return snap
 
 
@@ -727,6 +746,9 @@ func next_building_kind(cache: TickCache) -> StringName:
 	counts["wood_thin"] = _wood_thin_near_base()
 	counts["grove_far"] = _best_grove_is_remote()
 	counts["brave_stream"] = cache.brave_stream
+	var arena: float = _arena_span()
+	counts["cramped"] = AIState.is_cramped(arena)
+	counts["watchtower_target"] = AIState.target_watchtowers(arena)
 	return AIState.next_building_kind(counts)
 
 
@@ -1085,17 +1107,88 @@ func _wall_point_toward(from: Vector3, target: Vector3, reach: float) -> Vector3
 
 # --- DEFEND ------------------------------------------------------------------------
 
+## Distance from our base to the NEAREST ENEMY base, in cells (10g Teil 5).
+##
+## The map size alone is not the measure: island (128) with four tribes is cramped
+## (nearest neighbour 36,2 cells — MapGenerator._circle_anchors puts the anchors on
+## a circle of radius 0,2 * size), plateau (128) with its corner anchors is not
+## (82 cells). What matters is the measured distance.
+##
+## Source: every foreign tribe's reincarnation site — it stands on the anchor and
+## never moves. If one is gone (10d self-destruction) its nearest other building
+## counts; with nothing at all, half the map edge. Recomputed every
+## AI_ARENA_TTL_TICKS: one pass over ALL buildings, the only place this phase looks
+## at foreign ones.
+##
+## Side product and just as important: _enemy_anchors, the anchor position per
+## foreign tribe id — the territory test in _detect_threat needs it.
+func _arena_span() -> float:
+	if _tick_count - _arena_span_tick <= Balance.AI_ARENA_TTL_TICKS \
+			and _arena_span_cache >= 0.0:
+		return _arena_span_cache
+	_arena_span_tick = _tick_count
+	_enemy_anchors = {}
+	var fallback: Dictionary = {}
+	if building_manager != null:
+		for b in building_manager.buildings:
+			if not is_instance_valid(b) or b.health <= 0 or b.tribe_id == tribe.id:
+				continue
+			if b is ReincarnationSite:
+				_enemy_anchors[b.tribe_id] = b.center_world()
+			elif not fallback.has(b.tribe_id):
+				fallback[b.tribe_id] = b.center_world()
+	for id in fallback:
+		if not _enemy_anchors.has(id):
+			_enemy_anchors[id] = fallback[id]
+	var here: Vector3 = nav_grid.cell_to_world(base_anchor) if nav_grid != null \
+		else Vector3.ZERO
+	var best: float = INF
+	for id in _enemy_anchors:
+		best = minf(best, _flat_span(here, _enemy_anchors[id]))
+	if best == INF:
+		# No enemy building anywhere: treat the arena as open (half the map edge).
+		best = float(nav_grid.terrain.size) * 0.5 if nav_grid != null \
+			else float(TerrainData.SIZE) * 0.5
+	_arena_span_cache = best
+	return best
+
+
+func _flat_span(a: Vector3, b: Vector3) -> float:
+	return Vector2(a.x - b.x, a.z - b.z).length()
+
+
+## True while `pos` is closer to OUR anchor than to the anchor of `enemy_tribe`.
+##
+## This is the fix that needs no threshold at all: without it, neighbours standing
+## around at HOME counted as a threat whenever the fixed 32 m defence radius
+## reached their base — which on the island it always did. The consequence was
+## permanent: the wood logistics was skipped every tick, _tick_attack never ran,
+## and _tick_defend threw braves at them.
+func _in_own_territory(pos: Vector3, enemy_tribe: int, here: Vector3) -> bool:
+	var theirs = _enemy_anchors.get(enemy_tribe)
+	if theirs == null:
+		return true   # no known enemy anchor: cannot tell, stay defensive
+	return _flat_span(pos, here) <= _flat_span(pos, theirs)
+
+
 ## Enemies near the base anchor: nearest enemy unit + head count. Empty
 ## dictionary when the village is safe.
 func _detect_threat() -> Dictionary:
 	if unit_manager == null or nav_grid == null:
 		return {}
 	var anchor_world: Vector3 = nav_grid.cell_to_world(base_anchor)
+	# 10g: the radius follows the arena instead of being a fixed 32 m, and an enemy
+	# only counts while it is closer to OUR anchor than to its own. Both together
+	# end the island failure where the neighbouring base itself was a permanent
+	# "threat" (see _in_own_territory).
+	var radius: float = AIState.defend_radius(_arena_span())
 	var nearest: Unit = null
 	var nearest_dist: float = INF
 	var count: int = 0
-	for unit in unit_manager.get_units_in_radius(anchor_world, DEFEND_RADIUS):
+	for unit in unit_manager.get_units_in_radius(anchor_world, radius):
 		if unit.tribe_id == tribe.id or unit.state == Unit.State.DEAD:
+			continue
+		if not _in_own_territory(unit.position, unit.tribe_id, anchor_world):
 			continue
 		count += 1
 		var d: float = unit.position.distance_to(anchor_world)
@@ -1132,10 +1225,15 @@ func _tick_defend(cache: TickCache, threat: Dictionary) -> void:
 	# Militia only when the army alone is outnumbered. Idle braves only — the
 	# pool never holds workers on sites or trainees in a queue.
 	if core_power < float(enemy_count):
-		var braves: Array[Unit] = cache.take_idle(cache.idle_left())
+		# 10g: gedeckelt. Vorher nahm die Miliz ALLE idle Braves — bei BRAVE_POWER
+		# 0,5 sterben zwanzig fuer zehn Kampfkraft, und sie sind gleichzeitig die
+		# ganze Wirtschaft.
+		var braves: Array[Unit] = cache.take_idle(
+			AIState.militia_count(cache.idle_left()))
 		var enemy: Unit = threat.get("enemy")
 		if not braves.is_empty() and enemy != null and is_instance_valid(enemy):
 			commands.order_attack(braves, enemy)
+			dbg_militia_orders += braves.size()
 
 
 ## Nearest ATTACKABLE enemy building (to the base anchor); none left -> nearest
@@ -1447,7 +1545,11 @@ func _find_supplied_plot(anchor: Vector2i, footprint: Vector2i,
 	# would never get a single candidate.
 	var checked: int = 0
 	var per_sweep: int = maxi(1, MAX_PLOT_CANDIDATES / 2)
-	for radius in range(Balance.AI_PLOT_MIN_RADIUS, Balance.AI_PLOT_SEARCH_RADIUS):
+	# 10g Teil 5: der Suchradius folgt der Arena. 40 Zellen reichen auf einer
+	# 128er-Karte AN DER NACHBARBASIS VORBEI; eine enge Arena haelt die Basis
+	# kompakt — und macht den Sweep billiger.
+	var search_radius: int = AIState.plot_search_radius(_arena_span())
+	for radius in range(Balance.AI_PLOT_MIN_RADIUS, search_radius):
 		for cell in ring_cells(anchor, radius):
 			if _plot_budget <= 0:
 				return Vector2i(-1, -1)
@@ -1553,8 +1655,9 @@ func _settlement_anchors(cache: TickCache) -> Array[Vector2i]:
 	anchors.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
 		return Vector2(a - base_anchor).length_squared() \
 			< Vector2(b - base_anchor).length_squared())
-	if anchors.size() > Balance.AI_MAX_SETTLEMENT_ANCHORS:
-		anchors.resize(Balance.AI_MAX_SETTLEMENT_ANCHORS)
+	var anchor_limit: int = AIState.settlement_anchor_limit(_arena_span())
+	if anchors.size() > anchor_limit:
+		anchors.resize(anchor_limit)
 	_settlement_cache = anchors
 	_settlement_age = 0
 	return anchors
@@ -1775,7 +1878,14 @@ func _expansion_anchor() -> Vector2i:
 			and _expansion_anchor_age <= EXPANSION_ANCHOR_TTL_TICKS \
 			and tree_manager.has_tree_at(_expansion_anchor_cache):
 		return _expansion_anchor_cache
-	var tree = tree_manager.nearest_tree(nav_grid.cell_to_world(base_anchor))
+	var here: Vector3 = nav_grid.cell_to_world(base_anchor)
+	var tree = tree_manager.nearest_tree(here)
+	# 10g Teil 5: nicht in Feindgebiet expandieren — derselbe Territoriumstest wie
+	# in _detect_threat, ein Vergleich zweier Distanzen.
+	if tree != null and is_instance_valid(tree):
+		var owner_id: int = _nearest_enemy_tribe(tree.position)
+		if owner_id >= 0 and not _in_own_territory(tree.position, owner_id, here):
+			tree = null
 	if tree == null or not is_instance_valid(tree):
 		_expansion_anchor_cache = Vector2i(-1, -1)
 		return Vector2i(-1, -1)
@@ -1808,3 +1918,16 @@ static func ring_cells(center: Vector2i, radius: int) -> Array[Vector2i]:
 		cells.append(center + Vector2i(-radius, dz))
 		cells.append(center + Vector2i(radius, dz))
 	return cells
+
+
+## Foreign tribe whose anchor is nearest to `pos`, or -1 without any known anchor
+## (10g Teil 5 — feeds the territory test).
+func _nearest_enemy_tribe(pos: Vector3) -> int:
+	var best: int = -1
+	var best_d: float = INF
+	for id in _enemy_anchors:
+		var d: float = _flat_span(pos, _enemy_anchors[id])
+		if d < best_d:
+			best_d = d
+			best = int(id)
+	return best
