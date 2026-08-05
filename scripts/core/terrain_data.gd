@@ -106,6 +106,32 @@ func in_disc(cell: Vector2i) -> bool:
 	return _disc_mask[cell.y * size + cell.x] != 0
 
 
+## Radius of the VISIBLE rim — the full inscribed circle, half a cell further out than
+## the walkability radius. Every walkable cell (centre within `disc_radius()`) is thus
+## exactly covered by it, so the visual edge never cuts into playable ground.
+func rim_radius() -> float:
+	return float(size) * 0.5 * DISC_RADIUS_FRAC * CELL_SIZE
+
+
+## World XZ of a mesh vertex, pulled RADIALLY onto the rim circle when it lies outside.
+##
+## This is what makes the edge round. Cell culling alone leaves a staircase with
+## one-metre steps, which reads as coarse jags on a 144 m disc (user report: "die Zacken
+## sind extrem groß"). Snapping the outermost mesh vertices onto the circle turns that
+## staircase into a polygon inscribed in the rim — chords of about a metre, so the
+## silhouette is smooth — while WALKABILITY stays strictly cell-based and unchanged.
+## `TerrainRim` builds from these same snapped positions, so the mesh edge and the rock
+## flank cannot drift apart.
+func vertex_mesh_xz(vx: int, vz: int) -> Vector2:
+	var p: Vector2 = Vector2(float(vx) * CELL_SIZE, float(vz) * CELL_SIZE)
+	var d: Vector2 = p - Vector2(_disc_center, _disc_center)
+	var dist: float = d.length()
+	var r: float = rim_radius()
+	if dist <= r or dist < 0.000001:
+		return p
+	return Vector2(_disc_center, _disc_center) + d / dist * r
+
+
 ## Vertex-side disc test — for the rim skirt mesh and `average_height()`. A vertex
 ## counts as inside when it belongs to at least one in-disc CELL, so the outer
 ## vertices of a walkable rim cell stay writable (that is the vertex-vs-cell layout

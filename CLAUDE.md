@@ -66,8 +66,11 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
   Terrain-Zauber kann die Scheibe damit **nicht vergrößern**. `has_ground(x, z)`
   antwortet auf „ist hier Boden?" — `get_height()` clampt seine Eingaben weiterhin
   und liefert draußen die Randhöhe, ist also KEINE Gültigkeitsprüfung.
-  Rand: Felsband plus geschlossene Unterseite (`TerrainRim`), Wasserfall nur dort,
-  wo der Rand unter der Wasserlinie liegt (heute nur die Insel). Hintergrund ist ein
+  Rand: Die Silhouette ist **rund**, weil `vertex_mesh_xz()` die Mesh-Randvertices
+  radial auf den Kreis zieht (Begehbarkeit bleibt zellbasiert). Darunter kurze
+  Felskante und ein **umgedrehter Kegel mit abgerundeter Spitze** (`TerrainRim`);
+  Wasserfall nur dort, wo der Rand unter der Wasserlinie liegt (heute nur die Insel) —
+  er stürzt **senkrecht** und folgt dem Kegel bewusst nicht. Hintergrund ist ein
   **Sternenhimmel** (`shaders/starfield.gdshader`); das Ambient-Licht bleibt
   zwingend `AMBIENT_SOURCE_COLOR`, sonst wird die Karte unlesbar dunkel.
 - **Gebäude:** 3D-Modelle (platzierbar auf dem Terrain, an Geländehöhe ausgerichtet).

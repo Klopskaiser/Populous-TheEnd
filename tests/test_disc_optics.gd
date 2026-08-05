@@ -162,10 +162,10 @@ func test_waterfall_hangs_from_the_waterline_downward() -> void:
 	terrain.free()
 
 
-func test_the_sea_is_cut_on_the_same_staircase_as_the_land() -> void:
-	# The "Torte": a circular water cut overhung the rock wall by up to half a metre,
-	# so at the rim you saw land, then a strip of water below it, then rock. The sea now
-	# uses the CELL mask, so its edge is the land's edge.
+## The "Torte": at the rim you saw land, then a strip of water below it, then rock —
+## the sea's cut overhanging the rock. It is a RADIAL cut again, which is only correct
+## because the land's mesh vertices are snapped onto the very same circle.
+func test_the_sea_is_cut_on_the_rim_circle() -> void:
 	var td: TerrainData = _flat()
 	var terrain: Terrain = Terrain.new()
 	terrain.build(td)
@@ -173,19 +173,109 @@ func test_the_sea_is_cut_on_the_same_staircase_as_the_land() -> void:
 	check(water != null, "the sea plane exists")
 	var mat: ShaderMaterial = water.material_override as ShaderMaterial
 	check(mat != null, "and it is the shader material (the only path since 10j)")
-	var mask = mat.get_shader_parameter("disc_mask")
-	check(mask != null and mask is Texture2D, "the disc mask is fed to the shader")
-	check(is_equal_approx(float(mat.get_shader_parameter("map_size")), float(td.size)),
-		"with the map size for the UV mapping")
-	# The mask must be the same answer as in_disc, texel for texel.
-	var img: Image = (mask as Texture2D).get_image()
-	var mismatch: int = 0
-	for z in range(0, td.size, 5):
-		for x in range(0, td.size, 5):
-			var wet: bool = img.get_pixel(x, z).r >= 0.5
-			if wet != td.in_disc(Vector2i(x, z)):
-				mismatch += 1
-	check(mismatch == 0, "sea mask and walkable disc agree everywhere sampled")
+	check(is_equal_approx(float(mat.get_shader_parameter("disc_radius")),
+			td.rim_radius()),
+		"the sea is cut exactly on the rim circle")
+	check((mat.get_shader_parameter("disc_center") as Vector2).is_equal_approx(
+			Vector2(td.disc_center(), td.disc_center())),
+		"around the map centre")
+	terrain.free()
+
+
+## The roundness fix: the terrain's own boundary vertices are pulled onto the rim
+## circle, so the silhouette is an inscribed polygon with ~1 m chords instead of a
+## staircase with 1 m steps (user report: "die Zacken sind extrem groß").
+func test_mesh_boundary_is_round_not_a_staircase() -> void:
+	var td: TerrainData = _flat()
+	var c: float = td.disc_center()
+	var r: float = td.rim_radius()
+	# Any vertex that would stick out past the rim is snapped exactly onto it.
+	var off_circle: int = 0
+	var snapped: int = 0
+	for vz in range(0, td.verts, 3):
+		for vx in range(0, td.verts, 3):
+			var p: Vector2 = td.vertex_mesh_xz(vx, vz)
+			var d: float = Vector2(p.x - c, p.y - c).length()
+			if d > r + 0.001:
+				off_circle += 1
+			var raw_d: float = Vector2(float(vx) - c, float(vz) - c).length()
+			if raw_d > r + 0.001 and absf(d - r) < 0.001:
+				snapped += 1
+	check(off_circle == 0, "no mesh vertex lies outside the rim circle (%d did)"
+		% off_circle)
+	check(snapped > 20, "and the outside ones were really snapped onto it (%d)" % snapped)
+
+
+## The underside is an inverted cone with a ROUNDED tip, not a flat-bottomed slab
+## (user decision 2026-08-05). Asserted on the SHAPE — the flank's slope has to ease off
+## toward the axis — not on how the rings happen to be sampled.
+func test_underside_is_a_cone_with_a_rounded_tip() -> void:
+	var r: float = 72.0
+	var profile: Array = TerrainRim.cone_profile(r)
+	check(profile.size() >= 8, "the cone has enough rings to look smooth (%d)"
+		% profile.size())
+	check(is_equal_approx(float(profile[0][0]), 1.0), "it starts at the full rim radius")
+	check(is_equal_approx(float(profile[profile.size() - 1][0]), 0.0),
+		"and converges to the axis")
+	check(is_equal_approx(float(profile[profile.size() - 1][1]), TerrainRim.bottom_y()),
+		"reaching the tip at bottom_y")
+	# Slope dy/dr of the outermost and innermost segment. A cone with a rounded tip is
+	# steep at the rim and flattens on the axis; a spike would keep or raise its slope.
+	var outer: float = _segment_slope(profile, 0, r)
+	var inner: float = _segment_slope(profile, profile.size() - 2, r)
+	check(outer > 1.0, "the flank is properly steep at the rim (slope %.2f)" % outer)
+	check(inner < outer * 0.5,
+		"and flattens toward the tip, so the tip is rounded (%.2f -> %.2f)"
+			% [outer, inner])
+	# Even arc-length spacing is what keeps the flanks from showing facets.
+	var shortest: float = INF
+	var longest: float = 0.0
+	for i in range(profile.size() - 1):
+		var d: float = Vector2(
+			(float(profile[i][0]) - float(profile[i + 1][0])) * r,
+			float(profile[i][1]) - float(profile[i + 1][1])).length()
+		shortest = minf(shortest, d)
+		longest = maxf(longest, d)
+	check(longest < shortest * 2.0,
+		"the rings are evenly spaced along the profile (%.2f..%.2f m)"
+			% [shortest, longest])
+
+
+## |dy/dr| of profile segment `i`.
+func _segment_slope(profile: Array, i: int, radius: float) -> float:
+	var dr: float = absf(float(profile[i][0]) - float(profile[i + 1][0])) * radius
+	var dy: float = absf(float(profile[i][1]) - float(profile[i + 1][1]))
+	if dr < 0.0001:
+		return INF
+	return dy / dr
+
+
+## The water falls STRAIGHT down while the cone tapers away behind it — that contrast is
+## the whole point (user: "wasser sollte vom Rand gerade in den Abgrund stürzen").
+func test_waterfall_is_vertical_and_dissolves_above_the_tip() -> void:
+	var td: TerrainData = MapGenerator.create_terrain("island", SEED)
+	var terrain: Terrain = Terrain.new()
+	terrain.build(td)
+	var rim: TerrainRim = terrain.get_node_or_null("Rim") as TerrainRim
+	var fall: MeshInstance3D = rim.get_node_or_null("Waterfall") as MeshInstance3D
+	check(fall != null and fall.mesh != null and fall.visible,
+		"the island has a visible waterfall mesh")
+	var arrays: Array = (fall.mesh as ArrayMesh).surface_get_arrays(0)
+	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var c: float = td.disc_center()
+	# Vertical: top and bottom of each quad share their XZ, so every vertex sits at
+	# essentially the same radius — the curtain does not follow the cone inward.
+	var min_r: float = INF
+	var max_r: float = -INF
+	for v in verts:
+		var d: float = Vector2(v.x - c, v.z - c).length()
+		min_r = minf(min_r, d)
+		max_r = maxf(max_r, d)
+	check(max_r - min_r < 1.5,
+		"the curtain hangs vertically at the rim radius (spread %.2f m)"
+			% (max_r - min_r))
+	check(Balance.WATERFALL_HEIGHT < Balance.WORLD_RIM_SKIRT_DEPTH,
+		"and it stops well above the tip, where the alpha gradient has faded it out")
 	terrain.free()
 
 

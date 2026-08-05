@@ -8698,3 +8698,60 @@ schließt, dass die Wasserfall-Lippe an der Oberfläche beginnt und dass Meeresm
 begehbare Scheibe texelweise übereinstimmen. Suite **4158 grün**, Ladecheck sauber.
 
 **Weiterhin offen:** erneute Sichtprüfung durch den Nutzer.
+
+### Nachtrag 2 — runder Rand und Kegel-Unterseite (2026-08-05)
+
+Zweiter Nutzerreport: der Rand ist „viel zu eckig, die Zacken sind extrem groß"; der
+Wasserfall soll vom Rand **gerade in den Abgrund stürzen** und sich dadurch von der
+Scheibenform abheben; und die Unterseite soll wie vorher „quasi ein umgedrehter Kegel
+mit abgerundeter Spitze" sein, wobei der Fall sich per Gradient auflösen darf, bevor er
+die Kegeltiefe erreicht.
+
+**Die Zacken saßen im Terrain-Mesh, nicht am Rand.** `_build_chunk_mesh` cullt ganze
+Zellen, die Silhouette war also eine Treppe mit 1-m-Stufen. Zwei Anläufe hatten je eine
+Hälfte gelöst und die andere gebrochen: ein glatter Winkelring war rund, konnte der
+Treppe aber nicht folgen (offene Flanken, Nachtrag 1); der Bau je exponierter Zellkante
+schloss jede Flanke exakt, erbte aber die Treppe.
+
+Der Fix liegt **oberhalb von beidem**: `TerrainData.vertex_mesh_xz()` zieht Mesh-Vertices,
+die über den Rand ragen würden, radial auf den Randkreis. Die Silhouette ist damit ein
+dem Kreis eingeschriebenes Polygon mit ~1-m-Sehnen — glatt —, und `TerrainRim` baut aus
+**denselben** geschnappten Vertices entlang **derselben** exponierten Kanten: rund *und*
+lückenlos. **Die Begehbarkeit bleibt streng zellbasiert und unverändert**, es ist eine
+reine Darstellungsänderung.
+
+**Unterseite (neu):** kurze senkrechte Felskante (4 m, damit der Rand weiter als Kante
+liest), darunter ein umgedrehter Kegel bis zu einer abgerundeten Spitze unter der
+Kartenmitte. Profil `y(s) = cliff_bottom − depth · (1 − s^CONE_POW)` über dem
+Radiusfaktor s; der Exponent über 1 ist genau das, was die Spitze rundet (`dy/ds → 0`
+auf der Achse). Die flache Bodenplatte entfällt — der Körper ist geschlossen.
+
+**Ein Fehler, den erst der eigene Test gefunden hat:** ich hatte die Ringe so verteilt,
+dass die *vertikalen* Schritte gleich groß werden. Damit kollabiert der Radius über die
+letzten zwei Ringe, und die „abgerundete" Spitze kommt als flache Platte mit Dorn heraus
+(`test_underside_is_a_cone_with_a_rounded_tip`: Radiusschritt 0,029 → 0,348). Umgekehrt
+(gleiche Radiusschritte) landet der ganze Höhenabfall in den äußeren Ringen und die
+Flanke facettiert am Rand. Richtig ist die Verteilung nach **gleicher Bogenlänge** auf
+dem Profil — deshalb nimmt `cone_profile()` jetzt den echten Radius als Argument. Der
+Test prüft seitdem die **Form** (Flankenneigung fällt zur Achse hin ab) statt der
+Abtastung.
+
+**Wasserfall:** ein senkrechter Vorhang am Randradius von der Wasserlinie nach unten,
+der dem Kegel **bewusst nicht** folgt — der Kegel weicht nach innen zurück, das Wasser
+fällt gerade, und dieser Kontrast macht die Form lesbar (genau die Nutzervorgabe).
+`WATERFALL_HEIGHT` 34 m gegen `WORLD_RIM_SKIRT_DEPTH` 60 m, Alpha-Gradient über die
+unteren 65 %: er löst sich weit über der Spitze auf.
+
+**Meer wieder radial geschnitten.** Der Zellmasken-Schnitt aus Nachtrag 1 war nur
+richtig, solange das Land auf einer Treppe endete; jetzt liegt die Landkante exakt auf
+dem Kreis, also schneidet der Shader wieder bei `rim_radius()` (Restversatz ~2 mm
+Sehnenhöhe, von den 6 cm Auswärtsversatz des Felses gedeckt). Die R8-Maskentextur und
+`Terrain._build_disc_mask()` sind entfallen.
+
+Suite **4169 grün**, Ladecheck sauber. Neu in `test_disc_optics.gd`: Silhouette liegt
+komplett auf/innerhalb des Randkreises und Außenvertices sind wirklich geschnappt;
+Kegelform mit runder Spitze und gleichmäßiger Bogenlänge; Wasserfall hängt senkrecht
+(Radiusstreuung < 1,5 m) und endet über der Spitze; Meer wird auf dem Randkreis
+geschnitten.
+
+**Weiterhin offen:** erneute Sichtprüfung durch den Nutzer.

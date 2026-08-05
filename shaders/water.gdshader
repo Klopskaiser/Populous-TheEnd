@@ -26,14 +26,14 @@ uniform float wave_speed = 0.9;
 // path now: a StandardMaterial3D cannot discard, so the optional water texture is
 // fed in here instead of replacing the whole material.
 //
-// The cut uses the CELL MASK, not a circle. Terrain._build_chunk_mesh culls whole
-// cells, so the land's edge is a staircase; a circular cut let the sea overhang the
-// rock wall by up to half a metre, which showed up as a strip of water below the land
-// at the rim (user report: "sieht am Rand wie eine Torte aus") and hid the waterfall
-// behind that overhang. Sampling the same mask the walkability uses makes sea edge and
-// mesh edge the same line by construction.
-uniform sampler2D disc_mask : filter_nearest, repeat_disable, hint_default_white;
-uniform float map_size = 128.0;
+// The cut is RADIAL, at TerrainData.rim_radius(). That only works because the land's
+// mesh vertices are snapped onto the very same circle (vertex_mesh_xz), so sea edge and
+// land edge coincide. While the land still ended on a cell staircase this had to be a
+// cell mask instead: a circular cut then overhung the rock by up to half a metre, which
+// showed as a strip of water below the land at the rim ("sieht am Rand wie eine Torte
+// aus") and hid the waterfall behind the overhang.
+uniform vec2 disc_center = vec2(64.0, 64.0);
+uniform float disc_radius = 64.0;
 uniform sampler2D albedo_tex : source_color, hint_default_white;
 uniform bool use_tex = false;
 uniform float uv_scale = 1.0;
@@ -67,7 +67,7 @@ void vertex() {
 
 void fragment() {
 	// Outside the disc there is no world, so there is no sea either.
-	if (texture(disc_mask, world_xz / map_size).r < 0.5) {
+	if (length(world_xz - disc_center) > disc_radius) {
 		discard;
 	}
 	// No trig in the fragment stage at all — the crest tint rides the varying.

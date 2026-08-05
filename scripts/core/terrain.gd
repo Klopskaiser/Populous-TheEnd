@@ -154,8 +154,13 @@ func _ensure_water() -> void:
 		COLOR_WATER.r, COLOR_WATER.g, COLOR_WATER.b))
 	smat.set_shader_parameter("crest", Vector3(
 		COLOR_WATER_HIGHLIGHT.r, COLOR_WATER_HIGHLIGHT.g, COLOR_WATER_HIGHLIGHT.b))
-	smat.set_shader_parameter("disc_mask", _build_disc_mask())
-	smat.set_shader_parameter("map_size", float(data.size))
+	smat.set_shader_parameter("disc_center",
+		Vector2(data.disc_center(), data.disc_center()))
+	# The land's mesh edge is now an inscribed polygon of exactly this circle, so a
+	# radial cut matches it (bar a ~2 mm sagitta, which the rock flank's outward push
+	# covers). The cell-mask cut this replaces was right only while the land was a
+	# staircase.
+	smat.set_shader_parameter("disc_radius", data.rim_radius())
 	var water_tex: Texture2D = AssetLibrary.texture("textures/terrain/water.png")
 	if water_tex != null:
 		smat.set_shader_parameter("albedo_tex", water_tex)
@@ -163,19 +168,6 @@ func _ensure_water() -> void:
 		smat.set_shader_parameter("uv_scale", float(data.size) * 0.05)
 	water.material_override = smat
 	add_child(water)
-
-
-## One-byte-per-cell mask of the disc, for the water shader. Exactly the cells the
-## chunk mesh keeps, so the sea ends on the same staircase the land does instead of on
-## a circle that overhangs it. Cheap (size² bytes) and never needs updating — the disc
-## depends only on the map size, which is fixed after TerrainData._init.
-func _build_disc_mask() -> ImageTexture:
-	var img: Image = Image.create(data.size, data.size, false, Image.FORMAT_R8)
-	for z in range(data.size):
-		for x in range(data.size):
-			var v: float = 1.0 if data.in_disc(Vector2i(x, z)) else 0.0
-			img.set_pixel(x, z, Color(v, v, v))
-	return ImageTexture.create_from_image(img)
 
 
 # --- Mesh building -----------------------------------------------------------
@@ -240,7 +232,11 @@ func _build_chunk_mesh(cx: int, cz: int, mi: MeshInstance3D) -> void:
 			var gz: int = z0 + lz
 			var h: float = data.vertex_height(gx, gz)
 			var idx: int = lz * w + lx
-			verts[idx] = Vector3(float(gx) * TerrainData.CELL_SIZE, h, float(gz) * TerrainData.CELL_SIZE)
+			# XZ is pulled onto the rim circle where it would stick out (phase 10j):
+			# cell culling alone leaves a one-metre staircase, which reads as coarse
+			# jags. The height is the unsnapped grid height either way.
+			var xz: Vector2 = data.vertex_mesh_xz(gx, gz)
+			verts[idx] = Vector3(xz.x, h, xz.y)
 			normals[idx] = _normal_at(gx, gz)
 			colors[idx] = _color_for_height(h)
 

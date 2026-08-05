@@ -376,14 +376,16 @@ const VOID_FALL_DEPTH: float = 120.0
 ## Notausgang, falls ein Sturz ohne Vertikalgeschwindigkeit beginnt und die
 ## Tiefenschwelle nie erreicht.
 const VOID_FALL_MAX_TIME: float = 15.0
-## Dicke der Scheibe: so weit reicht das Felsband unter den Meeresspiegel, dort
-## sitzt die geschlossene Unterseite (TerrainRim). Ohne dieses Band waere die
-## Scheibe papierduenn und man sehe bei flachem Kamerawinkel hindurch.
-const WORLD_RIM_SKIRT_DEPTH: float = 40.0
-## Hoehe des Wasserfall-Bands unter dem Meeresspiegel und Scrollgeschwindigkeit
-## seiner UV. Nur dort sichtbar, wo der Rand unter der Wasserlinie liegt — bei der
-## "nackten Felskante" (Nutzerentscheidung) ist das heute nur die Insel.
-const WATERFALL_HEIGHT: float = 40.0
+## Gesamttiefe der Scheibe unter dem Meeresspiegel: kurze senkrechte Felskante am
+## Rand, darunter ein umgedrehter Kegel mit abgerundeter Spitze (Nutzerentscheidung
+## 2026-08-05, TerrainRim). Ohne diesen Koerper waere die Scheibe papierduenn und
+## man sehe bei flachem Kamerawinkel hindurch.
+const WORLD_RIM_SKIRT_DEPTH: float = 60.0
+## Hoehe des Wasserfall-Bands unter dem Meeresspiegel. BEWUSST kuerzer als die
+## Scheibe tief ist: das Wasser stuerzt senkrecht in den Abgrund, waehrend sich der
+## Kegel nach innen verjuengt, und loest sich per Alpha-Gradient auf, bevor es die
+## Spitze erreicht (Nutzervorgabe). Genau dieser Kontrast macht die Kegelform lesbar.
+const WATERFALL_HEIGHT: float = 34.0
 const WATERFALL_SCROLL_SPEED: float = 1.6
 
 # =============================================================================
