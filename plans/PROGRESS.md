@@ -7992,3 +7992,96 @@ Bevölkerungsdruck-Gate der naheliegende Nachtrag.
 **Manuelle Prüfung durch den Nutzer steht aus** (Prüfliste im Phasenplan): Ausbau
 sichtbar wachsen sehen, blauer Balken, Sperre/Pause, Ausbau ohne Holz, Ausbau-Braves
 töten (2-min-Abbruch), Vollausbau, Abriss-Erstattung, langes Skirmish.
+
+---
+
+## Phase 10g — KI-Logistik in sieben Teilen (2026-08-05)
+
+**Plan:** [10g_ai_logistics.md](10g_ai_logistics.md) — vollständig umgesetzt, in
+**sieben Commits** (jeder Teil eigenständig spielbar).
+
+Alle sieben Teile kamen aus Nutzertests, nicht aus einem Phasenplan-Entwurf. Der
+Plan wurde in zwei Schritten geschrieben: fünf Teile am 2026-08-04, Teil 6
+(Reinkarnationsplatz) und Teil 7 (Bauordnung) als Nachträge am 2026-08-05.
+
+### Reihenfolge der Umsetzung (von mir festgelegt) und Commits
+
+| Commit | Teil | Inhalt |
+|---|---|---|
+| `3dd9572` | **6** | Reinkarnationsplatz ist kein Angriffsziel |
+| `d75f2d3` | **7** | Wohnraum und Ausbildung vor Werkstätten |
+| `e869635` | **1** | Aktive Bauarbeiter-Zuweisung mit Budget |
+| `4582335` | **5** | Arena-Enge statt fixem Verteidigungsradius |
+| `3509ea6` | **2** | Erreichbarkeit als eine Wahrheit + Nachkontrolle |
+| `1484f96` | **3** | Fahrzeuge werden bemannt, Werkstattausgang frei |
+| `3033694` | **4** | Gezielter Holznachschub, Regale an den Werkstätten |
+
+Reihenfolge nach Wirkung pro Aufwand: erst der reine Zielwahl-Bugfix (6), dann
+die Bauordnung (7), dann die Bauarbeiter (1) als Voraussetzung dafür, dass 7
+überhaupt greifen kann, dann die kleinen Karten (5), dann Erreichbarkeit (2),
+Fahrzeuge (3) und zuletzt die Holzverteilung (4) als größter Teil.
+
+### Sechs Fehler, die erst die Messung zeigte
+
+1. **`Hut.growth_per_minute()` liefert am Wohnraumdeckel 0.** Teil 7 plante die
+   Lagerzahl daraus, der Bravestrom kollabierte also genau dann, wenn der Stamm
+   die meisten Braves hatte — die Lagerziele fielen auf eines je Art zurück und
+   die Bauordnung stampfte weiter Werkstätten (gemessen: pop 205 mit 1/1/1 Lagern
+   und **sieben** Werkstätten). Neu `Hut.potential_growth_per_minute()`.
+2. **Die erste Fassung von `tests/diag_ai_buildup.gd` rief nur `um.tick()`, nicht
+   `um.tick_units()`.** `UnitManager._physics_process` macht beides — ohne
+   `tick_units` tickt **keine einzige Einheit**. Der im Teil-7-Commit gemeldete
+   A/B „keine Regression" war damit gegenstandslos; er verglich zwei stillstehende
+   Stämme. Aufgefallen nur, weil 18 Braves in `State.BUILD` an einem Gebäude mit
+   `hp=0/400` klebten und ein einzelner manueller `tick()` sie sofort freigab.
+3. **`test_plot_reachable_success_cache` war falsch-grün.** Nach dem Entfernen von
+   `_reachable_plots` brach die Methode mit `SCRIPT ERROR` ab, die Suite meldete
+   weiter „0 failed" — nur die Zusicherungszahl fiel von 331 auf 327. Der
+   dokumentierte Falsch-Grün-Fallstrick, in der Praxis erlebt.
+4. **Der Armee-Anteil-Deckel kippte bei kleiner Armee die Crew-Reihenfolge um.**
+   `int(1 × 0,25) == 0` sperrte das Militär komplett aus, woraufhin der
+   Brave-Notnagel griff — die Umkehrung der Nutzerregel. `maxi(1, …)` ist tragend.
+5. **`AI_MILITIA_MIN_BRAVES` war das falsche Instrument.** Ein Räuber *im Dorf*
+   muss auch von einem Fünf-Brave-Stamm beantwortet werden
+   (`test_defense_militia`). Der gemeldete Fehler waren Braves gegen eine
+   *Nachbarbasis* — das behebt der Territoriumstest, nicht ein Mindestbestand.
+6. **Latenter Fehler seit 10e:** jeder Selbstabriss eines unerreichbaren
+   Bauplatzes löste `_rebuild_ticks = 15` aus und pausierte den eigenen Bau.
+   Behoben über ein `_self_scrap`-Flag.
+
+### Gelernt und im Code festgehalten
+
+- **`NavGrid._ensure_islands` ist gegen `ISLAND_REFRESH_MS` gedrosselt.** Wer vor
+  einer Terrainänderung schon etwas Insel-basiertes abfragt, liest danach
+  veraltete Labels. Insel-Tests brauchen eine frische Welt — steht jetzt als
+  Kommentar am betroffenen Test.
+- **Ein Rally Point auf einem Gebäude darf nicht gesnappt werden.**
+  `rally_training_building()` vergleicht die Rally-*Zelle* mit dem Grundriss, und
+  Grundrisse sind im NavGrid **solid** — Snapping auf die nächste begehbare Zelle
+  hätte die ganze Ausbildungs-Umleitung lautlos zerstört.
+- **Die Suite-Gesamtzahl ist bei Verhaltensänderungen keine belastbare
+  Invariante.** Zusicherungen in Schleifen reagieren auf geändertes KI-Verhalten;
+  maßgeblich sind „0 failed", „kein `SCRIPT ERROR`" und die Einzeldateien.
+
+### Messungen (alle Einzelstichproben chaotischer 4-Wege-KI-Kriege)
+
+| Größe | vorher | nachher |
+|---|---|---|
+| Bauarbeiter-Zuweisungen | **strukturell 0** (`order_build` wurde nie gerufen) | ~100–150 je Lauf |
+| Miliz-Befehle (Insel, 600 s) | **61** | **2** |
+| Fahrzeuge im Feld (bergpass, 900 s) | 3 bei 4 Werkstätten | **8–12** |
+| Trainingslager je Art | **1 / 1 / 1** bei 7 Werkstätten | 2 / 1 / 2 bei 4 |
+| Holzstationen | 1–2 | **6** |
+| Bauplatzsuche | ~0,026 ms/Zelle, schlimmster KI-Tick 146 ms | ~0,023 ms/Zelle, 123 ms |
+
+**Neu:** `tests/diag_ai_buildup.gd` (kein `test_`-Präfix) — Gebäudezusammensetzung,
+offene Baustellen, Bravestrom, Fahrzeuge und Zustandshistogramm von vier KIs auf
+einer echten Karte, Startbedingungen wie `main.gd._setup_skirmish_base`.
+
+### Verifikationsstand
+
+- **Suite 3809 Zusicherungen grün** (Start der Phase: 3644), Exit-Code 0, Output
+  frei von `SCRIPT ERROR`. Projekt-Ladecheck sauber.
+- **Manuelle Prüfung durch den Nutzer steht aus** — insbesondere Insel mit 4
+  Stämmen (Teil 5), Werkstatt-Ausstoß (Teil 3) und ob die KI jetzt sichtbar
+  Hütten statt Werkstätten baut (Teil 7).
