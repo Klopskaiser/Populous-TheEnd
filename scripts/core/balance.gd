@@ -331,16 +331,26 @@ const FW_FIREBALL_LIFT_HP_MAX_MULT: float = 3.0
 ## kein Schadensproblem.
 ##
 ## Der Radius ist an der **Einheitengeometrie** ausgerichtet (Nutzerentscheidung
-## 2026-08-05, vorher 2,0 m / 50 %): ein 6er-Pack ist maximal 1,10 m breit
-## (`TribeCommands.MEMBER_OFFSETS`) und eine Nahkampfgruppe 0,9 m
-## (`Unit.MELEE_SLOT_RADIUS`), 1,3 m fasst also **genau einen Pack** — und lässt
-## die Nachbargruppe (2,2 m Zentrumsabstand, `GROUP_SPACING`) draußen. Bei 2,0 m
-## griff der Splash in die Nachbarschaft über und drehte im Labor die Paarung
+## 2026-08-05, in zwei Schritten von 2,0 m / 50 % auf 1,2 m / 20 %): ein 6er-Pack
+## ist maximal 1,10 m breit (`TribeCommands.MEMBER_OFFSETS`) und eine
+## Nahkampfgruppe 0,9 m (`Unit.MELEE_SLOT_RADIUS`), 1,2 m fasst also **genau einen
+## Pack** — und lässt die Nachbargruppe (2,2 m Zentrumsabstand, `GROUP_SPACING`)
+## sowie den nächsten Angreifer des Nachbarkampfs (2,8 − 0,9 = 1,9 m) draußen. Bei
+## 2,0 m griff der Splash in die Nachbarschaft über und drehte im Labor die Paarung
 ## Luftschiff gegen Feuerkrieger. Achtung: die Radiusabfrage misst **flach in
 ## XZ**, der Bereich ist also ein senkrechter Zylinder — ein Bodeneinschlag
 ## trifft auch Fliegende darüber.
-const FW_FIREBALL_BLAST_RADIUS: float = 1.3
-const FW_FIREBALL_BLAST_FRAC: float = 0.3
+##
+## **Die Wirkung skaliert mit der DICHTE, nicht mit der Truppenzahl** (gemessen
+## 2026-08-05, `feuerkrieger_vs_krieger_200_anmarsch`): bei 20 gegen 20 stehen
+## vier lose 6er-Packs, der Radius findet meist niemanden; in einem 200er-Klumpen
+## liegen bei `UnitManager.SEPARATION_RADIUS` 0,44 m fast immer ~3 weitere Ziele
+## drin, und der Splash **verdoppelt** den Schadensdurchsatz. Feuerkrieger sind
+## damit bewusst eine **Masseneinheit** (Nutzerentscheidung: so gewollt, kein
+## Opferdeckel je Ball). Wer die kleinen Gefechte beurteilt, unterschätzt diese
+## Konstanten um etwa eine Größenordnung.
+const FW_FIREBALL_BLAST_RADIUS: float = 1.2
+const FW_FIREBALL_BLAST_FRAC: float = 0.2
 ## Treffer auf bereits fliegende Ziele: der Lift wird IMMER verstärkt.
 const LIFT_AIRBORNE_BONUS: float = 2.0
 const LIFT_AIRBORNE_PUSH_FACTOR: float = 0.5

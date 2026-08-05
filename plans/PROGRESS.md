@@ -8423,6 +8423,54 @@ Nutzererwartung. **Zwei Befunde bleiben offen:**
    > Luftschiff-Paarung kippt nicht vollständig zurück (2:1 statt 0:3). Das ist eine
    > bewusste Nutzerentscheidung nach dem Spielgefühl, nicht ein Messergebnis — die
    > Zahlen stehen hier, damit die nächste Runde davon ausgehen kann.
+
+### Der wichtigste Befund kam zuletzt: die 20-gegen-20-Paarungen taugen nicht
+
+Nutzerbeobachtung nach dem Spieltest: *„im Spiel wirken Feuerkrieger trotzdem stark."*
+Also 200 gegen 200 gemessen, mit echtem Anmarsch (neuer Paarungs-Schlüssel
+`separation`, 60 Zellen ⇒ ~46 m zwischen den Klumpenrändern, Krieger brauchen ~11 s
+dafür). Die Vermutung „es liegt am Anmarsch" war **falsch**, und der Rest hat das Bild
+dieser Phase auf den Kopf gestellt:
+
+| 200 gegen 200, reps=3 | Sieger | Feuerkrieger übrig | Schaden FK | Schaden Gegner |
+|---|---|---|---|---|
+| gegen Krieger, ~46 m Anmarsch | **FK 3:0** | 160,7/200 | 100 % | 25 % |
+| gegen Krieger, Sofortkontakt | **FK 3:0** | 157,3/200 | 100 % | 27 % |
+| gegen Krieger, **Splash aus** | **Krieger 3:0** | 0/200 | 51 % | 100 % |
+
+Der Anmarsch ist mit 160,7 gegen 157,3 übrig **wirkungslos** — der **Maßstab** ist
+alles. Bei 20 gegen 20 gewinnen die Krieger 3:0 und behalten 18 von 20, bei 200 gegen
+200 gewinnen die Feuerkrieger 3:0 und die Krieger werden ausgelöscht.
+
+**Die Ursache ist die Dichte, nicht die Truppenzahl.** Der Splash verdoppelt den
+Durchsatz (51 % → 100 % des Feindpools, Faktor 1,98): jeder Ball macht effektiv ~18
+statt 9 HP, nimmt also **~3 Umstehende** mit. Bei 20 gegen 20 stehen vier lose 6er-Packs
+und derselbe Radius findet meist niemanden; in einem 200er-Klumpen liegen bei
+`SEPARATION_RADIUS` 0,44 m fast immer drei weitere Ziele darin. **Die kleinen Paarungen
+unterschätzen den Flächenschaden damit um etwa eine Größenordnung** — jede
+Balance-Aussage dieser Phase, die nur auf ihnen beruht, ist mit Vorsicht zu lesen.
+
+**Endwerte nach Nutzerentscheidung: 1,2 m / 20 %** („ohne Flächenschaden sieht's auch
+doof aus, die Feuerkrieger sind eben am besten in Massen") — **ohne** Opferdeckel je
+Ball, obwohl der die Dichte-Skalierung gezielt brechen würde. Massenstärke ist gewollt.
+
+| 200 gegen 200 mit 1,2 m / 20 % | Sieger | FK übrig | Schaden FK | Schaden Gegner | Dauer |
+|---|---|---|---|---|---|
+| gegen Krieger | FK 3:0 | 145,3/200 | 100 % | 35 % | 19 s |
+| gegen **Prediger** | FK 2:0 (1 unentschieden) | 163,3/200 | 100 % | 32 % | 78 s |
+
+**Die Prediger-Zeile widerlegt die Prämisse dieser Phase — bei großen Armeen.** Sie
+bekehren **niemanden** (0,0 Bekehrte bei 200 gegen 200, gegen 19,3 bei 20 gegen 20) und
+verlieren. Der Grund steckt in `Unit.reset_conversion()`: ein Feuerball-Treffer bricht
+die laufende Bekehrung ab und löscht ihren Fortschritt — bei 200 Schützen mit 1,5-s-Takt
+kommt keine der 4-9 s langen Bekehrungen je durch. Damit gilt **beides**: die Annahme aus
+10e („Feuerkrieger sind der Prediger-Konter") stimmt in der Massenschlacht, die
+Widerlegung im 10i-Plan („Prediger sind ein Win-Button") stimmt im kleinen Gefecht. Die
+Streuung ist dort groß (118..192 BÄ übrig, ein Unentschieden) — die Zeile trägt weniger
+Signal als die Kriegerzeile.
+
+Neu im Labor und dauerhaft nachfahrbar: `feuerkrieger_vs_krieger_200_anmarsch`,
+`…_200_kontakt`, `feuerkrieger_vs_prediger_200_anmarsch`.
 2. `luftschiffe_vs_katapulte` und `feuerrammen_vs_katapulte` enden mit `!`: die Seiten
    **kamen nie in Waffenreichweite**. Das ist keine Balance-, sondern eine
    Verhaltensaussage und betrifft Fahrzeug-gegen-Fahrzeug allgemein, nicht nur

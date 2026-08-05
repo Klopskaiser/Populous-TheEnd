@@ -119,6 +119,13 @@ const SCENARIOS: Array = [
 	{"name": "feuerkrieger_vs_krieger_200_kontakt",
 	 "a": [[&"feuerkrieger", 200]], "b": [[&"krieger", 200]],
 	 "frage": "Dieselben 200 gegen 200 bei Sofortkontakt (Gegenprobe zum Anmarsch)"},
+	# Der Prediger muss auf 5 m heran (CONVERT_RANGE) und braucht 4-9 s je
+	# Bekehrung — im Anmarsch ist er also lange ein wehrloses Ziel. Die
+	# 20-gegen-20-Zeile oben sagt das Gegenteil; welche von beiden fuer das Spiel
+	# gilt, entscheidet die Armeegroesse.
+	{"name": "feuerkrieger_vs_prediger_200_anmarsch",
+	 "a": [[&"feuerkrieger", 200]], "b": [[&"prediger", 200]], "separation": 60,
+	 "frage": "200 gegen 200 mit Anmarsch: kommt die Bekehrung in der Masse an?"},
 	{"name": "feuerkrieger_vs_prediger", "a": [[&"feuerkrieger", 20]], "b": [[&"prediger", 20]],
 	 "frage": "Ist der Feuerkrieger wirklich der Prediger-Konter?"},
 

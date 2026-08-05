@@ -42,6 +42,16 @@ func _spawn(w: Dictionary, scene: PackedScene, tribe_id: int, at: Vector2) -> Un
 	return w.unit_manager.spawn_unit(scene, tribe_id, Vector3(at.x, 0.0, at.y))
 
 
+## Bystander spot for the splash tests: a FRACTION OF THE BLAST RADIUS next to the
+## direct target instead of a pinned 0,8 m. The ball explodes on contact and thus
+## lands ~0,4 m SHORT of its target's centre, so a hardcoded offset silently drifts
+## out of the blast when the radius is retuned — exactly what happened when
+## FW_FIREBALL_BLAST_RADIUS went 1,3 -> 1,2: the bystander sat 1,2101 m from the
+## impact and the splash missed by a centimetre. Same lesson as the fraction below.
+func _bystander_pos(target_at: Vector2) -> Vector2:
+	return Vector2(target_at.x + Balance.FW_FIREBALL_BLAST_RADIUS * 0.4, target_at.y)
+
+
 ## Tough target: survives the direct hit so the splash can be read in isolation.
 func _tough(u: Unit, hp: int = 10000) -> Unit:
 	u.max_health = hp
@@ -71,7 +81,7 @@ func test_fireball_splash_damages_nearby_enemies() -> void:
 	var w: Dictionary = _make_world()
 	var shooter: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(26, 30))
 	var target: Unit = _tough(_spawn(w, BRAVE_SCENE, 1, Vector2(30, 30)))
-	var bystander: Unit = _tough(_spawn(w, BRAVE_SCENE, 1, Vector2(30.8, 30)))
+	var bystander: Unit = _tough(_spawn(w, BRAVE_SCENE, 1, _bystander_pos(Vector2(30, 30))))
 	var hp_target: int = target.health
 	var hp_by: int = bystander.health
 	var ball: Fireball = _fire(shooter, target)
@@ -89,7 +99,7 @@ func test_fireball_splash_matches_the_configured_fraction() -> void:
 	var w: Dictionary = _make_world()
 	var shooter: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(26, 30))
 	var target: Unit = _tough(_spawn(w, BRAVE_SCENE, 1, Vector2(30, 30)))
-	var bystander: Unit = _tough(_spawn(w, BRAVE_SCENE, 1, Vector2(30.8, 30)))
+	var bystander: Unit = _tough(_spawn(w, BRAVE_SCENE, 1, _bystander_pos(Vector2(30, 30))))
 	var hp_by: int = bystander.health
 	var ball: Fireball = _fire(shooter, target)
 	check(hp_by - bystander.health == _splash_damage(),
@@ -103,7 +113,7 @@ func test_fireball_splash_spares_own_units() -> void:
 	var shooter: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(26, 30))
 	var target: Unit = _tough(_spawn(w, BRAVE_SCENE, 1, Vector2(30, 30)))
 	# Same tribe as the shooter, right next to the impact.
-	var friend: Unit = _tough(_spawn(w, BRAVE_SCENE, 0, Vector2(30.8, 30)))
+	var friend: Unit = _tough(_spawn(w, BRAVE_SCENE, 0, _bystander_pos(Vector2(30, 30))))
 	var hp_friend: int = friend.health
 	var ball: Fireball = _fire(shooter, target)
 	check(friend.health == hp_friend,
@@ -133,7 +143,7 @@ func test_fireball_splash_still_applies_when_the_direct_hit_kills() -> void:
 	var shooter: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(26, 30))
 	var target: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
 	target.health = 1   # the direct hit kills it
-	var bystander: Unit = _tough(_spawn(w, BRAVE_SCENE, 1, Vector2(30.8, 30)))
+	var bystander: Unit = _tough(_spawn(w, BRAVE_SCENE, 1, _bystander_pos(Vector2(30, 30))))
 	var hp_by: int = bystander.health
 	var ball: Fireball = _fire(shooter, target)
 	check(target.state == Unit.State.DEAD, "the direct hit killed the target")
@@ -147,7 +157,7 @@ func test_fireball_splash_skips_vehicles() -> void:
 	var w: Dictionary = _make_world()
 	var shooter: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(26, 30))
 	var target: Unit = _tough(_spawn(w, BRAVE_SCENE, 1, Vector2(30, 30)))
-	var engine: Unit = _spawn(w, SIEGE_SCENE, 1, Vector2(30.8, 30))
+	var engine: Unit = _spawn(w, SIEGE_SCENE, 1, _bystander_pos(Vector2(30, 30)))
 	var hp_engine: int = engine.health
 	var ball: Fireball = _fire(shooter, target)
 	check(engine.health == hp_engine,
@@ -160,7 +170,7 @@ func test_fireball_splash_does_not_push_bystanders() -> void:
 	var w: Dictionary = _make_world()
 	var shooter: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(26, 30))
 	var target: Unit = _tough(_spawn(w, BRAVE_SCENE, 1, Vector2(30, 30)))
-	var bystander: Unit = _tough(_spawn(w, BRAVE_SCENE, 1, Vector2(30.8, 30)))
+	var bystander: Unit = _tough(_spawn(w, BRAVE_SCENE, 1, _bystander_pos(Vector2(30, 30))))
 	var ball: Fireball = _fire(shooter, target)
 	check(bystander._knockback_remaining == Vector3.ZERO,
 		"a bystander is damaged but not shoved (hundreds of balls per battle)")
