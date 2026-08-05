@@ -1719,3 +1719,72 @@ func test_vehicle_drops_an_unattackable_building_target() -> void:
 	engine._set_building_target(hut, false)
 	check(engine._building_target_valid(), "normales Feindgebaeude bleibt gueltig")
 	_free_world(w)
+
+
+# --- Uebernahme eines verlassenen Fahrzeugs (Nutzerreport 2026-08-05) ----------------
+# "Ich konnte ein gegnerisches Katapult nicht besetzen, obwohl es keine gegnerische
+# Besatzung mehr gab, erst nach einer ganzen Weile."
+#
+# Ursache war KEINE unsichtbare Besatzung: die Slots hielten noch nicht
+# eingestiegene NACHBESETZER des Gegners. crew_count() zaehlt die mit, und
+# TribeCommands.order_crew rechnete free = max_crew - crew_count() — bei sechs
+# Reservierungen also 0 Einheiten. Erst VEHICLE_CREW_BOARD_TIMEOUT (45 s) raeumte
+# sie ab. Gemessen: crew=5, boarded=0, aktiv=0, freie Slots 1 von 6.
+
+func test_unboarded_reservations_do_not_block_a_takeover() -> void:
+	var w: Dictionary = _make_world()
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 1, Vector3(60, 0, 60)) as SiegeEngine
+	# Ein Feind an Bord, fuenf weitere von weit weg unterwegs.
+	var aboard: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 1, Vector3(60.5, 0, 60.5))
+	aboard.order_crew(engine)
+	for i in range(60):
+		w.unit_manager.tick_units(TICK)
+		w.unit_manager.tick(TICK)
+	check(engine.boarded_count() == 1, "einer ist an Bord (Testvoraussetzung)")
+	for i in range(engine.max_crew - 1):
+		var far: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 1,
+			Vector3(20.0 + float(i), 0, 20.0))
+		far.order_crew(engine)
+	check(engine.crew_count() == engine.max_crew,
+		"alle Slots belegt, die meisten nur reserviert (Testvoraussetzung)")
+	# Die Besatzung stirbt: das Fahrzeug ist LEER, aber die Reservierungen bleiben.
+	aboard.take_damage(aboard.max_health * 10)
+	for i in range(10):
+		w.unit_manager.tick_units(TICK)
+		w.unit_manager.tick(TICK)
+	check(engine.boarded_count() == 0, "niemand mehr an Bord")
+	check(engine.crew_count() > 0, "aber die Reservierungen halten noch Slots")
+	# Der Spieler uebernimmt — SOFORT, nicht erst nach dem Board-Timeout.
+	var mine: Array[Unit] = []
+	for i in range(3):
+		mine.append(w.unit_manager.spawn_unit(WARRIOR_SCENE, 0,
+			Vector3(58.0 + float(i), 0, 58.0)))
+	check(engine.free_slots_for(mine[0]) >= 3,
+		"freie Slots werden fuer einen Uebernehmer korrekt gezaehlt")
+	w.commands.order_crew(mine, engine)
+	var claimed: int = 0
+	for u in mine:
+		if u.siege_engine == engine:
+			claimed += 1
+	check(claimed == 3, "alle drei duerfen sofort aufsteigen (war: 1 von 3)")
+	_free_world(w)
+
+
+func test_a_served_vehicle_still_cannot_be_hijacked() -> void:
+	# Gegenkontrolle: die Uebernahme-Sperre fuer BEMANNTE Fahrzeuge bleibt.
+	var w: Dictionary = _make_world()
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 1, Vector3(60, 0, 60)) as SiegeEngine
+	var aboard: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 1, Vector3(60.5, 0, 60.5))
+	aboard.order_crew(engine)
+	for i in range(60):
+		w.unit_manager.tick_units(TICK)
+		w.unit_manager.tick(TICK)
+	check(engine.boarded_count() == 1, "bemannt (Testvoraussetzung)")
+	var mine: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, Vector3(58, 0, 58))
+	check(engine.free_slots_for(mine) == 0,
+		"ein bediente Fahrzeug bietet einem Fremden keinen Slot")
+	w.commands.order_crew([mine] as Array[Unit], engine)
+	check(mine.siege_engine == null, "und nimmt ihn auch nicht auf")
+	_free_world(w)

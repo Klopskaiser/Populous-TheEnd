@@ -481,7 +481,6 @@ func order_crew(units: Array[Unit], engine: Unit) -> void:
 			or engine.state == Unit.State.DEAD or not (engine is CrewedVehicle):
 		return
 	var vehicle: CrewedVehicle = engine as CrewedVehicle
-	var free: int = vehicle.max_crew - vehicle.crew_count()
 	var candidates: Array[Unit] = []
 	for unit in units:
 		if unit == null or not is_instance_valid(unit) \
@@ -493,6 +492,13 @@ func order_crew(units: Array[Unit], engine: Unit) -> void:
 	candidates.sort_custom(func(a: Unit, b: Unit) -> bool:
 		return a.position.distance_squared_to(engine.position) \
 			< b.position.distance_squared_to(engine.position))
+	# free_slots_for instead of max_crew - crew_count(): on a FOREIGN vehicle that is
+	# genuinely unmanned, the owner's not-yet-boarded reservations do not count as
+	# occupied. They used to, so a takeover was blocked until
+	# VEHICLE_CREW_BOARD_TIMEOUT (45 s) expired — user report: an enemy catapult whose
+	# crew had died could not be crewed, "only after quite a while".
+	var free: int = vehicle.free_slots_for(
+		candidates[0] if not candidates.is_empty() else null)
 	for unit in candidates:
 		if free <= 0:
 			break

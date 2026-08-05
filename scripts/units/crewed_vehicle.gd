@@ -400,12 +400,62 @@ func add_crew(unit) -> bool:
 	_prune_crew()
 	if unit in crew:
 		return true
+	if unit.tribe_id != tribe_id:
+		if boarded_count() > 0:
+			return false   # manned vehicles cannot be hijacked while served
+		# Genuinely UNMANNED vehicle: the owner's not-yet-boarded reservations do
+		# not defend it. They used to hold their slots until
+		# VEHICLE_CREW_BOARD_TIMEOUT (45 s), so a catapult whose crew had just died
+		# could not be taken over at all while five recruits were still walking
+		# towards it — user report: "I could not crew an enemy catapult although it
+		# had no crew left, only after quite a while." Nothing is lost by releasing
+		# them: they never boarded.
+		_release_unboarded_crew(unit.tribe_id)
 	if crew.size() >= max_crew:
 		return false
-	if unit.tribe_id != tribe_id and boarded_count() > 0:
-		return false   # manned vehicles cannot be hijacked while served
 	crew.append(unit)
 	return true
+
+
+## Crew slots `unit` may actually claim. For an OWN vehicle this is the plain
+## remainder; for a FOREIGN vehicle that nobody is serving, slots held by the
+## owner's not-yet-boarded reservations count as free — add_crew releases them.
+## One truth with TribeCommands.order_crew, which sizes its batch from this.
+func free_slots_for(unit) -> int:
+	_prune_crew()
+	var taken: int = crew.size()
+	var foreign: bool = unit != null and is_instance_valid(unit) \
+		and unit.tribe_id != tribe_id
+	if foreign:
+		if boarded_count() > 0:
+			return 0   # a served vehicle cannot be hijacked (add_crew agrees)
+		for m in crew:
+			# Only the OWNER's reservations are discounted — the takeover party's own
+			# inbound recruits legitimately hold their slots.
+			if is_instance_valid(m) and not m.siege_boarded 					and m.tribe_id != unit.tribe_id:
+				taken -= 1
+	return maxi(0, max_crew - taken)
+
+
+## Drops crew members that have not boarded yet and do NOT belong to
+## `keep_tribe` (see add_crew).
+##
+## Excluding keep_tribe is load-bearing: without it every further unit of the
+## TAKEOVER party kicked out the one before it (none of them has boarded yet while
+## they are still walking, and the vehicle only changes owner on boarding), so a
+## three-unit takeover ended with exactly one recruit.
+func _release_unboarded_crew(keep_tribe: int) -> void:
+	var kept: Array = []
+	var dropped: Array = []
+	for m in crew:
+		if is_instance_valid(m) and not m.siege_boarded and m.tribe_id != keep_tribe:
+			dropped.append(m)
+		else:
+			kept.append(m)
+	crew = kept
+	for m in dropped:
+		_recruit_wait.erase(m)
+		m.leave_crew()
 
 
 func remove_crew(unit) -> void:
