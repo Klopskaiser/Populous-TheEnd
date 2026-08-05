@@ -1211,14 +1211,14 @@ func _wall_point_toward(from: Vector3, target: Vector3, reach: float) -> Vector3
 
 ## Distance from our base to the NEAREST ENEMY base, in cells (10g Teil 5).
 ##
-## The map size alone is not the measure: island (128) with four tribes is cramped
-## (nearest neighbour 36,2 cells — MapGenerator._circle_anchors puts the anchors on
-## a circle of radius 0,2 * size), plateau (128) with its corner anchors is not
-## (82 cells). What matters is the measured distance.
+## The map size alone is not the measure: island (144) with four tribes is cramped
+## (nearest neighbour 40,7 cells — MapGenerator._circle_anchors puts the anchors on
+## a circle of radius 0,2 * size), plateau (144) with its corner anchors is not
+## (80 cells). What matters is the measured distance.
 ##
 ## Source: every foreign tribe's reincarnation site — it stands on the anchor and
 ## never moves. If one is gone (10d self-destruction) its nearest other building
-## counts; with nothing at all, half the map edge. Recomputed every
+## counts; with nothing at all, the full map edge (i.e. "off the map"). Recomputed every
 ## AI_ARENA_TTL_TICKS: one pass over ALL buildings, the only place this phase looks
 ## at foreign ones.
 ##
@@ -1248,9 +1248,15 @@ func _arena_span() -> float:
 	for id in _enemy_anchors:
 		best = minf(best, _flat_span(here, _enemy_anchors[id]))
 	if best == INF:
-		# No enemy building anywhere: treat the arena as open (half the map edge).
-		best = float(nav_grid.terrain.size) * 0.5 if nav_grid != null \
-			else float(TerrainData.SIZE) * 0.5
+		# No enemy building anywhere: the nearest enemy base is effectively off the
+		# map, so the proxy is the FULL map edge — not half of it as before.
+		# Half the edge is a value that must clear AI_CRAMPED_ARENA to mean "open",
+		# and it stopped doing so when the threshold grew with the disc maps in 10j
+		# (128 * 0.5 = 64 < 68 flipped every enemy-less world to CRAMPED and with
+		# it the whole build order). The full edge is monotone in map size and
+		# unambiguously open on every real map (smallest is 144).
+		best = float(nav_grid.terrain.size) if nav_grid != null \
+			else float(MapGenerator.STANDARD_SIZE)
 	_arena_span_cache = best
 	return best
 
@@ -1530,6 +1536,8 @@ func _flatten_break_point(building: Building) -> Vector3:
 	var base_h: float = td.get_height(center.x, center.z)
 	for dir in [Vector3(1, 0, 0), Vector3(-1, 0, 0), Vector3(0, 0, 1), Vector3(0, 0, -1)]:
 		var probe: Vector3 = center + dir * FLATTEN_OFFSET
+		if not td.has_ground(probe.x, probe.z):
+			continue   # Void: get_height() clampt und meldet dort die Randhoehe
 		var h: float = td.get_height(probe.x, probe.z)
 		if h <= TerrainData.SEA_LEVEL:
 			continue   # flattening onto a water-level point is the sink's job
@@ -1698,11 +1706,21 @@ func _find_supplied_plot(anchor: Vector2i, footprint: Vector2i,
 	var checked: int = 0
 	var per_sweep: int = maxi(1, MAX_PLOT_CANDIDATES / 2)
 	# 10g Teil 5: der Suchradius folgt der Arena. 40 Zellen reichen auf einer
-	# 128er-Karte AN DER NACHBARBASIS VORBEI; eine enge Arena haelt die Basis
+	# 144er-Karte AN DER NACHBARBASIS VORBEI; eine enge Arena haelt die Basis
 	# kompakt — und macht den Sweep billiger.
 	var search_radius: int = AIState.plot_search_radius(_arena_span())
 	for radius in range(Balance.AI_PLOT_MIN_RADIUS, search_radius):
 		for cell in ring_cells(anchor, radius):
+			# Der Void kostet KEIN Budget (Phase 10j). Anders als Wasser kann er
+			# niemals bebaubar werden — keine Landbruecke reicht hinaus —, ihn zu
+			# pruefen ist also reine Verschwendung. Auf den Eckanker-Karten liegt
+			# der Scheibenrand ~15 Zellen vom Anker, das Baumuster ist aber das
+			# OFFENE mit Radius 40: ohne diesen Filter verbrennt ein grosser Teil
+			# jedes Rings das gemeinsame AI_MAX_PLOT_SCAN_CELLS. in_disc() prueft
+			# die Kartengrenzen mit, faengt also auch die Zellen ab, die
+			# ring_cells() ungeprueft ausserhalb des Rechtecks liefert.
+			if nav_grid != null and not nav_grid.terrain.in_disc(cell):
+				continue
 			if _plot_budget <= 0:
 				return Vector2i(-1, -1)
 			dbg_plot_cells += 1

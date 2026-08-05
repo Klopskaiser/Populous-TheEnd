@@ -245,7 +245,15 @@ func _terrain_hit(screen_pos: Vector2) -> Dictionary:
 	var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(
 		from, from + dir * RAY_LENGTH)
 	query.collision_mask = TERRAIN_MASK
-	return space.intersect_ray(query)
+	var hit: Dictionary = space.intersect_ray(query)
+	# Void (phase 10j): HeightMapShape3D stays rectangular, so the ray hits out
+	# there — but there is no ground. Reported as a MISS, so the cursor and the aim
+	# ring hide and the void visibly offers no target.
+	if not hit.is_empty():
+		var td: TerrainData = GameState.terrain_data
+		if td != null and not td.has_ground(hit.position.x, hit.position.z):
+			return {}
+	return hit
 
 
 func _unhandled_input(event: InputEvent) -> void:

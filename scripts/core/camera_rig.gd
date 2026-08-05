@@ -18,6 +18,10 @@ class_name CameraRig extends Node3D
 @export var height_offset: float = 0.0      # extra Y above terrain
 @export var edge_scroll_enabled: bool = true
 
+## How far past the disc's rim the rig may pan, so the edge can be viewed head-on
+## instead of clinging to the screen border.
+const PAN_RIM_OVERSHOOT: float = 12.0
+
 var _boom: float = 45.0
 
 @onready var _pitch: Node3D = $Pitch
@@ -84,11 +88,15 @@ func _handle_pan(delta: float) -> void:
 	right = right.normalized()
 	var motion: Vector3 = (right * input.x + forward * input.y) * pan_speed * delta
 	global_position += motion
-	# Keep the rig within the terrain bounds (map-driven; falls back to default).
+	# Keep the rig on the DISC (phase 10j), with a little overshoot so the rim does
+	# not have to sit right at the screen edge to be looked at. A negative margin
+	# clamps to radius + overshoot, so no extra helper is needed.
 	var td: TerrainData = GameState.terrain_data
-	var bound: float = float(td.size) if td != null else float(TerrainData.SIZE)
-	global_position.x = clampf(global_position.x, 0.0, bound)
-	global_position.z = clampf(global_position.z, 0.0, bound)
+	if td != null:
+		var inside: Vector2 = TerrainData.clamp_into_world(
+			td, global_position.x, global_position.z, -PAN_RIM_OVERSHOOT)
+		global_position.x = inside.x
+		global_position.z = inside.y
 
 
 func _edge_scroll_vector() -> Vector2:
@@ -126,5 +134,12 @@ func _clamp_to_terrain() -> void:
 	var td: TerrainData = GameState.terrain_data
 	if td == null:
 		return
-	var ground: float = td.get_height(global_position.x, global_position.z)
+	# Over the overshoot ring there is no ground, and get_height() would report the
+	# clamped rim height by accident. Sample the radially clamped point instead, so
+	# the camera keeps the rim's altitude rather than dropping to sea level when it
+	# looks in from outside. The sea-level floor also keeps the rig 40 m above the
+	# disc's underside, which is what makes it unreachable from any legal camera.
+	var sample: Vector2 = TerrainData.clamp_into_world(
+		td, global_position.x, global_position.z)
+	var ground: float = td.get_height(sample.x, sample.y)
 	global_position.y = maxf(ground, TerrainData.SEA_LEVEL) + height_offset

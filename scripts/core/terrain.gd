@@ -54,6 +54,7 @@ var _static_body: StaticBody3D = null
 var _collision_shape: CollisionShape3D = null
 var _height_shape: HeightMapShape3D = null
 var _material: Material = null
+var _rim: TerrainRim = null
 var _chunk_count: int = TerrainData.SIZE / CHUNK  # chunks per side
 
 
@@ -89,6 +90,14 @@ func _ensure_nodes() -> void:
 		_collision_shape.shape = _height_shape
 
 	_ensure_water()
+
+	if _rim == null:
+		# The disc's edge (phase 10j): rock band + closed underside + waterfall.
+		# Static meshes, no tick — see TerrainRim.
+		_rim = TerrainRim.new()
+		_rim.name = "Rim"
+		add_child(_rim)
+	_rim.rebuild(data)
 
 
 ## Textured triplanar shader when all three ground textures exist under
@@ -130,32 +139,31 @@ func _ensure_water() -> void:
 	water.mesh = plane
 	water.position = Vector3(
 		data.size * 0.5, TerrainData.SEA_LEVEL + WATER_SURFACE_LIFT, data.size * 0.5)
+	# The wave shader displaces vertices, so the plane needs geometry. One vertex per
+	# WATER_WAVE_CELL metres — far finer than the ~18 m swell, far coarser than the
+	# terrain (a 144 map gets 72x72 verts).
+	var subdiv: int = clampi(int(float(data.size) / WATER_WAVE_CELL), 16, 160)
+	plane.subdivide_width = subdiv
+	plane.subdivide_depth = subdiv
+	# ONE material path (phase 10j). The sea has to be cut to the disc, and only a
+	# shader can discard — the old StandardMaterial3D texture variant would have left
+	# square water hanging over the void. The texture is fed INTO the shader instead.
+	var smat: ShaderMaterial = ShaderMaterial.new()
+	smat.shader = preload("res://shaders/water.gdshader")
+	smat.set_shader_parameter("deep", Vector3(
+		COLOR_WATER.r, COLOR_WATER.g, COLOR_WATER.b))
+	smat.set_shader_parameter("crest", Vector3(
+		COLOR_WATER_HIGHLIGHT.r, COLOR_WATER_HIGHLIGHT.g, COLOR_WATER_HIGHLIGHT.b))
+	smat.set_shader_parameter("disc_center",
+		Vector2(data.disc_center(), data.disc_center()))
+	# A hair PAST the walkable rim so the sea meets the rock band without a seam.
+	smat.set_shader_parameter("disc_radius", data.disc_radius() + 0.5)
 	var water_tex: Texture2D = AssetLibrary.texture("textures/terrain/water.png")
-	if water_tex == null:
-		# The wave shader displaces vertices, so the plane needs geometry. One
-		# vertex per WATER_WAVE_CELL metres — far finer than the ~18 m swell,
-		# far coarser than the terrain (a 128 map gets 66x66 verts).
-		var subdiv: int = clampi(
-			int(float(data.size) / WATER_WAVE_CELL), 16, 160)
-		plane.subdivide_width = subdiv
-		plane.subdivide_depth = subdiv
 	if water_tex != null:
-		# User texture wins: tinted, but still fully opaque.
-		var tmat: StandardMaterial3D = StandardMaterial3D.new()
-		tmat.albedo_texture = water_tex
-		tmat.albedo_color = COLOR_WATER * 1.6
-		tmat.metallic = 0.1
-		tmat.roughness = 0.25
-		tmat.uv1_scale = Vector3(float(data.size) * 0.05, float(data.size) * 0.05, 1.0)
-		water.material_override = tmat
-	else:
-		var smat: ShaderMaterial = ShaderMaterial.new()
-		smat.shader = preload("res://shaders/water.gdshader")
-		smat.set_shader_parameter("deep", Vector3(
-			COLOR_WATER.r, COLOR_WATER.g, COLOR_WATER.b))
-		smat.set_shader_parameter("crest", Vector3(
-			COLOR_WATER_HIGHLIGHT.r, COLOR_WATER_HIGHLIGHT.g, COLOR_WATER_HIGHLIGHT.b))
-		water.material_override = smat
+		smat.set_shader_parameter("albedo_tex", water_tex)
+		smat.set_shader_parameter("use_tex", true)
+		smat.set_shader_parameter("uv_scale", float(data.size) * 0.05)
+	water.material_override = smat
 	add_child(water)
 
 
@@ -239,6 +247,11 @@ func _build_chunk_mesh(cx: int, cz: int, mi: MeshInstance3D) -> void:
 			var tr: int = tl + 1
 			var bl: int = (lz + 1) * w + lx
 			var br: int = bl + 1
+			# A quad IS a cell, and outside the disc there is no cell (phase 10j).
+			# Asking data.in_disc() instead of re-deriving the circle here keeps the
+			# visible edge and the walkable edge the same thing by construction.
+			if not data.in_disc(Vector2i(x0 + lx, z0 + lz)):
+				continue
 			if verts[tl].y < cull_below and verts[tr].y < cull_below \
 					and verts[bl].y < cull_below and verts[br].y < cull_below:
 				continue
@@ -246,7 +259,7 @@ func _build_chunk_mesh(cx: int, cz: int, mi: MeshInstance3D) -> void:
 			indices.append(tr); indices.append(br); indices.append(bl)
 
 	if indices.is_empty():
-		mi.mesh = null   # chunk is entirely open sea
+		mi.mesh = null   # chunk is entirely open sea, or entirely void
 		return
 
 	var arrays: Array = []
@@ -288,3 +301,8 @@ func update_collision() -> void:
 func apply_deformation(rect: Rect2i) -> void:
 	rebuild_chunks(rect)
 	update_collision()
+	# The rim skirt samples the terrain height along the edge, so a deformation that
+	# reaches the rim changes it — and a Sink out there can create new water, and with
+	# it a new stretch of waterfall. Rare enough that a full rim rebuild is fine.
+	if _rim != null and TerrainRim.touches_rim(data, rect):
+		_rim.rebuild(data)

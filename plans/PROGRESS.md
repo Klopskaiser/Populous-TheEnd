@@ -8520,3 +8520,126 @@ Hälfte des Reports.
   Schamanin daneben ab, bei bloß stehender nicht; Feuerkrieger auf eine dichte Gruppe
   (Umstehende nehmen Schaden, eigene nicht); KI reißt Gebäude sichtbar ab; Feuerstrahl
   der Ramme verschwindet mit der Explosion.
+
+---
+
+## Phase 10j — Scheibenwelt im Weltall (2026-08-05)
+
+Alle Karten sind runde Scheiben im All. Außerhalb der Scheibe ist der **Void**: kein
+Boden, keine Zelle, kein Mesh. Über den Rand Geschleuderte stürzen hinaus und sterben
+lautlos — die Schamanin hörbar, mit Mana-Bonus und Respawn. Die unsichtbare Mauer aus
+`95b0e73` ist damit abgebaut.
+
+**Verifikation:** Suite **4147 grün** (vorher 4023), Ladecheck sauber, kein
+`SCRIPT ERROR` im Output. Manuelle Prüfung durch den Nutzer **ausstehend**.
+
+### Gebaut
+
+- `scripts/core/terrain_data.gd` — `DISC_RADIUS_FRAC`, `_disc_mask` (Byte-Maske,
+  einmal in `_init`), `in_disc(cell)`, `vertex_in_disc(vx, vz)`, `has_ground(x, z)`,
+  `disc_center()`, `disc_radius()`, `clamp_into_world(td, x, z, margin)` (radial,
+  ersetzt `world_clamp_limit()`), `clamp_cell_into_disc(cell, size)` (statisch, für
+  den PathWorker ohne TerrainData). Maske in `is_walkable()`/`is_grass()`,
+  `average_height()` nur über die Scheibe.
+- `scripts/core/terrain_rim.gd` (**neu**) — Felsband, geschlossene Unterseite und
+  Wasserfall-Band als drei statische `ArrayMesh` ohne `tick()`. Pure Statics
+  `segment_is_submerged`, `waterfall_segments`, `touches_rim`, `rock_top_y` (alles
+  headless testbar).
+- `shaders/starfield.gdshader` (**neu**) — prozeduraler Sternenhimmel (`shader_type
+  sky`), drei Helligkeitslagen, Nebel und Milchstraßenband, keine `TIME`-Abhängigkeit.
+- `shaders/waterfall.gdshader` (**neu**) — scrollende UV, Streifen aus 1D-Hash,
+  Ausfaden nach unten; teilt `deep`/`crest` mit dem Meer.
+- `shaders/water.gdshader` — `disc_center`/`disc_radius` + `discard`, plus optionale
+  Textur-Uniforms. **Nur noch EIN Materialpfad** (siehe Erkenntnisse).
+- `scripts/core/terrain.gd` — Chunk-Cull um "außerhalb der Scheibe", Rim-Node,
+  Rim-Rebuild in `apply_deformation`.
+- `scripts/core/map_generator.gd` — `STANDARD_SIZE` 144, `LARGE_SIZE` 288,
+  `round_mask()` true für alle, `CORNER_INSET_F` 0,22, `RIDGE_ANCHOR_OFFSET_F`.
+- `scripts/units/unit.gd` — `_falling_into_void`, `_void_velocity`, `_void_start_y`,
+  `fall_into_void()`, `_leaves_the_disc()`; Rand-Test in `_tick_thrown` (der EINE
+  Detektor), Rand-Start in `_tick_roll` und `_tick_knockback`; Void-Zweig in
+  `_tick_dead`; `death_sfx_key()`/`_anim_base()`/`_corpse_*`/`water_splash_active()`/
+  `_is_water_at()` angepasst. **Entfernt:** `_bounce_off_world_edge()`,
+  `_clamp_world_xz()`, `WORLD_EDGE_MARGIN`, `WORLD_BOUNCE_RESTITUTION`.
+- Void-Guards: `TribeCommands.order_move()`/`cast_spell()` (der gemeinsame Punkt von
+  UI und KI), `SelectionManager` (Befehl, Rally, Unload, `_screen_to_ground`),
+  `SpellTargeting`, `BuildMenu`-Ghost, `Minimap._move_camera_to()`.
+- KI: radiale Snap-Klemmung (alle drei Kopien), budgetfreier `in_disc`-Vorfilter im
+  Bauplatz-Sweep, `has_ground` in `_flatten_break_point`, `AI_CRAMPED_ARENA` 68,
+  `_arena_span()`-Fallback auf die ganze Kantenlänge.
+- Tests: `tests/test_disc_world.gd`, `tests/test_void_fall.gd`,
+  `tests/test_disc_optics.gd`, `tests/test_void_orders.gd` (neu); sechs Mauer-Tests in
+  `test_combat.gd` durch drei Rand-Tests ersetzt.
+
+### Erkenntnisse und Stolpersteine
+
+1. **Vier Planannahmen waren falsch** (alle am Code nachgerechnet, siehe
+   `00_overview.md`): die Eckanker lagen *innerhalb* der Scheibe (K1), Terrain-Zauber
+   können sie strukturell nicht vergrößern (K2), das Rand-Mesh fehlte im Plan (K3),
+   und `_snap_to_ground()` war **nie** der unumgehbare Backstop, den sein Kommentar
+   behauptete (K4). K1 und K2 haben die Phase deutlich verkleinert, K3 und K4 sie
+   erweitert.
+2. **"Verlassen" und "fallen" brauchen zwei Granularitäten.** `has_ground()` ist eine
+   halbe Zelldiagonale großzügiger als die Zellmaske, damit eine Einheit auf der
+   Außenecke der letzten begehbaren Zelle noch Boden hat. Mit nur einem Test blieb ein
+   Stoß am Rand auf diesem Sims stehen wie an der alten Mauer. Jetzt: verlassen per
+   ZELLE (`_leaves_the_disc`), fallen per PUNKT (`has_ground`).
+3. **Tod am Rand, nicht in der Tiefe.** Mana-Bonus, Todesschrei und Respawn hängen an
+   `_die()`; 3,7 s später am Boden des Alls hätte sie niemand gesehen, und eine
+   "lebende" Einheit im Void hätte die Siegauswertung verzögert. Die Optik bleibt
+   richtig, weil `_anim_base()` für den Void `airborne` liefert statt `dead`.
+4. **Der Wasser-Materialpfad war doppelt.** `_ensure_water()` hatte einen
+   `StandardMaterial3D`-Zweig für den Texturfall — und ein StandardMaterial kann nicht
+   `discard`en, hätte also quadratisches Wasser über den Void gehängt. Beide Pfade
+   laufen jetzt über den Shader, die Textur wird hineingegeben.
+5. **Die Byte-Maske ist gemessen, nicht geraten.** `is_walkable()` wird beim
+   `NavGrid`-Aufbau ~17× pro Zelle gefragt (`_refresh_vehicle_region`), also ~280 000×
+   je Gitter. Ein zusätzlicher GDScript-Methodenaufruf auf diesem Pfad ist teuer; die
+   Maske wird deshalb inline als Byte gelesen, nicht über `in_disc()`.
+6. **Falsche Laufzeit-Baseline.** Die Suite schien von 79 s auf 170 s zu springen. Ein
+   `git worktree` auf HEAD zeigte: der Vergleichsstand selbst braucht **161,7 s** — die
+   79 s stammten vom *älteren* Commit vor dem Feuerkrieger-Flächenschaden, der die
+   Laufzeit verdoppelt hat. Die Scheibe ist in Wahrheit **schneller** (142,6 s), weil
+   21,5 % der Zellen dauerhaft solid sind. Laufzeiten nur gegen denselben Commit
+   vergleichen.
+7. **Zwei Test-Infrastruktur-Fallen** (beide kosteten Zeit): ein Testskript mit
+   Parse-Fehler lässt `run_tests.gd` **hängen** statt abzubrechen (der Godot-Prozess
+   bleibt liegen und verfälscht danach jede Messung), und `_find_plot()` nimmt als
+   erstes Argument die **Footprint-Größe**, nicht einen Anker — als Anker gelesen
+   sucht man Platz für ein 126×64-Gebäude und bekommt "kein Bauplatz".
+8. **Testkoordinaten in den Ecken.** Nur eine Handvoll Tests platzierte Einheiten bei
+   ~(10, 10); auf der 128er-Scheibe ist das 76 m vom Zentrum und damit Void. Betroffen
+   waren `test_unit_logic.gd`, `test_watchtower.gd` und der Chunk-Mesh-Test in
+   `test_drowning.gd` — alle nach innen verschoben und mit dem Grund kommentiert.
+9. **Die Unterseite sieht man im Normalspiel nicht.** `pitch_degrees` ist fest −55°,
+   die Kamera hängt also immer über dem Rig, und das Rig hat durch
+   `maxf(ground, SEA_LEVEL)` einen Boden 40 m über der Bodenplatte. Sichtbar arbeitet
+   das **Felsband**; die Platte schließt das Mesh für den Fall, dass der Pitch später
+   verstellbar wird (Nutzerentscheidung, bewusst so).
+
+### Gemessen
+
+| Größe | Baseline (HEAD `bd57140`) | Scheibenwelt |
+|---|---|---|
+| Suite | 4023 grün, 161,7 s | **4147 grün, 142,6 s** |
+| `benchmark_earlygame` pop t=60/90/120/150 s | 84 / 106 / 131 / 160 | **84 / 107 / 133 / 159** |
+| Plot-Zellen je Fenster | 1121 / 1137 / 1018 / 2399 | **1009 / 596 / 650 / 1692** |
+| Bäume Insel/Plateau bzw. Seenland/Bergpass | 72 / 4 Haine · 240 / 12 | **unverändert** |
+
+Die KI baut auf beiden neuen Kantenlängen normal auf (`diag_ai_buildup`, 4 KIs, 300 s:
+Hütten samt Ausbaustufen, Lager, Trainingslager, Bevölkerung steigend). Die Bevölkerung
+im Frühspiel ist gegen die Baseline **identisch**, der Bauplatz-Sweep prüft weniger
+Zellen — der Void-Vorfilter wirkt.
+
+### Offen
+
+- **Manuelle Prüfung durch den Nutzer** (fast alles Optik): runder Rand und
+  Sternenhimmel auf allen vier Karten, Karte weiter gut lesbar, Kante frontal ohne
+  Z-Fighting und ohne Loch in der Wasserfläche, Wasserfall auf der Insel, Sturz einer
+  Einheit über den Rand (lautlos, kein Spritzring) und der Schamanin (Schrei, Bonus,
+  Respawn), Klick ins Nichts ohne Befehl, Landbrücke Richtung Rand.
+- Auf `bergpass` lag der KI-Aufbau bei t=300 s hinter der Baseline (weniger Lager und
+  Werkstätten). Das Frühspiel ist laut `benchmark_earlygame` unauffällig, also ist es
+  ein **divergierter Kampfverlauf** auf der größeren Karte — beobachten, ob im
+  Nutzertest auffällt, dass die absoluten KI-Radien (`AI_BUILDER_WALK_RADIUS` 80,
+  `AI_FORWARD_DEPOT_DISTANCE` 35) nicht mit den 12,8 % längeren Wegen mitgewachsen sind.

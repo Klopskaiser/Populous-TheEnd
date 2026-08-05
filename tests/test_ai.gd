@@ -586,6 +586,39 @@ func test_expansion_toward_wood() -> void:
 	_free_world(w)
 
 
+## Phase 10j: an anchor sitting right at the disc's rim must still find somewhere to
+## build. The void costs no search budget — unlike water it can NEVER become buildable,
+## so scanning it is pure waste, and on the corner-anchor maps the rim is only ~15 cells
+## from the base while the AI runs the OPEN profile (radius 40). Without the filter a
+## large share of every ring burned AI_MAX_PLOT_SCAN_CELLS on cells that could never be
+## a plot, and the search came back empty.
+##
+## Deliberately NOT asserted: that a rim search scans FEWER cells. Skipping the void
+## lets the sweep reach further out, so it legitimately inspects more real cells. The
+## outcome the filter exists for is that a plot is found at all.
+func test_plot_search_still_succeeds_from_an_anchor_at_the_rim() -> void:
+	var w: Dictionary = _make_world()
+	var mid: int = w.td.size / 2
+	var last: int = mid
+	while w.td.in_disc(Vector2i(last + 1, mid)):
+		last += 1
+	var anchor: Vector2i = Vector2i(last - 1, mid)
+	var ai: AIController = _make_ai(w, w.tribes[1], anchor)
+	for i in range(4):
+		w.tree_manager.spawn_tree(Vector2i(last - 8 + i % 2, mid - 3 + i),
+			TreeResource.MAX_STAGE)
+	ai.dbg_plot_cells = 0
+	# NB: _find_plot's first argument is the FOOTPRINT — the anchors come from
+	# setup()/`_settlement_anchors`, not from here.
+	var cell: Vector2i = ai._find_plot(Vector2i(2, 2))
+	check(cell.x >= 0, "a rim anchor still finds a plot (%s)" % cell)
+	check(w.td.in_disc(cell), "and it is on real ground, not out in the void")
+	check(ai.dbg_plot_cells <= Balance.AI_MAX_PLOT_SCAN_CELLS + 1,
+		"the scan cap still holds (%d cells)" % ai.dbg_plot_cells)
+	ai.free()
+	_free_world(w)
+
+
 # --- TRAIN tick -----------------------------------------------------------------------
 
 func test_train_tick_enrolls_braves() -> void:
@@ -2406,9 +2439,9 @@ func test_small_map_wood_bonus_is_a_real_bonus() -> void:
 	# Nutzervorgabe: "auf kleinen Karten muss am Anfang 20 % mehr Holz spawnen."
 	check(Balance.SMALL_MAP_WOOD_BONUS > 1.0, "der Zuschlag ist einer")
 	check(is_equal_approx(Balance.SMALL_MAP_WOOD_BONUS, 1.2), "und zwar 20 %")
-	check(Balance.SMALL_MAP_MAX_SIZE == TerrainData.SIZE,
-		"klein heisst bis zur Standard-Kantenlaenge (Insel/Plateau 128, "
-			+ "Seenland/Bergpass 256)")
+	check(Balance.SMALL_MAP_MAX_SIZE == MapGenerator.STANDARD_SIZE,
+		"klein heisst bis zur Standard-Kantenlaenge (Insel/Plateau 144, "
+			+ "Seenland/Bergpass 288)")
 	check(MapGenerator.map_size("island") <= Balance.SMALL_MAP_MAX_SIZE,
 		"Insel gilt als klein")
 	check(MapGenerator.map_size("plateau") <= Balance.SMALL_MAP_MAX_SIZE,

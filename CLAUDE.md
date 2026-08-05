@@ -57,6 +57,19 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
   Deshalb kein statisches Mesh, sondern ein **Heightmap-basiertes Mesh**, dessen Höhenwerte
   zur Laufzeit geändert und neu vernetzt werden können (inkl. Aktualisierung von Kollision
   und Navigation).
+- **Die Welt ist eine Scheibe im Weltall (Phase 10j).** Begehbar ist nur der in das
+  quadratische Höhenraster **einbeschriebene Kreis**; außerhalb ist der **Void** —
+  kein Boden, keine Zelle, kein Mesh. Einziger Hebel ist die Maske in
+  `TerrainData.is_walkable()`/`is_grass()`: weil `NavGrid.update_region()` der
+  **einzige** Solidity-Writer ist, ziehen A-Stern, PathWorker, Fahrzeuggitter,
+  Insel-Labels, Baum-/Einheiten-Spawns und `can_place_at` automatisch mit. Ein
+  Terrain-Zauber kann die Scheibe damit **nicht vergrößern**. `has_ground(x, z)`
+  antwortet auf „ist hier Boden?" — `get_height()` clampt seine Eingaben weiterhin
+  und liefert draußen die Randhöhe, ist also KEINE Gültigkeitsprüfung.
+  Rand: Felsband plus geschlossene Unterseite (`TerrainRim`), Wasserfall nur dort,
+  wo der Rand unter der Wasserlinie liegt (heute nur die Insel). Hintergrund ist ein
+  **Sternenhimmel** (`shaders/starfield.gdshader`); das Ambient-Licht bleibt
+  zwingend `AMBIENT_SOURCE_COLOR`, sonst wird die Karte unlesbar dunkel.
 - **Gebäude:** 3D-Modelle (platzierbar auf dem Terrain, an Geländehöhe ausgerichtet).
 - **Einheiten:** **2D-Sprites mit Billboarding** – `Sprite3D`/`AnimatedSprite3D` mit
   `billboard = BILLBOARD_ENABLED`, immer zur Kamera gedreht.
@@ -217,11 +230,18 @@ Laufzeit-Terrainverformung (Erdbeben/Vulkan/Ebene/Absinken).
   Nur der Aufstieg wird gekappt — wer höher startet (vom Zeppelindeck
   geschleudert), fällt von dort. Was vom Hochschub nicht mehr unter den Deckel
   passt, wirkt stattdessen **seitlich**.
-- **Weltgrenze = unsichtbare Mauer.** Eine geschleuderte Einheit verlässt die
-  Karte nicht, sondern prallt **in der Luft** dagegen und wird mit einem Teil
-  ihrer Geschwindigkeit zurückgeworfen (`WORLD_BOUNCE_RESTITUTION`); in einer
-  Ecke werden beide Achsen gespiegelt. Laufende Einheiten sind davon nicht
-  betroffen — außerhalb der Karte ist ohnehin nichts begehbar.
+- **Über den Rand = Sturz ins All** (Phase 10j; ersetzt die unsichtbare Mauer aus
+  10c). Wer geschleudert, gestoßen oder gerollt die Scheibe verlässt, **stirbt im
+  Moment des Randübertritts** und fällt danach als Leiche mit erhaltener
+  Geschwindigkeit weiter, bis er unter `Balance.VOID_FALL_DEPTH` entsorgt wird. Der
+  Tod am Rand (und nicht in der Tiefe) ist Absicht: Mana-Bonus, Todesschrei und
+  Respawn-Zähler laufen dort, wo man sie sieht. Der Tod ist **lautlos**
+  (`death_sfx_key()` leer) — **außer bei der Schamanin**, die hörbar stirbt, deren
+  Töter den Mana-Bonus bekommt und die am Reinkarnationsplatz respawnt.
+  Laufende Einheiten erreichen den Void nie (unbegehbar), Fahrzeuge lassen sich
+  nicht schleudern, und **Luftschiffe behalten ihren Clamp** — sie werden
+  befehligt, nicht geworfen. Zwei Granularitäten: **verlassen** wird per ZELLE
+  entschieden (`_leaves_the_disc`), **fallen** per PUNKT (`has_ground`).
 - **Fliegende Ziele:** Nahkampf und Bekehrung kommen nicht an sie heran, Lava
   ignoriert sie, und Feuerkrieger-Feuerbälle machen **+20 % Schaden**
   (`FIREWARRIOR_AIRBORNE_MULT`, auch je Flächenschaden-Opfer) und
@@ -238,10 +258,14 @@ Verletzung, Panik, Brand): es sind UI-Glyphen über dem Kopf, und in der
 Massenschlacht würden hunderte davon die Shadow-Map fluten. Weltgeometrie
 (Gebäude, Bäume, Fahrzeuge) wirft weiterhin Schatten.
 
-**Skirmish-Karten (Phase 7i):** Auswahl im Skirmish-Setup — **Insel** (Standard,
-128), **Seenland** (256, See mittig, Start in den Ecken), **Bergpass** (256, Gebirge
-mit 3 Pässen), **Plateau** (128, erhöhte Start-Plateaus mit Rampe). Terrain-Kantenlänge
-ist pro Karte variabel.
+**Skirmish-Karten (Phase 7i, Kantenlängen in 10j gewachsen):** Auswahl im
+Skirmish-Setup — **Insel** (Standard, 144), **Seenland** (288, See mittig, Start in
+den Ecken), **Bergpass** (288, Gebirge mit 3 Pässen), **Plateau** (144, erhöhte
+Start-Plateaus mit Rampe). Terrain-Kantenlänge ist pro Karte variabel
+(`MapGenerator.STANDARD_SIZE` / `LARGE_SIZE`; `TerrainData.SIZE` = 128 ist nur noch
+die Default-/Testgröße). Die Kanten wuchsen um **×1,128**, damit die **Fläche der
+Scheibe der alten Quadratfläche entspricht** (99,4 %) — die Scheibenwelt kostet
+also keine Spielfläche. Alle Karten sind rund.
 
 ## 7. Skirmish-KI
 

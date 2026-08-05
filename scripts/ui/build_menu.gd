@@ -172,6 +172,14 @@ func _process(_delta: float) -> void:
 		_ghost.visible = false
 		_ghost_valid = false
 		return
+	# Void (phase 10j): can_place_at would refuse it anyway (void cells are
+	# unwalkable), but a ghost hovering over empty space still reads as "you may
+	# build here, just not yet" — so hide it outright.
+	var gtd: TerrainData = GameState.terrain_data
+	if gtd != null and not gtd.has_ground(hit.position.x, hit.position.z):
+		_ghost.visible = false
+		_ghost_valid = false
+		return
 	# Centre the footprint (as oriented) on the cursor cell.
 	var fp: Vector2i = _effective_footprint()
 	var hit_cell: Vector2i = _nav_grid.world_to_cell(hit.position)

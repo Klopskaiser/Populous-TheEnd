@@ -21,12 +21,18 @@ func test_variable_terrain_size() -> void:
 
 
 func test_registry_sizes_and_mask() -> void:
-	check(MapGenerator.map_size("island") == 128, "island is standard size")
-	check(MapGenerator.map_size("plateau") == 128, "plateau is standard size")
-	check(MapGenerator.map_size("seenland") == 256, "seenland is twice as big")
-	check(MapGenerator.map_size("bergpass") == 256, "bergpass is twice as big")
-	check(MapGenerator.round_mask("island"), "island uses the round mask")
-	check(not MapGenerator.round_mask("seenland"), "square maps drop the round mask")
+	check(MapGenerator.map_size("island") == MapGenerator.STANDARD_SIZE,
+		"island is standard size")
+	check(MapGenerator.map_size("plateau") == MapGenerator.STANDARD_SIZE,
+		"plateau is standard size")
+	check(MapGenerator.map_size("seenland") == MapGenerator.LARGE_SIZE,
+		"seenland is twice as big")
+	check(MapGenerator.map_size("bergpass") == MapGenerator.LARGE_SIZE,
+		"bergpass is twice as big")
+	# Phase 10j: JEDE Karte ist eine Scheibe, die Maske ist keine Kosmetik mehr.
+	for map_id in MapGenerator.map_ids():
+		check(MapGenerator.round_mask(map_id),
+			"%s is a disc" % map_id)
 
 
 ## Every anchor sits on walkable ground and every base can reach every other.
@@ -124,8 +130,8 @@ func test_plateau() -> void:
 	_check_anchors("plateau")
 	var td: TerrainData = MapGenerator.create_terrain("plateau", SEED)
 	# The plateau tops are strongly raised above the flat surroundings.
-	var corner: Vector2i = Vector2i(int(round(float(td.size) * 0.18)),
-		int(round(float(td.size) * 0.18)))
+	# Probe what the game actually uses, not a copy of the anchor formula.
+	var corner: Vector2i = MapGenerator.spawn_anchors(td, "plateau", 4)[0]
 	check(td.cell_height(corner) > MapGenerator.LAND + MapGenerator.PLATEAU_HEIGHT - 2.0,
 		"plateau top is raised")
 	check(td.cell_height(Vector2i(td.size / 2, td.size / 2)) < MapGenerator.LAND + 2.0,

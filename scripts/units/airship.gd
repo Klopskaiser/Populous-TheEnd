@@ -279,9 +279,12 @@ func _on_path_finished() -> void:
 func _plan_path_to(target: Vector3, _allow_partial: bool = false) -> bool:
 	var t: Vector3 = target
 	if terrain_data != null:
-		var limit: float = float(terrain_data.size) * TerrainData.CELL_SIZE - 1.0
-		t.x = clampf(t.x, 1.0, limit)
-		t.z = clampf(t.z, 1.0, limit)
+		# The airship keeps its clamp on the disc world (phase 10j): it is
+		# COMMANDED, never hurled, so it must not be orderable into the void.
+		# Shared helper, not a hand-copied formula — see clamp_into_world's doc.
+		var inside: Vector2 = TerrainData.clamp_into_world(terrain_data, t.x, t.z)
+		t.x = inside.x
+		t.z = inside.y
 	_path = PackedVector3Array([t])
 	_path_index = 0
 	return true

@@ -120,15 +120,13 @@ func _build_terrain_image() -> void:
 	_texture = ImageTexture.create_from_image(_image)
 
 
-## Colour for a cell, transparent outside the inscribed circle (round mask).
+## Colour for a cell, transparent outside the disc. Asks TerrainData.in_disc()
+## rather than keeping a private copy of the circle formula (phase 10j): the
+## minimap and the gameplay disc are now the same thing, and two formulas would
+## eventually disagree by a cell.
 func _cell_color(x: int, z: int) -> Color:
-	if round_mask:
-		var n: float = float(_terrain_data.size)
-		var half: float = n * 0.5
-		var dx: float = float(x) + 0.5 - half
-		var dz: float = float(z) + 0.5 - half
-		if dx * dx + dz * dz > half * half:
-			return Color(0, 0, 0, 0)
+	if round_mask and not _terrain_data.in_disc(Vector2i(x, z)):
+		return Color(0, 0, 0, 0)
 	return height_to_color(_terrain_data.cell_height(Vector2i(x, z)))
 
 
@@ -233,6 +231,10 @@ func _move_camera_to(local_pos: Vector2) -> void:
 	if _camera_rig == null:
 		return
 	var s: float = minf(size.x, size.y)
+	# A click in the transparent corner of a round minimap used to send the camera
+	# into the void (there was no guard at all here).
+	if not _inside(local_pos, Vector2(s, s) * 0.5, s * 0.5):
+		return
 	var world: Vector2 = map_to_world(local_pos, s, float(_terrain_data.size))
 	_camera_rig.global_position.x = world.x
 	_camera_rig.global_position.z = world.y

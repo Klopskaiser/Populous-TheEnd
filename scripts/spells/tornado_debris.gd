@@ -159,9 +159,10 @@ func _in_water(pos: Vector3) -> bool:
 
 
 func _clamp_to_map() -> void:
-	var limit: float = TerrainData.world_clamp_limit(terrain_data)
-	position.x = clampf(position.x, 1.0, limit)
-	position.z = clampf(position.z, 1.0, limit)
+	var inside: Vector2 = TerrainData.clamp_into_world(
+		terrain_data, position.x, position.z)
+	position.x = inside.x
+	position.z = inside.y
 
 
 ## Billboarded pile sprite (in-tree only). A sapling shows a single small log.

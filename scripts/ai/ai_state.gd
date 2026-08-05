@@ -407,10 +407,12 @@ static func training_hut_share(state: State, army: int, army_target: int) -> flo
 
 
 # --- Arena-Enge: zwei Baumuster (10g Teil 5) -----------------------------------------
-# Die KARTENGROESSE allein reicht nicht: Insel (128) mit 4 Staemmen ist eng (die
-# naechste Nachbarbasis liegt 36,2 Zellen weg, MapGenerator._circle_anchors setzt
-# die Anker auf einen Kreis mit Radius 0,2 * size), Plateau (128) mit seinen
-# Eckankern dagegen nicht (82 Zellen). Maszgeblich ist der gemessene Basisabstand.
+# Die KARTENGROESSE allein reicht nicht: Insel (144) mit 4 Staemmen ist eng (die
+# naechste Nachbarbasis liegt 40,7 Zellen weg, MapGenerator._circle_anchors setzt
+# die Anker auf einen Kreis mit Radius 0,2 * size), Plateau (144) mit seinen
+# Eckankern dagegen nicht (80 Zellen). Maszgeblich ist der gemessene Basisabstand.
+# Die Schwelle wuchs in Phase 10j mit den Kartenkanten mit (60 -> 68), damit die
+# Einstufung je Karte gleich blieb.
 
 ## True while the nearest ENEMY base is so close that expanding outward means
 ## expanding into enemy territory.
@@ -423,13 +425,13 @@ static func is_cramped(arena_span: float) -> bool:
 ## _detect_threat fired permanently — the wood logistics never ran, _tick_attack
 ## never ran at all, and every idle brave was thrown at the enemy as militia. That
 ## is the reported "on small maps it immediately attacks with braves".
-## 36 -> 14 | 51 -> 17,9 | 82 -> 28,7 | 128+ -> 32 (the old value)
+## 41 -> 14 | 58 -> 20,2 | 80 -> 28 | 92+ -> 32 (the old value)
 static func defend_radius(arena_span: float) -> float:
 	return clampf(arena_span * Balance.AI_DEFEND_RADIUS_FACTOR,
 		Balance.AI_DEFEND_RADIUS_MIN, Balance.AI_DEFEND_RADIUS_MAX)
 
 
-## Ring search radius for build plots. 40 cells on a 128er map reaches PAST the
+## Ring search radius for build plots. 40 cells on a 144er map reaches PAST the
 ## neighbour's base; a cramped tribe keeps its base compact (and the sweep cheaper).
 static func plot_search_radius(arena_span: float) -> int:
 	return Balance.AI_PLOT_SEARCH_RADIUS_CRAMPED if is_cramped(arena_span) \

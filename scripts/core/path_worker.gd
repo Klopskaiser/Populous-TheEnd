@@ -149,7 +149,7 @@ func _solve_request(instance_id: int, request_id: int, from_cell: Vector2i,
 ## Nearest walkable cell via outward ring search (mirrors
 ## NavGrid.nearest_walkable_cell on the worker clone). (-1, -1) if none in range.
 func _snap(cell: Vector2i) -> Vector2i:
-	cell = Vector2i(clampi(cell.x, 0, _size - 1), clampi(cell.y, 0, _size - 1))
+	cell = TerrainData.clamp_cell_into_disc(cell, _size)
 	if not _grid.is_point_solid(cell):
 		return cell
 	for radius in range(1, MAX_SNAP_RADIUS + 1):

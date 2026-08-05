@@ -362,12 +362,29 @@ const LIFT_MAX_HEIGHT: float = 8.0
 ## Was vom Hochschub nicht mehr unter den Deckel passt, wird stattdessen mit
 ## diesem Faktor auf den SEITLICHEN Schub gelegt (1,0 = eins zu eins).
 const LIFT_SIDEWAYS_TRANSFER: float = 1.0
-## Unsichtbare Mauer an der Weltgrenze: so weit INNERHALB des Kartenrandes
-## steht sie, damit eine geschleuderte Einheit nicht auf der Kante landet.
-const WORLD_EDGE_MARGIN: float = 1.0
-## Rückprall-Anteil der Geschwindigkeit beim Anprall (0 = klebt, 1 = perfekt
-## elastisch). Bewusst klein: ein "leichter Bounce" zurück ins Spielfeld.
-const WORLD_BOUNCE_RESTITUTION: float = 0.45
+# --- Scheibenwelt: Sturz ins All (Phase 10j) ---
+# Die unsichtbare Mauer an der Weltgrenze (WORLD_EDGE_MARGIN /
+# WORLD_BOUNCE_RESTITUTION, Phase 10c) ist ENTFALLEN. Sie war die Behandlung eines
+# Symptoms: die Schamanin landete ausserhalb der Karte, weil
+# TerrainData.get_height() seine Eingaben clampt und draussen die Randhoehe
+# fortsetzt — es gab also UEBERALL Boden. Seit 10j ist draussen der Void, und wer
+# hinausgeschleudert wird, faellt.
+## Tiefe unter dem Absprungpunkt, ab der eine ins All gestuerzte Einheit entsorgt
+## wird (sie ist da langst ausser Sicht). Bei THROW_GRAVITY 18 sind das ~3,7 s
+## freier Fall.
+const VOID_FALL_DEPTH: float = 120.0
+## Notausgang, falls ein Sturz ohne Vertikalgeschwindigkeit beginnt und die
+## Tiefenschwelle nie erreicht.
+const VOID_FALL_MAX_TIME: float = 15.0
+## Dicke der Scheibe: so weit reicht das Felsband unter den Meeresspiegel, dort
+## sitzt die geschlossene Unterseite (TerrainRim). Ohne dieses Band waere die
+## Scheibe papierduenn und man sehe bei flachem Kamerawinkel hindurch.
+const WORLD_RIM_SKIRT_DEPTH: float = 40.0
+## Hoehe des Wasserfall-Bands unter dem Meeresspiegel und Scrollgeschwindigkeit
+## seiner UV. Nur dort sichtbar, wo der Rand unter der Wasserlinie liegt — bei der
+## "nackten Felskante" (Nutzerentscheidung) ist das heute nur die Insel.
+const WATERFALL_HEIGHT: float = 40.0
+const WATERFALL_SCROLL_SPEED: float = 1.6
 
 # =============================================================================
 # BRAND / LAVA (Einheiten)
@@ -733,14 +750,15 @@ const TREE_TYPE_PARAMS: Array[Dictionary] = [
 ## (Nicht-Gras bleibt immer Standard) plus reine Laub-/Bambus-Haine.
 const TREE_LEAF_SHARE: float = 0.20
 const TREE_BAMBOO_SHARE: float = 0.10
-const TREE_GROVES_PER_STANDARD_MAP: int = 3   # Haine je 128er-Fläche (skaliert wie TREE_COUNT)
+const TREE_GROVES_PER_STANDARD_MAP: int = 3   # Haine je Standardkarte (skaliert wie TREE_COUNT)
 ## Holz-Zuschlag beim Start auf KLEINEN Karten (10h, Nutzervorgabe): dort liegen die
 ## Basen eng zusammen, jeder Stamm hat also weniger Wald für sich. Der Zuschlag gilt
 ## für Bäume UND Haine, damit sich das Verhältnis der Baumarten nicht verschiebt.
 const SMALL_MAP_WOOD_BONUS: float = 1.2
-## Bis zu dieser Kantenlänge gilt eine Karte als klein (Insel und Plateau: 128;
-## Seenland und Bergpass: 256).
-const SMALL_MAP_MAX_SIZE: int = TerrainData.SIZE
+## Bis zu dieser Kantenlänge gilt eine Karte als klein (Insel und Plateau: 144;
+## Seenland und Bergpass: 288). Folgt der Standardkarte, NICHT `TerrainData.SIZE`
+## — das ist seit Phase 10j nur noch die Default-/Testgröße (128).
+const SMALL_MAP_MAX_SIZE: int = MapGenerator.STANDARD_SIZE
 const TREE_GROVE_TREES_MIN: int = 8
 const TREE_GROVE_TREES_MAX: int = 14
 const TREE_GROVE_RADIUS: int = 6
@@ -899,9 +917,14 @@ const AI_ARMY_SHARE_PREACHER: float = 0.30
 const AI_ARENA_TTL_TICKS: int = 60
 ## Unter diesem Abstand zur naechsten FEINDLICHEN Basis (Zellen = Meter) gilt die
 ## Arena als ENG. MapGenerator._circle_anchors setzt die Anker auf einen Kreis mit
-## Radius 0,2 * size: Insel 128 mit 4 Staemmen 36,2 · mit 3 Staemmen 44,3 · mit 2
-## Staemmen 51,2 · Plateau 128 (Eckanker) 82 · Seenland/Bergpass 256 deutlich mehr.
-const AI_CRAMPED_ARENA: float = 60.0
+## Radius 0,2 * size: Insel 144 mit 4 Staemmen 40,7 · mit 3 Staemmen 49,9 · mit 2
+## Staemmen 57,6 · Plateau 144 (Eckanker, benachbart) 80 · Seenland/Bergpass 288
+## deutlich mehr (162 bzw. 104).
+## In Phase 10j mit den Kartenkanten mitskaliert (60 → 68 = 60 · 1,128), damit
+## JEDE Karte ihre heutige Einstufung behaelt — das ist eine Kante, kein Regler:
+## ein Umschlag aendert Suchradius (18↔40), Siedlungsanker (2↔4), Waechtertuerme
+## (3↔2), Wellengroesse (8↔12) und Trainingsschwelle (12↔16) auf einen Schlag.
+const AI_CRAMPED_ARENA: float = 68.0
 ## Verteidigungsradius relativ zum Basisabstand statt fixer 32 m: auf der Insel
 ## lagen die Nachbarbasen IM alten Radius, wodurch _detect_threat dauerhaft feuerte
 ## — Holzwirtschaft aus, nie ein echter Angriff, alle Braves als Miliz.

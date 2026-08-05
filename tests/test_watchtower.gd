@@ -4,6 +4,11 @@ extends TestBase
 ## combat units / the shaman (never braves); ranged crew fight from the tower
 ## with +3 m range; crew are a protected reserve (no fireball/conversion target)
 ## until ejected by a storm, ranged stage-1 fire (killed) or a disabling spell.
+##
+## Phase 10j note: the positions below sit near the MAP CENTRE, not near the origin.
+## The world is a disc inscribed in the square grid, so the old (10, 10) corner area
+## is the void — a unit placed there falls out of the world and every motion
+## assertion fails. These are relative-motion tests; only the origin moved.
 
 const TICK: float = 0.1
 const MAX_TICKS: int = 1500
@@ -109,9 +114,9 @@ func test_crew_capacity_and_eligibility() -> void:
 func test_queued_garrison_runs_after_route() -> void:
 	var w: Dictionary = _make_world()
 	var tower: Watchtower = _tower(w, w.tribe0)   # footprint at (30,30)
-	var fire: Unit = w.unit_manager.spawn_unit(FIREWARRIOR_SCENE, 0, Vector3(10, 0, 10))
-	fire.order_move(Vector3(12, 0, 12))          # start the route
-	fire.order_move(Vector3(14, 0, 16), true)    # queued waypoint
+	var fire: Unit = w.unit_manager.spawn_unit(FIREWARRIOR_SCENE, 0, Vector3(50, 0, 50))
+	fire.order_move(Vector3(52, 0, 52))          # start the route
+	fire.order_move(Vector3(54, 0, 56), true)    # queued waypoint
 	# Arm the follow-up (as the SelectionManager does on Shift+right-click).
 	fire.route_end_action = (func(u: Unit) -> void: u.order_garrison(tower)).bind(fire)
 	# One tick in: still walking, NOT garrisoning yet.

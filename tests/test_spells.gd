@@ -1722,13 +1722,30 @@ func _flat_terrain_sized(cells: int, h: float = 5.0) -> TerrainData:
 	return td
 
 
-func test_world_clamp_limit_follows_the_map_size() -> void:
-	check(is_equal_approx(TerrainData.world_clamp_limit(_flat_terrain_sized(128)), 127.0),
-		"128er Karte: Grenze 127")
-	check(is_equal_approx(TerrainData.world_clamp_limit(_flat_terrain_sized(256)), 255.0),
-		"256er Karte: Grenze 255 (vorher fest 127)")
-	check(is_equal_approx(TerrainData.world_clamp_limit(null), 127.0),
+## Phase 10j: der Clamp ist radial (Scheibe) statt rechteckig. Er folgt weiter der
+## KARTENGROESSE — genau der Fehler, der Tornados auf 256er Karten an die 127-Linie
+## nagelte (Nutzerreport: Tornados am See).
+func test_clamp_into_world_follows_the_map_size() -> void:
+	var small: TerrainData = _flat_terrain_sized(128)
+	var big: TerrainData = _flat_terrain_sized(256)
+	# Ein Punkt weit ausserhalb landet auf dem Scheibenrand, nicht in der Mitte.
+	var p_small: Vector2 = TerrainData.clamp_into_world(small, 400.0, 64.0)
+	check(is_equal_approx(p_small.x, 126.5) and is_equal_approx(p_small.y, 64.0),
+		"128er Karte: radial auf 62,5 m um die Mitte geklemmt")
+	var p_big: Vector2 = TerrainData.clamp_into_world(big, 400.0, 128.0)
+	check(is_equal_approx(p_big.x, 254.5) and is_equal_approx(p_big.y, 128.0),
+		"256er Karte: eigene Grenze (vorher fest 127)")
+	var p_null: Vector2 = TerrainData.clamp_into_world(null, 400.0, 64.0)
+	check(is_equal_approx(p_null.x, 126.5),
 		"ohne Terrain: Rückfall auf die Standardgröße")
+	# Innerhalb der Scheibe bleibt der Punkt unangetastet.
+	var inside: Vector2 = TerrainData.clamp_into_world(small, 70.0, 60.0)
+	check(is_equal_approx(inside.x, 70.0) and is_equal_approx(inside.y, 60.0),
+		"Punkt in der Scheibe wird nicht verschoben")
+	# Die Ecke ist Void und wird radial hereingezogen.
+	var corner: Vector2 = TerrainData.clamp_into_world(small, 127.0, 127.0)
+	check(Vector2(corner.x - 64.0, corner.y - 64.0).length() <= 62.6,
+		"Kartenecke liegt im Void und wird auf die Scheibe geklemmt")
 
 
 func test_tornado_does_not_teleport_on_a_large_map() -> void:

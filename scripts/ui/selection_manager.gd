@@ -310,7 +310,7 @@ func _fire_unload(screen_pos: Vector2) -> void:
 		from, from + dir * RAY_LENGTH)
 	query.collision_mask = TERRAIN_MASK
 	var hit: Dictionary = space.intersect_ray(query)
-	if hit.is_empty():
+	if hit.is_empty() or _is_void(hit.position):
 		return
 	ship.order_unload(hit.position)
 	ship.flash_ring()
@@ -362,12 +362,17 @@ func _fire_harvest(screen_rect: Rect2, drag_dist: float) -> void:
 
 ## Ground point under a screen position. Terrain raycast first; a ray that leaves
 ## the terrain BODY (drag corner past the coast or over the map edge) falls back
-## to the analytic sea-level plane hit clamped into the map, so a corner over the
+## to the analytic sea-level plane hit clamped into the disc, so a corner over the
 ## void still yields a usable rectangle edge. Vector3.INF only when the ray points
 ## at or above the horizon and cannot be resolved at all.
+##
+## Phase 10j: a hit in the void counts as a MISS so it takes the clamping path.
+## Deliberately NOT Vector3.INF — this feeds the CORNERS of the harvest rectangle,
+## and one corner over space would cancel the whole chop order. Clamping the corner
+## onto the rim is harmless because nothing grows in the void anyway.
 func _screen_to_ground(screen_pos: Vector2) -> Vector3:
 	var hit: Dictionary = _raycast(screen_pos, TERRAIN_MASK)
-	if not hit.is_empty():
+	if not hit.is_empty() and not _is_void(hit.position):
 		return hit.position
 	var camera: Camera3D = get_viewport().get_camera_3d()
 	if camera == null:
@@ -380,9 +385,18 @@ func _screen_to_ground(screen_pos: Vector2) -> Vector3:
 	var td: TerrainData = GameState.terrain_data
 	if td == null:
 		return Vector3(p.x, TerrainData.SEA_LEVEL, p.z)
-	var extent: float = float(td.size) * TerrainData.CELL_SIZE
-	return Vector3(clampf(p.x, 0.0, extent), TerrainData.SEA_LEVEL,
-		clampf(p.z, 0.0, extent))
+	var inside: Vector2 = TerrainData.clamp_into_world(td, p.x, p.z)
+	return Vector3(inside.x, TerrainData.SEA_LEVEL, inside.y)
+
+
+## True when a world point lies over the VOID (phase 10j). `HeightMapShape3D` is
+## unavoidably rectangular, so the terrain raycast still HITS out there — every
+## click path has to reject it explicitly, otherwise the player can order and cast
+## into nothing. TribeCommands guards the same thing server-side; this layer exists
+## so no sound, ring or ghost pretends the click was valid.
+func _is_void(point: Vector3) -> bool:
+	var td: TerrainData = GameState.terrain_data
+	return td != null and not td.has_ground(point.x, point.z)
 
 
 ## White confirmation ring around ordered trees (no-op without the renderer).
@@ -725,7 +739,7 @@ func _demolish_selected_buildings() -> void:
 ## camp's rally dropped onto a hut/tower so graduates walk in).
 func _set_rally(screen_pos: Vector2) -> void:
 	var hit: Dictionary = _raycast(screen_pos, TERRAIN_MASK)
-	if hit.is_empty():
+	if hit.is_empty() or _is_void(hit.position):
 		return
 	for b in selected_buildings:
 		if is_instance_valid(b):
@@ -847,6 +861,10 @@ func _command_move(screen_pos: Vector2, queue_up: bool, aggressive: bool = false
 		from, from + dir * RAY_LENGTH)
 	var hit: Dictionary = space.intersect_ray(query)
 	if hit.is_empty():
+		return
+	# Void: no order, and deliberately no move/blocked cue either — clicking into
+	# space must feel like clicking nothing, not like a refused order.
+	if _is_void(hit.position):
 		return
 
 	# 10h: a brave that HOLDS wood (right-clicked a pile) waits for a destination —

@@ -20,10 +20,21 @@ uniform float wave_height = 0.07;
 // cell, so the surface never looks faceted.
 uniform float wave_scale = 0.35;
 uniform float wave_speed = 0.9;
+// Phase 10j: the sea is cut to the DISC. The plane stays a square PlaneMesh so its
+// subdivision (and with it the wave displacement) is untouched — the fragments
+// outside the disc are simply discarded. That is also why there is only ONE material
+// path now: a StandardMaterial3D cannot discard, so the optional water texture is
+// fed in here instead of replacing the whole material.
+uniform vec2 disc_center = vec2(64.0, 64.0);
+uniform float disc_radius = 64.0;
+uniform sampler2D albedo_tex : source_color, hint_default_white;
+uniform bool use_tex = false;
+uniform float uv_scale = 1.0;
 // Finite-difference step for the normal, in metres.
 const float NORMAL_EPS = 0.75;
 
 varying float wave;
+varying vec2 world_xz;
 
 // Normalised swell in roughly [-1, 1].
 float wave_at(vec2 p, float t) {
@@ -34,6 +45,7 @@ float wave_at(vec2 p, float t) {
 
 void vertex() {
 	vec2 wxz = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xz;
+	world_xz = wxz;
 	wave = wave_at(wxz, TIME);
 	VERTEX.y += wave * wave_height;
 	// Rebuild the normal from the same function (central differences). The plane
@@ -47,8 +59,17 @@ void vertex() {
 }
 
 void fragment() {
+	// Outside the disc there is no world, so there is no sea either.
+	if (length(world_xz - disc_center) > disc_radius) {
+		discard;
+	}
 	// No trig in the fragment stage at all — the crest tint rides the varying.
-	ALBEDO = mix(deep, crest, clamp(wave * 0.5 + 0.5, 0.0, 1.0));
+	vec3 col = mix(deep, crest, clamp(wave * 0.5 + 0.5, 0.0, 1.0));
+	if (use_tex) {
+		// Same look as the old StandardMaterial3D path: tinted texture, still opaque.
+		col = texture(albedo_tex, world_xz * uv_scale * 0.02).rgb * col * 1.6;
+	}
+	ALBEDO = col;
 	ROUGHNESS = 0.25;
 	METALLIC = 0.1;
 }

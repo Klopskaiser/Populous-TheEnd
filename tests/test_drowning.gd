@@ -489,16 +489,23 @@ func test_seabed_is_not_meshed() -> void:
 	var deep: float = TerrainData.SEA_LEVEL - Terrain.SEABED_CULL_MARGIN - 1.0
 	for i in range(td.heights.size()):
 		td.heights[i] = deep
-	# A single land plateau in one corner so the map is not entirely sea.
-	for z in range(0, 20):
-		for x in range(0, 20):
+	# A single land plateau so the map is not entirely sea. It has to sit near the
+	# MIDDLE: since phase 10j the map is a disc, and a plateau in the square's corner
+	# would be in the void — unmeshed for that reason instead of the one under test.
+	var mid: int = td.size / 2
+	for z in range(mid - 8, mid + 12):
+		for x in range(mid - 8, mid + 12):
 			td.set_vertex_height(x, z, 6.0)
 	var terrain: Terrain = Terrain.new()
 	terrain.build(td)
-	var open_sea: MeshInstance3D = terrain.get_node_or_null("Chunks/Chunk_5_5")
+	var chunk_mid: int = mid / Terrain.CHUNK
+	# Open sea, but still well inside the disc.
+	var open_sea: MeshInstance3D = terrain.get_node_or_null(
+		"Chunks/Chunk_%d_%d" % [chunk_mid - 2, chunk_mid])
 	check(open_sea != null and open_sea.mesh == null,
 		"a chunk of pure open sea carries no mesh at all")
-	var land: MeshInstance3D = terrain.get_node_or_null("Chunks/Chunk_0_0")
+	var land: MeshInstance3D = terrain.get_node_or_null(
+		"Chunks/Chunk_%d_%d" % [chunk_mid, chunk_mid])
 	check(land != null and land.mesh != null, "the land chunk is meshed")
 	# Shallow water just under the line stays, so nothing shows through a trough.
 	for z in range(td.verts):

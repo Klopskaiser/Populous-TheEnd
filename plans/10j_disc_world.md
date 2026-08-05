@@ -1,5 +1,31 @@
 # Phase 10j — Scheibenwelt im Weltall: runde Karten, Sternenhimmel, Sturz ins All
 
+> **UMGESETZT am 2026-08-05.** Ist-Stand, Messwerte und Stolpersteine stehen in
+> [PROGRESS.md](PROGRESS.md); dieser Plan bleibt als Entwurf stehen. **Vier seiner
+> Annahmen haben sich am Code als falsch erwiesen** — sie sind unten an der jeweiligen
+> Stelle korrigiert, damit niemand ihnen später wieder folgt:
+>
+> - **K1 — „drei Karten brauchen echten Neuentwurf" ist falsch.** `_corner_cells()`
+>   setzt die Anker bei `(0,5 − 0,18) · size · √2 = 0,4525 · size`, also *innerhalb*
+>   des Radius `0,5 · size`. Nötig war nur die Ankerfraktion 0,18 → 0,22 (Randabstand
+>   6,9 → 15,4 Zellen bei 144). Kein Generator wurde inhaltlich angefasst.
+> - **K2 — Terrain-Zauber können die Scheibe nicht vergrößern.** Die Maske sitzt IN
+>   `is_walkable()`, und `NavGrid.update_region()` ist der einzige Solidity-Writer:
+>   eine angehobene Void-Zelle kann nie begehbar werden. Die sechs geplanten Edits an
+>   den Verform-Funktionen entfielen; ein Test belegt die Invariante stattdessen.
+> - **K3 — der Plan nannte kein Rand-Mesh.** „Nackte Felskante" beschreibt nur die
+>   Farbe; ohne Geometrie ist die Scheibe papierdünn. Neu: `TerrainRim` mit Felsband
+>   **und geschlossener Unterseite** (Nutzerentscheidung).
+> - **K4 — `_snap_to_ground()` war nie der unumgehbare Backstop**, den sein Kommentar
+>   behauptete: die C2-Kernels in `UnitManager` schreiben `position` direkt. Sie sind
+>   über A\* bzw. `is_cell_walkable` gesichert, aber die Garantie lautet anders als
+>   dokumentiert — der Kommentar ist berichtigt.
+>
+> **Nutzervorgaben, die im Plan noch fehlen:** alle vier Karten wachsen um ×1,128
+> (Insel/Plateau 144, Seenland/Bergpass 288), damit die **Scheibenfläche der alten
+> Quadratfläche entspricht** (99,4 %) — die Scheibenwelt kostet keine Spielfläche. Und
+> die Scheibe ist **endlich mit Unterseite**, keine bodenlose Wand.
+
 > Architektur-Entscheidungen und Verifikations-Befehle: siehe [00_overview.md](00_overview.md).
 > **Abhängigkeit:** [Phase 10i](10i_construction_bugfix_combat_balance.md) sollte
 > abgeschlossen sein — sie fasst dieselben Unit-Bewegungspfade an, die diese Phase

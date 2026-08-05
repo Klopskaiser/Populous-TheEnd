@@ -141,6 +141,16 @@ func demolish_building(tribe: Tribe, building: Building) -> bool:
 
 # --- Unit orders ----------------------------------------------------------------------
 
+## True when this world point lies over the VOID (phase 10j) — outside the disc
+## there is no ground, so it is not a place and cannot be ordered to or cast at.
+## The guard lives on TribeCommands because it is the one mutation API both the UI
+## and the AI go through: `HeightMapShape3D` stays rectangular, so a mouse ray still
+## HITS the void, and every UI path that forgets to check would otherwise let the
+## player command into nothing.
+func _is_void(point: Vector3) -> bool:
+	return nav_grid != null and nav_grid.terrain != null 		and not nav_grid.terrain.has_ground(point.x, point.z)
+
+
 ## Move order in packs of GROUP_SIZE: the selection is sorted spatially so
 ## nearby units end up in the same group, group centres get deterministic
 ## formation offsets (rings), members stand tightly around their centre.
@@ -148,6 +158,8 @@ func demolish_building(tribe: Tribe, building: Building) -> bool:
 ## default is the plain (passive) move — also used to flee a fight.
 func order_move(units: Array[Unit], target: Vector3, queue_up: bool = false,
 		aggressive: bool = false) -> void:
+	if _is_void(target):
+		return   # der Void ist kein Ort
 	var alive: Array[Unit] = []
 	for unit in units:
 		if unit.state != Unit.State.DEAD and _unit_active(unit):
@@ -471,6 +483,10 @@ func set_upgrades_allowed(tribe: Tribe, value: bool) -> bool:
 func cast_spell(tribe: Tribe, spell_id: StringName, target: Vector3,
 		target_unit: Unit = null) -> bool:
 	if not _tribe_active(tribe):
+		return false
+	# Nothing may land in the void — not from the UI and not from the AI heuristic.
+	# The charge is kept, exactly like every other early return here.
+	if target_unit == null and _is_void(target):
 		return false
 	var spell: Spell = tribe.get_spell(spell_id)
 	if spell == null or spell.charges <= 0:

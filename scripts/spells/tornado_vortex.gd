@@ -92,9 +92,10 @@ func setup(p_tribe_id: int, at: Vector3, p_unit_manager: UnitManager,
 	# Clamp the spawn to the map BEFORE the first drift tick. _tick_drift clamps
 	# too, but only after IDLE_TIME — an out-of-bounds cast point would otherwise
 	# sit still for a second and then jump to the border in one frame.
-	var limit: float = TerrainData.world_clamp_limit(terrain_data)
-	position.x = clampf(position.x, 1.0, limit)
-	position.z = clampf(position.z, 1.0, limit)
+	var spawn_inside: Vector2 = TerrainData.clamp_into_world(
+		terrain_data, position.x, position.z)
+	position.x = spawn_inside.x
+	position.z = spawn_inside.y
 	if terrain_data != null:
 		position.y = terrain_data.get_height(position.x, position.z)
 
@@ -136,9 +137,10 @@ func _tick_drift(delta: float) -> void:
 	var speed: float = lerpf(MIN_SPEED, MAX_SPEED,
 		clampf((age - IDLE_TIME) / ACCEL_TIME, 0.0, 1.0))
 	position += _drift * speed * delta
-	var limit: float = TerrainData.world_clamp_limit(terrain_data)
-	position.x = clampf(position.x, 1.0, limit)
-	position.z = clampf(position.z, 1.0, limit)
+	var inside: Vector2 = TerrainData.clamp_into_world(
+		terrain_data, position.x, position.z)
+	position.x = inside.x
+	position.z = inside.y
 	if terrain_data != null:
 		position.y = terrain_data.get_height(position.x, position.z)
 

@@ -3,6 +3,11 @@ extends TestBase
 ## Headless tests for Unit movement logic (tick-driven, outside the scene
 ## tree) and the UnitManager spatial hash. Nodes are freed manually to avoid
 ## leaked instances.
+##
+## Phase 10j note: the positions below sit near the MAP CENTRE, not near the origin.
+## The world is a disc inscribed in the square grid, so the old (10, 10) corner area
+## is the void — a unit placed there falls out of the world and every motion
+## assertion fails. These are relative-motion tests; only the origin moved.
 
 const TICK: float = 0.05
 const MAX_TICKS: int = 20000
@@ -33,14 +38,14 @@ func _tick_until_idle(unit: Unit) -> int:
 func test_unit_follows_path_to_target() -> void:
 	var td: TerrainData = _flat_terrain()
 	var unit: Unit = _make_unit(td)
-	unit.position = Vector3(10.0, 0.0, 10.0)
+	unit.position = Vector3(50.0, 0.0, 50.0)
 	unit._sync_soa_pos()
-	unit.set_path(PackedVector3Array([Vector3(15.0, 0.0, 10.0), Vector3(15.0, 0.0, 18.0)]))
+	unit.set_path(PackedVector3Array([Vector3(55.0, 0.0, 50.0), Vector3(55.0, 0.0, 58.0)]))
 	check(unit.state == Unit.State.MOVE, "unit is MOVE after set_path")
 	_tick_until_idle(unit)
 	check(unit.state == Unit.State.IDLE, "unit is IDLE after finishing the path")
 	var flat: Vector2 = Vector2(unit.position.x, unit.position.z)
-	check(flat.distance_to(Vector2(15.0, 18.0)) <= 0.1,
+	check(flat.distance_to(Vector2(55.0, 58.0)) <= 0.1,
 		"unit reached the path end (at %s)" % str(flat))
 	unit.free()
 
@@ -48,11 +53,11 @@ func test_unit_follows_path_to_target() -> void:
 func test_y_snapping_follows_terrain() -> void:
 	var td: TerrainData = _flat_terrain()
 	# Give the terrain a distinct bump so Y actually changes along the way.
-	td.raise_area(Vector2(20.0, 20.0), 8.0, 4.0)
+	td.raise_area(Vector2(60.0, 60.0), 8.0, 4.0)
 	var unit: Unit = _make_unit(td)
-	unit.position = Vector3(12.0, 0.0, 20.0)
+	unit.position = Vector3(52.0, 0.0, 60.0)
 	unit._sync_soa_pos()
-	unit.set_path(PackedVector3Array([Vector3(20.0, 0.0, 20.0)]))
+	unit.set_path(PackedVector3Array([Vector3(60.0, 0.0, 60.0)]))
 	var snapped_ok: bool = true
 	for i in range(200):
 		unit.tick(TICK)
@@ -101,11 +106,11 @@ func test_group_slot_offset() -> void:
 func test_waypoint_queue_in_order() -> void:
 	var td: TerrainData = _flat_terrain()
 	var unit: Unit = _make_unit(td)
-	unit.position = Vector3(10.0, 0.0, 10.0)
+	unit.position = Vector3(50.0, 0.0, 50.0)
 	unit._sync_soa_pos()
-	var wp1: Vector3 = Vector3(14.0, 0.0, 10.0)
-	var wp2: Vector3 = Vector3(14.0, 0.0, 14.0)
-	var wp3: Vector3 = Vector3(10.0, 0.0, 14.0)
+	var wp1: Vector3 = Vector3(54.0, 0.0, 50.0)
+	var wp2: Vector3 = Vector3(54.0, 0.0, 54.0)
+	var wp3: Vector3 = Vector3(50.0, 0.0, 54.0)
 	unit.order_move(wp1)
 	unit.order_move(wp2, true)
 	unit.order_move(wp3, true)
@@ -133,11 +138,11 @@ func test_waypoint_queue_in_order() -> void:
 func test_patrol_repeats_route() -> void:
 	var td: TerrainData = _flat_terrain()
 	var unit: Unit = _make_unit(td)
-	unit.position = Vector3(10.0, 0.0, 10.0)
+	unit.position = Vector3(50.0, 0.0, 50.0)
 	unit._sync_soa_pos()
-	var wp1: Vector3 = Vector3(13.0, 0.0, 10.0)
-	var wp2: Vector3 = Vector3(13.0, 0.0, 13.0)
-	var wp3: Vector3 = Vector3(10.0, 0.0, 13.0)
+	var wp1: Vector3 = Vector3(53.0, 0.0, 50.0)
+	var wp2: Vector3 = Vector3(53.0, 0.0, 53.0)
+	var wp3: Vector3 = Vector3(50.0, 0.0, 53.0)
 	unit.patrol = true
 	unit.order_move(wp1)
 	unit.order_move(wp2, true)
@@ -233,9 +238,9 @@ func test_view_index_sector_boundaries() -> void:
 func test_facing_follows_movement() -> void:
 	var td: TerrainData = _flat_terrain()
 	var unit: Unit = _make_unit(td)
-	unit.position = Vector3(10.0, 0.0, 10.0)
+	unit.position = Vector3(50.0, 0.0, 50.0)
 	unit._sync_soa_pos()
-	unit.set_path(PackedVector3Array([Vector3(14.0, 0.0, 10.0)]))
+	unit.set_path(PackedVector3Array([Vector3(54.0, 0.0, 50.0)]))
 	unit.tick(TICK)
 	check(unit.facing.distance_to(Vector3(1, 0, 0)) < 0.001,
 		"facing points along the movement direction (+X)")
@@ -248,9 +253,9 @@ func test_facing_follows_movement() -> void:
 func test_remaining_path_shrinks() -> void:
 	var td: TerrainData = _flat_terrain()
 	var unit: Unit = _make_unit(td)
-	unit.position = Vector3(10.0, 0.0, 10.0)
+	unit.position = Vector3(50.0, 0.0, 50.0)
 	unit._sync_soa_pos()
-	unit.set_path(PackedVector3Array([Vector3(12.0, 0.0, 10.0), Vector3(14.0, 0.0, 10.0)]))
+	unit.set_path(PackedVector3Array([Vector3(52.0, 0.0, 50.0), Vector3(54.0, 0.0, 50.0)]))
 	check(unit.get_remaining_path().size() == 2, "remaining path starts with 2 points")
 	for i in range(100):
 		unit.tick(TICK)

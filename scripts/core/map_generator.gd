@@ -8,8 +8,15 @@ class_name MapGenerator extends RefCounted
 ## Base anchors and terrain generation share the same anchor cells (corners /
 ## halves), so bases always land on the raised / flat build spots.
 
-const STANDARD_SIZE: int = TerrainData.SIZE   # 128
-const LARGE_SIZE: int = 256                    # "twice the standard map"
+## Kantenlänge der Standardkarte. Explizit 144 und NICHT `TerrainData.SIZE`: die
+## Scheibe (Phase 10j) mit R = 72 hat 16 286 Zellen gegen 16 384 der alten
+## 128er-Quadratkarte — 99,4 %, die Spielfläche bleibt also erhalten, obwohl die
+## Ecken wegfallen. `TerrainData.SIZE` bleibt bei 128 als Default-/Testgröße.
+## 144 = 9 × `Terrain.CHUNK` und 288 = 18 × `Terrain.CHUNK`: `_chunk_count`
+## trunkiert eine Division, eine Kantenlänge ohne Chunk-Ausrichtung ließe einen
+## unvernetzten, aber begehbaren Streifen stehen.
+const STANDARD_SIZE: int = 144
+const LARGE_SIZE: int = 2 * STANDARD_SIZE      # 288, "twice the standard map"
 
 const DEFAULT_MAP: String = "island"
 
@@ -27,6 +34,14 @@ const CORNER_REACH_F: float = 0.30             # * size, corner bump reach
 const RIDGE_HALF_F: float = 0.10               # * size, half-width of the ridge band
 const RIDGE_HEIGHT: float = 26.0               # above LAND
 const PASS_HALF: int = 4                        # half-width of a walkable pass (cells)
+
+# Anker
+## Abstand der Eckanker vom Kartenrand als Anteil der Kantenlänge (siehe
+## _corner_cells). NICHT mit RIDGE_ANCHOR_OFFSET_F verwechseln.
+const CORNER_INSET_F: float = 0.22
+## Achsparalleler z-Versatz der Bergpass-Anker vom Grat — KEIN Eckabstand: radial
+## liegt der Anker bei 0,269 · size und damit sehr weit innen.
+const RIDGE_ANCHOR_OFFSET_F: float = 0.18
 
 # Plateau
 const PLATEAU_HEIGHT: float = 12.0             # above LAND (hard-edged)
@@ -52,9 +67,11 @@ static func map_size(map_id: String) -> int:
 		"seenland", "bergpass": return LARGE_SIZE
 	return STANDARD_SIZE
 
-## The round island mask fits only the radial island; the others are square.
-static func round_mask(map_id: String) -> bool:
-	return map_id == "island"
+## Jede Karte IST eine Scheibe (Phase 10j) — die Maske ist keine Kosmetik der
+## Minimap mehr, sie ist die Welt. Bleibt als Funktion erhalten, damit die Absicht
+## dokumentiert und die Minimap testbar bleibt.
+static func round_mask(_map_id: String) -> bool:
+	return true
 
 ## How many distinct player bases the map places (min 2).
 static func max_players(map_id: String) -> int:
@@ -103,8 +120,14 @@ static func _circle_anchors(td: TerrainData, count: int) -> Array[Vector2i]:
 
 
 ## The four corners, ordered so 2 players start diagonally opposite.
+## Abstand vom Kartenrand: 0,18 → 0,22 in Phase 10j. Bei 0,18 lag der Anker
+## radial `(0,5 − 0,18) · size · √2 = 0,4525 · size` von der Mitte, also nur 6,9
+## (144) bzw. 13,9 (288) Zellen innerhalb des Scheibenrands — zu wenig für eine
+## Basis. Mit 0,22 sind es 15,4 / 29,5. Weiter nach innen geht nicht, ohne den
+## Basisabstand unter `Balance.AI_CRAMPED_ARENA` zu drücken: das Plateau würde als
+## ENG eingestuft und wechselte sein komplettes Baumuster.
 static func _corner_cells(td: TerrainData) -> Array[Vector2i]:
-	var m: int = int(round(float(td.size) * 0.18))
+	var m: int = int(round(float(td.size) * CORNER_INSET_F))
 	var lo: int = m
 	var hi: int = td.size - m
 	# order: top-left, bottom-right, top-right, bottom-left
@@ -123,7 +146,7 @@ static func _corner_anchors(td: TerrainData, count: int) -> Array[Vector2i]:
 ## distance from the ridge so they are relatively close across the passes.
 static func _half_anchors(td: TerrainData, count: int) -> Array[Vector2i]:
 	var s: int = td.size
-	var off: int = int(round(float(s) * 0.18))
+	var off: int = int(round(float(s) * RIDGE_ANCHOR_OFFSET_F))
 	var top_z: int = s / 2 - off
 	var bot_z: int = s / 2 + off
 	var xl: int = int(round(float(s) * 0.3))

@@ -184,10 +184,11 @@ const STEEP_ROLL_CHANCE_PER_SEC: float = Balance.STEEP_ROLL_CHANCE_PER_SEC
 const THROW_GRAVITY: float = 18.0
 ## Ceiling of every throw arc, in metres above the ground below (phase 10c).
 const LIFT_MAX_HEIGHT: float = Balance.LIFT_MAX_HEIGHT
-## Invisible wall at the world border (phase 10c): how far inside the edge it
-## stands, and how much of the impact speed bounces back off it.
-const WORLD_EDGE_MARGIN: float = Balance.WORLD_EDGE_MARGIN
-const WORLD_BOUNCE_RESTITUTION: float = Balance.WORLD_BOUNCE_RESTITUTION
+## Sturz ins All (phase 10j): removal depth below the launch point, plus a time
+## backstop for a fall that begins without vertical speed. The invisible wall of
+## phase 10c is gone — outside the disc there is simply no ground.
+const VOID_FALL_DEPTH: float = Balance.VOID_FALL_DEPTH
+const VOID_FALL_MAX_TIME: float = Balance.VOID_FALL_MAX_TIME
 ## Friction (m/s^2) that bleeds off a landing throw's roll speed on flat
 ## ground — thrown units tumble on and quickly come to a stop.
 const ROLL_FRICTION: float = 6.0
@@ -684,6 +685,19 @@ var _corpse_done: bool = false
 ## than a State of its own — every "is this unit gone?" check in the codebase
 ## already tests State.DEAD, and drowning wants exactly those semantics.
 var _drowning: bool = false
+## Went over the world rim (phase 10j). Cut exactly like `_drowning`: a flag on
+## DEAD rather than a State of its own, because every "is this unit gone?" check in
+## the codebase already tests State.DEAD, and a body falling through space wants
+## precisely those semantics. The unit dies AT THE RIM — see fall_into_void() for
+## why — and the corpse keeps travelling until _tick_dead removes it.
+var _falling_into_void: bool = false
+## Ballistic velocity of that fall, carried over from the throw/roll that took the
+## unit out. Integrated in _tick_dead, so the body sails on instead of dropping
+## straight down.
+var _void_velocity: Vector3 = Vector3.ZERO
+## Y at which the fall started; the removal depth is measured from here (not from
+## sea level, so a body flung off a mountain is not deleted early).
+var _void_start_y: float = 0.0
 ## Where the drowning body is dragged to while it flails: the nearest spot with
 ## real depth. Without it a unit that rolled in stops right on the waterline and
 ## visibly sinks into the beach.
@@ -801,6 +815,11 @@ func unit_kind() -> StringName:
 ## the splash — the body hits the sea, the "water_sink" gurgle follows a beat
 ## later when it goes under (see _tick_dead).
 func death_sfx_key() -> StringName:
+	if _falling_into_void:
+		# Dies unheard, far off screen (user decision). Silence is free:
+		# AudioManager._on_unit_died already returns on an empty key. Shaman
+		# overrides this unconditionally, so HER cry survives.
+		return &""
 	return &"water_splash" if _drowning else &"unit_death"
 
 
@@ -1122,17 +1141,23 @@ func _snap_to_ground() -> void:
 	# each) — this is the hottest per-mover call.
 	var p: Vector3 = position
 	if terrain_data != null:
-		# HARD world-border invariant (user report 2026-08-04: the shaman ended up
-		# outside the map on Plateau). Every movement writer funnels through here
-		# — _advance_path, _step_toward, knockback, roll, throw landing, crew
-		# glide — so clamping here is what makes the border inescapable no matter
-		# HOW a unit reaches it. The elastic bounce-back lives at the individual
-		# movement sites (_bounce_off_world_edge for throws, roll_dir reflection
-		# in _tick_roll); this is the backstop that cannot be bypassed.
-		var extent: float = float(terrain_data.size) * TerrainData.CELL_SIZE \
-			- WORLD_EDGE_MARGIN
-		p.x = clampf(p.x, WORLD_EDGE_MARGIN, extent)
-		p.z = clampf(p.z, WORLD_EDGE_MARGIN, extent)
+		# World-border invariant, INVERTED in phase 10j. Until then this clamped X/Z
+		# back inside the map (user report 2026-08-04: the shaman ended up outside
+		# the map on Plateau). The real defect was that TerrainData.get_height()
+		# clamps its inputs and so reports the rim height forever outwards — there
+		# was ground EVERYWHERE, and a unit outside simply stood on it. Now there is
+		# none, and the verdict flips: whoever ends up out here falls into space.
+		#
+		# NOTE this is a wide net, not a complete one. The claim the old comment made
+		# — "every movement writer funnels through here" — was false: the C2 kernels
+		# in UnitManager write `position` directly (kernel march, separation, combat
+		# push). Those are safe because they follow A* waypoints or check
+		# is_cell_walkable, and the disc mask covers both. The real invariant is:
+		# every position writer is either has_ground-checked HERE or
+		# walkability-checked THERE.
+		if not terrain_data.has_ground(p.x, p.z):
+			fall_into_void()
+			return
 		p.y = terrain_data.get_height(p.x, p.z)
 		position = p
 	# SoA double-write, inlined (hot path: every mover, every tick). Covers all
@@ -1471,10 +1496,14 @@ func _die() -> void:
 ## How long the corpse lies before it starts sinking (drowned units flail at
 ## the surface only briefly).
 func _corpse_lie_duration() -> float:
+	if _falling_into_void:
+		return VOID_FALL_MAX_TIME   # removed by depth, not by this timer
 	return DROWN_FLAIL_DURATION if _drowning else CORPSE_DURATION
 
 
 func _corpse_sink_duration() -> float:
+	if _falling_into_void:
+		return 0.01
 	return DROWN_SINK_DURATION if _drowning else CORPSE_SINK_DURATION
 
 
@@ -1489,6 +1518,19 @@ func _tick_dead(delta: float) -> void:
 	if _corpse_timer >= _corpse_lie_duration() + _corpse_sink_duration():
 		_corpse_done = true
 		corpse_expired.emit(self)
+		return
+	if _falling_into_void:
+		# Keeps falling through space, momentum and all. Two independent exits:
+		# the depth (the normal one) and the timer above as a backstop for a fall
+		# that somehow began without vertical speed. The early return also keeps
+		# the body out of the C2 corpse hold below — the same reason _drowning is
+		# excluded — because a held corpse would freeze in mid-air.
+		_void_velocity.y -= THROW_GRAVITY * delta
+		position += _void_velocity * delta
+		_sync_soa_pos()
+		if position.y <= _void_start_y - VOID_FALL_DEPTH:
+			_corpse_done = true
+			corpse_expired.emit(self)
 		return
 	if _drowning:
 		# The flail is over: the body goes under. Edge-triggered off the timer,
@@ -1586,6 +1628,18 @@ func _tick_knockback(delta: float) -> void:
 	if nav_grid != null and not nav_grid.is_cell_walkable(
 			nav_grid.world_to_cell(Vector3(nx, 0.0, nz))):
 		_knockback_remaining = Vector3.ZERO
+		# Shoved over the rim (phase 10j): becomes a throw, exactly like a shove off
+		# a cliff, so the fall has one implementation. MUST precede the water and
+		# cliff branches — both read the clamped get_height and would misread the
+		# void as sea or as level ground.
+		if _leaves_the_disc(nx, nz):
+			position.x = nx
+			position.z = nz
+			_sync_soa_pos()
+			var over: Vector3 = Vector3(step.x, 0.0, step.z).normalized()
+			throw_airborne(over * CLIFF_LAUNCH_SPEED + Vector3.UP * CLIFF_LAUNCH_UP,
+				0, true)
+			return
 		if _is_water_at(nx, nz):
 			position.x = nx
 			position.z = nz
@@ -1754,27 +1808,16 @@ func _tick_roll(delta: float) -> void:
 	var step: float = speed_now * (1.0 + slope * 0.4) * delta
 	var nx: float = position.x + roll_dir.x * step
 	var nz: float = position.z + roll_dir.z * step
-	# The world border is a wall for a ROLL too, not just for a throw: reflect the
-	# roll direction on the axis that hit and keep tumbling back inland. Without
-	# this a unit rolling down a cliff at the map edge left the map (user report).
-	if terrain_data != null:
-		var wall: float = float(terrain_data.size) * TerrainData.CELL_SIZE \
-			- WORLD_EDGE_MARGIN
-		var reflected: bool = false
-		if (nx < WORLD_EDGE_MARGIN and roll_dir.x < 0.0) \
-				or (nx > wall and roll_dir.x > 0.0):
-			roll_dir.x = -roll_dir.x
-			nx = clampf(nx, WORLD_EDGE_MARGIN, wall)
-			reflected = true
-		if (nz < WORLD_EDGE_MARGIN and roll_dir.z < 0.0) \
-				or (nz > wall and roll_dir.z > 0.0):
-			roll_dir.z = -roll_dir.z
-			nz = clampf(nz, WORLD_EDGE_MARGIN, wall)
-			reflected = true
-		if reflected:
-			roll_dir = roll_dir.normalized()
-			if _roll_init_speed > 0.0:
-				_roll_init_speed *= WORLD_BOUNCE_RESTITUTION
+	# The rim is no wall any more (phase 10j): a roll that leaves the disc tumbles
+	# over the edge. It turns into a THROW, so the arc and the fall live in exactly
+	# ONE place (_tick_thrown). MUST be tested before _cliff_drop_ahead below —
+	# that probe reads the clamped get_height and would read the rim as level ground.
+	if _leaves_the_disc(nx, nz):
+		position.x = nx
+		position.z = nz
+		_sync_soa_pos()
+		throw_airborne(roll_dir * maxf(_roll_init_speed, ROLL_SPEED), 0, true)
+		return
 	# Buildings stop the roll; steep/unwalkable open ground is rolled across.
 	if nav_grid != null and nav_grid.is_cell_blocked_by_building(
 			nav_grid.world_to_cell(Vector3(nx, 0.0, nz))):
@@ -1928,50 +1971,6 @@ func apply_lift(dir: Vector3, horizontal: float, vertical: float,
 	throw_airborne(flat * h + Vector3.UP * v, fall_damage)
 
 
-## `p` with its X/Z pulled inside the world border. Used wherever a target point
-## is COMPUTED rather than stepped toward (drown drag), so the invisible wall also
-## holds for movement that does not go through _snap_to_ground.
-func _clamp_world_xz(p: Vector3) -> Vector3:
-	if terrain_data == null:
-		return p
-	var extent: float = float(terrain_data.size) * TerrainData.CELL_SIZE \
-		- WORLD_EDGE_MARGIN
-	return Vector3(clampf(p.x, WORLD_EDGE_MARGIN, extent), p.y,
-		clampf(p.z, WORLD_EDGE_MARGIN, extent))
-
-
-## Invisible wall at the world border (phase 10c, user spec): a unit hurled
-## past the map edge does NOT sail off into nothing — it smacks into the wall
-## in mid-air and is thrown back with part of its speed. Only the axis that
-## actually hit is reflected, so a body flying into a corner ricochets off both
-## walls in turn. Purely a throw rule: walking units never leave the map,
-## because everything outside is unwalkable for the pathfinder anyway.
-func _bounce_off_world_edge() -> void:
-	if terrain_data == null:
-		return
-	var high: float = float(terrain_data.size) * TerrainData.CELL_SIZE \
-		- WORLD_EDGE_MARGIN
-	var low: float = WORLD_EDGE_MARGIN
-	# The position is pulled back UNCONDITIONALLY; only the velocity reflection
-	# depends on the direction. A body that is outside must come back in even if
-	# its velocity happens to point inward already (a lift or a second hit landing
-	# in the same frame can flip it) — otherwise it drifts on outside the map.
-	if position.x < low:
-		position.x = low
-		if _throw_velocity.x < 0.0:
-			_throw_velocity.x = -_throw_velocity.x * WORLD_BOUNCE_RESTITUTION
-	elif position.x > high:
-		position.x = high
-		if _throw_velocity.x > 0.0:
-			_throw_velocity.x = -_throw_velocity.x * WORLD_BOUNCE_RESTITUTION
-	if position.z < low:
-		position.z = low
-		if _throw_velocity.z < 0.0:
-			_throw_velocity.z = -_throw_velocity.z * WORLD_BOUNCE_RESTITUTION
-	elif position.z > high:
-		position.z = high
-		if _throw_velocity.z > 0.0:
-			_throw_velocity.z = -_throw_velocity.z * WORLD_BOUNCE_RESTITUTION
 
 
 ## Vertical speed whose ballistic apex lands exactly on the throw ceiling,
@@ -1987,12 +1986,25 @@ func _launch_speed_budget() -> float:
 
 
 func _tick_thrown(delta: float) -> void:
+	# Over the rim there is no ground, so the arc does not end — it becomes a fall
+	# into space (phase 10j). THE single rim detector: rolls and shoves convert
+	# themselves into a throw first, so this one test covers every way of leaving
+	# the disc. Skipped while a carrier holds us: a tornado clamps ITSELF into the
+	# disc, and its orbiting passenger slot must not kill the passenger.
+	if throw_carrier == null and terrain_data != null \
+			and not terrain_data.has_ground(position.x, position.z):
+		fall_into_void()
+		return
 	_throw_time += delta
 	if _throw_time >= THROWN_MAX_DURATION:
 		# Safety net: a throw/carry that never lands (e.g. trapped over a
 		# deformation pit) ends here — the unit dies and falls as a corpse.
+		# Over the void _snap_to_ground starts the void fall instead, which is
+		# exactly right, so this needs no special case.
 		throw_carrier = null
 		_snap_to_ground()
+		if state == State.DEAD:
+			return
 		health = 0
 		_die()
 		return
@@ -2003,7 +2015,6 @@ func _tick_thrown(delta: float) -> void:
 	var prev_y: float = position.y
 	_throw_velocity.y -= THROW_GRAVITY * delta
 	position += _throw_velocity * delta
-	_bounce_off_world_edge()
 	_sync_soa_pos()   # THROWN never snaps to ground — mirror here
 	var flat: Vector3 = Vector3(_throw_velocity.x, 0.0, _throw_velocity.z)
 	if flat.length_squared() > 0.000001:
@@ -2070,8 +2081,13 @@ func water_splash_radius() -> float:
 ## True when the sea covers the given world XZ. Single source of truth for
 ## every "is this water?" gameplay check (throw landing, roll, knockback,
 ## cliff probe).
+## Phase 10j: the ground test comes FIRST. get_height() clamps its inputs, so
+## without it every point in the void reads as the rim height — and wherever that
+## rim sits below the waterline (the island, all the way round) the entire void
+## would count as water. This is the single source of truth for "is this water?"
+## (throw landing, roll, knockback, cliff probe), so one guard covers all of them.
 func _is_water_at(x: float, z: float) -> bool:
-	return terrain_data != null \
+	return terrain_data != null and terrain_data.has_ground(x, z) \
 		and terrain_data.get_height(x, z) <= TerrainData.SEA_LEVEL + WATER_EPS
 
 
@@ -2094,11 +2110,60 @@ func drown() -> void:
 		# MUST be set before _die(): _die() locks the corpse pose exactly once
 		# and the per-tick dead path never refreshes the animation again.
 		_drowning = true
-		_drown_target = _clamp_world_xz(_water_entry_target(position))
+		# The drag target is COMPUTED, not stepped toward, so it needs its own
+		# clamp — radial since 10j, and via the shared helper rather than a
+		# hand-written formula.
+		var entry: Vector3 = _water_entry_target(position)
+		var inside: Vector2 = TerrainData.clamp_into_world(
+			terrain_data, entry.x, entry.z)
+		_drown_target = Vector3(inside.x, entry.y, inside.y)
 		position.y = TerrainData.SEA_LEVEL - DROWN_FLOAT_DEPTH
 		_sync_soa_pos()
 	health = 0
 	# The splash itself rides on death_sfx_key() (one death sound, not two).
+	_die()
+
+
+## True when this world XZ has no CELL — the next step would leave the disc.
+##
+## Deliberately NOT the same test as `TerrainData.has_ground()`, and the difference
+## matters. `has_ground` is half a cell diagonal more generous, so a unit standing on
+## the outer corner of the last walkable rim cell still has ground under it. Without
+## two levels, a shove into that sliver stopped dead as if against the old invisible
+## wall. So: LEAVING is decided per cell (is there anything to step onto?), FALLING
+## per point (is there anything underneath?).
+func _leaves_the_disc(x: float, z: float) -> bool:
+	if terrain_data == null:
+		return false
+	return not terrain_data.in_disc(Vector2i(
+		int(floor(x / TerrainData.CELL_SIZE)), int(floor(z / TerrainData.CELL_SIZE))))
+
+
+## Went over the rim: out here there is no ground, so the unit falls into space.
+##
+## It dies IMMEDIATELY, at the rim, and only then keeps falling as a corpse. That
+## ordering is deliberate: the mana bonus, the shaman's death cry and her respawn
+## countdown all hang off `_die()`, and the player has to see and hear them happen
+## where the unit went over — not three and a half seconds later, somewhere off
+## screen. It also keeps the defeat check honest; a unit that is "alive" but
+## unreachable in space for 30 s would stall the victory evaluation.
+##
+## Unlike drown(), the MOMENTUM is kept: the body sails on outwards and down.
+func fall_into_void(velocity: Vector3 = Vector3.ZERO) -> void:
+	if state == State.DEAD:
+		return
+	var v: Vector3 = velocity if velocity != Vector3.ZERO else _throw_velocity
+	_knockback_remaining = Vector3.ZERO
+	_throw_velocity = Vector3.ZERO
+	_roll_init_speed = 0.0
+	throw_carrier = null
+	if renders_as_sprite():
+		# MUST be set before _die(): _die() locks the corpse pose exactly once and
+		# the per-tick dead path never refreshes the animation again.
+		_falling_into_void = true
+		_void_velocity = v
+		_void_start_y = position.y
+	health = 0
 	_die()
 
 
@@ -3848,6 +3913,8 @@ func _anim_base() -> StringName:
 		State.THROWN:
 			return &"airborne"      # flying THROUGH the air
 		State.DEAD:
+			if _falling_into_void:
+				return &"airborne"   # tumbling through space, not lying down
 			return &"drown" if _drowning else &"dead"
 		State.CREW:
 			if crew_action_anim != &"":

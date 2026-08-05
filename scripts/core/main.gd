@@ -265,20 +265,25 @@ func _ready() -> void:
 
 	var map_center: Vector2i = TerrainData.center_cell(td)
 	var camera_anchor: Vector2i = map_center
-	# Scale the wild-tree count with the map area (128 -> TREE_COUNT, 256 -> 4x),
-	# plus the small-map wood bonus (10h): on the 128er maps the bases sit close
+	# Scale the wild-tree count with the map area (144 -> TREE_COUNT, 288 -> 4x),
+	# plus the small-map wood bonus (10h): on the small maps the bases sit close
 	# together, so each tribe has far less forest to itself.
+	# FLOAT division against the STANDARD MAP (phase 10j), not integer division
+	# against TerrainData.SIZE: the disc areas of 144/288 match the old 128/256
+	# squares, so this reproduces exactly the previous counts (72/4 and 240/12).
+	# Integer division against 128 would have handed the large maps 5x.
 	var wood_bonus: float = 1.0
 	if td.size <= Balance.SMALL_MAP_MAX_SIZE:
 		wood_bonus = Balance.SMALL_MAP_WOOD_BONUS
-	var area_factor: int = (td.size * td.size) / (TerrainData.SIZE * TerrainData.SIZE)
-	var tree_count: int = int(round(float(TREE_COUNT * area_factor) * wood_bonus))
+	var area_factor: float = float(td.size * td.size) \
+		/ float(MapGenerator.STANDARD_SIZE * MapGenerator.STANDARD_SIZE)
+	var tree_count: int = int(round(float(TREE_COUNT) * area_factor * wood_bonus))
 	_tree_manager.spawn_trees(tree_count, GameState.ISLAND_SEED)
 	# Pure leaf/bamboo groves on grass — same area scaling AND the same bonus, so the
 	# tree-type ratio does not shift; deterministic because spawn_groves reuses the
 	# _rng seeded by spawn_trees.
 	_tree_manager.spawn_groves(int(round(
-		float(Balance.TREE_GROVES_PER_STANDARD_MAP * area_factor) * wood_bonus)))
+		float(Balance.TREE_GROVES_PER_STANDARD_MAP) * area_factor * wood_bonus)))
 	match config.mode:
 		MatchConfig.Mode.DEBUG_BATTLE:
 			# Sandbox: two armies clashing, no bases and no win tracking.

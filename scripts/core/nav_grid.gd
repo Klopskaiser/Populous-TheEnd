@@ -184,10 +184,10 @@ func is_cell_blocked_by_building(cell: Vector2i) -> bool:
 
 
 ## Nearest walkable cell via outward ring search; (-1, -1) if none in range.
+## The entry clamp is RADIAL (phase 10j): on a disc the rectangle corners lie
+## further from land than MAX_SNAP_RADIUS reaches.
 func nearest_walkable_cell(cell: Vector2i) -> Vector2i:
-	cell = Vector2i(
-		clampi(cell.x, 0, terrain.size - 1),
-		clampi(cell.y, 0, terrain.size - 1))
+	cell = TerrainData.clamp_cell_into_disc(cell, terrain.size)
 	if not _astar.is_point_solid(cell):
 		return cell
 	for radius in range(1, MAX_SNAP_RADIUS + 1):
@@ -319,9 +319,7 @@ func find_vehicle_path(from: Vector3, to: Vector3) -> PackedVector3Array:
 
 ## Nearest vehicle-passable cell via outward ring search; (-1, -1) if none.
 func _nearest_vehicle_cell(cell: Vector2i) -> Vector2i:
-	cell = Vector2i(
-		clampi(cell.x, 0, terrain.size - 1),
-		clampi(cell.y, 0, terrain.size - 1))
+	cell = TerrainData.clamp_cell_into_disc(cell, terrain.size)
 	if not _vehicle_astar.is_point_solid(cell):
 		return cell
 	for radius in range(1, MAX_SNAP_RADIUS + 1):

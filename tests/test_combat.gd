@@ -870,48 +870,57 @@ func _fireball_damage(w: Dictionary, shooter: Unit, victim: Unit) -> int:
 	return before - victim.health
 
 
-# --- Phase 10c: invisible wall at the world border ---------------------------------
+# --- Phase 10j: the rim replaces the wall ------------------------------------------
 
-## A unit hurled at the map edge must not sail off into nothing: it hits an
-## invisible wall in mid-air and is thrown back with part of its speed.
-func test_thrown_unit_bounces_off_the_world_edge() -> void:
+## Phase 10c put an invisible wall at the map border because a thrown shaman ended
+## up outside the map. 10j inverts that: the world is a DISC, outside it there is no
+## ground, and leaving it became a mechanic instead of a bug. The two bounce tests
+## that lived here are gone with the wall; the fall itself is covered by
+## tests/test_void_fall.gd. What stays is the movement-path invariant — with the
+## opposite verdict.
+
+## _snap_to_ground is the wide net every ordinary movement writer funnels through.
+## It used to clamp a stray position back inside the map; now it starts the fall.
+func test_snap_to_ground_over_the_void_starts_a_void_fall() -> void:
 	var w: Dictionary = _make_world()
-	var edge: float = float(w.td.size) * TerrainData.CELL_SIZE 		- Balance.WORLD_EDGE_MARGIN
-	var victim: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(edge - 2.0, 30))
-	victim.max_health = 100000
-	victim.health = 100000
-	victim.throw_airborne(Vector3(1, 0, 0) * 12.0 + Vector3.UP * 7.0)
-	var hit_wall: bool = false
-	for i in range(120):
-		if victim.state != Unit.State.THROWN:
-			break
-		victim.tick(TICK)
-		check(victim.position.x <= edge + 0.001,
-			"never past the wall (x=%.2f)" % victim.position.x)
-		if not hit_wall and victim._throw_velocity.x < 0.0:
-			hit_wall = true
-			check(absf(victim._throw_velocity.x) < 12.0,
-				"the bounce is damped, not a mirror")
-	check(hit_wall, "it did bounce back off the wall")
+	var unit: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
+	# Force the position into the void the way a rogue movement writer would.
+	unit.position = Vector3(float(w.td.size) + 25.0, 5.0, -12.0)
+	unit._snap_to_ground()
+	check(unit.state == Unit.State.DEAD,
+		"a unit over the void dies instead of standing on phantom ground")
+	check(unit.death_sfx_key() == &"", "and it dies silently")
 	_free_world(w)
 
 
-## Into a corner: both axes reflect, so the body ricochets back into the field.
-func test_thrown_unit_bounces_out_of_a_world_corner() -> void:
+## A shove over the rim: the other way a unit used to be pushed out of the world.
+##
+## The victim has to start at the very outer edge of the last real cell, because
+## apply_knockback() uses its argument only as a DIRECTION — one shove is
+## KNOCKBACK_BASE (0.35 m), not the vector's length. So a single shove can only tip
+## someone over the rim who is already standing on the brink; that is a property of
+## the shove, not of the rim, and stacked knockback covers the rest.
+func test_knockback_over_the_rim_launches_into_the_void() -> void:
 	var w: Dictionary = _make_world()
-	var low: float = Balance.WORLD_EDGE_MARGIN
-	var victim: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(low + 2.0, low + 2.0))
+	var mid: int = w.td.size / 2
+	# Outermost cell along +x that still exists, derived rather than hardcoded.
+	var last: int = mid
+	while w.td.in_disc(Vector2i(last + 1, mid)):
+		last += 1
+	var victim: Unit = _spawn(w, BRAVE_SCENE, 1,
+		Vector2(float(last) + 0.95, float(mid) + 0.5))
 	victim.max_health = 100000
 	victim.health = 100000
-	victim.throw_airborne(Vector3(-10.0, 7.0, -10.0))
+	check(w.nav.is_cell_walkable(Vector2i(last, mid)),
+		"the victim starts on real ground at the brink")
+	victim.apply_knockback(Vector3(1, 0, 0))
+	var fell: bool = false
 	for i in range(120):
-		if victim.state != Unit.State.THROWN:
-			break
 		victim.tick(TICK)
-		check(victim.position.x >= low - 0.001 and victim.position.z >= low - 0.001,
-			"stays inside both walls (%.2f, %.2f)" % [victim.position.x, victim.position.z])
-	check(victim._throw_velocity.x >= 0.0 and victim._throw_velocity.z >= 0.0,
-		"both axes were turned back into the field")
+		if victim.state == Unit.State.DEAD or victim.state == Unit.State.THROWN:
+			fell = true
+			break
+	check(fell, "the shove carried it over the rim instead of into a wall")
 	_free_world(w)
 
 
@@ -1384,84 +1393,29 @@ func test_unreachable_cache_evicts_instead_of_clearing() -> void:
 	_free_world(w)
 
 
-## User report 2026-08-04 (Plateau): the shaman ended up OUTSIDE the map, probably
-## after falling off a cliff. The border was a throw-only rule; a roll, a
-## knockback shove and a drowning corpse drag all moved the position freely.
-## It is now an invariant of every movement path.
+## Phase 10j: a roll over the rim used to be reflected by the invisible wall. Now it
+## tumbles over the edge and turns into a throw, which _tick_thrown converts into the
+## fall — one code path for every way of leaving the disc.
 ##
-## The loops below collect a violation flag and assert ONCE afterwards — a check()
-## per iteration would make the suite's assertion count depend on how many ticks
-## the roll happens to last.
-func test_rolling_unit_bounces_off_the_world_edge() -> void:
+## The loop collects a flag and asserts ONCE afterwards: a check() per iteration
+## would make the suite's assertion count depend on how many ticks the roll lasts.
+func test_rolling_unit_tumbles_over_the_rim() -> void:
 	var w: Dictionary = _make_world()
-	var edge: float = float(w.td.size) * TerrainData.CELL_SIZE - Balance.WORLD_EDGE_MARGIN
-	var victim: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(edge - 1.0, 30))
+	var rim: float = w.td.disc_center() + w.td.disc_radius()
+	var victim: Unit = _spawn(w, BRAVE_SCENE, 1,
+		Vector2(rim - 1.0, w.td.disc_center()))
 	victim.max_health = 100000
 	victim.health = 100000
-	victim.start_roll(Vector3(1, 0, 0), 3.0, 8.0)   # straight at the wall, with momentum
-	var worst: float = victim.position.x
-	var turned: bool = false
+	victim.start_roll(Vector3(1, 0, 0), 3.0, 8.0)   # straight at the rim, with momentum
+	var left_the_disc: bool = false
 	for i in range(200):
-		if victim.state != Unit.State.ROLL:
+		if victim.state == Unit.State.DEAD:
+			left_the_disc = true
 			break
 		victim.tick(TICK)
-		worst = maxf(worst, victim.position.x)
-		if victim.roll_dir.x < 0.0:
-			turned = true
-	check(worst <= edge + 0.001,
-		"a rolling unit never leaves the map (max x=%.2f, Wand %.2f)" % [worst, edge])
-	check(turned, "the roll direction was reflected off the wall")
-	_free_world(w)
-
-
-func test_rolling_unit_bounces_out_of_a_world_corner() -> void:
-	var w: Dictionary = _make_world()
-	var low: float = Balance.WORLD_EDGE_MARGIN
-	var victim: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(low + 1.0, low + 1.0))
-	victim.max_health = 100000
-	victim.health = 100000
-	victim.start_roll(Vector3(-1, 0, -1).normalized(), 3.0, 8.0)
-	var worst: Vector2 = Vector2(victim.position.x, victim.position.z)
-	for i in range(200):
-		if victim.state != Unit.State.ROLL:
-			break
-		victim.tick(TICK)
-		worst.x = minf(worst.x, victim.position.x)
-		worst.y = minf(worst.y, victim.position.z)
-	check(worst.x >= low - 0.001 and worst.y >= low - 0.001,
-		"the roll stays inside both walls (min %.2f, %.2f)" % [worst.x, worst.y])
-	_free_world(w)
-
-
-## _snap_to_ground is the choke point every movement writer funnels through, so
-## the clamp there is the backstop that cannot be bypassed — even if a future
-## movement path forgets its own bounce.
-func test_snap_to_ground_pulls_a_unit_back_into_the_world() -> void:
-	var w: Dictionary = _make_world()
-	var unit: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
-	var extent: float = float(w.td.size) * TerrainData.CELL_SIZE - Balance.WORLD_EDGE_MARGIN
-	# Force the position outside the way a rogue movement writer would.
-	unit.position = Vector3(extent + 25.0, 5.0, -12.0)
-	unit._snap_to_ground()
-	check(unit.position.x <= extent + 0.001 and unit.position.x >= Balance.WORLD_EDGE_MARGIN,
-		"X was pulled back inside (%.2f)" % unit.position.x)
-	check(unit.position.z >= Balance.WORLD_EDGE_MARGIN - 0.001,
-		"Z was pulled back inside (%.2f)" % unit.position.z)
-	_free_world(w)
-
-
-## A shove at the map edge is the other way a unit used to be pushed out.
-func test_knockback_cannot_shove_a_unit_out_of_the_world() -> void:
-	var w: Dictionary = _make_world()
-	var edge: float = float(w.td.size) * TerrainData.CELL_SIZE - Balance.WORLD_EDGE_MARGIN
-	var victim: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(edge - 0.5, 30))
-	victim.max_health = 100000
-	victim.health = 100000
-	victim.apply_knockback(Vector3(1, 0, 0) * 20.0)
-	var worst: float = victim.position.x
-	for i in range(120):
-		victim.tick(TICK)
-		worst = maxf(worst, victim.position.x)
-	check(worst <= edge + 0.001,
-		"a shoved unit stays on the map (max x=%.2f)" % worst)
+		if not w.td.has_ground(victim.position.x, victim.position.z):
+			left_the_disc = true
+	check(left_the_disc, "the roll went over the rim instead of bouncing back")
+	check(victim.state == Unit.State.DEAD or victim.state == Unit.State.THROWN,
+		"and it is falling or already dead, not standing on nothing")
 	_free_world(w)
