@@ -491,6 +491,17 @@ func test_endless_building_scaling() -> void:
 	# before expanding, so the "full base" must include it for this check.
 	w.building_manager.place(preload("res://scenes/buildings/forester.tscn"),
 		tribe, Vector2i(56, 58), 0, true)
+	# 10h Teil 2: jede noch ausbaubare Huette ohne Regal bekommt zuerst eines — das
+	# finanziert ihre Ausbaustufen ohne einen einzigen KI-Befehl. Steht VOR den
+	# Werkstaetten (Wohnraum vor Fahrzeugen), also hier abarbeiten.
+	check(ai._next_building_scene(ai.build_tick_cache()) == AIController.WOOD_DEPOT_SCENE,
+		"vor den Werkstaetten kommen die Huetten-Regale (10h Teil 2)")
+	for i in range(Balance.AI_MAX_HUT_RACKS):
+		var needy: Building = ai._hut_needing_rack(ai.build_tick_cache())
+		if needy == null:
+			break
+		if _place_rack_for(w, tribe, needy) == null:
+			break
 	# And the workshop (phase 7f): it follows right after the temple.
 	var shop: Building = w.building_manager.place(
 		preload("res://scenes/buildings/workshop.tscn"), tribe, Vector2i(64, 50), 0, true)
@@ -528,7 +539,12 @@ func test_endless_building_scaling() -> void:
 	# target. Manning them does, because growth_per_minute() then rises.
 	w.building_manager.place(HUT_SCENE, tribe, Vector2i(40, 58), 0, true)
 	w.building_manager.place(HUT_SCENE, tribe, Vector2i(48, 58), 0, true)
-	check(ai._next_building_scene(ai.build_tick_cache()) == null,
+	# Gepruefte Absicht ist "kein zusaetzliches LAGER", nicht "gar nichts": die zwei
+	# frischen Huetten wollen seit 10h Teil 2 ein Holzregal, und das ist richtig.
+	var next_scene: PackedScene = ai._next_building_scene(ai.build_tick_cache())
+	check(next_scene != AIController.WARRIOR_CAMP_SCENE
+			and next_scene != AIController.FIREWARRIOR_CAMP_SCENE
+			and next_scene != AIController.TEMPLE_SCENE,
 		"unbemannte Zusatzhuetten heben das Lagerziel NICHT (Strom statt Huettenzahl)")
 
 	# Housing pressure: population at 80% capacity -> a new hut, forever.
@@ -2238,3 +2254,91 @@ func _place_rack_for(w: Dictionary, tribe: Tribe, shop: Building) -> Building:
 		if rack != null:
 			return rack
 	return null
+
+
+# --- Teil 2: Regale an den Huetten als Ausbau-Depots (10h) ----------------------------
+# Nutzerwunsch: "es muessen auch Holzlager in der Naehe von Huetten errichtet werden
+# und zumindest immer mal wieder mit Holz bestueckt werden, wenn die Huetten noch
+# ausbaubar sind."
+#
+# Warum Regale und nicht Just-in-time: Building._tick_upgrade_absorb holt das Holz per
+# take_from_radius(delivery_point(), ABSORB_RADIUS) SELBST. Ein Regal in dieser
+# Reichweite finanziert damit jede Ausbaustufe mit NULL KI-Befehlen, waehrend JIT je
+# Ausbau einen Befehl und eine Laufstrecke kostet — bei HUT_UPGRADE_DELAY 90 s, vier
+# Stufen und bis zu AI_MAX_HUTS Huetten ein Dauerstrom.
+
+func test_ai_wants_a_rack_for_an_upgradable_hut() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var ai: AIController = _make_ai(w, tribe, Vector2i(40, 40))
+	var hut: Building = w.building_manager.place(HUT_SCENE, tribe, Vector2i(50, 50), 0, true)
+	check((hut as Hut).upgrade_stage < Balance.HUT_MAX_UPGRADE_STAGE,
+		"die Huette ist noch ausbaubar (Testvoraussetzung)")
+	check(ai._hut_needing_rack(ai.build_tick_cache()) == hut,
+		"sie wird als regalbedueftig erkannt")
+	ai.free()
+	_free_world(w)
+
+
+func test_ai_wants_no_rack_for_a_fully_upgraded_hut() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var ai: AIController = _make_ai(w, tribe, Vector2i(40, 40))
+	var hut: Hut = w.building_manager.place(HUT_SCENE, tribe, Vector2i(50, 50), 0, true) as Hut
+	hut.upgrade_stage = Balance.HUT_MAX_UPGRADE_STAGE
+	check(ai._hut_needing_rack(ai.build_tick_cache()) == null,
+		"ein Wohnpalast braucht kein Ausbau-Regal mehr")
+	ai.free()
+	_free_world(w)
+
+
+func test_a_rack_in_reach_satisfies_the_hut() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var ai: AIController = _make_ai(w, tribe, Vector2i(40, 40))
+	var hut: Building = w.building_manager.place(HUT_SCENE, tribe, Vector2i(50, 50), 0, true)
+	check(_place_rack_for(w, tribe, hut) != null, "Regal an der Huette gesetzt")
+	check(ai._hut_needing_rack(ai.build_tick_cache()) == null,
+		"mit Regal im Absorptionsradius ist sie versorgt")
+	ai.free()
+	_free_world(w)
+
+
+func test_rack_plot_lands_inside_the_hut_absorb_radius() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var ai: AIController = _make_ai(w, tribe, Vector2i(40, 40))
+	var hut: Building = w.building_manager.place(HUT_SCENE, tribe, Vector2i(50, 50), 0, true)
+	var cell: Vector2i = ai._find_rack_plot(hut, ai.build_tick_cache(), 0.0)
+	check(cell.x >= 0, "ein Regalplatz wird gefunden")
+	var drop: Vector3 = hut.delivery_point()
+	var pos: Vector3 = w.nav.cell_to_world(cell)
+	var d: float = Vector2(pos.x - drop.x, pos.z - drop.z).length()
+	check(d <= Building.ABSORB_RADIUS,
+		"und liegt im Absorptionsradius (%.1f m) - sonst zaehlt er nicht" % d)
+	check(d >= Balance.AI_SHOP_RACK_MIN_DIST, "aber nicht auf dem Lieferpunkt selbst")
+	ai.free()
+	_free_world(w)
+
+
+func test_starved_hut_rack_becomes_a_supply_target() -> void:
+	var w: Dictionary = _make_world()
+	var tribe: Tribe = w.tribes[1]
+	var ai: AIController = _make_ai(w, tribe, Vector2i(40, 40))
+	var hut: Building = w.building_manager.place(HUT_SCENE, tribe, Vector2i(50, 50), 0, true)
+	var rack: WoodDepot = _place_rack_for(w, tribe, hut) as WoodDepot
+	check(rack != null, "Regal gesetzt")
+	check(rack.stored_wood() < Balance.AI_HUT_RACK_STOCK, "es ist leer")
+	var starved: Array[Building] = ai._starved_hut_racks(ai.build_tick_cache())
+	check(rack in starved, "ein leeres Huetten-Regal wird Nachschub-Ziel")
+	rack.store_wood(Balance.AI_HUT_RACK_STOCK)
+	check(not (rack in ai._starved_hut_racks(ai.build_tick_cache())),
+		"mit einem Ausbau an Bord nicht mehr")
+	ai.free()
+	_free_world(w)
+
+
+func test_hut_rack_stock_is_exactly_one_upgrade() -> void:
+	check(Balance.AI_HUT_RACK_STOCK == Balance.HUT_UPGRADE_WOOD_COST,
+		"der Mindestbestand ist genau eine Ausbaustufe - aus Balance abgeleitet, "
+			+ "nicht als Zahl gepflegt")

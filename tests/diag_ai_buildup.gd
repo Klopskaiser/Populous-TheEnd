@@ -112,6 +112,18 @@ func _initialize() -> void:
 			var uk: String = str(u.unit_kind())
 			if uk in ["siege", "fireram", "airship"]:
 				veh[uk] = int(veh.get(uk, 0)) + 1
+		var stages: Dictionary = {}
+		var racks: int = 0
+		for b in tribes[i].buildings:
+			if not is_instance_valid(b) or b.health <= 0: continue
+			if b is Hut:
+				var stage_i: int = (b as Hut).upgrade_stage
+				stages[stage_i] = int(stages.get(stage_i, 0)) + 1
+			elif b is WoodDepot and (b as WoodDepot).stored_wood() > 0:
+				racks += 1
+		if not stages.is_empty():
+			print("     Huetten-Ausbaustufen: %s | gefuellte Regale: %d" % [
+				str(stages), racks])
 		if not veh.is_empty():
 			print("     Fahrzeuge: %s" % str(veh))
 		for b in tribes[i].buildings:

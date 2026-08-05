@@ -1401,9 +1401,27 @@ func test_ai_builds_workshop_after_temple() -> void:
 	w.building_manager.place(
 		preload("res://scenes/buildings/temple.tscn"), w.tribe,
 		Vector2i(56, 62), 0, true)
+	# 10h Teil 2: davor kommen noch die Huetten-Regale (Wohnraum vor Fahrzeugen) —
+	# jede noch ausbaubare Huette ohne Regal bekommt eines, gedeckelt auf
+	# AI_MAX_HUT_RACKS. Hier abarbeiten, dann muss die Werkstatt folgen.
+	for i in range(Balance.AI_MAX_HUT_RACKS):
+		var needy: Building = ai._hut_needing_rack(ai.build_tick_cache())
+		if needy == null:
+			break
+		var drop: Vector3 = needy.delivery_point()
+		var placed: Building = null
+		for off in [Vector2i(2, 0), Vector2i(-2, 0), Vector2i(0, 2), Vector2i(0, -2),
+				Vector2i(3, 0)]:
+			placed = w.building_manager.place(
+				preload("res://scenes/buildings/wood_depot.tscn"), w.tribe,
+				w.nav.world_to_cell(drop) + off, 0, true)
+			if placed != null:
+				break
+		if placed == null:
+			break
 	var next: PackedScene = ai._next_building_scene(ai.build_tick_cache())
 	check(next != null and next.resource_path.ends_with("workshop.tscn"),
-		"the AI plans the workshop right after the temple")
+		"nach den Huetten-Regalen plant die KI die Werkstatt")
 	# Staffing: idle braves are sent in as workers.
 	var ws: Workshop = _place_workshop(w, Vector2i(64, 50))
 	for i in range(12):

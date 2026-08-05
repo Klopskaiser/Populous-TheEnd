@@ -195,6 +195,9 @@ const BUILD_SCENES: Dictionary = {
 	# Zweiter Schluessel auf dieselbe Szene: das Werkstatt-Regal IST eine
 	# Holzstation, bekommt aber einen eigenen Bauplatz-Scan (10g Teil 4).
 	&"shop_rack": WOOD_DEPOT_SCENE,
+	# Drittes Alias auf dieselbe Szene: das Huetten-Regal ist eine Holzstation, hat
+	# aber einen eigenen Auslöser und Platz-Scan (10h Teil 2).
+	&"hut_rack": WOOD_DEPOT_SCENE,
 }
 
 ## Footprints straight from Balance — saves instantiating and freeing a probe
@@ -211,6 +214,7 @@ const BUILD_FOOTPRINTS: Dictionary = {
 	&"watchtower": Balance.WATCHTOWER_FOOTPRINT,
 	&"wood_depot": Balance.WOOD_DEPOT_FOOTPRINT,
 	&"shop_rack": Balance.WOOD_DEPOT_FOOTPRINT,
+	&"hut_rack": Balance.WOOD_DEPOT_FOOTPRINT,
 }
 
 const TICK_INTERVAL: float = 1.0
@@ -638,7 +642,12 @@ func _tick_build(cache: TickCache) -> void:
 	if kind == &"wood_depot" and cache.planned[&"wood_depot"] > 0:
 		prefer = _forward_depot_anchor()
 	var cell: Vector2i = Vector2i(-1, -1)
-	if kind == &"shop_rack":
+	if kind == &"hut_rack":
+		var hut: Building = _hut_needing_rack(cache)
+		if hut != null:
+			# side_clear 0: Huetten haben keine Fahrzeug-Ausfahrt freizuhalten.
+			cell = _find_rack_plot(hut, cache, 0.0)
+	elif kind == &"shop_rack":
 		# Eigener, begrenzter Scan — NICHT _find_plot: dessen Sweep verlangt
 		# MIN_TREES_NEAR_PLOT Baeume unabhaengig von der Gebaeudeart, und eine
 		# Werkstatt in einer abgeholzten Basis haette dort nie drei. Ein Lager
@@ -646,7 +655,7 @@ func _tick_build(cache: TickCache) -> void:
 		# Zell-/Kandidatenbudget der Bauplatzsuche unberuehrt (10e-Regression).
 		var shop: Workshop = _shop_needing_rack(cache)
 		if shop != null:
-			cell = _find_shop_rack_plot(shop, cache)
+			cell = _find_rack_plot(shop, cache)
 	else:
 		cell = _find_plot(footprint, cache, prefer)
 	if cell.x < 0:
@@ -825,6 +834,12 @@ func next_building_kind(cache: TickCache) -> StringName:
 			racks += 1
 	counts["shop_rack"] = racks
 	counts["shops_without_rack"] = 1 if _shop_needing_rack(cache) != null else 0
+	var hut_racks: int = 0
+	for depot in cache.depots:
+		if _rack_serves_any_hut(cache, depot):
+			hut_racks += 1
+	counts["hut_rack"] = hut_racks
+	counts["huts_without_rack"] = 1 if _hut_needing_rack(cache) != null else 0
 	counts["watchtower_target"] = AIState.target_watchtowers(arena)
 	return AIState.next_building_kind(counts)
 
@@ -2332,6 +2347,11 @@ func _supply_targets(cache: TickCache) -> Array[Building]:
 	for hut in cache.huts:
 		if is_instance_valid(hut) and hut.upgrading and hut.wood_stalled:
 			out.append(hut)
+	# 10h Teil 2: Huetten-Regale unter Mindestbestand. Sie sind das SPARSAME Mittel —
+	# ein gefuelltes Regal finanziert die naechste Ausbaustufe ohne jeden Befehl, also
+	# lohnt es, es aufzufuellen, statt jeden Ausbau einzeln zu beliefern.
+	for rack in _starved_hut_racks(cache):
+		out.append(rack)
 	return out
 
 
@@ -2452,7 +2472,8 @@ func _rack_serves(cache: TickCache, shop: Building):
 	return null
 
 
-## Rack plot for `shop` (10g Teil 4). A dedicated, bounded scan — NOT _find_plot,
+## Rack plot for `target` (10g Teil 4 for workshops, 10h Teil 2 for huts). A
+## dedicated, bounded scan — NOT _find_plot,
 ## for two reasons from the 10e measurements: every added sweep multiplies against
 ## the shared _plot_budget/_plot_candidates_left, and _find_supplied_plot requires
 ## MIN_TREES_NEAR_PLOT trees regardless of building kind, so a rack in a logged-out
@@ -2464,12 +2485,15 @@ func _rack_serves(cache: TickCache, shop: Building):
 ## the gate would trap the fresh vehicle and make exit_blocked permanent — it would
 ## CAUSE the Teil-3 bug), and outside any other own delivery point's absorb radius
 ## (Building._absorb_piles has no ownership concept, a neighbour site would eat it).
-func _find_shop_rack_plot(shop: Workshop, cache: TickCache) -> Vector2i:
-	if nav_grid == null or commands == null:
+## `side_clear` keeps the rack out of a VEHICLE exit corridor; huts have no
+## vehicles, so they pass 0.0.
+func _find_rack_plot(target: Building, cache: TickCache,
+		side_clear: float = Balance.AI_SHOP_RACK_SIDE_CLEAR) -> Vector2i:
+	if nav_grid == null or commands == null or target == null:
 		return Vector2i(-1, -1)
-	var ent_cell: Vector2i = shop.entrance_cell()
-	var ent: Vector3 = shop.delivery_point()
-	var centre: Vector3 = shop.center_world()
+	var ent_cell: Vector2i = target.entrance_cell()
+	var ent: Vector3 = target.delivery_point()
+	var centre: Vector3 = target.center_world()
 	var normal: Vector2 = Vector2(ent.x - centre.x, ent.z - centre.z)
 	if normal.length_squared() < 0.001:
 		normal = Vector2(0.0, 1.0)
@@ -2483,10 +2507,10 @@ func _find_shop_rack_plot(shop: Workshop, cache: TickCache) -> Vector2i:
 			var dist: float = to.length()
 			if dist < Balance.AI_SHOP_RACK_MIN_DIST or dist > Balance.AI_SHOP_RACK_MAX_DIST:
 				continue
-			# Lateral distance from the exit corridor.
-			if absf(to.x * normal.y - to.y * normal.x) < Balance.AI_SHOP_RACK_SIDE_CLEAR:
+			# Lateral distance from the exit corridor (0 for huts: no vehicles).
+			if side_clear > 0.0 					and absf(to.x * normal.y - to.y * normal.x) < side_clear:
 				continue
-			if _in_foreign_absorb_radius(cache, pos, shop):
+			if _in_foreign_absorb_radius(cache, pos, target):
 				continue
 			if not _plot_reachable(cell, Vector2i.ONE, 0):
 				continue
@@ -2495,10 +2519,10 @@ func _find_shop_rack_plot(shop: Workshop, cache: TickCache) -> Vector2i:
 
 
 ## True while `pos` lies in the absorb radius of an own building other than `shop`.
-func _in_foreign_absorb_radius(cache: TickCache, pos: Vector3, shop: Building) -> bool:
+func _in_foreign_absorb_radius(cache: TickCache, pos: Vector3, target: Building) -> bool:
 	var flat: Vector2 = Vector2(pos.x, pos.z)
 	for b in tribe.buildings:
-		if b == shop or not is_instance_valid(b) or b.health <= 0:
+		if b == target or not is_instance_valid(b) or b.health <= 0:
 			continue
 		if b is WoodDepot:
 			continue   # a rack next to a rack is harmless
@@ -2506,3 +2530,63 @@ func _in_foreign_absorb_radius(cache: TickCache, pos: Vector3, shop: Building) -
 		if Vector2(d.x, d.z).distance_to(flat) <= Building.ABSORB_RADIUS:
 			return true
 	return false
+
+
+## Usable hut that can still be UPGRADED and has no rack inside
+## Building.ABSORB_RADIUS of its delivery point, or null (10h Teil 2).
+##
+## Why this pays for itself: Building._tick_upgrade_absorb pulls wood with
+## take_from_radius(delivery_point(), ABSORB_RADIUS) — a rack that close funds every
+## upgrade stage with ZERO AI commands. Just-in-time delivery would cost one order
+## and one walk per HUT_UPGRADE_WOOD_COST, and with HUT_UPGRADE_DELAY 90 s, four
+## stages and up to AI_MAX_HUTS huts that is a permanent stream of orders.
+func _hut_needing_rack(cache: TickCache) -> Building:
+	for hut in cache.huts:
+		if not is_instance_valid(hut) or not hut.is_usable():
+			continue
+		if (hut as Hut).upgrade_stage >= Balance.HUT_MAX_UPGRADE_STAGE:
+			continue   # fully upgraded: a rack would serve nothing
+		if _rack_near(cache, hut):
+			continue
+		return hut
+	return null
+
+
+## True while some own rack lies inside `target`'s absorb radius.
+func _rack_near(cache: TickCache, target: Building) -> bool:
+	var drop: Vector3 = target.delivery_point()
+	var flat: Vector2 = Vector2(drop.x, drop.z)
+	for depot in cache.depots:
+		if is_instance_valid(depot) \
+				and depot.footprint_distance_to(flat) <= Building.ABSORB_RADIUS:
+			return true
+	return false
+
+
+## True while `depot` sits inside SOME own hut's absorb radius, i.e. counts as a
+## hut rack. A rack may serve a hut AND a workshop — then it counts for both, which
+## is correct: it really does feed both.
+func _rack_serves_any_hut(cache: TickCache, depot: Building) -> bool:
+	var flat: Vector2 = Vector2(depot.center_world().x, depot.center_world().z)
+	for hut in cache.huts:
+		if not is_instance_valid(hut):
+			continue
+		var d: Vector3 = hut.delivery_point()
+		if Vector2(d.x, d.z).distance_to(flat) <= Building.ABSORB_RADIUS:
+			return true
+	return false
+
+
+## Hut racks that fell below AI_HUT_RACK_STOCK (one upgrade's worth) — they become
+## supply targets of the existing _tick_supply_runs, so no new transport mechanism
+## is needed (10h Teil 2).
+func _starved_hut_racks(cache: TickCache) -> Array[Building]:
+	var out: Array[Building] = []
+	for depot in cache.depots:
+		if not is_instance_valid(depot) or not depot.is_usable():
+			continue
+		if (depot as WoodDepot).stored_wood() >= Balance.AI_HUT_RACK_STOCK:
+			continue
+		if _rack_serves_any_hut(cache, depot):
+			out.append(depot)
+	return out

@@ -915,3 +915,10 @@ const AI_MAX_SHOP_RACKS: int = 3
 ## Haelt ein Brave Holz OHNE Ablege-Befehl so lange, laesst er es an Ort und Stelle
 ## fallen (Nutzerentscheidung). Bei Nahkampf und Tod faellt es sofort.
 const BRAVE_CARRY_HOLD_TIMEOUT: float = 30.0
+
+# --- KI: Regale an den Huetten (10h Teil 2) ---
+## Ein Regal im Absorptionsradius einer Huette finanziert ihre Ausbaustufen mit NULL
+## KI-Befehlen: Building._tick_upgrade_absorb holt das Holz selbst.
+const AI_MAX_HUT_RACKS: int = 4
+## Mindestbestand eines Huetten-Regals: genau ein Ausbau.
+const AI_HUT_RACK_STOCK: int = HUT_UPGRADE_WOOD_COST

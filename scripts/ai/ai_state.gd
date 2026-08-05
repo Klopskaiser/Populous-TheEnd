@@ -300,7 +300,14 @@ static func next_building_kind(counts: Dictionary) -> StringName:
 	# by Workshop.stock_wood() as its own stock, so the housed workers stop being
 	# dispatched out at all. Deliberately BEFORE the next workshop: feeding the shops
 	# that stand is worth more than adding an idle one (10g Teil 4).
-	if int(counts.get("shops_without_rack", 0)) > 0 			and int(counts.get("shop_rack", 0)) < Balance.AI_MAX_SHOP_RACKS:
+	# 10h Teil 2: ein Regal an einer noch ausbaubaren Huette finanziert jede
+	# Ausbaustufe mit NULL KI-Befehlen (Building._tick_upgrade_absorb zieht das Holz
+	# selbst ein). Das steht VOR den Werkstatt-Zweigen — Wohnraum vor Fahrzeugen.
+	if int(counts.get("huts_without_rack", 0)) > 0 \
+			and int(counts.get("hut_rack", 0)) < Balance.AI_MAX_HUT_RACKS:
+		return &"hut_rack"
+	if int(counts.get("shops_without_rack", 0)) > 0 \
+			and int(counts.get("shop_rack", 0)) < Balance.AI_MAX_SHOP_RACKS:
 		return &"shop_rack"
 	# Production shops scale with the tribe (7f): together with the vehicle caps
 	# this is the actual fix for "the AI hardly ever fields vehicles". The FIRST
