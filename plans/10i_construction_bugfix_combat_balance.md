@@ -215,12 +215,27 @@ Symptom 2, unabhängig davon, wie der Graben entstand. Dazu
 (`wood_incoming` macht das schon) — kein belegter Leak, aber eine offene
 Härtungslücke.
 
-**F6 — Planierkante abflachen (gegen den Ringgraben).**
-Der Ring **eine Zelle außerhalb** des Grundrisses wird auf einen **gemittelten**
-Wert zwischen `flatten_target` und Originalhöhe gezogen. Damit halbiert sich die
-Kantenstufe (~1,5 m → ~0,75 m) und bleibt unter `MAX_SLOPE`. Vorhandene
-Maschinerie prüfen: `_tick_foundation_smoothing` macht schon
-Fundament-Nachglättung, ist aber an `_foundation_disturbed` gebunden.
+**F6 — ~~Planierkante abflachen (gegen den Ringgraben)~~ → nach Messung VERWORFEN
+(2026-08-05).**
+Geplant war: der Ring **eine Zelle außerhalb** des Grundrisses wird auf einen
+**gemittelten** Wert zwischen `flatten_target` und Originalhöhe gezogen, womit
+sich die Kantenstufe halbiert (~1,5 m → ~0,75 m) und unter `MAX_SLOPE` bleibt.
+
+**Umgesetzt, gemessen, wieder entfernt.** Es kostete die KI ein Drittel bis die
+Hälfte ihrer Bevölkerung — `benchmark_earlygame` bergpass, pop@300 s: **242/244**
+ohne die Phase, **158/159** mit allen Fixes inklusive F6, und die Bisektion
+isoliert F6 als Alleinursache (**F6 allein 134**, **F3 allein 241**). Erklärung:
+der Blend entfernt die Stufe am Grundriss und öffnet dafür eine **neue** gegen
+das unberührte Gelände eine Zelle weiter außen. Eine Klemmung gegen
+`TerrainData.MAX_SLOPE` (nur blenden, soweit keine steilere Kante entsteht)
+brachte trotzdem nur 162 — also Implementierung entfernt statt einen
+Halb-Effekt mit vollem Risiko zu behalten.
+
+Der Ringgraben, gegen den F6 gedacht war, ist über **F5** (Fluchtweg für
+eingeschlossene Braves), **F3** (Zell-Timeout) und **F4** (Anlauftor schon bei
+der Platzierung) abgedeckt. Diese Plandatei hatte F6 selbst als größtes
+Regressionsrisiko geführt und die Messung zur Pflicht gemacht — genau dafür war
+sie da.
 
 **F7 — Bauverfall härten.**
 Zusätzlich zur Signatur ein **absolutes** Limit: eine Baustelle mit

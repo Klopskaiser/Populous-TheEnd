@@ -310,6 +310,27 @@ const FW_FIREBALL_LIFT_CHANCE_ROLLING: float = 0.10
 ## Ein Lift ERSETZT den Bodenschub: weniger Horizontale, kleiner Hüpfer.
 const FW_FIREBALL_LIFT_PUSH: float = 1.2
 const FW_FIREBALL_LIFT_UP: float = 3.0
+## Kämpft die FEINDLICHE Schamanin so nah an einem Prediger, bricht seine Predigt
+## ab und er kann keine neue beginnen (Original-Populous-Regel, Phase 10i Teil 2).
+## Gegenmittel gegen die im Balance-Labor belegte Prediger-Dominanz: 20 Prediger
+## bekehren 20 zeitgleich ausgebildete Krieger verlustfrei (0:3 Siege, 19,7
+## Bekehrte). Ohne kämpfende Schamanin bleibt diese Dominanz unangetastet — die
+## Regel ist ein Gegenmittel, keine Nerfung.
+const PREACHER_SHAMAN_DISTURB_RANGE: float = 6.0
+
+## Anhebe-Chance bei fast totem Ziel als Vielfaches der Basis (1.0 = keine
+## Skalierung), linear invers über die HP: je verletzter das Ziel, desto leichter
+## fliegt es. Bei 3.0 also 4 % bei voller Gesundheit und 12 % kurz vor dem Tod
+## (rollendes Ziel 10 % → 30 %).
+const FW_FIREBALL_LIFT_HP_MAX_MULT: float = 3.0
+## Flächenschaden des Feuerkrieger-Feuerballs (Phase 10i Teil 3): Radius und
+## Anteil am Hauptzielschaden. Trifft NUR Feinde und macht keinen Rückstoß —
+## Feuerkrieger schießen in Massen, mit Friendly Fire würde die hintere Reihe die
+## eigene Front zerlegen. Grund: sie teilen im Balance-Labor 100 % des
+## Kriegerpools aus und töten trotzdem fast niemanden — ein Konzentrations-,
+## kein Schadensproblem.
+const FW_FIREBALL_BLAST_RADIUS: float = 2.0
+const FW_FIREBALL_BLAST_FRAC: float = 0.5
 ## Treffer auf bereits fliegende Ziele: der Lift wird IMMER verstärkt.
 const LIFT_AIRBORNE_BONUS: float = 2.0
 const LIFT_AIRBORNE_PUSH_FACTOR: float = 0.5

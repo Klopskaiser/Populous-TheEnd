@@ -2403,6 +2403,12 @@ func has_stars() -> bool:
 		and health <= int(float(max_health) * BADLY_HURT_FRAC)
 
 
+## Remaining health as a fraction in [0,1]. The maxi(max_health, 1) guard is the
+## one from sidebar.gd; the same calculation was inlined in five places.
+func health_fraction() -> float:
+	return clampf(float(health) / float(maxi(max_health, 1)), 0.0, 1.0)
+
+
 # --- Conversion (preacher, phase 5c) ----------------------------------------------
 
 ## Shamans and preachers can never be converted (original rule).
@@ -2430,6 +2436,8 @@ func begin_conversion(preacher: Unit, duration: float,
 		return false
 	if rides_airborne():
 		return false   # airship passengers are out of a preacher's reach
+	if _preach_disturbed_by_enemy_shaman(preacher):
+		return false   # a fighting enemy shaman breaks the sermon (10i, part 2)
 	_on_combat_interrupt()
 	_end_attack()
 	waypoint_queue.clear()
@@ -2453,6 +2461,11 @@ func _tick_sit(delta: float) -> void:
 	if p.state == State.ATTACK:
 		_stand_up(true)   # trance broken by a duel -> fight the preacher
 		return
+	if _preach_disturbed_by_enemy_shaman(p):
+		# A fighting enemy shaman nearby breaks the sermon (10i, part 2).
+		# _stand_up nulls conversion_progress: the progress is lost, as intended.
+		_stand_up(false)
+		return
 	# Channeling either on the ground (CAST) or stationed on a tower platform /
 	# airship deck (the station tick keeps station_channeling alive).
 	var channeling: bool = p.state == State.CAST \
@@ -2465,6 +2478,45 @@ func _tick_sit(delta: float) -> void:
 	conversion_progress += delta
 	if conversion_progress >= conversion_time and p.tribe != null:
 		convert_to_tribe(p.tribe)
+
+
+## True when an ENEMY shaman is fighting within PREACHER_SHAMAN_DISTURB_RANGE of
+## `preacher`. Populous rule: her presence in a brawl breaks the sermon — and it
+## breaks it for EVERY preacher in her radius, not just the one she attacks (the
+## explicit case from the spec: she attacks preacher A, preacher B must not be
+## able to carry on either).
+##
+## Deliberately NOT a grid query: there is exactly one shaman per tribe and
+## Tribe.shaman is a direct pointer, so this is O(#tribes) — 2 to 4 iterations
+## with one distance check each. Cheaper than any get_units_in_radius call, which
+## matters because _tick_sit runs per sitting unit per tick (SIT has no SoA hold).
+## No throttle on purpose: 300 sitting units x 4 tribes is 1200 distance checks a
+## tick, which disappears next to the existing per-unit work, and a timer would
+## make the disturbance unreliable.
+##
+## The distance is measured to the PREACHER, not to the victim. Both sit within
+## conversion_reach (5 m) of each other, but code and test have to use the same
+## reference or a 6 m radius test passes by accident.
+func _preach_disturbed_by_enemy_shaman(preacher: Unit) -> bool:
+	if preacher == null or not is_instance_valid(preacher):
+		return false
+	if path_service == null:
+		return false   # bare tests without a manager: no tribe list to ask
+	for t in path_service.tribes:
+		if t == null or t.id == preacher.tribe_id:
+			continue
+		var sh: Unit = t.shaman
+		if sh == null or not is_instance_valid(sh) or sh.state == State.DEAD:
+			continue
+		# "Fighting" = she is striking, or somebody is meleeing her. _in_melee
+		# alone would be too narrow: it flickers per tick, and the sermon would
+		# carry on between two blows.
+		if sh.state != State.ATTACK and sh.melee_attackers.is_empty():
+			continue
+		if _flat_dist(sh.position, preacher.position) \
+				<= Balance.PREACHER_SHAMAN_DISTURB_RANGE:
+			return true
+	return false
 
 
 ## A firewarrior's fireball hit interrupts the conversion: the progress is

@@ -69,8 +69,8 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
 | **Schamanin** | Wichtigste Einheit, einzige Zauberwirkerin. **HP = 4 × Brave**, **Nahkampfschaden = 2 × Brave**. Stirbt sie, **respawnt** sie nach einer Wartezeit am **Reinkarnationsplatz** (Reincarnation Site); der Stamm des Tötenden bekommt einmalig **10 % der minütlichen Manaproduktion ihres Stammes** auf seine aktiven Aufladeraten verteilt. Pro Stamm genau eine. |
 | **Brave (Gefolgsmann)** | Basis-Einheit. Sammelt **passiv Holz** und baut Gebäude aus. Wird von Hütten gespawnt. |
 | **Krieger** | Nahkampf-Einheit. Ausbildung in der **Kaserne** (Krieger-Trainingslager). |
-| **Feuerkrieger** | Fernkampf-Einheit (Feuerbälle). Ausbildung im **Feuertempel** (Feuerkrieger-Trainingslager). |
-| **Prediger** | **Konvertiert** feindliche Einheiten zum eigenen Stamm. Ausbildung im **Tempel**. Mehrere Prediger verteilen sich auf verschiedene Ziele; **Einheiten in Bekehrung sind kein gültiges Ziel** für Nah-/Fernkampf (Katapult ausgenommen). |
+| **Feuerkrieger** | Fernkampf-Einheit (Feuerbälle). Ausbildung im **Feuertempel** (Feuerkrieger-Trainingslager). Der Feuerball macht **Flächenschaden** (halber Hauptschaden im Umkreis von 2 m, **nur Feinde**, kein Rückstoß auf Umstehende) — ohne ihn teilten Feuerkrieger viel Schaden aus und töteten fast nichts. |
+| **Prediger** | **Konvertiert** feindliche Einheiten zum eigenen Stamm. Ausbildung im **Tempel**. Mehrere Prediger verteilen sich auf verschiedene Ziele; **Einheiten in Bekehrung sind kein gültiges Ziel** für Nah-/Fernkampf (Katapult ausgenommen). Eine **kämpfende feindliche Schamanin** im Umkreis von 6 m **unterbricht die Predigt** — laufende Bekehrungen brechen ab, neue beginnen nicht, und das gilt für alle Prediger in ihrem Radius. Bloßes Herumstehen stört nicht. |
 | **Belagerungswaffe (Katapult)** | Fernkampf-Fahrzeug mit Crew, gebaut in der **Werkstatt** (Phase 7f). |
 
 > **Einheiten-Hardcap:** max. **1000 Einheiten pro Stamm** (`Balance.TRIBE_MAX_UNITS`,
@@ -212,9 +212,14 @@ Laufzeit-Terrainverformung (Erdbeben/Vulkan/Ebene/Absinken).
   betroffen — außerhalb der Karte ist ohnehin nichts begehbar.
 - **Fliegende Ziele:** Nahkampf und Bekehrung kommen nicht an sie heran, Lava
   ignoriert sie, und Feuerkrieger-Feuerbälle machen **+20 % Schaden**
-  (`FIREWARRIOR_AIRBORNE_MULT`) und **beschleunigen** bei der Verfolgung.
-  Ein tödlicher Treffer in der Luft tötet nicht sofort: die Einheit fällt als
-  Ragdoll zu Boden und stirbt bei der Landung.
+  (`FIREWARRIOR_AIRBORNE_MULT`, auch je Flächenschaden-Opfer) und
+  **beschleunigen** bei der Verfolgung. Ein tödlicher Treffer in der Luft tötet
+  nicht sofort: die Einheit fällt als Ragdoll zu Boden und stirbt bei der Landung.
+- **Verletzte fliegen leichter:** Die Anhebe-Chance des Feuerkrieger-Feuerballs
+  skaliert **invers zu den Lebenspunkten** des Ziels — bei voller Gesundheit die
+  Basis, kurz vor dem Tod das Dreifache (`FW_FIREBALL_LIFT_HP_MAX_MULT`, also
+  4 % → 12 %; rollendes Ziel 10 % → 30 %). Die Summe aus Anheben und Umwerfen ist
+  damit zur **Laufzeit nicht mehr konstant** — nur die Basiswerte sind es.
 
 **Zustandsanzeigen werfen keinerlei Schatten** (Sterne bei kritischer
 Verletzung, Panik, Brand): es sind UI-Glyphen über dem Kopf, und in der

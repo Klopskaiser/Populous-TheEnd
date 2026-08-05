@@ -8246,3 +8246,174 @@ ein Insel-Rebuild). Die Bauplatzsuche bleibt pro Zelle im gleichen Band.
   (Rechtsklick auf Stapel → halten, zweiter Rechtsklick → ablegen, 30-s-Countdown),
   ob Hütten sichtbar ausbauen statt sich zu vermehren, ob noch große Stapel
   herumliegen, und die 20 % Startholz auf Insel/Plateau.
+
+---
+
+## Phase 10i — Baustellen-Bugfix, Prediger-Störung, Feuerkrieger-Flächenschaden (2026-08-05)
+
+**Plan:** [10i_construction_bugfix_combat_balance.md](10i_construction_bugfix_combat_balance.md)
+— umgesetzt in **drei Commits** (zwei laut Plan, plus einer für zwei Nutzerreports,
+die mitten in der Phase hereinkamen).
+
+| Commit | Inhalt |
+|---|---|
+| `2c0d854` | Teil 1 (F1–F5, F7) + F8: steckengebliebene Baustellen, Lauf-Animation |
+| `787b559` | Zwei Nutzerreports: KI zerstört keine Gebäude, Feuerstrahl überlebt die Ramme |
+| (dieser) | Teile 2–5: Prediger-Störung, Flächenschaden, Anhebe-Kurve, Balance-Labor |
+
+### Der Kernfix, und warum er so klein ausfällt
+
+`delivery_point()` war **nicht persistiert**. Der Punkt ist der gemeinsame Anker von
+fünf Verbrauchern (`_absorb_piles`, `wood_incoming`, Lieferziel der Braves,
+`_refund_wood`, `approach_island`), und die Ringsuche dahinter liefert eine
+Perimeterzelle — er sprang also, sobald sich irgendwo in der Nachbarschaft die
+Begehbarkeit änderte. **Jede planierte Zelle tut das.** Auf einem 8×8-Grundriss liegen
+gegenüberliegende Ring-1-Ecken ~14 m auseinander, `ABSORB_RADIUS` ist 5 m. Damit buchte
+`_absorb_piles` nichts, `wood_delivered` blieb 0, `wants_more_wood()` blieb dauerhaft
+true — das ist der gemeldete **unbegrenzt wachsende Holzstapel**, nicht die Erstattung —
+und `progress_cap()` blieb 0, weshalb die Arbeiter formal in `interact_range()` standen
+und ins Leere hämmerten. Der Fix ist ein Lazy-Cache mit einer Gültigkeitsprüfung.
+
+**Planabweichung F1:** *nicht* in `init_construction()` initialisiert wie geplant —
+`BuildingManager.place()` ruft für `pre_built = true` (alle Startgebäude)
+`finish_construction()` **statt** `init_construction()`, fertige Gebäude hätten also
+keinen Anker bekommen.
+
+### F6 wurde nach Messung VERWORFEN
+
+Das ist die wichtigste Abweichung der Phase. F6 (Planierkante eine Zelle außerhalb des
+Grundrisses halb auf `flatten_target` ziehen) kostete die KI **ein Drittel bis die
+Hälfte ihrer Bevölkerung**:
+
+| `benchmark_earlygame`, bergpass, pop@300 s | Werte |
+|---|---|
+| ohne meine Änderungen | 242, 244 |
+| mit allen Änderungen **inkl. F6** | 158, 159 |
+| **F6 allein** (F3 aus) | 134 |
+| **F3 allein** (F6 aus) | 241 |
+| ohne F6 (Endstand) | 224, 225, 241, 248 |
+
+Die Bisektion ist eindeutig: F3 ist unschuldig, F6 ist die Ursache. Eine Klemmung gegen
+`TerrainData.MAX_SLOPE` (der Verdacht: der Blend entfernt die Stufe am Grundriss und
+öffnet eine neue gegen das unberührte Gelände dahinter) brachte nur 162 — also
+**Implementierung entfernt**. Der Ringgraben, gegen den F6 gedacht war, ist über **F5**
+(Fluchtweg für eingeschlossene Braves), **F3** (Zell-Timeout) und **F4** (Anlauftor bei
+der Platzierung) abgedeckt. Der Plan hatte F6 selbst als größtes Regressionsrisiko
+geführt und diese Messung zur Pflicht gemacht — sie hat genau das geleistet.
+
+### Weitere Planabweichungen (alle am Code nachgeprüft)
+
+1. **F4 war kein Einzeiler.** `can_place_at(cell, footprint)` hatte **keine
+   `orientation`**, `approach_cell_for` braucht sie. Neuer optionaler Parameter,
+   durchgereicht von `place_building`, dem Bauplatz-Ghost (`build_menu`, sonst zeigt der
+   Ghost eine andere Seite als die gebaute) und der KI. Nebenbei fiel auf, dass der
+   Regal-Pfad `_find_rack_plot` **eine veraltete `_plot_orientation` erbte** — Vorfilter
+   und Platzierung wären auseinandergelaufen.
+2. **F5 braucht zwei Einhängepunkte.** `_on_seek_failed()` zählt den Fehlschlag-Streak
+   nur im `State.BUILD`-Zweig, der `else`-Zweig ruft direkt `_stop_all()`. Und die
+   **Reihenfolge ist sicherheitsrelevant**: erst Job abgeben, dann snappen — Planierer
+   stehen absichtlich auf dem soliden Grundriss (`Building.worker_can_reach` sagt das im
+   Kommentar), ein Snap davor hätte legitime Arbeiter von ihrer Zelle gerissen.
+3. **F3 brauchte ein Arbeiter-Tor.** Der Zell-Timeout läuft nur, solange die Baustelle
+   Besatzung hat — sonst erodiert ein unbeachteter Bauplatz nach 25 s seine eigene
+   Planierpflicht weg und erhebt sich später aus unberührtem Gelände. Und das
+   „letzte Zelle nie fallen lassen"-Sicherheitsnetz, das zuerst dastand, war **falsch**:
+   die blockierende Zelle IST am Ende die letzte, der Riegel hätte den Fix aufgehoben.
+   Ein Bauplatz, dessen ganzer Grund unerreichbar ist, wird weiter vom Verfall geholt.
+4. **Teil 3 hat eine Festlegung gebraucht, die der Plan offenließ:** der Gebäudepfad
+   `Fireball._impact_building()` bleibt **ohne** Flächenschaden — die Gebäudebalance
+   sollte diese Phase nicht anfassen.
+
+### Zwei Nutzerreports mitten in der Phase (Commit `787b559`)
+
+**„Das Holzablagegebäude kann von der KI nicht angegriffen werden."** Am Depot war
+nichts zu ändern: es ist `is_attackable()`, wird vom Einheiten-Scan gefunden, und hat wie
+vorgesehen nur eine Schadensstufe — eine Sonde zerstörte es in Sekunden. Die Ursache ist
+**allgemein**: `Unit.order_move()` löscht absichtlich `attack_building` („a move order
+also breaks off a building assault"), und `_tick_attack`/`_tick_defend` schicken **alle
+`ATTACK_ORDER_TICKS` (4)** einen neuen Attack-Move an die **ganze** Armee. Jeder
+begonnene Sturm wurde also Sekunden später abgebrochen — die KI konnte **kein** Gebäude
+fertig abreißen. Am 1×1-Depot mit 120 HP fällt das am meisten auf, weil das in Sekunden
+fallen müsste. Neu: `_marching_only()` nimmt die Einheiten aus dem Sammelbefehl, die
+gerade ein Gebäude abreißen. Ohne den Fix liest der Test `hp 120 -> 120 after 60 s`.
+
+**„Explodiert die Feuerramme während sie Feuer speit, bleibt der Feuerstrahl bestehen."**
+`FireRam.tick()` überspringt den ganzen Flammenblock bei `State.DEAD` — also auch das
+`_show_flame_cone(false)`, mit dem ein Stoß endet. Der Kegel ist ein **Kindknoten** und
+blieb bis zum Verschwinden der Leiche stehen. Neu: `FireRam._die()` beendet den Stoß auf
+**jedem** Todesweg (Explosion, Ausbrennen, Wasser, Tornadospitze) und nullt
+`_flame_time`, womit eine tote Ramme strukturell auch keinen Flammenschaden mehr
+austeilen kann.
+
+### Balance: was die Messung sagt
+
+**Teil 3 (Flächenschaden) ist der große Effekt.** `balance_lab`, reps=3, vorher/nachher:
+
+| Paarung | vorher | nachher |
+|---|---|---|
+| `krieger_vs_feuerkrieger` | 3:0 Krieger, **19,7 von 20** überleben | **2:1**, 6,7:6,3, Effizienz 1,02 |
+| `krieger_vs_feuerkrieger_zeitgleich` | 3:0, 20,0 überleben | 3:0, **15,0** überleben |
+| `feuerkrieger_vs_prediger` | Effizienz **0,00**, 8 % Schaden | Effizienz **6,00**, **69 %** Schaden |
+| `prediger_vs_feuerkrieger_zeitgleich` | 3:0 für Prediger | **1:2** für die Feuerkrieger |
+| `katapulte_vs_feuerkrieger` | 0:2, Katapulte behalten 1,7 | 0:3, Katapulte auf 0,0 |
+
+Der Feuerkrieger teilte vorher **100 % des Kriegerpools** aus und riss keinen einzigen um
+— ein Konzentrations-, kein Schadensproblem, genau wie der Plan es beschrieb. Jetzt
+schlägt der Schaden in Kills um.
+
+**Perf-Abnahme (Pflicht laut Plan):** `benchmark_stress`, verschränktes A/B über die
+Konstante `FW_FIREBALL_BLAST_FRAC` (0,0 gegen 0,5) im selben Binary, je zwei Läufe:
+
+| Fenster t 0–149 | Splash aus | Splash an |
+|---|---|---|
+| Ø Tick | 103,7 / 98,3 ms | **54,0 / 52,7 ms** |
+| davon `proj` | 7,20 / 6,73 ms | **4,98 / 4,85 ms** |
+| lebend | 3858 | 3531 |
+
+Die zusätzliche Radiusabfrage je Einschlag ist also **nicht** teuer geworden — im
+Gegenteil. **Ehrlich zur Ursache:** das ist kein Beweis, dass die Abfrage billig ist,
+sondern dass sie sich bezahlt: der Splash **tötet**, und 327 Einheiten weniger sparen
+überall Arbeit. Eine isolierte Kostenmessung könnte nur ein Harnisch nach Vorbild von
+`benchmark_lava` liefern (Population fixiert).
+
+**Teil 2 (Prediger-Störung) wirkt lokal, nicht matchup-entscheidend.** Die neue Paarung
+`prediger_vs_krieger_mit_schamanin` (20 Prediger gegen 20 Krieger + Schamanin) geht
+**3:0 an die Prediger**, 20 Bekehrte. Eine einzelne Schamanin kann bei 6 m Radius nur
+eine Handvoll Prediger niederhalten, und sie muss dabei selbst im Kampf stehen. Die Regel
+ist damit genau das, was der Plan wollte — ein **Gegenmittel**, keine Nerfung; wer die
+Prediger-Dominanz wirklich brechen will, dreht am Radius
+(`PREACHER_SHAMAN_DISTURB_RANGE`).
+
+**Teil 5 hat einen Laborbefund kassiert und einen neuen gebracht.** Fahrzeuge wurden
+ausnahmslos mit Braves besetzt; beim Luftschiff **ist die Deckbesatzung die ganze
+Kampfkraft**, gemessen wurden also unbewaffnete Zeppeline. Mit Feuerkriegern auf dem Deck
+(`crew_kind`) schlagen Luftschiffe Krieger (12:0) und Prediger (12:0) — beides
+Nutzererwartung. **Zwei Befunde bleiben offen:**
+
+1. `luftschiffe_vs_feuerkrieger` **kippte durch Teil 3** von 0:3 (Luftschiffe verlieren,
+   Nutzererwartung) auf **3:0**. Beide Seiten sind Feuerkrieger, aber die Deckbesatzung
+   profitiert stärker: sie ist unerreichbar, bekommt den Luftbonus und ihr Splash trifft
+   die geballte Bodenreihe. Regler sind `FW_FIREBALL_BLAST_RADIUS` (2 m ist ein
+   Schätzwert) und `_BLAST_FRAC` — reine Zahlen, kein Codeeingriff.
+2. `luftschiffe_vs_katapulte` und `feuerrammen_vs_katapulte` enden mit `!`: die Seiten
+   **kamen nie in Waffenreichweite**. Das ist keine Balance-, sondern eine
+   Verhaltensaussage und betrifft Fahrzeug-gegen-Fahrzeug allgemein, nicht nur
+   Luftschiffe.
+
+### Verifikationsstand
+
+- **Suite 4010 Zusicherungen grün** (Start der Phase: 3874), Exit-Code 0, Output frei von
+  `SCRIPT ERROR`. Projekt-Ladecheck sauber. Neu: `tests/test_construction_stuck.gd` (16
+  Tests, je einer pro Stufe der Ursachenkette), `tests/test_fireball_impact.gd`,
+  `tests/test_preach_disturb.gd`.
+- **Jeder Fix hat einen Wächter, der ohne ihn umfällt** — gegengeprüft per Stash:
+  Teil 1 acht Fehlschläge (darunter `the wood at the anchor is booked (0 of 18)`), die
+  KI-Gebäudeangriffe zwei (`hp 120 -> 120 after 60 s`), die Feuerramme einen.
+  Das erste Testpaar zu F1 war **grün ohne den Fix** und musste zu einer echten
+  Reproduktion umgebaut werden — ein Wächter, der nicht fällt, ist Dekoration.
+- **Manuelle Prüfung durch den Nutzer steht aus:** Lauf-Animation zum Trainingslager;
+  Hütte dicht neben eine Hütte (wird gebaut, kein Holzberg); Feuertempel 8×8 auf
+  hängigem Gelände (Arbeiter kommen rein *und* raus); Bekehrung bricht bei kämpfender
+  Schamanin daneben ab, bei bloß stehender nicht; Feuerkrieger auf eine dichte Gruppe
+  (Umstehende nehmen Schaden, eigene nicht); KI reißt Gebäude sichtbar ab; Feuerstrahl
+  der Ramme verschwindet mit der Explosion.

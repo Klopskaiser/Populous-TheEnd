@@ -169,6 +169,10 @@ func _impact() -> void:
 		var events: Node = get_node_or_null("/root/Events")
 		if events != null:
 			events.combat_hit.emit(&"fireball", position)
+	# Splash BEFORE the "did the direct hit kill it" return (phase 10i, part 3):
+	# otherwise the area damage would vanish exactly when the direct hit was
+	# lethal — the most common case against a battered target.
+	_apply_blast()
 	if not _target_alive():
 		return   # the hit killed it
 	# Knockback away from the shooter (fallback: along the flight direction).
@@ -187,7 +191,8 @@ func _impact() -> void:
 	# higher on targets that already tumble (extends the roll). A fresh
 	# knock-over can also topple adjacent units in tight formations.
 	var was_rolling: bool = target.state == Unit.State.ROLL
-	var lift_chance: float = LIFT_CHANCE_ROLLING if was_rolling else LIFT_CHANCE
+	var lift_chance: float = lift_chance_for_health(target.health_fraction(),
+		LIFT_CHANCE_ROLLING if was_rolling else LIFT_CHANCE)
 	var roll_chance: float = ROLL_CHANCE_ROLLING if was_rolling else ROLL_CHANCE
 	match impact_outcome(randf(), lift_chance, roll_chance):
 		OUTCOME_LIFT:
@@ -217,6 +222,54 @@ func _impact() -> void:
 ## static so the split is exhaustively testable headless (same pattern as
 ## SiegeShot.roll_chance_for_slope). LIFT takes the bottom slice, ROLL the
 ## next one, everything above is a plain shove.
+## Area damage around the impact (phase 10i, part 3). Pattern: the cheapest of
+## the three existing splash shapes, FireballBolt._explode — one radius query, a
+## tribe_id filter, a DEAD check after every take_damage.
+##
+## Why at all: the balance lab shows firewarriors dealing 100 % of the enemy
+## warrior HP pool while killing next to nobody (20 warriors keep 19.7 of 20).
+## Their damage is spread thin over everyone instead of concentrated — area
+## damage is exactly the fix for that.
+##
+## Deliberate limits (user decisions): ENEMIES ONLY (they fight in masses and
+## fire constantly; friendly fire would have the back row shredding its own
+## front) and DAMAGE ONLY, no knockback or lift on bystanders (hundreds of balls
+## per battle would otherwise churn every front line — and cost accordingly).
+func _apply_blast() -> void:
+	if Balance.FW_FIREBALL_BLAST_RADIUS <= 0.0 or Balance.FW_FIREBALL_BLAST_FRAC <= 0.0:
+		return
+	if shooter == null or not is_instance_valid(shooter) or shooter.path_service == null:
+		return   # without the shooter friend/foe is undecidable; guessing is not an option
+	var um = shooter.path_service
+	var base: int = maxi(1, int(roundf(float(Unit.FIREBALL_DAMAGE)
+		* Balance.FW_FIREBALL_BLAST_FRAC)))
+	for u in um.get_units_in_radius(position, Balance.FW_FIREBALL_BLAST_RADIUS):
+		if u == target or u.state == Unit.State.DEAD or u.tribe_id == shooter.tribe_id:
+			continue
+		# Vehicles have their own damage models (ignite / register_hull_hit); a
+		# 50-%-splash ignition would upgrade the firewarrior against vehicles
+		# through a side door.
+		if u is CrewedVehicle or u is Airship:
+			continue
+		var dmg: int = base
+		if u.is_airborne():
+			# Same bonus as on the main target — otherwise "flyers take +20 %"
+			# would depend on who happened to be the direct target.
+			dmg = maxi(1, int(roundf(float(dmg) * Balance.FIREWARRIOR_AIRBORNE_MULT)))
+		u.take_damage(dmg, shooter)
+
+
+## Lift chance scaled by the target's remaining health: a battered unit is thrown
+## far more easily than a fresh one. Linear inverse — full health keeps `base`, an
+## almost dead target reaches base * FW_FIREBALL_LIFT_HP_MAX_MULT. Pure and static
+## so the curve is exhaustively testable headless (pattern: impact_outcome,
+## SiegeShot.roll_chance_for_slope).
+static func lift_chance_for_health(hp_frac: float, base: float) -> float:
+	var f: float = clampf(hp_frac, 0.0, 1.0)
+	var mult: float = lerpf(Balance.FW_FIREBALL_LIFT_HP_MAX_MULT, 1.0, f)
+	return clampf(base * mult, 0.0, 1.0)
+
+
 static func impact_outcome(r: float, lift_chance: float, roll_chance: float) -> int:
 	if r < lift_chance:
 		return OUTCOME_LIFT

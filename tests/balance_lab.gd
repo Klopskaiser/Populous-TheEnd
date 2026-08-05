@@ -60,17 +60,32 @@ const FIRERAM_SCENE: PackedScene = preload("res://scenes/units/fire_ram.tscn")
 const AIRSHIP_SCENE: PackedScene = preload("res://scenes/units/airship.tscn")
 
 ## Einheitenarten: Szene, Standard-Besatzung (0 = keine), Rumpfholz,
-## Ausbildungs-/Bauzeit in Sekunden (für die Zeit-Spalte).
+## Ausbildungs-/Bauzeit in Sekunden (für die Zeit-Spalte) und `crew_kind` =
+## Einheitenart der Besatzung.
 ## Die BÄ-Kosten sind 1 je Fußeinheit und `crew` je Fahrzeug.
+##
+## `crew_kind` (10i Teil 5) korrigiert einen ungültigen Laborbefund: Fahrzeuge
+## wurden ausnahmslos mit BRAVES besetzt. Für Katapult und Ramme ist das richtig
+## (die schießen selbst), beim LUFTSCHIFF ist die Deckbesatzung aber die ganze
+## Kampfkraft — gemessen wurden also unbewaffnete Zeppeline, und "Luftschiffe
+## teilen 0 Schaden aus" war eine Aussage über brave-besetzte Rümpfe.
 const KINDS: Dictionary = {
-	&"brave":       {"scene": BRAVE_SCENE,       "crew": 0, "wood": 0, "time": 0.0},
-	&"krieger":     {"scene": WARRIOR_SCENE,     "crew": 0, "wood": 0, "time": 3.0},
-	&"feuerkrieger":{"scene": FIREWARRIOR_SCENE, "crew": 0, "wood": 0, "time": 4.0},
-	&"prediger":    {"scene": PREACHER_SCENE,    "crew": 0, "wood": 0, "time": 5.0},
-	&"schamanin":   {"scene": SHAMAN_SCENE,      "crew": 0, "wood": 0, "time": 0.0},
-	&"katapult":    {"scene": SIEGE_SCENE,       "crew": 3, "wood": 6, "time": 60.0},
-	&"feuerramme":  {"scene": FIRERAM_SCENE,     "crew": 2, "wood": 4, "time": 40.0},
-	&"luftschiff":  {"scene": AIRSHIP_SCENE,     "crew": 3, "wood": 8, "time": 80.0},
+	&"brave":       {"scene": BRAVE_SCENE,       "crew": 0, "wood": 0, "time": 0.0,
+		"crew_kind": &"brave"},
+	&"krieger":     {"scene": WARRIOR_SCENE,     "crew": 0, "wood": 0, "time": 3.0,
+		"crew_kind": &"brave"},
+	&"feuerkrieger":{"scene": FIREWARRIOR_SCENE, "crew": 0, "wood": 0, "time": 4.0,
+		"crew_kind": &"brave"},
+	&"prediger":    {"scene": PREACHER_SCENE,    "crew": 0, "wood": 0, "time": 5.0,
+		"crew_kind": &"brave"},
+	&"schamanin":   {"scene": SHAMAN_SCENE,      "crew": 0, "wood": 0, "time": 0.0,
+		"crew_kind": &"brave"},
+	&"katapult":    {"scene": SIEGE_SCENE,       "crew": 3, "wood": 6, "time": 60.0,
+		"crew_kind": &"brave"},
+	&"feuerramme":  {"scene": FIRERAM_SCENE,     "crew": 2, "wood": 4, "time": 40.0,
+		"crew_kind": &"brave"},
+	&"luftschiff":  {"scene": AIRSHIP_SCENE,     "crew": 3, "wood": 8, "time": 80.0,
+		"crew_kind": &"feuerkrieger"},
 }
 
 ## Aufstellung = Liste von [art, anzahl] oder [art, anzahl, besatzung].
@@ -103,10 +118,25 @@ const SCENARIOS: Array = [
 	 "frage": "6 Feuerrammen (12 Mann + 24 Holz) gegen 12 Krieger"},
 	{"name": "feuerrammen_vs_katapulte", "a": [[&"feuerramme", 6, 2]], "b": [[&"katapult", 4, 3]],
 	 "frage": "Fahrzeug gegen Fahrzeug bei 12 BÄ je Seite"},
+	# Luftschiffe: seit 10i mit FEUERKRIEGERN auf dem Deck besetzt. Die
+	# Nutzererwartung ist "gewinnt gegen alles ausser Feuerkrieger und Katapult" —
+	# genau diese vier Paarungen pruefen das.
 	{"name": "luftschiffe_vs_feuerkrieger", "a": [[&"luftschiff", 4, 3]], "b": [[&"feuerkrieger", 12]],
 	 "frage": "Deckfeuer gegen Bodenfeuer bei 12 BÄ je Seite"},
+	{"name": "luftschiffe_vs_krieger", "a": [[&"luftschiff", 4, 3]], "b": [[&"krieger", 12]],
+	 "frage": "Kommt der Nahkampf an bewaffnete Zeppeline heran? (12 BÄ je Seite)"},
+	{"name": "luftschiffe_vs_prediger", "a": [[&"luftschiff", 4, 3]], "b": [[&"prediger", 12]],
+	 "frage": "Bekehrung gegen Fliegende — Deckbesatzung ist unerreichbar"},
+	{"name": "luftschiffe_vs_katapulte", "a": [[&"luftschiff", 4, 3]], "b": [[&"katapult", 4, 3]],
+	 "frage": "Abfangschuss gegen Deckfeuer bei 12 BÄ je Seite"},
 
 	# --- Schamanin ---
+	# Die Wirkung von 10i Teil 2 ist NUR mit Schamanin auf der Anti-Prediger-Seite
+	# messbar: ohne sie bleibt die Prediger-Dominanz unangetastet (so gewollt).
+	# 21 gegen 20 BÄ — die Schamanin ist der Aufpreis, den die Regel kostet.
+	{"name": "prediger_vs_krieger_mit_schamanin", "a": [[&"prediger", 20]],
+	 "b": [[&"krieger", 20], [&"schamanin", 1]],
+	 "frage": "Bricht die kaempfende Schamanin die Prediger-Dominanz? (10i Teil 2)"},
 	{"name": "schamanin_vs_braves", "a": [[&"schamanin", 1]], "b": [[&"brave", 6]],
 	 "frage": "Wie viele Braves kostet die Schamanin im Nahkampf?"},
 	{"name": "schamanin_vs_krieger", "a": [[&"schamanin", 1]], "b": [[&"krieger", 3]],
@@ -441,18 +471,19 @@ func _spawn_side(um: UnitManager, nav: NavGrid, tribe_id: int, anchor: Vector2i,
 			# Besatzung schon. Die Braves zählen einzeln, der Rumpf mit 0 —
 			# sonst würde die Besatzung doppelt berechnet.
 			be_of[unit.get_instance_id()] = 0
+			var crew_scene: PackedScene = KINDS[_crew_kind_of(kind)]["scene"] as PackedScene
 			for c in range(crew):
 				var crew_cell: Vector2i = _free_cell(nav, anchor, placed)
 				placed += 1
 				if crew_cell.x < 0:
 					continue
-				var brave: Unit = um.spawn_unit(BRAVE_SCENE, tribe_id,
+				var member: Unit = um.spawn_unit(crew_scene, tribe_id,
 					nav.cell_to_world(crew_cell))
-				if brave == null:
+				if member == null:
 					continue
-				origin[brave.get_instance_id()] = tribe_id
-				be_of[brave.get_instance_id()] = 1
-				brave.order_crew(unit)
+				origin[member.get_instance_id()] = tribe_id
+				be_of[member.get_instance_id()] = 1
+				member.order_crew(unit)
 
 
 ## `skip`-te begehbare Zelle in Ringen um `center` (dicht gepackte Aufstellung).
@@ -470,6 +501,12 @@ func _free_cell(nav: NavGrid, center: Vector2i, skip: int) -> Vector2i:
 
 # --- Kosten & Ausgabe ---------------------------------------------------------
 
+## Besatzungsart eines Fahrzeugs (Standard: Braves).
+func _crew_kind_of(kind: StringName) -> StringName:
+	var spec: Dictionary = KINDS[kind]
+	return spec.get("crew_kind", &"brave") as StringName
+
+
 func _composition_cost(composition: Array) -> Dictionary:
 	var be: int = 0
 	var wood: int = 0
@@ -481,6 +518,12 @@ func _composition_cost(composition: Array) -> Dictionary:
 		be += count * (crew if crew > 0 else 1)
 		wood += count * int(spec["wood"])
 		time += float(count) * float(spec["time"])
+		# Die AUSBILDUNGSZEIT der Besatzung gehört dazu (10i Teil 5): drei
+		# Feuerkrieger auf dem Deck sind 3 BÄ UND 12 s Ausbildung, nicht nur der
+		# Rumpf. Ohne das waren Fahrzeuge in der Zeit-Spalte zu billig.
+		if crew > 0:
+			var crew_spec: Dictionary = KINDS[_crew_kind_of(entry[0])]
+			time += float(count * crew) * float(crew_spec["time"])
 	return {"be": be, "wood": wood, "time": time}
 
 

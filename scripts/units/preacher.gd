@@ -239,6 +239,13 @@ func _refresh_conversion() -> void:
 	if path_service == null:
 		_set_state(State.IDLE)
 		return
+	# A fighting enemy shaman in range breaks every sermon around her (10i, part
+	# 2). The victims stand up on their own in _tick_sit; without this the
+	# preacher would keep standing in CAST over nobody. Cheap here because the
+	# whole scan is already throttled by _due_to_scan.
+	if _preach_disturbed_by_enemy_shaman(self):
+		_set_state(State.IDLE)
+		return
 	# "Responsible" = at least one in-range convertible that is MINE to handle
 	# (I just pacified it, or it already sits under me). A unit already sitting
 	# under a PEER does NOT count — otherwise a second preacher pins itself

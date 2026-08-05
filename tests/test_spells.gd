@@ -1347,6 +1347,12 @@ func test_lightning_lift_stronger_than_fireball() -> void:
 
 ## Exhaustive on the pure decision function plus the balance invariant: the
 ## lift chance was carved OUT of the old roll chance, the sum is unchanged.
+##
+## CAREFUL (phase 10i, part 4): this pins the BASE constants only. At RUNTIME the
+## sum is deliberately NOT invariant any more — Fireball.lift_chance_for_health()
+## scales the lift chance up as the target's health drops (4 % -> 12 %), which
+## shrinks the plain-shove share. That is the intended effect, not a bug to
+## "repair" by making the numbers add up again.
 func test_firewarrior_fireball_outcome_split() -> void:
 	check_near(Balance.FW_FIREBALL_LIFT_CHANCE + Balance.FW_FIREBALL_ROLL_CHANCE, 0.10,
 		"standing target: lift + roll still add up to the old 10 %")
