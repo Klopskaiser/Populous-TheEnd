@@ -450,9 +450,12 @@ func test_spell_stage1_ejects_crew_alive() -> void:
 
 func test_cost_and_footprint() -> void:
 	var w: Dictionary = _make_world()
-	check(Watchtower.WOOD_COST == 4, "watchtower costs 4 wood")
+	check(Watchtower.WOOD_COST == Balance.WATCHTOWER_WOOD_COST,
+		"der Wachturm uebernimmt WATCHTOWER_WOOD_COST (%d) aus Balance"
+			% Balance.WATCHTOWER_WOOD_COST)
 	var site: Building = w.bm.place(TOWER_SCENE, w.tribe0, Vector2i(30, 30), 0, false)
-	check(site != null and site.wood_cost == 4, "placed via the build pipeline at 4 wood")
+	check(site != null and site.wood_cost == Balance.WATCHTOWER_WOOD_COST,
+		"und die Bau-Pipeline setzt ihn mit demselben Preis")
 	check(site.footprint == Vector2i(2, 2), "2x2 footprint")
 	check(not w.nav.is_cell_walkable(Vector2i(30, 30)), "footprint blocks the NavGrid")
 	check(not w.nav.is_cell_walkable(Vector2i(31, 31)), "whole footprint solid")

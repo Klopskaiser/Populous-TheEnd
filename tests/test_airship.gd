@@ -121,7 +121,9 @@ func test_wharf_produces_an_airship() -> void:
 	var ws: AirshipWharf = w.building_manager.place(
 		WHARF_SCENE, w.tribe, Vector2i(60, 60), 0, true) as AirshipWharf
 	check(ws != null, "airship wharf placed")
-	check(ws.wood_cost == 20, "wharf costs 20 wood")
+	check(ws.wood_cost == Balance.AIRSHIP_WHARF_WOOD_COST,
+		"die Werft uebernimmt AIRSHIP_WHARF_WOOD_COST (%d) aus Balance"
+			% Balance.AIRSHIP_WHARF_WOOD_COST)
 	check(ws.footprint == Vector2i(8, 8), "8x8 footprint")
 	check(ws.worker_slots() == 4, "4 worker slots")
 	check(ws.display_name() == "Luftschiffwerft", "display name")

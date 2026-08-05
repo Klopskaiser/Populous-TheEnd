@@ -54,7 +54,9 @@ func _depot(w: Dictionary, cell: Vector2i) -> WoodDepot:
 
 func test_cost_footprint_and_single_stage() -> void:
 	var w: Dictionary = _make_world()
-	check(WoodDepot.WOOD_COST == 1, "depot costs 1 wood")
+	check(WoodDepot.WOOD_COST == Balance.WOOD_DEPOT_WOOD_COST,
+		"die Holzstation uebernimmt WOOD_DEPOT_WOOD_COST (%d) aus Balance"
+			% Balance.WOOD_DEPOT_WOOD_COST)
 	var depot: WoodDepot = _depot(w, Vector2i(60, 60))
 	check(depot != null and depot.footprint == Vector2i(1, 1), "1x1 footprint")
 	check(depot.is_usable(), "finished depot is usable")

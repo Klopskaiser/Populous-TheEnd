@@ -91,7 +91,9 @@ func _man_hut(w: Dictionary, hut: Hut) -> void:
 func test_stage_zero_hut_has_the_new_small_values() -> void:
 	var w: Dictionary = _make_world()
 	var hut: Hut = _place_hut(w, Vector2i(60, 60))
-	check(hut.wood_cost == 7, "a fresh hut costs 7 wood (12 -> 8 -> 7 in 10h)")
+	check(hut.wood_cost == Balance.HUT_WOOD_COST,
+		"eine frische Huette uebernimmt HUT_WOOD_COST (%d) aus Balance"
+			% Balance.HUT_WOOD_COST)
 	check(hut.upgrade_stage == 0, "a fresh hut starts at stage 0")
 	check(hut.capacity() == 10, "stage 0 houses 10 (was 40)")
 	check(hut.crew_capacity() == 2, "stage 0 has 2 worker slots (was 4)")

@@ -130,7 +130,7 @@ func test_prebuilt_building_keeps_full_hp() -> void:
 func test_melee_raiders_demolish_site() -> void:
 	var w: Dictionary = _make_world()
 	var site: Building = _site(w)
-	_deliver_wood(w, site, 4)   # 150 HP — demolition must tick it down
+	_deliver_wood(w, site, Balance.HUT_WOOD_COST / 2)   # Teil-HP, der Abriss muss sie abbauen
 	for i in range(3):
 		site.admit_raider(w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, Vector3(41 + i, 0, 41)))
 	check(site.raiders.size() == 3, "3 raiders inside the site")
@@ -160,7 +160,7 @@ func test_ordered_warriors_raze_site() -> void:
 func test_firewarrior_bombards_site() -> void:
 	var w: Dictionary = _make_world()
 	var site: Building = _site(w)
-	_deliver_wood(w, site, 4)   # 150 HP
+	_deliver_wood(w, site, Balance.HUT_WOOD_COST / 2)   # Teil-HP
 	var fw: Unit = w.unit_manager.spawn_unit(FIREWARRIOR_SCENE, 0, Vector3(35, 0, 35))
 	fw.order_attack_building(site)
 	var razed: int = _run(w, [fw], func() -> bool: return site.health <= 0)
