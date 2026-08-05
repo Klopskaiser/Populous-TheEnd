@@ -291,3 +291,60 @@ func test_area_order_still_delivers_automatically() -> void:
 	check(not brave.carry_hold,
 		"ein Flaechenauftrag setzt KEINEN Haltezustand - er liefert automatisch ab")
 	_free_world(w)
+
+
+# --- Teil 3: Ablieferung nach BEDARF statt nach Naehe (10h) ---------------------------
+# Nutzerreport: "bisher lagen riesige Stapel einfach rum, teilweise in der Naehe von
+# Werkstaetten, obwohl Huetten auch wichtig sind." Ursache war die Zielwahl: der
+# Traeger nahm das NAECHSTE eigene Gebaeude.
+
+func test_delivery_prefers_the_neediest_target_over_the_nearest() -> void:
+	var w: Dictionary = _make_world()
+	var brave: Brave = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, Vector3(50, 5, 50)) as Brave
+	# Nah: eine fertige, unbeschaedigte Huette (kein Bedarf).
+	var idle_hut: Building = w.building_manager.place(HUT_SCENE, w.tribe, Vector2i(52, 50), 0, true)
+	# Weiter weg: eine Baustelle, die Holz braucht.
+	var site: Building = w.building_manager.place(HUT_SCENE, w.tribe, Vector2i(62, 50), 0, false)
+	check(brave._delivery_demand(idle_hut) == 0, "die fertige Huette braucht nichts")
+	check(brave._delivery_demand(site) > 0, "die Baustelle braucht Holz")
+	check(brave._neediest_target_in_reach() == site,
+		"der Traeger waehlt die BEDUERFTIGE Baustelle, nicht die naehere fertige Huette")
+	_free_world(w)
+
+
+func test_a_stocked_workshop_is_not_a_consumer() -> void:
+	# Genau der gemeldete Fall: Holz soll nicht an einer satten Werkstatt liegen
+	# bleiben, waehrend eine Huette ausbauen will.
+	var w: Dictionary = _make_world()
+	var brave: Brave = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, Vector3(50, 5, 50)) as Brave
+	var shop: Workshop = w.building_manager.place(WORKSHOP_SCENE, w.tribe,
+		Vector2i(52, 50), 0, true) as Workshop
+	check(brave._delivery_demand(shop) > 0, "eine leere Werkstatt hat Bedarf")
+	w.wood_pile_manager.deposit(shop.delivery_point(), shop.product_wood())
+	check(brave._delivery_demand(shop) == 0,
+		"mit einem Produkt-Wert an Bord ist sie KEIN Abnehmer mehr")
+	_free_world(w)
+
+
+func test_a_rack_ranks_below_a_real_consumer() -> void:
+	var w: Dictionary = _make_world()
+	var brave: Brave = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, Vector3(50, 5, 50)) as Brave
+	var rack: Building = w.building_manager.place(DEPOT_SCENE, w.tribe, Vector2i(51, 50), 0, true)
+	var site: Building = w.building_manager.place(HUT_SCENE, w.tribe, Vector2i(56, 50), 0, false)
+	check(brave._delivery_demand(rack) <= Balance.AI_HUT_RACK_STOCK,
+		"ein Regal konkurriert nur bis zu einem Ausbau — es ist ein Puffer, kein Abnehmer")
+	check(brave._delivery_demand(site) > brave._delivery_demand(rack),
+		"eine Baustelle hat mehr offenen Bedarf als das Regal")
+	check(brave._neediest_target_in_reach() == site, "und gewinnt die Zielwahl")
+	_free_world(w)
+
+
+func test_equal_demand_goes_to_the_nearer_target() -> void:
+	var w: Dictionary = _make_world()
+	var brave: Brave = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, Vector3(50, 5, 50)) as Brave
+	var near_site: Building = w.building_manager.place(HUT_SCENE, w.tribe, Vector2i(54, 50), 0, false)
+	w.building_manager.place(HUT_SCENE, w.tribe, Vector2i(66, 50), 0, false)
+	check(brave._neediest_target_in_reach() == near_site,
+		"bei gleichem Bedarf gewinnt die kuerzere Strecke - ein Dorf gleich hungriger "
+			+ "Huetten behaelt kurze Wege")
+	_free_world(w)

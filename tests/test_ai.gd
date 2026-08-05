@@ -1029,10 +1029,13 @@ func test_parallel_site_count_scales_with_braves() -> void:
 
 
 func test_wood_crew_count_leaves_the_early_game_alone() -> void:
-	check(AIState.wood_crew_count(11) == 0,
-		"below AI_BRAVES_PER_WOOD_CREW braves there is NO crew: the early game "
-		+ "behaves exactly as before")
-	check(AIState.wood_crew_count(12) == 1, "the first crew forms at 12 braves")
+	# Aus Balance abgeleitet: die Schwelle ist in 10h von 12 auf 9 gesunken, und eine
+	# feste Zahl haette hier erneut gebrochen.
+	check(AIState.wood_crew_count(Balance.AI_BRAVES_PER_WOOD_CREW - 1) == 0,
+		"unter AI_BRAVES_PER_WOOD_CREW Braves gibt es KEINEN Trupp - das Fruehspiel "
+			+ "bleibt unberuehrt")
+	check(AIState.wood_crew_count(Balance.AI_BRAVES_PER_WOOD_CREW) == 1,
+		"der erste Trupp entsteht bei %d Braves" % Balance.AI_BRAVES_PER_WOOD_CREW)
 	check(AIState.wood_crew_count(500) == Balance.AI_MAX_WOOD_CREWS, "the cap holds")
 
 

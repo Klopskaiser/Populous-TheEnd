@@ -71,6 +71,26 @@ func _initialize() -> void:
 		for t in tribes: t.tick(1.0 / 30.0)
 		for ai in ais: ai._process(1.0 / 30.0)
 	print("Karte %s, %.0f s, 4 KIs | Baeume gesamt %d" % [map_id, sim, tm.trees.size()])
+	# Herumliegendes Holz: Stapel, die NICHT im Absorptionsradius eines eigenen
+	# Gebaeudes liegen — genau das, was der Nutzer als "Riesenstapel" gemeldet hat.
+	var loose: int = 0
+	var loose_piles: int = 0
+	for pile in wpm.piles:
+		if not is_instance_valid(pile) or pile.amount <= 0: continue
+		var served: bool = false
+		for t in tribes:
+			for b in t.buildings:
+				if not is_instance_valid(b) or b.health <= 0: continue
+				var d: Vector3 = b.delivery_point()
+				if Vector2(d.x, d.z).distance_to(Vector2(pile.position.x, pile.position.z)) 						<= Building.ABSORB_RADIUS:
+					served = true
+					break
+			if served: break
+		if not served:
+			loose += pile.amount
+			loose_piles += 1
+	print("  Holz frei herumliegend: %d in %d Stapeln (von %d gesamt)" % [
+		loose, loose_piles, wpm.total_wood()])
 	print("  Fahrzeuge bemannt: %d | Verworfene Baustellen: %d | Nachschub-Truppe: %d" % [
 		AIController.dbg_vehicles_crewed, AIController.dbg_site_scraps,
 		AIController.dbg_supply_runs])

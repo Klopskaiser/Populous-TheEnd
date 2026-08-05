@@ -1376,12 +1376,15 @@ func _tick_loose_deliver(delta: float) -> void:
 				_haul_target = null
 				_haul_source = null
 				_loose_deliver_goal = Vector3.INF
-			var building: Building = null
-			if has_chop_area():
-				# Area harvest: a rack within DEPOT_PREFER_RADIUS beats a merely
-				# nearer hut — the wood should end up in storage, and the crew
-				# keeps hauling to one spot instead of scattering piles across
-				# the whole village.
+			# 10h Teil 3: NEED before proximity. Picking the nearest target left huge
+			# piles at workshops while huts waited to upgrade (user report). The
+			# consumer with the biggest OPEN demand in reach wins now.
+			var building: Building = _neediest_target_in_reach()
+			if building == null and has_chop_area():
+				# Nothing needs wood: an area crew still prefers a rack within
+				# DEPOT_PREFER_RADIUS over a merely nearer hut, so the load ends up in
+				# storage and the crew keeps hauling to ONE spot instead of scattering
+				# piles across the village.
 				var depot: WoodDepot = _nearest_depot(position)
 				if depot != null and _flat_dist(position, depot.delivery_point()) \
 						<= DEPOT_PREFER_RADIUS:
@@ -1848,3 +1851,65 @@ func _drop_held_wood() -> void:
 	_carry_drop_goal = Vector3.INF
 	_carry_drop_into = null
 	_stop_all()
+
+
+## Own building within DEPOT_PREFER_RADIUS with the biggest OPEN wood demand, or
+## null when nothing in reach needs any (10h Teil 3).
+##
+## Before this the carrier took the NEAREST target, which is why huge piles sat at
+## workshops while huts waited to upgrade (user report). Ties go to the nearer one, so
+## a village of equally hungry huts still gets short walks.
+##
+## Cost: one pass over tribe.buildings per DELIVERY TRIP (a trip is many seconds) —
+## the same loop _nearest_own_building already does — plus one cheap pile query per
+## workshop candidate. Deliberately NOT Workshop.stock_wood(), which is
+## O(piles x buildings) because of its peer-reservation check.
+func _neediest_target_in_reach() -> Building:
+	if tribe == null:
+		return null
+	var best: Building = null
+	var best_need: int = 0
+	var best_dist: float = INF
+	for building in tribe.buildings:
+		if not is_instance_valid(building) or building.health <= 0:
+			continue
+		var drop: Vector3 = building.delivery_point()
+		var d: float = _flat_dist(position, drop)
+		if d > DEPOT_PREFER_RADIUS:
+			continue
+		var need: int = _delivery_demand(building)
+		if need <= 0:
+			continue
+		if need < best_need or (need == best_need and d >= best_dist):
+			continue
+		if nav_grid != null and not nav_grid.same_island(position, drop):
+			continue
+		best = building
+		best_need = need
+		best_dist = d
+	return best
+
+
+## Wood `building` still openly needs. 0 = it wants nothing right now, so the carrier
+## looks elsewhere — a workshop with a full product's worth of stock is NOT a
+## consumer, which is exactly the "piles rot at the workshop" case.
+func _delivery_demand(building: Building) -> int:
+	if building.demolishing:
+		return 0
+	if building.under_construction:
+		return maxi(0, building.wood_needed_total() - building.wood_incoming())
+	if building.upgrading:
+		return maxi(0, building.upgrade_wood_missing())
+	if building.health < building.max_health:
+		return maxi(0, building.repair_wood_missing())
+	if building is Workshop:
+		if wood_pile_manager == null:
+			return 0
+		var have: int = wood_pile_manager.wood_in_radius(
+			building.delivery_point(), Building.ABSORB_RADIUS)
+		return maxi(0, (building as Workshop).product_wood() - have)
+	if building is WoodDepot:
+		# A rack is a BUFFER, not a consumer: it competes only up to one upgrade's
+		# worth, so a hut that actually wants to grow always outranks it.
+		return mini((building as WoodDepot).storage_left(), Balance.AI_HUT_RACK_STOCK)
+	return 0

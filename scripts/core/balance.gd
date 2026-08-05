@@ -712,8 +712,11 @@ const AI_ECONOMY_BRAVE_SHARE: float = 0.35
 ## Fäll-Trupps: Größe, Braves je Trupp und Deckel. Unter AI_BRAVES_PER_WOOD_CREW
 ## Braves gibt es GAR keinen Trupp — das Frühspiel bleibt damit unverändert.
 const AI_WOOD_CREW_SIZE: int = 6
-const AI_BRAVES_PER_WOOD_CREW: int = 12
-const AI_MAX_WOOD_CREWS: int = 4
+## 10h Teil 3: 12 -> 9 und 4 -> 6. Nutzerwunsch "am besten ist es, Leute direkt zum
+## Holz holen zu schicken" — der erste Trupp faellt damit frueher und die Truppzahl
+## skaliert schneller mit dem Stamm.
+const AI_BRAVES_PER_WOOD_CREW: int = 9
+const AI_MAX_WOOD_CREWS: int = 6
 ## Die Holzlogistik läuft nur auf jedem n-ten KI-Tick (Hain-Suche ist teuer).
 const AI_WOOD_TICK_INTERVAL: int = 3
 const AI_WOOD_GROVE_TTL_TICKS: int = 30
