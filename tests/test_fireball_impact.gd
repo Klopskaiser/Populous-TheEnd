@@ -82,7 +82,10 @@ func test_fireball_splash_damages_nearby_enemies() -> void:
 	_free_world(w)
 
 
-func test_fireball_splash_is_half_the_direct_damage() -> void:
+## The fraction itself is a balance dial (2,0 m / 50 % -> 1,3 m / 30 % on
+## 2026-08-05), so this derives the expectation from Balance instead of pinning a
+## number — the same lesson the wood costs taught three times.
+func test_fireball_splash_matches_the_configured_fraction() -> void:
 	var w: Dictionary = _make_world()
 	var shooter: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(26, 30))
 	var target: Unit = _tough(_spawn(w, BRAVE_SCENE, 1, Vector2(30, 30)))
@@ -165,6 +168,30 @@ func test_fireball_splash_does_not_push_bystanders() -> void:
 		"and not lifted or rolled either")
 	ball.free()
 	_free_world(w)
+
+
+## The radius is not a free-floating number: it was chosen (user decision
+## 2026-08-05) so that ONE unit pack is covered and the NEIGHBOURING pack is not.
+## Pinning the geometry keeps that reasoning alive the next time somebody turns
+## the dial — the failing assertion says which rule was broken.
+func test_blast_radius_covers_one_pack_but_not_the_neighbour() -> void:
+	var r: float = Balance.FW_FIREBALL_BLAST_RADIUS
+	# Widest distance between two members of a 6-pack (TribeCommands.MEMBER_OFFSETS).
+	var pack_width: float = 0.0
+	for a: Vector3 in TribeCommands.MEMBER_OFFSETS:
+		for b: Vector3 in TribeCommands.MEMBER_OFFSETS:
+			pack_width = maxf(pack_width, Vector2(a.x - b.x, a.z - b.z).length())
+	check(r >= pack_width,
+		"the radius covers a whole 6-pack (%.2f m wide)" % pack_width)
+	check(r >= Unit.MELEE_SLOT_RADIUS,
+		"and a whole melee group (attackers on a %.2f m ring)" % Unit.MELEE_SLOT_RADIUS)
+	check(r < TribeCommands.GROUP_SPACING,
+		"but stays below the distance between pack centres (%.2f m) — at 2.0 m the "
+			% TribeCommands.GROUP_SPACING
+			+ "splash reached into the neighbouring pack and flipped the airship pairing")
+	check(r < UnitManager.COMBAT_GROUP_MIN_DIST - Unit.MELEE_SLOT_RADIUS,
+		"and below the nearest attacker of the neighbouring brawl (%.2f m)"
+			% (UnitManager.COMBAT_GROUP_MIN_DIST - Unit.MELEE_SLOT_RADIUS))
 
 
 # --- Part 4: lift chance rises as health drops --------------------------------------

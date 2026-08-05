@@ -8400,6 +8400,29 @@ Nutzererwartung. **Zwei Befunde bleiben offen:**
    profitiert stärker: sie ist unerreichbar, bekommt den Luftbonus und ihr Splash trifft
    die geballte Bodenreihe. Regler sind `FW_FIREBALL_BLAST_RADIUS` (2 m ist ein
    Schätzwert) und `_BLAST_FRAC` — reine Zahlen, kein Codeeingriff.
+   > **Nachtrag 2026-08-05 — an diesem Regler wurde gedreht (Nutzerentscheidung):**
+   > 2,0 m / 50 % → **1,3 m / 30 %**. Der Radius folgt jetzt der Einheitengeometrie —
+   > 1,3 m fasst genau ein 6er-Pack (`MEMBER_OFFSETS`, max. 1,10 m breit) bzw. eine
+   > Nahkampfgruppe (`MELEE_SLOT_RADIUS` 0,9 m) und lässt die Nachbargruppe
+   > (`GROUP_SPACING` 2,2 m) draußen. Ein Test (`test_blast_radius_covers_one_pack_but_
+   > not_the_neighbour`) hält diese Begründung fest, damit sie beim nächsten Drehen
+   > nicht verloren geht.
+   >
+   > **Der Preis ist gemessen und erheblich:** Fläche × Anteil ergibt nur noch
+   > (1,3/2,0)² × 0,6 ≈ **25 %** des vorigen Flächenschaden-Durchsatzes, und der
+   > Feuerkrieger ist damit nahe an seiner alten Wirkungslosigkeit:
+   >
+   > | Paarung | ohne Splash | 2,0 m / 50 % | 1,3 m / 30 % |
+   > |---|---|---|---|
+   > | `krieger_vs_feuerkrieger` | 3:0, Krieger behalten 19,7 | 2:1, behalten 6,7 | 3:0, behalten **18,3** |
+   > | `feuerkrieger_vs_prediger` Schaden% | 8 % | 69 % | **22 %** |
+   > | `prediger_vs_feuerkrieger_zeitgleich` | 3:0 Prediger | 1:2 Feuerkrieger | **3:0 Prediger** |
+   > | `luftschiffe_vs_feuerkrieger` | 0:3 | 3:0 | **2:1** |
+   >
+   > Von den 13,3 zusätzlich getöteten Kriegern bleiben also ~1,7 übrig. Die
+   > Luftschiff-Paarung kippt nicht vollständig zurück (2:1 statt 0:3). Das ist eine
+   > bewusste Nutzerentscheidung nach dem Spielgefühl, nicht ein Messergebnis — die
+   > Zahlen stehen hier, damit die nächste Runde davon ausgehen kann.
 2. `luftschiffe_vs_katapulte` und `feuerrammen_vs_katapulte` enden mit `!`: die Seiten
    **kamen nie in Waffenreichweite**. Das ist keine Balance-, sondern eine
    Verhaltensaussage und betrifft Fahrzeug-gegen-Fahrzeug allgemein, nicht nur
