@@ -849,6 +849,22 @@ func _command_move(screen_pos: Vector2, queue_up: bool, aggressive: bool = false
 	if hit.is_empty():
 		return
 
+	# 10h: a brave that HOLDS wood (right-clicked a pile) waits for a destination —
+	# this click is the drop order. MUST come before the pile/tree/building branches:
+	# further back, a click on a pile would only pick up MORE wood and the drop
+	# command would be practically unreachable. An armed attack-move is exempt.
+	if not aggressive and _tribe_commands != null 			and _tribe_commands.any_holds_wood_for_drop(selected):
+		var drop: Vector3 = hit.position
+		var into: Building = null
+		var node_hit: Node = hit.get("collider") as Node
+		if node_hit != null and node_hit.has_meta("building"):
+			var b: Building = node_hit.get_meta("building") as Building
+			if b != null and b.tribe_id == player_tribe_id and b.health > 0:
+				into = b
+				drop = b.delivery_point()   # the building absorbs it like a delivery
+		if _tribe_commands.order_drop_wood(selected, drop, into) > 0:
+			return
+
 	# Right-click on an ENEMY building with siege engines selected: bombard it
 	# (7f); everyone else escorts with an attack-move onto the plot.
 	if _tribe_commands != null and _dispatch_enemy_building(hit):

@@ -910,3 +910,8 @@ const AI_SHOP_RACK_MAX_DIST: float = 4.5
 const AI_SHOP_RACK_SIDE_CLEAR: float = 2.5
 const AI_SHOP_RACK_SCAN_RINGS: int = 3
 const AI_MAX_SHOP_RACKS: int = 3
+
+# --- Trageverhalten (10h) ---
+## Haelt ein Brave Holz OHNE Ablege-Befehl so lange, laesst er es an Ort und Stelle
+## fallen (Nutzerentscheidung). Bei Nahkampf und Tod faellt es sofort.
+const BRAVE_CARRY_HOLD_TIMEOUT: float = 30.0

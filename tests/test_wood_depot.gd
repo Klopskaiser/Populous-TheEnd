@@ -183,11 +183,15 @@ func test_depot_haul_without_second_depot_is_a_plain_move() -> void:
 	_free_world(w)
 
 
-func test_pickup_relay_delivers_into_the_depot() -> void:
+## 10h ERSETZT test_pickup_relay_delivers_into_the_depot: das alte Stapel-Relais
+## (Stapel an einem eigenen Gebaeude -> selbstaendig ins naechste Regal tragen) hatte
+## nur EINEN Ausloeser, den Einzel-Rechtsklick — und der HAELT das Holz jetzt.
+## _next_area_pile ueberspringt Stapel an eigenen Gebaeuden, der Flaechenauftrag
+## konnte den Fall also nie ausloesen. Einraeumen ist damit ein Zwei-Klick-Vorgang,
+## und das ist deterministischer: aufnehmen, dann auf das Regal klicken.
+func test_holding_brave_puts_the_wood_into_the_clicked_rack() -> void:
 	var w: Dictionary = _make_world()
 	var wpm: WoodPileManager = w.wood_pile_manager
-	# A pile right at a friendly hut counts as "already delivered": a manual
-	# pickup relays it to the (farther) wood depot instead.
 	var hut: Hut = w.building_manager.place(HUT_SCENE, w.tribe, Vector2i(30, 30), 0, true) as Hut
 	var depot: WoodDepot = _depot(w, Vector2i(44, 31))
 	var pile: WoodPile = wpm.create_pile_at(hut.entrance_world() + Vector3(1.0, 0, 0))
@@ -197,10 +201,22 @@ func test_pickup_relay_delivers_into_the_depot() -> void:
 	w.unit_manager.tick(TICK)
 	brave.order_pickup(pile)
 	var ticks: int = 0
+	while brave.carried_wood == 0 and ticks < MAX_TICKS:
+		w.building_manager.tick(TICK)
+		w.unit_manager.tick(TICK)
+		brave.tick(TICK)
+		ticks += 1
+	check(brave.carried_wood > 0, "der Brave hat das Holz aufgenommen")
+	check(brave.holds_wood_for_drop(), "und haelt es (kein selbstaendiges Relais mehr)")
+	check(depot.stored_wood() == 0, "das Regal ist noch leer")
+	# Diese Testwelt hat keinen TribeCommands — direkt auf dem Brave, gleiche Wirkung.
+	check(brave.order_drop_wood(depot.delivery_point(), depot),
+		"Ablegen ins Regal befohlen")
+	ticks = 0
 	while depot.stored_wood() < 3 and ticks < MAX_TICKS:
 		w.building_manager.tick(TICK)
 		w.unit_manager.tick(TICK)
 		brave.tick(TICK)
 		ticks += 1
-	check(depot.stored_wood() == 3, "the relayed wood ends up in the depot rack")
+	check(depot.stored_wood() == 3, "und landet im Regal")
 	_free_world(w)

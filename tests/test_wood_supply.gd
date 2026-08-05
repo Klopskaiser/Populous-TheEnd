@@ -198,3 +198,96 @@ func test_rack_outside_the_absorb_radius_is_not_shop_stock() -> void:
 	check(Balance.AI_SHOP_RACK_MAX_DIST < Building.ABSORB_RADIUS,
 		"deshalb klemmt AI_SHOP_RACK_MAX_DIST unter ABSORB_RADIUS")
 	_free_world(w)
+
+
+# --- Trageverhalten: aufnehmen und halten (10h Teil 1) -------------------------------
+# Nutzerentscheidung: Rechtsklick auf einen Stapel nimmt das Holz auf und HAELT es;
+# der naechste Rechtsklick bestimmt das Ziel. Haelt ein Brave es ohne Befehl laenger
+# als BRAVE_CARRY_HOLD_TIMEOUT, faellt es an Ort und Stelle. Der automatische
+# Ablieferpfad bleibt fuer den B-Rechteck-Auftrag erhalten.
+
+func _pile_at(w: Dictionary, at: Vector3, amount: int) -> WoodPile:
+	w.wood_pile_manager.deposit(at, amount)
+	return w.wood_pile_manager.nearest_pile(at)
+
+
+func test_pickup_holds_the_wood_instead_of_delivering() -> void:
+	var w: Dictionary = _make_world()
+	w.building_manager.place(HUT_SCENE, w.tribe, Vector2i(60, 60), 0, true)
+	var pile: WoodPile = _pile_at(w, Vector3(45, 5, 45), 3)
+	var brave: Brave = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, Vector3(46, 5, 45)) as Brave
+	w.commands.order_pickup([brave] as Array[Unit], pile)
+	var ticks: int = _run(w, func() -> bool: return brave.carried_wood > 0)
+	check(ticks < MAX_TICKS, "der Brave nimmt das Holz auf")
+	check(brave.holds_wood_for_drop(), "und HAELT es (wartet auf ein Ziel)")
+	# Weiterlaufen lassen: er darf es NICHT selbst zur Huette bringen.
+	for i in range(150):
+		w.unit_manager.tick_units(TICK)
+		w.unit_manager.tick(TICK)
+		w.building_manager.tick(TICK)
+	check(brave.carried_wood > 0,
+		"und liefert es NICHT selbstaendig ab (das war das alte Verhalten)")
+	_free_world(w)
+
+
+func test_second_order_drops_the_wood_at_the_target() -> void:
+	var w: Dictionary = _make_world()
+	var pile: WoodPile = _pile_at(w, Vector3(45, 5, 45), 3)
+	var brave: Brave = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, Vector3(46, 5, 45)) as Brave
+	w.commands.order_pickup([brave] as Array[Unit], pile)
+	_run(w, func() -> bool: return brave.carried_wood > 0)
+	check(w.commands.any_holds_wood_for_drop([brave] as Array[Unit]),
+		"die UI erkennt den Haltezustand")
+	var goal: Vector3 = Vector3(55, 5, 55)
+	check(w.commands.order_drop_wood([brave] as Array[Unit], goal) == 1, "Ablegen befohlen")
+	var ticks: int = _run(w, func() -> bool: return brave.carried_wood == 0)
+	check(ticks < MAX_TICKS, "er legt das Holz ab")
+	check(w.wood_pile_manager.wood_in_radius(goal, 4.0) > 0,
+		"und zwar am befohlenen Ziel")
+	check(not brave.holds_wood_for_drop(), "der Haltezustand ist beendet")
+	_free_world(w)
+
+
+func test_held_wood_drops_after_the_timeout() -> void:
+	var w: Dictionary = _make_world()
+	var pile: WoodPile = _pile_at(w, Vector3(45, 5, 45), 3)
+	var brave: Brave = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, Vector3(46, 5, 45)) as Brave
+	w.commands.order_pickup([brave] as Array[Unit], pile)
+	_run(w, func() -> bool: return brave.carried_wood > 0)
+	var held_at: Vector3 = brave.position
+	var steps: int = int(Balance.BRAVE_CARRY_HOLD_TIMEOUT / TICK) + 20
+	for i in range(steps):
+		w.unit_manager.tick_units(TICK)
+		w.unit_manager.tick(TICK)
+	check(brave.carried_wood == 0,
+		"nach BRAVE_CARRY_HOLD_TIMEOUT laesst er es fallen")
+	check(w.wood_pile_manager.wood_in_radius(held_at, 4.0) > 0,
+		"und zwar an Ort und Stelle")
+	_free_world(w)
+
+
+func test_melee_makes_the_carrier_drop_the_wood() -> void:
+	var w: Dictionary = _make_world()
+	var pile: WoodPile = _pile_at(w, Vector3(45, 5, 45), 3)
+	var brave: Brave = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, Vector3(46, 5, 45)) as Brave
+	w.commands.order_pickup([brave] as Array[Unit], pile)
+	_run(w, func() -> bool: return brave.carried_wood > 0)
+	check(brave.carried_wood > 0, "haelt Holz (Testvoraussetzung)")
+	brave._on_combat_interrupt()
+	check(brave.carried_wood == 0, "im Nahkampf faellt das Holz")
+	check(not brave.carry_hold, "und der Haltezustand endet")
+	_free_world(w)
+
+
+func test_area_order_still_delivers_automatically() -> void:
+	# Regressionswaechter fuer den BEWUSST erhaltenen Pfad: der B-Rechteck-Auftrag
+	# liefert weiter selbstaendig ab, nur der Einzel-Rechtsklick haelt.
+	var w: Dictionary = _make_world()
+	w.building_manager.place(HUT_SCENE, w.tribe, Vector2i(50, 50), 0, true)
+	w.tree_manager.spawn_tree(Vector2i(56, 56), TreeResource.MAX_STAGE)
+	var brave: Brave = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, Vector3(54, 5, 54)) as Brave
+	var area: Rect2 = Rect2(Vector2(52, 52), Vector2(8, 8))
+	check(w.commands.order_chop_area([brave] as Array[Unit], area) == 1, "Flaechenauftrag")
+	check(not brave.carry_hold,
+		"ein Flaechenauftrag setzt KEINEN Haltezustand - er liefert automatisch ab")
+	_free_world(w)

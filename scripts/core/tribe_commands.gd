@@ -560,6 +560,31 @@ func order_depot_haul(units: Array[Unit], depot: WoodDepot) -> void:
 		order_move(movers, depot.center_world())
 
 
+## Drop order for braves that HOLD wood (10h): the second right-click says where the
+## load goes. Returns how many braves took it — 0 means nobody was holding wood, and
+## the UI must then treat the click as a normal command.
+func order_drop_wood(units: Array[Unit], point: Vector3,
+		into: Building = null) -> int:
+	var assigned: int = 0
+	for unit in units:
+		if unit == null or not is_instance_valid(unit) or unit.state == Unit.State.DEAD:
+			continue
+		if not _unit_active(unit) or not (unit is Brave):
+			continue
+		if (unit as Brave).order_drop_wood(point, into):
+			assigned += 1
+	return assigned
+
+
+## True while any of `units` holds wood waiting for a drop order — the UI asks this
+## BEFORE dispatching a right-click, so the drop branch wins over move/attack.
+func any_holds_wood_for_drop(units: Array[Unit]) -> bool:
+	for unit in units:
+		if is_instance_valid(unit) and unit is Brave 				and (unit as Brave).holds_wood_for_drop():
+			return true
+	return false
+
+
 ## Braves carry wood to ONE specific own building (AI wood logistics, 10g Teil 4):
 ## they source it from the nearest rack, else a ground pile, else a tree, and drop it
 ## at the target's delivery point, where the target absorbs it.

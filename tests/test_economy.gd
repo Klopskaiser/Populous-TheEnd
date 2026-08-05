@@ -1051,19 +1051,29 @@ func test_order_pickup_fetches_pile_and_delivers() -> void:
 	w.commands.order_pickup([brave] as Array[Unit], pile)
 	check(brave.state == Unit.State.GATHER, "pickup order enters GATHER")
 	check(brave.task == Brave.Task.PICKUP, "pickup order sets Task.PICKUP")
+	# 10h: der Einzel-Rechtsklick nimmt das Holz auf und HAELT es — der Brave liefert
+	# es NICHT mehr selbstaendig ab. Das Ziel nennt der naechste Rechtsklick
+	# (order_drop_wood). Automatisch abgeliefert wird jetzt beim B-Rechteck-Auftrag.
+	var picked: bool = false
+	for i in range(600):
+		brave.tick(0.1)
+		w.unit_manager.tick(0.1)
+		if brave.carried_wood > 0:
+			picked = true
+			break
+	check(picked, "der Brave nimmt das Holz auf")
+	check(brave.holds_wood_for_drop(), "und HAELT es (10h-Trageverhalten)")
 	var drop: Vector3 = hut.delivery_point()
+	check(w.commands.order_drop_wood([brave] as Array[Unit], drop, hut) == 1,
+		"Ablegen an der Huette befohlen")
 	var delivered: bool = false
 	for i in range(600):
 		brave.tick(0.1)
 		w.unit_manager.tick(0.1)
-		for p in w.wood_pile_manager.piles:
-			if is_instance_valid(p) and p.amount >= 3 \
-					and Vector2(p.position.x, p.position.z).distance_to(
-						Vector2(drop.x, drop.z)) <= 6.0:
-				delivered = true
-		if delivered:
+		if brave.carried_wood == 0:
+			delivered = true
 			break
-	check(delivered, "wood ends up on a pile at the hut's drop spot")
+	check(delivered, "und legt es am befohlenen Ziel ab")
 	check(brave.carried_wood == 0, "brave dropped everything")
 	_free_world(w)
 

@@ -133,6 +133,23 @@ var _haul_target: WoodDepot = null
 ## delivery path — the same number of branches, but with a regression risk in a
 ## feature the tests already pin down.
 var _supply_target: Building = null
+## Carry-and-hold (10h): set by order_pickup. The brave keeps the wood in its hands
+## and waits for a DROP order instead of delivering on its own — the second
+## right-click decides where it goes. The automatic delivery is still what the
+## standing area order (key B) does; only the single-pile right-click changed.
+var carry_hold: bool = false
+## Seconds the brave has been holding wood with no drop order. At
+## Balance.BRAVE_CARRY_HOLD_TIMEOUT it puts the wood down where it stands, so a
+## forgotten carrier does not walk around with it forever (user decision).
+var _carry_hold_timer: float = 0.0
+## Drop destination of the current hold order; INF while none is set.
+var _carry_drop_goal: Vector3 = Vector3.INF
+## Optional building the load goes INTO: a WoodDepot stores it in its rack, any
+## other own building absorbs the dropped pile as usual. This replaces the old
+## pile relay (a pile at a friendly building was carried to the nearest rack) —
+## that only ever triggered on the single right-click, which now HOLDS the wood,
+## so it had no trigger left at all.
+var _carry_drop_into: Building = null
 
 ## Standing area-harvest order (phase 10e, key B and the AI wood crews): while
 ## set, the brave keeps claiming trees inside this world-XZ rectangle, fills
@@ -200,8 +217,14 @@ func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = fals
 const IDLE_AGGRO_RADIUS: float = Balance.BRAVE_IDLE_AGGRO_RADIUS
 
 
-## Manual pickup order (right-click on a wood pile): fetch the pile, then
-## deliver like loose-chopped wood (nearest own building's drop spot).
+## Manual pickup order (right-click on a wood pile, 10h): fetch the pile and HOLD
+## it. The brave no longer delivers on its own — the next right-click says where the
+## wood goes (order_drop_wood). Holding it without an order for
+## BRAVE_CARRY_HOLD_TIMEOUT puts it down on the spot.
+##
+## The automatic "carry it to the nearest wood spot" behaviour is deliberately kept
+## for the standing AREA order (key B): there the player asked for a whole patch to
+## be cleared, not for a hand-placed load.
 func order_pickup(pile: WoodPile) -> void:
 	if not can_take_orders():
 		return
@@ -210,8 +233,34 @@ func order_pickup(pile: WoodPile) -> void:
 	_interrupt_tasks()
 	task_pile = pile
 	task = Task.PICKUP
+	carry_hold = true
+	_carry_hold_timer = 0.0
+	_carry_drop_goal = Vector3.INF
 	_loose_return_pos = Vector3.INF
 	_set_state(State.GATHER)
+
+
+## Drop order (second right-click while holding wood, 10h): walk to `point` and put
+## the load down there. A point ON an own building uses its delivery_point, so the
+## building absorbs the wood exactly as a worker delivery would.
+func order_drop_wood(point: Vector3, into: Building = null) -> bool:
+	if not can_take_orders() or not carry_hold or carried_wood <= 0:
+		return false
+	task_pile = null
+	task_tree = null
+	_carry_drop_into = into
+	_carry_drop_goal = point
+	_carry_hold_timer = 0.0
+	task = Task.NONE
+	_reset_seek()
+	_set_state(State.GATHER)
+	return true
+
+
+## True while this brave holds wood and waits for a drop order — the predicate the
+## UI needs to turn the next right-click into order_drop_wood.
+func holds_wood_for_drop() -> bool:
+	return carry_hold and carried_wood > 0
 
 
 ## Haul order (right-click on a wood depot): carry its stock to the nearest
@@ -702,7 +751,9 @@ func leave_forester() -> void:
 func _tick_state(delta: float) -> void:
 	match state:
 		State.GATHER:
-			if task == Task.DELIVER:
+			if carry_hold and carried_wood > 0:
+				_tick_carry_hold(delta)
+			elif task == Task.DELIVER:
 				_tick_loose_deliver(delta)
 			elif task == Task.PICKUP:
 				_tick_pickup(delta)
@@ -1061,7 +1112,8 @@ func _tick_pickup(delta: float) -> void:
 	# friendly building — and a rack's own stock pile always does. This is the
 	# nastiest interaction of the whole change.
 	if state == State.GATHER and job == null and carried_wood > 0 \
-			and _supply_target == null and _pile_near_friendly_building(pile_pos):
+			and _supply_target == null and not carry_hold \
+			and _pile_near_friendly_building(pile_pos):
 		var depot: WoodDepot = _nearest_depot(pile_pos, null, pile_pos)
 		if depot != null:
 			_haul_target = depot
@@ -1070,6 +1122,13 @@ func _tick_pickup(delta: float) -> void:
 	# Standing area order (10g): fill the load from the next source in the area
 	# before hauling, exactly like the tree path does.
 	if _fills_full_load() and carried_wood < CARRY_CAPACITY and _next_area_source():
+		return
+	if carry_hold and carried_wood > 0:
+		# Aufnehmen und HALTEN (10h): kein Task.DELIVER. Der naechste Rechtsklick
+		# entscheidet, wohin — bis dahin laeuft der Ablege-Countdown.
+		task = Task.NONE
+		_carry_hold_timer = 0.0
+		_reset_seek()
 		return
 	task = Task.DELIVER if carried_wood > 0 else Task.NONE
 	_reset_seek()
@@ -1578,6 +1637,10 @@ func _interrupt_tasks() -> void:
 	_haul_target = null
 	# Any other order cancels the supply job — the one-order principle, for free.
 	_supply_target = null
+	carry_hold = false
+	_carry_hold_timer = 0.0
+	_carry_drop_goal = Vector3.INF
+	_carry_drop_into = null
 	_set_working(false)
 	if carried_wood > 0 and wood_pile_manager != null:
 		wood_pile_manager.deposit(position, carried_wood)
@@ -1747,3 +1810,41 @@ func _carry_or(base: StringName) -> StringName:
 ## worthless. The single-tree right-click keeps its one-piece-per-trip behaviour.
 func _fills_full_load() -> bool:
 	return has_chop_area() or has_supply_job()
+
+
+## Carry-and-hold tick (10h): the brave holds its load until a drop order arrives.
+##
+## With a destination it walks there and puts the wood down — on an own building's
+## delivery point that means the building absorbs it, exactly like a worker delivery.
+## Without one, BRAVE_CARRY_HOLD_TIMEOUT seconds later it drops the load where it
+## stands, so a forgotten carrier never walks around with wood forever.
+func _tick_carry_hold(delta: float) -> void:
+	if carried_wood <= 0:
+		carry_hold = false
+		_stop_all()
+		return
+	if _carry_drop_goal != Vector3.INF:
+		if not _seek(_carry_drop_goal, DELIVER_RANGE, delta, true):
+			return
+		_drop_held_wood()
+		return
+	_carry_hold_timer += delta
+	if _carry_hold_timer >= Balance.BRAVE_CARRY_HOLD_TIMEOUT:
+		_drop_held_wood()
+
+
+## Puts the held load down at the current position and ends the hold.
+func _drop_held_wood() -> void:
+	# Into a rack first (that is what "tidy the wood away" means now), leftovers and
+	# non-depot targets as a normal ground pile — which an own building absorbs.
+	if _carry_drop_into is WoodDepot and is_instance_valid(_carry_drop_into) 			and (_carry_drop_into as WoodDepot).is_usable():
+		carried_wood -= (_carry_drop_into as WoodDepot).store_wood(carried_wood)
+	if wood_pile_manager != null and carried_wood > 0:
+		wood_pile_manager.deposit(position, carried_wood)
+	carried_wood = 0
+	_carry_drop_into = null
+	carry_hold = false
+	_carry_hold_timer = 0.0
+	_carry_drop_goal = Vector3.INF
+	_carry_drop_into = null
+	_stop_all()
