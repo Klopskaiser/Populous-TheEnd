@@ -233,3 +233,77 @@ func test_hut_brave_production_costs_no_mana() -> void:
 	check_near(w.tribe.upkeep_debt(), before,
 		"hut population costs NO mana (user requirement)")
 	_free_world(w)
+
+
+# --- Bugfix: die Manaanzeige muss den Unterhalt zeigen ------------------------
+
+## Nutzerreport: "Manaanzeige ist falsch — schickt man Leute in Holzfäller oder
+## Training, wird die gleiche Manazahl angezeigt." Die Sidebar zeigte
+## mana_rate(), also das BRUTTO-Einkommen; der Unterhalt wird erst in
+## Tribe.tick() abgezogen und war damit unsichtbar. Die Anzeige liest jetzt
+## charging_income() und nennt upkeep_rate() daneben.
+func test_active_training_lowers_the_displayed_income() -> void:
+	var w: Dictionary = _make_world()
+	var camp: WarriorCamp = w.bm.place(
+		WARRIOR_CAMP_SCENE, w.tribe, Vector2i(30, 30), 0, true) as WarriorCamp
+	for i in range(40):
+		w.um.spawn_unit(BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(10 + i % 20, 10 + i / 20)))
+	var gross: float = w.tribe.mana_rate()
+	check(gross > 0.0, "the tribe earns something")
+	check_near(w.tribe.charging_income(), gross,
+		"with nothing running, net equals gross")
+	check_near(w.tribe.upkeep_rate(), 0.0, "and there is no upkeep")
+
+	# Get a brave into the camp so training really runs.
+	var brave: Brave = w.um.spawn_unit(BRAVE_SCENE, 0,
+		w.nav.cell_to_world(Vector2i(30, 36))) as Brave
+	w.commands.order_train(camp, [brave] as Array[Unit])
+	for i in range(2000):
+		brave.tick(0.05)
+		camp.tick(0.05)
+		if camp.trainee != null:
+			break
+	check(camp.trainee != null, "the brave is training")
+	# The rate is a PER-TICK value that Tribe.tick() clears, so measure exactly one
+	# building tick after a tribe tick — otherwise the bookings of the loop above
+	# pile up and read like a double charge.
+	w.tribe.tick(0.01)
+	camp.tick(0.1)
+	# Gross has to be re-read: spawning the training brave raised the population.
+	var gross_now: float = w.tribe.mana_rate()
+	check_near(w.tribe.upkeep_rate(), Balance.TRAINING_MANA_PER_BUILDING,
+		"the training shows up as upkeep")
+	check(w.tribe.charging_income() < gross_now,
+		"and the DISPLAYED income drops (%.2f < %.2f)"
+			% [w.tribe.charging_income(), gross_now])
+	check_near(w.tribe.charging_income(),
+		gross_now - Balance.TRAINING_MANA_PER_BUILDING,
+		"by exactly the training cost")
+	_free_world(w)
+
+
+## Derselbe Fehler betraf die Försterei — dort war die Rate schon erfasst
+## (claim_upkeep_rate), aber die Anzeige las sie nicht.
+func test_forester_upkeep_is_visible_in_the_income() -> void:
+	var w: Dictionary = _make_world()
+	# The claim is capped by the income, so the tribe needs people first.
+	for i in range(30):
+		w.um.spawn_unit(BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(10 + i, 10)))
+	var gross: float = w.tribe.mana_rate()
+	# The forester claims its rate against the income; simulate one claim.
+	var granted: float = w.tribe.claim_upkeep_rate(Balance.FORESTER_MANA_PER_WORKER * 2.0)
+	check(granted > 0.0, "the claim was granted (%.2f)" % granted)
+	check_near(w.tribe.upkeep_rate(), granted, "it counts as upkeep")
+	check_near(w.tribe.charging_income(), gross - granted,
+		"and the displayed income is the NET one")
+	_free_world(w)
+
+
+func test_upkeep_resets_every_tick() -> void:
+	var w: Dictionary = _make_world()
+	w.tribe.book_upkeep_rate(2.0, 0.1)
+	check(w.tribe.upkeep_rate() > 0.0, "booked")
+	w.tribe.tick(0.1)
+	check_near(w.tribe.upkeep_rate(), 0.0,
+		"the per-tick rate is cleared again (it is a rate, not a stock)")
+	_free_world(w)

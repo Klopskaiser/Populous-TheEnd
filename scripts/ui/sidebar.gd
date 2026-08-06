@@ -1379,16 +1379,22 @@ func _set_wood(amount: int) -> void:
 ## per second and how many spells are currently sharing it.
 func _set_mana(_amount: float) -> void:
 	var player: Tribe = _player_tribe()
-	var rate: float = player.mana_rate() if player != null else 0.0
+	# NET income (bugfix): the label used to show the gross mana_rate(), so
+	# staffing a forester or starting a training changed nothing on screen even
+	# though both really cost mana. The upkeep is named separately, otherwise a
+	# shrinking number would look like the population had dropped.
+	var upkeep: float = player.upkeep_rate() if player != null else 0.0
+	var rate: float = player.charging_income() if player != null else 0.0
 	var takers: int = player.active_spell_count() if player != null else 0
 	var filled: int = mana_segments(rate, MANA_RATE_DISPLAY_CAP, MANA_SEGMENTS)
 	for i in range(_mana_segments.size()):
 		_mana_segments[i].color = _mana_fill_color() if i < filled else _mana_empty_color()
 	if _mana_label != null:
+		var cost: String = "  (−%.1f Unterhalt)" % upkeep if upkeep > 0.05 else ""
 		if takers > 0:
-			_mana_label.text = "Mana: +%.1f/s  auf %d Zauber" % [rate, takers]
+			_mana_label.text = "Mana: +%.1f/s%s  auf %d Zauber" % [rate, cost, takers]
 		else:
-			_mana_label.text = "Mana: +%.1f/s  (verfällt)" % rate
+			_mana_label.text = "Mana: +%.1f/s%s  (verfällt)" % [rate, cost]
 
 
 func _refresh_tribe_bars() -> void:

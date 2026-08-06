@@ -11,6 +11,10 @@ const HP: int = Balance.SHAMAN_HP                        # 4x brave life
 const SHAMAN_MELEE_STRENGTH: float = Balance.SHAMAN_MELEE_STRENGTH
 ## Wind-up of the cast animation before the effect fires. The release range
 ## is per spell (Spell.cast_range).
+##
+## Anteil der Reichweite, auf den sie sich beim Anmarsch heranarbeitet — knapp
+## innerhalb, damit ein Schritt Ungenauigkeit den Cast nicht wieder verhindert.
+const APPROACH_RANGE_FRACTION: float = 0.85
 const CAST_TIME: float = Balance.SHAMAN_CAST_TIME
 ## Killing an enemy shaman grants the killer's tribe bonus mana worth this
 ## share of its total charge capacity, paid straight into spell charges.
@@ -169,7 +173,12 @@ func _tick_cast(delta: float) -> void:
 	if _flat_dist(position, pending_target) > pending_spell.cast_range:
 		_casting = false
 		_cast_timer = CAST_TIME
-		_approach(pending_target, delta)
+		# NICHT auf das Ziel selbst zulaufen: steht es auf unbegehbarem Grund —
+		# im Grundriss eines Gebaeudes oder auf einem Vulkanberg — scheitert der
+		# A* und sie blieb fuer immer stehen, obwohl der Zauber es erreicht
+		# (Nutzerreport). Sie laeuft bis knapp INNERHALB der Reichweite.
+		_approach(stand_off_point(position, pending_target,
+			pending_spell.cast_range * APPROACH_RANGE_FRACTION), delta)
 		return
 	if _has_path():
 		_clear_path()

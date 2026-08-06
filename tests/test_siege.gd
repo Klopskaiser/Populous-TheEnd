@@ -1808,3 +1808,94 @@ func test_a_served_vehicle_still_cannot_be_hijacked() -> void:
 	w.commands.order_crew([mine] as Array[Unit], engine)
 	check(mine.siege_engine == null, "und nimmt ihn auch nicht auf")
 	_free_world(w)
+
+
+# --- Bugfix: unerreichbares Belagerungsziel ------------------------------------
+
+## Nutzerreport: ein Vulkan hob ein Gebäude auf einen Berg; das Katapult erkannte
+## es als Ziel, richtete sich ewig darauf aus und schoss nie. Ursache: es lief auf
+## den ZIELPUNKT selbst zu — der liegt im Grundriss und auf dem Berg auf
+## unbegehbarem Grund, der A* scheiterte also, und der Rückgabewert von _approach
+## wurde verworfen.
+##
+## Der Schuss fliegt eine Parabel und kennt kein Gelände: das Gerät muss nur in
+## die Reichweite kommen, nicht ans Gebäude. Es läuft daher bis knapp INNERHALB
+## der Feuerreichweite und beschießt das Gebäude, obwohl es zu Fuß gar nicht
+## dorthin könnte.
+func test_catapult_bombards_a_building_it_cannot_walk_to() -> void:
+	var w: Dictionary = _make_world()
+	var siege: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(20, 20))) as SiegeEngine
+	for c in range(3):
+		_board_crew(w, siege)
+	var far: Vector2i = Vector2i(60, 20)
+	var hut: Building = w.building_manager.place(HUT_SCENE, w.tribe1, far, 0, true)
+	check(hut != null, "the enemy hut stands far away")
+	var d: float = Vector2(hut.center_world().x - siege.position.x,
+		hut.center_world().z - siege.position.z).length()
+	check(d > SiegeEngine.FIRE_RANGE, "and beyond the fire range (%.1f m)" % d)
+	# Wall the hut in completely: on foot it is unreachable, exactly like a
+	# building a volcano lifted onto an unwalkable mountain.
+	w.nav.fill_solid_region(Rect2i(far - Vector2i(2, 2),
+		hut.footprint + Vector2i(4, 4)), true)
+
+	siege.order_attack_building(hut)
+	check(siege.attack_building == hut, "the siege order was accepted")
+	var fired: bool = false
+	for i in range(900):
+		_tick_world(w)
+		if not w.unit_manager.projectiles.is_empty():
+			fired = true
+			break
+	check(fired, "the catapult closes into range and SHOOTS at it")
+	check(siege.attack_building == hut, "and keeps the target")
+	var after: float = Vector2(hut.center_world().x - siege.position.x,
+		hut.center_world().z - siege.position.z).length()
+	check(after <= SiegeEngine.FIRE_RANGE,
+		"it really got inside the fire range (%.1f m)" % after)
+	_free_world(w)
+
+
+## Die Geometrie des Anmarschpunkts, rein geprüft: er liegt auf der Linie zum
+## Ziel, `reach` Meter davor — und wer schon in Reichweite ist, bleibt stehen.
+func test_stand_off_point_geometry() -> void:
+	var target: Vector3 = Vector3(50, 5, 50)
+	var from: Vector3 = Vector3(20, 5, 50)
+	var p: Vector3 = Unit.stand_off_point(from, target, 10.0)
+	check_near(Vector2(p.x - target.x, p.z - target.z).length(), 10.0,
+		"the point sits exactly `reach` from the target")
+	check(p.x > from.x and p.x < target.x, "and between the two")
+	check_near(p.z, 50.0, "on the straight line")
+	# Already in range: stay put (no pointless walking).
+	var close: Vector3 = Vector3(45, 5, 50)
+	check(Unit.stand_off_point(close, target, 10.0) == close,
+		"a unit already in range does not move")
+	# Degenerate: standing exactly on the target must not divide by zero.
+	check(Unit.stand_off_point(target, target, 10.0) == target,
+		"standing on the target is handled")
+
+
+## Gegenprobe: ein ERREICHBARES Gebäude jenseits der Feuerreichweite wird
+## weiterhin angefahren und beschossen — der Fix darf den Normalfall nicht
+## kaputtmachen.
+func test_catapult_still_closes_in_on_a_reachable_building() -> void:
+	var w: Dictionary = _make_world()
+	var siege: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(20, 20))) as SiegeEngine
+	for c in range(3):
+		_board_crew(w, siege)
+	var hut: Building = w.building_manager.place(HUT_SCENE, w.tribe1, Vector2i(45, 20), 0, true)
+	check(hut != null, "the enemy hut stands in the open")
+	siege.order_attack_building(hut)
+	var start: float = Vector2(siege.position.x, siege.position.z).distance_to(
+		Vector2(hut.center_world().x, hut.center_world().z))
+	check(start > SiegeEngine.FIRE_RANGE, "it starts outside the fire range")
+	var fired: bool = false
+	for i in range(900):
+		_tick_world(w)
+		if not w.unit_manager.projectiles.is_empty():
+			fired = true
+			break
+	check(siege.attack_building == hut, "the order is kept")
+	check(fired, "and the catapult closes in and shoots")
+	_free_world(w)

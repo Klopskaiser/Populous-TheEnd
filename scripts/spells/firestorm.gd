@@ -115,7 +115,10 @@ class FirestormShower extends Node3D:
 				u.position.z - target_pos.z).length()
 			if d <= FirestormSpell.SPREAD_RADIUS:
 				continue   # im Feuer selbst — das machen die Baelle
-			u.panic()
+			# start_panic, NICHT panic(): letzteres gibt es nicht und liess den
+			# Zauber mit "Invalid call: nonexistent function 'panic'" abstuerzen
+			# (Nutzerreport). Die Quelle ist der Feuersturm, davon flieht sie.
+			u.start_panic(target_pos)
 
 	func _launch_bolt() -> void:
 		_spawned += 1

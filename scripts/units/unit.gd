@@ -3801,6 +3801,26 @@ func melee_slot_position(slot: int) -> Vector3:
 ## Returns false when the destination is UNREACHABLE (A* failed) — the caller
 ## decides; the old blind direct-step fallback made blocked chasers run into
 ## cliff walls forever (Bergpass, phase 8.2).
+## Point to walk to when a target only has to come INTO RANGE: on the line from
+## `from` toward `target`, `reach` metres short of it.
+##
+## Bugfix (user report): both the shaman walking into cast range and the catapult
+## closing on a building pathed to the TARGET ITSELF. That fails whenever the
+## target stands on unwalkable ground — inside a building footprint, or on a
+## mountain a volcano just raised. The unit then stood still, aimed at the target
+## forever and never acted, although the spell/shot only needs the DISTANCE and
+## does not care about the ground under the target at all.
+##
+## Pure and static, so the geometry is testable without a scene.
+static func stand_off_point(from: Vector3, target: Vector3, reach: float) -> Vector3:
+	var flat: Vector2 = Vector2(from.x - target.x, from.z - target.z)
+	var d: float = flat.length()
+	if d <= reach or d < 0.001:
+		return from            # already in range: stay put
+	var dir: Vector2 = flat / d
+	return Vector3(target.x + dir.x * reach, from.y, target.z + dir.y * reach)
+
+
 func _approach(dest: Vector3, delta: float) -> bool:
 	if _flat_dist(position, dest) > COMBAT_DIRECT_RANGE and nav_grid != null:
 		if not _has_path() or _flat_dist(_combat_goal, dest) > 1.0:

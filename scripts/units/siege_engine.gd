@@ -21,6 +21,9 @@ const MIN_FIRE_CREW: int = Balance.SIEGE_MIN_FIRE_CREW
 ## too flat — it holds fire.
 const FIRE_RANGE: float = Balance.SIEGE_FIRE_RANGE
 const MIN_RANGE: float = Balance.SIEGE_MIN_RANGE
+## Anteil der Feuerreichweite, auf den sich das Geraet heranarbeitet — knapp
+## innerhalb, damit ein Schritt Ungenauigkeit den Schuss nicht wieder verhindert.
+const APPROACH_RANGE_FRACTION: float = 0.85
 ## Shot cooldown by boarded crew: 2 -> slowest, 6 (full) -> fastest.
 const COOLDOWN_MIN_CREW: float = Balance.SIEGE_COOLDOWN_MIN_CREW
 const COOLDOWN_FULL_CREW: float = Balance.SIEGE_COOLDOWN_FULL_CREW
@@ -204,7 +207,14 @@ func _bombard_point(target_pos: Vector3, delta: float, approach: bool) -> void:
 		if not approach:
 			return
 		_in_melee = false
-		_approach(target_pos, delta)
+		# NICHT auf den Zielpunkt selbst zulaufen (Bugfix, Nutzerreport): der liegt
+		# bei einem Gebaeude IM Grundriss und damit auf unbegehbarem Grund, und auf
+		# einem Vulkanberg erst recht. Der A* scheiterte, und das Katapult stand
+		# fuer immer davor und zielte, ohne je zu schiessen. Es laeuft jetzt bis
+		# knapp INNERHALB der Feuerreichweite — der Schuss fliegt eine Parabel und
+		# kennt kein Gelaende, die Hoehe des Ziels ist ihm also gleichgueltig.
+		_approach(stand_off_point(position, target_pos,
+			FIRE_RANGE * APPROACH_RANGE_FRACTION), delta)
 		_face_point(target_pos)
 		return
 	if _has_path():

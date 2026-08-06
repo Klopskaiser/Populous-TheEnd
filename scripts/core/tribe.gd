@@ -75,6 +75,10 @@ var spells: Array[Spell] = []
 var _upkeep_debt: float = 0.0
 ## Income share (mana/s) already reserved by upkeep this tick; cleared in tick().
 var _upkeep_rate_claimed: float = 0.0
+## Wie _upkeep_rate_claimed, aber fuer Verbraucher OHNE Deckelung (aktive
+## Ausbildung): sie zahlen in jedem Fall, brauchen aber trotzdem eine sichtbare
+## Rate. Wird wie der Claim je Tick zurueckgesetzt.
+var _upkeep_rate_booked: float = 0.0
 
 ## Out of the match (phase 10d): the tribe lost its last unit. Everything it
 ## still owned was razed by eliminate(); it takes no orders any more (UI and AI
@@ -193,6 +197,7 @@ func mana_population() -> float:
 func tick(delta: float) -> void:
 	# New round of upkeep claims: the foresters re-book their share every tick.
 	_upkeep_rate_claimed = 0.0
+	_upkeep_rate_booked = 0.0
 	var income: float = mana_rate() * delta
 	# Forester upkeep is a debt against the income, not against a pool: the
 	# foresters have to be paid before anything charges (their intended cost).
@@ -264,11 +269,33 @@ func charging_spell_count() -> int:
 	return n
 
 
+## Continuous upkeep booked this tick (mana/s): forester workers claim theirs via
+## claim_upkeep_rate, active training books its own through book_upkeep_rate.
+## Read-only view for the UI.
+func upkeep_rate() -> float:
+	return _upkeep_rate_claimed + _upkeep_rate_booked
+
+
 ## Income (mana/s) that actually reaches the charge stores: gross minus the
-## upkeep claimed this tick (foresters, active training). Uses the claim of the
-## CURRENT tick, so it lags by at most one tick — good enough for a display.
+## upkeep booked this tick (foresters, active training). Uses the current tick's
+## bookings, so it lags by at most one tick — good enough for a display.
 func charging_income() -> float:
-	return maxf(mana_rate() - _upkeep_rate_claimed, 0.0)
+	return maxf(mana_rate() - upkeep_rate(), 0.0)
+
+
+## Books a CONTINUOUS upkeep: the debt against the income (consume_mana) plus the
+## RATE, so the UI can show the net income.
+##
+## Bugfix 10k: the sidebar showed the gross mana_rate(), so staffing a forester or
+## starting a training changed nothing on screen even though the cost was real.
+## The forester's claim_upkeep_rate() already recorded a rate (it needs the
+## granted amount to scale its workers); training only booked a debt, which is
+## invisible. Both now land in upkeep_rate().
+func book_upkeep_rate(rate: float, delta: float) -> void:
+	if rate <= 0.0 or delta <= 0.0:
+		return
+	_upkeep_rate_booked += rate
+	consume_mana(rate * delta)
 
 
 ## Seconds until `spell` gains its next charge at the current income share.

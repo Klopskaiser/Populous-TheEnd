@@ -115,7 +115,10 @@ func _tick_active(delta: float) -> void:
 func _charge_training_mana(delta: float) -> void:
 	if tribe == null or delta <= 0.0:
 		return
-	tribe.consume_mana(Balance.TRAINING_MANA_PER_BUILDING * delta)
+	# book_upkeep_rate, nicht consume_mana: es bucht dieselbe Schuld UND die Rate,
+	# damit die Manaanzeige den Abzug zeigt (Bugfix — mit consume_mana blieb die
+	# angezeigte Zahl gleich, obwohl die Ausbildung wirklich kostete).
+	tribe.book_upkeep_rate(Balance.TRAINING_MANA_PER_BUILDING, delta)
 
 
 ## Drops braves that are gone or no longer heading here.

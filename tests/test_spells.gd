@@ -1967,3 +1967,67 @@ func test_firestorm_is_a_denial_zone_now() -> void:
 		"BOLT_COUNT is only the safety cap, above the ~%d expected balls" % int(expected))
 	check(Balance.FIRESTORM_PANIC_RADIUS > Balance.FIRESTORM_SPREAD_RADIUS,
 		"the panic ring lies OUTSIDE the impacts")
+
+
+## Waechter gegen den gemeldeten Absturz "Invalid call: nonexistent function
+## 'panic'": der Panikring des Feuerregens rief eine Methode, die es nicht gibt.
+## Der Test wirkt einen echten Feuerregen mit einer Einheit AUSSERHALB der
+## Streuung und prueft, dass sie in Panik geraet — der falsche Aufruf haette den
+## Zauber-Tick mit einem SCRIPT ERROR abgebrochen.
+func test_firestorm_panics_onlookers_outside_the_impacts() -> void:
+	var w: Dictionary = _make_world()
+	w.unit_manager.spawn_unit(SHAMAN_SCENE, 0, Vector3(30, 0, 30))
+	var target: Vector3 = Vector3(40, 5, 30)
+	# Between the spread radius and the panic radius: never hit, but scared.
+	var mid: float = (Balance.FIRESTORM_SPREAD_RADIUS
+		+ Balance.FIRESTORM_PANIC_RADIUS) * 0.5
+	var onlooker: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1,
+		target + Vector3(mid, 0, 0))
+	onlooker.max_health = 100000
+	onlooker.health = 100000
+	var far: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1,
+		target + Vector3(Balance.FIRESTORM_PANIC_RADIUS + 6.0, 0, 0))
+	var spell: FirestormSpell = FirestormSpell.new()
+	check(spell.execute(w.tribe0, target, w.ctx), "firestorm cast succeeds")
+	for i in range(30):
+		w.unit_manager.tick(0.1)
+	check(onlooker.state == Unit.State.PANIC,
+		"a bystander outside the impacts panics")
+	check(far.state != Unit.State.PANIC,
+		"someone well beyond the panic radius stays calm")
+	_free_world(w)
+
+
+## Nutzerreport: die Schamanin lief nicht in Reichweite, um einen Blitz auf ein
+## Gebäude auf einem Vulkanberg zu wirken — stand sie schon in Reichweite, ging
+## es. Ursache war dieselbe wie beim Katapult: sie lief auf den ZIELPUNKT selbst
+## zu, der auf unbegehbarem Grund liegt, und blieb nach dem A*-Fehlschlag stehen.
+## Sie läuft jetzt bis knapp INNERHALB der Zauberreichweite.
+func test_shaman_walks_into_range_of_an_unreachable_point() -> void:
+	var w: Dictionary = _make_world_with_buildings()
+	var shaman: Unit = w.unit_manager.spawn_unit(SHAMAN_SCENE, 0, Vector3(20, 5, 40))
+	w.tribe0.shaman = shaman
+	w.tribe0.set_spells(Spell.create_default_set())
+	for spell in w.tribe0.spells:
+		spell.charges = spell.max_charges
+	# Target far away AND on ground nobody can walk to (walled off), like a
+	# building a volcano lifted onto a mountain.
+	var target: Vector3 = Vector3(46, 5, 40)
+	w.nav.fill_solid_region(Rect2i(42, 36, 9, 9), true)
+	var start: float = Vector2(shaman.position.x, shaman.position.z).distance_to(
+		Vector2(target.x, target.z))
+	var reach: float = Balance.SPELL_LIGHTNING_CAST_RANGE
+	check(start > reach, "she starts outside the cast range (%.1f m)" % start)
+
+	check(w.tc.cast_spell(w.tribe0, &"lightning", target),
+		"the cast order is accepted")
+	var moved: bool = false
+	for i in range(600):
+		shaman.tick(0.1)
+		w.unit_manager.tick(0.1)
+		var d: float = Vector2(shaman.position.x, shaman.position.z).distance_to(
+			Vector2(target.x, target.z))
+		if d <= reach:
+			moved = true
+			break
+	check(moved, "she walks until the target is IN RANGE, unwalkable or not")
