@@ -1462,8 +1462,14 @@ func test_volcano_cone_lava_and_permanence() -> void:
 	check(spell.execute(w.tribe0, target, w.ctx), "volcano cast succeeds")
 	for i in range(35):
 		w.unit_manager.tick(0.1)   # cone morph (3 s) completes
-	check(w.td.get_height(40.0, 40.0) >= 5.0 + VolcanoSpell.PEAK - 1.0,
-		"cone tip rises to (nearly) peak height")
+	# Since 10k the top is a CRATER, not a tip: the centre is the hollow, and the
+	# highest ring is the rim at RIM_RADIUS. Details in tests/test_volcano_shape.gd.
+	check(w.td.get_height(40.0, 40.0)
+			>= 5.0 + VolcanoSpell.PEAK - VolcanoSpell.CRATER_DEPTH - 1.0,
+		"the crater hollow still rises close to peak height")
+	check(w.td.get_height(40.0 + VolcanoSpell.RIM_RADIUS, 40.0)
+			> w.td.get_height(40.0, 40.0),
+		"and the rim stands above the hollow")
 	var surges: int = 0
 	for p in w.unit_manager.projectiles:
 		if p is LavaSurge:

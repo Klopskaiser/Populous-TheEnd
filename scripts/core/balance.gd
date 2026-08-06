@@ -536,11 +536,22 @@ const EARTHQUAKE_LAVA_DELAY: float = 1.2
 const EARTHQUAKE_LAVA_RANGE: float = 3.5
 
 # --- Vulkan ---
-const VOLCANO_RADIUS: float = 5.0
+## Phase 10k: breiter (5,0 -> 7,0) und mit echtem KRATER statt spitzem Kegel.
+const VOLCANO_RADIUS: float = 7.0
+## Lage des Kraterrands als Anteil des Radius — dort ist der hoechste Punkt, und
+## der Kreis darin ist nach dem Ausbruch das kleine Gipfelplateau.
+const VOLCANO_RIM_FRACTION: float = 0.55
+## Tiefe der Mulde UNTER dem Rand. Die Lava quillt darin hoch, steigt ueber den
+## Rand und laeuft dann aussen hinunter.
+const VOLCANO_CRATER_DEPTH: float = 1.5
+## Lebensdauer der Vulkanlava — laenger als LAVA_LIFETIME, weil es nur noch EINEN
+## Schwall gibt (Nutzervorgabe) und der dafuer weiter kommen soll.
+const VOLCANO_LAVA_LIFETIME: float = 8.0
 ## Lebensdauer der aktiven Vulkanzone (Lava/Stufenschaden).
 const VOLCANO_ZONE_LIFETIME: float = 20.0
 ## Gezählte Lavastöße je Ausbruch (robust gegen spätere Lifetime-Änderungen).
-const VOLCANO_SURGE_COUNT: int = 2
+## EIN grosser Schwall statt zwei kleiner (Nutzervorgabe Phase 10k).
+const VOLCANO_SURGE_COUNT: int = 1
 ## ACHTUNG: > LAVA_MOLTEN_TIME + LAVA_BUILDING_CONTACT_GRACE schaltet den
 ## Gebäudeschaden des Vulkans still ab (Herleitung in plans/10c).
 const VOLCANO_SURGE_INTERVAL: float = 3.5

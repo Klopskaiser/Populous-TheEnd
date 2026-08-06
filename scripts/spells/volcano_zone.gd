@@ -21,6 +21,8 @@ const LAVA_REACH: float = RADIUS + 2.5
 ## The zone's OWN continuous burn covers the vent only; everything further out
 ## is the surges' business (phase 10c).
 const CRATER_REACH: float = RADIUS * 0.6
+## Dauer des zweiten Morphs, der die Mulde zum Gipfelplateau auffuellt (10k).
+const CRATER_FILL_DURATION: float = 1.5
 ## Eruptions start only once the cone is at max height (morph duration).
 const SURGE_START: float = VolcanoSpell.DURATION
 ## Counted, not derived from the lifetime: a later lifetime change must not
@@ -45,6 +47,10 @@ var building_manager: BuildingManager = null
 var _time: float = 0.0
 var _surge_timer: float = 0.0
 var _surges_spawned: int = 0
+## Grundhoehe des Gelaendes VOR dem Ausbruch (fuer die Randhoehe beim Auffuellen)
+## und ob die Mulde schon geschlossen ist.
+var _base_height: float = -9999.0
+var _crater_filled: bool = false
 var _ignite_timer: float = 0.0
 var _smoke: Array[MeshInstance3D] = []
 var _smoke_mats: Array[StandardMaterial3D] = []
@@ -57,6 +63,10 @@ func setup(p_tribe_id: int, at: Vector3, p_unit_manager: UnitManager,
 	unit_manager = p_unit_manager
 	terrain_data = p_terrain_data
 	building_manager = p_building_manager
+	# Grundhoehe VOR dem Morph festhalten: danach hat der Kegel das Gelaende schon
+	# angehoben und die Randhoehe waere nicht mehr rekonstruierbar (10k).
+	if terrain_data != null:
+		_base_height = terrain_data.get_height(at.x, at.z)
 
 
 func tick(delta: float) -> void:
@@ -92,7 +102,34 @@ func _spawn_surge() -> void:
 	SpellAudio.play_named(self, &"spell_volcano_erupt", position)
 	var surge: LavaSurge = LavaSurge.new()
 	surge.setup(position, unit_manager, terrain_data, LAVA_REACH, building_manager)
+	# ONE big surge since 10k, so it may run longer and therefore further
+	# (Nutzervorgabe). Set AFTER setup — setup assigns the default lifetime.
+	surge.lifetime = Balance.VOLCANO_LAVA_LIFETIME
 	unit_manager.register_projectile(surge)
+	# The lava has spilled over the rim: the hollow fills up and the summit ends
+	# as a small round plateau (10k). A second, short morph — the hole must not
+	# stay open, and a filled crater is walkable.
+	_fill_the_crater()
+
+
+## Pulls the crater hollow up to rim height (see VolcanoSpell.fill_crater_targets).
+func _fill_the_crater() -> void:
+	if terrain_data == null or unit_manager == null or _crater_filled:
+		return
+	_crater_filled = true
+	var centre: Vector2 = Vector2(position.x, position.z)
+	var base: float = _base_height
+	var plan: Dictionary = VolcanoSpell.fill_crater_targets(terrain_data, centre, base)
+	if (plan.indices as PackedInt32Array).is_empty():
+		return
+	var ctx: SpellContext = SpellContext.new()
+	ctx.terrain_data = terrain_data
+	ctx.nav_grid = unit_manager.nav_grid
+	ctx.unit_manager = unit_manager
+	ctx.building_manager = building_manager
+	var morph: TerrainMorph = TerrainMorph.new()
+	morph.setup(ctx, plan, CRATER_FILL_DURATION)
+	unit_manager.register_projectile(morph)
 
 
 ## Continuous burn AT THE VENT while the volcano is erupting: standing in the
