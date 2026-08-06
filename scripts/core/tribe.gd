@@ -250,6 +250,43 @@ func upkeep_debt() -> float:
 	return _upkeep_debt
 
 
+# --- Charge forecast for the UI (phase 10k) -----------------------------------
+# With the 10k costs a single charge can take minutes, so the spell bar has to
+# say how long. All three helpers below are SNAPSHOTS of the current tick.
+
+## Number of spells currently taking mana (active and not yet full). This is the
+## divisor of the income share — _distribute_mana splits evenly among them.
+func charging_spell_count() -> int:
+	var n: int = 0
+	for spell in spells:
+		if spell.wants_mana():
+			n += 1
+	return n
+
+
+## Income (mana/s) that actually reaches the charge stores: gross minus the
+## upkeep claimed this tick (foresters, active training). Uses the claim of the
+## CURRENT tick, so it lags by at most one tick — good enough for a display.
+func charging_income() -> float:
+	return maxf(mana_rate() - _upkeep_rate_claimed, 0.0)
+
+
+## Seconds until `spell` gains its next charge at the current income share.
+## INF when it is full, switched off, or nothing is coming in.
+##
+## SNAPSHOT, not a promise: the value jumps the moment another spell fills up or
+## is switched off (the share grows), the population changes, or a forester
+## starts working. Callers must present it as "at the current rate".
+func seconds_to_next_charge(spell: Spell) -> float:
+	if spell == null or not spell.wants_mana():
+		return INF
+	var sharers: int = maxi(charging_spell_count(), 1)
+	var share: float = charging_income() / float(sharers)
+	if share <= 0.0:
+		return INF
+	return maxf(spell.charge_cost - spell.charge_mana, 0.0) / share
+
+
 ## How much of the current income (mana/s) is still free for upkeep this tick.
 func free_upkeep_rate() -> float:
 	return maxf(mana_rate() - _upkeep_rate_claimed, 0.0)

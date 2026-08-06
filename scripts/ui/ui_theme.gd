@@ -10,6 +10,9 @@ class_name UiTheme
 # --- Palette ----------------------------------------------------------------
 
 const GOLD: Color = Color(0.85, 0.68, 0.30)
+## Zauber-Ladebalken (Phase 10k): BLAU ist der echte Fortschritt, GOLD der
+## Ratenbalken dahinter — wie im Original-Populous.
+const CHARGE_BLUE: Color = Color(0.32, 0.52, 0.92)
 const GOLD_BRIGHT: Color = Color(0.98, 0.85, 0.45)
 const GOLD_DARK: Color = Color(0.52, 0.40, 0.16)
 const BROWN_DARK: Color = Color(0.16, 0.11, 0.06)

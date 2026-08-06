@@ -140,6 +140,44 @@ static func mana_segments(mana: float, cap: float, segments: int) -> int:
 	return clampi(int(floor(mana / cap * float(segments))), 0, segments)
 
 
+# --- Charge gauge: rate sweep + ETA (phase 10k) --------------------------------
+## Sweep period bounds (seconds for one gold pass) and the log mapping constants.
+const CHARGE_SWEEP_MIN: float = 0.3
+const CHARGE_SWEEP_MAX: float = 2.5
+const CHARGE_SWEEP_SLOPE: float = 0.35
+const CHARGE_SWEEP_BASE: float = 0.3
+## The remaining time is spelled out from here on — below that the bar says it.
+const CHARGE_ETA_MIN_SECONDS: float = 30.0
+
+
+## Period (seconds) of one gold sweep, derived from the seconds left until the
+## next charge. LOGARITHMIC on purpose: with the 10k costs the remaining times
+## span three orders of magnitude (~1 s for a lone fireball, ~900 s for a volcano
+## on a full bar). A linear mapping would make every slow spell look identical,
+## which is exactly the information the sweep is supposed to carry.
+##
+## Pure and static — exhaustively testable headless (pattern: pip_state).
+static func sweep_period(remaining_s: float) -> float:
+	if not is_finite(remaining_s):
+		return CHARGE_SWEEP_MAX   # nothing charging — the bar is frozen anyway
+	if remaining_s <= 0.0:
+		return CHARGE_SWEEP_MIN   # about to pop: the fastest sweep, not the slowest
+	var mapped: float = CHARGE_SWEEP_SLOPE * (log(remaining_s + 1.0) / log(10.0)) \
+		+ CHARGE_SWEEP_BASE
+	return clampf(mapped, CHARGE_SWEEP_MIN, CHARGE_SWEEP_MAX)
+
+
+## Remaining time as shown in the cell: "" below the threshold (the bar speaks),
+## seconds up to a minute, m:ss above. INF (nothing charging) also yields "".
+static func charge_eta_text(remaining_s: float) -> String:
+	if not is_finite(remaining_s) or remaining_s < CHARGE_ETA_MIN_SECONDS:
+		return ""
+	if remaining_s < 60.0:
+		return "%ds" % int(round(remaining_s))
+	var total: int = int(round(remaining_s))
+	return "%d:%02d" % [total / 60, total % 60]
+
+
 ## Charge-pip display state: how many pips are full, how many empty, and the
 ## fill fraction of the next (partial) pip. When all charges are full the
 ## progress is 0 (nothing is charging).
@@ -282,6 +320,7 @@ func setup(p_tribes: Array[Tribe], p_player_id: int, p_unit_manager: UnitManager
 
 func _process(delta: float) -> void:
 	_refresh_crew_tab()   # responsive to selection changes (cheap: a few widgets)
+	_advance_charge_sweeps(delta)   # every frame: the sweep must look continuous
 	_follower_timer -= delta
 	if _follower_timer <= 0.0:
 		_follower_timer = FOLLOWER_INTERVAL
@@ -290,6 +329,24 @@ func _process(delta: float) -> void:
 		_refresh_spells()
 		_refresh_portrait()
 		_update_growth_label()
+
+
+## Advances the gold rate bars. Runs EVERY frame (not on the throttled refresh)
+## so the sweep is smooth; a spell that is full or switched off keeps its phase,
+## which reads as "paused" instead of "empty".
+func _advance_charge_sweeps(delta: float) -> void:
+	for id in _spell_ui:
+		var ui: Dictionary = _spell_ui[id]
+		var rate: ColorRect = ui.get("rate") as ColorRect
+		if rate == null:
+			continue
+		if not bool(ui.get("sweeping", false)):
+			continue
+		var period: float = maxf(float(ui.get("period", CHARGE_SWEEP_MAX)), 0.01)
+		var phase: float = fposmod(float(ui.get("phase", 0.0)) + delta / period, 1.0)
+		ui["phase"] = phase
+		rate.anchor_right = phase
+		rate.offset_right = 0.0
 
 
 # --- UI construction --------------------------------------------------------
@@ -635,19 +692,33 @@ func _make_spell_cell(entry: Dictionary) -> Control:
 	bar_bg.color = _pip_empty_color()
 	bar_bg.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bar_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE   # decoration only
-	var bar_fill: ColorRect = ColorRect.new()
-	bar_fill.color = UiTheme.GOLD
-	bar_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	bar_fill.anchor_left = 0.0
-	bar_fill.anchor_top = 0.0
-	bar_fill.anchor_right = 0.0
-	bar_fill.anchor_bottom = 1.0
-	bar_fill.offset_left = 0.0
-	bar_fill.offset_top = 0.0
-	bar_fill.offset_right = 0.0
-	bar_fill.offset_bottom = 0.0
+	# Two bars like the original game (phase 10k): a GOLD rate bar that sweeps
+	# 0->1 over and over, and the BLUE real progress on top of it. Since later
+	# children draw over earlier ones, the blue fill covers the gold on its own
+	# length — so the sweep is only visible in the still-open part of the gauge,
+	# exactly the original's look, with no arithmetic. The sweep SPEED carries the
+	# charging rate: with 10k costs a single bar can sit still for minutes.
+	var bar_rate: ColorRect = _make_bar_layer(UiTheme.GOLD)
+	bar_bg.add_child(bar_rate)
+	var bar_fill: ColorRect = _make_bar_layer(UiTheme.CHARGE_BLUE)
 	bar_bg.add_child(bar_fill)
 	cell.add_child(bar_bg)
+
+	# Remaining time for the next charge, shown only when waiting is a decision
+	# (see CHARGE_ETA_MIN_SECONDS). Overlays the cell's bottom-right corner.
+	var eta: Label = Label.new()
+	eta.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	eta.add_theme_font_size_override("font_size", 9)
+	eta.add_theme_color_override("font_color", UiTheme.TEXT)
+	eta.add_theme_color_override("font_outline_color", UiTheme.BROWN_DARK)
+	eta.add_theme_constant_override("outline_size", 3)
+	eta.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	eta.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	eta.offset_top = -13.0
+	eta.offset_bottom = -3.0
+	eta.offset_right = -3.0
+	eta.visible = false
+	b.add_child(eta)
 
 	# Right-click anywhere on the cell toggles the spell's charging. The handler
 	# sits on the CELL (the button and the decorations pass their events on, see
@@ -657,8 +728,26 @@ func _make_spell_cell(entry: Dictionary) -> Control:
 		_on_spell_cell_input(event, spell_id))
 
 	_spell_ui[entry["id"]] = {"button": b, "pips": pips, "bar": bar_fill,
-		"cell": cell}
+		"cell": cell, "rate": bar_rate, "eta": eta,
+		"phase": 0.0, "period": CHARGE_SWEEP_MAX, "sweeping": false}
 	return cell
+
+
+## One full-height bar layer inside the charge gauge, left-anchored and driven
+## through anchor_right.
+func _make_bar_layer(color: Color) -> ColorRect:
+	var bar: ColorRect = ColorRect.new()
+	bar.color = color
+	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bar.anchor_left = 0.0
+	bar.anchor_top = 0.0
+	bar.anchor_right = 0.0
+	bar.anchor_bottom = 1.0
+	bar.offset_left = 0.0
+	bar.offset_top = 0.0
+	bar.offset_right = 0.0
+	bar.offset_bottom = 0.0
+	return bar
 
 
 ## Right-click on a spell cell: stop/resume paying mana into it. Stored charges
@@ -1367,7 +1456,8 @@ func _refresh_spells() -> void:
 	var alive: bool = _player_shaman_alive()
 	for spell in player.spells:
 		set_spell_state(spell.id, spell.charges, spell.max_charges,
-			spell.charge_progress, alive and spell.charges > 0, spell.active)
+			spell.charge_progress, alive and spell.charges > 0, spell.active,
+			player.seconds_to_next_charge(spell))
 
 
 func _on_spell_pressed(spell_id: StringName) -> void:
@@ -1437,7 +1527,8 @@ func _set_portrait_anim(anim: StringName) -> void:
 # --- Spell display API ---------------------------------------------------------
 
 func set_spell_state(id: StringName, charges: int, max_charges: int,
-		charge_progress: float, castable: bool, active: bool = true) -> void:
+		charge_progress: float, castable: bool, active: bool = true,
+		remaining_s: float = INF) -> void:
 	if not _spell_ui.has(id):
 		return
 	var ui: Dictionary = _spell_ui[id]
@@ -1460,8 +1551,27 @@ func set_spell_state(id: StringName, charges: int, max_charges: int,
 	var bar: ColorRect = ui["bar"]
 	bar.anchor_right = progress
 	bar.offset_right = 0.0
-	bar.color = UiTheme.GOLD if active else _pip_empty_color().lerp(UiTheme.GOLD, 0.4)
+	bar.color = UiTheme.CHARGE_BLUE if active \
+		else _pip_empty_color().lerp(UiTheme.CHARGE_BLUE, 0.4)
 	(ui["cell"] as Control).modulate = Color.WHITE if active else Color(0.55, 0.55, 0.55)
+
+	# Rate bar + ETA (phase 10k). The sweep only runs while the spell really
+	# takes mana; a full or switched-off spell freezes it, which is the visual
+	# difference between "paused" and "charging slowly".
+	var sweeping: bool = active and progress > 0.0 or (active and charges < max_charges)
+	ui["sweeping"] = sweeping and is_finite(remaining_s)
+	ui["period"] = sweep_period(remaining_s)
+	var rate: ColorRect = ui.get("rate") as ColorRect
+	if rate != null:
+		rate.color = UiTheme.GOLD if active else _pip_empty_color()
+		if not bool(ui["sweeping"]):
+			rate.anchor_right = 0.0
+			rate.offset_right = 0.0
+	var eta: Label = ui.get("eta") as Label
+	if eta != null:
+		var text: String = charge_eta_text(remaining_s) if active else ""
+		eta.text = text
+		eta.visible = text != ""
 
 
 # --- Button actions ---------------------------------------------------------

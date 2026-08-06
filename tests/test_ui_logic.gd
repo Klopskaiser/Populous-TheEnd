@@ -511,3 +511,49 @@ func test_shift_binding_is_no_conflict_with_the_plain_key() -> void:
 		KEY_B, &"harvest_area_arm")
 	check(conflict != &"select_all_huts",
 		"Shift+B does not count as a conflict for the plain-B action")
+
+
+# --- Zauber-Ladeanzeige (Phase 10k, Teil 7) -----------------------------------
+
+## Zwei Balken wie im Original: BLAU der echte Fortschritt, GOLD ein Ratenbalken
+## dahinter, der immer wieder durchläuft. Seine Umlaufzeit trägt die Rate — und
+## weil die Restzeiten mit den 10k-Kosten drei Größenordnungen überspannen
+## (~1 s bis ~900 s), ist die Abbildung logarithmisch.
+func test_sweep_period_is_monotonic_and_clamped() -> void:
+	var prev: float = -1.0
+	var monotone: bool = true
+	for i in range(0, 200):
+		var r: float = float(i) * 5.0
+		var p: float = Sidebar.sweep_period(r)
+		if p < prev - 0.000001:
+			monotone = false
+		prev = p
+		check(p >= Sidebar.CHARGE_SWEEP_MIN and p <= Sidebar.CHARGE_SWEEP_MAX,
+			"period stays inside the bounds" if i == 0 else "")
+	check(monotone, "a longer remaining time never sweeps FASTER")
+	# Degenerate inputs must not produce a division by zero downstream.
+	check(Sidebar.sweep_period(0.0) > 0.0, "zero remaining still gives a period")
+	check(Sidebar.sweep_period(-5.0) > 0.0, "negative remaining is handled")
+	check(Sidebar.sweep_period(INF) > 0.0, "INF (nothing charging) is handled")
+
+
+## The whole point of the log mapping: the real span must stay distinguishable.
+func test_sweep_period_spans_the_real_range() -> void:
+	var fast: float = Sidebar.sweep_period(1.0)      # lone fireball
+	var mid: float = Sidebar.sweep_period(100.0)
+	var slow: float = Sidebar.sweep_period(900.0)    # volcano on a full bar
+	check(fast < mid and mid < slow, "1 s / 100 s / 900 s are three distinct speeds")
+	check(slow - fast > 0.5,
+		"and they are far enough apart to read (%.2f vs %.2f)" % [fast, slow])
+	check(mid > fast * 1.5, "the middle is clearly slower than the fast end")
+
+
+func test_charge_eta_text_only_appears_when_waiting_is_a_decision() -> void:
+	check(Sidebar.charge_eta_text(5.0) == "", "a few seconds need no number")
+	check(Sidebar.charge_eta_text(Sidebar.CHARGE_ETA_MIN_SECONDS - 0.1) == "",
+		"just below the threshold: still nothing")
+	check(Sidebar.charge_eta_text(45.0) == "45s", "seconds up to a minute")
+	check(Sidebar.charge_eta_text(90.0) == "1:30", "m:ss above a minute")
+	check(Sidebar.charge_eta_text(873.0) == "14:33", "a volcano on a full bar")
+	check(Sidebar.charge_eta_text(INF) == "",
+		"nothing charging shows nothing (INF must not print)")
