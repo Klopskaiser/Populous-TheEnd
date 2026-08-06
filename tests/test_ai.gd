@@ -2521,3 +2521,73 @@ func test_ai_actually_destroys_a_wood_depot() -> void:
 			% [hp0, depot.health if is_instance_valid(depot) else 0, elapsed])
 	ai.free()
 	_free_world(w)
+
+
+# --- Zauber-Ladeauswahl der KI (Phase 10k) ------------------------------------
+
+func _spell_entry(id: String, cost: float, full: bool = false) -> Dictionary:
+	return {"id": StringName(id), "cost": cost, "full": full}
+
+
+## Grundfall: bei kleinem Einkommen bleiben nur die billigen Zauber aktiv, sonst
+## verteilt die KI ihr Mana auf zwoelf Zauber und erreicht keinen davon.
+func test_ai_charges_only_what_fits_the_time_budget() -> void:
+	var spells: Array = [
+		_spell_entry("fireball", 30.0), _spell_entry("swarm", 100.0),
+		_spell_entry("lightning", 200.0), _spell_entry("volcano", 1600.0),
+	]
+	# 11 Mana/s (100 Anhaenger), Budget 120 s -> 1320 Mana teilbar.
+	var picked: Array[StringName] = AIState.spells_to_charge(spells, 11.0, 120.0)
+	check(&"fireball" in picked, "the cheap fireball is always in")
+	check(not (&"volcano" in picked), "a 1600er volcano does not fit at 11 Mana/s")
+	# Reiche Einkommen holen mehr herein.
+	var rich: Array[StringName] = AIState.spells_to_charge(spells, 35.0, 120.0)
+	check(rich.size() >= picked.size(),
+		"more income keeps at least as many spells charging")
+
+
+## Die Kernregel gegen Verschwendung: es gibt kein Mana-Banking, Einkommen ohne
+## Abnehmer verfaellt. Sind die billigen Zauber voll, MUSS ein teurer anlaufen.
+func test_ai_switches_to_expensive_spells_when_the_cheap_ones_are_full() -> void:
+	var spells: Array = [
+		_spell_entry("fireball", 30.0, true), _spell_entry("swarm", 100.0, true),
+		_spell_entry("volcano", 1600.0, false),
+	]
+	var picked: Array[StringName] = AIState.spells_to_charge(spells, 11.0, 120.0)
+	check(picked.size() == 1 and picked[0] == &"volcano",
+		"with everything cheap full the volcano charges, however slowly")
+	check(not (&"fireball" in picked),
+		"a FULL spell is never kept on (it would only shrink the others' share)")
+
+
+## Ist alles voll, gibt es nichts zu laden — und das ist kein Fehler.
+func test_ai_charges_nothing_when_every_spell_is_full() -> void:
+	var spells: Array = [
+		_spell_entry("fireball", 30.0, true), _spell_entry("volcano", 1600.0, true),
+	]
+	check(AIState.spells_to_charge(spells, 35.0, 120.0).is_empty(),
+		"everything full: nothing to charge")
+
+
+## Der Boden: reicht das Einkommen fuer keinen einzigen Zauber im Budget, laedt
+## die KI trotzdem den billigsten — nichts zu laden waere Totalverlust.
+func test_ai_always_charges_the_cheapest_even_when_nothing_fits() -> void:
+	var spells: Array = [
+		_spell_entry("volcano", 1600.0), _spell_entry("firestorm", 775.0),
+	]
+	var picked: Array[StringName] = AIState.spells_to_charge(spells, 1.0, 120.0)
+	check(picked.size() == 1, "exactly one spell is kept")
+	check(picked[0] == &"firestorm", "and it is the cheapest candidate")
+	# Auch ohne jedes Einkommen darf die Auswahl nicht leer sein.
+	var broke: Array[StringName] = AIState.spells_to_charge(spells, 0.0, 120.0)
+	check(broke.size() == 1 and broke[0] == &"firestorm",
+		"even at zero income the cheapest stays selected")
+
+
+## Deterministisch bei gleichen Kosten (sort_custom ist nicht stabil).
+func test_ai_spell_choice_is_deterministic_on_equal_costs() -> void:
+	var a: Array = [_spell_entry("bbb", 100.0), _spell_entry("aaa", 100.0)]
+	var first: Array[StringName] = AIState.spells_to_charge(a, 5.0, 120.0)
+	var b: Array = [_spell_entry("aaa", 100.0), _spell_entry("bbb", 100.0)]
+	var second: Array[StringName] = AIState.spells_to_charge(b, 5.0, 120.0)
+	check(first == second, "equal costs resolve by id, not by input order")

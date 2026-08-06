@@ -488,3 +488,56 @@ static func militia_count(idle_braves: int) -> int:
 		return 0
 	return clampi(int(float(idle_braves) * Balance.AI_MILITIA_MAX_SHARE),
 		1, idle_braves)
+
+
+## Which spells the AI keeps CHARGING (phase 10k). `spells` is a list of
+## {"id": StringName, "cost": float, "full": bool}; the return value are the ids
+## to switch ON — everything else gets switched off and keeps its stored charges.
+##
+## Necessary because 10k made the high spells cost up to 1600 mana. All active
+## spells share the income evenly, so with a full bar of twelve a volcano would
+## need ~900 s at 500 followers: the AI would never reach one and would dribble
+## its whole income into fireballs instead.
+##
+## ONE rule plus a floor, and the "avoid waste" requirement falls out of it:
+##
+## - Candidates are the spells that are NOT full — a full spell takes no mana
+##   anyway (Spell.wants_mana), so keeping it on would only shrink everyone
+##   else's share.
+## - Of those, cost-sorted, keep the largest group k whose most expensive member
+##   still fits the time budget at the resulting share: cost <= budget * income / k.
+##   Bigger k means a smaller share, so the bound tightens monotonically and the
+##   maximal k is unique.
+## - FLOOR: if not even the cheapest candidate fits, keep the cheapest anyway.
+##
+## That floor is what avoids the waste the user asked about: there is no mana
+## banking (10c), income without a taker is simply LOST. So as soon as the cheap
+## spells are full, the expensive ones come on however slowly they charge — which
+## is also the only way the AI ever collects a volcano: during build-up, when
+## everything cheap has long been full.
+static func spells_to_charge(spells: Array, income: float,
+		budget: float = Balance.AI_SPELL_TIME_BUDGET) -> Array[StringName]:
+	var open: Array = []
+	for s in spells:
+		if not bool(s.get("full", false)):
+			open.append(s)
+	var result: Array[StringName] = []
+	if open.is_empty():
+		return result           # everything full: nothing left to charge
+	open.sort_custom(func(a, b) -> bool:
+		var ca: float = float(a.get("cost", 0.0))
+		var cb: float = float(b.get("cost", 0.0))
+		if ca == cb:
+			return String(a.get("id", &"")) < String(b.get("id", &""))
+		return ca < cb)
+	var best_k: int = 0
+	if income > 0.0 and budget > 0.0:
+		for k in range(1, open.size() + 1):
+			var dearest: float = float(open[k - 1].get("cost", 0.0))
+			if dearest <= budget * income / float(k):
+				best_k = k
+	# Floor: charge SOMETHING, otherwise the whole income is lost.
+	best_k = maxi(best_k, 1)
+	for i in range(best_k):
+		result.append(open[i].get("id", &"") as StringName)
+	return result

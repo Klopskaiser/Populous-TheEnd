@@ -742,6 +742,12 @@ const MANA_LOG_BASE: float = 1.04
 ## Fahrzeugbau wie Hütten-Bevölkerung kosten GAR kein Mana (die Buchung hängt
 ## an TrainingBuilding.trainee, nicht an Building).
 const TRAINING_MANA_PER_BUILDING: float = 0.6
+
+## Zeitbudget der KI-Zauberwahl (Phase 10k): aktiv bleibt, was in so vielen
+## Sekunden ladbar ist — ungefaehr eine Angriffswelle. Reicht es fuer keinen
+## einzigen Zauber, laedt sie trotzdem den billigsten, denn Einkommen ohne
+## Abnehmer verfaellt (kein Mana-Banking).
+const AI_SPELL_TIME_BUDGET: float = 120.0
 ## Hardcap Einheiten pro Stamm (zusätzlich zum Hütten-Bevölkerungslimit).
 const TRIBE_MAX_UNITS: int = 1000
 

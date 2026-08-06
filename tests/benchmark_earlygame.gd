@@ -172,6 +172,18 @@ func _initialize() -> void:
 			AIController.dbg_plot_scans = 0
 			AIController.dbg_plot_cells = 0
 			AIController.dbg_plot_us = 0
+	# Zauber der KI (Phase 10k): die eigentliche Abnahme der Manakurve — bricht
+	# die Zahl auf ~0 ein, ist die Daempfung oder die Ladeauswahl falsch.
+	var cast_total: int = 0
+	var cast_parts: Array[String] = []
+	for id in AIController.dbg_casts:
+		var n: int = int(AIController.dbg_casts[id])
+		cast_total += n
+		cast_parts.append("%s=%d" % [id, n])
+	cast_parts.sort()
+	print("KI-Zauber gesamt: %d (%s) | Ladeauswahl-Umschaltungen: %d" % [
+		cast_total, ", ".join(cast_parts) if not cast_parts.is_empty() else "keine",
+		AIController.dbg_spell_toggles])
 	print("Schlimmster Frame: %.2f ms (bei t=%.0fs) | schlimmster KI-Tick: %.2f ms (Budget ~33 ms)" % [
 		float(worst_frame) / 1000.0, worst_frame_at, float(worst_ai) / 1000.0])
 

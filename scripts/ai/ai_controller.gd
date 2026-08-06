@@ -383,6 +383,11 @@ static var dbg_builders_assigned: int = 0
 ## fixe 32-m-Radius machte die Nachbarbasis zur Dauerbedrohung.
 static var dbg_militia_orders: int = 0
 static var dbg_threat_ticks: int = 0
+## Zauber der KI (Phase 10k): tatsaechliche Casts je Zauber-Id und Umschaltungen
+## der Ladeauswahl. OHNE diese Zaehler ist "kann die KI nach der Manakurve noch
+## zaubern?" nicht beantwortbar — vorher gab es kein Instrument dafuer.
+static var dbg_casts: Dictionary = {}
+static var dbg_spell_toggles: int = 0
 ## Baustellen, die die Nachkontrolle als abgeschnitten verworfen hat (10g Teil 2).
 static var dbg_site_scraps: int = 0
 ## Einheiten, die die KI auf Fahrzeuge geschickt hat (10g Teil 3). Vorher rief sie
@@ -460,6 +465,7 @@ func tick_ai() -> void:
 	_tick_vehicle_crews(cache, serious)
 	_man_watchtowers(cache)
 	_man_airships(cache)
+	_tick_spell_charging()
 	_cast_spells()
 	# An attack on the own village takes priority over everything else.
 	if not threat.is_empty():
@@ -1108,7 +1114,7 @@ func _tick_unblock_path(target: Vector3) -> bool:
 	if bridge != null and bridge.charges > 0:
 		var cast_at: Vector3 = _bridge_cast_point(shaman.position, target,
 			bridge.cast_range - 1.0)
-		if commands.cast_spell(tribe, &"landbridge", cast_at):
+		if _cast(&"landbridge", cast_at):
 			if debug_log:
 				print("KI %d: Landbrücke zum Angriffsziel (%.0f/%.0f)" % [
 					tribe.id, cast_at.x, cast_at.z])
@@ -1119,7 +1125,7 @@ func _tick_unblock_path(target: Vector3) -> bool:
 			sink.cast_range - 1.0)
 		if wall != Vector3.INF and _sink_would_flood_caster(shaman, wall):
 			wall = Vector3.INF   # too close on low ground — wait for a landbridge
-		if wall != Vector3.INF and commands.cast_spell(tribe, &"sink", wall):
+		if wall != Vector3.INF and _cast(&"sink", wall):
 			if debug_log:
 				print("KI %d: Absinken schneidet Barriere (%.0f/%.0f)" % [
 					tribe.id, wall.x, wall.z])
@@ -1414,6 +1420,38 @@ func _attack_target_position() -> Vector3:
 ##    the AI's siege tool.
 ## 3. SWARM on a big enemy group (panic breaks up attacks/defence lines).
 ## 4. Fireball on the densest enemy clump.
+## Single funnel for every AI cast — counts it and delegates to TribeCommands.
+## The counter is the measuring instrument for phase 10k ("can the AI still cast
+## after the damped mana curve?"); before it there was none, and 14 scattered
+## call sites would each have had to remember to count.
+func _cast(spell_id: StringName, at: Vector3) -> bool:
+	if commands == null or not commands.cast_spell(tribe, spell_id, at):
+		return false
+	dbg_casts[spell_id] = int(dbg_casts.get(spell_id, 0)) + 1
+	return true
+
+
+## Decides which spells keep charging (phase 10k). Without this the AI would
+## spread its whole income over twelve spells and never reach the expensive ones —
+## and once the cheap ones are full it would LOSE the income entirely (there is no
+## mana banking). The decision itself is a pure static in AIState; here it is only
+## applied, and only where it differs, so the signal does not fire every tick.
+func _tick_spell_charging() -> void:
+	if tribe == null or commands == null or tribe.spells.is_empty():
+		return
+	var listed: Array = []
+	for spell in tribe.spells:
+		listed.append({"id": spell.id, "cost": spell.charge_cost,
+			"full": spell.is_full()})
+	var wanted: Array[StringName] = AIState.spells_to_charge(
+		listed, tribe.charging_income())
+	for spell in tribe.spells:
+		var want: bool = spell.id in wanted
+		if spell.active != want:
+			commands.set_spell_active(tribe, spell.id, want)
+			dbg_spell_toggles += 1
+
+
 func _cast_spells() -> void:
 	if not _shaman_alive() or unit_manager == null:
 		return
@@ -1426,7 +1464,7 @@ func _cast_spells() -> void:
 			enemies.append(unit)
 	for enemy in enemies:
 		if enemy.unit_kind() == &"shaman":
-			if commands.cast_spell(tribe, &"lightning", enemy.position):
+			if _cast(&"lightning", enemy.position):
 				return
 			break
 	# Enemy preachers are the AI's worst matchup — they convert its army away
@@ -1436,9 +1474,9 @@ func _cast_spells() -> void:
 	for enemy in enemies:
 		if enemy.unit_kind() != &"preacher":
 			continue
-		if commands.cast_spell(tribe, &"lightning", enemy.position):
+		if _cast(&"lightning", enemy.position):
 			return
-		if commands.cast_spell(tribe, &"fireball", enemy.position):
+		if _cast(&"fireball", enemy.position):
 			return
 		break
 	var target_building: Building = _nearest_enemy_building(shaman.position,
@@ -1449,35 +1487,35 @@ func _cast_spells() -> void:
 		# plots, flatten breaks foundations on slopes, then the old
 		# tornado/quake/lightning ladder.
 		if _enemy_buildings_near(center, VolcanoZone.RADIUS) >= VOLCANO_MIN_BUILDINGS:
-			if commands.cast_spell(tribe, &"volcano", center):
+			if _cast(&"volcano", center):
 				return
 		if center.y <= SINK_COAST_HEIGHT:
-			if commands.cast_spell(tribe, &"sink", center):
+			if _cast(&"sink", center):
 				return
 		var flatten_at: Vector3 = _flatten_break_point(target_building)
 		if flatten_at != Vector3.INF:
-			if commands.cast_spell(tribe, &"flatten", flatten_at):
+			if _cast(&"flatten", flatten_at):
 				return
-		if commands.cast_spell(tribe, &"tornado", center):
+		if _cast(&"tornado", center):
 			return
-		if commands.cast_spell(tribe, &"earthquake", center):
+		if _cast(&"earthquake", center):
 			return
-		if commands.cast_spell(tribe, &"lightning", center):
+		if _cast(&"lightning", center):
 			return
 	if enemies.size() >= SWARM_MIN_ENEMIES:
 		var centroid: Vector3 = Vector3.ZERO
 		for enemy in enemies:
 			centroid += enemy.position
-		if commands.cast_spell(tribe, &"swarm", centroid / float(enemies.size())):
+		if _cast(&"swarm", centroid / float(enemies.size())):
 			return
 	var cluster: Vector3 = _densest_cluster(enemies)
 	if cluster != Vector3.INF:
 		# A big pile is worth the salvo; smaller ones get the single fireball.
 		if _count_enemies_near(enemies, cluster, FirestormSpell.SPREAD_RADIUS) \
 				>= FIRESTORM_MIN_ENEMIES:
-			if commands.cast_spell(tribe, &"firestorm", cluster):
+			if _cast(&"firestorm", cluster):
 				return
-		commands.cast_spell(tribe, &"fireball", cluster)
+		_cast(&"fireball", cluster)
 
 
 ## Nearest ATTACKABLE enemy building whose centre is within `radius` of `pos`.
