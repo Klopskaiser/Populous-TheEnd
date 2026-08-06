@@ -293,19 +293,68 @@ func _armed_shaman(w: Dictionary, target: Vector3) -> Dictionary:
 	return {"shaman": shaman, "spell": spell}
 
 
-func test_cast_time_is_one_second() -> void:
-	check_near(Balance.SHAMAN_CAST_TIME, 1.0, "the wind-up is 1.0 s for every spell")
+## Phase 10k-Nachtrag: das Wind-up ist auf 0,5 s verkuerzt (Nutzervorgabe) und der
+## EFFEKT kann pro Zauber spaeter eintreten (Spell.effect_delay). Ein Zauber ohne
+## Verzoegerung — wie dieser Dummy — zuendet direkt am Ende des Wind-ups.
+func test_cast_time_is_half_a_second() -> void:
+	check_near(Balance.SHAMAN_CAST_TIME, 0.5, "the wind-up is 0,5 s for every spell")
 	var w: Dictionary = _make_world()
 	var a: Dictionary = _armed_shaman(w, Vector3(33, 0, 30))   # inside cast_range
-	for i in range(9):
+	for i in range(4):
 		a.shaman.tick(TICK)
-	check(a.spell.executed == 0, "nothing fired after 0.9 s of wind-up")
-	# Two more ticks, not one: 10 x 0.1 leaves the timer a hair above zero
+	check(a.spell.executed == 0, "nothing fired after 0.4 s of wind-up")
+	# Two more ticks, not one: 5 x 0.1 leaves the timer a hair above zero
 	# (float accumulation), so bracket the wind-up instead of counting on the
 	# exact tick it crosses.
 	a.shaman.tick(TICK)
 	a.shaman.tick(TICK)
-	check(a.spell.executed == 1, "the spell releases once the 1.0 s wind-up is over")
+	check(a.spell.executed == 1, "the spell releases once the 0,5 s wind-up is over")
+	_free_world(w)
+
+
+## Die drei Stufen der Effektverzoegerung, wie vom Nutzer vorgegeben: sofort fuer
+## die schnellen Zauber, 0,5 s spaeter fuer Feuerregen und Absinken (also insgesamt
+## wie bisher), 1,0 s spaeter fuer Vulkan, Erdbeben und Supertornado.
+func test_effect_delay_tiers() -> void:
+	var by_id: Dictionary = {}
+	for spell in Spell.create_default_set():
+		by_id[spell.id] = spell.effect_delay
+	for id in [&"fireball", &"lightning", &"swarm", &"hypnosis", &"tornado",
+			&"landbridge", &"flatten"]:
+		check_near(float(by_id[id]), 0.0, "%s lands right away" % id)
+	for id in [&"firestorm", &"sink"]:
+		check_near(float(by_id[id]), Balance.SPELL_EFFECT_DELAY_MID,
+			"%s lands half a second later" % id)
+	for id in [&"volcano", &"earthquake", &"supertornado"]:
+		check_near(float(by_id[id]), Balance.SPELL_EFFECT_DELAY_LATE,
+			"%s lands a full second later" % id)
+	# Total time to effect for the heavy spells matches the old feel and more.
+	check_near(Balance.SHAMAN_CAST_TIME + Balance.SPELL_EFFECT_DELAY_MID, 1.0,
+		"firestorm/sink keep the old overall 1,0 s")
+	check(Balance.SHAMAN_CAST_TIME + Balance.SPELL_EFFECT_DELAY_LATE > 1.0,
+		"and the heaviest three take longer than before")
+
+
+## Der verzoegerte Effekt haengt NICHT an der Schamanin: die Ladung ist mit dem
+## Wind-up weg, sie ist sofort wieder frei, und der Effekt kommt aus einem Traeger
+## auf der Projektilliste.
+func test_delayed_effect_frees_the_shaman_and_fires_later() -> void:
+	var w: Dictionary = _make_world()
+	var shaman: Unit = w.unit_manager.spawn_unit(SHAMAN_SCENE, 0, Vector3(30, 0, 30))
+	w.tribe0.shaman = shaman
+	var spell: DummySpell = DummySpell.new(&"dummy", 10.0, 4)
+	spell.effect_delay = 0.5
+	w.tribe0.set_spells([spell] as Array[Spell])
+	spell.charges = 1
+	check(w.tc.cast_spell(w.tribe0, &"dummy", Vector3(33, 0, 30)), "cast accepted")
+	for i in range(7):
+		shaman.tick(TICK)
+	check(spell.charges == 0, "the charge is gone with the wind-up")
+	check(shaman.state != Unit.State.CAST, "and she is free again")
+	check(spell.executed == 0, "but the effect has NOT happened yet")
+	for i in range(8):
+		w.unit_manager._tick_projectiles(TICK)
+	check(spell.executed == 1, "the carrier fires it after the delay")
 	_free_world(w)
 
 

@@ -12,6 +12,7 @@ func _init() -> void:
 	charge_cost = Balance.SPELL_SUPERTORNADO_CHARGE_COST
 	max_charges = Balance.SPELL_SUPERTORNADO_MAX_CHARGES
 	cast_range = Balance.SPELL_SUPERTORNADO_CAST_RANGE
+	effect_delay = Balance.SPELL_EFFECT_DELAY_LATE
 
 
 func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:

@@ -195,7 +195,16 @@ func _tick_cast(delta: float) -> void:
 	var target: Vector3 = pending_target
 	var ctx: SpellContext = pending_ctx
 	_cancel_cast()
-	if spell.cast(tribe, target, ctx):
+	if spell.effect_delay > 0.0 and ctx != null and ctx.unit_manager != null 			and spell.charges > 0:
+		# Schwerer Zauber (Phase 10k-Nachtrag): die Ladung ist mit dem Wind-up weg,
+		# der EFFEKT tritt spaeter ein. Die Schamanin ist sofort wieder frei — ein
+		# Traeger auf der Projektilliste zuendet ihn.
+		spell.consume_charge()
+		var carrier: Spell.DelayedEffect = Spell.DelayedEffect.new()
+		carrier.setup(spell, tribe, target, ctx, spell.effect_delay)
+		ctx.unit_manager.register_projectile(carrier)
+		_emit_spell_cast(spell, target)
+	elif spell.cast(tribe, target, ctx):
 		_emit_spell_cast(spell, target)
 	_set_state(State.IDLE)
 

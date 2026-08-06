@@ -26,6 +26,7 @@ func _init() -> void:
 	charge_cost = Balance.SPELL_FIRESTORM_CHARGE_COST
 	max_charges = Balance.SPELL_FIRESTORM_MAX_CHARGES
 	cast_range = Balance.SPELL_FIRESTORM_CAST_RANGE
+	effect_delay = Balance.SPELL_EFFECT_DELAY_MID
 
 
 func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:

@@ -23,6 +23,7 @@ func _init() -> void:
 	charge_cost = Balance.SPELL_SINK_CHARGE_COST
 	max_charges = Balance.SPELL_SINK_MAX_CHARGES
 	cast_range = Balance.SPELL_SINK_CAST_RANGE
+	effect_delay = Balance.SPELL_EFFECT_DELAY_MID
 
 
 func execute(_tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:

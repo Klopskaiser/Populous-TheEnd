@@ -65,7 +65,16 @@ const SHAMAN_SPEED: float = 4.0
 const SHAMAN_MELEE_STRENGTH: float = 2.0   # 2 x Brave-Schaden
 ## Wind-up vor dem Zauber-Release: die Zeit, in der die Schamanin die
 ## Zauberformel spricht (Phase 10b). Für alle Zauber gleich.
-const SHAMAN_CAST_TIME: float = 1.0
+## Dauer der Zauber-Animation (Wind-up). Phase 10k-Nachtrag: 1,0 -> 0,5 s
+## (Nutzervorgabe) — die Schamanin ist danach wieder frei, der EFFEKT tritt bei
+## den schweren Zaubern erst spaeter ein (SPELL_EFFECT_DELAY_*).
+const SHAMAN_CAST_TIME: float = 0.5
+## Verzoegerung des Effekts NACH dem Wind-up. 0 = sofort (etwas schneller als
+## vorher), MID = wie bisher insgesamt 1,0 s, LATE = 1,5 s fuer die schweren
+## Zauber. Die Schamanin wartet nicht mit — ein kleiner Traeger auf der
+## Projektilliste zuendet den Effekt (Muster FirestormShower).
+const SPELL_EFFECT_DELAY_MID: float = 0.5
+const SPELL_EFFECT_DELAY_LATE: float = 1.0
 ## Mana-Bonus (Anteil der Ladungskapazität) für den Stamm, der sie tötet.
 ## Schamanentötung: Der Töter bekommt diesen Anteil der MINÜTLICHEN
 ## Manaproduktion des getöteten Stammes einmalig auf seine aktiven

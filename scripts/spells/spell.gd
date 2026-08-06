@@ -12,6 +12,8 @@ class_name Spell extends RefCounted
 var id: StringName = &"spell"
 var display_name_de: String = "Zauber"
 ## Mana converted per stored charge (start values, balancing in phase 8).
+## Verzoegerung des Effekts nach dem Wind-up (Phase 10k-Nachtrag); 0 = sofort.
+var effect_delay: float = 0.0
 var charge_cost: float = 50.0
 var max_charges: int = 4
 ## Range (metres) from which the shaman can release this spell at its target;
@@ -72,10 +74,19 @@ func cast(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:
 		return false
 	if not execute(tribe, target, ctx):
 		return false
+	consume_charge()
+	return true
+
+
+## Verbraucht eine gespeicherte Ladung. Getrennt von cast(), weil die schweren
+## Zauber ihren Effekt VERZOEGERT zuenden (effect_delay): die Ladung ist mit dem
+## Wind-up weg, der Effekt kommt spaeter.
+func consume_charge() -> void:
+	if charges <= 0:
+		return
 	charges -= 1
 	# Dropping out of "full" reopens the partial fill display.
 	_sync_charge_progress()
-	return true
 
 
 func is_full() -> bool:
@@ -99,3 +110,38 @@ static func create_default_set() -> Array[Spell]:
 		SupertornadoSpell.new(),
 		HypnosisSpell.new(),
 	]
+
+
+## Zuendet einen Zaubereffekt VERZOEGERT (Phase 10k-Nachtrag). Die Schamanin ist
+## nach ihrem 0,5-s-Wind-up wieder frei; die schweren Zauber (Vulkan, Erdbeben,
+## Supertornado 1,0 s; Feuerregen, Absinken 0,5 s) treten erst danach ein.
+##
+## Ein winziger Traeger auf der Projektilliste statt einer Warteschlange auf der
+## Schamanin — dasselbe Muster wie FirestormShower, und damit ueberlebt der Effekt
+## auch ihren Tod im Wind-up-Nachlauf.
+class DelayedEffect extends Node3D:
+	var done: bool = false
+	var _spell: Spell = null
+	var _tribe: Tribe = null
+	var _target: Vector3 = Vector3.ZERO
+	var _ctx: SpellContext = null
+	var _timer: float = 0.0
+
+	func setup(spell: Spell, tribe: Tribe, target: Vector3, ctx: SpellContext,
+			delay: float) -> void:
+		_spell = spell
+		_tribe = tribe
+		_target = target
+		_ctx = ctx
+		_timer = maxf(delay, 0.0)
+		position = target
+
+	func tick(delta: float) -> void:
+		if done:
+			return
+		_timer -= delta
+		if _timer > 0.0:
+			return
+		done = true
+		if _spell != null:
+			_spell.execute(_tribe, _target, _ctx)

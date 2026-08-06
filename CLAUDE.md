@@ -217,10 +217,17 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
 - **Kein Mana-Banking:** Einkommen, das keinen Abnehmer findet (alles voll oder
   abgeschaltet), **verfällt**. Der Förster-Unterhalt wird vom Einkommen abgezogen,
   bevor geladen wird.
-- **Zauberzeit 1,0 s für alle Zauber** (`Balance.SHAMAN_CAST_TIME`): In diesem Wind-up
+- **Zauberzeit 0,5 s für alle Zauber** (`Balance.SHAMAN_CAST_TIME`): In diesem Wind-up
   spricht die Schamanin die **Zauberformel** (`spell_voice_<id>`). Der Sound des Zaubers
   selbst (`spell_<id>`) kommt getrennt davon, erst **wenn der Effekt eintritt**
   (Einschlag/Ausbruch/Bodenbewegung). Aus Wachturm und Luftschiff zaubert sie ohne Wind-up.
+- **Der Effekt kann später eintreten als das Wind-up** (`Spell.effect_delay`): Feuerball,
+  Blitz, Schwarm, Hypnose, Tornado, Landbrücke und Ebene wirken **sofort**; Feuerregen und
+  Absinken **0,5 s später** (also insgesamt wie vor der Verkürzung); Vulkan, Erdbeben und
+  Supertornado **1,0 s später**. Die Schamanin ist nach ihren 0,5 s in jedem Fall wieder
+  frei — die **Ladung ist mit dem Wind-up verbraucht**, und den verzögerten Effekt zündet
+  ein kleiner Träger auf der Projektilliste (`Spell.DelayedEffect`), der auch ihren Tod
+  überlebt.
 - **Zaubersprüche:** Grundset (1–5) aus Phase 6, erweitertes Set (6–10) aus Phase 7c,
   Supertornado (11) und **Hypnose (12)** aus Phase 10k. „Ladungen" = `max_charges`; der
   **Mana-Bedarf pro Ladung** (`charge_cost`) steigt stark mit der Mächtigkeit.
