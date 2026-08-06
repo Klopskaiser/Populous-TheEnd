@@ -8973,9 +8973,45 @@ Krieger" wörtlich: ein Kriegerschlag ist 6/8 × Stärke 3,0 = **18–24 HP**.
 5. **`Spell` ist `RefCounted`** — `free()` darauf ist ein `SCRIPT ERROR`, den die Suite
    als „0 failed" durchgehen lässt. Der Filter bleibt Pflicht.
 
+### Nachträge nach der ersten Spielprüfung (`412c232`, `fb3c7e2`)
+
+Drei Nutzerreports und eine Balancing-Änderung nach dem ersten Spielen:
+
+1. **Die Manaanzeige zeigte dieselbe Zahl**, egal wie viele Förster und
+   Trainingsgebäude liefen. Ursache war keine falsche Formel, sondern eine
+   **Buchung im falschen Takt**: die Ausbildungskosten wurden als *Schuld*
+   (`_upkeep_debt`, ein Bestand) abgezogen, die Anzeige rechnet aber mit *Raten*.
+   Getrennt in `_upkeep_rate_claimed` / `_upkeep_rate_booked` (beide in
+   `Tribe.tick()` zurückgesetzt), `book_upkeep_rate()` als einziger Schreiber,
+   und die Anzeige nennt den Unterhalt jetzt explizit:
+   `Mana: +12,3/s (−3,0 Unterhalt) auf 4 Zauber`.
+2. **Katapult und Schamanin blieben vor einem vom Vulkan angehobenen Gebäude
+   stehen**, hielten es aber als Ziel. Es hatte **nichts mit der Höhe zu tun**:
+   beide liefen auf den **Gebäudemittelpunkt** zu, und ein A*-Weg *in* eine
+   Gebäudefläche schlägt immer fehl — nur stand man bisher zufällig schon in
+   Reichweite, weil das Gebäude auf Bodenhöhe erreichbar war. Der erste Versuch
+   („bei A*-Fehlschlag den Auftrag aufgeben") war zu grob und verwarf auch
+   erreichbare Gebäude; ein Gegentest hat das gezeigt. Richtig ist ein
+   **Stand-off-Punkt** (`Unit.stand_off_point`, pure static): beide laufen auf
+   **85 %** ihrer Reichweite an das Ziel heran (`APPROACH_RANGE_FRACTION`), also
+   auf einen Punkt daneben statt hinein.
+3. **`Invalid call: nonexistent function 'panic'`** im Feuerregen (Absturz beim
+   Spielen). Die Funktion heißt `start_panic(source_pos)`. Ein Aufruf einer
+   nicht existierenden Methode ist in GDScript erst zur **Laufzeit** ein Fehler,
+   und die Panikschleife lief in keinem Test — daher fiel es erst im Spiel auf.
+4. **Zauberzeit 1,0 s → 0,5 s** (Nutzervorgabe), mit Effekten in drei Stufen:
+   sofort (Feuerball, Blitz, Schwarm, Hypnose, Tornado, Landbrücke, Ebene),
+   **+0,5 s** (Feuerregen, Absinken — insgesamt also wie vorher) und **+1,0 s**
+   (Vulkan, Erdbeben, Supertornado). Die Schamanin ist nach ihren 0,5 s in jedem
+   Fall frei: `Spell.cast()` ist in `consume_charge()` + `execute()` aufgeteilt,
+   die **Ladung geht mit dem Wind-up weg**, und ein winziger Träger auf der
+   Projektilliste (`Spell.DelayedEffect`, Muster `FirestormShower`) zündet den
+   Effekt später — er überlebt damit auch ihren Tod im Nachlauf, und es braucht
+   keine Warteschlange auf der Einheit.
+
 ### Verifikationsstand
 
-- **Suite 4677 Zusicherungen grün** (Start der Phase: 4177), Exit-Code 0, Output frei von
+- **Suite 4729 Zusicherungen grün** (Start der Phase: 4177; 4677 vor den Nachträgen), Exit-Code 0, Output frei von
   `SCRIPT ERROR`. Projekt-Ladecheck nach jedem Teil exit 0 ohne Ausgabe. Neu:
   `tests/test_mana_curve.gd` (152), `tests/test_hypnosis.gd` (49),
   `tests/test_volcano_shape.gd` (22), `tests/benchmark_firestorm.gd`.

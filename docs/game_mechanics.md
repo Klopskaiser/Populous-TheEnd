@@ -25,26 +25,44 @@ fällen Bäume bzw. holen Holzstapel ab und tragen das Holz zur Baustelle
   Bäume lohnen sich am meisten.
 
 ### Mana
-Mana lädt **passiv** und skaliert mit der eigenen Bevölkerung:
+Mana lädt **passiv** und skaliert allein mit der eigenen Bevölkerung — seit
+Phase 10k **gedämpft**, damit große Stämme nicht beliebig viel Magie bekommen:
 
-> **Mana/s = 0,1 × Bevölkerung + 0,3 × Anzahl betender Braves**
+> **Mana/s = 0,11 × P(n)**, mit
+> **P(n) = n** für n ≤ 100 und
+> **P(n) = 100 × (1 + ln(1 + (n − 100)/10000) / ln(1,04))** darüber
 
-Betende Braves (am Reinkarnationsplatz) sind also je 4× so viel wert wie ein
-normales Stammesmitglied, tun aber sonst nichts. Mana wird automatisch in
-**Zauber-Ladungen** umgewandelt (siehe §7). Der Förster **verbraucht** Mana
-als Arbeiter-Unterhalt (siehe §4).
+Bis 100 Anhängern zählt also jeder Kopf voll, danach nur noch **~25 %**. Die
+Kurve trifft die Balancing-Vorgaben exakt: **500 Anhänger = 2,00×**, **1000
+Anhänger = 3,20×** der Produktion von 100. Die Schamanin zählt mit; Braves, die
+in einer Hütte versteckt arbeiten, zählen **nicht**. **Beten gibt es nicht
+mehr** — es war die einzige Möglichkeit, die Kurve zu umgehen.
+
+Vom Einkommen geht **zuerst der Unterhalt** ab, erst der Rest lädt Zauber
+(`Tribe.charging_income()`):
+
+| Unterhalt | Rate |
+|---|---|
+| **Förster** je Arbeiter | 0,6 Mana/s (voll besetzt 2,4) |
+| **Trainingsgebäude**, das **aktiv** ausbildet | 0,6 Mana/s |
+
+Wer in der Warteschlange steht, kostet nichts; **Fahrzeugbau und
+Hüttenbevölkerung kosten überhaupt kein Mana**. **Kein Mana-Banking:**
+Einkommen ohne Abnehmer (alles voll oder abgeschaltet) verfällt.
 
 ### Bevölkerung & Limits
 - **Hardcap: 1000 Einheiten pro Stamm** (zusätzlich zum Bevölkerungslimit der
-  Hütten; jede Hütte bietet Platz für 40).
-- **Hütten-Besatzung:** Eine Hütte produziert nur **mit Besatzung** (bis zu
-  4 Braves, im Gebäude versteckt; sie zählen zur Bevölkerung, erzeugen aber
-  **kein** Mana). Bei voller Besatzung entsteht alle **10 s** ein neuer Brave,
-  volle Hütten arbeiten ~10 % schneller als die alte Basisrate; weniger
-  Besatzung = proportional langsamer, leere Hütte = keine Produktion.
+  Hütten). Der Cap zählt **alles** — Armee, Schamanin, Fahrzeuge, Besatzung —,
+  als reine Zivilbevölkerung sind also ~700 erreichbar.
+- **Hütten-Ausbaustufen** (Phase 10f): Bevölkerungsplätze **10 / 18 / 26 / 34 /
+  45**, Arbeiterplätze **2 / 3 / 4 / 5 / 6**.
+- **Hütten-Besatzung:** Eine Hütte produziert nur **mit Besatzung** (Braves, im
+  Gebäude versteckt; sie zählen zur Bevölkerung, erzeugen aber **kein** Mana).
+  Die Rate ist **linear in der Besatzung** — 30 s je Brave, also 15 s auf
+  Stufe 0 und 5 s im Wohnpalast; leere Hütte = keine Produktion.
 - **Wachstumsregler** (pro Stamm, UI bei Bevölkerung/Mana): **Kein** (leert
-  alle Hütten), **Minimal** (1 Besatzung je Hütte), **Maximum** (füllt auf 4).
-  Automatisch eingezogen werden nur **nahe, untätige** Braves.
+  alle Hütten), **Minimal** (1 Besatzung je Hütte), **Maximum** (füllt bis zur
+  Stufen-Kapazität). Automatisch eingezogen werden nur **nahe, untätige** Braves.
 
 ---
 
@@ -56,7 +74,7 @@ als Arbeiter-Unterhalt (siehe §4).
 | **Krieger** | 120 | 4,0 m/s | Nahkampf ×3,0 | Stärkster Nahkämpfer; schubst fast nie (4 % statt 15 %), schlägt lieber zu. Aggro-Radius 8 m. |
 | **Feuerkrieger** | 60 | 4,0 m/s | Feuerball: 9 HP (Einheiten) / 5 HP (Gebäude), Reichweite 8 m, alle 1,5 s, dazu **Flächenschaden 2 HP (20 %) im Umkreis 1,2 m** | Fernkämpfer; großer Aggro-Radius (13 m). Kann Wachtürme bemannen (+3 m Reichweite). Der Flächenschaden trifft **nur Feinde** und schleudert Umstehende nicht (Phase 10i); Fahrzeuge sind ausgenommen, sie haben eigene Schadensmodelle. Der Radius folgt der Einheitengeometrie — 1,2 m fasst genau ein 6er-Pack (max. 1,10 m breit) bzw. eine Nahkampfgruppe (0,9-m-Ring), die Nachbargruppe (2,2 m Abstand) bleibt außen. Gemessen **flach in XZ**: ein senkrechter Zylinder, ein Bodeneinschlag trifft also auch Fliegende darüber. **Die Wirkung skaliert mit der Dichte** — im 200er-Klumpen nimmt fast jeder Ball ~3 Umstehende mit, bei 20 gegen 20 meist keinen: Feuerkrieger sind bewusst eine Masseneinheit. |
 | **Prediger** | 90 | 4,0 m/s | konvertiert statt zu kämpfen | **Bekehrt** Feinde (Reichweite 5 m, Dauer zufällig 4–9 s). Mehrere Prediger verteilen sich auf verschiedene Ziele; Einheiten **in Bekehrung sind kein gültiges Ziel** für Nah-/Fernkampf (Katapult ausgenommen). **Eine kämpfende feindliche Schamanin im Umkreis von 6 m unterbricht die Predigt** (Phase 10i): laufende Bekehrungen brechen ab und verlieren ihren Fortschritt, neue beginnen nicht — und das gilt für **alle** Prediger in ihrem Radius, nicht nur den, den sie angreift. „Kämpfend" heißt: sie schlägt zu oder wird im Nahkampf angegriffen; bloßes Herumstehen stört nicht. |
-| **Schamanin** | 240 (4× Brave) | 4,0 m/s | Nahkampf ×2,0; einzige Zauberwirkerin (Wind-up 1,0 s) | Genau eine pro Stamm. Stirbt sie, **respawnt** sie nach **20 s** am Reinkarnationsplatz; der Stamm des Tötenden erhält einmalig **15 %** seiner Ladungskapazität als Manaboost. |
+| **Schamanin** | 240 (4× Brave) | 4,0 m/s | Nahkampf ×2,0; einzige Zauberwirkerin (Wind-up 0,5 s) | Genau eine pro Stamm. Stirbt sie, **respawnt** sie nach **20 s** am Reinkarnationsplatz; der Stamm des Tötenden erhält einmalig **15 %** seiner Ladungskapazität als Manaboost. |
 | **Katapult** | — (nicht direkt angreifbar) | 2,0 m/s | Schuss: Reichweite 3–15 m; Einschlag 15 HP im 2-m-Radius (**Friendly Fire!**); Gebäude +1 Zerstörungsstufe; Raider im eigenen Gebäude: 30 HP + Rauswurf | Fahrzeug mit Crew (bis 6): Schuss-Cooldown 6 s bei 2 Crew → 3 s bei voller Crew. Bekämpft wird die **Crew**, nicht das Fahrzeug; ein unbemanntes Katapult kann jeder Stamm übernehmen. |
 
 ---
@@ -75,7 +93,7 @@ Enum `Unit.State` in `scripts/units/unit.gd`:
 | `ATTACK` | Kämpft im Nahkampf/Fernkampf gegen ein Einheitenziel. |
 | `TRAIN` | In einem Trainingsgebäude; kommt als Kampfeinheit wieder heraus. |
 | `PANIC` | Flieht kopflos vor der Panikquelle; nicht steuerbar (Details §6 Statuseffekte). |
-| `CAST` | Schamanin wirkt einen Zauber: 1,0 s Wind-up (sie spricht die Zauberformel), dann Release. |
+| `CAST` | Schamanin wirkt einen Zauber: 0,5 s Wind-up (sie spricht die Zauberformel), dann Release. Schwere Zauber treten **nach** dem Release ein (§7). |
 | `THROWN` | Durch die Luft geschleudert (Feuerball, Tornado) — Wurfparabel bis zur Landung. |
 | `DEAD` | Tot; Leiche liegt 6 s und versinkt dann im Boden (1 s Animation). |
 | `SIT` | Von einem feindlichen Prediger fixiert (Bekehrung läuft). |
@@ -211,9 +229,15 @@ sowie von selbst beim Hinablaufen sehr steiler Hänge (Stolpern).
   stapelt aber nicht.
 - Brand **löst Panik aus** (für die Brenndauer): die Einheit rennt brennend
   umher. Die panik-immune Schamanin brennt stehend und bleibt steuerbar.
-- Feuerball/Feuerregen zünden Einheiten **nicht** an — Feuerzauber setzen aber
-  **Bäume, Holzstapel und Katapulte** in Brand (das hölzerne Fahrzeug brennt
-  ab und versinkt; die Crew erleidet nur den normalen Flächenschaden).
+- **Feuerregen** zündet Einheiten seit Phase 10k **doch** an (er ist die
+  Verbotszone, §7); der einzelne **Feuerball nicht**. Feuerzauber setzen
+  außerdem **Bäume, Holzstapel und Katapulte** in Brand (das hölzerne Fahrzeug
+  brennt ab und versinkt; die Crew erleidet nur den normalen Flächenschaden).
+
+**Hypnose** (Phase 10k) ist kein Effekt dieser Art: die Einheit ist **normal
+steuerbar** — nur eben vom Hypnotiseur (§7). Sie trägt dafür ein eigenes
+**Zeichen über dem Kopf** (`StatusFxRenderer.FX_HYPNOTIZED`, wie Panik-, Brand-
+und Verletzungs-Glyphen ohne Schattenwurf).
 
 ---
 
@@ -221,29 +245,59 @@ sowie von selbst beim Hinablaufen sehr steiler Hänge (Stolpern).
 
 **Ladungssystem:** Mana wird automatisch in Zauber-Ladungen umgewandelt (je
 Zauber `charge_cost` Mana pro Ladung, gespeichert bis `max_charges`). Casts
-verbrauchen Ladungen; es gibt **keinen separaten Cooldown**. Anzeige als
-Ladungs-Pips in der Zauberleiste. Nur die Schamanin zaubert.
+verbrauchen Ladungen; es gibt **keinen separaten Cooldown**. Nur die Schamanin
+zaubert.
 
-**Zauberzeit:** Jeder Zauber hat ein Wind-up von **1,0 s**
-(`Balance.SHAMAN_CAST_TIME`), in dem die Schamanin die **Zauberformel** spricht
-(Sound `spell_voice_<id>`). Der Sound des Effekts (`spell_<id>`) kommt getrennt
-davon, erst wenn der Effekt **tatsächlich eintritt** — beim Einschlag, beim
-Ausbruch oder sobald sich der Boden zu bewegen beginnt. Aus einem Wachturm oder
-vom Luftschiffdeck zaubert sie **ohne** Wind-up; dort fallen Formel und Effekt
-zusammen.
+**Alle aktiven Zauber laden gleichzeitig** und teilen sich das Einkommen
+(§1) zu **gleichen Teilen**. Weil die Ladungen unterschiedlich viel kosten,
+ergeben sich die Ladezeiten von selbst — billige Zauber sind schneller wieder
+da. **Per Rechtsklick abschaltbar:** ein abgeschalteter Zauber lädt nicht mehr
+(sein Anteil geht an die übrigen), behält aber seine Ladungen und seinen
+angefangenen Balken. Ein **voller** Zauber lädt ebenfalls nicht. Da die
+schweren Zauber seit Phase 10k ein Vielfaches kosten, ist dieser Schalter die
+**Hauptmechanik** des Magiesystems: 12 Zauber gleichzeitig zu laden heißt, dass
+keiner davon rechtzeitig fertig wird. Die KI schaltet ebenfalls ab.
+
+**Ladeanzeige** (nach dem Originalspiel): **blau** der echte Fortschritt der
+nächsten Ladung, dahinter ein **gelber**, schneller durchlaufender Balken, der
+nur den offenen Teil füllt — seine Umlaufzeit zeigt die **Rate**, sodass man
+ohne Zahlen abschätzen kann, wie lange es noch dauert.
+
+**Zauberzeit:** Das Wind-up ist **0,5 s** (`Balance.SHAMAN_CAST_TIME`), in dem
+die Schamanin die **Zauberformel** spricht (Sound `spell_voice_<id>`); die
+**Ladung ist damit verbraucht** und die Schamanin danach in jedem Fall wieder
+frei. Der Effekt tritt je Zauber **verzögert** ein (`Spell.effect_delay`):
+
+| Verzögerung | Zauber | Gesamt |
+|---|---|---|
+| **sofort** | Feuerball, Blitz, Schwarm, Hypnose, Tornado, Landbrücke, Ebene | 0,5 s |
+| **+0,5 s** | Feuerregen, Absinken | 1,0 s |
+| **+1,0 s** | Vulkan, Erdbeben, Supertornado | 1,5 s |
+
+Den verzögerten Effekt zündet ein kleiner Träger auf der Projektilliste
+(`Spell.DelayedEffect`), der auch den Tod der Schamanin überlebt. Der Sound des
+Effekts (`spell_<id>`) kommt erst, wenn der Effekt **tatsächlich eintritt**.
+Aus einem Wachturm oder vom Luftschiffdeck zaubert sie **ohne** Wind-up.
+
+Die Schamanin läuft für einen Zauber nur bis auf **85 %** der Reichweite heran
+(`Shaman.APPROACH_RANGE_FRACTION`) und zielt auf einen Punkt **neben** dem
+Ziel: ein Weg *in* eine Gebäudefläche schlägt in A* immer fehl, und sie blieb
+sonst vor angehobenen Gebäuden (Vulkan) stehen, statt zu zaubern.
 
 | Taste | Zauber | Mana/Ladung | Max. Ladungen | Reichweite | Effekt |
 |---|---|---|---|---|---|
-| 1 | **Feuerball** | 30 | 4 | 8 m | Direkttreffer 60 HP (r ≤ 0,8 m), Fläche 30 HP (r ≤ 2,5 m). Getroffene werden zurückgeschleudert (kleiner Bogen), landen im Rollzustand. |
-| 2 | **Blitz** | 70 | 4 | 12 m | Einheit: **240 HP** (4× Brave; Angrenzende rollen kurz). Gebäude: **+2 Zerstörungsstufen**. |
-| 3 | **Schwarm** | 50 | 4 | 8 m | Zufällig wandernder Insektenschwarm (10 s, r = 3 m): Gegner geraten in **Panik (6 s)** und erleiden 5 HP/s. Schamanin ist gegen die Panik immun. |
-| 4 | **Landbrücke** | 60 | 4 | 9 m | Kein Schaden. Hebt Terrain in breiter Linie (Halbbreite 1,6 m) an: über Wasser auf Küstenniveau, sonst auf Zielpunkt-Niveau; bei Höhendifferenz entsteht eine begehbare Schräge. |
-| 5 | **Tornado** | 110 | 3 | 10 m | Windhose (10 s, r = 2,2 m), wandert zufällig; Gebäude **+1 Stufe alle 2 s**. Einheiten werden hochgewirbelt und weggeschleudert (Sturzschaden 30 HP + Rollschaden; ins Wasser = Tod). |
-| 6 | **Erdbeben** | 130 | 2 | 10 m | Hebt/senkt Terrain entlang einer zufälligen Verwerfung (r = 7 m); Gebäude **+2 Stufen**, Einheiten 15 HP. |
-| 7 | **Vulkan** | 180 | 1 | 12 m | Teuerster Zauber: hebt einen Vulkankegel (r = 5 m), aktive Lavazone 20 s (Brand/Stufenschaden). |
-| 8 | **Feuerregen** | 100 | 2 | 10 m | 12 Feuerbälle regnen über 3 s im Zielgebiet (r = 5,5 m) nieder; je Bolt Feuerball-Werte (60/30 HP). |
-| 9 | **Ebene** | 90 | 3 | 10 m | Ebnet das Zielquadrat (9×9 m) exakt ein, harte Kanten. |
-| 0 | **Absinken** | 60 | 3 | 10 m | Senkt das Zielgebiet (r = 6 m) um bis zu 3 m ab — nie unter den Meeresboden. |
+| 1 | **Feuerball** | 30 | 4 | 8 m | Direkttreffer 20 HP (r ≤ 0,8 m), Fläche 10 HP (r ≤ 2,5 m). **Verfolgt** ein Ziel in 2 m um den Zielpunkt (bis 6 m Drift). Getroffene werden zurückgeschleudert und gewirbelt (direkt 4 m, Fläche 2 m Höhe), landen im Rollzustand. |
+| 2 | **Blitz** | 200 | 4 | 12 m | Einheit: **240 HP** (4× Brave; Angrenzende rollen kurz). Gebäude: **+2 Zerstörungsstufen**. |
+| 3 | **Schwarm** | 100 | 4 | 10 m | Zufällig wandernder Insektenschwarm (10 s, r = 3 m): Gegner geraten in **Panik (6 s)** und erleiden 5 HP/s. Schamanin ist gegen die Panik immun. |
+| 4 | **Landbrücke** | 150 | 4 | 9 m | Kein Schaden. Hebt Terrain in breiter Linie (Halbbreite 1,6 m) an: über Wasser auf Küstenniveau, sonst auf Zielpunkt-Niveau; bei Höhendifferenz entsteht eine begehbare Schräge. |
+| 5 | **Tornado** | 220 | 3 | 11 m | Windhose (10 s, r = 2,2 m), wandert zufällig; Gebäude **+1 Stufe alle 2 s**. Einheiten werden hochgewirbelt und weggeschleudert (Sturzschaden 30 HP + Rollschaden; ins Wasser = Tod). |
+| 6 | **Erdbeben** | 400 | 2 | 11 m | Hebt/senkt Terrain entlang einer zufälligen Verwerfung (r = 7 m); Gebäude **+2 Stufen**, Einheiten 15 HP, Lava in der Spalte. |
+| 7 | **Vulkan** | 1600 | 1 | 12 m | Teuerster Zauber: hebt einen Vulkankegel mit **echtem Krater** (r = 7 m, Rand bei 0,55 × R, Kratertiefe 1,5 m), **eine** Lavawelle (8 s), die den Krater zu einem Plateau **auffüllt**; aktive Zone 20 s. |
+| 8 | **Feuerregen** | 775 | 2 | 12 m | **Verbotszone** über **20 s**: Bälle in zufälligen Abständen (Ø 0,3 s) auf Zufallspunkte im Gebiet (r = 7,2 m), je 20/10 HP, **kein** Hochwirbeln, dafür **Brand** und **20 HP Gebäudeschaden je Ball**. Wer außen herum zusieht (bis 11,5 m), gerät in **Panik**. |
+| 9 | **Ebene** | 300 | 3 | 10 m | Ebnet das Zielquadrat (9×9 m) exakt ein, harte Kanten. |
+| 0 | **Absinken** | 350 | 3 | 10 m | Senkt das Zielgebiet (r = 6 m) um bis zu 3 m ab — nie unter den Meeresboden. |
+| 11 | **Supertornado** | 1200 | 1 | 12 m | Doppelt so breite (r = 4,4 m) und 12 m hohe Windhose über 16 s, mit **2 Satelliten**-Tornados im Abstand von 6 m. |
+| 12 | **Hypnose** | 210 | 3 | 10 m | Übernimmt für **30 s** alle feindlichen Einheiten im **4×4-m**-Quadrat: sie gehorchen dem Zauberer und tragen ein Zeichen über dem Kopf. **Prediger können sie bekehren** — das gewinnt und ist dauerhaft. Der Stammeswechsel ist der **volle** (Bevölkerung, Manaerzeugung, Selektion wandern mit), wer also die **letzten** Einheiten eines Stammes hypnotisiert, beendet ihn. **Immun:** die Schamanin und Wachturm-Besatzung. Nach Ablauf fällt die Einheit zurück — außer der Ursprungsstamm ist inzwischen ausgeschieden, dann bleibt sie. |
 
 **Terrainverformung** (Landbrücke, Erdbeben, Vulkan, Ebene, Absinken) ändert
 Heightmap, Kollision und Navigation zur Laufzeit.
