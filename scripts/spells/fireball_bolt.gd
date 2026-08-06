@@ -1,14 +1,22 @@
 class_name FireballBolt extends Node3D
 
 ## The shaman's fireball projectile (named "bolt" — scripts/units/fireball.gd
-## is the firewarrior's projectile). Flies from the caster to a fixed target
-## POINT (no homing) and explodes there: direct hits take a full brave life,
-## the small splash area half of one, and every survivor is thrown back into
-## a small arc (THROWN -> momentum roll). Ticked by the UnitManager's
-## projectile list; `done` marks it for removal.
+## is the firewarrior's projectile). Ticked by the UnitManager's projectile list;
+## `done` marks it for removal.
+##
+## PARAMETERISED since 10k, because the firestorm rains dozens of these through
+## the very same class and needs its own values: damage, whirl heights, ignite and
+## building damage are per-INSTANCE fields with the fireball spell's numbers as
+## defaults. Without that split every firestorm tweak silently changed the
+## fireball spell too.
+##
+## Fireball spell (default): 20/10 damage, whirls the direct hit 4 m and splash
+## victims 2 m up — they take fall damage on landing and roll on like any other
+## fall. Firestorm: 20/10 too, but NO whirl, plus ignite and building damage.
 
 const SPEED: float = Balance.FIREBALL_BOLT_SPEED
 const ARC_HEIGHT: float = 2.5      # extra apex height of the flight arc
+## Defaults; the per-instance fields below are what _explode actually reads.
 const DIRECT_DAMAGE: int = Balance.FIREBALL_DIRECT_DAMAGE
 const SPLASH_DAMAGE: int = Balance.FIREBALL_SPLASH_DAMAGE
 const DIRECT_RADIUS: float = Balance.FIREBALL_DIRECT_RADIUS   # counts as a direct hit
@@ -30,6 +38,27 @@ var _start: Vector3 = Vector3.ZERO
 var _travelled: float = 0.0
 var _total: float = 0.0
 
+# --- Per-instance effect values (10k) -----------------------------------------
+var direct_damage: int = DIRECT_DAMAGE
+var splash_damage: int = SPLASH_DAMAGE
+## Whirl heights in metres (0 = no whirl, only the old ground shove).
+var whirl_direct: float = Balance.FIREBALL_WHIRL_DIRECT
+var whirl_splash: float = Balance.FIREBALL_WHIRL_SPLASH
+## Sets victims on fire (firestorm) and damages buildings in the splash radius.
+var ignites: bool = false
+var building_damage: int = 0
+## Explicitly handed in for the building damage (pattern: LavaSurge.setup) —
+## relying on unit_manager.building_manager would make the effect depend on a
+## wiring the caller cannot see, and it is not set in every test world.
+var building_manager: BuildingManager = null
+
+## Unit this bolt CHASES (10k): the enemy picked at cast time. The bolt follows it
+## while it stays within FIREBALL_CHASE_MAX_DRIFT of the original target point;
+## further away (or dead) it falls back to that fixed point. Untyped — the target
+## may be freed mid-flight.
+var chase_target = null
+var _anchor: Vector3 = Vector3.ZERO
+
 
 func setup(p_tribe_id: int, from: Vector3, to: Vector3, p_shooter,
 		p_unit_manager: UnitManager, p_terrain_data: TerrainData) -> void:
@@ -40,18 +69,36 @@ func setup(p_tribe_id: int, from: Vector3, to: Vector3, p_shooter,
 	unit_manager = p_unit_manager
 	terrain_data = p_terrain_data
 	position = _start
+	_anchor = to
 	_total = maxf(Vector2(to.x - from.x, to.z - from.z).length(), 0.1)
 
 
 func tick(delta: float) -> void:
 	if done:
 		return
+	_update_chase()
 	_travelled += SPEED * delta
 	var t: float = clampf(_travelled / _total, 0.0, 1.0)
 	position = _start.lerp(target_pos, t)
 	position.y += sin(t * PI) * ARC_HEIGHT   # simple ballistic arc
 	if t >= 1.0:
 		_explode()
+
+
+## Follows the chased unit as long as it has not run too far from the point the
+## shaman actually aimed at. The parabola itself is unchanged — only its endpoint
+## moves, which is why this is a two-line rule and not a new flight model.
+func _update_chase() -> void:
+	if chase_target == null:
+		return
+	if not is_instance_valid(chase_target) or chase_target.state == Unit.State.DEAD:
+		chase_target = null
+		return
+	var pos: Vector3 = chase_target.position
+	if Vector2(pos.x - _anchor.x, pos.z - _anchor.z).length() 			> Balance.FIREBALL_CHASE_MAX_DRIFT:
+		chase_target = null   # ran out of the aimed area: keep the fixed point
+		return
+	target_pos = pos
 
 
 func _explode() -> void:
@@ -92,15 +139,65 @@ func _explode() -> void:
 			# then sinks; the crew takes the splash on its own.
 			u.ignite(target_pos)
 			continue
-		var dmg: int = DIRECT_DAMAGE if flat_d <= DIRECT_RADIUS else SPLASH_DAMAGE
+		var direct: bool = flat_d <= DIRECT_RADIUS
+		var dmg: int = direct_damage if direct else splash_damage
 		var attacker = shooter if (shooter != null and is_instance_valid(shooter)) else null
 		u.take_damage(dmg, attacker)
+		if ignites:
+			u.ignite(target_pos, attacker)   # firestorm: the fire keeps burning
 		if u.state == Unit.State.DEAD:
 			continue
-		# Knocked back and lifted into a small arc; they land rolling and come
-		# to a stop quickly on flat ground. A target that is already flying is
-		# whirled higher still (Unit.apply_lift).
-		u.apply_lift(away, PUSH_SPEED, LIFT_SPEED)
+		var whirl: float = whirl_direct if direct else whirl_splash
+		if whirl <= 0.0:
+			# No whirl (firestorm): 67 bolts would otherwise keep a whole area in
+			# the air — and near the disc edge that would be a mass killer.
+			u.apply_knockback(away)
+			continue
+		# Whirled UP instead of only shoved (10k): the arc height is prescribed, so
+		# the fall damage follows the game-wide per-metre rule and the landing rolls
+		# on exactly like any other fall (Unit.throw_airborne).
+		u.throw_airborne(_whirl_velocity(away, whirl),
+			fall_damage_for_height(whirl))
+	if building_damage > 0:
+		_damage_buildings()
+
+
+## Upward velocity that reaches `height` metres, plus a little sideways drift so
+## the victims do not land on the exact same spot they took off from.
+static func _whirl_velocity(away: Vector3, height: float) -> Vector3:
+	var up: float = sqrt(maxf(2.0 * Unit.THROW_GRAVITY * height, 0.0))
+	var flat: Vector3 = away
+	if flat.length_squared() > 0.000001:
+		flat = flat.normalized() * PUSH_SPEED * 0.4
+	else:
+		flat = Vector3.ZERO
+	return flat + Vector3.UP * up
+
+
+## Fall damage for a drop of `height` metres — the same per-metre rule cliffs and
+## the tornado use, so a whirl never has its own damage model.
+static func fall_damage_for_height(height: float) -> int:
+	return int(round(maxf(height, 0.0) * Balance.CLIFF_FALL_DAMAGE_PER_M))
+
+
+## Buildings in the splash radius (firestorm only). HP damage, not destruction
+## stages: that way the existing four-stage model of Building.take_damage decides
+## what a hit looks like, and one bolt lands in the band of a warrior's melee
+## strike (18-24) by construction.
+func _damage_buildings() -> void:
+	var bm: BuildingManager = building_manager
+	if bm == null and unit_manager != null:
+		bm = unit_manager.building_manager
+	if bm == null:
+		return
+	for b in bm.buildings:
+		if not is_instance_valid(b) or b.health <= 0 or b.tribe_id == tribe_id:
+			continue
+		if not b.is_attackable():
+			continue   # the reincarnation circle is never a target (10g)
+		if b.footprint_distance_to(Vector2(target_pos.x, target_pos.z)) > SPLASH_RADIUS:
+			continue
+		b.take_damage(building_damage)
 
 
 func _ready() -> void:

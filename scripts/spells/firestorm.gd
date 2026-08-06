@@ -1,12 +1,15 @@
 class_name FirestormSpell extends Spell
 
-## "Feuerregen": a salvo of BOLT_COUNT fireballs RAINING FROM THE SKY,
-## staggered over DURATION seconds onto deterministically scattered points
-## within SPREAD_RADIUS of the target — each bolt drops from high above its
-## own impact point (not from the shaman) and is a full, unchanged
-## FireballBolt (same direct/splash damage and throw-back, attacker =
-## shaman). A small scheduler entity on the projectile list spawns the bolts
-## over time.
+## "Feuerregen": fireballs RAINING FROM THE SKY over DURATION (20 s since 10k)
+## onto random points within SPREAD_RADIUS of the target — each bolt drops from
+## high above its own impact point (not from the shaman). A small scheduler entity
+## on the projectile list spawns them over time.
+##
+## Since 10k it is a DENIAL zone, not a salvo: the intervals are random with a
+## 0,3-s mean (bursts included), the bolts do less damage but SET VICTIMS ON FIRE
+## and damage buildings, they do NOT whirl anyone up, and units standing near but
+## outside the impacts fall into panic. All of it drawn from the RNG seeded by the
+## target cell, so the spell looks irregular and stays deterministic for tests.
 
 const BOLT_COUNT: int = Balance.FIRESTORM_BOLT_COUNT
 const SPREAD_RADIUS: float = Balance.FIRESTORM_SPREAD_RADIUS
@@ -30,7 +33,8 @@ func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:
 		return false
 	var caster: Unit = tribe.shaman if tribe != null else null
 	var shower: FirestormShower = FirestormShower.new()
-	shower.setup(tribe.id, target, caster, ctx.unit_manager, ctx.terrain_data)
+	shower.setup(tribe.id, target, caster, ctx.unit_manager, ctx.terrain_data,
+		ctx.building_manager)
 	ctx.unit_manager.register_projectile(shower)
 	return true
 
@@ -44,18 +48,25 @@ class FirestormShower extends Node3D:
 	var shooter = null   # untyped: the shaman may die mid-salvo
 	var unit_manager: UnitManager = null
 	var terrain_data: TerrainData = null
+	var building_manager: BuildingManager = null
 
 	var _spawned: int = 0
 	var _timer: float = 0.0
+	var _elapsed: float = 0.0
+	var _panic_timer: float = 0.0
+	## Takt der Panikabfrage (s).
+	const PANIC_INTERVAL: float = 1.0
 	var _rng: RandomNumberGenerator = RandomNumberGenerator.new()
 
 	func setup(p_tribe_id: int, to: Vector3, p_shooter,
-			p_unit_manager: UnitManager, p_terrain_data: TerrainData) -> void:
+			p_unit_manager: UnitManager, p_terrain_data: TerrainData,
+			p_building_manager: BuildingManager = null) -> void:
 		tribe_id = p_tribe_id
 		target_pos = to
 		shooter = p_shooter
 		unit_manager = p_unit_manager
 		terrain_data = p_terrain_data
+		building_manager = p_building_manager
 		position = to
 		var seed_cell: Vector2i = Vector2i(int(floor(to.x)), int(floor(to.z)))
 		_rng.seed = seed_cell.x * 40503 + seed_cell.y * 96269
@@ -63,12 +74,48 @@ class FirestormShower extends Node3D:
 	func tick(delta: float) -> void:
 		if done:
 			return
+		_elapsed += delta
+		# Panik am Rand: wer nah genug steht, um den Feuersturm zu sehen, aber
+		# ausserhalb der Einschlaege ist, geraet in Panik. Gedrosselt, weil das
+		# ueber 20 s sonst 600 Radiusabfragen waeren.
+		_panic_timer -= delta
+		if _panic_timer <= 0.0:
+			_panic_timer = PANIC_INTERVAL
+			_panic_the_onlookers()
 		_timer -= delta
-		while _timer <= 0.0 and _spawned < FirestormSpell.BOLT_COUNT:
-			_timer += FirestormSpell.DURATION / float(FirestormSpell.BOLT_COUNT)
+		while _timer <= 0.0 and _may_spawn():
+			# ZUFAELLIGER Abstand (10k) aus dem geseedeten RNG: der Zauber wirkt
+			# unregelmaessig und bleibt trotzdem deterministisch und testbar.
+			_timer += _rng.randf_range(Balance.FIRESTORM_INTERVAL_MIN,
+				Balance.FIRESTORM_INTERVAL_MAX)
 			_launch_bolt()
-		if _spawned >= FirestormSpell.BOLT_COUNT:
+		if not _may_spawn():
 			done = true
+
+
+	## Solange die Dauer laeuft UND der Sicherheitsdeckel nicht erreicht ist.
+	## BOLT_COUNT ist seit 10k nur noch dieser Deckel — die Zahl der Baelle
+	## entscheiden die Zufallsintervalle (~67 bei 20 s und 0,3 s Mittel).
+	func _may_spawn() -> bool:
+		return _elapsed < FirestormSpell.DURATION \
+			and _spawned < FirestormSpell.BOLT_COUNT
+
+
+	## Einheiten zwischen Streuung und Panikradius geraten in Panik. Die
+	## Schamanin ist global immun (Unit.is_panic_immune), Fahrzeuge ebenso —
+	## hier ist dafuer nichts zu tun.
+	func _panic_the_onlookers() -> void:
+		if unit_manager == null:
+			return
+		for u in unit_manager.get_units_in_radius(target_pos,
+				Balance.FIRESTORM_PANIC_RADIUS):
+			if u.state == Unit.State.DEAD or u.tribe_id == tribe_id:
+				continue
+			var d: float = Vector2(u.position.x - target_pos.x,
+				u.position.z - target_pos.z).length()
+			if d <= FirestormSpell.SPREAD_RADIUS:
+				continue   # im Feuer selbst — das machen die Baelle
+			u.panic()
 
 	func _launch_bolt() -> void:
 		_spawned += 1
@@ -91,4 +138,16 @@ class FirestormShower extends Node3D:
 			sin(drop_angle) * FirestormSpell.SKY_DRIFT)
 		var bolt: FireballBolt = FireballBolt.new()
 		bolt.setup(tribe_id, from, impact, shooter, unit_manager, terrain_data)
+		# Eigene Werte (10k): weniger Schaden je Ball, KEIN Hochwirbeln (67 Baelle
+		# wuerden das Zielgebiet sonst dauerhaft durch die Luft wirbeln, und am
+		# Scheibenrand waere der Zauber ein Massentoeter), dafuer Brand und
+		# Gebaeudeschaden. Ohne diese Parametrisierung haetten Feuerball und
+		# Feuerregen weiter dieselben Konstanten geteilt.
+		bolt.direct_damage = Balance.FIRESTORM_DIRECT_DAMAGE
+		bolt.splash_damage = Balance.FIRESTORM_SPLASH_DAMAGE
+		bolt.whirl_direct = 0.0
+		bolt.whirl_splash = 0.0
+		bolt.ignites = true
+		bolt.building_damage = Balance.FIRESTORM_BUILDING_DAMAGE
+		bolt.building_manager = building_manager
 		unit_manager.register_projectile(bolt)

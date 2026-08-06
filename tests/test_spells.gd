@@ -562,8 +562,15 @@ func test_fireball_damage_and_throw() -> void:
 	var bolt: FireballBolt = w.unit_manager.projectiles[0]
 	var ticks: int = _run(w, [], func() -> bool: return bolt.done)
 	check(ticks < MAX_TICKS, "bolt reaches the target point")
-	check(direct.state == Unit.State.DEAD, "direct hit kills a brave (60 dmg)")
-	check(splash.health == 30, "splash hit takes half a brave life")
+	# Since 10k the fireball is a DISRUPTION weapon, not a killer: 20/10 damage
+	# plus a whirl (4 m / 2 m) whose fall damage lands on impact with the ground.
+	# Right after the explosion nobody has landed yet.
+	check(direct.state == Unit.State.THROWN, "the direct hit whirls the brave up")
+	check(direct.health == 60 - Balance.FIREBALL_DIRECT_DAMAGE,
+		"and takes the reduced direct damage")
+	check(splash.health == 60 - Balance.FIREBALL_SPLASH_DAMAGE,
+		"the splash victim takes the reduced splash damage")
+	check(splash.state == Unit.State.THROWN, "and is whirled up too, only lower")
 	check(splash.state == Unit.State.THROWN, "survivor is thrown into the air")
 	check(friend.health == 60 and friend.state != Unit.State.THROWN,
 		"own units are unaffected")
@@ -1602,7 +1609,12 @@ func test_firestorm_salvo_spread_and_damage() -> void:
 				seen[p.get_instance_id()] = (p as FireballBolt).target_pos
 				if (p as FireballBolt)._start.y < (p as FireballBolt).target_pos.y + 8.0:
 					from_sky = false
-	check(seen.size() == FirestormSpell.BOLT_COUNT, "8 bolts launched over the salvo")
+	# Since 10k the bolt count is not fixed: the intervals are random (0,3 s mean)
+	# and BOLT_COUNT is only a safety cap. Over 8 s of a 20 s spell that is roughly
+	# 27 bolts — the assertion checks the ORDER of magnitude, not an exact number.
+	check(seen.size() > 10, "the rain keeps coming (%d bolts in 8 s)" % seen.size())
+	check(seen.size() < FirestormSpell.BOLT_COUNT,
+		"and the safety cap was not reached")
 	check(from_sky, "every bolt dives out of the sky above its impact point")
 	for pos: Vector3 in seen.values():
 		check(Vector2(pos.x - target.x, pos.z - target.z).length() \
@@ -1613,7 +1625,13 @@ func test_firestorm_salvo_spread_and_damage() -> void:
 		if u.state == Unit.State.DEAD or u.health < u.max_health:
 			hurt += 1
 	check(hurt >= 2, "the salvo hits the crowd repeatedly")
-	check(w.unit_manager.projectiles.is_empty(), "shower and bolts all despawned")
+	# The spell now runs 20 s, so after 8 s the shower is still working.
+	check(not w.unit_manager.projectiles.is_empty(),
+		"the shower is still raining at 8 s of its 20 s")
+	for i in range(int((FirestormSpell.DURATION + 3.0) / 0.1)):
+		w.unit_manager.tick(0.1)
+	check(w.unit_manager.projectiles.is_empty(),
+		"shower and bolts all despawned once the duration is over")
 	_free_world(w)
 
 
@@ -1802,3 +1820,150 @@ func test_center_cell_follows_the_map_size() -> void:
 		"256er Karte: Mitte (128, 128) - vorher fest (64, 64)")
 	check(TerrainData.center_cell(null) == Vector2i(64, 64),
 		"ohne Terrain: Rueckfall auf die Standardgroesse")
+
+
+# --- Phase 10k: Feuerball und Feuerregen ---------------------------------------
+
+## Der Feuerball verfolgt das beim Ausloesen erfasste Ziel — in der 1,0-s-Zauberzeit
+## laeuft eine Einheit bis zu 4 m, ein rein punktbezogener Ball ging also
+## konstruktionsbedingt daneben.
+func test_fireball_bolt_chases_its_target() -> void:
+	var w: Dictionary = _make_world_with_buildings()
+	var aim: Vector3 = Vector3(40, 5, 40)
+	var victim: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, aim)
+	var picked = FireballSpell.acquire_target(w.unit_manager, aim, 0)
+	check(picked == victim, "the enemy at the aimed point is acquired")
+	var bolt: FireballBolt = FireballBolt.new()
+	bolt.setup(0, Vector3(30, 5, 40), aim, null, w.unit_manager, w.td)
+	bolt.chase_target = victim
+	# The victim steps aside — but stays inside the leash.
+	victim.position = aim + Vector3(3.0, 0.0, 0.0)
+	bolt.tick(0.05)
+	check_near(bolt.target_pos.x, victim.position.x,
+		"the bolt follows the target that moved a little", 0.01)
+	# Now it runs far out of the aimed area: the bolt keeps the ground point.
+	victim.position = aim + Vector3(Balance.FIREBALL_CHASE_MAX_DRIFT + 3.0, 0.0, 0.0)
+	bolt.tick(0.05)
+	check(bolt.chase_target == null, "the chase is dropped beyond the leash")
+	check(absf(bolt.target_pos.x - victim.position.x) > 1.0,
+		"and the impact stays where the shaman aimed")
+	_free_world_with_buildings(w)
+
+
+func test_fireball_bolt_drops_a_dead_target() -> void:
+	var w: Dictionary = _make_world_with_buildings()
+	var aim: Vector3 = Vector3(40, 5, 40)
+	var victim: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, aim)
+	var bolt: FireballBolt = FireballBolt.new()
+	bolt.setup(0, Vector3(30, 5, 40), aim, null, w.unit_manager, w.td)
+	bolt.chase_target = victim
+	victim.health = 0
+	victim._die()
+	bolt.tick(0.05)
+	check(bolt.chase_target == null, "a dead target is dropped")
+	_free_world_with_buildings(w)
+
+
+## 20/10 Schaden, dafuer 4 m bzw. 2 m Wirbel mit Sturzschaden nach der
+## spielweiten Regel je Meter — der Wirbel hat KEIN eigenes Schadensmodell.
+func test_fireball_whirls_instead_of_only_shoving() -> void:
+	check(Balance.FIREBALL_DIRECT_DAMAGE == 20, "direct damage is 20")
+	check(Balance.FIREBALL_SPLASH_DAMAGE == 10, "splash damage is 10")
+	check_near(Balance.FIREBALL_WHIRL_DIRECT, 4.0, "a direct hit whirls 4 m up")
+	check_near(Balance.FIREBALL_WHIRL_SPLASH, 2.0, "a splash victim 2 m")
+	check(FireballBolt.fall_damage_for_height(4.0)
+		== int(round(4.0 * Balance.CLIFF_FALL_DAMAGE_PER_M)),
+		"the fall damage follows the game-wide per-metre rule")
+	check(FireballBolt.fall_damage_for_height(2.0)
+		< FireballBolt.fall_damage_for_height(4.0),
+		"and a lower whirl hurts less")
+	# A brave survives a direct hit now (60 damage used to be exactly one life).
+	var total: int = Balance.FIREBALL_DIRECT_DAMAGE + FireballBolt.fall_damage_for_height(4.0)
+	check(total < 60, "direct hit + fall no longer kills a brave outright (%d)" % total)
+
+
+func test_fireball_direct_hit_throws_the_victim_into_the_air() -> void:
+	var w: Dictionary = _make_world_with_buildings()
+	var at: Vector3 = Vector3(40, 5, 40)
+	var victim: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, at)
+	victim.max_health = 10000
+	victim.health = 10000
+	var bolt: FireballBolt = FireballBolt.new()
+	bolt.setup(0, Vector3(36, 5, 40), at, null, w.unit_manager, w.td)
+	bolt._explode()
+	check(victim.state == Unit.State.THROWN, "the direct hit throws it airborne")
+	check(victim._throw_velocity.y > 0.0, "upward")
+	check(victim.health < 10000, "and it took the (reduced) damage")
+	_free_world_with_buildings(w)
+
+
+## Der Feuerregen wirbelt NICHT — 67 Baelle wuerden das Gebiet sonst dauerhaft
+## durch die Luft wirbeln, und am Scheibenrand waere er ein Massentoeter.
+func test_firestorm_bolts_do_not_whirl_but_ignite() -> void:
+	var w: Dictionary = _make_world_with_buildings()
+	var at: Vector3 = Vector3(40, 5, 40)
+	var victim: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, at)
+	victim.max_health = 10000
+	victim.health = 10000
+	var bolt: FireballBolt = FireballBolt.new()
+	bolt.setup(0, Vector3(36, 5, 40), at, null, w.unit_manager, w.td)
+	bolt.direct_damage = Balance.FIRESTORM_DIRECT_DAMAGE
+	bolt.whirl_direct = 0.0
+	bolt.whirl_splash = 0.0
+	bolt.ignites = true
+	bolt._explode()
+	check(victim.state != Unit.State.THROWN, "no whirl from a firestorm bolt")
+	check(victim.is_burning(), "but it is set on fire")
+	_free_world_with_buildings(w)
+
+
+func test_firestorm_bolt_damages_buildings() -> void:
+	var w: Dictionary = _make_world_with_buildings()
+	var hut: Building = w.bm.place(
+		HUT_SCENE_T, w.tribe1, Vector2i(40, 40), 0, true)
+	check(hut != null, "an enemy hut stands there")
+	var before: int = hut.health
+	var at: Vector3 = hut.center_world()
+	var bolt: FireballBolt = FireballBolt.new()
+	bolt.setup(0, at + Vector3(-6, 0, 0), at, null, w.unit_manager, w.td)
+	bolt.building_damage = Balance.FIRESTORM_BUILDING_DAMAGE
+	bolt.building_manager = w.bm   # explicitly handed in, like the firestorm does
+	bolt._explode()
+	check(hut.health == before - Balance.FIRESTORM_BUILDING_DAMAGE,
+		"the bolt takes exactly one warrior strike worth of HP off it")
+	# One warrior strike is 18-24 HP (6/8 base x strength 3,0) — the user's rule.
+	check(Balance.FIRESTORM_BUILDING_DAMAGE >= Balance.MELEE_PUNCH * 3
+		and Balance.FIRESTORM_BUILDING_DAMAGE <= Balance.MELEE_KICK * 3,
+		"and that value sits inside a warrior's melee band")
+	_free_world_with_buildings(w)
+
+
+## Ein Feuerball-Zauber (Standardwerte) darf Gebaeude NICHT beschaedigen — nur
+## der Feuerregen tut das.
+func test_plain_fireball_bolt_leaves_buildings_alone() -> void:
+	var w: Dictionary = _make_world_with_buildings()
+	var hut: Building = w.bm.place(
+		HUT_SCENE_T, w.tribe1, Vector2i(40, 40), 0, true)
+	var before: int = hut.health
+	var at: Vector3 = hut.center_world()
+	var bolt: FireballBolt = FireballBolt.new()
+	bolt.setup(0, at + Vector3(-6, 0, 0), at, null, w.unit_manager, w.td)
+	bolt._explode()
+	check(hut.health == before, "the fireball spell does no building damage")
+	_free_world_with_buildings(w)
+
+
+func test_firestorm_is_a_denial_zone_now() -> void:
+	check_near(Balance.FIRESTORM_DURATION, 20.0, "it lasts 20 s")
+	check(Balance.FIRESTORM_SPREAD_RADIUS > 5.5 * 1.25,
+		"the area grew by about 30 %% (%.1f m)" % Balance.FIRESTORM_SPREAD_RADIUS)
+	var mean: float = (Balance.FIRESTORM_INTERVAL_MIN
+		+ Balance.FIRESTORM_INTERVAL_MAX) * 0.5
+	check_near(mean, 0.3, "the mean interval between balls is 0,3 s", 0.01)
+	check(Balance.FIRESTORM_INTERVAL_MIN < 0.1,
+		"and bursts are possible (balls can follow each other closely)")
+	var expected: float = Balance.FIRESTORM_DURATION / mean
+	check(float(Balance.FIRESTORM_BOLT_COUNT) > expected,
+		"BOLT_COUNT is only the safety cap, above the ~%d expected balls" % int(expected))
+	check(Balance.FIRESTORM_PANIC_RADIUS > Balance.FIRESTORM_SPREAD_RADIUS,
+		"the panic ring lies OUTSIDE the impacts")

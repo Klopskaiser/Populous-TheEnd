@@ -482,8 +482,25 @@ const HYPNOSIS_DURATION: float = 30.0
 # =============================================================================
 
 # --- Feuerball (auch je Bolt des Feuerregens) ---
-const FIREBALL_DIRECT_DAMAGE: int = 60     # 1 x Brave-Leben
-const FIREBALL_SPLASH_DAMAGE: int = 30     # 1/2 Brave-Leben
+## Phase 10k: 60/30 -> 20/10. Der Feuerball toetet damit keinen Braves mehr
+## direkt (60 war genau ein Brave-Leben) — er wird von der Toetungs- zur
+## Stoerwaffe: er wirbelt eine ganze Traube durch die Luft und unterbricht
+## Kaempfe, Bekehrungen und Arbeit. Bei 30 Mana und 4 Ladungen der Dauerzauber.
+const FIREBALL_DIRECT_DAMAGE: int = 20
+const FIREBALL_SPLASH_DAMAGE: int = 10
+## Wirbelhoehen in Metern (Phase 10k): der Direkttreffer fliegt hoeher als die
+## Splash-Opfer. Der Sturzschaden folgt daraus ueber CLIFF_FALL_DAMAGE_PER_M —
+## 4 m ergeben 24 HP, 2 m ergeben 12 HP, es gibt also kein eigenes Schadensmodell
+## fuer den Wirbel. Deckel bleibt LIFT_MAX_HEIGHT.
+const FIREBALL_WHIRL_DIRECT: float = 4.0
+const FIREBALL_WHIRL_SPLASH: float = 2.0
+## Der Feuerball verfolgt das beim Ausloesen erfasste Ziel, solange es sich nicht
+## weiter als das vom eigentlichen Zielpunkt entfernt (in der 1,0-s-Zauberzeit
+## laeuft eine Einheit bis zu 4 m). Darueber schlaegt er auf dem Punkt ein.
+const FIREBALL_CHASE_MAX_DRIFT: float = 6.0
+## Umkreis um den Zielpunkt, in dem beim Ausloesen nach einem Verfolgungsziel
+## gesucht wird.
+const FIREBALL_ACQUIRE_RADIUS: float = 2.0
 const FIREBALL_DIRECT_RADIUS: float = 0.8
 const FIREBALL_SPLASH_RADIUS: float = 2.5
 ## Fluggeschwindigkeit (m/s) des Schamanen-Feuerballs bzw. jedes Feuerregen-Bolts.
@@ -514,10 +531,30 @@ const SUPERTORNADO_LIFETIME: float = 16.0              # 16 s
 const SUPERTORNADO_SATELLITE_COUNT: int = 2
 const SUPERTORNADO_SATELLITE_DIST: float = 6.0         # Spawn-Abstand der kleinen
 
-# --- Feuerregen ---
-const FIRESTORM_BOLT_COUNT: int = 12
-const FIRESTORM_SPREAD_RADIUS: float = 5.5
-const FIRESTORM_DURATION: float = 3.0
+# --- Feuerregen (Phase 10k: Dauerbeschuss statt Salve) ---
+## Streuung +30 % (5,5 -> 7,2), Dauer 3 -> 20 s, und die Baelle fallen in
+## ZUFAELLIGEN Abstaenden mit Mittel 0,3 s — es koennen also auch zwei kurz
+## nacheinander kommen. BOLT_COUNT ist nur noch die Obergrenze gegen
+## Endlosschleifen (~67 Baelle sind zu erwarten).
+const FIRESTORM_BOLT_COUNT: int = 120
+const FIRESTORM_SPREAD_RADIUS: float = 7.2
+const FIRESTORM_DURATION: float = 20.0
+## Zufaelliger Abstand zwischen zwei Baellen, gleichverteilt in [MIN, MAX];
+## das Mittel ist FIRESTORM_INTERVAL_MEAN.
+const FIRESTORM_INTERVAL_MIN: float = 0.05
+const FIRESTORM_INTERVAL_MAX: float = 0.55
+## Schaden je Ball (Nutzervorgabe) — KEIN Hochwirbeln, dafuer Brand.
+const FIRESTORM_DIRECT_DAMAGE: int = 20
+const FIRESTORM_SPLASH_DAMAGE: int = 10
+## Gebaeudeschaden je Ball. "Wie ein Nahkampfangriff von einem Krieger": ein
+## Kriegerschlag ist MELEE_PUNCH/MELEE_KICK (6/8) x melee_strength() 3,0 = 18-24
+## HP, die 20 liegen also genau in dieser Spanne. Ueber ~67 Baelle summiert das
+## auf ~1340 HP im Zielgebiet — dass dabei Gebaeude fallen, ist gewollt.
+const FIRESTORM_BUILDING_DAMAGE: int = 20
+## Panik ausserhalb der Streuung: wer nah genug am Feuersturm steht, um ihn zu
+## sehen, aber ausserhalb der Einschlaege ist, geraet in Panik. Die Schamanin ist
+## global immun (Unit.is_panic_immune).
+const FIRESTORM_PANIC_RADIUS: float = 11.5
 
 # --- Erdbeben ---
 const EARTHQUAKE_RADIUS: float = 7.0
