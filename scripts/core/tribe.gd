@@ -160,7 +160,28 @@ func set_growth_mode(mode: GrowthMode) -> void:
 ## Forester upkeep is booked as a debt against this income (consume_mana) and
 ## is not netted here.
 func mana_rate() -> float:
-	return float(population()) * MANA_BASE_RATE
+	return mana_population() * MANA_BASE_RATE
+
+
+## Wirksame Bevölkerung für die Manaerzeugung (Phase 10k). Bis
+## Balance.MANA_SOFT_CAP zählt jeder Anhänger voll, darüber dämpft eine
+## logarithmische Kurve auf etwa ein Viertel je weiterem Kopf: 500 Anhänger
+## liefern genau das Doppelte von 100, 1000 das 3,197-Fache.
+##
+## Rein und statisch gehalten (die Kurve ist erschöpfend headless prüfbar,
+## Muster: Sidebar.pip_state, Fireball.lift_chance_for_health). Die Schamanin
+## zählt mit — population() zählt alle Einheiten, und der Unterschied ist bei
+## 100+ Anhängern ohnehin vernachlässigbar (Nutzerentscheidung).
+static func mana_population_for(n: int) -> float:
+	if n <= Balance.MANA_SOFT_CAP:
+		return float(maxi(n, 0))
+	var over: float = float(n - Balance.MANA_SOFT_CAP)
+	return float(Balance.MANA_SOFT_CAP) * (1.0
+		+ log(1.0 + over / Balance.MANA_LOG_SCALE) / log(Balance.MANA_LOG_BASE))
+
+
+func mana_population() -> float:
+	return mana_population_for(population())
 
 
 # --- Tick (mana economy) ------------------------------------------------------
@@ -221,6 +242,12 @@ func consume_mana(amount: float) -> float:
 		return 0.0
 	_upkeep_debt += amount
 	return amount
+
+
+## Outstanding upkeep debt (foresters, active training). Read-only view — the
+## next ticks' income pays it off before any spell charges.
+func upkeep_debt() -> float:
+	return _upkeep_debt
 
 
 ## How much of the current income (mana/s) is still free for upkeep this tick.

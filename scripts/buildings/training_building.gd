@@ -96,9 +96,26 @@ func _tick_active(delta: float) -> void:
 		return
 	_admit_front()
 	if trainee != null:
+		_charge_training_mana(delta)
 		_train_timer -= delta
 		if _train_timer <= 0.0:
 			_finish_one()
+
+
+## Mana cost of ACTIVE training (phase 10k): as much as one forester worker,
+## and only while a trainee is actually inside — braves waiting in the queue are
+## free. Booked as a debt against the income exactly like the forester upkeep
+## (Tribe.consume_mana): the cost cannot be dodged, it only delays spell
+## charging. Training itself is never stalled by it.
+##
+## This lives on TrainingBuilding ON PURPOSE and must NOT move up to Building:
+## vehicle construction (Workshop, FireRamWorkshop, AirshipWharf) and the hut's
+## brave production are separate Building branches without a `trainee` and cost
+## NO mana (user requirement). Generalising this hook would silently charge them.
+func _charge_training_mana(delta: float) -> void:
+	if tribe == null or delta <= 0.0:
+		return
+	tribe.consume_mana(Balance.TRAINING_MANA_PER_BUILDING * delta)
 
 
 ## Drops braves that are gone or no longer heading here.

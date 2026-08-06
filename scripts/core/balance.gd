@@ -426,43 +426,43 @@ const SPELL_FIREBALL_CHARGE_COST: float = 30.0
 const SPELL_FIREBALL_MAX_CHARGES: int = 4
 const SPELL_FIREBALL_CAST_RANGE: float = 8.0
 
-const SPELL_LIGHTNING_CHARGE_COST: float = 70.0
+const SPELL_LIGHTNING_CHARGE_COST: float = 200.0
 const SPELL_LIGHTNING_MAX_CHARGES: int = 4
 const SPELL_LIGHTNING_CAST_RANGE: float = 12.0
 
-const SPELL_SWARM_CHARGE_COST: float = 50.0
+const SPELL_SWARM_CHARGE_COST: float = 100.0
 const SPELL_SWARM_MAX_CHARGES: int = 4
-const SPELL_SWARM_CAST_RANGE: float = 8.0
+const SPELL_SWARM_CAST_RANGE: float = 10.0
 
-const SPELL_LANDBRIDGE_CHARGE_COST: float = 60.0
+const SPELL_LANDBRIDGE_CHARGE_COST: float = 150.0
 const SPELL_LANDBRIDGE_MAX_CHARGES: int = 4
 const SPELL_LANDBRIDGE_CAST_RANGE: float = 9.0
 
-const SPELL_TORNADO_CHARGE_COST: float = 110.0
+const SPELL_TORNADO_CHARGE_COST: float = 220.0
 const SPELL_TORNADO_MAX_CHARGES: int = 3
-const SPELL_TORNADO_CAST_RANGE: float = 10.0
+const SPELL_TORNADO_CAST_RANGE: float = 11.0
 
-const SPELL_SUPERTORNADO_CHARGE_COST: float = 200.0   # teurer als Tornado, ~Vulkan
+const SPELL_SUPERTORNADO_CHARGE_COST: float = 1200.0   # teurer als Tornado, ~Vulkan
 const SPELL_SUPERTORNADO_MAX_CHARGES: int = 1
-const SPELL_SUPERTORNADO_CAST_RANGE: float = 10.0
+const SPELL_SUPERTORNADO_CAST_RANGE: float = 12.0
 
-const SPELL_EARTHQUAKE_CHARGE_COST: float = 130.0
+const SPELL_EARTHQUAKE_CHARGE_COST: float = 400.0
 const SPELL_EARTHQUAKE_MAX_CHARGES: int = 2
-const SPELL_EARTHQUAKE_CAST_RANGE: float = 10.0
+const SPELL_EARTHQUAKE_CAST_RANGE: float = 11.0
 
-const SPELL_VOLCANO_CHARGE_COST: float = 180.0
+const SPELL_VOLCANO_CHARGE_COST: float = 1600.0
 const SPELL_VOLCANO_MAX_CHARGES: int = 1
 const SPELL_VOLCANO_CAST_RANGE: float = 12.0
 
-const SPELL_FIRESTORM_CHARGE_COST: float = 100.0
+const SPELL_FIRESTORM_CHARGE_COST: float = 775.0
 const SPELL_FIRESTORM_MAX_CHARGES: int = 2
-const SPELL_FIRESTORM_CAST_RANGE: float = 10.0
+const SPELL_FIRESTORM_CAST_RANGE: float = 12.0
 
-const SPELL_FLATTEN_CHARGE_COST: float = 90.0
+const SPELL_FLATTEN_CHARGE_COST: float = 300.0
 const SPELL_FLATTEN_MAX_CHARGES: int = 3
 const SPELL_FLATTEN_CAST_RANGE: float = 10.0
 
-const SPELL_SINK_CHARGE_COST: float = 60.0
+const SPELL_SINK_CHARGE_COST: float = 350.0
 const SPELL_SINK_MAX_CHARGES: int = 3
 const SPELL_SINK_CAST_RANGE: float = 10.0
 
@@ -665,8 +665,10 @@ const FIREWARRIOR_CAMP_TRAINING_TIME: float = 4.0
 # --- Förster ---
 const FORESTER_WOOD_COST: int = 18
 const FORESTER_HP: int = 250
-## Mana/s je aktivem Arbeiter im Gebäude.
-const FORESTER_MANA_PER_WORKER: float = 1.5
+## Mana/s je aktivem Arbeiter im Gebäude (Phase 10k: 1,5 -> 0,6; eine volle
+## Försterei kostet damit 2,4 Mana/s). Mit 1,5 hätten fünf Förstereien nach der
+## gedämpften Manakurve das GESAMTE Einkommen aufgefressen.
+const FORESTER_MANA_PER_WORKER: float = 0.6
 ## Arbeiter-Sekunden pro gepflanztem Baum (4 Arbeiter -> 15 s).
 const FORESTER_PLANT_WORK_PER_TREE: float = 50.0
 
@@ -714,8 +716,32 @@ const REINCARNATION_SITE_HP: int = 500
 # STAMM / WIRTSCHAFT
 # =============================================================================
 
-## Mana/s je Bevölkerungsmitglied.
-const MANA_BASE_RATE: float = 0.1
+## Mana/s je wirksamem Bevölkerungsmitglied (Phase 10k: 0,1 -> 0,11).
+const MANA_BASE_RATE: float = 0.11
+
+# --- Manakurve (Phase 10k) ----------------------------------------------------
+# Die Erzeugung war linear und unbegrenzt: 1000 Anhänger lieferten das Zehnfache
+# von 100. Ab MANA_SOFT_CAP dämpft eine logarithmische Kurve das auf ~1/4 je
+# weiterem Kopf.
+#
+# WARUM GENAU DIESE ZAHLEN: sie sind nicht gefittet, sie fallen aus den
+# Zielwerten heraus. 400/10000 = 0,04, also ist der Logarithmus bei 500
+# Anhängern EXAKT ln(1,04) und der Bruch exakt 1 -> genau die doppelte
+# Produktion. Bei 1000 ergibt ln(1,09)/ln(1,04) = 2,1972 -> 3,197-fach.
+# Der Beitrag des 101. Anhängers ist 25,5 % eines Kopfes unterhalb der Grenze
+# und fällt bis 1000 nur auf 23,4 % — die Kurve liegt also über ihre ganze Länge
+# an der Vorgabe "ein Viertel je neuem Mitglied".
+## Bis hierhin zählt jeder Anhänger voll (linear wie bisher).
+const MANA_SOFT_CAP: int = 100
+const MANA_LOG_SCALE: float = 10000.0
+const MANA_LOG_BASE: float = 1.04
+
+## Mana/s je Trainingsgebäude, das GERADE ausbildet (Phase 10k). Bewusst
+## derselbe Wert wie FORESTER_MANA_PER_WORKER — Nutzervorgabe: "so viel wie ein
+## Försterarbeiter". Wer nur in der Warteschlange steht, kostet nichts, und
+## Fahrzeugbau wie Hütten-Bevölkerung kosten GAR kein Mana (die Buchung hängt
+## an TrainingBuilding.trainee, nicht an Building).
+const TRAINING_MANA_PER_BUILDING: float = 0.6
 ## Hardcap Einheiten pro Stamm (zusätzlich zum Hütten-Bevölkerungslimit).
 const TRIBE_MAX_UNITS: int = 1000
 
