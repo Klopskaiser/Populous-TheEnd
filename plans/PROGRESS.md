@@ -8797,3 +8797,190 @@ Innenvertices unbewegt, Kegel verjüngt sich auch auf einer **Landkarte** und be
 der Grathöhe, Wasserfall-Normalen radial.
 
 **Weiterhin offen:** erneute Sichtprüfung durch den Nutzer.
+
+---
+
+## Phase 10k — Manakurve, Zauberkosten, Hypnose, Vulkankrater, Feuerball, Feuerregen (2026-08-07)
+
+**Plan:** [10k_mana_spells.md](10k_mana_spells.md) — umgesetzt in **sechs Commits**, alle
+Vorgaben aus zwei Nutzerrunden. Der Plan war beim Start bis auf die Vulkanform
+entscheidungsfrei.
+
+| Commit | Teil |
+|---|---|
+| `6c0b4cb` | 1+2: Manakurve, Grundrate, Kosten, Reichweiten, Ausbildungs-/Förstermana |
+| `8d74826` | 7: Ladeanzeige (blau + gelber Ratenbalken) |
+| `8ce6bb2` | KI schaltet Zauber ab |
+| `9c869a2` | 6: Zauber Hypnose (Nr. 12) |
+| `b7eeb65` | 5: Vulkan mit Krater |
+| `f533b12` | 3+4: Feuerball wirbelt und verfolgt, Feuerregen wird Dauerregen |
+
+### Die Manakurve trifft alle drei Vorgaben exakt — und das war nicht selbstverständlich
+
+Gefordert waren: ab 100 Anhängern nur noch ~¼ je Kopf, bei 500 die doppelte und bei
+1000 die ~3,2-fache Produktion. Eine reine `1 + k·ln(n/100)`-Kurve kann 2× bei 500 und
+3× bei 1000 **nicht gleichzeitig** treffen (sie liefert 2,4×). Mit dem Versatz um die
+100 im Zähler geht es exakt auf:
+
+```
+P(n) = 1 + ln(1 + (n − 100)/10000) / ln(1,04)
+```
+
+`400/10000 = 0,04`, also ist der Logarithmus bei 500 **exakt** `ln(1,04)` → genau 2,000×.
+Bei 1000 ergibt `ln(1,09)/ln(1,04) = 2,1972` → 3,197×. Der Grenzbeitrag liegt bei 25,5 %
+direkt oberhalb der Grenze und fällt bis 1000 nur auf 23,4 % — die Kurve liegt also über
+ihre **ganze Länge** an der Vorgabe. Grundrate 0,10 → 0,11.
+
+### Was die Wirtschaft jetzt kostet
+
+| | Wert |
+|---|---|
+| Förster-Unterhalt | 1,5 → **0,6** je Arbeiter (volle Försterei 2,4 Mana/s) |
+| Ausbildung (neu) | **0,6 Mana/s je aktiv ausbildendem Lager** |
+| Gesamtspeicher aller Zauber | 2460 → **10 310 Mana** (Faktor 4,2) |
+
+Der Förster-Unterhalt **musste** fallen: mit 1,5 hätten fünf Förstereien bei 1000
+Anhängern das *gesamte* Einkommen aufgefressen und Zaubern unmöglich gemacht.
+
+**Nur die Ausbildung zahlt.** Der Klassenbaum trennt das schon: `trainee` existiert
+ausschließlich auf `TrainingBuilding`, während `Workshop` (Fahrzeuge) und `Hut` (Braves)
+Geschwisterzweige von `Building` ohne dieses Feld sind. Die Buchung sitzt deshalb
+bewusst auf `TrainingBuilding` — zwei Wächter-Tests fallen um, sobald jemand sie nach
+`Building` hochzieht, denn dann zahlten Fahrzeugbau und Hütten still mit.
+
+### Die Kosten machen den An/Aus-Schalter zur Hauptmechanik
+
+Alle aktiven Zauber teilen sich das Einkommen zu gleichen Teilen. Bei voller Leiste:
+
+| Eine Ladung | alle 12 aktiv @500 | **allein** @500 | **allein** @1000 |
+|---|---|---|---|
+| Feuerball (30) | 16 s | 1 s | 1 s |
+| Hypnose (210) | 115 s | 10 s | 6 s |
+| Feuerregen (775) | 423 s | 35 s | 22 s |
+| Vulkan (1600) | 873 s | 73 s | 45 s |
+
+Ein Vulkan ist bei voller Leiste also **nie** verfügbar — das ist die Pointe, nicht ein
+Rechenfehler. Daraus folgten zwei Dinge, die zur Umsetzung gehörten:
+
+**Die Ladeanzeige** nach Original-Vorbild, weil ein einzelner Balken bei 873 s optisch
+stillsteht: **blau** der echte Fortschritt, **gold** dahinter ein Ratenbalken, der immer
+wieder durchläuft. Da spätere Kinder in Godot über früheren zeichnen, verdeckt der blaue
+den goldenen auf seiner Länge — der Sweep ist damit nur im offenen Teil sichtbar, **ohne
+eine einzige Rechnung**. Die Umlaufzeit ist logarithmisch aus der Restzeit abgeleitet
+(1 s → 0,41 s Umlauf, 900 s → 1,33 s), weil die Restzeiten drei Größenordnungen
+überspannen und linear alle langsamen Zauber identisch aussähen. Ab 30 s steht die
+Restzeit als Zahl da. **Der eigene Test fand einen echten Fehler:** `sweep_period(0)` gab
+die *langsamste* Umlaufzeit zurück, eine fast fertige Ladung hätte also getrödelt.
+
+**Die KI schaltet ab** — ohne das wäre sie durch diese Phase *schwächer* geworden.
+`AIState.spells_to_charge()` ist eine reine Funktion mit **einer** Regel plus einem
+Boden: Kandidaten sind die nicht-vollen Zauber, davon bleibt die größte Gruppe aktiv,
+deren teuerstes Mitglied bei geteiltem Einkommen noch ins 120-s-Budget passt; passt nicht
+einmal der billigste, läuft er trotzdem. **Die geforderte Verschwendungsvermeidung fällt
+aus der Konstruktion heraus** und braucht keinen Sonderfall: sind die billigen Zauber
+voll, sind nur noch die teuren Kandidaten — genau so kommt die KI überhaupt an einen
+Vulkan.
+
+Gemessen (bergpass, 4 KIs, 600 s, verschränkt): **KI-Zauber 22 ohne die Heuristik gegen
+73 und 83 mit ihr** — Faktor 3,3 bei einem Rauschband von ~10 %. Die Bevölkerung sinkt
+dabei von 269 auf 149/185, die erwartete Folge: dreimal so viele Zauber töten auf allen
+vier Seiten mehr. **Das Messinstrument dafür fehlte** und wurde mitgebaut — alle 14
+Cast-Aufrufe der KI laufen jetzt durch `_cast()` und werden je Zauber-Id gezählt.
+
+### Hypnose (Zauber 12)
+
+210 Mana, 3 Ladungen, 10 m Reichweite, 4 × 4 m Quadrat, 30 s Kontrollwechsel. Der
+Stammeswechsel ist bewusst der **volle** (`convert_to_tribe`): Bevölkerung, Manaerzeugung
+und Selektion wandern mit.
+
+**Die Nutzerentscheidung „wenn die letzten Leute hypnotisiert werden, ist Ende" hat die
+Umsetzung deutlich vereinfacht.** Ursprünglich war eine zweite Zugehörigkeitsliste
+geplant, weil `GameState.is_tribe_defeated()` „keine lebende Einheit in `tribe.units`"
+prüft und `Tribe.eliminated` seit 10d **irreversibel** ist — ein Stamm wäre während der
+Hypnose endgültig ausgeschieden. Da genau das gewollt ist, entfallen die zweite Liste und
+alle Sonderfälle in `population()`, `mana_rate()` und der Siegprüfung. Ein Test nagelt
+die Regel fest, damit sie später nicht als Bug „repariert" wird.
+
+Weitere Regeln: nur die Schamanin ist immun (**Prediger sind hypnotisierbar**, anders als
+bei der Bekehrung); erneutes Hypnotisieren erneuert den Timer, behält aber den *echten*
+Ursprung; eine Bekehrung durch einen Prediger gewinnt und ist endgültig; fällt der
+Ursprungsstamm, wird der Wechsel endgültig, sonst stünde die Einheit bei einem toten
+Stamm. Das Zeichen über dem Kopf reiht sich in die vorhandene Bitmaske des
+`StatusFxRenderer` (`FX_HYPNOTIZED = 8`).
+
+### Vulkan: Krater statt Spitze
+
+Radius 5 → **7**, höchster Ring ist der **Kraterrand** bei 0,55 × Radius, innen eine
+1,5 m tiefe Mulde. `VolcanoSpell.crater_profile()` ist eine reine, statische Funktion —
+die Form ist damit ohne Szene prüfbar und es gibt nur *eine* Stelle, die sie kennt. Ein
+Schwall statt zwei, dafür mit längerer Lebensdauer, und beim Überlaufen füllt ein zweiter
+kurzer Morph die Mulde zum Gipfelplateau.
+
+**Der wichtigste Test ist nicht die Form, sondern die 10c-Falle:** der Gebäudeschaden des
+Vulkans hängt an *durchgehendem* Lavakontakt. Mit nur noch einem Schwall darf er nicht
+still ausfallen — `test_a_single_surge_still_wrecks_a_building` prüft das zusammen mit der
+Bedingung, dass die Lavalebensdauer das Molten-Fenster plus die Kontakt-Gnadenzeit
+überdauert.
+
+### Feuerball und Feuerregen: eine Parametrisierung war die Voraussetzung
+
+Beide teilten dieselben Konstanten — jede Feuerregen-Änderung hätte den Feuerball stumm
+mitgezogen. `FireballBolt` hat jetzt Instanzfelder für Schaden, Wirbelhöhen, Brand und
+Gebäudeschaden, mit den Feuerball-Werten als Standard.
+
+**Feuerball** 60/30 → **20/10**, dafür wirbelt der Direkttreffer **4 m** und Splash-Opfer
+**2 m** hoch. Der Sturzschaden folgt der spielweiten Regel je Meter, der Wirbel hat also
+kein eigenes Schadensmodell. Damit tötet er keinen Braves mehr direkt (60 war genau ein
+Brave-Leben) und wird von der Tötungs- zur **Störwaffe**. Dazu die **Zielverfolgung**: in
+der 1,0-s-Zauberzeit läuft eine Einheit bis zu 4 m, ein rein punktbezogener Ball ging also
+konstruktionsbedingt daneben; der Ball folgt dem erfassten Ziel, solange es innerhalb 6 m
+des gezielten Punktes bleibt. Die Parabel bleibt, nur ihr Endpunkt wandert.
+**Eine Wechselwirkung, die dadurch stark wird:** seit 10j stirbt jeder über dem
+Scheibenrand — ein Feuerball dort wirft nun auch die Splash-Opfer und wird zum
+Gruppentöter.
+
+**Feuerregen** ist eine Verbotszone geworden: 20 s, Streuung 7,2 m (+30 %), Bälle in
+zufälligen Abständen (Ø 0,3 s, Doppelschläge inklusive) aus dem schon vorhandenen, aus der
+Zielzelle geseedeten RNG — unregelmäßig in der Wirkung, deterministisch im Test. 20/10
+Schaden, **kein** Hochwirbeln (67 Bälle würden das Gebiet sonst dauerhaft durch die Luft
+wirbeln, und am Scheibenrand wäre er ein Massentöter), dafür **Brand** und **20 HP
+Gebäudeschaden je Ball**. Die 20 sind die Nutzervorgabe „ein Nahkampfangriff von einem
+Krieger" wörtlich: ein Kriegerschlag ist 6/8 × Stärke 3,0 = **18–24 HP**.
+
+### Erkenntnisse und Stolpersteine
+
+1. **`benchmark_stress` war für den Feuerregen untauglich** — es wirkt gar keinen. Das
+   fiel nur auf, weil die Überlebendenzahlen mit und ohne Änderung **identisch** waren.
+   Der erste A/B-Lauf hätte sonst „kein Regress" gemeldet, ohne etwas gemessen zu haben.
+   Neu daher `tests/benchmark_firestorm.gd` nach dem Muster von `benchmark_lava`: 900
+   unsterbliche Einheiten, fixe Population, nur die Projektilliste getickt. Verschränkt
+   gemessen: **proj-Phase 0,58 ms/Tick (alte Kadenz) gegen 2,63 und 2,73 ms (neu)** bei 11
+   statt 3 gleichzeitigen Projektilen — proportional zu dem, was der Zauber jetzt tut
+   (6,7× länger, ~5× mehr Bälle), und ~8 % des 33-ms-Budgets in einem absichtlich
+   pessimistischen Aufbau.
+2. **Der BuildingManager muss dem Bolt explizit übergeben werden** (Muster
+   `LavaSurge.setup`) statt aus `unit_manager.building_manager` gelesen — genau daran
+   scheiterte der erste Testlauf, weil diese Verdrahtung nicht in jeder Welt existiert.
+3. **Neun bestehende Tests kodierten alte Werte** und mussten nachgezogen werden: 60/30
+   Feuerball-Schaden, „8 Bälle über eine 3-s-Salve", „alles despawnt" nach 8 s, die
+   **Kegelspitze** des Vulkans (jetzt eine Mulde) und zweimal „elf Zauber". Das ist keine
+   Überraschung mehr, sondern das Muster dieser Phasen — Erwartungen gehören aus `Balance`
+   gerechnet, nicht als Zahl hingeschrieben.
+4. **Zwei eigene Testfehler, die als Codefehler aussahen:** die Ausbildungskosten wurden
+   über 5 s gemessen, während die Kriegerausbildung nur 3 s dauert (korrekt nur 6 statt 10
+   Ticks berechnet), und das Krater-Plateau wurde zu nah am Rand abgetastet, wo
+   `get_height` ungefüllte Nachbarvertices mit hineininterpoliert.
+5. **`Spell` ist `RefCounted`** — `free()` darauf ist ein `SCRIPT ERROR`, den die Suite
+   als „0 failed" durchgehen lässt. Der Filter bleibt Pflicht.
+
+### Verifikationsstand
+
+- **Suite 4677 Zusicherungen grün** (Start der Phase: 4177), Exit-Code 0, Output frei von
+  `SCRIPT ERROR`. Projekt-Ladecheck nach jedem Teil exit 0 ohne Ausgabe. Neu:
+  `tests/test_mana_curve.gd` (152), `tests/test_hypnosis.gd` (49),
+  `tests/test_volcano_shape.gd` (22), `tests/benchmark_firestorm.gd`.
+- **Manuelle Prüfung durch den Nutzer steht aus.** Insbesondere: die **Vulkanform** (die
+  einzige offene Entscheidung des Plans — Radius 7,0 / Kratertiefe 1,5 / Rand bei
+  0,55 × R sind reine `Balance`-Werte und nach dem ersten Anblick drehbar), die
+  Ladeanzeige mit ihren zwei Balken, das Hypnose-Zeichen, und ob sich die neue
+  Manaknappheit im Spiel richtig anfühlt.

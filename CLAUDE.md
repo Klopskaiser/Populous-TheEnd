@@ -187,11 +187,26 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
 
 ## 6. Magiesystem
 
-- **Mana** wird **passiv** generiert; die Rate skaliert allein mit der **eigenen
-  Bevölkerungszahl** (je mehr Leute, desto schneller lädt Mana).
+- **Mana** wird **passiv** generiert; die Rate skaliert mit der **eigenen
+  Bevölkerungszahl**, aber **gedämpft** (Phase 10k): bis 100 Anhänger zählt jeder voll,
+  darüber nur noch etwa **ein Viertel** je weiterem Kopf. 500 Anhänger liefern damit
+  genau das **Doppelte** von 100, 1000 das **3,2-Fache** (vorher das Zehnfache). Die
+  Kurve ist `1 + ln(1 + (n−100)/10000) / ln(1,04)`; die Konstanten sind nicht gefittet,
+  sondern fallen aus den Zielwerten heraus (`400/10000 = 0,04`).
+- **Mana kostet auch Unterhalt:** eine voll besetzte **Försterei** 2,4 Mana/s (0,6 je
+  Arbeiter) und jedes **aktiv ausbildende** Trainingsgebäude 0,6 Mana/s. Beides wird vom
+  Einkommen abgezogen, **bevor** geladen wird. **Fahrzeugbau und die Brave-Produktion
+  der Hütte kosten kein Mana** — die Buchung hängt bewusst an `TrainingBuilding.trainee`,
+  nicht an `Building`. Wer in der Warteschlange steht, kostet nichts. Zusatzmana durch
+  Beten gibt es nicht (mit 10c entfallen).
 - **Ladungssystem:** Mana wird automatisch in **Zauber-Ladungen** umgewandelt (je Zauber
   `charge_cost` und `max_charges`); Casts verbrauchen gespeicherte Ladungen, es gibt
-  keinen separaten Cooldown. Anzeige als Ladungs-Pips **plus Ladebalken** je Zauber.
+  keinen separaten Cooldown. Anzeige als Ladungs-Pips **plus zwei Ladebalken** je Zauber:
+  **blau** der echte Fortschritt, **gold** dahinter ein Ratenbalken, der immer wieder
+  durchläuft und nur im offenen Teil sichtbar ist (Original-Populous-Muster). Seine
+  Umlaufzeit ist logarithmisch aus der Restzeit abgeleitet, weil die Restzeiten drei
+  Größenordnungen überspannen. Ab 30 s steht die Restzeit zusätzlich als Zahl da — sie
+  ist eine **Momentaufnahme** und springt, sobald ein anderer Zauber voll wird.
 - **Alle aktiven Zauber laden gleichzeitig** und teilen sich das Einkommen zu gleichen
   Teilen. Da die Zauber unterschiedlich viel pro Ladung kosten, ergeben sich daraus
   von selbst individuelle Aufladezeiten — **billige Zauber sind schneller wieder da**.
@@ -206,23 +221,30 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
   spricht die Schamanin die **Zauberformel** (`spell_voice_<id>`). Der Sound des Zaubers
   selbst (`spell_<id>`) kommt getrennt davon, erst **wenn der Effekt eintritt**
   (Einschlag/Ausbruch/Bodenbewegung). Aus Wachturm und Luftschiff zaubert sie ohne Wind-up.
-- **Zaubersprüche:** Grundset (1–5) aus Phase 6, erweitertes Set (6–10) aus Phase 7c.
-  „Ladungen" = `max_charges`; der **Mana-Bedarf pro Ladung** (`charge_cost`) steigt mit
-  der Mächtigkeit — die **hohen Zauber** (Erdbeben/Vulkan/Feuerregen, auch Tornado/Ebene)
-  haben in Phase 7i **erhöhte Manabedarfe**.
+- **Zaubersprüche:** Grundset (1–5) aus Phase 6, erweitertes Set (6–10) aus Phase 7c,
+  Supertornado (11) und **Hypnose (12)** aus Phase 10k. „Ladungen" = `max_charges`; der
+  **Mana-Bedarf pro Ladung** (`charge_cost`) steigt stark mit der Mächtigkeit.
+- **Die Kosten wurden in Phase 10k neu gesetzt** und der Gesamtspeicher wuchs von 2460
+  auf 10 310 Mana. Damit ist der **An/Aus-Schalter der Zauberleiste die zentrale
+  strategische Entscheidung**: bei voller Leiste braucht ein Vulkan über 14 Minuten,
+  allein geladen 45–80 s. Auch die **KI schaltet ab** — sie hält aktiv, was in ~120 s
+  ladbar ist, und schaltet teure Zauber zu, sobald alles Aktive voll ist (Einkommen ohne
+  Abnehmer verfällt, es gibt kein Mana-Banking).
 
-| # | Zauber | Ladungen | Effekt |
-|---|---|---|---|
-| 1 | **Feuerball** | 4 | Flächenschaden am Einschlag (½ Brave-Leben, kleiner Umkreis), Direkttreffer 1 × Brave-Leben. Getroffene werden **zurückgeschleudert und in die Luft gehoben** (kleiner Bogen), landen im Rollzustand und kommen ohne Hang schnell zum Stehen. |
-| 2 | **Lightning (Blitz)** | 4 | Trifft Einheiten (**4 × Brave-Leben** Schaden; angrenzende Einheiten kommen kurz ins Rollen) oder Gebäude (**+2 Zerstörungsstufen**). |
-| 3 | **Swarm (Insektenschwarm)** | 4 | Spawnt einen **zufällig wandernden Schwarm (10 s)**; Gegner in der Nähe geraten in **Panik (6 s)** und erleiden leichten Schaden. Schamanin ist gegen den Panikeffekt immun. |
-| 4 | **Landbridge (Landbrücke)** | 4 | Kein Schaden. Hebt Terrain in **breiter Linie** an: über Wasser auf Küstenniveau, sonst auf das Niveau des Zielpunkts; bei Höhendifferenz entsteht eine **begehbare Schräge** (→ Laufzeit-Terrainverformung, §3). |
-| 5 | **Tornado** | 3 | Windhose (8 s), wandert zufällig; über Gebäuden **+1 Zerstörungsstufe alle 2 s**. Einheiten im Weg werden zur Spitze **hochgewirbelt**, kurz mitgetragen und mit hoher Geschwindigkeit **weggeschleudert** (Sturzschaden ½ Brave-Leben + Rollschaden; ins Wasser = Sofort-Tod). |
-| 6 | **Erdbeben** | 2 | Hebt/senkt das Terrain entlang einer zufälligen Verwerfung (Laufzeit-Verformung), beschädigt Gebäude. |
-| 7 | **Vulkan** | 1 | Hebt einen Vulkankegel, Lava; teuerster Zauber. |
-| 8 | **Feuerregen** | 2 | Feuerbälle regnen über dem Zielgebiet nieder. |
-| 9 | **Ebene** | 3 | Ebnet das Zielquadrat exakt ein (harte Kanten). |
-| 10 | **Absinken** | 3 | Senkt das Zielgebiet ab (nie unter den Meeresboden). |
+| # | Zauber | Mana/Ladung | Ladungen | Reichweite | Effekt |
+|---|---|---|---|---|---|
+| 1 | **Feuerball** | 30 | 4 | 8 m | **Störwaffe, kein Killer** (10k): 20 HP Direkttreffer, 10 HP Splash — dazu wird der Direkttreffer **4 m hochgewirbelt**, Splash-Opfer 2 m. Sturzschaden nach der spielweiten Regel je Meter, Landung rollt aus wie jeder Sturz. Der Ball **verfolgt** das beim Auslösen erfasste Ziel, solange es nicht weiter als 6 m vom Zielpunkt wegläuft. Nahe dem Scheibenrand wird er dadurch zum Gruppentöter. |
+| 2 | **Lightning (Blitz)** | 200 | 4 | 12 m | Trifft Einheiten (**4 × Brave-Leben** Schaden; angrenzende Einheiten kommen kurz ins Rollen) oder Gebäude (**+2 Zerstörungsstufen**). |
+| 3 | **Swarm (Insektenschwarm)** | 100 | 4 | 10 m | Spawnt einen **zufällig wandernden Schwarm (10 s)**; Gegner in der Nähe geraten in **Panik (6 s)** und erleiden leichten Schaden. Schamanin ist gegen den Panikeffekt immun. |
+| 4 | **Landbridge (Landbrücke)** | 150 | 4 | 9 m | Kein Schaden. Hebt Terrain in **breiter Linie** an: über Wasser auf Küstenniveau, sonst auf das Niveau des Zielpunkts; bei Höhendifferenz entsteht eine **begehbare Schräge** (→ Laufzeit-Terrainverformung, §3). |
+| 5 | **Tornado** | 220 | 3 | 11 m | Windhose (8 s), wandert zufällig; über Gebäuden **+1 Zerstörungsstufe alle 2 s**. Einheiten im Weg werden zur Spitze **hochgewirbelt**, kurz mitgetragen und mit hoher Geschwindigkeit **weggeschleudert** (Sturzschaden ½ Brave-Leben + Rollschaden; ins Wasser = Sofort-Tod). |
+| 6 | **Erdbeben** | 400 | 2 | 11 m | Hebt/senkt das Terrain entlang einer zufälligen Verwerfung (Laufzeit-Verformung), beschädigt Gebäude. |
+| 7 | **Vulkan** | 1600 | 1 | 12 m | Hebt einen **Vulkan mit echtem Krater** (10k): Radius 7 m, höchster Ring ist der Kraterrand bei 0,55 × Radius, innen eine 1,5 m tiefe Mulde. Die Lava quillt in der Mulde hoch, tritt über den Rand und läuft außen hinunter — **ein** großer Schwall mit längerer Lebensdauer. Danach füllt sich die Mulde zum kleinen runden Gipfelplateau. Teuerster Zauber. |
+| 8 | **Feuerregen** | 775 | 2 | 12 m | **Dauerregen statt Salve** (10k): 20 s lang fallen Bälle in zufälligen Abständen (Ø 0,3 s) auf zufällige Punkte im Umkreis von 7,2 m. Je Ball 20/10 HP, **kein** Hochwirbeln, dafür **Brand** und **20 HP Gebäudeschaden** (= ein Kriegerschlag). Wer nah dabei steht, aber außerhalb der Einschläge, geräte in **Panik**. Über ~67 Bälle fallen Gebäude — gewollt. |
+| 9 | **Ebene** | 300 | 3 | 10 m | Ebnet das Zielquadrat exakt ein (harte Kanten). |
+| 10 | **Absinken** | 350 | 3 | 10 m | Senkt das Zielgebiet ab (nie unter den Meeresboden). |
+| 11 | **Supertornado** | 1200 | 1 | 12 m | Doppelt so breiter Trichter (4,4 m), 12 m hoch, 16 s, dazu zwei normale Tornados als Satelliten. |
+| 12 | **Hypnose** | 210 | 3 | 10 m | Bekehrt gegnerische Anhänger im **4 × 4 m**-Quadrat **vorübergehend (30 s)** zum eigenen Stamm: sie sind normal steuerbar und kämpfen für den Kontrolleur, Bevölkerung und Manaerzeugung wandern mit. Ein Zeichen über dem Kopf zeigt die Fremdkontrolle. **Nur die Schamanin ist immun** — Prediger nicht. Eine Bekehrung durch einen Prediger gewinnt und ist endgültig. Wer damit die **letzten** Einheiten eines Stammes nimmt, beendet ihn. |
 
 **Neue Mechaniken durch die Zauber:** Panik, Umherschleudern von Einheiten
 (Wurf-Parabel → Rollen bis zum Ausrollen), Gebäudezerstörung in Stufen (§5),
