@@ -1005,6 +1005,7 @@ func tick(delta: float) -> void:
 	_tick_knockback(delta)
 	_tick_regen(delta)
 	_tick_burning(delta)
+	_tick_hypnosis(delta)   # early-outs when not hypnotized (10k)
 	_tick_state(delta)
 	_apply_animation(false)
 
@@ -2620,7 +2621,75 @@ func convert_to_tribe(new_tribe: Tribe) -> void:
 	_dissolve_own_group()   # everyone fighting the (now friendly) unit retargets
 	selected = false
 	_set_state(State.IDLE)
+	# A preacher's conversion is FINAL and beats a running hypnosis (10k): the
+	# unit belongs to the preacher's tribe now, so the timer must not drag it back.
+	_hypnosis_time = 0.0
+	_hypnosis_origin = null
 	converted.emit(self)
+
+
+# --- Hypnosis (spell 12, phase 10k) -----------------------------------------------
+
+## Seconds of enemy control left, and the tribe the unit falls back to. Unlike
+## convert_to_tribe the switch is TEMPORARY and remembers where it came from.
+var _hypnosis_time: float = 0.0
+var _hypnosis_origin: Tribe = null
+
+
+func is_hypnotized() -> bool:
+	return _hypnosis_time > 0.0
+
+
+## Remaining seconds of foreign control (0 when not hypnotized) — read by the UI.
+func hypnosis_remaining() -> float:
+	return maxf(_hypnosis_time, 0.0)
+
+
+## Puts this unit under `new_tribe`'s control for `duration` seconds. Returns
+## false when it cannot be hypnotized.
+##
+## The tribe switch is DELIBERATELY the full one (convert_to_tribe): population,
+## mana production and selection all move to the controller. That is the user's
+## decision — hypnotizing a tribe's last units ends it, and it keeps the
+## implementation free of a second membership list and of special cases in
+## population(), mana_rate() and the victory check.
+##
+## Only the SHAMAN is immune (user spec). Preachers are NOT — unlike a preacher's
+## conversion, where they are (is_conversion_immune).
+func hypnotize(new_tribe: Tribe, duration: float) -> bool:
+	if new_tribe == null or state == State.DEAD:
+		return false
+	if unit_kind() == &"shaman":
+		return false
+	if garrison_housed:
+		return false   # tower crew are a protected reserve (7h), like conversion
+	if new_tribe.id == tribe_id and not is_hypnotized():
+		return false   # own units cannot be hypnotized
+	# Re-hypnotizing refreshes the timer and may change the controller, but the
+	# ORIGIN stays the tribe the unit really belongs to.
+	var origin: Tribe = _hypnosis_origin if is_hypnotized() else tribe
+	convert_to_tribe(new_tribe)          # clears _hypnosis_* — set them after
+	_hypnosis_origin = origin
+	_hypnosis_time = maxf(duration, 0.0)
+	return true
+
+
+## Counts the control down and hands the unit back. Called from the state tick.
+func _tick_hypnosis(delta: float) -> void:
+	if _hypnosis_time <= 0.0:
+		return
+	_hypnosis_time -= delta
+	if _hypnosis_time > 0.0:
+		return
+	_hypnosis_time = 0.0
+	var origin: Tribe = _hypnosis_origin
+	_hypnosis_origin = null
+	# The origin tribe is gone (it may have fallen BECAUSE of this hypnosis):
+	# handing the unit back to a dead tribe would strand it, so the switch
+	# becomes permanent.
+	if origin == null or origin.eliminated:
+		return
+	convert_to_tribe(origin)
 
 
 # --- Siege crew (phase 7f) ---------------------------------------------------------

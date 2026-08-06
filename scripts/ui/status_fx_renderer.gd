@@ -32,6 +32,9 @@ const BURNING_INDEX: int = 1
 const FX_PANIC: int = 1
 const FX_BURNING: int = 2
 const FX_INJURED: int = 4
+## Fremdkontrolle durch Hypnose (Zauber 12, Phase 10k) — zeigt an, dass die
+## Einheit nur VORUEBERGEHEND fuer den Kontrolleur kaempft.
+const FX_HYPNOTIZED: int = 8
 
 var _unit_manager: UnitManager = null
 var _tree_manager: TreeManager = null
@@ -60,6 +63,7 @@ func _ready() -> void:
 		_make_effect(FX_BURNING, &"burning", 1.25, Vector2(1.1, 1.3), 0.35,
 			MAX_BURNING),
 		_make_effect(FX_INJURED, &"injured", 1.55, Vector2(0.8, 0.4)),
+		_make_effect(FX_HYPNOTIZED, &"hypnotized", 2.25, Vector2(0.5, 0.5)),
 	]
 
 
@@ -112,6 +116,9 @@ func _load_textures(fx_name: StringName) -> Array[Texture2D]:
 	match fx_name:
 		&"panic":
 			return [_panic_frame(0), _panic_frame(1)]
+		&"hypnotized":
+			return [_hypnotized_frame(0), _hypnotized_frame(1),
+				_hypnotized_frame(2), _hypnotized_frame(3)]
 		_:
 			return [_injured_frame(0), _injured_frame(1)]
 
@@ -170,7 +177,7 @@ func _process(delta: float) -> void:
 	# like the flame in front of the unit's own billboard.
 	var toward: Vector3 = camera.global_transform.basis.z if camera != null \
 		else Vector3.ZERO
-	var counts: Array[int] = [0, 0, 0]
+	var counts: Array[int] = [0, 0, 0, 0]   # panic, burning, injured, hypnotized
 	for unit in _unit_manager.units:
 		var mask: int = 0
 		if unit.state != Unit.State.DEAD:
@@ -294,6 +301,9 @@ func _sync_loops(unit: Unit, old_mask: int, new_mask: int) -> void:
 const C_PANIC: Color = Color(0.95, 0.15, 0.1)
 const C_FLAME: Color = Color(1.0, 0.45, 0.05)
 const C_FLAME_CORE: Color = Color(1.0, 0.85, 0.25)
+## Hypnose-Spirale (Phase 10k).
+const C_HYPNO: Color = Color(0.72, 0.45, 0.95)
+const C_HYPNO_DIM: Color = Color(0.42, 0.24, 0.62)
 const C_BLOOD: Color = Color(0.8, 0.08, 0.08)
 
 
@@ -324,6 +334,30 @@ static func _burning_frame(phase: int) -> ImageTexture:
 
 
 ## Red drops beside the head, alternating positions between the frames.
+## Kreisende Spirale ueber dem Kopf: die Einheit steht nur VORUEBERGEHEND unter
+## fremder Kontrolle (Hypnose, Zauber 12). Prozeduraler Platzhalter wie die
+## anderen Zeichen, ersetzbar ueber assets/textures/effects/hypnotized.png.
+## Vier Phasen, damit die Drehung lesbar ist.
+static func _hypnotized_frame(phase: int) -> ImageTexture:
+	var size: int = 14
+	var img: Image = Image.create_empty(size, size, false, Image.FORMAT_RGBA8)
+	var mid: float = float(size) * 0.5 - 0.5
+	# Zwei gegenueberliegende Spiralarme, je Phase um eine Vierteldrehung weiter.
+	var start: float = float(phase) * PI * 0.5
+	for arm in range(2):
+		var base: float = start + float(arm) * PI
+		for i in range(10):
+			var t: float = float(i) / 9.0
+			var ang: float = base + t * PI * 1.1
+			var r: float = 1.2 + t * 5.2
+			var x: int = int(round(mid + cos(ang) * r))
+			var y: int = int(round(mid + sin(ang) * r))
+			if x < 0 or y < 0 or x >= size or y >= size:
+				continue
+			img.set_pixel(x, y, C_HYPNO if i % 3 != 2 else C_HYPNO_DIM)
+	return ImageTexture.create_from_image(img)
+
+
 static func _injured_frame(phase: int) -> ImageTexture:
 	var img: Image = Image.create_empty(24, 12, false, Image.FORMAT_RGBA8)
 	var offsets: Array = [[2, 2], [10, 5], [19, 3]] if phase % 2 == 0 \

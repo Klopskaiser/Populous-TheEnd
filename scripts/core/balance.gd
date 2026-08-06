@@ -466,6 +466,17 @@ const SPELL_SINK_CHARGE_COST: float = 350.0
 const SPELL_SINK_MAX_CHARGES: int = 3
 const SPELL_SINK_CAST_RANGE: float = 10.0
 
+## --- Hypnose (Zauber 12, Phase 10k) ---
+## Bekehrt gegnerische Anhänger in einem kleinen Quadrat VORÜBERGEHEND zum
+## eigenen Stamm; sie sind so lange normal steuerbar. Die Schamanin ist immun,
+## Prediger sind es NICHT (anders als bei der Bekehrung).
+const SPELL_HYPNOSIS_CHARGE_COST: float = 210.0
+const SPELL_HYPNOSIS_MAX_CHARGES: int = 3
+const SPELL_HYPNOSIS_CAST_RANGE: float = 10.0
+## Kantenlänge des Wirkquadrats (m) und Dauer des Kontrollwechsels (s).
+const HYPNOSIS_AREA_SIZE: float = 4.0
+const HYPNOSIS_DURATION: float = 30.0
+
 # =============================================================================
 # ZAUBER — Effektwerte
 # =============================================================================

@@ -16,7 +16,7 @@ const TERRAIN_MASK: int = 1   # the indicator snaps to terrain only
 const HOTKEY_SPELLS: Array[StringName] = [
 	&"fireball", &"lightning", &"swarm", &"landbridge", &"tornado",
 	&"earthquake", &"volcano", &"firestorm", &"flatten", &"sink",
-	&"supertornado"]
+	&"supertornado", &"hypnosis"]
 
 ## Damaging spells that may lock onto an enemy DEVICE (catapult, fire ram,
 ## airship) under the cursor: the cast then tracks that unit's live position.

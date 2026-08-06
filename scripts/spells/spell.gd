@@ -82,7 +82,7 @@ func is_full() -> bool:
 	return charges >= max_charges
 
 
-## One fresh set of all ten spells (phase 6 + 7c) — charges are per-tribe
+## One fresh set of all twelve spells (phase 6 + 7c + 10k) — charges are per-tribe
 ## state, so every tribe gets its own instances (Tribe.set_spells).
 static func create_default_set() -> Array[Spell]:
 	return [
@@ -97,4 +97,5 @@ static func create_default_set() -> Array[Spell]:
 		FlattenSpell.new(),
 		SinkSpell.new(),
 		SupertornadoSpell.new(),
+		HypnosisSpell.new(),
 	]

@@ -255,6 +255,8 @@ static func default_spell_entries() -> Array[Dictionary]:
 			"max_charges": 3, "hotkey": "0"},
 		{"id": &"supertornado", "name": "Supertornado", "icon": &"supertornado",
 			"max_charges": 1, "hotkey": "ß"},
+		{"id": &"hypnosis", "name": "Hypnose", "icon": &"hypnosis",
+			"max_charges": Balance.SPELL_HYPNOSIS_MAX_CHARGES, "hotkey": "´"},
 	]
 
 

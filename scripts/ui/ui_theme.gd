@@ -135,6 +135,8 @@ static func icon(key: StringName) -> ImageTexture:
 			_draw_flatten(img)
 		&"sink":
 			_draw_sink(img)
+		&"hypnosis":
+			_draw_hypnosis(img)
 		&"shaman":
 			_draw_shaman(img)
 		&"pause":
@@ -415,6 +417,22 @@ static func _draw_sink(img: Image) -> void:
 	_rect(img, 11, 4, 2, 8, I_GOLD)
 	for i in range(4):
 		_rect(img, 8 + i, 11 + i, 8 - i * 2, 1, I_GOLD)
+
+
+static func _draw_hypnosis(img: Image) -> void:
+	# Kreisende Spirale — dasselbe Motiv wie das Zeichen ueber hypnotisierten
+	# Einheiten (StatusFxRenderer._hypnotized_frame), damit Zauber und Wirkung
+	# zusammengehoeren.
+	var mid: float = float(ICON_SIZE) * 0.5 - 0.5
+	for arm in range(2):
+		var base: float = float(arm) * PI
+		for i in range(16):
+			var t: float = float(i) / 15.0
+			var ang: float = base + t * PI * 1.3
+			var r: float = 1.5 + t * 8.5
+			var x: int = int(round(mid + cos(ang) * r))
+			var y: int = int(round(mid + sin(ang) * r))
+			_rect(img, x, y, 2, 2, I_GOLD if i % 3 != 2 else I_LIGHT)
 
 
 static func _draw_shaman(img: Image) -> void:
