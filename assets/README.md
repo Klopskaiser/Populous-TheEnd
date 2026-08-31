@@ -142,6 +142,22 @@ einzeln nachgeliefert werden.
   wird nur diese Animation prozedural dargestellt.
   - `roll` = Purzeln **am Boden**, `airborne` = Flug **durch die Luft** (Wurf,
     Tornado, Sturz vom Luftschiff) — bewusst zwei verschiedene Posen.
+  - **`dead` und `airborne` werden AUFRECHT gezeichnet** (Kopf oben, Füße unten,
+    volle Zellhöhe) — obwohl beides *liegende* Posen sind. Das Spiel rollt genau
+    diese zwei Animationen zur Laufzeit um **90° auf dem Bildschirm**, damit die
+    **lange** Zellachse (die Höhe, z. B. 96 px = 1,44 m) zur Körperlänge wird und
+    die Leiche so lang ist, wie die Figur groß ist. Eine liegend gezeichnete
+    Leiche würde im Spiel **senkrecht stehen** und außerdem nur 0,96 m lang sein.
+    Zeichenkonvention innerhalb der Zelle: In den **Rechts**-Ansichten (`right`,
+    `front_right`, `back_right`) ist **+x die Himmelsseite** — Gesicht und Bauch
+    zeigen zum rechten Zellrand, der Rücken liegt am linken. Die
+    **Links**-Ansichten sind spiegelbildlich (bei 5-Zeilen-Sheets ergibt sich das
+    automatisch) und werden andersherum gerollt; dann liegt die Figur in allen
+    acht Richtungen mit dem Gesicht nach oben. In 40 % der Fälle dreht das Spiel
+    eine Einheit auf den **Bauch** (`Balance.LIE_FACE_DOWN_CHANCE`) — dabei
+    wechselt zwangsläufig auch die Kopfseite, weil eine reine Drehung beides
+    zugleich kippt.
+    `roll` und `drown` bleiben bildschirmaufrecht und werden **nicht** gerollt.
   - `drown` = Ertrinken im Wasser. Die Figur wird an der Wasseroberfläche
     gezeigt und dann darunter gezogen; die untere Hälfte des Sprites wird von
     der undurchsichtigen Wasserfläche abgeschnitten, sollte also nicht die

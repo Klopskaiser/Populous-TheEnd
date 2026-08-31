@@ -121,6 +121,9 @@ const CORPSE_SINK_DURATION: float = Balance.CORPSE_SINK_DURATION
 ## How deep the corpse sprite submerges while sinking (sprite height + margin,
 ## so nothing pokes out of slopes at the end).
 const CORPSE_SINK_DEPTH: float = Balance.CORPSE_SINK_DEPTH
+## Share of units that end up on their BELLY instead of on their back in the
+## horizontal poses (see PlaceholderSprites.FLAT_ANIMS).
+const LIE_FACE_DOWN_CHANCE: float = Balance.LIE_FACE_DOWN_CHANCE
 
 ## Drowning (phase 10a): a unit that rolls/is thrown into the sea dies at once
 ## but keeps flailing at the surface for a moment before it sinks below the
@@ -584,6 +587,13 @@ var _render_pos: Vector3 = Vector3.INF
 var _render_frame: int = -1
 ## True once the renderer collapsed this unit's blob shadow (corpses).
 var _blob_hidden: bool = false
+## Belly instead of back for the horizontal poses (dead/airborne): the renderer
+## rolls the sprite the other way (UnitRenderer.lie_roll), which also puts the
+## head on the other side — a pure rotation cannot flip one without the other.
+## Rolled ONCE per unit (member initialisers run per instance), NOT per fall:
+## re-rolling on the THROWN -> DEAD transition would visibly flip the body over
+## mid-flight, and it keeps a flyer and its corpse lying the same way.
+var lies_face_down: bool = randf() < LIE_FACE_DOWN_CHANCE
 
 var _path: PackedVector3Array = PackedVector3Array()
 var _path_index: int = 0

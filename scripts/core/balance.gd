@@ -252,6 +252,11 @@ const CORPSE_DURATION: float = 6.0
 const CORPSE_SINK_DURATION: float = 1.0
 ## Wie tief das Leichen-Sprite versinkt (Sprite-Höhe + Rand).
 const CORPSE_SINK_DEPTH: float = 1.6
+## Anteil der Einheiten, die in den liegenden Posen (Leiche, Flug) auf dem
+## BAUCH statt auf dem Rücken landen. Einmal je Einheit gewürfelt, damit nicht
+## jede Leiche gleich herum liegt. 0 = alle auf dem Rücken, 1 = alle auf dem
+## Bauch.
+const LIE_FACE_DOWN_CHANCE: float = 0.4
 
 # =============================================================================
 # ERTRINKEN (Phase 10a)

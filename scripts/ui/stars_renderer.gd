@@ -77,8 +77,14 @@ func _process(delta: float) -> void:
 		if count >= MAX_STARS:
 			break
 		if unit.has_stars():
+			# A THROWN unit is drawn LYING (the UnitRenderer rolls the airborne
+			# pose), so its head is barely off the ground — the stars follow it
+			# down instead of circling a metre of empty air. Corpses never get
+			# stars, so this enum test covers every flat case.
+			var h: float = HEIGHT * (UnitRenderer.LIE_HEIGHT_FRAC \
+				if unit.state == Unit.State.THROWN else 1.0)
 			_multimesh.set_instance_transform(count, Transform3D(
-				Basis.IDENTITY, unit.position + up * HEIGHT))
+				Basis.IDENTITY, unit.position + up * h))
 			count += 1
 	_multimesh.visible_instance_count = count
 

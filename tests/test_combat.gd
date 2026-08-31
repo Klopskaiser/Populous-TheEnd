@@ -663,6 +663,39 @@ func test_airborne_and_drown_anims_in_atlas() -> void:
 	check(int(table[&"brave"][&"drown"][0][1]) == 3, "drown has 3 frames")
 
 
+## The two LYING poses are painted UPRIGHT into the portrait cell (the renderer
+## rolls them 90 degrees), so their ink must run along the LONG cell axis. A
+## corpse painted lying down again would be 0.96 m short — and would stand up
+## on screen once the roll is applied.
+func test_lying_poses_are_drawn_along_the_long_cell_axis() -> void:
+	for anim: StringName in PlaceholderSprites.FLAT_ANIMS:
+		for view: StringName in [&"front", &"right", &"left", &"back_right"]:
+			var frames: Array[Image] = PlaceholderSprites._build_frames(&"brave", anim, view)
+			check(not frames.is_empty(), "%s/%s has frames" % [anim, view])
+			var box: Rect2i = _ink_box(frames[0])
+			check(box.size.y >= 20,
+				"%s/%s fills the long cell axis (%d of %d px)"
+					% [anim, view, box.size.y, PlaceholderSprites.H])
+			check(box.size.y > box.size.x,
+				"%s/%s runs along y, not along x" % [anim, view])
+
+
+## Bounding box of the opaque pixels of a placeholder frame.
+static func _ink_box(img: Image) -> Rect2i:
+	var x0: int = img.get_width()
+	var y0: int = img.get_height()
+	var x1: int = -1
+	var y1: int = -1
+	for y in range(img.get_height()):
+		for x in range(img.get_width()):
+			if img.get_pixel(x, y).a > 0.5:
+				x0 = mini(x0, x)
+				y0 = mini(y0, y)
+				x1 = maxi(x1, x)
+				y1 = maxi(y1, y)
+	return Rect2i() if x1 < 0 else Rect2i(x0, y0, x1 - x0 + 1, y1 - y0 + 1)
+
+
 ## The cast animation exists (phase 6) and stays caster-only.
 func test_cast_anim_is_caster_only() -> void:
 	var atlas: Dictionary = PlaceholderSprites.build_atlas(

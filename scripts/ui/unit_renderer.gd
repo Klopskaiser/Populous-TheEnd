@@ -38,6 +38,25 @@ const DEPTH_BIAS: float = 0.35
 ## Values >1 pull heads further toward the camera but make them poke through
 ## roofs/walls when the unit is actually behind — so keep this at 1.0.
 const ELEVATION_GAIN: float = 1.0
+## How far the body axis of the LYING poses (PlaceholderSprites.FLAT_ANIMS) is
+## dropped below the unit's ground point, in metres along screen up. Without it
+## the axis would float at half the quad width (0.48 m) above the ground. The
+## only tuning knob of the roll — also read by the SelectionManager so the pick
+## rectangle stays on the body. Keep below ~0.45 m: deeper and the corpse reads
+## as having slid toward the camera, and its contact edge approaches the depth
+## threshold where the ground in front of it takes over.
+const LIE_DROP_M: float = 0.3
+## Roll direction per view index (order = Unit.view_index /
+## PlaceholderSprites.VIEWS): +1 = counter-clockwise (head LEFT), -1 = clockwise
+## (head RIGHT). Chosen so the figure lies on its BACK in every view: the
+## right-side views are painted with the face toward +x and roll CCW, their
+## mirrored left-side twins roll CW; front/back have no side preference and take
+## the CCW default. lies_face_down flips the sign (see lie_roll).
+const LIE_ROLL: Array[float] = [1.0, 1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0]
+## Status icons (stars, panic, flame) sit at head height of a STANDING figure;
+## over a unit that lies flat they would float about a metre above it. This
+## factor pulls them down onto the body.
+const LIE_HEIGHT_FRAC: float = 0.4
 
 const SHADER_CODE: String = """
 shader_type spatial;
@@ -49,6 +68,11 @@ uniform sampler2D tint_mask : filter_nearest;
 uniform vec2 frame_uv;
 uniform float depth_bias;
 uniform float elevation_gain;
+// Geometry of the 90-degree screen roll for the lying poses (dead, airborne):
+// x = quad half height (the pivot on the body axis), y = quad half width,
+// z = drop of the body axis below the unit's ground point. A uniform instead
+// of literals so the numbers live in ONE place (SPRITE_WORLD_H/W, LIE_DROP_M).
+uniform vec3 lie_geom;
 
 varying vec4 tint;
 varying vec2 uv_offset;
@@ -56,23 +80,45 @@ varying vec2 uv_offset;
 void vertex() {
 	tint = COLOR;
 	uv_offset = INSTANCE_CUSTOM.xy;
+	// The lying poses (dead, airborne) are AUTHORED UPRIGHT in the portrait-
+	// shaped atlas cell and rolled 90 degrees here, so the long cell axis
+	// (1.44 m) becomes the body's LENGTH instead of its 0.96 m width — a corpse
+	// painted lying down was only 0.96 m long and read as a toy.
+	// INSTANCE_CUSTOM.z: 0 = upright, +1 = counter-clockwise (head left),
+	// -1 = clockwise (head right). Both are proper rotations (determinant +1),
+	// never a MIRROR: the eight views tell left from right (shield vs. sword
+	// side), so a flip would swap the unit's handedness.
+	float roll = INSTANCE_CUSTOM.z;
+	float keep = 1.0 - abs(roll);                        // = cos(roll * 90 deg)
+	vec2 pivot = vec2(VERTEX.x, VERTEX.y - lie_geom.x);  // pivot on the body axis
+	vec3 v = vec3(
+		keep * pivot.x - roll * pivot.y,
+		roll * pivot.x + keep * pivot.y
+			+ mix(lie_geom.x, lie_geom.y - lie_geom.z, abs(roll)),
+		VERTEX.z);
 	// Camera-facing (spherical) billboard: the quad axes follow the camera so
 	// the sprite never foreshortens. This is used for the on-screen SHAPE.
 	mat4 mv = VIEW_MATRIX * mat4(
 		INV_VIEW_MATRIX[0], INV_VIEW_MATRIX[1], INV_VIEW_MATRIX[2], MODEL_MATRIX[3]);
-	vec4 vp = mv * vec4(VERTEX, 1.0);
+	vec4 vp = mv * vec4(v, 1.0);
 	vec4 clip = PROJECTION_MATRIX * vp;
 
 	// A spherical billboard puts the whole quad at ONE depth (the unit's ground
 	// point), so the head is drawn too far back and nearby elevated geometry
 	// (building roofs, flattened-terrain lips) wrongly occludes it. Instead
 	// derive the DEPTH as if the sprite stood vertically in the world: raise
-	// each row by its true world height (VERTEX.y along world up) plus a small
-	// bias toward the camera. Only the depth changes; x/y keep the spherical
+	// each row by its true world height (v.y along world up) plus a small bias
+	// toward the camera. Only the depth changes; x/y keep the spherical
 	// projection, so there is no shear or screen shift.
+	// max(): a ROLLED pose hangs lie_geom.z BELOW the ground point, and a
+	// negative height would push those rows AWAY from the camera — the flat
+	// ground in front of the corpse would then bury its contact edge (at the
+	// 55 degree camera pitch, everything below -0.23 m). A lying body is at
+	// ground level anyway, so clamping is also the physically right answer.
+	// No-op for upright sprites: their VERTEX.y is never negative.
 	vec3 up_view = (VIEW_MATRIX * vec4(0.0, 1.0, 0.0, 0.0)).xyz;
 	vec4 vp_depth = vp;
-	vp_depth.z += up_view.z * VERTEX.y * elevation_gain + depth_bias;
+	vp_depth.z += up_view.z * max(v.y, 0.0) * elevation_gain + depth_bias;
 	vec4 clip_depth = PROJECTION_MATRIX * vp_depth;
 
 	POSITION = clip;
@@ -140,6 +186,16 @@ static func make_blob_mesh(size: Vector2, color: Color = BLOB_COLOR) -> PlaneMes
 	return plane
 
 
+## Roll direction for a unit lying flat, in the encoding the shader expects
+## (0 = upright, +1 = counter-clockwise, -1 = clockwise). Belly-down flips the
+## rotation, and with it the head's side — a pure rotation tips the facing and
+## the head together, and the alternative (mirroring) would swap the unit's
+## handedness. Pure function so it can be asserted headless.
+static func lie_roll(view: int, face_down: bool) -> float:
+	var dir: float = LIE_ROLL[view]
+	return -dir if face_down else dir
+
+
 func _ready() -> void:
 	var atlas: Dictionary = UnitSpriteLibrary.build_atlas(KINDS)
 	_uvs = atlas.uvs
@@ -158,6 +214,8 @@ func _ready() -> void:
 	material.set_shader_parameter("frame_uv", atlas.frame_uv)
 	material.set_shader_parameter("depth_bias", DEPTH_BIAS)
 	material.set_shader_parameter("elevation_gain", ELEVATION_GAIN)
+	material.set_shader_parameter("lie_geom", Vector3(
+		SPRITE_WORLD_H * 0.5, SPRITE_WORLD_W * 0.5, LIE_DROP_M))
 	quad.material = material
 
 	_multimesh = MultiMesh.new()
@@ -203,6 +261,15 @@ func register_unit(unit: Unit) -> void:
 	_units.append(unit)
 	_multimesh.set_instance_color(unit._render_index,
 		Unit.TRIBE_COLORS[unit.tribe_id % Unit.TRIBE_COLORS.size()])
+	# Freshly taken slots are RECYCLED (swap-remove below) and still carry their
+	# predecessor's custom data. The transform is written immediately, the frame
+	# only once the slice rotation reaches this index (up to VISUAL_SLICES frames
+	# later) — without this seed a new unit would flash up as the previous
+	# owner's frame, and with the roll flag as a tipped-over corpse.
+	var per_base: Dictionary = _table.get(unit._render_kind, _table[KINDS[0]])
+	var idle_uv: Vector2 = _uvs[int((per_base[&"idle"][0] as Array)[0])]
+	_multimesh.set_instance_custom_data(unit._render_index,
+		Color(idle_uv.x, idle_uv.y, 0.0, 0.0))
 	_multimesh.visible_instance_count = _units.size()
 	_blob_multimesh.visible_instance_count = _units.size()
 
@@ -302,4 +369,11 @@ func _update_frame(unit: Unit, cam_forward: Vector3, cam_right: Vector3,
 		return
 	unit._render_frame = global_frame
 	var uv: Vector2 = _uvs[global_frame]
-	_multimesh.set_instance_custom_data(unit._render_index, Color(uv.x, uv.y, 0.0, 0.0))
+	# The roll flag travels with the UV: every (animation, view) owns its own
+	# disjoint atlas slots, so a change of pose OR facing always changes
+	# global_frame too — the early return above can never leave it stale.
+	# Deliberately behind that return, so this runs on real frame changes only
+	# and not for every unit every frame.
+	var roll: float = lie_roll(view, unit.lies_face_down) \
+		if PlaceholderSprites.anim_lies_flat(base) else 0.0
+	_multimesh.set_instance_custom_data(unit._render_index, Color(uv.x, uv.y, roll, 0.0))

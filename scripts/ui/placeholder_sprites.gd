@@ -59,12 +59,32 @@ const MIRRORED_VIEWS: Array[StringName] = [&"left", &"front_left", &"back_left"]
 ## accents are painted BEFORE the mirror so body and accents flip together.
 const DIAGONAL_PAINT_VIEWS: Array[StringName] = [&"front_right", &"back_right"]
 
+## Poses that lie HORIZONTALLY, even though they are painted upright into the
+## portrait-shaped cell like every other pose: the UnitRenderer rolls their quad
+## 90 degrees ON SCREEN, so the LONG cell axis (24 px = 1.44 m) becomes the
+## body's length instead of the short one (16 px = 0.96 m). A corpse painted
+## lying down was only 0.96 m long and read as a toy — and it would stand back
+## up once the roll was added.
+## Drawing convention inside the cell: head at the top, feet at the bottom, full
+## cell height; in the RIGHT-side views +x is the SKY side (face and belly), in
+## their mirrored left-side twins -x. Together with UnitRenderer.LIE_ROLL that
+## is what puts the figure on its BACK in all eight views.
+## "roll" (tumbling ALONG the ground) and "drown" (flailing at the surface) are
+## screen-upright poses and deliberately NOT listed here.
+const FLAT_ANIMS: Array[StringName] = [&"dead", &"airborne"]
+
 
 ## One shared SpriteFrames per kind — building the frames is expensive and
 ## AnimatedSprite3D instances can share the resource (each keeps its own
 ## frame index). Without the cache, spawning hundreds of units rebuilt all
 ## images per unit and caused visible hitches.
 static var _cache: Dictionary[StringName, SpriteFrames] = {}
+
+
+## True for the horizontal poses (see FLAT_ANIMS). Single source of truth for
+## the renderer's screen roll, the pick rectangle and the sidebar portrait.
+static func anim_lies_flat(anim: StringName) -> bool:
+	return anim in FLAT_ANIMS
 
 
 ## All animation bases a kind carries. "jump" is frame-driven by the hop
@@ -664,19 +684,30 @@ static func _frame_throw(view: StringName, phase: int) -> Image:
 	return img
 
 
-## Defeated unit lying on the ground — deliberately crumpled, not laid out
-## straight: torso and hip are offset, the head is flopped to the side, one
-## arm and one bent leg poke up, one leg is stretched out. Drawn in the bottom
-## rows (the quad's origin is at the feet, so the corpse hugs the ground).
+## Defeated unit lying on the ground. Painted UPRIGHT over the full cell height
+## like every other pose (head at the top, feet at the bottom) — it is a member
+## of FLAT_ANIMS, so the renderer rolls it 90 degrees on screen and the long
+## cell axis becomes the corpse's 1.44 m length. Painting it lying down (as it
+## was before) made it 0.96 m short, and after the roll it would stand up.
+## Across the cell: LOW columns are the GROUND side, HIGH columns point at the
+## SKY, so the body ends up on its back with the face visible (the left views
+## are mirrored AND roll the other way, so they land face-up too).
+## Deliberately crumpled, not laid out straight: torso and hip are offset, the
+## head is flopped over toward the ground, one arm is flung up, one leg is
+## stretched out and the other is bent with the knee poking up. No accessories
+## (see the decorate list in _build_frames).
 static func _frame_dead(_view: StringName) -> Image:
 	var img: Image = _new_image()
-	img.fill_rect(Rect2i(1, 20, 5, 3), C_BODY)       # torso
-	img.fill_rect(Rect2i(6, 21, 4, 2), C_BODY)       # hip, offset (bent body)
-	img.fill_rect(Rect2i(11, 19, 4, 4), C_HEAD)      # head flopped to the side
-	img.fill_rect(Rect2i(12, 21, 1, 1), C_EYE)       # closed eye
-	img.fill_rect(Rect2i(0, 18, 2, 3), C_LIMB)       # arm sticking out
-	img.fill_rect(Rect2i(7, 18, 2, 3), C_LIMB)       # bent leg poking up
-	img.fill_rect(Rect2i(9, 23, 5, 1), C_LIMB)       # outstretched leg
+	img.fill_rect(Rect2i(2, 1, 5, 5), C_HEAD)        # head, flopped toward the ground
+	img.fill_rect(Rect2i(5, 3, 1, 1), C_EYE)         # closed eye, on the sky side
+	img.fill_rect(Rect2i(4, 6, 3, 2), C_LIMB)        # neck, kinked
+	img.fill_rect(Rect2i(3, 8, 7, 5), C_BODY)        # torso, sagged onto the ground
+	img.fill_rect(Rect2i(4, 13, 6, 4), C_BODY)       # hip, offset (bent body)
+	img.fill_rect(Rect2i(9, 8, 4, 2), C_LIMB)        # arm flung up at the sky
+	img.fill_rect(Rect2i(1, 10, 2, 3), C_LIMB)       # other arm trapped underneath
+	img.fill_rect(Rect2i(3, 17, 3, 6), C_LIMB)       # stretched leg down to the foot
+	img.fill_rect(Rect2i(6, 16, 2, 4), C_LIMB)       # bent leg, thigh
+	img.fill_rect(Rect2i(7, 19, 5, 2), C_LIMB)       # ... knee poking up at the sky
 	return img
 
 

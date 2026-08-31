@@ -1502,12 +1502,13 @@ func _refresh_portrait() -> void:
 		_portrait_sprite.modulate = player.color
 	if _player_shaman_alive():
 		var shaman: Unit = player.shaman
-		_set_portrait_anim(StringName("%s_front" % shaman.anim_base_name))
+		_set_portrait_anim(StringName("%s_front" % shaman.anim_base_name),
+			shaman.anim_base_name)
 		_portrait_hp.value = float(shaman.health) / float(maxi(shaman.max_health, 1))
 		_portrait_status.text = ""
 		_portrait_status.visible = false
 		return
-	_set_portrait_anim(&"dead_front")
+	_set_portrait_anim(&"dead_front", &"dead")
 	_portrait_hp.value = 0.0
 	var remaining: float = -1.0
 	if player != null:
@@ -1522,12 +1523,19 @@ func _refresh_portrait() -> void:
 	_portrait_status.visible = true
 
 
-func _set_portrait_anim(anim: StringName) -> void:
+func _set_portrait_anim(anim: StringName, base: StringName = &"idle") -> void:
 	var frames: SpriteFrames = _portrait_sprite.sprite_frames
 	if frames == null:
 		return
 	if not frames.has_animation(anim):
 		anim = &"idle_front"
+		base = &"idle"
+	# The lying poses are painted UPRIGHT in the cell and rolled 90 degrees by
+	# the UnitRenderer's shader. The portrait has no such shader, so it rotates
+	# the node instead — otherwise the dead shaman stands to attention in here.
+	# -PI/2 = counter-clockwise (head left), matching the renderer's default.
+	_portrait_sprite.rotation = -PI * 0.5 \
+		if PlaceholderSprites.anim_lies_flat(base) else 0.0
 	if _portrait_sprite.animation != anim or not _portrait_sprite.is_playing():
 		_portrait_sprite.play(anim)
 

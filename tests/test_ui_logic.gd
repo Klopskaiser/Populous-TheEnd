@@ -191,6 +191,20 @@ func test_selection_tolerates_freed_unit() -> void:
 	live2.free()
 
 
+## A unit that lies flat (only THROWN is selectable — corpses are not) gets a
+## SIDEWAYS pick rectangle: the 1.44 m axis runs horizontally.
+func test_pick_size_swaps_for_the_lying_poses() -> void:
+	var upright: Vector2 = SelectionManager.sprite_pick_size(&"idle")
+	check(upright.y > upright.x, "upright poses are taller than wide")
+	for anim: StringName in PlaceholderSprites.FLAT_ANIMS:
+		var flat: Vector2 = SelectionManager.sprite_pick_size(anim)
+		check(flat.x > flat.y, "%s is wider than tall" % anim)
+		check_near(flat.x, upright.y, "%s takes the full body length" % anim, 0.001)
+		check_near(flat.y, upright.x, "%s is only as tall as the body is wide" % anim, 0.001)
+	check_near(SelectionManager.sprite_pick_size(&"drown").y, upright.y,
+		"drown keeps the upright rectangle", 0.001)
+
+
 # --- Selection ring basis (oval must rotate with the platform) ----------------
 
 ## The airship's oval selection ring must keep its LONG axis along `facing` at

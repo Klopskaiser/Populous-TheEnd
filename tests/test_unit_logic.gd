@@ -235,6 +235,43 @@ func test_view_index_sector_boundaries() -> void:
 		"rotated camera: NE heading -> back_left view")
 
 
+## The lying poses are a SHARED convention (sprite factory, renderer, picking,
+## sidebar portrait): painted upright in the portrait cell, rolled 90 degrees on
+## screen. A typo in FLAT_ANIMS would switch the roll off silently.
+func test_flat_anims_are_the_lying_poses() -> void:
+	check(PlaceholderSprites.anim_lies_flat(&"dead"), "the corpse lies flat")
+	check(PlaceholderSprites.anim_lies_flat(&"airborne"), "a flyer lies flat")
+	check(not PlaceholderSprites.anim_lies_flat(&"roll"),
+		"tumbling ALONG the ground stays screen-upright")
+	check(not PlaceholderSprites.anim_lies_flat(&"drown"),
+		"the drowning flail stays screen-upright")
+	for anim: StringName in [&"idle", &"walk", &"sit", &"jump", &"cast"]:
+		check(not PlaceholderSprites.anim_lies_flat(anim), "%s stays upright" % anim)
+	var brave: Array[StringName] = PlaceholderSprites._anims_for(&"brave")
+	for anim: StringName in PlaceholderSprites.FLAT_ANIMS:
+		check(anim in brave, "flat animation '%s' exists on the brave" % anim)
+
+
+## Roll direction per view: always a full 90 degrees, and opposite between a
+## right-side view and its mirrored left twin — only then does the figure end up
+## face-up everywhere. Belly-down flips every direction.
+func test_lie_roll_directions_match_the_views() -> void:
+	check(UnitRenderer.LIE_ROLL.size() == PlaceholderSprites.VIEWS.size(),
+		"one roll direction per view")
+	for i in range(UnitRenderer.LIE_ROLL.size()):
+		check(absf(UnitRenderer.lie_roll(i, false)) == 1.0,
+			"view %d rolls a full 90 degrees" % i)
+		check(UnitRenderer.lie_roll(i, true) == -UnitRenderer.lie_roll(i, false),
+			"view %d flips when the unit lands on its belly" % i)
+	for pair: Array in [[2, 3], [4, 5], [6, 7]]:
+		check(UnitRenderer.lie_roll(pair[0], false) == -UnitRenderer.lie_roll(pair[1], false),
+			"views %d/%d (mirrored twins) roll in opposite directions" % pair)
+	check(UnitRenderer.lie_roll(0, false) == UnitRenderer.lie_roll(1, false),
+		"front and back share the default roll")
+	check(Balance.LIE_FACE_DOWN_CHANCE > 0.0 and Balance.LIE_FACE_DOWN_CHANCE < 1.0,
+		"both landings actually occur")
+
+
 func test_facing_follows_movement() -> void:
 	var td: TerrainData = _flat_terrain()
 	var unit: Unit = _make_unit(td)

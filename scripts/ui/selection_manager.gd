@@ -507,6 +507,16 @@ func _box_select(rect: Rect2) -> void:
 	_last_box_select_ms = Time.get_ticks_msec()
 
 
+## On-screen pick size (width x height, metres) of the sprite body. The lying
+## poses are rolled 90 degrees by the UnitRenderer, so their LONG axis runs
+## horizontally and length and width swap. Static and camera-free so it can be
+## asserted headless.
+static func sprite_pick_size(anim: StringName) -> Vector2:
+	if PlaceholderSprites.anim_lies_flat(anim):
+		return Vector2(SPRITE_HEIGHT_M, SPRITE_HEIGHT_M * SPRITE_ASPECT)
+	return Vector2(SPRITE_HEIGHT_M * SPRITE_ASPECT, SPRITE_HEIGHT_M)
+
+
 ## Screen rect the unit's clickable body covers (feet->head projected,
 ## width from the unit's pick size, clamped to a minimum clickable size).
 ## Zero-height rect when the unit is behind the camera.
@@ -524,9 +534,16 @@ func _unit_screen_rect(unit: Unit, camera: Camera3D) -> Rect2:
 	if not points.is_empty():
 		return _screen_rect_from_points(points, camera)
 	var size_m: Vector2 = unit.pick_size_m()
+	var drop: float = 0.0
 	if size_m.y <= 0.0:
-		size_m = Vector2(SPRITE_HEIGHT_M * SPRITE_ASPECT, SPRITE_HEIGHT_M)
-	var feet: Vector3 = unit.global_position
+		# Only the sprite fallback knows about the roll — vehicles supply their
+		# hull dimensions above and never reach this branch.
+		size_m = sprite_pick_size(unit.anim_base_name)
+		if PlaceholderSprites.anim_lies_flat(unit.anim_base_name):
+			drop = UnitRenderer.LIE_DROP_M
+	# A rolled sprite hangs LIE_DROP_M below the ground point (UnitRenderer), so
+	# anchoring at the feet would leave the rect exactly that far too high.
+	var feet: Vector3 = unit.global_position - camera.global_transform.basis.y * drop
 	var head: Vector3 = feet + camera.global_transform.basis.y * size_m.y
 	if camera.is_position_behind(feet) or camera.is_position_behind(head):
 		return Rect2()

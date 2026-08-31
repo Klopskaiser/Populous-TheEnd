@@ -224,6 +224,12 @@ func _process(delta: float) -> void:
 					var h: float = unit.burn_fx_height()
 					if h >= 0.0:
 						height = h
+				# A THROWN unit is drawn LYING (the UnitRenderer rolls the
+				# airborne pose), so every icon — the flame included — drops
+				# onto the body instead of hovering where a standing head would
+				# be. Corpses carry no icons at all (mask 0 above).
+				if unit.state == Unit.State.THROWN:
+					height *= UnitRenderer.LIE_HEIGHT_FRAC
 				(e.mm as MultiMesh).set_instance_transform(counts[i],
 					Transform3D(basis, unit.position
 						+ up * height + toward * float(e.toward_cam)))

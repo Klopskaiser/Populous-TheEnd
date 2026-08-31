@@ -9009,6 +9009,92 @@ Drei Nutzerreports und eine Balancing-Änderung nach dem ersten Spielen:
    Effekt später — er überlebt damit auch ihren Tod im Nachlauf, und es braucht
    keine Warteschlange auf der Einheit.
 
+### Nachtrag — liegende Posen liegen jetzt wirklich (Nutzerreport, 2026-08-31)
+
+Nutzerbefund: Die Figuren in den Posen `airborne` und `dead` wirkten **zu klein**.
+Ursache war eine Formatverwechslung, kein Skalierungsfehler:
+
+- Alle Frames leben in einer **hochkanten 16×24-Zelle**, gezeichnet auf **ein**
+  Quad fester Weltgröße 0,96 × 1,44 m. `_frame_dead()` malte die Leiche
+  **liegend in die untersten sechs Zeilen** — damit war sie ~16 px = **0,96 m**
+  lang statt 1,44 m. `_frame_airborne()` malte umgekehrt eine **aufrechte**
+  Figur, obwohl der Geschleuderte waagerecht fliegen soll.
+- Lösung: Beide Posen werden — wie jede andere und wie es das Zellformat
+  vorgibt — **aufrecht** gezeichnet, und der Renderer **rollt ihr Quad um 90°
+  auf dem Bildschirm**. Die **lange** Zellachse wird damit zur Körperlänge.
+  `PlaceholderSprites.FLAT_ANIMS` + `anim_lies_flat()` sind der einzige Ort der
+  Wahrheit (Renderer, Picking, Sidebar-Porträt lesen ihn).
+
+**Der Roll musste in den Shader.** `UnitRenderer` baut sein Billboard aus
+`mat4(INV_VIEW_MATRIX[0..2], MODEL_MATRIX[3])` und übernimmt aus der Instanz
+**nur die Translation** — eine gedrehte `Basis` in `set_instance_transform`
+hätte null Wirkung. Gesteuert wird der Roll deshalb über den freien Kanal
+`INSTANCE_CUSTOM.z` (0 = aufrecht, ±1 = 90° gegen/im Uhrzeigersinn),
+verzweigungsfrei über `keep = 1 - abs(roll)`. Beides sind **echte Rotationen**
+(Determinante +1), niemals eine Spiegelung — die acht Ansichten unterscheiden
+Schild- von Schwertseite.
+
+Drei Fallen, die beim Entwurf auffielen und alle im selben Zug behoben wurden:
+
+1. **Der Tiefenterm braucht `max(v.y, 0.0)`.** Die liegende Pose hängt
+   `LIE_DROP_M = 0,3 m` unter dem Bodenpunkt, und eine negative Höhe schiebt
+   diese Zeilen von der Kamera **weg**. Bei Pitch 55° verdeckt der Boden davor
+   alles unter −0,23 m — genau die Kontaktkante der Leiche hätte geflackert.
+   Für aufrechte Sprites ist die Klemmung ein **No-op** (`VERTEX.y ≥ 0`).
+2. **Das Pick-Rechteck** tauscht für flache Posen Länge und Breite
+   (`SelectionManager.sprite_pick_size()`) **und** muss um `LIE_DROP_M` nach
+   unten wandern — sonst deckt es nur ~70 % des Körpers. Betrifft nur `THROWN`;
+   Leichen sind nicht selektierbar.
+3. **Das Sidebar-Porträt** spielt `dead_front`/`airborne_front` über eine
+   `AnimatedSprite2D` **ohne** den Shader. Mit der neuen aufrechten Leichenpose
+   hätte die tote Schamanin dort Habacht gestanden — es dreht jetzt den Knoten
+   (`rotation = -PI/2`).
+
+Zusätzlich fiel dabei ein **latenter Bug** auf: `register_unit()` schrieb nie
+Custom-Data, und die Slots werden per Swap-Remove **recycelt**. Die Transform
+wird sofort geschrieben, der Frame erst wenn die Slice-Rotation den Index
+trifft (bis zu `VISUAL_SLICES` = 3 Frames später) — eine neue Einheit zeigte
+also kurz den Atlas-Frame ihres Vorgängers. Bisher Kosmetik, mit dem Roll-Flag
+wäre daraus ein aufblitzender gekippter Leichnam geworden; `register_unit()`
+setzt die Custom-Data jetzt auf den Idle-Frame.
+
+**Fallrichtung (Nutzerentscheidung):** Die Rollrichtung folgt der Blickrichtung
+(`UnitRenderer.LIE_ROLL`, rechts-artige Ansichten CCW, ihre gespiegelten
+Links-Zwillinge CW), sodass die Figur auf dem **Rücken** landet — in **40 %**
+der Fälle (`Balance.LIE_FACE_DOWN_CHANCE`) dreht sie sich auf den **Bauch**.
+Das Bit wird **einmal je Einheit** gewürfelt (Member-Initializer), nicht je
+Sturz: sonst klappt die Leiche beim Übergang `THROWN → DEAD` sichtbar um. Eine
+reine Rotation kippt Gesichts- und Kopfseite **gemeinsam**, Bauchlage wechselt
+also zwangsläufig auch die Kopfseite — die Alternative wäre eine Spiegelung
+gewesen, und die verdreht die Händigkeit der Einheit.
+
+**Status-Icons** (Sterne, Panik, Brand) hängen an `position + Kamera-Up × Höhe`
+und hätten über der flach liegenden Figur geschwebt; für `THROWN` werden sie mit
+`UnitRenderer.LIE_HEIGHT_FRAC = 0,4` heruntergezogen. Leichen tragen ohnehin
+keine Icons, der Enum-Test ist damit exakt **und** billiger als ein
+StringName-Vergleich im Hot Loop.
+
+Geändert: `placeholder_sprites.gd` (FLAT_ANIMS, `anim_lies_flat`, `_frame_dead`
+neu gezeichnet), `unit_renderer.gd` (Shader-Roll, `lie_roll`, `LIE_DROP_M`,
+`LIE_ROLL`, `LIE_HEIGHT_FRAC`, Custom-Data-Seed), `unit.gd` (`lies_face_down`),
+`balance.gd` (`LIE_FACE_DOWN_CHANCE`), `selection_manager.gd`, `sidebar.gd`,
+`stars_renderer.gd`, `status_fx_renderer.gd`, `assets/README.md`, `CLAUDE.md`.
+Neue Tests in `test_unit_logic.gd` (Konvention + Rollrichtungen),
+`test_combat.gd` (Tinten-Begrenzungsrechteck läuft entlang der langen Achse) und
+`test_ui_logic.gd` (getauschtes Pick-Rechteck). Die 40-%-Verteilung wird
+**nicht** zugesichert (statistischer Test wäre flaky), nur die reine
+Roll-Funktion und die Konstante.
+
+**Verifikation dieses Nachtrags:** Syntaxcheck aller acht geänderten Skripte,
+Projekt-Ladecheck exit 0 ohne Ausgabe, **Suite 4805 Zusicherungen grün**
+(0 failed, 0 `SCRIPT ERROR`), Spielstart auf Vulkan/Forward+ 35 s ohne
+Shaderfehler, und die Roll-Geometrie numerisch nachgerechnet (aufrecht =
+Identität, gerollt 1,44 × 0,96 m, Kopf je nach Vorzeichen links/rechts,
+Rumpfspalten bei −0,09 … +0,27 m über dem Boden). **Die Sichtprüfung im
+laufenden Spiel steht aus** — insbesondere die neue Leichen-Pixelpose,
+`LIE_DROP_M` und die Bauchlagen-Quote.
+
+
 ### Verifikationsstand
 
 - **Suite 4729 Zusicherungen grün** (Start der Phase: 4177; 4677 vor den Nachträgen), Exit-Code 0, Output frei von

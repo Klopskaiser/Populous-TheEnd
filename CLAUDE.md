@@ -77,6 +77,15 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
 - **Einheiten:** **2D-Sprites mit Billboarding** – `Sprite3D`/`AnimatedSprite3D` mit
   `billboard = BILLBOARD_ENABLED`, immer zur Kamera gedreht.
   Benötigte Animationen pro Einheit: **Idle, Walk, Attack, Cast** (Cast nur Schamanin/Prediger).
+  **Liegende Posen (`dead`, `airborne`) werden aufrecht in die hochkante
+  Sprite-Zelle gezeichnet und vom Renderer um 90° auf dem Bildschirm gerollt**
+  (`PlaceholderSprites.FLAT_ANIMS`, `UnitRenderer.LIE_ROLL`): so wird die
+  **lange** Zellachse zur Körperlänge und die Leiche ist so lang wie die Figur
+  hoch — liegend gezeichnet wäre sie nur 0,96 statt 1,44 m. Die Rollrichtung
+  folgt der Blickrichtung, sodass die Figur auf dem **Rücken** landet; in
+  **40 %** der Fälle (`Balance.LIE_FACE_DOWN_CHANCE`, einmal je Einheit
+  gewürfelt) fällt sie auf den **Bauch**, wobei zwangsläufig auch die Kopfseite
+  wechselt. `roll` (Purzeln am Boden) und `drown` bleiben aufrecht.
 
 ## 4. Einheiten & Steuerung
 
