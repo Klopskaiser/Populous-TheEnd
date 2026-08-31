@@ -250,6 +250,22 @@ func test_flat_anims_are_the_lying_poses() -> void:
 	var brave: Array[StringName] = PlaceholderSprites._anims_for(&"brave")
 	for anim: StringName in PlaceholderSprites.FLAT_ANIMS:
 		check(anim in brave, "flat animation '%s' exists on the brave" % anim)
+	# The flying pose is viewless (one drawing for all eight views) and always
+	# belly-down; the corpse keeps its per-view drawing and its 40 % variation.
+	check(PlaceholderSprites.anim_is_viewless(&"airborne"), "airborne is viewless")
+	check(not PlaceholderSprites.anim_is_viewless(&"dead"), "the corpse keeps its views")
+	check(PlaceholderSprites.anim_lies_belly_down(&"airborne"),
+		"a body flung through the air falls belly-down")
+	check(not PlaceholderSprites.anim_lies_belly_down(&"dead"),
+		"the corpse lands on its back unless lies_face_down says otherwise")
+	for anim: StringName in PlaceholderSprites.VIEWLESS_ANIMS + PlaceholderSprites.BELLY_ANIMS:
+		check(PlaceholderSprites.anim_lies_flat(anim),
+			"'%s' is one of the flat poses" % anim)
+	# _build_frames relies on the canonical view being a real, never-mirrored one.
+	check(PlaceholderSprites.VIEWLESS_PAINT_VIEW in PlaceholderSprites.VIEWS,
+		"the canonical viewless view is a real view")
+	check(not (PlaceholderSprites.VIEWLESS_PAINT_VIEW in PlaceholderSprites.MIRRORED_VIEWS),
+		"the canonical viewless view is never mirrored")
 
 
 ## Roll direction per view: always a full 90 degrees, and opposite between a
@@ -270,6 +286,30 @@ func test_lie_roll_directions_match_the_views() -> void:
 		"front and back share the default roll")
 	check(Balance.LIE_FACE_DOWN_CHANCE > 0.0 and Balance.LIE_FACE_DOWN_CHANCE < 1.0,
 		"both landings actually occur")
+
+
+## The flying pose is viewless, so its roll must NOT vary with the view — a
+## per-view direction would turn the very same drawing belly-up in half of them.
+## It is also always belly-down, unlike the corpse.
+func test_pose_roll_is_fixed_and_belly_down_for_the_flying_pose() -> void:
+	check(UnitRenderer.pose_roll(&"idle", 2, false) == 0.0, "an upright pose is not rolled")
+	check(UnitRenderer.pose_roll(&"drown", 2, true) == 0.0, "drowning stays upright")
+	var belly: float = UnitRenderer.pose_roll(&"airborne", 0, false)
+	check(absf(belly) == 1.0, "the flying pose is rolled a full 90 degrees")
+	check(belly == -UnitRenderer.lie_roll(0, false),
+		"belly-down is the opposite of the corpse's back landing")
+	for v in range(PlaceholderSprites.VIEWS.size()):
+		check(UnitRenderer.pose_roll(&"airborne", v, false) == belly,
+			"airborne rolls the same way in view %d" % v)
+		check(UnitRenderer.pose_roll(&"airborne", v, true) == belly,
+			"airborne stays belly-down in view %d, whatever the unit's bit" % v)
+	# The corpse DOES follow its view and the unit's own bit.
+	check(UnitRenderer.pose_roll(&"dead", 2, false) == UnitRenderer.lie_roll(2, false),
+		"the corpse follows its view")
+	check(UnitRenderer.pose_roll(&"dead", 3, false) == -UnitRenderer.pose_roll(&"dead", 2, false),
+		"the corpse's mirrored twin view rolls the other way")
+	check(UnitRenderer.pose_roll(&"dead", 2, true) == -UnitRenderer.pose_roll(&"dead", 2, false),
+		"the corpse flips when it lands on its belly")
 
 
 func test_facing_follows_movement() -> void:

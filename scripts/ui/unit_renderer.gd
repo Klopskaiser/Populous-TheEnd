@@ -51,7 +51,8 @@ const LIE_DROP_M: float = 0.3
 ## (head RIGHT). Chosen so the figure lies on its BACK in every view: the
 ## right-side views are painted with the face toward +x and roll CCW, their
 ## mirrored left-side twins roll CW; front/back have no side preference and take
-## the CCW default. lies_face_down flips the sign (see lie_roll).
+## the CCW default. Belly-down flips the sign (see lie_roll). A VIEWLESS pose
+## (PlaceholderSprites.VIEWLESS_ANIMS) always reads index 0 — see _update_frame.
 const LIE_ROLL: Array[float] = [1.0, 1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0]
 ## Status icons (stars, panic, flame) sit at head height of a STANDING figure;
 ## over a unit that lies flat they would float about a metre above it. This
@@ -194,6 +195,18 @@ static func make_blob_mesh(size: Vector2, color: Color = BLOB_COLOR) -> PlaneMes
 static func lie_roll(view: int, face_down: bool) -> float:
 	var dir: float = LIE_ROLL[view]
 	return -dir if face_down else dir
+
+
+## Screen roll for a whole pose (0 for every upright one). Two rules on top of
+## lie_roll: a VIEWLESS pose is one drawing shared by all eight views, so its
+## roll must not vary with the view either — a per-view direction would turn the
+## very same drawing belly-up in half of them; and BELLY_ANIMS always land
+## belly-down, so only the corpse honours the unit's own lies_face_down bit.
+static func pose_roll(base: StringName, view: int, face_down: bool) -> float:
+	if not PlaceholderSprites.anim_lies_flat(base):
+		return 0.0
+	var dir_view: int = 0 if PlaceholderSprites.anim_is_viewless(base) else view
+	return lie_roll(dir_view, face_down or PlaceholderSprites.anim_lies_belly_down(base))
 
 
 func _ready() -> void:
@@ -374,6 +387,5 @@ func _update_frame(unit: Unit, cam_forward: Vector3, cam_right: Vector3,
 	# global_frame too — the early return above can never leave it stale.
 	# Deliberately behind that return, so this runs on real frame changes only
 	# and not for every unit every frame.
-	var roll: float = lie_roll(view, unit.lies_face_down) \
-		if PlaceholderSprites.anim_lies_flat(base) else 0.0
+	var roll: float = pose_roll(base, view, unit.lies_face_down)
 	_multimesh.set_instance_custom_data(unit._render_index, Color(uv.x, uv.y, roll, 0.0))

@@ -10,8 +10,9 @@ class_name UnitSpriteLibrary
 ## <anim>_mask.png get a white mask, which reproduces the old full multiply).
 ##
 ## Sheet layout (see assets/README.md): rows = directional views (8 rows in
-## PlaceholderSprites.VIEWS order, or 5 rows front/back/right/front_right/
-## back_right with the left views mirrored), columns = frames. All frames are
+## PlaceholderSprites.VIEWS order, 5 rows front/back/right/front_right/
+## back_right with the left views mirrored, or a SINGLE row that serves every
+## view — see sheet_cut_plan), columns = frames. All frames are
 ## blitted into ONE uniform atlas cell (the max frame size over all kinds);
 ## smaller frames are upscaled nearest-neighbour, so the renderer's single
 ## frame_uv uniform keeps working unchanged.
@@ -55,6 +56,11 @@ static func build_atlas(kinds: Array[StringName]) -> Dictionary:
 			var sheet: Dictionary = kind_sheets.get(anim, {})
 			var per_view: Array = []
 			for view in PlaceholderSprites.VIEWS:
+				# A viewless pose is stored ONCE: the remaining seven views
+				# point at the same slots instead of holding copies.
+				if not per_view.is_empty() and PlaceholderSprites.anim_is_viewless(anim):
+					per_view.append((per_view[0] as Array).duplicate())
+					continue
 				var frame_images: Array[Image] = []
 				var mask_images: Array = []
 				var fps: float = PlaceholderSprites._anim_fps(anim)
@@ -120,8 +126,9 @@ static func _slice_sheet(kind: StringName, anim: StringName, manifest: Dictionar
 		return {}
 	var frame_count: int = img.get_width() / fw
 	var row_count: int = img.get_height() / fh
-	if row_count != 5 and row_count != 8:
-		push_warning("UnitSpriteLibrary: '%s' hat %d Zeilen — erlaubt sind 5 oder 8 Blickrichtungen. Platzhalter bleibt aktiv." % [rel, row_count])
+	var plan: Dictionary = sheet_cut_plan(row_count)
+	if plan.is_empty():
+		push_warning("UnitSpriteLibrary: '%s' hat %d Zeilen — erlaubt sind 1, 5 oder 8 Blickrichtungen. Platzhalter bleibt aktiv." % [rel, row_count])
 		return {}
 	var mask_img: Image = AssetLibrary.image("units/%s/%s_mask.png" % [kind, anim])
 	if mask_img != null and (mask_img.get_width() != img.get_width()
@@ -131,26 +138,60 @@ static func _slice_sheet(kind: StringName, anim: StringName, manifest: Dictionar
 	if mask_img != null and mask_img.get_format() != Image.FORMAT_RGBA8:
 		mask_img.convert(Image.FORMAT_RGBA8)
 
-	var row_views: Array[StringName] = SHEET_ROWS_5 if row_count == 5 \
-			else PlaceholderSprites.VIEWS
 	var views: Dictionary = {}
 	var view_masks: Dictionary = {}
-	for row in range(row_count):
-		views[row_views[row]] = _cut_row(img, row, fw, fh, frame_count)
-		if mask_img != null:
-			view_masks[row_views[row]] = _cut_row(mask_img, row, fw, fh, frame_count)
-	if row_count == 5:
-		for view in MIRROR_SOURCE:
-			var src: StringName = MIRROR_SOURCE[view]
-			views[view] = _mirror_frames(views[src])
-			if view_masks.has(src):
-				view_masks[view] = _mirror_frames(view_masks[src])
+	# Every row is cut ONCE and shared by the views that read it (a 1-row sheet
+	# is cut a single time for all eight).
+	var row_cache: Dictionary = {}
+	var mask_cache: Dictionary = {}
+	for view in PlaceholderSprites.VIEWS:
+		var entry: Array = plan[view]
+		var row: int = int(entry[0])
+		if not row_cache.has(row):
+			row_cache[row] = _cut_row(img, row, fw, fh, frame_count)
+			if mask_img != null:
+				mask_cache[row] = _cut_row(mask_img, row, fw, fh, frame_count)
+		var frames: Array[Image] = row_cache[row]
+		var mask_frames: Array[Image] = mask_cache.get(row, [] as Array[Image])
+		if bool(entry[1]):
+			frames = _mirror_frames(frames)
+			if not mask_frames.is_empty():
+				mask_frames = _mirror_frames(mask_frames)
+		views[view] = frames
+		if not mask_frames.is_empty():
+			view_masks[view] = mask_frames
 
 	var fps: float = PlaceholderSprites._anim_fps(anim)
 	var anims_meta: Dictionary = manifest.get("anims", {})
 	if anims_meta.has(String(anim)):
 		fps = float((anims_meta[String(anim)] as Dictionary).get("fps", fps))
 	return {"views": views, "masks": view_masks, "fps": fps}
+
+
+## How a sheet with `row_count` rows is cut: view -> [row index, mirror].
+##   1 row  = ONE drawing for EVERY view, never mirrored. For poses whose facing
+##            carries no information (PlaceholderSprites.VIEWLESS_ANIMS — a body
+##            tumbling through the air); the artist delivers a single row.
+##   5 rows = front/back/right/front_right/back_right drawn, the three left views
+##            mirrored from their right twin.
+##   8 rows = every view drawn individually (left may differ from right).
+## An empty dictionary means the row count is unsupported. Pure function so the
+## rule is assertable headless.
+static func sheet_cut_plan(row_count: int) -> Dictionary:
+	var plan: Dictionary = {}
+	match row_count:
+		1:
+			for view in PlaceholderSprites.VIEWS:
+				plan[view] = [0, false]
+		5:
+			for i in range(SHEET_ROWS_5.size()):
+				plan[SHEET_ROWS_5[i]] = [i, false]
+			for view in MIRROR_SOURCE:
+				plan[view] = [SHEET_ROWS_5.find(MIRROR_SOURCE[view]), true]
+		8:
+			for i in range(PlaceholderSprites.VIEWS.size()):
+				plan[PlaceholderSprites.VIEWS[i]] = [i, false]
+	return plan
 
 
 static func _cut_row(sheet: Image, row: int, fw: int, fh: int, count: int) -> Array[Image]:

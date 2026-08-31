@@ -680,6 +680,61 @@ func test_lying_poses_are_drawn_along_the_long_cell_axis() -> void:
 				"%s/%s runs along y, not along x" % [anim, view])
 
 
+## A viewless pose is stored ONCE: all eight view entries point at the same atlas
+## slots (eight identical copies would be pure waste), and the drawing really is
+## the same in every view. The corpse is NOT viewless — its left views are
+## mirrored, so it keeps its own slots.
+func test_viewless_pose_shares_its_atlas_slots() -> void:
+	var atlas: Dictionary = PlaceholderSprites.build_atlas(
+		[&"brave", &"warrior"] as Array[StringName])
+	var table: Dictionary = atlas.table
+	for kind: StringName in [&"brave", &"warrior"]:
+		for anim: StringName in PlaceholderSprites.VIEWLESS_ANIMS:
+			var views: Array = table[kind][anim]
+			check(views.size() == 8, "%s/%s still has eight view entries" % [kind, anim])
+			for i in range(1, views.size()):
+				check(int(views[i][0]) == int(views[0][0]),
+					"%s/%s view %d reuses the first view's slots" % [kind, anim, i])
+				check(int(views[i][1]) == int(views[0][1]),
+					"%s/%s view %d has the same frame count" % [kind, anim, i])
+	var dead_views: Array = table[&"brave"][&"dead"]
+	check(int(dead_views[3][0]) != int(dead_views[2][0]),
+		"the corpse keeps separate slots for its left and right views")
+	var first: PackedByteArray = PlaceholderSprites._build_frames(
+		&"warrior", &"airborne", PlaceholderSprites.VIEWS[0])[0].get_data()
+	for view: StringName in PlaceholderSprites.VIEWS:
+		var other: PackedByteArray = PlaceholderSprites._build_frames(
+			&"warrior", &"airborne", view)[0].get_data()
+		check(other == first, "airborne is pixel-identical in the %s view" % view)
+
+
+## Row counts the sheet loader accepts, and how each maps rows to views. The
+## 1-row variant exists for the viewless poses: the artist delivers one row.
+func test_sheet_cut_plan_row_variants() -> void:
+	for bad: int in [0, 2, 3, 4, 6, 7, 9, 16]:
+		check(UnitSpriteLibrary.sheet_cut_plan(bad).is_empty(),
+			"%d rows is not a valid sheet" % bad)
+	var one: Dictionary = UnitSpriteLibrary.sheet_cut_plan(1)
+	check(one.size() == 8, "a 1-row sheet still fills all eight views")
+	for view: StringName in PlaceholderSprites.VIEWS:
+		check(int(one[view][0]) == 0, "%s reads row 1 of a 1-row sheet" % view)
+		check(not bool(one[view][1]), "%s is not mirrored on a 1-row sheet" % view)
+	var five: Dictionary = UnitSpriteLibrary.sheet_cut_plan(5)
+	check(five.size() == 8, "a 5-row sheet fills all eight views")
+	check(int(five[&"right"][0]) == 2 and not bool(five[&"right"][1]),
+		"right is drawn in row 3 of a 5-row sheet")
+	check(int(five[&"left"][0]) == int(five[&"right"][0]) and bool(five[&"left"][1]),
+		"left mirrors the right row")
+	check(bool(five[&"front_left"][1]) and bool(five[&"back_left"][1]),
+		"both left diagonals are mirrored")
+	var eight: Dictionary = UnitSpriteLibrary.sheet_cut_plan(8)
+	check(eight.size() == 8, "an 8-row sheet fills all eight views")
+	for i in range(PlaceholderSprites.VIEWS.size()):
+		var view: StringName = PlaceholderSprites.VIEWS[i]
+		check(int(eight[view][0]) == i and not bool(eight[view][1]),
+			"an 8-row sheet draws %s in row %d" % [view, i + 1])
+
+
 ## Bounding box of the opaque pixels of a placeholder frame.
 static func _ink_box(img: Image) -> Rect2i:
 	var x0: int = img.get_width()

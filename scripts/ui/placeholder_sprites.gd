@@ -68,10 +68,30 @@ const DIAGONAL_PAINT_VIEWS: Array[StringName] = [&"front_right", &"back_right"]
 ## Drawing convention inside the cell: head at the top, feet at the bottom, full
 ## cell height; in the RIGHT-side views +x is the SKY side (face and belly), in
 ## their mirrored left-side twins -x. Together with UnitRenderer.LIE_ROLL that
-## is what puts the figure on its BACK in all eight views.
+## is what puts a CORPSE on its back in all eight views; BELLY_ANIMS turns the
+## other way.
 ## "roll" (tumbling ALONG the ground) and "drown" (flailing at the surface) are
 ## screen-upright poses and deliberately NOT listed here.
 const FLAT_ANIMS: Array[StringName] = [&"dead", &"airborne"]
+
+## Flat poses that always land BELLY-DOWN, whatever a unit's lies_face_down bit
+## says: a body flung through the air falls with its back to the sky, it does
+## not sail along on its back (user report). Only the CORPSE varies.
+const BELLY_ANIMS: Array[StringName] = [&"airborne"]
+
+## Poses whose FACING carries no information, so ONE drawing serves all eight
+## views — a body tumbling through the air turns, there is no "front" to it.
+## Three deliberate consequences: the atlas stores such a pose once and points
+## all eight view entries at the same slots, nothing is mirrored, and the
+## renderer must use a view-INDEPENDENT roll direction (a per-view direction
+## would turn the very same drawing belly-up in half the views). A user-supplied
+## sheet may therefore have a single row — see assets/README.md.
+const VIEWLESS_ANIMS: Array[StringName] = [&"airborne"]
+
+## The one view a VIEWLESS pose is painted in. "back", not "front": we look down
+## on a body that falls belly-first, so its BACK is what faces us. The front
+## view would show the face and read as lying on the back.
+const VIEWLESS_PAINT_VIEW: StringName = &"back"
 
 
 ## One shared SpriteFrames per kind — building the frames is expensive and
@@ -85,6 +105,16 @@ static var _cache: Dictionary[StringName, SpriteFrames] = {}
 ## the renderer's screen roll, the pick rectangle and the sidebar portrait.
 static func anim_lies_flat(anim: StringName) -> bool:
 	return anim in FLAT_ANIMS
+
+
+## True for the poses that always land belly-down (see BELLY_ANIMS).
+static func anim_lies_belly_down(anim: StringName) -> bool:
+	return anim in BELLY_ANIMS
+
+
+## True for the poses drawn once for all eight views (see VIEWLESS_ANIMS).
+static func anim_is_viewless(anim: StringName) -> bool:
+	return anim in VIEWLESS_ANIMS
 
 
 ## All animation bases a kind carries. "jump" is frame-driven by the hop
@@ -138,6 +168,11 @@ static func build_atlas(kinds: Array[StringName]) -> Dictionary:
 		for anim in _anims_for(kind):
 			var per_view: Array = []
 			for view in VIEWS:
+				# A viewless pose is stored ONCE: the remaining seven views point
+				# at the same slots instead of holding identical copies.
+				if not per_view.is_empty() and anim_is_viewless(anim):
+					per_view.append((per_view[0] as Array).duplicate())
+					continue
 				var frame_images: Array[Image] = _build_frames(kind, anim, view)
 				per_view.append([images.size(), frame_images.size(), _anim_fps(anim)])
 				images.append_array(frame_images)
@@ -197,9 +232,13 @@ static func _anim_fps(anim: StringName) -> float:
 ## silhouette accents (shield/sword, helmet/fireballs, hood/gown) are drawn on
 ## top of the shared body so each unit type is recognisable.
 static func _build_frames(kind: StringName, anim: StringName, view: StringName) -> Array[Image]:
+	# A VIEWLESS pose resolves every view to its one canonical drawing. Nothing
+	# below mirrors it either: the canonical view is neither a diagonal paint
+	# view nor a mirrored one.
+	var draw_view: StringName = VIEWLESS_PAINT_VIEW if anim_is_viewless(anim) else view
 	# Left-side views are painted as their right-side twin, then mirrored below.
-	var paint_view: StringName = view
-	match view:
+	var paint_view: StringName = draw_view
+	match draw_view:
 		&"left":
 			paint_view = &"right"
 		&"front_left":
@@ -292,19 +331,19 @@ static func _build_frames(kind: StringName, anim: StringName, view: StringName) 
 		if decorate:
 			for i in range(images.size()):
 				_decorate(images[i], kind, paint_view, bobs[i])
-		if view in MIRRORED_VIEWS:
+		if draw_view in MIRRORED_VIEWS:
 			for img in images:
 				img.flip_x()
 	else:
 		# Cardinal side views are NOT mirror images (a warrior shows the shield on
 		# one side, the sword on the other), so mirror the plain body first, then
 		# paint the accents in the REAL view.
-		if view in MIRRORED_VIEWS:
+		if draw_view in MIRRORED_VIEWS:
 			for img in images:
 				img.flip_x()
 		if decorate:
 			for i in range(images.size()):
-				_decorate(images[i], kind, view, bobs[i])
+				_decorate(images[i], kind, draw_view, bobs[i])
 	return images
 
 

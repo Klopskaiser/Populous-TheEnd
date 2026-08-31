@@ -9094,6 +9094,64 @@ Rumpfspalten bei −0,09 … +0,27 m über dem Boden). **Die Sichtprüfung im
 laufenden Spiel steht aus** — insbesondere die neue Leichen-Pixelpose,
 `LIE_DROP_M` und die Bauchlagen-Quote.
 
+### Nachtrag 2 — airborne liegt auf dem Bauch und ist blickrichtungslos (2026-08-31)
+
+Zwei Nutzerbefunde aus dem Test der Drehung:
+
+1. **„Die Figuren sind auf dem Rücken dargestellt, sollen aber auf dem Bauch
+   liegen in der Luft."** Die Drehung selbst war richtig, nur die gezeigte
+   Körperseite falsch — und die entscheidet **die Zeichnung**, nicht der
+   Rollwinkel: bei der `front`-Ansicht sieht man das Gesicht, also die
+   Vorderseite, also liegt die Figur auf dem Rücken. Bei einer Profilansicht
+   trägt zusätzlich die Rollrichtung (Bauchseite nach oben oder unten).
+2. **„Eine Animation für alle Ansichten — die Blickrichtung wäre egal, es ist
+   aber mehr als ein Frame."** Ein trudelnder Körper hat keine Vorderseite.
+
+Beides zusammen ergab ein neues Konzept in `PlaceholderSprites`:
+
+- **`VIEWLESS_ANIMS`** (heute nur `airborne`) — Posen, deren Blickrichtung keine
+  Aussage trägt. Drei Konsequenzen, alle gewollt: `_build_frames` malt sie in
+  **einer** kanonischen Ansicht (`VIEWLESS_PAINT_VIEW`) und spiegelt **nichts**,
+  der Atlas legt die Frames **einmal** ab und lässt alle acht View-Einträge auf
+  dieselben Slots zeigen (airborne: 10 statt 80 Zellen), und der Renderer muss
+  einen **view-unabhängigen** Rollwinkel nehmen — ein Roll je Blickrichtung
+  würde genau dieselbe Zeichnung in der Hälfte der Ansichten bauchseitig nach
+  oben kippen.
+- **`VIEWLESS_PAINT_VIEW = &"back"`** — nicht `front`: man schaut von oben auf
+  einen bauchwärts fallenden Körper, sichtbar ist also sein **Rücken**. Das ist
+  der eigentliche Fix für Befund 1; die `front`-Ansicht zeigte das Gesicht.
+- **`BELLY_ANIMS`** (heute nur `airborne`) — liegt immer auf dem Bauch,
+  unabhängig vom `lies_face_down`-Bit der Einheit. Nur die **Leiche** würfelt.
+  Redundant zur Zeichnung, solange die Pose x-symmetrisch ist, aber die
+  Autorität, sobald jemand eine asymmetrische (Profil-)Zeichnung liefert.
+
+Die Rollauswahl wanderte dabei in eine **pure Funktion**
+`UnitRenderer.pose_roll(base, view, face_down)` (0 für alle aufrechten Posen) —
+vorher stand die Logik inline in `_update_frame` und war headless nicht prüfbar.
+Der Hot Path bleibt ein einzelner statischer Aufruf hinter dem Early-Return.
+
+**Sheet-Loader: 1-Zeilen-Sheets.** Die Zeilenlogik von `_slice_sheet` steckt
+jetzt in `UnitSpriteLibrary.sheet_cut_plan(row_count)` → `view -> [Zeile,
+spiegeln]`, ebenfalls pure und damit prüfbar. Neu erlaubt ist **1 Zeile**
+(dieselbe Zeichnung für alle acht Ansichten, nichts gespiegelt) neben 5 und 8;
+jede Zeile wird außerdem nur **einmal** geschnitten und von den Ansichten
+geteilt, die sie lesen. Damit kann ein `airborne.png` als einzelne Zeile mit
+beliebig vielen Spalten geliefert werden — genau die Form, die der Nutzer
+liefern will. Das Sidebar-Porträt dreht die Bauchlage passend andersherum
+(+PI/2 statt −PI/2).
+
+**Was NICHT geändert wurde:** die Leiche. `dead` behält seine acht Ansichten
+(gespiegelt) und den per-View-Roll, weil daraus die Rückenlage in allen
+Richtungen entsteht — und weil der Nutzer sie noch testet.
+
+Verifikation: Ladecheck exit 0 ohne Ausgabe, **Suite 4913 Zusicherungen grün**
+(0 failed, kein `SCRIPT ERROR`). Neue Tests: `pose_roll` ist für `airborne`
+view-unabhängig und immer bauchwärts, für `dead` weiter view- und bitabhängig
+(`test_unit_logic.gd`); der Atlas teilt die Slots einer blickrichtungslosen Pose
+und die Frames sind pixelgleich in allen acht Ansichten, die Leiche dagegen
+nicht (`test_combat.gd`); `sheet_cut_plan` für 1/5/8 Zeilen und die Ablehnung
+aller anderen Zeilenzahlen (`test_combat.gd`).
+
 
 ### Verifikationsstand
 

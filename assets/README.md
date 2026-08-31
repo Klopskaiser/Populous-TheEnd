@@ -115,26 +115,32 @@ einzeln nachgeliefert werden.
 - **Framegröße:** einheitlich pro Einheit, angegeben in `manifest.json`
   (`frame_width`/`frame_height`). Empfohlener Standard: **64×96 px**.
   **Hard Cap: 64×96** — größere Frames sprengen das Textur-Atlas-Budget.
-- **Blickrichtungen (Zeilen), zwei erlaubte Varianten — Wahl gilt pro Datei:**
+- **Blickrichtungen (Zeilen), drei erlaubte Varianten — Wahl gilt pro Datei:**
 
-  | Zeile | 8-Zeilen-Sheet | 5-Zeilen-Sheet |
-  |---|---|---|
-  | 1 | front | front |
-  | 2 | back | back |
-  | 3 | right | right |
-  | 4 | left | front_right |
-  | 5 | front_right | back_right |
-  | 6 | front_left | — |
-  | 7 | back_right | — |
-  | 8 | back_left | — |
+  | Zeile | 8-Zeilen-Sheet | 5-Zeilen-Sheet | 1-Zeilen-Sheet |
+  |---|---|---|---|
+  | 1 | front | front | **alle acht Richtungen** |
+  | 2 | back | back | — |
+  | 3 | right | right | — |
+  | 4 | left | front_right | — |
+  | 5 | front_right | back_right | — |
+  | 6 | front_left | — | — |
+  | 7 | back_right | — | — |
+  | 8 | back_left | — | — |
 
   - **8 Zeilen = keine Spiegelung.** Alle acht Richtungen werden exakt so
     verwendet, wie sie gezeichnet sind — links darf sich also individuell von
     rechts unterscheiden (Schild-/Schwertseite!).
   - **5 Zeilen = Komfort-Variante:** left/front_left/back_left werden
     automatisch aus den rechten Ansichten gespiegelt.
-  - Erkannt wird die Variante an der Bildhöhe (`Höhe / frame_height` = 8 oder 5);
-    `walk.png` darf 8 Zeilen haben und `dead.png` gleichzeitig 5.
+  - **1 Zeile = blickrichtungslos:** dieselbe Zeichnung gilt für alle acht
+    Richtungen, es wird **nichts gespiegelt**, und der Atlas legt die Frames nur
+    **einmal** ab. Für Posen, in denen die Blickrichtung keine Aussage trägt —
+    heute `airborne`, die trudelnde Figur in der Luft (Spalten/Frames sind dabei
+    beliebig, es bleibt eine Animation). Bei einer Pose, deren Blickrichtung
+    *doch* zählt, sieht die Figur damit aus allen Richtungen gleich aus.
+  - Erkannt wird die Variante an der Bildhöhe (`Höhe / frame_height` = 8, 5 oder
+    1); `walk.png` darf 8 Zeilen haben und `airborne.png` gleichzeitig 1.
 - **Frames (Spalten):** Anzahl = `Bildbreite / frame_width`, frei wählbar pro Animation.
 - **Animationsnamen** (Dateiname = `<anim>.png`): `idle, walk, attack, punch, kick,
   shove, jump, carry, carry_walk, dead, sit, roll, airborne, drown` — zusätzlich
@@ -152,12 +158,20 @@ einzeln nachgeliefert werden.
     `front_right`, `back_right`) ist **+x die Himmelsseite** — Gesicht und Bauch
     zeigen zum rechten Zellrand, der Rücken liegt am linken. Die
     **Links**-Ansichten sind spiegelbildlich (bei 5-Zeilen-Sheets ergibt sich das
-    automatisch) und werden andersherum gerollt; dann liegt die Figur in allen
-    acht Richtungen mit dem Gesicht nach oben. In 40 % der Fälle dreht das Spiel
-    eine Einheit auf den **Bauch** (`Balance.LIE_FACE_DOWN_CHANCE`) — dabei
+    automatisch) und werden andersherum gerollt; dann liegt die **Leiche** in
+    allen acht Richtungen mit dem Gesicht nach oben. In 40 % der Fälle dreht das
+    Spiel eine Einheit auf den **Bauch** (`Balance.LIE_FACE_DOWN_CHANCE`) — dabei
     wechselt zwangsläufig auch die Kopfseite, weil eine reine Drehung beides
     zugleich kippt.
     `roll` und `drown` bleiben bildschirmaufrecht und werden **nicht** gerollt.
+  - **`airborne` liegt immer auf dem BAUCH** und ist **blickrichtungslos**: ein
+    geschleuderter Körper fällt mit dem Rücken zum Himmel, nicht auf dem Rücken
+    segelnd. Praktisch heißt das: zeichne die Figur so, wie man sie **von oben**
+    sieht — der **Rücken** zeigt zum Betrachter, kein Gesicht. Der Roll ist hier
+    fest (`UnitRenderer.pose_roll`, Kopf nach rechts) und folgt weder der
+    Blickrichtung noch dem 40-%-Würfel; ein 1-Zeilen-Sheet ist deshalb genau die
+    richtige Lieferform. Der Platzhalter macht es vor: er malt für alle acht
+    Richtungen die `back`-Ansicht.
   - `drown` = Ertrinken im Wasser. Die Figur wird an der Wasseroberfläche
     gezeigt und dann darunter gezogen; die untere Hälfte des Sprites wird von
     der undurchsichtigen Wasserfläche abgeschnitten, sollte also nicht die

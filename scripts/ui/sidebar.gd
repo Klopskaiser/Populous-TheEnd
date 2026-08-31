@@ -1533,9 +1533,12 @@ func _set_portrait_anim(anim: StringName, base: StringName = &"idle") -> void:
 	# The lying poses are painted UPRIGHT in the cell and rolled 90 degrees by
 	# the UnitRenderer's shader. The portrait has no such shader, so it rotates
 	# the node instead — otherwise the dead shaman stands to attention in here.
-	# -PI/2 = counter-clockwise (head left), matching the renderer's default.
-	_portrait_sprite.rotation = -PI * 0.5 \
-		if PlaceholderSprites.anim_lies_flat(base) else 0.0
+	# Sign follows the renderer: -PI/2 = counter-clockwise (head left, on the
+	# back), +PI/2 for the belly-down poses.
+	var turn: float = 0.0
+	if PlaceholderSprites.anim_lies_flat(base):
+		turn = PI * 0.5 if PlaceholderSprites.anim_lies_belly_down(base) else -PI * 0.5
+	_portrait_sprite.rotation = turn
 	if _portrait_sprite.animation != anim or not _portrait_sprite.is_playing():
 		_portrait_sprite.play(anim)
 

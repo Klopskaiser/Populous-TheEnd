@@ -81,11 +81,16 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
   Sprite-Zelle gezeichnet und vom Renderer um 90° auf dem Bildschirm gerollt**
   (`PlaceholderSprites.FLAT_ANIMS`, `UnitRenderer.LIE_ROLL`): so wird die
   **lange** Zellachse zur Körperlänge und die Leiche ist so lang wie die Figur
-  hoch — liegend gezeichnet wäre sie nur 0,96 statt 1,44 m. Die Rollrichtung
-  folgt der Blickrichtung, sodass die Figur auf dem **Rücken** landet; in
-  **40 %** der Fälle (`Balance.LIE_FACE_DOWN_CHANCE`, einmal je Einheit
+  hoch — liegend gezeichnet wäre sie nur 0,96 statt 1,44 m. Bei der **Leiche**
+  folgt die Rollrichtung der Blickrichtung, sodass sie auf dem **Rücken** landet;
+  in **40 %** der Fälle (`Balance.LIE_FACE_DOWN_CHANCE`, einmal je Einheit
   gewürfelt) fällt sie auf den **Bauch**, wobei zwangsläufig auch die Kopfseite
-  wechselt. `roll` (Purzeln am Boden) und `drown` bleiben aufrecht.
+  wechselt. `airborne` liegt dagegen **immer auf dem Bauch** und ist
+  **blickrichtungslos** (`PlaceholderSprites.VIEWLESS_ANIMS`): ein trudelnder
+  Körper hat keine Vorderseite, deshalb gilt **eine** Zeichnung für alle acht
+  Ansichten (Platzhalter: die `back`-Ansicht, also der Rücken zum Betrachter),
+  der Atlas legt sie nur einmal ab, und ein geliefertes Sheet darf **eine
+  Zeile** haben. `roll` (Purzeln am Boden) und `drown` bleiben aufrecht.
 
 ## 4. Einheiten & Steuerung
 
