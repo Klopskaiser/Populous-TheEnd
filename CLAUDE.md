@@ -81,16 +81,23 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
   Sprite-Zelle gezeichnet und vom Renderer um 90° auf dem Bildschirm gerollt**
   (`PlaceholderSprites.FLAT_ANIMS`, `UnitRenderer.LIE_ROLL`): so wird die
   **lange** Zellachse zur Körperlänge und die Leiche ist so lang wie die Figur
-  hoch — liegend gezeichnet wäre sie nur 0,96 statt 1,44 m. Bei der **Leiche**
-  folgt die Rollrichtung der Blickrichtung, sodass sie auf dem **Rücken** landet;
-  in **40 %** der Fälle (`Balance.LIE_FACE_DOWN_CHANCE`, einmal je Einheit
-  gewürfelt) fällt sie auf den **Bauch**, wobei zwangsläufig auch die Kopfseite
-  wechselt. `airborne` liegt dagegen **immer auf dem Bauch** und ist
-  **blickrichtungslos** (`PlaceholderSprites.VIEWLESS_ANIMS`): ein trudelnder
-  Körper hat keine Vorderseite, deshalb gilt **eine** Zeichnung für alle acht
-  Ansichten (Platzhalter: die `back`-Ansicht, also der Rücken zum Betrachter),
-  der Atlas legt sie nur einmal ab, und ein geliefertes Sheet darf **eine
-  Zeile** haben. `roll` (Purzeln am Boden) und `drown` bleiben aufrecht.
+  hoch — liegend gezeichnet wäre sie nur 0,96 statt 1,44 m. Der Roll ist **eine
+  feste Richtung** (Kopf nach rechts); welche Körperseite man sieht, trägt die
+  **Zeichnung**. Beide liegenden Posen sind **blickrichtungslos**
+  (`PlaceholderSprites.VIEWLESS_POSES`) — ein Körper am Boden oder in der Luft
+  hat keine Vorderseite, um die die Kamera laufen könnte. Die acht Slots ihrer
+  Atlas-Zeile tragen deshalb **Varianten** statt Ansichten, gespiegelt wird
+  nichts, und ein geliefertes Sheet hat **eine Zeile je Variante**:
+  - **`dead`** hat zwei Varianten — `dead_back.png` (liegt auf dem **Rücken**,
+    also von der Vorderseite gezeichnet, Gesicht sichtbar) und `dead_front.png`
+    (liegt auf dem **Bauch**, also ihr Rücken gezeichnet). Der Dateiname meint
+    die **Lage**, nicht die sichtbare Seite. Welche eine Einheit bekommt, wird
+    einmal je Einheit gewürfelt: **40 %** Bauchlage
+    (`Balance.LIE_FACE_DOWN_CHANCE`). Beide Dateien oder keine.
+  - **`airborne`** fällt immer bauchwärts und hat deshalb nur **eine** Variante
+    (Platzhalter: die `back`-Ansicht, also der Rücken zum Betrachter).
+  `roll` (Purzeln am Boden) und `drown` bleiben aufrecht und behalten ihre acht
+  Ansichten.
 
 ## 4. Einheiten & Steuerung
 

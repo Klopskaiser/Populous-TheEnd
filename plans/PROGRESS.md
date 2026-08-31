@@ -9152,6 +9152,73 @@ und die Frames sind pixelgleich in allen acht Ansichten, die Leiche dagegen
 nicht (`test_combat.gd`); `sheet_cut_plan` für 1/5/8 Zeilen und die Ablehnung
 aller anderen Zeilenzahlen (`test_combat.gd`).
 
+### Nachtrag 3 — Slots tragen Varianten statt Ansichten (2026-08-31)
+
+Nutzervorgabe: „Die Leichen sollen auch richtungsinsensitiv sein, anders geht es
+nicht. Außerdem brauche ich da zwei Varianten: back und front für Rücken- und
+Bauchlage." Damit fiel die letzte Halbheit von Nachtrag 2 weg — dort war nur
+`airborne` blickrichtungslos, die Leiche behielt acht gespiegelte Ansichten plus
+einen per-View-Roll.
+
+**Das neue Modell:** `PlaceholderSprites.VIEWLESS_POSES` ersetzt
+`VIEWLESS_ANIMS` + `BELLY_ANIMS` und listet **beide** liegenden Posen mit ihren
+**Varianten**, je als `[Sheet-Suffix, Malansicht]`:
+
+```gdscript
+const VIEWLESS_POSES: Dictionary = {
+    &"dead": [[&"back", &"front"], [&"front", &"back"]],
+    &"airborne": [[&"", &"back"]],
+}
+```
+
+Der **Suffix benennt die LAGE** (welche Seite unten liegt), die **Malansicht die
+sichtbare Seite** — bei der Leiche sind die zwei bewusst **gegenläufig**: wer auf
+dem Rücken liegt (`dead_back.png`), zeigt uns seine **Vorderseite**. Das ist die
+eine Stelle, an der ein Missverständnis unbemerkt falsche Kunst produziert, also
+steht es dort, in `assets/README.md` und in CLAUDE.md §3 ausdrücklich.
+
+**Die acht Slots einer Atlas-Zeile bedeuten jetzt zweierlei** — Ansichten bei
+normalen Posen, Varianten bei blickrichtungslosen. Das brauchte keine
+Schema-Änderung, nur eine konsequente Umstellung von „view" auf „slot":
+`PlaceholderSprites.slot_count/variant_suffix/slot_paint_view/build_slot` und
+`UnitRenderer.pose_slot(base, view, face_down)` sind die neuen Nahtstellen;
+Slots jenseits der Variantenzahl zeigen auf Variante 0 statt Kopien zu speichern.
+`Unit.anim_base_name` bleibt bewusst `&"dead"` — die Variante ist eine
+**Renderentscheidung**. Hätte man sie zu einer eigenen Animation gemacht, wäre
+`anim_base_name` von einem Zufallsbit abhängig geworden und Zusicherungen wie
+`test_combat.gd:109` (`== &"dead"`) wären zu 40 % geflattert.
+
+**Der Roll schrumpfte auf eine Konstante.** Weil die Körperseite jetzt in der
+Zeichnung steckt (zwei Leichen-Varianten), braucht die Drehung sie nicht mehr zu
+kodieren: aus der Achttabelle `LIE_ROLL[]` plus `lie_roll(view, face_down)` wurde
+`const LIE_ROLL: float = -1.0` (im Uhrzeigersinn, Kopf nach rechts) und
+`pose_roll(base)`. Das ist der Teil, der rückblickend von Anfang an so gehört
+hätte — die per-View-Rolltabelle war ein Ersatz für Kunst, die es noch nicht gab.
+
+**Sheet-Loader:** `_slice_sheet` liefert jetzt **slot-**statt viewindizierte
+Frames und teilt sich mit `_cut_sheet` die Lade- und Prüflogik. Blickrichtungslose
+Posen werden **je Variantendatei** geschnitten und lesen immer Zeile 1; normale
+Posen laufen weiter über `sheet_cut_plan` (1/5/8 Zeilen). Fehlt **eine** von zwei
+Leichendateien, bleibt der Platzhalter für **beide** Lagen aktiv (mit Warnung, die
+die fehlende Datei nennt) — eine Einheit, die Handarbeit und Platzhalter mischt,
+wäre schlechter als beides. Die fps stehen im Manifest weiter unter dem
+**Animationsnamen** (`"dead"`), nicht unter dem Variantennamen.
+
+**Zwei Folgestellen, die leicht durchgerutscht wären:** `make_frames` (die
+SpriteFrames für das Sidebar-Porträt) baut Schlüssel `"<anim>_<view>"` und hätte
+für `airborne_front` eine Zeichnung geliefert, die das Spiel nie rendert — es
+nimmt für blickrichtungslose Posen jetzt immer Variante 0. Und die
+Porträt-Drehung folgt der einen Rollrichtung (`+PI/2`) statt der weggefallenen
+Bauch/Rücken-Unterscheidung.
+
+Verifikation: Ladecheck exit 0 ohne Ausgabe, **Suite 4934 Zusicherungen grün**
+(0 failed, kein `SCRIPT ERROR`), Spielstart ohne Shader-/Skriptfehler. Neue
+Zusicherungen: beide flachen Posen sind blickrichtungslos, die Leiche hat zwei
+Varianten und `airborne` eine, Suffix und Malansicht sind bei der Leiche
+gegenläufig, keine Malansicht ist eine gespiegelte (sonst würde `_build_frames`
+sie flippen), `pose_roll` ist eine feste Richtung, `pose_slot` liefert Ansicht
+bzw. Variante, und die zwei Leichenzeichnungen sind wirklich verschieden.
+
 
 ### Verifikationsstand
 

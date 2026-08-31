@@ -29,7 +29,7 @@ const MIRROR_SOURCE: Dictionary = {
 ## Drop-in replacement for PlaceholderSprites.build_atlas (plus mask_texture).
 static func build_atlas(kinds: Array[StringName]) -> Dictionary:
 	# 1) Load + slice all available sheets and find the atlas cell size.
-	var sheets: Dictionary = {}   # kind -> anim -> {"views": {view -> [Image]}, "masks": {view -> [Image]}, "fps": float}
+	var sheets: Dictionary = {}   # kind -> anim -> {"slots": {int -> [Image]}, "masks": {int -> [Image]}, "fps": float}
 	var cell_w: int = PlaceholderSprites.W
 	var cell_h: int = PlaceholderSprites.H
 	for kind in kinds:
@@ -55,21 +55,23 @@ static func build_atlas(kinds: Array[StringName]) -> Dictionary:
 		for anim in PlaceholderSprites._anims_for(kind):
 			var sheet: Dictionary = kind_sheets.get(anim, {})
 			var per_view: Array = []
-			for view in PlaceholderSprites.VIEWS:
-				# A viewless pose is stored ONCE: the remaining seven views
-				# point at the same slots instead of holding copies.
-				if not per_view.is_empty() and PlaceholderSprites.anim_is_viewless(anim):
+			var slots: int = PlaceholderSprites.slot_count(anim)
+			for slot in range(PlaceholderSprites.VIEWS.size()):
+				# The table always holds eight entries. A viewless pose fills only
+				# its variants (the two corpse landings) and lets the rest point
+				# at variant 0 instead of storing identical copies.
+				if slot >= slots:
 					per_view.append((per_view[0] as Array).duplicate())
 					continue
 				var frame_images: Array[Image] = []
 				var mask_images: Array = []
 				var fps: float = PlaceholderSprites._anim_fps(anim)
 				if not sheet.is_empty():
-					frame_images.assign(sheet.views[view])
-					mask_images = sheet.masks.get(view, [])
+					frame_images.assign(sheet.slots[slot])
+					mask_images = sheet.masks.get(slot, [])
 					fps = sheet.fps
 				else:
-					frame_images = PlaceholderSprites._build_frames(kind, anim, view)
+					frame_images = PlaceholderSprites.build_slot(kind, anim, slot)
 				per_view.append([images.size(), frame_images.size(), fps])
 				for i in range(frame_images.size()):
 					images.append(frame_images[i])
@@ -105,11 +107,55 @@ static func build_atlas(kinds: Array[StringName]) -> Dictionary:
 	}
 
 
-## Slices assets/units/<kind>/<anim>.png (+ optional <anim>_mask.png) into
-## per-view frame lists. Returns {} when the sheet is missing or malformed
-## (then the caller uses the procedural frames for this anim).
+## Slices one animation's user art into SLOT-keyed frame lists, matching the
+## atlas table: a normal pose's slots are its eight views, a viewless pose's are
+## its variants (PlaceholderSprites.VIEWLESS_POSES). Returns {} when the art is
+## missing or malformed — the caller then uses the procedural frames.
 static func _slice_sheet(kind: StringName, anim: StringName, manifest: Dictionary) -> Dictionary:
-	var rel: String = "units/%s/%s.png" % [kind, anim]
+	var fps: float = PlaceholderSprites._anim_fps(anim)
+	var anims_meta: Dictionary = manifest.get("anims", {})
+	if anims_meta.has(String(anim)):
+		fps = float((anims_meta[String(anim)] as Dictionary).get("fps", fps))
+	var slots: Dictionary = {}
+	var slot_masks: Dictionary = {}
+	if PlaceholderSprites.anim_is_viewless(anim):
+		# One FILE per variant, each a single row: "dead_back.png" (on the back)
+		# and "dead_front.png" (on the belly). All or nothing — a half-delivered
+		# corpse would mix hand-drawn and procedural landings.
+		var count: int = PlaceholderSprites.slot_count(anim)
+		for slot in range(count):
+			var suffix: StringName = PlaceholderSprites.variant_suffix(anim, slot)
+			var name: String = String(anim) if suffix == &"" \
+					else "%s_%s" % [anim, suffix]
+			var cut: Dictionary = _cut_sheet(kind, name, manifest, 0)
+			if cut.is_empty():
+				if not slots.is_empty():
+					push_warning("UnitSpriteLibrary: units/%s/%s.png fehlt oder ist unbrauchbar, obwohl die anderen Varianten von '%s' da sind — Platzhalter bleibt fuer ALLE Varianten aktiv." % [kind, name, anim])
+				return {}
+			slots[slot] = cut.frames
+			if not (cut.masks as Array).is_empty():
+				slot_masks[slot] = cut.masks
+		return {"slots": slots, "masks": slot_masks, "fps": fps}
+
+	var cut: Dictionary = _cut_sheet(kind, String(anim), manifest, -1)
+	if cut.is_empty():
+		return {}
+	for slot in range(PlaceholderSprites.VIEWS.size()):
+		slots[slot] = (cut.views as Dictionary)[PlaceholderSprites.VIEWS[slot]]
+		var m: Dictionary = cut.view_masks
+		if m.has(PlaceholderSprites.VIEWS[slot]):
+			slot_masks[slot] = m[PlaceholderSprites.VIEWS[slot]]
+	return {"slots": slots, "masks": slot_masks, "fps": fps}
+
+
+## Loads + validates assets/units/<kind>/<name>.png (plus its optional
+## <name>_mask.png) and cuts it. With row >= 0 only that row is cut and returned
+## as "frames"/"masks"; with row < 0 the full sheet_cut_plan is applied and
+## returned as "views"/"view_masks". Returns {} on anything unusable, after a
+## warning that names the file and the reason.
+static func _cut_sheet(kind: StringName, name: String, manifest: Dictionary,
+		row: int) -> Dictionary:
+	var rel: String = "units/%s/%s.png" % [kind, name]
 	var img: Image = AssetLibrary.image(rel)
 	if img == null:
 		return {}
@@ -126,17 +172,30 @@ static func _slice_sheet(kind: StringName, anim: StringName, manifest: Dictionar
 		return {}
 	var frame_count: int = img.get_width() / fw
 	var row_count: int = img.get_height() / fh
-	var plan: Dictionary = sheet_cut_plan(row_count)
-	if plan.is_empty():
-		push_warning("UnitSpriteLibrary: '%s' hat %d Zeilen — erlaubt sind 1, 5 oder 8 Blickrichtungen. Platzhalter bleibt aktiv." % [rel, row_count])
-		return {}
-	var mask_img: Image = AssetLibrary.image("units/%s/%s_mask.png" % [kind, anim])
+	var plan: Dictionary = {}
+	if row >= 0:
+		if row_count <= row:
+			push_warning("UnitSpriteLibrary: '%s' hat nur %d Zeile(n) — Zeile %d wird gebraucht. Platzhalter bleibt aktiv." % [rel, row_count, row + 1])
+			return {}
+	else:
+		plan = sheet_cut_plan(row_count)
+		if plan.is_empty():
+			push_warning("UnitSpriteLibrary: '%s' hat %d Zeilen — erlaubt sind 1, 5 oder 8 Blickrichtungen. Platzhalter bleibt aktiv." % [rel, row_count])
+			return {}
+	var mask_img: Image = AssetLibrary.image("units/%s/%s_mask.png" % [kind, name])
 	if mask_img != null and (mask_img.get_width() != img.get_width()
 			or mask_img.get_height() != img.get_height()):
-		push_warning("UnitSpriteLibrary: '%s_mask.png' passt nicht zur Sheet-Groesse — Maske wird ignoriert." % anim)
+		push_warning("UnitSpriteLibrary: '%s_mask.png' passt nicht zur Sheet-Groesse — Maske wird ignoriert." % name)
 		mask_img = null
 	if mask_img != null and mask_img.get_format() != Image.FORMAT_RGBA8:
 		mask_img.convert(Image.FORMAT_RGBA8)
+
+	if row >= 0:
+		return {
+			"frames": _cut_row(img, row, fw, fh, frame_count),
+			"masks": _cut_row(mask_img, row, fw, fh, frame_count) if mask_img != null \
+					else ([] as Array[Image]),
+		}
 
 	var views: Dictionary = {}
 	var view_masks: Dictionary = {}
@@ -146,13 +205,13 @@ static func _slice_sheet(kind: StringName, anim: StringName, manifest: Dictionar
 	var mask_cache: Dictionary = {}
 	for view in PlaceholderSprites.VIEWS:
 		var entry: Array = plan[view]
-		var row: int = int(entry[0])
-		if not row_cache.has(row):
-			row_cache[row] = _cut_row(img, row, fw, fh, frame_count)
+		var r: int = int(entry[0])
+		if not row_cache.has(r):
+			row_cache[r] = _cut_row(img, r, fw, fh, frame_count)
 			if mask_img != null:
-				mask_cache[row] = _cut_row(mask_img, row, fw, fh, frame_count)
-		var frames: Array[Image] = row_cache[row]
-		var mask_frames: Array[Image] = mask_cache.get(row, [] as Array[Image])
+				mask_cache[r] = _cut_row(mask_img, r, fw, fh, frame_count)
+		var frames: Array[Image] = row_cache[r]
+		var mask_frames: Array[Image] = mask_cache.get(r, [] as Array[Image])
 		if bool(entry[1]):
 			frames = _mirror_frames(frames)
 			if not mask_frames.is_empty():
@@ -160,18 +219,13 @@ static func _slice_sheet(kind: StringName, anim: StringName, manifest: Dictionar
 		views[view] = frames
 		if not mask_frames.is_empty():
 			view_masks[view] = mask_frames
-
-	var fps: float = PlaceholderSprites._anim_fps(anim)
-	var anims_meta: Dictionary = manifest.get("anims", {})
-	if anims_meta.has(String(anim)):
-		fps = float((anims_meta[String(anim)] as Dictionary).get("fps", fps))
-	return {"views": views, "masks": view_masks, "fps": fps}
+	return {"views": views, "view_masks": view_masks}
 
 
 ## How a sheet with `row_count` rows is cut: view -> [row index, mirror].
-##   1 row  = ONE drawing for EVERY view, never mirrored. For poses whose facing
-##            carries no information (PlaceholderSprites.VIEWLESS_ANIMS — a body
-##            tumbling through the air); the artist delivers a single row.
+##   1 row  = ONE drawing for EVERY view, never mirrored. Only reached by the
+##            poses that DO have views — the viewless ones are cut per variant
+##            file and always read row 1 (see _slice_sheet).
 ##   5 rows = front/back/right/front_right/back_right drawn, the three left views
 ##            mirrored from their right twin.
 ##   8 rows = every view drawn individually (left may differ from right).

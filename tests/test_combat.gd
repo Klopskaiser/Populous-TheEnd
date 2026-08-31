@@ -669,43 +669,45 @@ func test_airborne_and_drown_anims_in_atlas() -> void:
 ## on screen once the roll is applied.
 func test_lying_poses_are_drawn_along_the_long_cell_axis() -> void:
 	for anim: StringName in PlaceholderSprites.FLAT_ANIMS:
-		for view: StringName in [&"front", &"right", &"left", &"back_right"]:
-			var frames: Array[Image] = PlaceholderSprites._build_frames(&"brave", anim, view)
-			check(not frames.is_empty(), "%s/%s has frames" % [anim, view])
+		for slot in range(PlaceholderSprites.slot_count(anim)):
+			var frames: Array[Image] = PlaceholderSprites.build_slot(&"brave", anim, slot)
+			check(not frames.is_empty(), "%s/%d has frames" % [anim, slot])
 			var box: Rect2i = _ink_box(frames[0])
 			check(box.size.y >= 20,
-				"%s/%s fills the long cell axis (%d of %d px)"
-					% [anim, view, box.size.y, PlaceholderSprites.H])
+				"%s/%d fills the long cell axis (%d of %d px)"
+					% [anim, slot, box.size.y, PlaceholderSprites.H])
 			check(box.size.y > box.size.x,
-				"%s/%s runs along y, not along x" % [anim, view])
+				"%s/%d runs along y, not along x" % [anim, slot])
 
 
-## A viewless pose is stored ONCE: all eight view entries point at the same atlas
-## slots (eight identical copies would be pure waste), and the drawing really is
-## the same in every view. The corpse is NOT viewless — its left views are
-## mirrored, so it keeps its own slots.
-func test_viewless_pose_shares_its_atlas_slots() -> void:
+## A viewless pose's eight table entries carry its VARIANTS, not views: the ones
+## past the variant count point back at variant 0 instead of storing identical
+## copies. The corpse's two landings are genuinely different drawings; the flying
+## body has a single one.
+func test_viewless_pose_stores_variants_not_views() -> void:
 	var atlas: Dictionary = PlaceholderSprites.build_atlas(
 		[&"brave", &"warrior"] as Array[StringName])
 	var table: Dictionary = atlas.table
 	for kind: StringName in [&"brave", &"warrior"]:
-		for anim: StringName in PlaceholderSprites.VIEWLESS_ANIMS:
-			var views: Array = table[kind][anim]
-			check(views.size() == 8, "%s/%s still has eight view entries" % [kind, anim])
-			for i in range(1, views.size()):
-				check(int(views[i][0]) == int(views[0][0]),
-					"%s/%s view %d reuses the first view's slots" % [kind, anim, i])
-				check(int(views[i][1]) == int(views[0][1]),
-					"%s/%s view %d has the same frame count" % [kind, anim, i])
-	var dead_views: Array = table[&"brave"][&"dead"]
-	check(int(dead_views[3][0]) != int(dead_views[2][0]),
-		"the corpse keeps separate slots for its left and right views")
-	var first: PackedByteArray = PlaceholderSprites._build_frames(
-		&"warrior", &"airborne", PlaceholderSprites.VIEWS[0])[0].get_data()
-	for view: StringName in PlaceholderSprites.VIEWS:
-		var other: PackedByteArray = PlaceholderSprites._build_frames(
-			&"warrior", &"airborne", view)[0].get_data()
-		check(other == first, "airborne is pixel-identical in the %s view" % view)
+		for anim: StringName in PlaceholderSprites.FLAT_ANIMS:
+			var entries: Array = table[kind][anim]
+			var variants: int = PlaceholderSprites.slot_count(anim)
+			check(entries.size() == 8, "%s/%s still has eight entries" % [kind, anim])
+			for i in range(variants, entries.size()):
+				check(int(entries[i][0]) == int(entries[0][0]),
+					"%s/%s entry %d falls back on variant 0" % [kind, anim, i])
+				check(int(entries[i][1]) == int(entries[0][1]),
+					"%s/%s entry %d has the same frame count" % [kind, anim, i])
+			for i in range(1, variants):
+				check(int(entries[i][0]) != int(entries[0][0]),
+					"%s/%s variant %d has its own slots" % [kind, anim, i])
+	# The two corpse landings must not be the same picture — that is the whole
+	# point of the variants.
+	var supine: PackedByteArray = PlaceholderSprites.build_slot(
+		&"warrior", &"dead", 0)[0].get_data()
+	var prone: PackedByteArray = PlaceholderSprites.build_slot(
+		&"warrior", &"dead", 1)[0].get_data()
+	check(supine != prone, "the corpse on its back differs from the one on its belly")
 
 
 ## Row counts the sheet loader accepts, and how each maps rows to views. The

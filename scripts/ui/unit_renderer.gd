@@ -46,14 +46,14 @@ const ELEVATION_GAIN: float = 1.0
 ## as having slid toward the camera, and its contact edge approaches the depth
 ## threshold where the ground in front of it takes over.
 const LIE_DROP_M: float = 0.3
-## Roll direction per view index (order = Unit.view_index /
-## PlaceholderSprites.VIEWS): +1 = counter-clockwise (head LEFT), -1 = clockwise
-## (head RIGHT). Chosen so the figure lies on its BACK in every view: the
-## right-side views are painted with the face toward +x and roll CCW, their
-## mirrored left-side twins roll CW; front/back have no side preference and take
-## the CCW default. Belly-down flips the sign (see lie_roll). A VIEWLESS pose
-## (PlaceholderSprites.VIEWLESS_ANIMS) always reads index 0 — see _update_frame.
-const LIE_ROLL: Array[float] = [1.0, 1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0]
+## Screen roll of the flat poses, in the encoding the shader expects: -1 =
+## clockwise (head to the RIGHT), +1 = counter-clockwise. ONE direction, not a
+## per-view table: every flat pose is viewless, and which side of the body you
+## SEE is carried by the artwork (the corpse has two variants,
+## PlaceholderSprites.VIEWLESS_POSES), not by the direction of the rotation.
+## Both signs are proper rotations (determinant +1), never a mirror — the eight
+## views of the upright poses tell left from right (shield vs. sword side).
+const LIE_ROLL: float = -1.0
 ## Status icons (stars, panic, flame) sit at head height of a STANDING figure;
 ## over a unit that lies flat they would float about a metre above it. This
 ## factor pulls them down onto the body.
@@ -187,26 +187,21 @@ static func make_blob_mesh(size: Vector2, color: Color = BLOB_COLOR) -> PlaneMes
 	return plane
 
 
-## Roll direction for a unit lying flat, in the encoding the shader expects
-## (0 = upright, +1 = counter-clockwise, -1 = clockwise). Belly-down flips the
-## rotation, and with it the head's side — a pure rotation tips the facing and
-## the head together, and the alternative (mirroring) would swap the unit's
-## handedness. Pure function so it can be asserted headless.
-static func lie_roll(view: int, face_down: bool) -> float:
-	var dir: float = LIE_ROLL[view]
-	return -dir if face_down else dir
+## Screen roll of a pose: LIE_ROLL for the flat ones, 0 for every upright one.
+## Pure function so it can be asserted headless.
+static func pose_roll(base: StringName) -> float:
+	return LIE_ROLL if PlaceholderSprites.anim_lies_flat(base) else 0.0
 
 
-## Screen roll for a whole pose (0 for every upright one). Two rules on top of
-## lie_roll: a VIEWLESS pose is one drawing shared by all eight views, so its
-## roll must not vary with the view either — a per-view direction would turn the
-## very same drawing belly-up in half of them; and BELLY_ANIMS always land
-## belly-down, so only the corpse honours the unit's own lies_face_down bit.
-static func pose_roll(base: StringName, view: int, face_down: bool) -> float:
-	if not PlaceholderSprites.anim_lies_flat(base):
-		return 0.0
-	var dir_view: int = 0 if PlaceholderSprites.anim_is_viewless(base) else view
-	return lie_roll(dir_view, face_down or PlaceholderSprites.anim_lies_belly_down(base))
+## Which of the eight entries of an animation's atlas row a unit reads. For a
+## normal pose that is its VIEW; a viewless pose has no views, so the entries
+## carry its VARIANTS instead (PlaceholderSprites.VIEWLESS_POSES) and the unit's
+## landing picks one — the corpse on its back or on its belly. Poses with a
+## single variant always read entry 0.
+static func pose_slot(base: StringName, view: int, face_down: bool) -> int:
+	if not PlaceholderSprites.anim_is_viewless(base):
+		return view
+	return 1 if face_down and PlaceholderSprites.slot_count(base) > 1 else 0
 
 
 func _ready() -> void:
@@ -370,7 +365,7 @@ func _update_frame(unit: Unit, cam_forward: Vector3, cam_right: Vector3,
 	var per_base: Dictionary = _table.get(unit._render_kind, _table[KINDS[0]])
 	var base: StringName = unit.anim_base_name
 	var views: Array = per_base.get(base, per_base[&"idle"])
-	var info: Array = views[view]   # [start, count, fps]
+	var info: Array = views[pose_slot(base, view, unit.lies_face_down)]   # [start, count, fps]
 	var frame: int
 	if unit.hop_visual and base == &"jump":
 		# Frame-driven by the hop phase: arms up in the air, down on landing.
@@ -382,10 +377,10 @@ func _update_frame(unit: Unit, cam_forward: Vector3, cam_right: Vector3,
 		return
 	unit._render_frame = global_frame
 	var uv: Vector2 = _uvs[global_frame]
-	# The roll flag travels with the UV: every (animation, view) owns its own
-	# disjoint atlas slots, so a change of pose OR facing always changes
+	# The roll flag travels with the UV: every (animation, slot) owns its own
+	# disjoint atlas slots, so a change of pose, facing or landing always changes
 	# global_frame too — the early return above can never leave it stale.
 	# Deliberately behind that return, so this runs on real frame changes only
 	# and not for every unit every frame.
-	var roll: float = pose_roll(base, view, unit.lies_face_down)
-	_multimesh.set_instance_custom_data(unit._render_index, Color(uv.x, uv.y, roll, 0.0))
+	_multimesh.set_instance_custom_data(
+		unit._render_index, Color(uv.x, uv.y, pose_roll(base), 0.0))

@@ -66,32 +66,33 @@ const DIAGONAL_PAINT_VIEWS: Array[StringName] = [&"front_right", &"back_right"]
 ## lying down was only 0.96 m long and read as a toy — and it would stand back
 ## up once the roll was added.
 ## Drawing convention inside the cell: head at the top, feet at the bottom, full
-## cell height; in the RIGHT-side views +x is the SKY side (face and belly), in
-## their mirrored left-side twins -x. Together with UnitRenderer.LIE_ROLL that
-## is what puts a CORPSE on its back in all eight views; BELLY_ANIMS turns the
-## other way.
+## cell height. Which side of the body you SEE is carried by the artwork (see
+## VIEWLESS_POSES), not by the rotation — the screen roll is a single fixed
+## direction (UnitRenderer.LIE_ROLL).
 ## "roll" (tumbling ALONG the ground) and "drown" (flailing at the surface) are
 ## screen-upright poses and deliberately NOT listed here.
 const FLAT_ANIMS: Array[StringName] = [&"dead", &"airborne"]
 
-## Flat poses that always land BELLY-DOWN, whatever a unit's lies_face_down bit
-## says: a body flung through the air falls with its back to the sky, it does
-## not sail along on its back (user report). Only the CORPSE varies.
-const BELLY_ANIMS: Array[StringName] = [&"airborne"]
-
-## Poses whose FACING carries no information, so ONE drawing serves all eight
-## views — a body tumbling through the air turns, there is no "front" to it.
-## Three deliberate consequences: the atlas stores such a pose once and points
-## all eight view entries at the same slots, nothing is mirrored, and the
-## renderer must use a view-INDEPENDENT roll direction (a per-view direction
-## would turn the very same drawing belly-up in half the views). A user-supplied
-## sheet may therefore have a single row — see assets/README.md.
-const VIEWLESS_ANIMS: Array[StringName] = [&"airborne"]
-
-## The one view a VIEWLESS pose is painted in. "back", not "front": we look down
-## on a body that falls belly-first, so its BACK is what faces us. The front
-## view would show the face and read as lying on the back.
-const VIEWLESS_PAINT_VIEW: StringName = &"back"
+## Poses whose FACING carries no information, so views make no sense for them: a
+## body lying on the ground or tumbling through the air has no "front" the camera
+## could circle. Both flat poses are of that kind, and the consequences run deep
+## and are all deliberate — the eight slots of such a pose's atlas entry carry
+## its VARIANTS instead of views, nothing is mirrored, the renderer's roll is
+## view-independent, and a user-supplied sheet needs a single row per variant.
+##
+## Value = one entry per variant, as [sheet suffix, paint view]:
+##   * SHEET SUFFIX picks the file — "" is plain "<anim>.png", "back" is
+##     "<anim>_back.png". It names the POSE: which side is DOWN.
+##   * PAINT VIEW is the view the placeholder draws, and it names the side we
+##     SEE. For a corpse the two are deliberately OPPOSITE: a body lying on its
+##     back ("dead_back") shows us its FRONT, face up.
+## The corpse's variant index is the unit's lies_face_down bit (0 = on the back,
+## 1 = on the belly, Balance.LIE_FACE_DOWN_CHANCE); a flung body always falls
+## belly-first, so "airborne" has a single variant and is painted "back".
+const VIEWLESS_POSES: Dictionary = {
+	&"dead": [[&"back", &"front"], [&"front", &"back"]],
+	&"airborne": [[&"", &"back"]],
+}
 
 
 ## One shared SpriteFrames per kind — building the frames is expensive and
@@ -107,14 +108,41 @@ static func anim_lies_flat(anim: StringName) -> bool:
 	return anim in FLAT_ANIMS
 
 
-## True for the poses that always land belly-down (see BELLY_ANIMS).
-static func anim_lies_belly_down(anim: StringName) -> bool:
-	return anim in BELLY_ANIMS
-
-
-## True for the poses drawn once for all eight views (see VIEWLESS_ANIMS).
+## True for the poses that have no views, only variants (see VIEWLESS_POSES).
 static func anim_is_viewless(anim: StringName) -> bool:
-	return anim in VIEWLESS_ANIMS
+	return VIEWLESS_POSES.has(anim)
+
+
+## How many distinct drawings a pose has. A normal pose has one per VIEW; a
+## viewless pose has one per VARIANT (see VIEWLESS_POSES) — the corpse two, the
+## flying body one.
+static func slot_count(anim: StringName) -> int:
+	if anim_is_viewless(anim):
+		return (VIEWLESS_POSES[anim] as Array).size()
+	return VIEWS.size()
+
+
+## Sheet file suffix of one variant of a viewless pose: "" means the plain
+## "<anim>.png", "back" means "<anim>_back.png". Empty for every normal pose.
+static func variant_suffix(anim: StringName, variant: int) -> StringName:
+	if not anim_is_viewless(anim):
+		return &""
+	return ((VIEWLESS_POSES[anim] as Array)[variant] as Array)[0]
+
+
+## The view a table SLOT is painted in: for a normal pose that is simply its
+## view, for a viewless pose the canonical view of that variant. Never a mirrored
+## or diagonal view for the viewless case, so _build_frames leaves it unflipped.
+static func slot_paint_view(anim: StringName, slot: int) -> StringName:
+	if not anim_is_viewless(anim):
+		return VIEWS[slot]
+	return ((VIEWLESS_POSES[anim] as Array)[slot] as Array)[1]
+
+
+## Frames of one table SLOT — a view for normal poses, a variant for viewless
+## ones. The single entry point for both atlas builders.
+static func build_slot(kind: StringName, anim: StringName, slot: int) -> Array[Image]:
+	return _build_frames(kind, anim, slot_paint_view(anim, slot))
 
 
 ## All animation bases a kind carries. "jump" is frame-driven by the hop
@@ -146,7 +174,13 @@ static func make_frames(unit_kind: StringName) -> SpriteFrames:
 	for anim in _anims_for(unit_kind):
 		for view in VIEWS:
 			var full_name: StringName = StringName("%s_%s" % [anim, view])
-			_add_animation(frames, full_name, _build_frames(unit_kind, anim, view), _anim_fps(anim))
+			# A viewless pose has no per-view drawing: every view key gets its
+			# FIRST variant (the corpse on its back, the flying body belly-down).
+			# Without this the sidebar portrait would ask for e.g. "airborne_front"
+			# and get a face-up figure the game never renders.
+			var images: Array[Image] = build_slot(unit_kind, anim, 0) \
+				if anim_is_viewless(anim) else _build_frames(unit_kind, anim, view)
+			_add_animation(frames, full_name, images, _anim_fps(anim))
 	_cache[unit_kind] = frames
 	return frames
 
@@ -167,13 +201,15 @@ static func build_atlas(kinds: Array[StringName]) -> Dictionary:
 		var per_base: Dictionary = {}
 		for anim in _anims_for(kind):
 			var per_view: Array = []
-			for view in VIEWS:
-				# A viewless pose is stored ONCE: the remaining seven views point
-				# at the same slots instead of holding identical copies.
-				if not per_view.is_empty() and anim_is_viewless(anim):
+			var slots: int = slot_count(anim)
+			for slot in range(VIEWS.size()):
+				# The table always has eight entries; a viewless pose fills only
+				# its variants and lets the rest point at variant 0 instead of
+				# storing identical copies.
+				if slot >= slots:
 					per_view.append((per_view[0] as Array).duplicate())
 					continue
-				var frame_images: Array[Image] = _build_frames(kind, anim, view)
+				var frame_images: Array[Image] = build_slot(kind, anim, slot)
 				per_view.append([images.size(), frame_images.size(), _anim_fps(anim)])
 				images.append_array(frame_images)
 			per_base[anim] = per_view
@@ -232,11 +268,8 @@ static func _anim_fps(anim: StringName) -> float:
 ## silhouette accents (shield/sword, helmet/fireballs, hood/gown) are drawn on
 ## top of the shared body so each unit type is recognisable.
 static func _build_frames(kind: StringName, anim: StringName, view: StringName) -> Array[Image]:
-	# A VIEWLESS pose resolves every view to its one canonical drawing. Nothing
-	# below mirrors it either: the canonical view is neither a diagonal paint
-	# view nor a mirrored one.
-	var draw_view: StringName = VIEWLESS_PAINT_VIEW if anim_is_viewless(anim) else view
 	# Left-side views are painted as their right-side twin, then mirrored below.
+	var draw_view: StringName = view
 	var paint_view: StringName = draw_view
 	match draw_view:
 		&"left":
@@ -728,22 +761,32 @@ static func _frame_throw(view: StringName, phase: int) -> Image:
 ## of FLAT_ANIMS, so the renderer rolls it 90 degrees on screen and the long
 ## cell axis becomes the corpse's 1.44 m length. Painting it lying down (as it
 ## was before) made it 0.96 m short, and after the roll it would stand up.
-## Across the cell: LOW columns are the GROUND side, HIGH columns point at the
-## SKY, so the body ends up on its back with the face visible (the left views
-## are mirrored AND roll the other way, so they land face-up too).
+## The corpse is VIEWLESS with TWO variants (VIEWLESS_POSES), and the view it is
+## asked for names the side we SEE, not the pose: "front" = face up, so the body
+## lies on its BACK ("dead_back"); "back" = only the hair, so it lies on its
+## BELLY ("dead_front"). No other view ever reaches here.
 ## Deliberately crumpled, not laid out straight: torso and hip are offset, the
-## head is flopped over toward the ground, one arm is flung up, one leg is
-## stretched out and the other is bent with the knee poking up. No accessories
-## (see the decorate list in _build_frames).
-static func _frame_dead(_view: StringName) -> Image:
+## head is flopped over, one arm is flung out, one leg is stretched and the other
+## is bent with the knee poking up. No accessories (see _build_frames' decorate
+## list). Low columns are the GROUND side, high columns point at the SKY.
+static func _frame_dead(view: StringName) -> Image:
 	var img: Image = _new_image()
-	img.fill_rect(Rect2i(2, 1, 5, 5), C_HEAD)        # head, flopped toward the ground
-	img.fill_rect(Rect2i(5, 3, 1, 1), C_EYE)         # closed eye, on the sky side
+	img.fill_rect(Rect2i(2, 1, 5, 5), C_HEAD)        # head, flopped to one side
+	if view == &"back":
+		img.fill_rect(Rect2i(2, 1, 5, 3), C_HAIR)    # face DOWN: only hair shows
+	else:
+		img.fill_rect(Rect2i(5, 3, 1, 1), C_EYE)     # face UP: the closed eye
 	img.fill_rect(Rect2i(4, 6, 3, 2), C_LIMB)        # neck, kinked
 	img.fill_rect(Rect2i(3, 8, 7, 5), C_BODY)        # torso, sagged onto the ground
 	img.fill_rect(Rect2i(4, 13, 6, 4), C_BODY)       # hip, offset (bent body)
-	img.fill_rect(Rect2i(9, 8, 4, 2), C_LIMB)        # arm flung up at the sky
-	img.fill_rect(Rect2i(1, 10, 2, 3), C_LIMB)       # other arm trapped underneath
+	if view == &"back":
+		# Face down the arms fall the other way: one flung out along the ground,
+		# the other folded under the chest.
+		img.fill_rect(Rect2i(0, 9, 3, 2), C_LIMB)    # arm flung out, palm down
+		img.fill_rect(Rect2i(10, 11, 2, 3), C_LIMB)  # forearm folded under
+	else:
+		img.fill_rect(Rect2i(9, 8, 4, 2), C_LIMB)    # arm flung up at the sky
+		img.fill_rect(Rect2i(1, 10, 2, 3), C_LIMB)   # other arm trapped underneath
 	img.fill_rect(Rect2i(3, 17, 3, 6), C_LIMB)       # stretched leg down to the foot
 	img.fill_rect(Rect2i(6, 16, 2, 4), C_LIMB)       # bent leg, thigh
 	img.fill_rect(Rect2i(7, 19, 5, 2), C_LIMB)       # ... knee poking up at the sky
