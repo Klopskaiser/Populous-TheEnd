@@ -215,10 +215,11 @@ const AIRSHIP_DRIFT_SPEED: float = 0.5
 ## Maximaler Abstand zum Absetzpunkt beim "Absetzen an..."-Befehl.
 const AIRSHIP_UNLOAD_RANGE: float = 2.0
 ## Feuerkrieger-Schadensfaktor gegen Ziele in der Luft (Deck-Crew UND
-## hochgeschleuderte Einheiten — `Unit.is_airborne()`). Seit Phase 10c nur noch
-## **+20 %** statt doppelt: mit dem Lift ist die Kombo „hochwerfen und
-## abschießen" zuverlässig geworden, der Verdoppler war damit zu stark.
-const FIREWARRIOR_AIRBORNE_MULT: float = 1.2
+## hochgeschleuderte Einheiten — `Unit.is_airborne()`). Phase 10c trimmte den
+## Verdoppler auf +20 %, weil die Kombo „hochwerfen und abschießen" mit dem Lift
+## zuverlässig wurde; 2026-09-02 auf **+10 %** halbiert (Nutzerentscheidung, im
+## selben Zug mit dem stärkeren Flächenschaden).
+const FIREWARRIOR_AIRBORNE_MULT: float = 1.1
 
 # =============================================================================
 # NAHKAMPF ALLGEMEIN (alle Einheiten)
@@ -363,8 +364,8 @@ const FW_FIREBALL_LIFT_HP_MAX_MULT: float = 3.0
 ## damit bewusst eine **Masseneinheit** (Nutzerentscheidung: so gewollt, kein
 ## Opferdeckel je Ball). Wer die kleinen Gefechte beurteilt, unterschätzt diese
 ## Konstanten um etwa eine Größenordnung.
-const FW_FIREBALL_BLAST_RADIUS: float = 1.2
-const FW_FIREBALL_BLAST_FRAC: float = 0.2
+const FW_FIREBALL_BLAST_RADIUS: float = 1.3
+const FW_FIREBALL_BLAST_FRAC: float = 0.3
 ## Treffer auf bereits fliegende Ziele: der Lift wird IMMER verstärkt.
 const LIFT_AIRBORNE_BONUS: float = 2.0
 const LIFT_AIRBORNE_PUSH_FACTOR: float = 0.5

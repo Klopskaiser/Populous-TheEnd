@@ -157,9 +157,10 @@ func _impact() -> void:
 			target.position + Vector3(0.0, TARGET_HEIGHT, 0.0)) > HIT_RANGE * 2.0:
 		return
 	# Targets in the air (airship deck crew AND whirled-up units) take a damage
-	# bonus — fire feeds on the wind. Phase 10c trimmed it from double to +20 %:
-	# with the lift, "hurl it up and shoot it" became a reliable combo, and the
-	# accelerating chase (AIR_ACCEL) made sure the balls connect.
+	# bonus — fire feeds on the wind. Phase 10c trimmed it from double to +20 %
+	# (with the lift, "hurl it up and shoot it" became a reliable combo, and the
+	# accelerating chase makes the balls connect); halved again to +10 % when the
+	# area damage was raised. The factor lives in Balance, never inline.
 	var dmg: int = Unit.FIREBALL_DAMAGE
 	if target.is_airborne():
 		dmg = int(roundf(float(dmg) * Balance.FIREWARRIOR_AIRBORNE_MULT))
@@ -253,8 +254,8 @@ func _apply_blast() -> void:
 			continue
 		var dmg: int = base
 		if u.is_airborne():
-			# Same bonus as on the main target — otherwise "flyers take +20 %"
-			# would depend on who happened to be the direct target.
+			# Same bonus as on the main target — otherwise "flyers take the air
+			# bonus" would depend on who happened to be the direct target.
 			dmg = maxi(1, int(roundf(float(dmg) * Balance.FIREWARRIOR_AIRBORNE_MULT)))
 		u.take_damage(dmg, shooter)
 

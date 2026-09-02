@@ -9539,3 +9539,33 @@ mehr an einem Fehler.
 geprueft: der Nachladezaehler ueberlebt den Kill-Zielwechsel (fiel vorher auf
 0,00), eine frische Aufnahme schlaegt weiterhin sofort zu, und Turm- wie
 Deckschuetze behalten ihren Zaehler ohne Ziel (fiel vorher auf 0,00).
+### Nachtrag 11 — Feuerkrieger nachtariert (Nutzerentscheidung, 2026-09-02)
+
+Nach der Entfernung des Freischusses (Nachtrag 10) drei Werte auf Nutzeransage:
+
+| Wert | vorher | jetzt |
+|---|---|---|
+| `FW_FIREBALL_BLAST_FRAC` | 0,2 (= 2 HP) | **0,3** (= 3 HP) |
+| `FW_FIREBALL_BLAST_RADIUS` | 1,2 m | **1,3 m** |
+| `FIREWARRIOR_AIRBORNE_MULT` | 1,2 (+20 %) | **1,1** (+10 %) |
+
+Die Richtung ist konsequent: der **massenabhängige** Teil (Splash) wird
+gestärkt, der **Kombo**-Teil (hochwerfen und in der Luft abschießen) gedämpft —
+und damit genau die Stelle, an der die Feuerkrieger durch den Freischuss zu
+stark waren, durch eine **einstellbare** Konstante ersetzt.
+
+Gemessen im Balance-Labor (2 Wiederholungen, 200 gegen 200 Anmarsch), Verlauf
+über die drei Stände: Effizienz **2,68 → 0,18 → 0,38**, Schadensanteil
+**100 % → 47 % → 71 %**. Die Feuerkrieger verlieren die Paarung weiterhin (0:2),
+teilen aber wieder deutlich mehr aus. Gegen Prediger bleibt das Bild unverändert
+(alle 20 Feuerkrieger werden bekehrt, Schadensanteil 23 %) — dort entscheidet
+die Bekehrungsreichweite, nicht der Schaden.
+
+Fläche: der Radius fasst weiterhin ein 6er-Pack (max. 1,10 m breit) bzw. eine
+Nahkampfgruppe (0,9-m-Ring) und lässt die Nachbargruppe (2,2 m) draußen; 1,3 m
+ist der Puffer dazwischen, keine neue Kategorie.
+
+**Verifikation:** Ladecheck exit 0 ohne Ausgabe, **Suite 5044 Zusicherungen grün**
+ohne Anpassung — die Tests lesen die Werte aus `Balance` statt sie zu kodieren,
+was hier zum ersten Mal getestet wurde. `assets/README.md` unberührt,
+`CLAUDE.md` §4/§6 nachgezogen.
