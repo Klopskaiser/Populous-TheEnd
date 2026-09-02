@@ -209,6 +209,18 @@ const SCENARIOS: Array = [
 	 "a": [[&"feuerramme", 4, 2, 8], [&"krieger", 16, 0, 0], [&"feuerkrieger", 8, 0, -3]],
 	 "b": [[&"krieger", 20], [&"feuerkrieger", 12]],
 	 "frage": "Rammen 8 statt 4 Zellen vor der Linie: hilft mehr Abstand mehr?"},
+	# Reine VORHUT: die Rammen treffen den Feind VOR der eigenen Infanterie, der
+	# Eigenbeschuss ist damit strukturell unmoeglich. Offene Frage war, ob sie das
+	# ueberleben — bei Startabstand 26 stehen sie mit +12 knapp vor der Mitte,
+	# mit +16 dahinter (naeher am Feind als an der eigenen Linie).
+	{"name": "armee_rammen_vorhut",
+	 "a": [[&"feuerramme", 4, 2, 12], [&"krieger", 16, 0, 0], [&"feuerkrieger", 8, 0, -3]],
+	 "b": [[&"krieger", 20], [&"feuerkrieger", 12]],
+	 "frage": "Rammen als reine Vorhut (12 Zellen vor der Linie): ueberleben sie das?"},
+	{"name": "armee_rammen_vorhut_tief",
+	 "a": [[&"feuerramme", 4, 2, 16], [&"krieger", 16, 0, 0], [&"feuerkrieger", 8, 0, -3]],
+	 "b": [[&"krieger", 20], [&"feuerkrieger", 12]],
+	 "frage": "Vorhut jenseits der Mitte (+16): geopferte Rammen oder Brecher?"},
 	{"name": "armee_rammen_vorn_gleiche_soldaten",
 	 "a": [[&"feuerramme", 4, 2, 4], [&"krieger", 20, 0, 0], [&"feuerkrieger", 12, 0, -3]],
 	 "b": [[&"krieger", 20], [&"feuerkrieger", 12]],
