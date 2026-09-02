@@ -9877,3 +9877,48 @@ mit Abstand nachfuehren.
 **Verifikation:** Suite unveraendert **5068 Zusicherungen gruen**, am Spiel ist
 nichts geaendert. Zwei neue Laborzeilen (`armee_rammen_vorhut`,
 `armee_rammen_vorhut_tief`); die Zustandssonde war temporaer und ist entfernt.
+### Nachtrag 19 — UI-Sounds: Pfad geprueft, Selbsttest gebaut (2026-09-02)
+
+Nutzerreport: die Sounds des letzten README-Blocks (`select_*`, `move_*`) spielen
+nicht, obwohl importiert wurde und „andere Sounds funktionieren".
+
+**Der UI-Pfad ist intakt** — Ende zu Ende nachgemessen, mit einer echten
+Testdatei in `assets/audio/ui/`: 5 Busse (Master/Music/Ambience/SFX/UI, keiner
+stumm), UI-Pool mit 4 Slots auf Bus „UI", `_streams_for("audio/ui/move_shaman")`
+liefert 1 Stream, und `play_ui` startet ihn wirklich (`slot 0 playing=true`).
+Auch die Aufrufstellen sind vollstaendig: **jede** Selektion laeuft ueber
+`_set_selection` (Klick, Box, Hotkey) bzw. `_select_buildings`, und jeder
+Bewegungsbefehl endet in `_play_move_sound()` oder — bei unerreichbarem Ziel — in
+`_play_blocked_sound()`.
+
+**Zwei Messfallen, die dabei aufgefallen sind:**
+
+1. **In `-s`-Skripten laeuft der Autoload-`_ready` NICHT**, wenn man in
+   `_initialize()` misst: dort gibt es genau einen Bus („Master") und einen
+   **leeren** UI-Pool — `play_ui` faellt dann still durch `pick_slot` (Poolgroesse
+   0 → -1). Mein frueherer „play_ui laeuft ohne Fehler"-Test war damit wertlos.
+   Erst ab Frame 3 (`_process`) ist die Verdrahtung da. Der Selbsttest unten
+   macht es deshalb so.
+2. **Format war NICHT die Ursache:** ein 32-Bit-Float-WAV und ein 24-Bit-PCM-WAV
+   wurden beide anstandslos geladen (0,30 s), mit und ohne Import.
+
+**Gebaut statt geraten: `tests/diag_audio_assets.gd`.** Der Selbsttest prueft alle
+**73** dokumentierten Soundnamen (die 24 Zaubernamen erzeugt er aus
+`Spell.create_default_set()`, tippt sie also nicht ab) auf Basisdatei und
+Varianten `_0.._7` in `.ogg`/`.wav`/`.mp3` und meldet je Name: keine Datei / OK
+mit Laenge / **NICHT LESBAR** / ohne Import geladen. Dazu die Verdrahtung. Mit
+`-- nur=fehlt` zeigt er nur die Namen, zu denen wirklich Dateien liegen — die
+kurze Liste beim Nachtragen von Assets. In `assets/README.md` steht er jetzt vor
+der Soundliste.
+
+**Was der Nutzer damit klaeren kann:** „andere Sounds funktionieren" bezieht sich
+sehr wahrscheinlich auf die **prozeduralen** Kampfsounds (punch/kick/shove/
+fireball/throw/preach), die gar keine Datei brauchen — sie beweisen also nicht,
+dass das Laden von Dateien in seiner Arbeitskopie ueberhaupt greift. Der
+Selbsttest sagt genau das: welche seiner Dateien die Engine sieht und welche sie
+nicht lesen kann.
+
+**Verifikation:** Ladecheck exit 0 ohne Ausgabe, Suite unveraendert **5068
+Zusicherungen gruen** (das Diagnosewerkzeug ist nicht Teil der Suite). Am Spiel
+selbst ist nichts geaendert; die Testdateien in `assets/audio/ui/` sind wieder
+entfernt (der Selbsttest meldet 0 spielbare Dateien).

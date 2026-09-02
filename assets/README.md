@@ -297,6 +297,23 @@ Solange ein Slot frei ist, wird **nie** etwas verworfen — unabhängig von der
 Priorität. Gleichrangige Sounds verdrängen sich erst, wenn das Opfer schon
 250 ms läuft; Kampftreffer verdrängen sich gar nicht (eigener Pool).
 
+### Selbsttest: „warum ist es still?"
+
+Statt zu raten, fragt man die Engine. Der Selbsttest listet für **jeden** hier
+dokumentierten Namen, was sie sieht — Datei da? importiert? dekodierbar? wie
+lang? — plus die Verdrahtung (Busse, Pools):
+
+```bash
+godot --headless -s res://tests/diag_audio_assets.gd
+godot --headless -s res://tests/diag_audio_assets.gd -- nur=fehlt
+```
+
+`nur=fehlt` zeigt ausschließlich die Namen, zu denen wirklich eine Datei liegt —
+das ist die kurze Liste, wenn man gerade Assets nachträgt. „NICHT LESBAR" heißt:
+die Datei ist da, aber weder Import noch Laufzeit-Dekoder kommen damit klar
+(Godot liest WAV nur als PCM 8/16/24 Bit, IMA-ADPCM oder QOA, `.ogg` nur als
+Vorbis).
+
 ### Vollständige Liste der einsetzbaren Sounds
 
 > **Varianten überall erlaubt:** Jeder Sound-Name (sfx **und** ui) kann statt
