@@ -3072,7 +3072,18 @@ func _begin_attack(enemy: Unit) -> void:
 	_end_attack()
 	attack_target = enemy
 	_sync_soa_target()
-	_attack_cooldown = 0.0
+	# Weapon cooldown: wiped only for a FRESH engagement (so an ordered attack
+	# or an idle unit that spots an enemy strikes without an arbitrary delay).
+	# A retarget while ALREADY fighting keeps it — a target that dies is not a
+	# reloaded weapon. Wiping it there gave every unit a free extra shot per
+	# kill or target switch, and since in mass the target dies well inside the
+	# cooldown, firewarriors sustained a MEASURED 1.44x fire rate (0.963
+	# instead of 0.667 shots/s per head) — the "gatling mode" of the user
+	# report. State is still ATTACK on every retarget path (_on_target_died,
+	# _retarget_or_idle, the firewarrior's threat/priest switch, the second
+	# row's swap), and IDLE/MOVE/PANIC on every fresh one.
+	if state != State.ATTACK:
+		_attack_cooldown = 0.0
 	_combat_goal = Vector3.INF
 	# Melee units bind into the target's fight right away (pairing rules);
 	# ranged units fire without a group seat and only brawl via

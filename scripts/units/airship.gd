@@ -807,7 +807,11 @@ func _tick_deck_firewarrior(fw, delta: float) -> void:
 				fw.fire_at_building_from(fw.position, b)
 			_fire_cd[fw] = cd
 			return
-		_fire_cd[fw] = 0.0
+		# Nothing to shoot: the reload KEEPS RUNNING but is never wiped. Zeroing
+		# it here handed the gunner a fully loaded weapon the moment its last
+		# target died, so the next one that walked in ate an instant ball (same
+		# free-shot bug as Unit._begin_attack, user report 2026-09-02).
+		_fire_cd[fw] = maxf(cd, 0.0)
 		_set_deck_anim(fw, &"idle")
 		return
 	fw.facing = _flat_dir(position, target.position)

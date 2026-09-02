@@ -9483,3 +9483,59 @@ un-importierte WAV nach `assets/audio/sfx/`, prüft
 `ResourceLoader.exists == false`, `has_stream`, `stream()` und den Variantenscan
 und räumt sie wieder weg. Ein Rot-Grün-A/B des Tests geht nicht (ohne
 `has_stream` parst die Datei nicht) — die Beweislast trägt die Messung oben.
+### Nachtrag 10 — der Freischuss pro Zielwechsel (Nutzervermutung, bestaetigt, 2026-09-02)
+
+Nutzerbeobachtung: „Feuerkrieger scheinen in der Masse ab einer gewissen Menge
+den Gattlingmodus anzuhaben." **Sie hatten ihn.** `Unit._begin_attack` setzte
+`_attack_cooldown = 0.0`, und weil der Zielwechsel nach einem Kill durch genau
+diese Funktion laeuft, gab **jeder Kill einen Gratisschuss**. Isoliert gemessen:
+Schuss, Nachladezaehler 1,50 s, Ziel stirbt — **0,05 s spaeter fliegt der
+naechste Ball**.
+
+**Gemessene Wirkung** (Wegwerf-Diagnose, 20 Feuerkrieger auf laufend sterbende
+Ziele): **0,963 statt 0,667 Schuss/s** je Kopf (1,44-fach), mit Fix 0,463. Die
+Verstaerkung skaliert ueberproportional mit der Masse — je mehr Schuetzen, desto
+schneller stirbt jedes Ziel, desto haeufiger der Freischuss. Genau deshalb fuehlte
+es sich „ab einer gewissen Menge" an.
+
+**Der Fix ist eine Zeile mit einer Bedingung:** der Zaehler wird nur noch fuer
+eine **frische** Aufnahme des Kampfes geleert (`state != State.ATTACK`) — ein
+Befehl oder eine Einheit, die aus dem Leerlauf einen Gegner entdeckt, schlaegt
+also weiterhin ohne kuenstliche Verzoegerung zu. Ein Zielwechsel **im** Kampf
+behaelt ihn: ein sterbendes Ziel ist keine nachgeladene Waffe. Auf jedem
+Zielwechselpfad ist der Zustand noch `ATTACK` (`_on_target_died`,
+`_retarget_or_idle`, der Bedrohungs-/Priester-Wechsel des Feuerkriegers, der
+Tausch der zweiten Reihe), auf jedem frischen `IDLE`/`MOVE`/`PANIC`.
+
+**Auf Nutzerwunsch gepruefte Nachbarschaft:**
+- **Nahkampf** — dasselbe Feld, also mitgefixt (Zielwechsel behaelt den
+  Schlagzaehler). Gemessen 0,50 Schlaege/s gegen ein Maximum von 1,25, also
+  keine Ueberhoehung.
+- **Wachturm-Besatzung** (`Watchtower._tick_crew_firewarrior`) und
+  **Luftschiffdeck** (`Airship._tick_deck_firewarrior`): **dieselbe Bauart
+  gefunden** — `_fire_cd[fw] = 0.0`, sobald kein Ziel in Reichweite ist. Der
+  naechste Gegner, der hereinlief, bekam einen Sofortball. Turm gemessen: 0,73
+  Baelle/s gegen ein Maximum von 0,67; nach dem Fix 0,67 und der Zaehler laeuft
+  im Leerlauf weiter statt sich zu leeren. Das Deck traf es seltener (der Reset
+  braucht dort ein Scan-Fenster ganz ohne Ziel), die Bauart war aber identisch.
+- **Katapult** (`_fire_cooldown`) und **Feuerramme** (`_reload`): **sauber**. Das
+  Katapult setzt seinen Zaehler nie zurueck, die Feuerramme zaehlt ihn sogar in
+  `tick()` unabhaengig vom Kampf herunter — das ist das eigentlich richtige
+  Modell. Gemessen 0,20 Schuss/s gegen ein Maximum von 0,19.
+
+**Balance-Folge, bewusst NICHT ausgeglichen (Nutzerentscheidung „nur den Fix"):**
+Der Freischuss trug die gesamte Massenstaerke der Feuerkrieger. Balance-Labor
+`feuerkrieger_vs_krieger_200_anmarsch` (2 Wiederholungen): **ohne** Fix Siege 2:0,
+125,5 BAe uebrig, Effizienz **2,68**, 100 % Schadensanteil — **mit** Fix Siege 0:2,
+0 BAe uebrig, Effizienz **0,18**, 47 %. Ein kuerzerer Cooldown kann das **nicht**
+nachbilden (probiert: 1,0 s ergibt 0,31): der Freischuss wirkte *pro Kill*, also
+massenabhaengig, ein Cooldown wirkt gleichmaessig und wuerde vor allem
+Einzelkaempfer aufwerten. Eine Neu-Einstellung der Feuerkrieger (Cooldown,
+Splash) steht damit als eigene, messbare Aufgabe aus — sie haengt jetzt nicht
+mehr an einem Fehler.
+
+**Verifikation:** Ladecheck exit 0 ohne Ausgabe, **Suite 5044 Zusicherungen gruen**
+(0 failed, kein `SCRIPT ERROR`). Vier neue Tests, alle gegen den ungefixten Stand
+geprueft: der Nachladezaehler ueberlebt den Kill-Zielwechsel (fiel vorher auf
+0,00), eine frische Aufnahme schlaegt weiterhin sofort zu, und Turm- wie
+Deckschuetze behalten ihren Zaehler ohne Ziel (fiel vorher auf 0,00).

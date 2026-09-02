@@ -552,3 +552,19 @@ func test_ordered_warriors_raze_manned_tower() -> void:
 	check(razed < MAX_TICKS, "ordered warriors raze the manned watchtower")
 	check(tower not in w.bm.buildings, "razed tower deregistered")
 	_free_world(w)
+## Same free-shot bug as Unit._begin_attack (user report 2026-09-02): losing
+## every target wiped the gunner's reload, so the next enemy that walked into
+## reach ate an instant fireball. The reload keeps RUNNING while idle, but it is
+## never reset. Measured before the fix: 0.73 balls/s against a max of 0.67.
+func test_tower_gunner_keeps_its_reload_without_a_target() -> void:
+	var w: Dictionary = _make_world()
+	var tower: Watchtower = _tower(w, w.tribe0)
+	var fire: Unit = w.unit_manager.spawn_unit(FIREWARRIOR_SCENE, 0, Vector3(32, 0, 33))
+	check(tower.admit_crew(fire), "the firewarrior mans the tower")
+	tower._fire_cd[fire] = 1.4          # half-spent reload, no enemy anywhere
+	w.bm.tick(0.05)
+	var left: float = float(tower._fire_cd.get(fire, -1.0))
+	check(left > 1.0,
+		"the reload survives having no target (%.2f of 1.4 left)" % left)
+	check(left < 1.4, "and it keeps counting down while idle")
+	_free_world(w)

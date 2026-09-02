@@ -1547,3 +1547,46 @@ func test_rolling_unit_tumbles_over_the_rim() -> void:
 	check(victim.state == Unit.State.DEAD or victim.state == Unit.State.THROWN,
 		"and it is falling or already dead, not standing on nothing")
 	_free_world(w)
+# --- Weapon cooldown across target switches (user report 2026-09-02) ---------
+
+## "Firewarriors feel like they switch to gatling mode in mass": they did.
+## _begin_attack wiped _attack_cooldown, and since a retarget after a kill goes
+## through it, every kill bought a free extra shot. With enough shooters the
+## target always dies inside the 1.5 s cooldown, so the sustained rate measured
+## 0.963 instead of 0.667 shots/s per head (1.44x). A retarget is not a reload.
+func test_kill_retarget_keeps_the_weapon_cooldown() -> void:
+	var w: Dictionary = _make_world()
+	var fw: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(50, 50))
+	var first: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(54, 50))
+	# Tick until the first fireball is away (the cooldown is then full).
+	var ticks: int = 0
+	while fw._attack_cooldown <= 0.0 and ticks < 200:
+		fw.tick(TICK)
+		w.unit_manager.tick(TICK)
+		ticks += 1
+	check(fw._attack_cooldown > 0.0, "the firewarrior fired and is reloading")
+	var cd_before: float = fw._attack_cooldown
+	# The target dies; a fresh one stands right next to it.
+	var second: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(54, 50.4))
+	first.take_damage(10000)
+	fw.tick(TICK)
+	w.unit_manager.tick(TICK)
+	check(fw.attack_target == second, "it retargets the survivor")
+	check(fw._attack_cooldown >= cd_before - TICK * 3.0,
+		"and carries its cooldown over (%.2f of %.2f left)"
+			% [fw._attack_cooldown, cd_before])
+	_free_world(w)
+
+
+## The other half of the rule: a FRESH engagement still strikes without delay,
+## so ordered attacks and idle units spotting an enemy stay responsive.
+func test_fresh_engagement_still_strikes_at_once() -> void:
+	var w: Dictionary = _make_world()
+	var fw: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(50, 50))
+	var foe: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(54, 50))
+	fw._attack_cooldown = 99.0     # as if it had fired long ago (it freezes when idle)
+	check(fw.state != Unit.State.ATTACK, "it is not in a fight yet")
+	fw.order_attack(foe)
+	check(fw._attack_cooldown == 0.0,
+		"engaging out of IDLE clears the stale cooldown (no arbitrary wait)")
+	_free_world(w)

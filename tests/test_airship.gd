@@ -1315,3 +1315,20 @@ func test_move_order_drops_the_sticky_attack_target() -> void:
 	check(far_foe.health == far_foe.max_health,
 		"and the abandoned right-click target is left alone")
 	_free_world(w)
+## Deck gunners had the same free-shot bug as the tower crew and the ground
+## units (user report 2026-09-02): with nothing in reach their reload was wiped,
+## so the next enemy to fly past ate an instant ball. It keeps running while
+## idle, but it is never reset.
+func test_deck_gunner_keeps_its_reload_without_a_target() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
+	var fw: Unit = _board(w, ship, FIREWARRIOR_SCENE)
+	check(fw.siege_boarded, "firewarrior aboard")
+	ship._fire_cd[fw] = 1.4      # half-spent reload, no enemy anywhere near
+	ship._deck_scan = 0.0        # let the throttled deck scan run this tick
+	_tick_world(w)
+	_tick_world(w)
+	var left: float = float(ship._fire_cd.get(fw, -1.0))
+	check(left > 1.0, "the reload survives having no target (%.2f of 1.4 left)" % left)
+	check(left < 1.4, "and it keeps counting down while idle")
+	_free_world(w)

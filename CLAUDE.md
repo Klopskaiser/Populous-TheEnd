@@ -313,6 +313,12 @@ Laufzeit-Terrainverformung (Erdbeben/Vulkan/Ebene/Absinken).
   4 % → 12 %; rollendes Ziel 10 % → 30 %). Die Summe aus Anheben und Umwerfen ist
   damit zur **Laufzeit nicht mehr konstant** — nur die Basiswerte sind es.
 
+**Nachladen ist zielunabhängig:** Der Angriffs-/Nachladezähler einer Einheit (und der eines
+Turm- oder Deckschützen) wird bei einem **Zielwechsel im Kampf nicht** zurückgesetzt — ein
+sterbendes Ziel ist keine nachgeladene Waffe. Nur die **frische** Aufnahme eines Kampfes
+(aus Leerlauf/Marsch oder per Befehl) schlägt sofort zu. Bis 2026-09-02 gab jeder Kill einen
+Gratisschuss, was massierte Feuerkrieger auf das 1,44-Fache ihrer Feuerrate brachte.
+
 **Zustandsanzeigen werfen keinerlei Schatten** (Sterne bei kritischer
 Verletzung, Panik, Brand, Hypnose): es sind UI-Glyphen über dem Kopf, und in der
 Massenschlacht würden hunderte davon die Shadow-Map fluten. Weltgeometrie

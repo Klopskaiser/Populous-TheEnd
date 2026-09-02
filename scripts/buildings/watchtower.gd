@@ -230,7 +230,11 @@ func _tick_crew_firewarrior(fw, delta: float) -> void:
 	var reach: float = Firewarrior.FIRE_RANGE + TOWER_RANGE_BONUS
 	var target: Unit = _nearest_enemy(origin, reach)
 	if target == null:
-		_fire_cd[fw] = 0.0
+		# Nothing to shoot: the reload KEEPS RUNNING but is never wiped. Zeroing
+		# it here handed the gunner a fully loaded weapon the moment its last
+		# target died, so the next one that walked in ate an instant ball (same
+		# free-shot bug as Unit._begin_attack, user report 2026-09-02).
+		_fire_cd[fw] = maxf(cd, 0.0)
 		_set_crew_anim(fw, &"idle")
 		return
 	fw.facing = _flat_dir(origin, target.position)
