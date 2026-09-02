@@ -655,6 +655,11 @@ func _nearest_enemy_building_by_wall(radius: float):
 	for b in building_manager.buildings:
 		if not is_instance_valid(b) or b.tribe_id == tribe_id or b.health <= 0:
 			continue
+		if not b.is_attackable():
+			# Reincarnation site (10d/10g): the deck guns cannot harm it, so it
+			# must not even be picked — the auto scan used to and the deck
+			# firewarriors wasted their shots on it (user bug).
+			continue
 		var d: float = b.footprint_distance_to(flat)
 		if d > radius:
 			continue
@@ -774,6 +779,7 @@ func _tick_deck_firewarrior(fw, delta: float) -> void:
 func _free_fire_building(reach: float):
 	var b = _auto_building
 	if b != null and is_instance_valid(b) and b.health > 0 and b.tribe_id != tribe_id \
+			and b.is_attackable() \
 			and b.footprint_distance_to(Vector2(position.x, position.z)) <= reach:
 		return b
 	return _nearest_enemy_building_by_wall(reach)

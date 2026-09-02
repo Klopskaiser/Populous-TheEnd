@@ -254,7 +254,12 @@ func _tick_crew_preacher(pr, delta: float) -> void:
 	var nearest_d: float = INF
 	for u in unit_manager.get_units_in_radius(origin, reach):
 		if u.tribe_id == tribe_id or u.state == Unit.State.DEAD \
-				or u.is_conversion_immune() or not u.is_targetable():
+				or u.is_conversion_immune() or not u.is_targetable() \
+				or u.is_airborne():
+			# is_airborne: airship deck crew (and whirled bodies) are no
+			# legitimate conversion target — begin_conversion refuses them, so
+			# the tower preacher must not even try (user bug); the deck
+			# preacher tick has carried this guard from the start.
 			continue
 		var d: float = _flat_dist(origin, u.position)
 		if d > reach:

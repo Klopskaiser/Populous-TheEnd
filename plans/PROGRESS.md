@@ -9296,3 +9296,43 @@ Loop-Dateien also ohne Import-Loop liefern.
 also sind nur die beiden Prediger-Gesänge (prozedural) zu hören; `unit_land`,
 `unit_air_death` und `spell_hypnosis` bleiben bis zu echten Dateien stumm —
 dieselbe Einschränkung, unter der Phase 10b abgenommen wurde.
+### Nachtrag 5 — zwei Zielwahl-Fehler aus dem Nutzertest (2026-09-02)
+
+**Deck-Feuerkrieger beschossen den Reinkarnationsplatz.** `order_attack_building`
+prüfte `is_attackable()` seit 10g, die **automatische** Zielsuche
+`Airship._nearest_enemy_building_by_wall` nicht — sie nahm den unverwundbaren
+Platz als nächstes Gebäude und die Deckgeschütze verpufften darauf. Filter dort
+ergänzt, dazu in `_free_fire_building` die Nachprüfung des gemerkten Ziels (nach
+dem Muster von `CrewedVehicle`). Das ist genau die Duplikation, die
+`ai_state.gd:406` schon als Ursache dieser Fehlerklasse benennt: **acht** Pfade
+fragen `is_attackable()`, der neunte fehlte.
+
+**Prediger wollten Luftschiffinsassen bekehren.** `begin_conversion` weist
+Deckpassagiere ab (`rides_airborne()`), die **Zielwahl** fragte danach aber nicht:
+`Preacher._pick_convert_focus` und `_refresh_conversion` nahmen den nächsten
+Kandidaten und damit den Passagier eines vorbeifliegenden Schiffs als
+Anlauf-Fokus — der Prediger stellte sich unter das Schiff und predigte ins Leere,
+während der echte Gegner am Boden stehen blieb. Neu wird `is_airborne()` in
+beiden Scans, in der Nachprüfung des **befohlenen** Ziels und in
+`Preacher.order_attack` gefragt; ein Rechtsklick auf Deckbesatzung wird damit
+abgewiesen wie ein Nahkampfbefehl (`_begin_attack` lehnt Flieger seit 10a ab).
+Im Boden-Scan sitzt der Filter **vor** der Priesterduell-Prüfung: ein fliegender
+Prediger ist auch für den Nahkampf unerreichbar.
+
+**Zwei Einordnungen, damit der Umfang stimmt:** Der *Einstieg* über
+`_engage_on_sight` war nie betroffen — `_scan_for_enemy` filtert `FLAG_AIRBORNE`
+für Nahkämpfer, also holt kein Flieger einen Prediger in den CAST-Zustand; der
+Fehler zeigte sich nur, wenn ein Bodengegner ihn hineinholte und die Fokuswahl
+dann auf den näheren Flieger sprang. Und die Wachturm-Kopie des Pacify-Scans
+(`Watchtower._tick_crew_preacher`) hatte den Guard ebenfalls nicht, dort aber
+**ohne sichtbare Folge** (ein abgewiesener Aufruf pro Tick) — sie ist der
+Vollständigkeit wegen mitgezogen, der Test dazu hält die Regel fest und
+reproduziert keinen Bug. Der Deck-Prediger (`Airship._tick_deck_preacher`) hatte
+`is_airborne()` von Anfang an.
+
+**Verifikation:** Ladecheck exit 0 ohne Ausgabe, **Suite 4993 Zusicherungen grün**
+(0 failed, kein `SCRIPT ERROR`). Die drei neuen Tests in `tests/test_airship.gd`
+sind gegen den ungefixten Stand geprüft: **4 Zusicherungen fallen ohne die
+Fixes** (3 Gebäudescan, 1 Prediger-Befehl) bzw. 2 weitere ohne den
+Prediger-Fix — die Fokus-Zusicherung braucht dafür einen Bodengegner *hinter*
+dem Schiff, sonst passiert der Test in beiden Ständen.

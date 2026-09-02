@@ -139,8 +139,8 @@ func _pick_convert_focus() -> Unit:
 	for u in path_service.get_enemy_candidates_cached(
 			position, AGGRO_RADIUS, tribe_id):
 		if u == self or u.state == State.SIT or u.is_conversion_immune() \
-				or not u.is_targetable():
-			continue
+				or not u.is_targetable() or u.is_airborne():
+			continue   # deck crew are no legitimate target (user bug)
 		var d: float = _flat_dist(position, u.position)
 		if d < d_any:
 			d_any = d
@@ -157,13 +157,16 @@ func order_attack(enemy: Unit) -> void:
 	if not can_take_orders():
 		return
 	if enemy != null and is_instance_valid(enemy) and enemy.state != State.DEAD \
-			and enemy.tribe_id != tribe_id and not enemy.is_conversion_immune():
+			and enemy.tribe_id != tribe_id and not enemy.is_conversion_immune() \
+			and not enemy.is_airborne():
 		_end_attack()   # clears _target_ordered — re-set it below (sticky order)
 		_set_convert_target(enemy)
 		_target_ordered = true   # march to THIS one; the auto-scan must not drop it
 		_set_state(State.CAST)
 		return
-	super.order_attack(enemy)   # priest/shaman (conversion-immune) -> melee duel
+	# priest/shaman (conversion-immune) -> melee duel; an AIRBORNE enemy ends
+	# up refused there too (_begin_attack: melee cannot reach a flyer).
+	super.order_attack(enemy)
 
 
 ## While assaulting a building, clear the entrance by CONVERTING convertible
@@ -196,7 +199,7 @@ func _tick_convert(delta: float) -> void:
 		var ot = _convert_target
 		if ot == null or not is_instance_valid(ot) or ot.state == State.DEAD \
 				or ot.tribe_id == tribe_id or ot.is_conversion_immune() \
-				or not ot.is_targetable():
+				or not ot.is_targetable() or ot.is_airborne():
 			_target_ordered = false   # order void -> fall through to auto behaviour
 		elif _flat_dist(position, ot.position) > CONVERT_RANGE * 0.85:
 			if not _approach(ot.position, delta):
@@ -284,6 +287,14 @@ func _refresh_conversion() -> void:
 		# Housed/protected units (e.g. a tower's crew reserve) are never a
 		# conversion target — same guard as the tower/deck preacher ticks.
 		if not u.is_targetable():
+			continue
+		# Airship passengers (and whirled bodies) are no legitimate target
+		# either: begin_conversion refuses them, so latching on here only
+		# pinned this preacher on something that can never say yes (user bug —
+		# it stood channelling under a passing ship). Asked BEFORE the duel
+		# check on purpose: a flying priest is out of melee reach as well,
+		# _begin_attack would refuse him anyway.
+		if u.is_airborne():
 			continue
 		var d: float = _flat_dist(position, u.position)
 		if u.is_conversion_immune():

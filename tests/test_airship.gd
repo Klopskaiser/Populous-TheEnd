@@ -1156,3 +1156,104 @@ func test_enemy_ship_with_inbound_crew_is_not_capturable() -> void:
 	check(ship.crew_count() > 0,
 		"a claimed enemy ship counts as taken for the capture test")
 	_free_world(w)
+# --- Bugfixes aus dem Nutzertest (2026-09-02) --------------------------------------
+
+## Deck firewarriors auto-attacked the enemy REINCARNATION SITE: it is
+## invulnerable (10d) and not a legal target (10g), so every shot at it was
+## thrown away. order_attack_building refused it from the start — the auto scan
+## did not, which is where the wasted shots came from.
+func test_deck_guns_never_pick_the_reincarnation_site() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
+	_board(w, ship, FIREWARRIOR_SCENE)
+	var site: Building = w.building_manager.place(
+		REINC_SCENE, w.tribe1, Vector2i(62, 60), 0, true)
+	check(ship._nearest_enemy_building_by_wall(20.0) == null,
+		"with only the site in reach the wall scan finds NO target")
+	var hut: Building = w.building_manager.place(
+		HUT_SCENE, w.tribe1, Vector2i(64, 63), 0, true)
+	check(ship._nearest_enemy_building_by_wall(20.0) == hut,
+		"the hut is picked instead — the site is skipped, not merely outranked")
+	# A stale auto pick must not slip through the free-fire revalidation either.
+	ship._auto_building = site
+	check(ship._free_fire_building(20.0) != site,
+		"free fire re-checks is_attackable and drops the site")
+	for i in range(60):
+		_tick_world(w)
+	check(ship.attack_building != site, "and it never becomes the ordered target")
+	_free_world(w)
+
+
+## Preachers tried to convert AIRSHIP PASSENGERS: begin_conversion refuses them
+## (out of reach at altitude), so the sermon could never land — the preacher
+## just stood there. Deck crew must not even be picked as a target.
+func test_ground_preacher_ignores_airship_passengers() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 1, w.nav.cell_to_world(Vector2i(60, 60)))
+	var passenger: Unit = _board(w, ship, BRAVE_SCENE, 1)
+	check(passenger.rides_airborne(), "the passenger rides the deck")
+	# A legal target on the ground, FARTHER away than the ship: the preacher must
+	# walk to that one. Before the fix the nearer deck passenger won the focus and
+	# the preacher stood under the ship channelling at something it can never
+	# reach (begin_conversion refuses a flyer).
+	var ground: Unit = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, w.nav.cell_to_world(Vector2i(66, 60)))
+	var pr: Unit = w.unit_manager.spawn_unit(
+		PREACHER_SCENE, 0, w.nav.cell_to_world(Vector2i(62, 60)))
+	var ticks: int = 0
+	while pr.state != Unit.State.CAST and ticks < 200:
+		_tick_world(w)
+		ticks += 1
+	check(pr.state == Unit.State.CAST, "the ground brave pulls the preacher into CAST")
+	check(pr._convert_target != passenger,
+		"the deck passenger is never the approach focus")
+	for i in range(60):
+		_tick_world(w)
+	check(passenger.tribe_id == 1 and passenger.state != Unit.State.SIT,
+		"and it is never pacified")
+	# An explicit order on a passenger is refused as well (like a melee order).
+	pr.order_attack(passenger)
+	check(pr._convert_target != passenger,
+		"a right-click on deck crew is no conversion order")
+	_free_world(w)
+
+
+## Same rule for a preacher garrisoned in a watchtower — its scan is a second
+## copy of the pacify loop and lacked the guard the DECK preacher always had.
+## Note: this one locks the RULE, it does not reproduce a visible bug — the tower
+## preacher only wasted a refused begin_conversion call per tick, it could never
+## actually pacify a flyer.
+func test_tower_preacher_ignores_airship_passengers() -> void:
+	var w: Dictionary = _make_world()
+	var tower: Building = w.building_manager.place(
+		WATCHTOWER_SCENE, w.tribe, Vector2i(60, 60), 0, true)
+	var pr: Unit = w.unit_manager.spawn_unit(
+		PREACHER_SCENE, 0, w.nav.cell_to_world(Vector2i(62, 62)))
+	pr.order_garrison(tower)
+	var ticks: int = 0
+	while not pr.garrison_housed and ticks < MAX_TICKS:
+		_tick_world(w)
+		ticks += 1
+	check(pr.garrison_housed, "the preacher is housed in the tower")
+	# Board FAR away and fly in: a brave walking to a ship parked next to the
+	# tower would be pacified on the ground first, which is perfectly legal.
+	var ship: Airship = _spawn_ship(w, 1, w.nav.cell_to_world(Vector2i(90, 60)))
+	var passenger: Unit = _board(w, ship, BRAVE_SCENE, 1)
+	check(passenger.rides_airborne(), "the passenger rides the deck")
+	var over_tower: Vector3 = w.nav.cell_to_world(Vector2i(62, 60))
+	ship.order_move(over_tower)
+	var flown: int = 0
+	while Vector2(ship.position.x - over_tower.x,
+			ship.position.z - over_tower.z).length() > 3.0 and flown < MAX_TICKS:
+		_tick_world(w)
+		flown += 1
+	check(Vector2(ship.position.x - over_tower.x,
+			ship.position.z - over_tower.z).length() <= 3.0,
+		"the ship hovers next to the tower")
+	for i in range(60):
+		_tick_world(w)
+	check(passenger.tribe_id == 1 and passenger.state != Unit.State.SIT,
+		"deck crew right next to the tower are never pacified")
+	check(not pr.station_channeling,
+		"and the tower preacher does not stand there channelling at them")
+	_free_world(w)
