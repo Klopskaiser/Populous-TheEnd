@@ -9657,3 +9657,60 @@ Versuch zeigte prompt die dokumentierte **Falsch-Gruen-Falle**: der alte Stand
 meldete „29 passed, 0 failed" MIT drei `SCRIPT ERROR`-Zeilen im Output. Die
 Beweislast tragen die Zusicherungen selbst (kein Stoss in 20 Treffern auf ein
 rollendes Ziel, Tempo 5,5 → 7,5 → Deckel 12).
+### Nachtrag 14 — Feuerrammen im Feldkampf, und eine Verzerrung im Balance-Labor (2026-09-02)
+
+Nutzerfrage: „Wie gut sind Feuerrammen im Kampf — der Eigenbeschuss wirkt
+chaotisch, Vor- und Nachteil zugleich?" Dafuer drei neue Laborpaarungen mit
+**gleichen 32 BAe je Seite** und **derselben Gegenseite** (20 Krieger + 12
+Feuerkrieger), keine Braves: ein **Spiegel** als Eichmass, dann 8 bzw. 16 BAe in
+Rammen umgeschichtet.
+
+**Erst kam ein Werkzeugfehler heraus.** Der Spiegel — dieselbe Armee gegen sich
+selbst — ging **0:9** aus, Effizienz 0,75. Mit getauschter Aufstellungsreihenfolge
+**8:1** und 1,31. Ursache: `_spawn_side` bestimmt die Reihenfolge in `um.units`
+und damit, wer im Tick zuerst handelt — **wer spaeter handelt, gewinnt** (er
+reagiert auf die schon bewegten Gegner). Das verzerrte JEDE Paarung des Labors um
+rund ±30 %. `_fight` bekommt deshalb ein `b_first`, das `_run_scenario` je
+Wiederholung abwechselt; bei gerader Wiederholungszahl hebt sich der Vorteil auf,
+und der Spiegel landet bei **1,09** (4:2 von 6). Im Spiel selbst mischen sich die
+Seiten in `um.units`, dort gibt es diesen Blockvorteil nicht.
+
+**Nachkontrolle der Feuerkrieger-Zahlen dieser Sitzung:** `200_anmarsch` bleibt
+mit abwechselnder Reihenfolge bei **0,38 / 71 %** — bei 200 gegen 200 verwaesert
+sich der Initiativvorteil, die Aussagen aus den Nachtraegen 10-13 stehen also.
+Betroffen war vor allem die kleine, dicht gepackte 32-BAe-Reihe.
+
+**Das Ergebnis zur eigentlichen Frage** (6 Wiederholungen je Zeile, 3 je
+Aufstellungsreihenfolge):
+
+| Aufstellung A (32 BAe) | Siege A:B | BAe uebrig A:B | Effizienz | Dauer | Schaden A |
+|---|---|---|---|---|---|
+| Spiegel, keine Rammen (Eichmass) | 4:2 | 4,8 : 2,3 | **1,09** | 17 s | 96 % |
+| 4 Rammen + 16 Krieger + 8 Feuerkrieger | 3:3 | 1,8 : 8,3 | **0,78** | 26 s | 86 % |
+| 8 Rammen + 8 Krieger + 8 Feuerkrieger | 0:3 | 1,0 : 19,7 | **0,40** | 57 s | 54 % |
+| 4 Rammen, Eigenbeschuss **aus** (Sonde) | 5:0 | 16,7 : 0,3 | **2,07** | 33 s | 99 % |
+| 8 Rammen, Eigenbeschuss **aus** (Sonde) | 3:0 | 8,8 : 1,3 | **1,32** | 60 s | 96 % |
+
+**Befund:** Rammen sind im Feldkampf ein **Netto-Nachteil**, und der Nachteil
+**skaliert mit ihrer Zahl** (1,09 → 0,78 → 0,40). Nicht weil die Waffe schwach
+waere: mit abgeschaltetem Eigenbeschuss verdoppeln 4 Rammen die Armee-Effizienz
+(**2,07**). Der Eigenbeschuss frisst also nicht einen Teil der Wirkung, sondern
+mehr als die ganze — er dreht ein +90 % in ein −28 %. Der Vergleich 4 gegen 8
+Rammen ohne Eigenbeschuss (2,07 gegen 1,32) zeigt zusaetzlich abnehmenden
+Grenznutzen: die Flaechen ueberlappen, und jede Ramme ersetzt 2 BAe Infanterie.
+
+Nebenbefund: Rammen **ziehen den Kampf in die Laenge** (17 s → 26 s → 57 s, bei 8
+Rammen mit Zeitueberschreitungen). Sie sind zaeh und langsam, das Gefecht
+zerfasert.
+
+**Nicht geaendert** — die Frage war eine Messung, keine Beauftragung. Der
+Eigenbeschuss ist ausdruecklich so gebaut („Friendly fire on purpose (flames know
+no friends)", `fire_ram.gd`), und die Ramme ist eine **Belagerungs**waffe: gegen
+Gebaeude misst das Labor sie ueberhaupt nicht (dokumentierte Grenze). Wer sie im
+Feld will, braucht entweder eine Schadenszaehmung gegen eigene Einheiten oder ein
+Verhalten, das nicht in die eigene Linie feuert.
+
+**Verifikation:** Ladecheck exit 0 ohne Ausgabe, Suite unveraendert **5058
+Zusicherungen gruen** (das Labor ist nicht Teil der Suite). Die
+Eigenbeschuss-Sonde war ein temporaerer `tribe_id`-Filter in `_apply_flames` und
+ist zurueckgenommen.

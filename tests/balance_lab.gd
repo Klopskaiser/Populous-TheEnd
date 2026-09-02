@@ -170,6 +170,27 @@ const SCENARIOS: Array = [
 	 "b": [[&"krieger", 12], [&"feuerkrieger", 9], [&"prediger", 9]],
 	 "frage": "Zahlt sich der Prediger-Anteil aus? 30 BÄ je Seite"},
 
+	# --- Zahlt sich die Feuerramme in einer ARMEE aus? (Nutzerfrage 2026-09-02) ---
+	# Die Frage ist nicht "Ramme gegen X", sondern: bringt es etwas, einen Teil
+	# der Armee-BAe in Rammen zu stecken? Deshalb dreimal dieselbe Gegenseite
+	# (20 Krieger + 12 Feuerkrieger = 32 BAe) und drei Aufstellungen mit
+	# EBENFALLS 32 BAe. Die erste Zeile ist ein SPIEGEL und damit das Eichmass:
+	# sie muss bei ~1,0 landen, sonst taugt die Messreihe nicht (sie hat genau
+	# das aufgedeckt, siehe die Aufstellungsreihenfolge in _fight).
+	# Nicht in BAe enthalten: 10 Holz je Ramme (4 Rammen = 40, 8 = 80).
+	{"name": "armee_ohne_feuerrammen",
+	 "a": [[&"krieger", 20], [&"feuerkrieger", 12]],
+	 "b": [[&"krieger", 20], [&"feuerkrieger", 12]],
+	 "frage": "Eichmass: dieselbe Armee gegen sich selbst (32 BAe je Seite)"},
+	{"name": "armee_mit_feuerrammen",
+	 "a": [[&"feuerramme", 4, 2], [&"krieger", 16], [&"feuerkrieger", 8]],
+	 "b": [[&"krieger", 20], [&"feuerkrieger", 12]],
+	 "frage": "8 der 32 BAe in 4 Feuerrammen: Vorteil oder Eigenbeschuss?"},
+	{"name": "armee_mit_vielen_feuerrammen",
+	 "a": [[&"feuerramme", 8, 2], [&"krieger", 8], [&"feuerkrieger", 8]],
+	 "b": [[&"krieger", 20], [&"feuerkrieger", 12]],
+	 "frage": "Die halbe Armee (16 BAe) in 8 Feuerrammen: skaliert das Chaos?"},
+
 	# --- Werte oder Verhalten? Die verteidigende Seite steht und schiesst. ---
 	{"name": "krieger_vs_haltende_feuerkrieger", "a": [[&"krieger", 20]], "b": [[&"feuerkrieger", 20]],
 	 "hold_b": true,
@@ -249,7 +270,8 @@ func _run_scenario(scenario: Dictionary, reps: int, seconds: float,
 	var closest: float = INF
 	var left_a_samples: Array[float] = []
 	for rep in range(reps):
-		var r: Dictionary = _fight(scenario, BASE_SEED + rep * 7919, seconds, island)
+		var r: Dictionary = _fight(scenario, BASE_SEED + rep * 7919, seconds,
+			island, rep % 2 == 1)
 		match int(r["winner"]):
 			0: wins_a += 1
 			1: wins_b += 1
@@ -306,8 +328,17 @@ func _run_scenario(scenario: Dictionary, reps: int, seconds: float,
 
 
 ## Ein einzelnes Gefecht. Rückgabe in BÄ, damit alles vergleichbar bleibt.
+## `b_first` stellt Seite B ZUERST auf. Das ist keine Kosmetik: die
+## Aufstellungsreihenfolge bestimmt die Reihenfolge in `um.units` und damit, wer
+## im Tick zuerst handelt — und wer SPAETER handelt, gewinnt. Ein perfekter
+## Spiegel (armee_ohne_feuerrammen) ging 0:9 fuer die zweite Seite aus, mit
+## getauschter Reihenfolge 8:1 fuer die andere: eine Verzerrung von rund
+## +-30 % Effizienz, die JEDE Paarung des Labors betraf. _run_scenario
+## wechselt deshalb je Wiederholung ab; bei GERADER Wiederholungszahl hebt
+## sich der Vorteil auf. Im Spiel selbst mischen sich die Seiten in
+## `um.units`, dort gibt es diesen Blockvorteil also nicht.
 func _fight(scenario: Dictionary, rep_seed: int, seconds: float,
-		island: bool) -> Dictionary:
+		island: bool, b_first: bool = false) -> Dictionary:
 	seed(rep_seed)
 	var td: TerrainData = TerrainData.new()
 	if island:
@@ -333,8 +364,12 @@ func _fight(scenario: Dictionary, rep_seed: int, seconds: float,
 	# Verlustrechnung zählt aber, wem sie ANFANGS gehörten.
 	var origin: Dictionary = {}
 	var be_of: Dictionary = {}
-	_spawn_side(um, nav, 0, mid + Vector2i(0, -half), scenario["a"], origin, be_of)
-	_spawn_side(um, nav, 1, mid + Vector2i(0, half), scenario["b"], origin, be_of)
+	if b_first:
+		_spawn_side(um, nav, 1, mid + Vector2i(0, half), scenario["b"], origin, be_of)
+		_spawn_side(um, nav, 0, mid + Vector2i(0, -half), scenario["a"], origin, be_of)
+	else:
+		_spawn_side(um, nav, 0, mid + Vector2i(0, -half), scenario["a"], origin, be_of)
+		_spawn_side(um, nav, 1, mid + Vector2i(0, half), scenario["b"], origin, be_of)
 
 	# Beide Seiten greifen an (Angriffsbewegung, wie im Stresstest): so entsteht
 	# Kontakt auch dann, wenn eine Seite reine Fernkämpfer ohne Vorwärtsdrang hat.
