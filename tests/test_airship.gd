@@ -1257,3 +1257,61 @@ func test_tower_preacher_ignores_airship_passengers() -> void:
 	check(not pr.station_channeling,
 		"and the tower preacher does not stand there channelling at them")
 	_free_world(w)
+## Right-click on an enemy: the ship must actually reach FIRING range. It aimed
+## reach-1.0 from the target but halts arrive_eps (~2 m) short of its path end,
+## so it parked at 12.0 m with a reach of 11.0 — hovering over the enemy without
+## ever firing (user bug). Measured: 0 damage in 40 s before the fix.
+func test_ordered_attack_closes_to_firing_range() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(40, 60)))
+	for i in range(3):
+		_board(w, ship, FIREWARRIOR_SCENE)
+	var foe: Unit = w.unit_manager.spawn_unit(
+		WARRIOR_SCENE, 1, w.nav.cell_to_world(Vector2i(70, 60)))
+	foe.speed = 0.0   # measure the SHIP, not a fleeing target
+	var reach: float = Firewarrior.FIRE_RANGE + Airship.RANGE_BONUS
+	ship.order_attack(foe)
+	var ticks: int = 0
+	while foe.health == foe.max_health and ticks < 400:
+		_tick_world(w)
+		ticks += 1
+	var dist: float = Vector2(ship.position.x - foe.position.x,
+		ship.position.z - foe.position.z).length()
+	check(dist <= reach,
+		"the ship stands inside its %.1f m reach (%.2f m)" % [reach, dist])
+	check(foe.health < foe.max_health,
+		"and the deck firewarriors actually hit the ordered target")
+	_free_world(w)
+
+
+## A fresh move order replaces the attack order. The airship's sticky
+## _ordered_unit escaped that base rule, and since a set _ordered_unit switches
+## _tick_auto_engage off, an attack-move issued after a right-click flew its
+## whole route without engaging anything — the "attack-move only fires once it
+## stands at the destination" report. Measured: 0 damage to an enemy 2 m off the
+## flight path before the fix.
+func test_move_order_drops_the_sticky_attack_target() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(40, 60)))
+	for i in range(3):
+		_board(w, ship, FIREWARRIOR_SCENE)
+	var far_foe: Unit = w.unit_manager.spawn_unit(
+		WARRIOR_SCENE, 1, w.nav.cell_to_world(Vector2i(40, 90)))
+	far_foe.speed = 0.0
+	ship.order_attack(far_foe)
+	check(ship._ordered_unit == far_foe, "the right-click sets the sticky target")
+	var on_route: Unit = w.unit_manager.spawn_unit(
+		WARRIOR_SCENE, 1, w.nav.cell_to_world(Vector2i(62, 62)))
+	on_route.speed = 0.0
+	ship.order_move(w.nav.cell_to_world(Vector2i(100, 60)), false, true)
+	check(ship._ordered_unit == null,
+		"the move order drops it — otherwise auto-engage stays off for the route")
+	var ticks: int = 0
+	while on_route.health == on_route.max_health and ticks < 400:
+		_tick_world(w)
+		ticks += 1
+	check(on_route.health < on_route.max_health,
+		"the attack-move engages the enemy beside the flight path (%d ticks)" % ticks)
+	check(far_foe.health == far_foe.max_health,
+		"and the abandoned right-click target is left alone")
+	_free_world(w)

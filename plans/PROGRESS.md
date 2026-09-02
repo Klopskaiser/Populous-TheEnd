@@ -9375,3 +9375,45 @@ bewusst ungenutzt (`_priority_loop_mask` kennt nur Brand > Panik > krit. Schaden
 den ungefixten Stand geht hier **nicht** — ohne die neuen Funktionen parst die
 Testdatei nicht; die Beweislast trägt der Grep oben. Optisch geprüft ist es noch
 nicht: das steht beim Nutzer.
+### Nachtrag 7 — Luftschiff-Feuerkrieger schossen nicht (Nutzerreport, 2026-09-02)
+
+Zwei unabhängige Ursachen, beide am Code gemessen (Wegwerf-Diagnose, 3 Feuerkrieger
+an Bord, Reichweite 11,0 m):
+
+**(1) Rechtsklick: das Schiff parkte 1 m zu weit weg.** `_fly_into_reach` zielte
+`reach - 1.0` vor das Ziel, aber ein Schiff gilt schon als „angekommen", wenn es
+`arrive_eps()` (~2 m) vor seinem Wegende ist — Standabstand also `reach + 1.0`.
+**Gemessen: 12,00 m bei 11,0 m Reichweite, 0 Schaden in 40 s.** Genau diese
+`arrive_eps`-Korrektur stand seit dem Attack-Move-Stutter-Fix in
+`_tick_auto_engage` — der **Befehlspfad** hatte sie nie. Jetzt zielt er auf
+`reach × ENGAGE_STOP_FRAC − arrive_eps()`; nach dem Fix: **8,5 m, Ziel tot**.
+
+**(2) Angriffsmove: ein altes Rechtsklick-Ziel schaltete die Zielsuche ab.**
+`Unit.order_move` beendet den Angriff und löscht das Gebäudeziel — das **eigene
+klebende `_ordered_unit`** des Luftschiffs entkam dieser Regel. Und weil ein
+gesetztes `_ordered_unit` `_tick_auto_engage` ganz früh abbricht, flog ein
+Angriffsmove **nach** einem Rechtsklick seine komplette Route, ohne irgendetwas
+anzugreifen — das ist der Report „greift erst am Zielpunkt an". **Gemessen: 0
+Schaden an einem Gegner 2 m neben der Flugbahn**; nach dem Fix erster Treffer
+nach 3,6 s, 274 Schaden. Dazu werden totgelaufene klebende Ziele jetzt **vor**
+der Stand-Prüfung in `_tick_deck_combat` verworfen (vorher überlebte ein totes
+Ziel den ganzen Flug und hielt die Zielsuche stumm).
+
+**Dritte, kleinere Ursache: die Haltelinie lag auf der Kante.** Angeflogen wurde
+bis `reach - 0.2` — 20 cm Luft, also drückte jeder Schritt des Ziels (oder ein
+Separations-Schubser) es wieder aus der Reichweite, das Schiff plante einen neuen
+Anflug und das Deck feuerte währenddessen nicht. Neu `ENGAGE_STOP_FRAC = 0.8`
+(8,8 m bei 11 m Reichweite): ~2 m Reserve, und als Nebeneffekt bleibt der Rumpf
+knapp außerhalb der 8 m eines **Boden**-Feuerkriegers. Gemessen im
+Vorbeiflug-Szenario: Zustandswechsel 22 → 18, Schaden +20 %.
+
+**Was NICHT geändert wurde:** die Regel „Deckkampf nur im Stand" (Watchtower-
+Muster) bleibt — ein Angriffsmove greift also weiter dadurch an, dass das Schiff
+**anhält**, nicht im Vorbeiflug. Und die Erkennungsreichweite bleibt
+`FIREWARRIOR_AGGRO_RADIUS + 3 = 16 m`: was weiter weg steht, wird auf einem
+Angriffsmove nicht angeflogen.
+
+**Verifikation:** Ladecheck exit 0 ohne Ausgabe, **Suite 5009 Zusicherungen grün**
+(0 failed, kein `SCRIPT ERROR`). Zwei neue Tests in `tests/test_airship.gd`, gegen
+den ungefixten Stand geprüft: **4 Zusicherungen fallen ohne die Fixes**. Die
+Diagnose war ein Wegwerfskript und ist nicht im Repo — die Messwerte stehen oben.

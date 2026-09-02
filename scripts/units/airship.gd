@@ -43,6 +43,15 @@ const DECK_Y: float = 0.6
 ## Throttles (seconds): drift condition check, drift anchor re-pick.
 const DRIFT_CHECK_INTERVAL: float = 1.0
 const ANCHOR_REPICK_INTERVAL: float = 5.0
+## Fraction of the crew's reach the ship closes to when it engages. NOT the
+## edge of the envelope (that was the bug): stopping at reach-0.2 left 20 cm of
+## slack, so any step the target took — or a separation nudge — pushed it out of
+## reach again, the ship re-planned an approach and the deck stopped firing for
+## the whole flight. At 0.8 the ship carries ~2 m of slack and keeps shooting
+## while the target shuffles around. Bonus property at reach 11 m: 8.8 m still
+## keeps the hull just outside a GROUND firewarrior's 8 m answer.
+const ENGAGE_STOP_FRAC: float = 0.8
+
 ## Deck-combat target acquisition throttle: the per-crew enemy/building scans
 ## ran every frame (the only ungated per-frame combat scan). Re-acquired ~5x/s
 ## instead; fire/convert cadence is unaffected (cooldowns advance with the
@@ -340,6 +349,20 @@ func remove_crew(unit) -> void:
 
 # --- Orders ------------------------------------------------------------------------------
 
+## A fresh move order replaces an attack order — the base rule (Unit.order_move
+## ends the attack and drops the building target), which the airship's own
+## sticky UNIT target escaped: an attack-move issued after a right-click kept
+## the old target, so _tick_auto_engage bailed out on it every single scan and
+## the ship flew its whole route without engaging anything ("attack-move only
+## fires once it stands at the destination" — user bug). _fly_into_reach saves
+## and restores the sticky targets around its own order_move call, so approach
+## flights are unaffected.
+func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = false) -> void:
+	_ordered_unit = null
+	_auto_building = null
+	super.order_move(target, queue_up, aggressive)
+
+
 ## Explicit attack on an enemy unit: fly into deck reach, then the standing
 ## crew engages it (only members that CAN act on it do anything).
 func order_attack(enemy: Unit) -> void:
@@ -406,11 +429,19 @@ func _unload_all(dest: Vector3) -> void:
 
 ## Flies to standing reach of `point` (deck combat only works standing);
 ## already in reach = stop and let the crew tick take over.
+##
+## The stop point must account for arrive_eps() — a ship counts as "arrived"
+## once within ~2 m of its path end. Aiming reach-1.0 from the target therefore
+## parked it at reach+1.0, a metre OUTSIDE firing range: on a right-click the
+## ship flew up, stood there and never fired a shot (user bug, measured at
+## 12.0 m with a reach of 11.0). _tick_auto_engage already carried this
+## correction; the ORDER path did not.
 func _fly_into_reach(point: Vector3) -> void:
 	var reach: float = _best_reach()
 	if _flat_dist(position, point) > reach:
 		var dir: Vector3 = Vector3(point.x - position.x, 0.0, point.z - position.z)
-		var dest: Vector3 = point - dir.normalized() * maxf(reach - 1.0, 1.0)
+		var gap: float = maxf(reach * ENGAGE_STOP_FRAC - arrive_eps(), 1.0)
+		var dest: Vector3 = point - dir.normalized() * gap
 		# order_move wipes the sticky targets (base rule) — keep them across
 		# the approach flight.
 		var ordered: Unit = _ordered_unit
@@ -532,7 +563,16 @@ func _tick_auto_engage(delta: float) -> void:
 	if state != State.IDLE \
 			and not (state == State.MOVE and (move_aggressive or _auto_approach)):
 		return
-	if _ordered_unit != null or attack_building != null or route_end_action.is_valid():
+	if _ordered_unit != null:
+		# A sticky ordered target steers itself — but it WALKS. Standing at the
+		# spot where it used to be is how a right-click order died quietly, so
+		# follow it once it leaves the firing envelope (throttled by this scan).
+		if state == State.IDLE and is_instance_valid(_ordered_unit) \
+				and _ordered_unit.state != State.DEAD \
+				and _flat_dist(position, _ordered_unit.position) > _best_reach():
+			_fly_into_reach(_ordered_unit.position)
+		return
+	if attack_building != null or route_end_action.is_valid():
 		return
 	var has_fw: bool = _has_deck_firewarrior()
 	var has_pr: bool = _has_deck_preacher()
@@ -584,7 +624,7 @@ func _tick_auto_engage(delta: float) -> void:
 			return
 		stop_at = b.center_world()
 		dist = b.footprint_distance_to(Vector2(position.x, position.z))
-	if dist <= reach - 0.2:
+	if dist <= reach * ENGAGE_STOP_FRAC:
 		if state == State.MOVE:
 			# In reach: stand and fight (the kept route resumes later).
 			_auto_approach = false
@@ -603,8 +643,9 @@ func _tick_auto_engage(delta: float) -> void:
 	# the ship arrive_eps SHORT of that — still ~1 m OUTSIDE reach — so it never
 	# entered firing range, re-planned another sub-arrive_eps hop every _engage_scan
 	# and stepped forward in tiny choppy stutters. Subtracting arrive_eps makes the
-	# ship actually fly INTO reach (the in-flight dist<=reach-0.2 check then halts it).
-	var rest_gap: float = reach - 1.0 - arrive_eps()
+	# ship actually fly INTO reach; the in-flight ENGAGE_STOP_FRAC check above then
+	# halts it with slack to spare instead of right on the edge.
+	var rest_gap: float = maxf(reach * ENGAGE_STOP_FRAC - arrive_eps(), 1.0)
 	_plan_path_to(position + dir.normalized() * (dir.length() - rest_gap))
 	_auto_approach = true
 	_set_state(State.MOVE)
@@ -686,6 +727,17 @@ func _building_priority(b) -> int:
 ## (reach +3). An explicitly ordered target is preferred while valid; a
 ## warrior/brave crew idles (nothing it can do from the deck).
 func _tick_deck_combat(delta: float) -> void:
+	# Stale sticky targets are dropped BEFORE the standing check: a dead
+	# ordered target used to survive the whole flight, and a set _ordered_unit
+	# switches _tick_auto_engage off — so the ship ignored everything around
+	# it until it happened to stand still again.
+	if _ordered_unit != null and (not is_instance_valid(_ordered_unit)
+			or _ordered_unit.state == State.DEAD
+			or _ordered_unit.tribe_id == tribe_id):
+		_ordered_unit = null
+	if attack_building != null and (not is_instance_valid(attack_building)
+			or attack_building.health <= 0):
+		attack_building = null
 	if state == State.MOVE:
 		# A moving ship never channels: drop the deck preachers' conversion
 		# channel so their sitting targets stand up instead of sticking to a
@@ -696,13 +748,6 @@ func _tick_deck_combat(delta: float) -> void:
 				_set_deck_anim(m, &"idle")
 		_deck_elapsed = 0.0
 		return
-	if _ordered_unit != null and (not is_instance_valid(_ordered_unit)
-			or _ordered_unit.state == State.DEAD
-			or _ordered_unit.tribe_id == tribe_id):
-		_ordered_unit = null
-	if attack_building != null and (not is_instance_valid(attack_building)
-			or attack_building.health <= 0):
-		attack_building = null
 	if path_service == null:
 		return
 	# Throttle the per-crew target scans (the only ungated per-frame combat
