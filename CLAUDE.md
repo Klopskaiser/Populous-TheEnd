@@ -301,8 +301,9 @@ Laufzeit-Terrainverformung (Erdbeben/Vulkan/Ebene/Absinken).
   **beschleunigen** bei der Verfolgung. Ein tödlicher Treffer in der Luft tötet
   nicht sofort: die Einheit fällt als Ragdoll zu Boden und stirbt bei der Landung.
   Sie schreit dabei **oben**, im Moment des Treffers (`unit_air_death`, gilt auch
-  für die vom Luftschiffdeck geschossene Besatzung); der eigentliche Todes-Sound
-  kommt Sekunden später beim Aufprall. Die Landung eines Ragdolls ist stumm.
+  für die vom Luftschiffdeck geschossene Besatzung) — **genau einmal je Einheit**,
+  weitere Treffer auf denselben fallenden Körper bleiben stumm; der eigentliche
+  Todes-Sound kommt Sekunden später beim Aufprall. Die Landung eines Ragdolls ist stumm.
 - **Wer die Landung überlebt, ist zu hören** (`unit_land`, `Unit.land_sfx_key()`):
   jede Landung, nicht nur die aus Zaubern — Klippensturz, Rückstoß über eine
   Kante, Tornado-Auswurf, Feuerkrieger-Uppercut. Gemeint ist die **Landung

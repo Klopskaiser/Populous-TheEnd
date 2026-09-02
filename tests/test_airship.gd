@@ -1332,3 +1332,21 @@ func test_deck_gunner_keeps_its_reload_without_a_target() -> void:
 	check(left > 1.0, "the reload survives having no target (%.2f of 1.4 left)" % left)
 	check(left < 1.4, "and it keeps counting down while idle")
 	_free_world(w)
+## The air-death cry is ONE PER UNIT (user report 2026-09-02). The deck path is
+## the harder half: the lethal hit cries at deck altitude, then the fall makes
+## the passenger THROWN with 0 HP — and the next ball must not cry again. He
+## never becomes a `doomed` ragdoll here, so the ragdoll guard cannot cover it.
+func test_deck_passenger_cries_only_on_the_first_lethal_hit() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 1, w.nav.cell_to_world(Vector2i(60, 60)))
+	var rider: Unit = _board(w, ship, BRAVE_SCENE, 1)
+	check(rider.rides_airborne(), "the passenger rides the deck")
+	check(not rider._air_death_cried, "nothing cried yet")
+	rider.take_damage(10000)
+	check(rider._air_death_cried, "the lethal hit on the deck cries once")
+	check(rider.state == Unit.State.THROWN,
+		"...and throws him off the deck instead of killing him at altitude")
+	rider.take_damage(10000)
+	check(not rider._cry_air_death(),
+		"the ball that catches him falling stays silent")
+	_free_world(w)

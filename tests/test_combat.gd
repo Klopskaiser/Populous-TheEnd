@@ -1590,3 +1590,23 @@ func test_fresh_engagement_still_strikes_at_once() -> void:
 	check(fw._attack_cooldown == 0.0,
 		"engaging out of IDLE clears the stale cooldown (no arbitrary wait)")
 	_free_world(w)
+## The air-death cry is ONE PER UNIT (user report 2026-09-02): further fireballs
+## on the same falling body used to let it scream again, because play_sfx's
+## throttle counts per SOUND NAME globally and neither call site was idempotent
+## on its own — the doomed guard sits inside _enter_ragdoll, after the cry.
+func test_air_death_cry_fires_once_per_unit() -> void:
+	var w: Dictionary = _make_world()
+	var victim: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
+	victim.throw_airborne(Vector3(1, 0, 0) * 4.0 + Vector3.UP * 5.0)
+	check(victim.state == Unit.State.THROWN, "the victim is in the air")
+	check(not victim._air_death_cried, "nothing cried yet")
+	victim.take_damage(10000)
+	check(victim._air_death_cried, "the lethal hit in the air cries out")
+	check(victim.state == Unit.State.THROWN and victim.doomed,
+		"...and turns it into a falling ragdoll")
+	# Follow-up hits land (the body is still a projectile target) but stay silent.
+	victim.take_damage(10000)
+	victim.take_damage(10000)
+	check(not victim._cry_air_death(),
+		"further hits on the same falling body never cry again")
+	_free_world(w)

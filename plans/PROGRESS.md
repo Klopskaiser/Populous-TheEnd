@@ -9714,3 +9714,33 @@ Verhalten, das nicht in die eigene Linie feuert.
 Zusicherungen gruen** (das Labor ist nicht Teil der Suite). Die
 Eigenbeschuss-Sonde war ein temporaerer `tribe_id`-Filter in `_apply_flames` und
 ist zurueckgenommen.
+### Nachtrag 15 — Luft-Todesschrei nur noch einmal je Einheit (Nutzerreport, 2026-09-02)
+
+Der in Nachtrag 4 eingebaute `unit_air_death` konnte **mehrfach** erklingen: jeder
+weitere Feuerball auf denselben fallenden Koerper loeste ihn erneut aus. Ursache
+sind zwei Dinge, die beide nicht griffen:
+
+- Die Drosselung in `AudioManager.play_sfx` zaehlt **global pro Soundnamen**, sie
+  begrenzt also nicht eine einzelne Einheit (und bei 200 ms haette sie es auch
+  nicht getan — die Baelle kommen langsamer).
+- **Keine** der beiden Aufrufstellen war von sich aus einmalig: im Wurfzweig
+  liegt der Schrei **vor** `_enter_ragdoll()`, dessen `doomed`-Riegel also erst
+  danach greift; und der **Deckpassagier** wird bewusst nie zum Ragdoll (er
+  bleibt beschussfaehig, waehrend er faellt), dort gab es gar keinen Riegel.
+
+Neu traegt die Einheit ein `_air_death_cried` und ruft `_cry_air_death()`, das
+den Schrei genau einmal je Einheit zulaesst und zurueckgibt, ob es wirklich
+geschrien hat — damit ist die Einmaligkeit headless pruefbar, obwohl der Ton
+selbst nicht beobachtbar ist.
+
+**Ein Test war zuerst falsch, nicht der Code:** der Deckfall laesst sich nicht mit
+einem hochgesetzten `position.y` nachstellen — ohne `rides_airborne()` laeuft
+`take_damage` in den normalen Todeszweig, es schreit gar nichts, und
+`_cry_air_death()` meldete danach voellig korrekt „zum ersten Mal". Der Test
+sitzt jetzt in `test_airship.gd`, wo ein echtes Schiff mit Besatzung existiert.
+
+**Verifikation:** Ladecheck exit 0 ohne Ausgabe, **Suite 5068 Zusicherungen gruen**
+(0 failed, kein `SCRIPT ERROR`), zwei neue Tests (Wurfopfer und Deckpassagier).
+Gegen den ungefixten Stand gepruefte Warnung: dort fehlt das Feld, die Testdatei
+laeuft in `SCRIPT ERROR` und meldet trotzdem „0 failed" — dieselbe
+Falsch-Gruen-Falle wie in Nachtrag 13.

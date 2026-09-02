@@ -728,6 +728,13 @@ var _knockback_remaining: Vector3 = Vector3.ZERO
 ## deferred to the landing, but the unit is out of the simulation already —
 ## no orders, no fight, no target slot, just the ragdoll. See _enter_ragdoll.
 var doomed: bool = false
+## Der Todesschrei aus der Luft ist gefallen. Eigenes Feld, weil KEINE der
+## beiden Aufrufstellen von sich aus einmalig ist: der doomed-Riegel sitzt INNEN
+## in _enter_ragdoll (der Schrei davor), und der Deckpassagier wird bewusst nie
+## zum Ragdoll. Die Drosselung in play_sfx zaehlt global pro Soundnamen und
+## begrenzt eine einzelne Einheit deshalb nicht (Nutzerreport 2026-09-02:
+## nachfolgende Feuerbaelle liessen den Schrei erneut erklingen).
+var _air_death_cried: bool = false
 
 # --- Conversion state (preacher, phase 5c) ---------------------------------------
 ## Enemy preacher currently pacifying this unit (untyped: may be freed).
@@ -1436,8 +1443,9 @@ func take_damage(amount: int, attacker = null) -> void:
 				# Struck dead in mid-air: the cry happens HERE, at altitude
 				# (user request), while the death sound itself follows seconds
 				# later where the body hits. A tumble on the ground is not "in
-				# the air" and stays silent.
-				_play_sfx(&"unit_air_death", AIR_DEATH_SFX_INTERVAL_MS)
+				# the air" and stays silent, and every FURTHER hit on the same
+				# falling body stays silent too (_cry_air_death is one-shot).
+				_cry_air_death()
 			_enter_ragdoll()
 			return
 		# Deck passengers (airship): a lethal hit while riding at altitude is
@@ -1449,7 +1457,9 @@ func take_damage(amount: int, attacker = null) -> void:
 		if rides_airborne():
 			# Same cry as a thrown body: he is hit at deck altitude and falls
 			# from there (user decision), so it plays before he leaves the crew.
-			_play_sfx(&"unit_air_death", AIR_DEATH_SFX_INTERVAL_MS)
+			# One-shot as well: the fall makes him THROWN with 0 HP, and the next
+			# ball would otherwise let him cry a second time on the way down.
+			_cry_air_death()
 			var drop: float = position.y
 			if terrain_data != null:
 				drop -= terrain_data.get_height(position.x, position.z)
@@ -1484,6 +1494,17 @@ func take_damage(amount: int, attacker = null) -> void:
 ## group bound (its attackers idled on a dead man for seconds), stayed in every
 ## enemy scan, and paid for regeneration, burn and knockback ticks it could
 ## never benefit from.
+## Todesschrei fuer einen toedlichen Treffer IN DER LUFT — genau einmal je
+## Einheit. Gibt zurueck, ob wirklich geschrien wurde (macht die Einmaligkeit
+## headless pruefbar).
+func _cry_air_death() -> bool:
+	if _air_death_cried:
+		return false
+	_air_death_cried = true
+	_play_sfx(&"unit_air_death", AIR_DEATH_SFX_INTERVAL_MS)
+	return true
+
+
 func _enter_ragdoll() -> void:
 	if doomed:
 		return
