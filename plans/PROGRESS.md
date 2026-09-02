@@ -9744,3 +9744,37 @@ sitzt jetzt in `test_airship.gd`, wo ein echtes Schiff mit Besatzung existiert.
 Gegen den ungefixten Stand gepruefte Warnung: dort fehlt das Feld, die Testdatei
 laeuft in `SCRIPT ERROR` und meldet trotzdem „0 failed" — dieselbe
 Falsch-Gruen-Falle wie in Nachtrag 13.
+### Nachtrag 16 — Feuerramme: Drehrate 2,0 rad/s, Todesexplosion 30 (Nutzeransage, 2026-09-02)
+
+Zwei Werte auf Nutzeransage, direkt nach der Messreihe aus Nachtrag 14:
+
+| Wert | vorher | jetzt |
+|---|---|---|
+| `FIRERAM_TURN_RATE` | 1,6 rad/s | **2,0 rad/s** |
+| `FIRERAM_DEATH_BLAST_DAMAGE` | 20 | **30** |
+
+**Gemessen (je 6 Wiederholungen, gefixtes Labor):**
+
+| Paarung | alte Werte | neue Werte |
+|---|---|---|
+| `feuerrammen_vs_krieger` (6 Rammen allein, 12 BAe je Seite) | 2:0, Effizienz **2,52** | 2:0, Effizienz **2,78** |
+| `armee_mit_feuerrammen` (4 Rammen IN einer Armee) | 3:3, Effizienz **0,78** | 0:3, Effizienz **0,56** |
+
+Die beiden Zeilen zeigen dieselbe Aenderung mit **umgekehrtem Vorzeichen** — und
+genau das ist die Bestaetigung der Eigenbeschuss-Diagnose:
+
+- **Allein** ist die Ramme staerker geworden (2,52 → 2,78, +10 %): schnelleres
+  Drehen heisst mehr Stoesse auf Ziel, und die groessere Todesexplosion trifft
+  ausschliesslich Feinde, weil keine eigene Infanterie in Reichweite steht.
+- **In der Armee** ist sie schwaecher geworden (0,78 → 0,56, −28 %): dieselben
+  zwei Werte drehen dort ins Negative, weil beides den Eigenbeschuss verstaerkt.
+  Die Explosion trifft ein 3 x 6 m Rechteck **einschliesslich der eigenen Linie**
+  und der eigenen gerade freigelassenen Besatzung, und schnelleres Ausrichten
+  heisst auch: haeufiger in die eigenen Reihen gefeuert.
+
+Die Fights dauern mit Rammen 56-67 s (Zeitueberschreitungen inklusive) — die
+Ramme zerfasert das Gefecht, wie schon in Nachtrag 14 gesehen.
+
+**Verifikation:** Ladecheck exit 0 ohne Ausgabe, **Suite 5068 Zusicherungen gruen**
+ohne Testanpassung (beide Werte werden aus `Balance` gelesen). Kein Test und kein
+Dokument kodierte sie.

@@ -149,7 +149,7 @@ const FIRERAM_COOLDOWN_FULL_CREW: float = 1.4
 const FIRERAM_AGGRO_RADIUS: float = 12.0
 ## Echte Dreh-Rate des Rumpfs (rad/s); Stoß startet erst bei Ausrichtung
 ## innerhalb der Toleranz (rad) zum Ziel.
-const FIRERAM_TURN_RATE: float = 1.6
+const FIRERAM_TURN_RATE: float = 2.0
 const FIRERAM_AIM_TOLERANCE: float = 0.33
 ## Lava-Kontakt-Gutschrift pro Flammensekunde an Gebäuden. MUSS zusammen mit
 ## FLAME_DURATION >= LAVA_BUILDING_STAGE_TIME ergeben, sonst verfällt der
@@ -168,7 +168,7 @@ const FIRERAM_LIFE_REGEN_TIME: float = 30.0
 ## (auch die eigene, gerade freigelassene Crew): Einheiten DAMAGE +
 ## Feuerball-Rückstoß, Gebäude +1 Zerstörungsstufe, Fahrzeuge 1 Feuertreffer/
 ## Hüllentreffer.
-const FIRERAM_DEATH_BLAST_DAMAGE: int = 20
+const FIRERAM_DEATH_BLAST_DAMAGE: int = 30
 const FIRERAM_DEATH_BLAST_FRONT: float = 2.0
 const FIRERAM_DEATH_BLAST_BACK: float = 4.0
 const FIRERAM_DEATH_BLAST_HALF_WIDTH: float = 1.5
