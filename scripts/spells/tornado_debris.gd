@@ -34,6 +34,11 @@ var vortex: Node3D = null
 ## vortex may be freed mid-flight, so these are captured, not read back.
 var top_height: float = 6.0
 var spiral_r0: float = 2.0
+## Spiral radius at the funnel MOUTH, set by the spawning vortex so the chunk
+## follows the same flaring cone as the whirled-up units. <= 0 keeps the old
+## narrowing shape (no other caller exists; the fallback keeps this class
+## usable on its own).
+var spiral_r1: float = 0.0
 
 var _phase: Phase = Phase.LIFT
 var _t: float = 0.0
@@ -97,7 +102,8 @@ func _ride(delta: float, lift: float) -> void:
 	if vortex != null and is_instance_valid(vortex):
 		_center_xz = Vector3(vortex.position.x, 0.0, vortex.position.z)
 	_angle += SPIN_SPEED * delta
-	var r: float = lerpf(spiral_r0, 0.5, lift)
+	var top_r: float = spiral_r1 if spiral_r1 > 0.0 else 0.5
+	var r: float = lerpf(spiral_r0, top_r, lift)
 	var base_y: float = _ground(_center_xz)
 	position = Vector3(
 		_center_xz.x + cos(_angle) * r,

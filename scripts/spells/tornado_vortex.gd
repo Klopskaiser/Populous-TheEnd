@@ -21,6 +21,17 @@ var top_height: float = 8.0                  # riders spiral up to the tip
 ## what the Supertornado's satellites use — its own roar covers them, and three
 ## howls at once would only muddy it.
 var sfx_id: StringName = &"tornado"
+## Funnel flare: how much wider the vortex is at the TIP than at the ground
+## (user request). Everything follows this one number — the visible rings, the
+## catch radius at altitude and the circle the riders whirl on — so the
+## Supertornado's flare is automatically as much bigger as its funnel
+## (radius 4.4 -> an 8.8 m mouth against the plain tornado's 4.4 m).
+##
+## It only ever WIDENS: at ground level the radius stays exactly `radius`, so
+## the balance of what a twister sweeps up on foot is untouched, and above the
+## tip the mouth width is held rather than falling off (a high-flying airship
+## must not become immune — before this it was a plain cylinder).
+const TOP_WIDEN: float = 2.0
 ## Movement profile: parks on the cast point first, then crawls off and
 ## accelerates over ACCEL_TIME up to MAX_SPEED.
 const IDLE_TIME: float = 1.0
@@ -98,6 +109,26 @@ func setup(p_tribe_id: int, at: Vector3, p_unit_manager: UnitManager,
 	position.z = spawn_inside.y
 	if terrain_data != null:
 		position.y = terrain_data.get_height(position.x, position.z)
+
+
+## Funnel radius `h` metres above the base — the cone the visible rings draw.
+## Clamped at both ends: never narrower than `radius` (ground level), never
+## wider than the mouth (above the tip).
+func radius_at_height(h: float) -> float:
+	var t: float = clampf(h / maxf(top_height, 0.001), 0.0, 1.0)
+	return lerpf(radius, radius * TOP_WIDEN, t)
+
+
+## Flat XZ distance from the funnel axis.
+func _axis_dist(at: Vector3) -> float:
+	return Vector2(at.x - position.x, at.z - position.z).length()
+
+
+## True while `at` lies inside the cone (flat distance within the funnel radius
+## at that height). This is what makes the hit volume a FUNNEL instead of the
+## cylinder it used to be.
+func _inside_cone(at: Vector3) -> bool:
+	return _axis_dist(at) <= radius_at_height(at.y - position.y)
 
 
 func tick(delta: float) -> void:
@@ -189,6 +220,8 @@ func _spawn_debris(at: Vector3, wood: int, fling_now: bool = false) -> void:
 	var debris: TornadoDebris = TornadoDebris.new()
 	debris.setup(at, wood, terrain_data, unit_manager.wood_pile_manager, self,
 		randf() * TAU, top_height, radius * 0.9, fling_now)
+	# Wood rides the flaring wall too (same cone as the riders).
+	debris.spiral_r1 = radius_at_height(top_height) * 0.9
 	unit_manager.register_projectile(debris)
 
 
@@ -198,8 +231,13 @@ func _spawn_debris(at: Vector3, wood: int, fling_now: bool = false) -> void:
 func _pick_up_units() -> void:
 	if unit_manager == null:
 		return
-	for u in unit_manager.get_units_in_radius(position, radius):
+	# Query the widest slice (the mouth), then keep what is inside the CONE at
+	# its own height: on the ground that is exactly the old radius, higher up
+	# the funnel grabs as wide as it looks (user request).
+	for u in unit_manager.get_units_in_radius(position, radius_at_height(top_height)):
 		if u.state == Unit.State.DEAD or u.state == Unit.State.THROWN:
+			continue
+		if not _inside_cone(u.position):
 			continue
 		# `force`: the twister is the only thing besides death that tears a
 		# casting shaman out of her incantation (phase 10c, user spec).
@@ -223,7 +261,10 @@ func _tick_riders(delta: float) -> void:
 		r.time += delta
 		r.angle += SPIN_SPEED * delta
 		var lift: float = clampf(r.time / LIFT_TIME, 0.0, 1.0)
-		var spiral_r: float = lerpf(radius * 0.8, 0.5, lift)   # narrows to the tip
+		# Riders whirl on the funnel wall, so their circle WIDENS with the cone
+		# (user request) — it used to pinch to half a metre at the tip, which
+		# read as a spike rather than a twister.
+		var spiral_r: float = radius_at_height(lift * top_height) * 0.8
 		u.position = Vector3(
 			position.x + cos(r.angle) * spiral_r,
 			position.y + lift * top_height,
@@ -248,9 +289,11 @@ func _affect_siege_engines(delta: float) -> void:
 		return
 	_tick_siege_riders(delta)
 	var near_now: Dictionary = {}
-	for u in unit_manager.get_units_in_radius(position, radius):
+	for u in unit_manager.get_units_in_radius(position, radius_at_height(top_height)):
 		if not (u is CrewedVehicle) or u is Airship or u.state == Unit.State.DEAD:
 			continue
+		if not _inside_cone(u.position):
+			continue   # ground vehicles sit at h=0, so this is the plain radius
 		if _is_siege_rider(u):
 			continue   # already captured and rising
 		near_now[u] = true
@@ -294,7 +337,7 @@ func _tick_siege_riders(delta: float) -> void:
 		r.rise += delta
 		r.angle += SPIN_SPEED * delta
 		var f: float = clampf(r.rise / SIEGE_RISE_TIME, 0.0, 1.0)
-		var spiral_r: float = lerpf(radius * 0.6, 0.4, f)   # narrows to the tip
+		var spiral_r: float = radius_at_height(f * top_height) * 0.6   # follows the cone
 		u.position = Vector3(
 			position.x + cos(r.angle) * spiral_r,
 			position.y + f * top_height,
@@ -313,8 +356,12 @@ func _tick_siege_riders(delta: float) -> void:
 func _affect_airships() -> void:
 	if unit_manager == null:
 		return
-	for u in unit_manager.get_units_in_radius(position, radius):
+	# Airships cruise at 10 m — right at (or above) the funnel mouth, so they
+	# are caught on the FLARED radius, not the narrow ground one.
+	for u in unit_manager.get_units_in_radius(position, radius_at_height(top_height)):
 		if not (u is Airship) or u.state == Unit.State.DEAD:
+			continue
+		if not _inside_cone(u.position):
 			continue
 		var at: Vector3 = Vector3(u.position.x, position.y, u.position.z)
 		(u as Airship).explode()
@@ -382,7 +429,9 @@ func _ready() -> void:
 		var ring: MeshInstance3D = MeshInstance3D.new()
 		var torus: TorusMesh = TorusMesh.new()
 		var t: float = float(i) / float(count - 1)
-		var r: float = lerpf(radius * 0.16, radius, t)
+		# Narrow where it touches down, flared at the mouth — and the mouth is
+		# exactly the radius the effect uses up there (TOP_WIDEN).
+		var r: float = lerpf(radius * 0.16, radius * TOP_WIDEN, t)
 		torus.inner_radius = r - 0.22 * (radius / 2.2)
 		torus.outer_radius = r
 		ring.mesh = torus

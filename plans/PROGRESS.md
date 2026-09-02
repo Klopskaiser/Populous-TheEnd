@@ -9417,3 +9417,37 @@ Angriffsmove nicht angeflogen.
 (0 failed, kein `SCRIPT ERROR`). Zwei neue Tests in `tests/test_airship.gd`, gegen
 den ungefixten Stand geprüft: **4 Zusicherungen fallen ohne die Fixes**. Die
 Diagnose war ein Wegwerfskript und ist nicht im Repo — die Messwerte stehen oben.
+### Nachtrag 8 — der Tornado ist ein Trichter, kein Zylinder (Nutzerwunsch, 2026-09-02)
+
+Der **Wirkbereich** war höhenunabhängig (`get_units_in_radius(position, radius)`
+— ein Zylinder), während die **Optik** schon als Trichter gebaut war (Ringe von
+0,16 × radius unten auf radius oben). Und die Hochgewirbelten kreisten genau
+verkehrt: `lerpf(radius * 0.8, 0.5, lift)` **verengte** sich auf 0,5 m an der
+Spitze — das las sich als Spieß, nicht als Windhose.
+
+Neu trägt **eine** Konstante die Trichterform: `TornadoVortex.TOP_WIDEN = 2.0`,
+ausgelesen über `radius_at_height(h)`. Daran hängen jetzt alle vier Verbraucher —
+Einheiten-Aufnahme, Fahrzeug-Erfassung, Luftschiff-Kontakt und die Kreisradien von
+Riders, Fahrzeugen und Holzstücken — plus die Sichtringe (Mündung
+`radius * TOP_WIDEN`). Der **Supertornado** braucht dafür keinen eigenen Wert: aus
+4,4 m Bodenradius werden 8,8 m Mündung, „gemäß der Trichterausdehnung".
+
+**Bewusst nur eine Aufweitung, keine Einschnürung:** `radius_at_height` ist an
+beiden Enden geklemmt — am Boden **exakt** `radius` (die Balance dessen, was ein
+Twister zu Fuß einsammelt, bleibt unangetastet), über der Spitze bleibt die
+Mündungsbreite stehen. Letzteres ist wichtig, weil Luftschiffe auf **10 m**
+fliegen, ein normaler Trichter aber nur 8 m hoch ist: mit einem Abfall nach oben
+wären sie plötzlich immun geworden — vorher war der Bereich ein Zylinder ohne
+jede Höhenprüfung. Jetzt werden sie auf der **breiten** Mündung erfasst (4,4
+statt 2,2 m).
+
+Nebeneffekt in `TornadoDebris`: es bekam ein `spiral_r1` (Kreisradius an der
+Mündung), damit Holz derselben Wand folgt; ohne gesetzten Wert bleibt die alte
+verengende Form (Rückfallebene, sonst gibt es keinen zweiten Aufrufer).
+
+**Verifikation:** Ladecheck exit 0 ohne Ausgabe, **Suite 5026 Zusicherungen grün**
+(0 failed, kein `SCRIPT ERROR`), vier neue Tests in `tests/test_spells.gd`. Die
+beiden Verhaltenstests sind gegen den alten Effektcode geprüft (Helfer drin,
+Effektstellen zurückgedreht): ohne den Fix wird der Flieger 3,1 m außen **nicht**
+erfasst (Radius 2,2) und der Kreis an der Spitze misst **0,50 m** statt > 2,2 m.
+Optisch geprüft ist es noch nicht — die Trichterform im Spiel ist Nutzersache.

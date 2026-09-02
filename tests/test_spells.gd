@@ -754,6 +754,96 @@ func test_tornado_lifts_carries_and_flings_units() -> void:
 	_free_world_with_buildings(w)
 
 
+## Funnel shape (user request): the hit volume is a CONE, not a cylinder — the
+## radius grows toward the tip, and riders whirl on the widening wall. It only
+## ever widens: at ground level the old radius stands, above the tip the mouth
+## width is held (a high-flying airship must not become immune).
+func test_tornado_hit_radius_widens_toward_the_tip() -> void:
+	var w: Dictionary = _make_world_with_buildings()
+	var spell: TornadoSpell = TornadoSpell.new()
+	check(spell.execute(w.tribe0, Vector3(40, 0, 40), w.ctx), "tornado spawned")
+	var vortex: TornadoVortex = w.unit_manager.projectiles[0]
+	var r: float = vortex.radius
+	check_near(vortex.radius_at_height(0.0), r, "at the ground it is the plain radius")
+	check_near(vortex.radius_at_height(vortex.top_height), r * TornadoVortex.TOP_WIDEN,
+		"at the tip it is the flared mouth")
+	check(vortex.radius_at_height(vortex.top_height * 0.5) > r,
+		"and it widens monotonically on the way up")
+	check_near(vortex.radius_at_height(vortex.top_height * 5.0),
+		r * TornadoVortex.TOP_WIDEN, "above the tip the mouth width is held")
+	check_near(vortex.radius_at_height(-5.0), r,
+		"below the base it never narrows past the ground radius")
+	_free_world_with_buildings(w)
+
+
+## The cone in action: a unit FLYING at tip height is caught at a distance that
+## a unit standing on the ground survives.
+func test_tornado_catches_wider_at_altitude() -> void:
+	var w: Dictionary = _make_world_with_buildings()
+	var spell: TornadoSpell = TornadoSpell.new()
+	check(spell.execute(w.tribe0, Vector3(40, 0, 40), w.ctx), "tornado spawned")
+	var vortex: TornadoVortex = w.unit_manager.projectiles[0]
+	vortex._redirect = 999.0
+	vortex._drift = Vector3.ZERO
+	var wide: float = vortex.radius * 1.4   # outside the ground radius, inside the mouth
+	var on_ground: Unit = w.unit_manager.spawn_unit(
+		BRAVE_SCENE_T, 1, Vector3(40.0 + wide, 0, 40.0))
+	var flyer: Unit = w.unit_manager.spawn_unit(
+		BRAVE_SCENE_T, 1, Vector3(40.0, 0, 40.0 + wide))
+	flyer.position.y = vortex.position.y + vortex.top_height
+	flyer._sync_soa_pos()
+	vortex._pick_up_units()
+	check(flyer.state == Unit.State.THROWN,
+		"the flyer at the mouth is caught %.1f m out (radius %.1f)" % [wide, vortex.radius])
+	check(on_ground.state != Unit.State.THROWN,
+		"the one standing at the same distance is not — the funnel is narrow down there")
+	_free_world_with_buildings(w)
+
+
+## Riders used to pinch to half a metre at the tip (a spike, not a twister);
+## they now whirl on the flaring wall, so the circle up top is WIDER than the
+## funnel's ground radius.
+func test_tornado_riders_whirl_wider_at_the_top() -> void:
+	var w: Dictionary = _make_world_with_buildings()
+	var brave: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, Vector3(40.5, 0, 40.5))
+	var spell: TornadoSpell = TornadoSpell.new()
+	check(spell.execute(w.tribe0, Vector3(40, 0, 40), w.ctx), "tornado spawned")
+	var vortex: TornadoVortex = w.unit_manager.projectiles[0]
+	vortex._redirect = 999.0
+	vortex._drift = Vector3.ZERO
+	var ticks: int = _run(w, [brave],
+		func() -> bool: return brave.state == Unit.State.THROWN)
+	check(ticks < MAX_TICKS, "the brave is whirled up")
+	# Tick to the top of the lift (LIFT_TIME), then measure the whirl circle.
+	_run(w, [brave], func() -> bool:
+		return brave.position.y >= vortex.position.y + vortex.top_height * 0.95)
+	var axis: float = Vector2(brave.position.x - vortex.position.x,
+		brave.position.z - vortex.position.z).length()
+	check(brave.position.y >= vortex.position.y + vortex.top_height * 0.9,
+		"the rider reached the tip")
+	check(axis > vortex.radius,
+		"and whirls on a circle wider than the ground radius (%.2f > %.2f)"
+			% [axis, vortex.radius])
+	_free_world_with_buildings(w)
+
+
+## The Supertornado inherits the same flare, so its mouth grows with its funnel
+## (user request: "even more pronounced, per the funnel's spread").
+func test_supertornado_mouth_scales_with_its_funnel() -> void:
+	var w: Dictionary = _make_world_with_buildings()
+	var big: SupertornadoSpell = SupertornadoSpell.new()
+	check(big.execute(w.tribe0, Vector3(60, 0, 60), w.ctx), "supertornado spawned")
+	var main: TornadoVortex = w.unit_manager.projectiles[0]
+	check_near(main.radius, Balance.SUPERTORNADO_RADIUS, "the main funnel is the big one")
+	check_near(main.radius_at_height(main.top_height),
+		Balance.SUPERTORNADO_RADIUS * TornadoVortex.TOP_WIDEN,
+		"its mouth is flared by the same factor")
+	check(main.radius_at_height(main.top_height)
+			> Balance.TORNADO_RADIUS * TornadoVortex.TOP_WIDEN,
+		"and is clearly wider than a plain tornado's mouth")
+	_free_world_with_buildings(w)
+
+
 func test_thrown_into_water_dies_instantly() -> void:
 	var td: TerrainData = _channel_terrain()
 	var nav: NavGrid = NavGrid.new(td)
