@@ -9231,3 +9231,68 @@ bzw. Variante, und die zwei Leichenzeichnungen sind wirklich verschieden.
   0,55 × R sind reine `Balance`-Werte und nach dem ersten Anblick drehbar), die
   Ladeanzeige mit ihren zwei Balken, das Hypnose-Zeichen, und ob sich die neue
   Manaknappheit im Spiel richtig anfühlt.
+
+### Nachtrag 4 — vier neue Sounds und ein Loop-Bug (Nutzerwunsch, 2026-09-02)
+
+Reine Sound-Arbeit, deshalb ein Nachtrag zur Sound-Phase 10b und kein eigener
+Phasenplan.
+
+**Gegnerischer Prediger-Gesang** (`preach_enemy`, `CombatAudio.KINDS`): Der
+Gesang läuft nicht über `AudioManager.play_sfx`, sondern über `CombatAudio` mit
+prozeduralem Fallback — er ist damit der **einzige Sound, der heute schon hörbar
+ist**, obwohl `assets/audio/` leer ist. Der Gegner-Gesang musste deshalb in
+denselben Pool: als `play_sfx`-Key wären gegnerische Prediger ohne Audiodateien
+**stumm** gewesen, also schlechter als vorher. `_generate_chant(variant, enemy)`
+behält Länge und Hüllkurve (der Rhythmus der Predigt bleibt gleich) und wechselt
+nur den Klang: 118 statt 175 Hz, breiteres/schnelleres Vibrato und eine Quinte
+statt der Oktave als Oberton. Die Stammlogik steht **einmal** in
+`Preacher.chant_sfx_kind()` — nötig, weil der Chant-Block in drei Kopien existiert
+(Boden, Wachturm, Luftschiffdeck). Perspektive ist der lokale Spieler
+(`GameState.PLAYER_TRIBE`, die erste Referenz der Sim-Schicht auf das Autoload);
+ein **hypnotisierter** Gegner-Prediger klingt solange „eigen" — er predigt ja für
+den Spieler, und ein Test nagelt das fest.
+
+**Überlebte Landung** (`unit_land`, `Unit.land_sfx_key()`): `_land_from_throw` ist
+der einzige Punkt, an dem ein Wurf den Boden berührt (Wasser geht vorher in
+`drown()`, Rand in `fall_into_void()`), gilt also automatisch für Klippensturz,
+Rückstoß, Tornado-Auswurf und Feuerkrieger-Uppercut. Der Schlüssel folgt dem
+Muster von `death_sfx_key()` („Name oder Leerstring"), damit die Entscheidung
+headless testbar ist: `doomed` oder `health <= 0` → stumm. Nutzervorgabe: der
+**Rollschaden danach zählt nicht**, gemeint ist die Landung selbst.
+
+**Tödlicher Treffer in der Luft** (`unit_air_death`): in `take_damage` an den
+**zwei** Stellen, die in der Luft tödlich werden — dem aufgeschobenen Tod
+(`State.THROWN`, nicht `State.ROLL`: ein Körper, der am Boden ausrollt, ist nicht
+in der Luft) und dem tödlich getroffenen **Deckpassagier**, der vom Luftschiff
+fällt (Nutzerentscheidung: zählt als „in der Luft"). Er kommt **zusätzlich** zum
+normalen Todes-Sound beim Aufprall (Nutzerentscheidung); dass die Ragdoll-Landung
+stumm bleibt, verhindert ein Sound-Trio.
+
+**Hypnose hatte nur die halbe Vertonung:** Die Zauberformel
+`spell_voice_hypnosis` lief längst, weil der Shaman `spell_cast_started` generisch
+für **jeden** Zauber feuert. Der Effektsound `spell_hypnosis` hatte dagegen keinen
+Sender — die 10b-Regel „die Entität, die den Effekt erzeugt, spielt seinen Sound"
+findet bei Hypnose niemanden, weil sie der **einzige Zauber ohne Effekt-Entität**
+ist (kein Projektil, kein `TerrainMorph`, keine Wolke). `execute()` spielt ihn
+jetzt selbst, am Zielpunkt und nur bei echter Übernahme, mit dem UnitManager als
+Baumanker (`Spell` ist `RefCounted` und hat keine Position). Der
+`is_inside_tree()`-Guard in `SpellAudio._audio` trägt das headless — die
+bestehenden Hypnose-Tests casten mit einem Manager außerhalb des Baums und sind
+damit von sich aus der Regressionswächter. Hypnose fehlte außerdem komplett in
+`assets/README.md` („elf gültige IDs").
+
+**Der Loop-Bug war systemisch, nicht Wirbelsturm-spezifisch** (Nutzerreport: zwei
+`spell_tornado_loop`-Dateien, immer nur eine zu hören): `_activate_loop` würfelte
+die Variante **einmal** beim Start und hängte dann `finished` → `play` an
+*denselben* Stream. Betroffen waren alle acht Loop-Namen. Neu würfelt
+`AudioSlots.next_variant(count, current)` je Wiederholung und schließt die
+**direkte** Wiederholung aus (bei genau zwei Dateien wechseln sie sich damit ab).
+Grenze, die in die Doku gehört: der Wechsel hängt am `finished`-Signal, ein mit
+Import-Loop gelieferter Stream loopt intern und bleibt auf einer Variante —
+Loop-Dateien also ohne Import-Loop liefern.
+
+**Verifikation:** Ladecheck exit 0 ohne Ausgabe, **Suite 4979 Zusicherungen grün**
+(0 failed, kein `SCRIPT ERROR`). Nicht hörbar geprüft: `assets/audio/` ist leer,
+also sind nur die beiden Prediger-Gesänge (prozedural) zu hören; `unit_land`,
+`unit_air_death` und `spell_hypnosis` bleiben bis zu echten Dateien stumm —
+dieselbe Einschränkung, unter der Phase 10b abgenommen wurde.

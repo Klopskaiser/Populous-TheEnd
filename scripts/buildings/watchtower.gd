@@ -282,7 +282,7 @@ func _tick_crew_preacher(pr, delta: float) -> void:
 		pr._preach_sound_timer -= delta
 		if pr._preach_sound_timer <= 0.0:
 			pr._preach_sound_timer = Preacher.PREACH_SOUND_INTERVAL
-			pr._emit_combat_hit(&"preach")
+			pr._emit_combat_hit(pr.chant_sfx_kind())
 	else:
 		_set_crew_anim(pr, &"idle")
 

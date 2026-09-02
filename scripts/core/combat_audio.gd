@@ -25,10 +25,14 @@ const MIN_INTERVAL_MS: int = 45
 const MIX_RATE: int = 22050
 
 ## throw = fireball launch, preach = preacher channeling — one variant each is
-## plenty (user request); the melee strikes keep three.
+## plenty (user request); the melee strikes keep three. preach_enemy is the same
+## chant sung by an ENEMY preacher: a foreign sermon has to be audible as such
+## (user request), and it stays in this pool so it keeps the synthesized fallback
+## the own chant has — otherwise enemy preachers would be silent without assets.
 const KINDS: Array[StringName] = [
-	&"punch", &"kick", &"shove", &"fireball", &"throw", &"preach"]
-const SINGLE_VARIANT_KINDS: Array[StringName] = [&"fireball", &"throw", &"preach"]
+	&"punch", &"kick", &"shove", &"fireball", &"throw", &"preach", &"preach_enemy"]
+const SINGLE_VARIANT_KINDS: Array[StringName] = [
+	&"fireball", &"throw", &"preach", &"preach_enemy"]
 
 var _sounds: Dictionary = {}   # kind -> Array[AudioStreamWAV]
 var _pool: Array[AudioStreamPlayer3D] = []
@@ -95,8 +99,8 @@ func _on_combat_hit(kind: StringName, pos: Vector3) -> void:
 ## (crude low-pass -> timbre) and attack time; "preach" is tonal (soft chant)
 ## instead of noise-based.
 static func generate_samples(kind: StringName, variant: int) -> PackedByteArray:
-	if kind == &"preach":
-		return _generate_chant(variant)
+	if kind == &"preach" or kind == &"preach_enemy":
+		return _generate_chant(variant, kind == &"preach_enemy")
 	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 	rng.seed = hash(kind) + variant * 7919
 	var dur: float
@@ -139,18 +143,32 @@ static func generate_samples(kind: StringName, variant: int) -> PackedByteArray:
 
 ## Soft tonal chant for the channeling preacher: low sine with slow vibrato
 ## and a gentle swell, ~0.6 s.
-static func _generate_chant(variant: int) -> PackedByteArray:
+##
+## `enemy` = the same chant from an ENEMY preacher. Same length and envelope, so
+## the rhythm of the sermon reads identically, but clearly darker: a much lower
+## fundamental, wider and faster vibrato and a dissonant partial instead of the
+## clean octave. Both variants share this function on purpose — a second
+## generator would drift apart from the own chant over time.
+static func _generate_chant(variant: int, enemy: bool = false) -> PackedByteArray:
 	var dur: float = 0.6
 	var base_hz: float = 175.0 + float(variant) * 12.0
+	var vibrato_hz: float = 5.0
+	var vibrato_depth: float = 6.0
+	var partial: float = 2.0            # octave above the fundamental
+	if enemy:
+		base_hz = 118.0 + float(variant) * 9.0
+		vibrato_hz = 7.5
+		vibrato_depth = 11.0
+		partial = 1.5                   # fifth -> hollow, unsettling
 	var count: int = int(dur * float(MIX_RATE))
 	var bytes: PackedByteArray = PackedByteArray()
 	bytes.resize(count * 2)
 	var phase: float = 0.0
 	for i in range(count):
 		var t: float = float(i) / float(MIX_RATE)
-		var vibrato: float = sin(t * TAU * 5.0) * 6.0
+		var vibrato: float = sin(t * TAU * vibrato_hz) * vibrato_depth
 		phase += TAU * (base_hz + vibrato) / float(MIX_RATE)
-		var tone: float = sin(phase) * 0.7 + sin(phase * 2.0) * 0.2
+		var tone: float = sin(phase) * 0.7 + sin(phase * partial) * 0.2
 		var env: float = sin(clampf(t / dur, 0.0, 1.0) * PI)   # swell in and out
 		var sample: int = int(clampf(tone * env * 0.5, -1.0, 1.0) * 32767.0)
 		bytes.encode_s16(i * 2, sample)

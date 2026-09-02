@@ -622,6 +622,44 @@ func test_combat_audio_samples() -> void:
 	check(&"throw" in CombatAudio.SINGLE_VARIANT_KINDS
 		and &"preach" in CombatAudio.SINGLE_VARIANT_KINDS,
 		"throw and preach use a single sound file each")
+	check(&"preach_enemy" in CombatAudio.KINDS
+		and &"preach_enemy" in CombatAudio.SINGLE_VARIANT_KINDS,
+		"the enemy chant is a kind of its own, with one file")
+	check(CombatAudio.generate_samples(&"preach_enemy", 0)
+		!= CombatAudio.generate_samples(&"preach", 0),
+		"the enemy chant really sounds different (not the same timbre twice)")
+
+
+## The enemy chant must be selected by TRIBE, and from the local player's point
+## of view (user request: a foreign sermon has to be audible as such). Own tribe
+## is GameState.PLAYER_TRIBE = 0, so a preacher of tribe 1 is the enemy.
+func test_preacher_chant_kind_follows_the_tribe() -> void:
+	var w: Dictionary = _make_world()
+	var mine: Unit = _spawn(w, PREACHER_SCENE, 0, Vector2(30, 30))
+	var theirs: Unit = _spawn(w, PREACHER_SCENE, 1, Vector2(40, 30))
+	check(mine.chant_sfx_kind() == &"preach", "our own preacher keeps the old chant")
+	check(theirs.chant_sfx_kind() == &"preach_enemy", "an enemy preacher sings the other one")
+	# A hypnotized enemy preacher preaches for us, so he sounds like ours.
+	theirs.hypnotize(w.tribe0, 30.0)
+	check(theirs.chant_sfx_kind() == &"preach",
+		"while hypnotized he is on our side and sounds like it")
+	_free_world(w)
+
+
+## The landing sound only belongs to a touchdown the unit walks away from: a
+## ragdoll (lethally hit in mid-air) lands silently, its death cry follows at
+## the end of the tumble. Later roll damage is explicitly not considered.
+func test_land_sfx_key_only_for_survivors() -> void:
+	var w: Dictionary = _make_world()
+	var lucky: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
+	lucky.throw_airborne(Vector3(1, 0, 0) * 4.0 + Vector3.UP * 5.0)
+	check(lucky.land_sfx_key() == &"unit_land", "a body that survives thuds down")
+	var doomed: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(34, 30))
+	doomed.throw_airborne(Vector3(1, 0, 0) * 4.0 + Vector3.UP * 5.0)
+	doomed.take_damage(10000)
+	check(doomed.doomed, "the mid-air hit made it a ragdoll")
+	check(doomed.land_sfx_key() == &"", "a ragdoll lands silently — its death cry carries it")
+	_free_world(w)
 
 
 # --- Strike animations ---------------------------------------------------------------

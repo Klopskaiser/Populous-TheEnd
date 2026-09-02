@@ -296,3 +296,23 @@ func test_casting_on_empty_ground_fails_and_keeps_the_charge() -> void:
 	check(not spell.execute(w.t0, Vector3(50, 5, 50), w.ctx),
 		"nothing to hypnotize: the cast fails")
 	_free_world(w)
+
+
+# --- Sounds -------------------------------------------------------------------
+
+## Hypnose hat beide Zaubersounds wie jeder andere Zauber: die Formel läuft
+## generisch über Events.spell_cast_started (AudioManager), den EFFEKT spielt
+## execute() selbst — sie ist der einzige Zauber ohne Effekt-Entität, an der er
+## sonst hängen würde. Der Test nagelt die vier Namen fest, damit Code und
+## assets/README.md nicht auseinanderlaufen.
+func test_spell_sound_names() -> void:
+	var spell: HypnosisSpell = _hypnosis()
+	check(spell.id == &"hypnosis", "die Zauber-Id heißt hypnosis")
+	check(SpellAudio.voice_name(spell.id) == &"spell_voice_hypnosis",
+		"die Zauberformel heißt spell_voice_hypnosis")
+	check(SpellAudio.effect_name(spell.id) == &"spell_hypnosis",
+		"der Effektsound heißt spell_hypnosis")
+	check(AudioSlots.default_priority(SpellAudio.voice_name(spell.id))
+		== AudioSlots.PRIO_CRITICAL, "die Formel erbt Prio 1 über den Präfix")
+	check(AudioSlots.default_priority(SpellAudio.effect_name(spell.id))
+		== AudioSlots.PRIO_NORMAL, "der Effektsound ist gewöhnlich")

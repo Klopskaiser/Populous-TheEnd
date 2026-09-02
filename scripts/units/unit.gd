@@ -197,6 +197,11 @@ const VOID_FALL_MAX_TIME: float = Balance.VOID_FALL_MAX_TIME
 const ROLL_FRICTION: float = 6.0
 ## A speed-driven roll may end once its momentum decayed below this.
 const ROLL_STOP_SPEED: float = 1.0
+## Throttles for the two throw sounds. Both are mass events — a firestorm or a
+## tornado hurls dozens at once — and _land_from_throw is even re-entered per
+## tick while start_roll refuses (a casting shaman), so neither is optional.
+const LAND_SFX_INTERVAL_MS: int = 150
+const AIR_DEATH_SFX_INTERVAL_MS: int = 200
 
 # --- Cliff fall (combat shove / roll over a cliff edge) ------------------------------
 ## Being shoved (combat/fireball) or rolling over a cliff edge launches the unit
@@ -833,6 +838,15 @@ func death_sfx_key() -> StringName:
 	return &"water_splash" if _drowning else &"unit_death"
 
 
+## Sound key of a touchdown the unit walks away from (user request). A ragdoll
+## (doomed) and a body already at 0 HP stay silent — for those the death cry at
+## the end of the tumble carries the landing. Later ROLL damage explicitly does
+## not count here: this is the landing itself, not how it ends. Empty = silent,
+## same convention as death_sfx_key().
+func land_sfx_key() -> StringName:
+	return &"" if doomed or health <= 0 else &"unit_land"
+
+
 ## True for units that seek out enemies on their own while idle (Warrior/
 ## Firewarrior/Preacher). Braves are false: they only retaliate when hit.
 func _is_combatant() -> bool:
@@ -1418,6 +1432,12 @@ func take_damage(amount: int, attacker = null) -> void:
 			# Deferred: _end_roll / the landing roll finishes it. The unit is a
 			# goner though, so it drops out of the simulation NOW and only
 			# plays its ragdoll out (phase 10c, see _enter_ragdoll).
+			if state == State.THROWN:
+				# Struck dead in mid-air: the cry happens HERE, at altitude
+				# (user request), while the death sound itself follows seconds
+				# later where the body hits. A tumble on the ground is not "in
+				# the air" and stays silent.
+				_play_sfx(&"unit_air_death", AIR_DEATH_SFX_INTERVAL_MS)
 			_enter_ragdoll()
 			return
 		# Deck passengers (airship): a lethal hit while riding at altitude is
@@ -1427,6 +1447,9 @@ func take_damage(amount: int, attacker = null) -> void:
 		# hovering low the plain mini roll read as "spawns dead on the ground"
 		# instead of a visible crash-tumble (user report).
 		if rides_airborne():
+			# Same cry as a thrown body: he is hit at deck altitude and falls
+			# from there (user decision), so it plays before he leaves the crew.
+			_play_sfx(&"unit_air_death", AIR_DEATH_SFX_INTERVAL_MS)
 			var drop: float = position.y
 			if terrain_data != null:
 				drop -= terrain_data.get_height(position.x, position.z)
@@ -2333,6 +2356,9 @@ func _land_from_throw(ground: float) -> void:
 		take_damage(fall_damage)
 		if state == State.DEAD:
 			return
+	var land_key: StringName = land_sfx_key()
+	if land_key != &"":
+		_play_sfx(land_key, LAND_SFX_INTERVAL_MS)
 	var roll_dur: float = _throw_roll_duration
 	_throw_roll_duration = MINI_ROLL_DURATION
 	start_roll(momentum, roll_dur, momentum.length())

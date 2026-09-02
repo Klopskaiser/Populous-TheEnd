@@ -39,6 +39,14 @@ func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:
 	for u in victims:
 		if u.hypnotize(tribe, DURATION):
 			taken += 1
+	if taken > 0:
+		# Hypnosis is the only spell WITHOUT an effect entity (no projectile, no
+		# TerrainMorph, no cloud), so the usual "whoever produces the effect
+		# plays its sound" rule has nobody to hang on: execute() plays it
+		# itself, at the target and only on a real takeover. Spell is RefCounted
+		# and has no position — the unit manager is the tree anchor the
+		# projectiles use too, and SpellAudio._audio holds the headless guard.
+		SpellAudio.play_effect(ctx.unit_manager, id, target)
 	return taken > 0
 
 

@@ -228,13 +228,31 @@ func _activate_loop(name: StringName, entry: Dictionary, owner: Node3D) -> void:
 	var player: AudioStreamPlayer3D = AudioStreamPlayer3D.new()
 	player.max_distance = 40.0
 	player.bus = "SFX"
-	player.stream = streams[randi() % streams.size()]
-	# Replay on finish -> loops regardless of the file's import loop flag.
-	player.finished.connect(player.play)
+	player.stream = streams[AudioSlots.next_variant(streams.size(), -1)]
+	# Replay on finish -> loops regardless of the file's import loop flag, and
+	# re-rolls the variant on every repetition (see _on_loop_finished).
+	player.finished.connect(_on_loop_finished.bind(player, streams))
 	add_child(player)
 	player.global_position = owner.global_position
 	player.play()
 	entry.active.append({"owner": owner, "player": player})
+
+
+## Every repetition picks a fresh variant: a loop with several files
+## (spell_tornado_loop_0/_1) must not play the same one for the whole effect
+## (user report). The current index comes from the stream itself — the variant
+## list is cached and a handful of entries long, so the lookup costs nothing.
+##
+## NOTE: this hangs off `finished`, so a loop file imported WITH the loop flag
+## set never gets here (the stream loops internally and stays on one variant).
+## Ship loop files without import looping; the repeat is this manager's job.
+func _on_loop_finished(player: AudioStreamPlayer3D, streams: Array) -> void:
+	if not is_instance_valid(player):
+		return
+	if streams.size() > 1:
+		player.stream = streams[AudioSlots.next_variant(
+			streams.size(), streams.find(player.stream))]
+	player.play()
 
 
 func _release_loop_slot(name: StringName, entry: Dictionary, index: int) -> void:

@@ -139,3 +139,48 @@ func test_default_priority_mapping() -> void:
 		"spell EFFECT sounds are ordinary — only the incantation is critical")
 	check(AudioSlots.default_priority(&"wood_chop") == AudioSlots.PRIO_NORMAL,
 		"unknown names fall back to ordinary")
+
+
+# --- Loop variants ------------------------------------------------------------
+
+## User report: a tornado with two loop files (spell_tornado_loop_0/_1) only ever
+## played one of them, because _activate_loop rolled the variant once and then
+## replayed that same stream forever. next_variant re-rolls per repetition.
+func test_next_variant_single_file() -> void:
+	check(AudioSlots.next_variant(1, -1) == 0, "a single file always plays itself")
+	check(AudioSlots.next_variant(1, 0) == 0, "...and repeats without a second choice")
+	check(AudioSlots.next_variant(0, -1) == 0, "an empty list cannot pick out of range")
+
+
+func test_next_variant_never_repeats_itself() -> void:
+	# One assertion per (count, current) pair, not per draw — the draws only
+	# collect the failures so a rare bad pick cannot hide behind a lucky run.
+	for count in [2, 3, 4]:
+		for current in range(count):
+			var seen: Dictionary = {}
+			var out_of_range: int = 0
+			var repeats: int = 0
+			for _i in range(200):
+				var pick: int = AudioSlots.next_variant(count, current)
+				if pick < 0 or pick >= count:
+					out_of_range += 1
+				if pick == current:
+					repeats += 1
+				seen[pick] = true
+			check(out_of_range == 0,
+				"count %d: every pick stays inside 0..%d (%d escaped)"
+					% [count, count - 1, out_of_range])
+			check(repeats == 0,
+				"count %d: variant %d is never repeated back to back (%d times)"
+					% [count, current, repeats])
+			check(seen.size() == count - 1,
+				"count %d from %d reaches all %d other variants (got %d)"
+					% [count, current, count - 1, seen.size()])
+
+
+## The first start has no current variant, so every file is reachable there.
+func test_next_variant_first_start_uses_all_files() -> void:
+	var seen: Dictionary = {}
+	for _i in range(200):
+		seen[AudioSlots.next_variant(3, -1)] = true
+	check(seen.size() == 3, "the initial pick can land on any of the three files")

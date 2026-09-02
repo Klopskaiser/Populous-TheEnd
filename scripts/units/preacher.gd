@@ -51,6 +51,17 @@ func unit_kind() -> StringName:
 	return &"preacher"
 
 
+## Chant kind for the channeling sermon: an ENEMY preacher sings a different,
+## darker chant than our own, so a foreign sermon is audible as such (user
+## request). Perspective is the local player — the same one the selection and
+## move sounds use. A hypnotized enemy preacher counts as ours while the
+## hypnosis lasts: he preaches for us. Single source of the rule, because the
+## stationed preachers (watchtower, airship deck) chant through their own copies
+## of the timer block.
+func chant_sfx_kind() -> StringName:
+	return &"preach" if tribe_id == GameState.PLAYER_TRIBE else &"preach_enemy"
+
+
 func _is_combatant() -> bool:
 	return true
 
@@ -219,7 +230,7 @@ func _tick_convert(delta: float) -> void:
 	_preach_sound_timer -= delta
 	if _preach_sound_timer <= 0.0:
 		_preach_sound_timer = PREACH_SOUND_INTERVAL
-		_emit_combat_hit(&"preach")
+		_emit_combat_hit(chant_sfx_kind())
 	# C2.5 cast hold: the pure channel stand (no approach focus) does nothing
 	# until the next scheduled scan or chant — park it in the kernel; both
 	# timers are reconstructed from the held time on drop (_on_hold_elapsed).

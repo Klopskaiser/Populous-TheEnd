@@ -107,7 +107,7 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
 | **Brave (Gefolgsmann)** | Basis-Einheit. Sammelt **passiv Holz** und baut Gebäude aus. Wird von Hütten gespawnt. |
 | **Krieger** | Nahkampf-Einheit. Ausbildung in der **Kaserne** (Krieger-Trainingslager). |
 | **Feuerkrieger** | Fernkampf-Einheit (Feuerbälle). Ausbildung im **Feuertempel** (Feuerkrieger-Trainingslager). Der Feuerball macht **Flächenschaden** (20 % des Hauptschadens im Umkreis von **1,2 m**, **nur Feinde**, kein Rückstoß auf Umstehende) — ohne ihn teilten Feuerkrieger viel Schaden aus und töteten fast nichts. Der Radius ist an der Einheitengeometrie ausgerichtet: 1,2 m fasst **genau ein 6er-Pack** (max. 1,10 m breit) bzw. eine Nahkampfgruppe (0,9-m-Ring) und lässt die Nachbargruppe (2,2 m) draußen. Gemessen **flach in XZ**, der Bereich ist also ein senkrechter Zylinder. **Die Wirkung skaliert mit der Dichte:** im 200er-Klumpen nimmt fast jeder Ball ~3 Umstehende mit, bei 20 gegen 20 meist keinen — Feuerkrieger sind damit bewusst eine **Masseneinheit**. |
-| **Prediger** | **Konvertiert** feindliche Einheiten zum eigenen Stamm. Ausbildung im **Tempel**. Mehrere Prediger verteilen sich auf verschiedene Ziele; **Einheiten in Bekehrung sind kein gültiges Ziel** für Nah-/Fernkampf (Katapult ausgenommen). Eine **kämpfende feindliche Schamanin** im Umkreis von 6 m **unterbricht die Predigt** — laufende Bekehrungen brechen ab, neue beginnen nicht, und das gilt für alle Prediger in ihrem Radius. Bloßes Herumstehen stört nicht. |
+| **Prediger** | **Konvertiert** feindliche Einheiten zum eigenen Stamm. Ausbildung im **Tempel**. Mehrere Prediger verteilen sich auf verschiedene Ziele; **Einheiten in Bekehrung sind kein gültiges Ziel** für Nah-/Fernkampf (Katapult ausgenommen). Eine **kämpfende feindliche Schamanin** im Umkreis von 6 m **unterbricht die Predigt** — laufende Bekehrungen brechen ab, neue beginnen nicht, und das gilt für alle Prediger in ihrem Radius. Bloßes Herumstehen stört nicht. **Gegnerische Prediger singen hörbar anders** als die eigenen (`preach_enemy` statt `preach`, Perspektive Spieler) — eine fremde Predigt soll man erkennen. |
 | **Belagerungswaffe (Katapult)** | Fernkampf-Fahrzeug mit Crew, gebaut in der **Werkstatt** (Phase 7f). |
 
 > **Einheiten-Hardcap:** max. **1000 Einheiten pro Stamm** (`Balance.TRIBE_MAX_UNITS`,
@@ -300,6 +300,13 @@ Laufzeit-Terrainverformung (Erdbeben/Vulkan/Ebene/Absinken).
   (`FIREWARRIOR_AIRBORNE_MULT`, auch je Flächenschaden-Opfer) und
   **beschleunigen** bei der Verfolgung. Ein tödlicher Treffer in der Luft tötet
   nicht sofort: die Einheit fällt als Ragdoll zu Boden und stirbt bei der Landung.
+  Sie schreit dabei **oben**, im Moment des Treffers (`unit_air_death`, gilt auch
+  für die vom Luftschiffdeck geschossene Besatzung); der eigentliche Todes-Sound
+  kommt Sekunden später beim Aufprall. Die Landung eines Ragdolls ist stumm.
+- **Wer die Landung überlebt, ist zu hören** (`unit_land`, `Unit.land_sfx_key()`):
+  jede Landung, nicht nur die aus Zaubern — Klippensturz, Rückstoß über eine
+  Kante, Tornado-Auswurf, Feuerkrieger-Uppercut. Gemeint ist die **Landung
+  selbst**: dass der Rollschaden danach noch tötet, ändert den Sound nicht.
 - **Verletzte fliegen leichter:** Die Anhebe-Chance des Feuerkrieger-Feuerballs
   skaliert **invers zu den Lebenspunkten** des Ziels — bei voller Gesundheit die
   Basis, kurz vor dem Tod das Dreifache (`FW_FIREBALL_LIFT_HP_MAX_MULT`, also

@@ -84,6 +84,20 @@ static func _oldest_matching(prios: PackedInt32Array, starts: PackedInt64Array,
 	return best
 
 
+## Variant index to play on the NEXT repetition of a looping sound. `current` is
+## the index playing now (-1 on the first start). With several files a loop must
+## neither lock onto the variant picked at start (user report: two tornado loop
+## files, only ever one heard) nor immediately repeat the same one — with exactly
+## two files that makes them alternate.
+static func next_variant(count: int, current: int) -> int:
+	if count <= 1:
+		return 0
+	var pick: int = randi() % count
+	if pick == current:
+		pick = (pick + 1) % count
+	return pick
+
+
 ## Priority of a sound derived from its name. The death keys are the actual
 ## return values of Unit.death_sfx_key() and its overrides (shaman.gd,
 ## airship.gd, crewed_vehicle.gd).

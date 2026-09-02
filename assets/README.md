@@ -297,6 +297,12 @@ Priorität. Gleichrangige Sounds verdrängen sich erst, wenn das Opfer schon
 > (`<name>_0.ogg`, `<name>_1.ogg`, … lückenlos ab `_0`). Pro Abspielen wird
 > zufällig eine gewählt. Beispiel: `shaman_hurt_0.ogg` + `shaman_hurt_1.ogg`
 > + `shaman_hurt_2.ogg` für abwechslungsreiche Schmerzlaute.
+>
+> Das gilt **auch für Loops**: dort wird bei **jeder Wiederholung** neu
+> gewürfelt (nie zweimal dieselbe Datei direkt hintereinander, bei genau zwei
+> Dateien wechseln sie sich also ab). Dafür müssen Loop-Dateien **ohne**
+> Import-Loop geliefert werden — das Wiederholen macht der AudioManager, und ein
+> intern loopender Stream würde für immer auf einer Variante hängen bleiben.
 
 **Kampf** — `audio/sfx/combat/` (nummerierte Varianten, Fallback = Synthese):
 
@@ -307,7 +313,8 @@ Priorität. Gleichrangige Sounds verdrängen sich erst, wenn das Opfer schon
 | `shove_0.ogg`, … | Schubser (Nahkampf) |
 | `fireball_0.ogg`, … | Feuerball-Einschlag |
 | `throw_0.ogg`, … | Feuerball-Abschuss (Feuerkrieger) |
-| `preach_0.ogg`, … | Prediger-Gesang (Bekehrung) |
+| `preach_0.ogg`, … | Prediger-Gesang (Bekehrung) — **eigener** Stamm |
+| `preach_enemy_0.ogg`, … | Derselbe Gesang eines **gegnerischen** Predigers (Perspektive: Spieler; ein hypnotisierter Gegner-Prediger klingt solange „eigen") |
 
 **Einheiten** — `audio/sfx/` (Fallback = stumm):
 
@@ -321,6 +328,8 @@ Priorität. Gleichrangige Sounds verdrängen sich erst, wenn das Opfer schon
 | `water_sink.ogg` | Dasselbe geht kurz darauf unter der Oberfläche verloren (Gluckern) |
 | `shaman_hurt.ogg` | Schamanin erleidet Schaden (max. alle 1,2 s; mehrere Varianten empfohlen) |
 | `shaman_death.ogg` | Tod der Schamanin |
+| `unit_land.ogg` | Einheit landet nach Wurf/Sturz auf dem Boden und **überlebt** die Landung (späterer Rollschaden zählt nicht; max. alle 0,15 s) |
+| `unit_air_death.ogg` | Einheit erleidet **in der Luft** tödlichen Schaden (auch vom Luftschiffdeck geschossene Besatzung) — der Tod selbst folgt beim Aufprall mit `unit_death.ogg` (max. alle 0,2 s) |
 
 **Status-Loops** — `audio/sfx/` (laufen in Dauerschleife, **solange der Zustand
 anhält**; max. 4 gleichzeitige Emitter pro Sound, weitere Einheiten rücken nach,
@@ -331,6 +340,9 @@ sobald ein Platz frei wird; Fallback = stumm):
 | `unit_panic_loop.ogg` | … die Einheit in Panik ist |
 | `unit_burning_loop.ogg` | … die Einheit/das Katapult brennt |
 | `unit_injured_loop.ogg` | … die Einheit unter 25 % Leben ist |
+
+> Auch Loops dürfen mehrere Varianten haben (`unit_burning_loop_0.ogg`,
+> `_1.ogg`, …) — jede Wiederholung würfelt neu, siehe Varianten-Hinweis oben.
 
 **Fahrzeuge** (Katapult, Feuerramme, Luftschiff) — `audio/sfx/` (Fallback siehe Tabelle):
 
@@ -378,7 +390,7 @@ Zeitpunkten**:
   **tatsächlich eintritt** — bei Wurf-/Terrainzaubern also deutlich später als
   die Formel — und dort, wo er passiert.
 
-Die elf gültigen IDs (aus `scripts/spells/*.gd`):
+Die zwölf gültigen IDs (aus `scripts/spells/*.gd`):
 
 | Formel | Effekt | Zauber | Effekt spielt |
 |---|---|---|---|
@@ -393,6 +405,7 @@ Die elf gültigen IDs (aus `scripts/spells/*.gd`):
 | `spell_voice_flatten.ogg` | `spell_flatten.ogg` | Ebene | wenn sich der Boden zu bewegen beginnt |
 | `spell_voice_sink.ogg` | `spell_sink.ogg` | Absinken | wenn sich der Boden zu senken beginnt |
 | `spell_voice_supertornado.ogg` | `spell_supertornado.ogg` | Supertornado | wenn der Haupttrichter erscheint |
+| `spell_voice_hypnosis.ogg` | `spell_hypnosis.ogg` | Hypnose | im Moment der Übernahme (nur wenn wirklich jemand übernommen wird) |
 
 **Zusatzsounds der Zauber** — `audio/sfx/` (Fallback = stumm):
 
