@@ -67,8 +67,52 @@ static func instantiate_model(rel: String) -> Node3D:
 	return scene.instantiate() as Node3D
 
 
+## Audio gets a SECOND CHANCE that textures and models cannot have: a sound file
+## dropped into assets/ is invisible to ResourceLoader until Godot imported it
+## (the .godot cache), which silently swallowed every freshly added sound — a
+## move_shaman_0.wav that was plainly there simply never played, with nothing but
+## a warning buried in the log (user report). Audio formats can be decoded at
+## RUNTIME, so an un-imported file is loaded straight from disk instead.
+##
+## The imported resource still WINS when it exists (it honours the import
+## settings). Textures/models keep needing the importer — their GPU formats are
+## baked at import time, there is nothing to decode at runtime.
 static func stream(rel: String) -> AudioStream:
-	return _resource(rel) as AudioStream
+	var path: String = ROOT + rel
+	if _cache.has(path):
+		return _cache[path] as AudioStream
+	var res: AudioStream = null
+	if ResourceLoader.exists(path):
+		res = load(path) as AudioStream
+	elif FileAccess.file_exists(path):
+		res = _stream_from_disk(path)
+	_cache[path] = res
+	return res
+
+
+## True when a sound file is USABLE — imported or merely present on disk (see
+## stream()). The variant scan below must ask this, not exists(): a dropped-in
+## <name>_0.wav would otherwise end the scan before it started.
+static func has_stream(rel: String) -> bool:
+	return ResourceLoader.exists(ROOT + rel) or FileAccess.file_exists(ROOT + rel)
+
+
+## Decodes an un-imported audio file from disk. Null for anything unsupported
+## (or a broken file — the loader reports that itself); one warning per path so
+## a corrupt sound is diagnosable instead of just silent.
+static func _stream_from_disk(path: String) -> AudioStream:
+	var res: AudioStream = null
+	match path.get_extension().to_lower():
+		"wav":
+			res = AudioStreamWAV.load_from_file(path)
+		"ogg":
+			res = AudioStreamOggVorbis.load_from_file(path)
+		"mp3":
+			res = AudioStreamMP3.load_from_file(path)
+	if res == null and not _warned.has(path):
+		_warned[path] = true
+		push_warning("AssetLibrary: '%s' liegt auf der Platte, konnte aber nicht gelesen werden (Format/Datei defekt?) — Fallback auf Platzhalter." % path)
+	return res
 
 
 ## Parses a plain JSON file (not an imported resource); {} when missing/invalid.
@@ -95,7 +139,7 @@ static func stream_variants(rel_prefix: String) -> Array[AudioStream]:
 		var found: AudioStream = null
 		for ext in ["ogg", "wav"]:
 			var rel: String = "%s_%d.%s" % [rel_prefix, index, ext]
-			if exists(rel):
+			if has_stream(rel):
 				found = stream(rel)
 				break
 		if found == null:

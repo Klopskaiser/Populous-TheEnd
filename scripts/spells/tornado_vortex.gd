@@ -25,13 +25,16 @@ var sfx_id: StringName = &"tornado"
 ## (user request). Everything follows this one number — the visible rings, the
 ## catch radius at altitude and the circle the riders whirl on — so the
 ## Supertornado's flare is automatically as much bigger as its funnel
-## (radius 4.4 -> an 8.8 m mouth against the plain tornado's 4.4 m).
+## (radius 4.4 -> a 7.5 m mouth against the plain tornado's 3.7 m).
+##
+## 1.7, not the 2.0 it started at: both mouths read ~15 % too wide in play
+## (user call after seeing them).
 ##
 ## It only ever WIDENS: at ground level the radius stays exactly `radius`, so
 ## the balance of what a twister sweeps up on foot is untouched, and above the
 ## tip the mouth width is held rather than falling off (a high-flying airship
 ## must not become immune — before this it was a plain cylinder).
-const TOP_WIDEN: float = 2.0
+const TOP_WIDEN: float = 1.7
 ## Movement profile: parks on the cast point first, then crawls off and
 ## accelerates over ACCEL_TIME up to MAX_SPEED.
 const IDLE_TIME: float = 1.0

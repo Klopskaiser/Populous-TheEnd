@@ -266,7 +266,14 @@ richtig und erwünscht.
 
 ## Audio
 
-- Format: **.ogg** (empfohlen) oder .wav.
+- Format: **.ogg** (empfohlen) oder .wav (auch .mp3 wird gelesen).
+- **Neue Sounddateien wirken sofort** — sie werden notfalls direkt von der Platte
+  gelesen, auch wenn Godot sie noch nicht importiert hat. Ein Import (Editor
+  öffnen oder `--headless --import`) bleibt trotzdem sinnvoll, weil dann die
+  Import-Einstellungen der Datei gelten; **ohne** Import zählt nur die Datei
+  selbst (eine Loop-Markierung in den Import-Einstellungen gibt es dann z. B.
+  nicht — was für unsere Loops sogar erwünscht ist, siehe unten).
+  Für **Grafiken und Modelle** gilt das NICHT: die brauchen den Import.
 - `music/` und `ambience/`: alle Dateien im Ordner werden (alphabetisch sortiert)
   als Playlist geloopt — Dateinamen frei wählbar.
 - Kampfsounds: nummerierte Varianten ab `_0` ohne Lücken (`punch_0.ogg, punch_1.ogg, …`);

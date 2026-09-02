@@ -9451,3 +9451,35 @@ beiden Verhaltenstests sind gegen den alten Effektcode geprüft (Helfer drin,
 Effektstellen zurückgedreht): ohne den Fix wird der Flieger 3,1 m außen **nicht**
 erfasst (Radius 2,2) und der Kreis an der Spitze misst **0,50 m** statt > 2,2 m.
 Optisch geprüft ist es noch nicht — die Trichterform im Spiel ist Nutzersache.
+### Nachtrag 9 — Trichter 15 % schmaler, und Sounddateien wirken ohne Import (2026-09-02)
+
+**Trichter:** `TOP_WIDEN` 2,0 → **1,7** auf Nutzerentscheidung nach dem ersten
+Anblick. Bodenradius unverändert, Mündung damit 3,7 m (Tornado) bzw. 7,5 m
+(Supertornado). Eine Konstante, beide Trichter — genau der Grund, warum die Form
+in 10k-Nachtrag 8 an einem einzigen Wert hängt.
+
+**Der `move_shaman`-Sound war kein Namens- oder Codefehler, sondern der Import.**
+Am Code nachgestellt: eine frisch in `assets/` abgelegte `move_shaman_0.wav`
+liefert `FileAccess.file_exists = true`, aber `ResourceLoader.exists = false` —
+und damit `stream_variants = 0`, `_streams_for = 0`, also Stille. Nach
+`--headless --import` waren es 1 und 1 und der Sound spielte. Die Ursache ist
+also, dass Godot eine neue Datei erst kennt, wenn der Editor oder
+`--headless --import` sie importiert hat; der Hinweis darauf war ein
+`push_warning` tief im Log.
+
+**Behoben, statt nur dokumentiert:** `AssetLibrary.stream()` liest eine
+**nicht importierte** Audiodatei jetzt direkt von der Platte
+(`AudioStreamWAV/OggVorbis/MP3.load_from_file`), und der Variantenscan fragt dafür
+`has_stream()` statt `exists()` — sonst hätte er vor der ersten Datei abgebrochen.
+Die importierte Fassung gewinnt weiterhin, wenn es sie gibt (nur so gelten die
+Import-Einstellungen). **Grafiken und Modelle** bleiben import-pflichtig: ihre
+GPU-Formate entstehen beim Import, da gibt es zur Laufzeit nichts zu dekodieren.
+Nebenbei fällt damit die häufigste Stolperfalle beim Nachliefern von Assets weg —
+Datei ablegen, Spiel starten, fertig.
+
+**Verifikation:** Ladecheck exit 0 ohne Ausgabe, **Suite 5033 Zusicherungen grün**
+(0 failed, kein `SCRIPT ERROR`). Neuer Test schreibt eine echte, garantiert
+un-importierte WAV nach `assets/audio/sfx/`, prüft
+`ResourceLoader.exists == false`, `has_stream`, `stream()` und den Variantenscan
+und räumt sie wieder weg. Ein Rot-Grün-A/B des Tests geht nicht (ohne
+`has_stream` parst die Datei nicht) — die Beweislast trägt die Messung oben.

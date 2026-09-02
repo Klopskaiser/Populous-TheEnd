@@ -184,3 +184,69 @@ func test_next_variant_first_start_uses_all_files() -> void:
 	for _i in range(200):
 		seen[AudioSlots.next_variant(3, -1)] = true
 	check(seen.size() == 3, "the initial pick can land on any of the three files")
+# --- Drop-in audio files (AssetLibrary) ---------------------------------------
+
+## Minimal valid 16-bit mono PCM WAV (0.05 s of silence-ish data).
+func _tiny_wav() -> PackedByteArray:
+	var rate: int = 22050
+	var samples: int = 1024
+	var data: PackedByteArray = PackedByteArray()
+	data.resize(samples * 2)
+	for i in range(samples):
+		data.encode_s16(i * 2, 4000 if i % 64 < 32 else -4000)
+	var out: PackedByteArray = PackedByteArray()
+	out.append_array("RIFF".to_ascii_buffer())
+	var head: PackedByteArray = PackedByteArray()
+	head.resize(4)
+	head.encode_u32(0, 36 + data.size())
+	out.append_array(head)
+	out.append_array("WAVEfmt ".to_ascii_buffer())
+	var fmt: PackedByteArray = PackedByteArray()
+	fmt.resize(16)
+	fmt.encode_u32(0, 16)          # chunk size
+	fmt.encode_u16(4, 1)           # PCM
+	fmt.encode_u16(6, 1)           # mono
+	fmt.encode_u32(8, rate)
+	fmt.encode_u32(12, rate * 2)   # byte rate
+	out.append_array(fmt)
+	var blk: PackedByteArray = PackedByteArray()
+	blk.resize(4)
+	blk.encode_u16(0, 2)           # block align
+	blk.encode_u16(2, 16)          # bits per sample
+	out.append_array(blk)
+	out.append_array("data".to_ascii_buffer())
+	var dlen: PackedByteArray = PackedByteArray()
+	dlen.resize(4)
+	dlen.encode_u32(0, data.size())
+	out.append_array(dlen)
+	out.append_array(data)
+	return out
+
+
+## A sound file dropped into assets/ used to be INVISIBLE until Godot had
+## imported it: ResourceLoader.exists() is false, so the lookup found nothing and
+## the game stayed silent with only a warning in the log (user report: a
+## move_shaman_0.wav that was plainly there never played). Audio can be decoded
+## at runtime, so AssetLibrary now reads such a file straight from disk.
+func test_dropped_in_sound_needs_no_import() -> void:
+	var rel: String = "audio/sfx/_selftest_dropin_0.wav"
+	var path: String = "res://assets/" + rel
+	var f: FileAccess = FileAccess.open(path, FileAccess.WRITE)
+	check(f != null, "the test can write a temp sound into assets/")
+	if f == null:
+		return
+	f.store_buffer(_tiny_wav())
+	f.close()
+	check(not ResourceLoader.exists(path),
+		"the freshly written file is NOT imported (that is the whole point)")
+	check(AssetLibrary.has_stream(rel), "...but it counts as available")
+	var stream: AudioStream = AssetLibrary.stream(rel)
+	check(stream != null, "and it decodes straight from disk")
+	if stream != null:
+		check(stream.get_length() > 0.0, "with real audio data behind it")
+	# The variant scan must see it too — that is the path play_sfx/play_ui use
+	# for <name>_0.wav files.
+	check(AssetLibrary.stream_variants("audio/sfx/_selftest_dropin").size() == 1,
+		"the numbered-variant scan picks it up")
+	DirAccess.remove_absolute(path)
+	check(not FileAccess.file_exists(path), "temp sound removed again")
