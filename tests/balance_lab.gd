@@ -191,6 +191,29 @@ const SCENARIOS: Array = [
 	 "b": [[&"krieger", 20], [&"feuerkrieger", 12]],
 	 "frage": "Die halbe Armee (16 BAe) in 8 Feuerrammen: skaliert das Chaos?"},
 
+	# --- Hilft eine TAKTIK gegen den Eigenbeschuss? (Nutzerfrage 2026-09-02) ---
+	# Die Ring-Aufstellung setzt die ERSTE Zeile nach innen — in
+	# armee_mit_feuerrammen standen die Rammen also mitten im eigenen Klumpen,
+	# die schlechtestmoegliche Position fuer einen Flammenwerfer mit Friendly
+	# Fire. Das vierte Element einer Zeile verschiebt sie nach VORN (Richtung
+	# Feind): Rammen +4 Zellen, Fernkampf 3 Zellen hinter den Kriegern.
+	# Erste Zeile: gleiche 32 BAe wie die Ring-Variante, es aendert sich NUR die
+	# Aufstellung. Zweite Zeile: gleiche Zahl SOLDATEN wie der Gegner, die Rammen
+	# kommen obendrauf (40 gegen 32 BAe — das sagt, was die Ramme wert ist, wenn
+	# man die Maenner nicht abzieht).
+	{"name": "armee_rammen_vorn",
+	 "a": [[&"feuerramme", 4, 2, 4], [&"krieger", 16, 0, 0], [&"feuerkrieger", 8, 0, -3]],
+	 "b": [[&"krieger", 20], [&"feuerkrieger", 12]],
+	 "frage": "Rammen VORN, Fernkampf hinten: rettet die Reihe den Eigenbeschuss?"},
+	{"name": "armee_rammen_weit_vorn",
+	 "a": [[&"feuerramme", 4, 2, 8], [&"krieger", 16, 0, 0], [&"feuerkrieger", 8, 0, -3]],
+	 "b": [[&"krieger", 20], [&"feuerkrieger", 12]],
+	 "frage": "Rammen 8 statt 4 Zellen vor der Linie: hilft mehr Abstand mehr?"},
+	{"name": "armee_rammen_vorn_gleiche_soldaten",
+	 "a": [[&"feuerramme", 4, 2, 4], [&"krieger", 20, 0, 0], [&"feuerkrieger", 12, 0, -3]],
+	 "b": [[&"krieger", 20], [&"feuerkrieger", 12]],
+	 "frage": "Dieselbe Armee wie der Gegner PLUS 4 Rammen vorn (40 gegen 32 BAe)"},
+
 	# --- Werte oder Verhalten? Die verteidigende Seite steht und schiesst. ---
 	{"name": "krieger_vs_haltende_feuerkrieger", "a": [[&"krieger", 20]], "b": [[&"feuerkrieger", 20]],
 	 "hold_b": true,
@@ -364,12 +387,21 @@ func _fight(scenario: Dictionary, rep_seed: int, seconds: float,
 	# Verlustrechnung zählt aber, wem sie ANFANGS gehörten.
 	var origin: Dictionary = {}
 	var be_of: Dictionary = {}
+	# Eine Belegungsliste fuer BEIDE Seiten: Reihen-Anker koennen sich sonst in
+	# der Mitte begegnen und zwei Einheiten auf dieselbe Zelle setzen.
+	var taken: Dictionary = {}
+	var fwd_a: Vector2i = Vector2i(0, 1)    # Seite A steht bei -half, Feind bei +half
+	var fwd_b: Vector2i = Vector2i(0, -1)
 	if b_first:
-		_spawn_side(um, nav, 1, mid + Vector2i(0, half), scenario["b"], origin, be_of)
-		_spawn_side(um, nav, 0, mid + Vector2i(0, -half), scenario["a"], origin, be_of)
+		_spawn_side(um, nav, 1, mid + Vector2i(0, half), scenario["b"], origin, be_of,
+			fwd_b, taken)
+		_spawn_side(um, nav, 0, mid + Vector2i(0, -half), scenario["a"], origin, be_of,
+			fwd_a, taken)
 	else:
-		_spawn_side(um, nav, 0, mid + Vector2i(0, -half), scenario["a"], origin, be_of)
-		_spawn_side(um, nav, 1, mid + Vector2i(0, half), scenario["b"], origin, be_of)
+		_spawn_side(um, nav, 0, mid + Vector2i(0, -half), scenario["a"], origin, be_of,
+			fwd_a, taken)
+		_spawn_side(um, nav, 1, mid + Vector2i(0, half), scenario["b"], origin, be_of,
+			fwd_b, taken)
 
 	# Beide Seiten greifen an (Angriffsbewegung, wie im Stresstest): so entsteht
 	# Kontakt auch dann, wenn eine Seite reine Fernkämpfer ohne Vorwärtsdrang hat.
@@ -504,17 +536,23 @@ func _tally(um: UnitManager, origin: Dictionary, be_of: Dictionary,
 
 # --- Aufstellen ---------------------------------------------------------------
 
+## `forward` zeigt zum Feind; ein VIERTES Element einer Aufstellungszeile
+## verschiebt diese Gruppe um so viele Zellen in diese Richtung (negativ =
+## dahinter). Damit sind Reihen aufstellbar: `[&"feuerramme", 4, 2, 4]` setzt die
+## Rammen 4 Zellen vor den Rest. Ohne viertes Element bleibt alles beim dichten
+## Ring um den Anker (unveraendertes Verhalten aller alten Paarungen).
 func _spawn_side(um: UnitManager, nav: NavGrid, tribe_id: int, anchor: Vector2i,
-		composition: Array, origin: Dictionary, be_of: Dictionary) -> void:
-	var placed: int = 0
+		composition: Array, origin: Dictionary, be_of: Dictionary,
+		forward: Vector2i = Vector2i.ZERO,
+		occupied: Dictionary = {}) -> void:
 	for entry in composition:
 		var kind: StringName = entry[0]
 		var count: int = int(entry[1])
 		var spec: Dictionary = KINDS[kind]
 		var crew: int = int(entry[2]) if entry.size() > 2 else int(spec["crew"])
+		var row: Vector2i = anchor + forward * (int(entry[3]) if entry.size() > 3 else 0)
 		for i in range(count):
-			var cell: Vector2i = _free_cell(nav, anchor, placed)
-			placed += 1
+			var cell: Vector2i = _free_cell(nav, row, occupied)
 			if cell.x < 0:
 				continue
 			var unit: Unit = um.spawn_unit(spec["scene"] as PackedScene, tribe_id,
@@ -531,8 +569,10 @@ func _spawn_side(um: UnitManager, nav: NavGrid, tribe_id: int, anchor: Vector2i,
 			be_of[unit.get_instance_id()] = 0
 			var crew_scene: PackedScene = KINDS[_crew_kind_of(kind)]["scene"] as PackedScene
 			for c in range(crew):
-				var crew_cell: Vector2i = _free_cell(nav, anchor, placed)
-				placed += 1
+				# Besatzung neben IHREM Fahrzeug, nicht am Seitenanker — sonst
+				# muesste sie in einer Reihen-Aufstellung erst quer durchs Feld
+				# laufen, um einzusteigen.
+				var crew_cell: Vector2i = _free_cell(nav, row, occupied)
 				if crew_cell.x < 0:
 					continue
 				var member: Unit = um.spawn_unit(crew_scene, tribe_id,
@@ -545,15 +585,22 @@ func _spawn_side(um: UnitManager, nav: NavGrid, tribe_id: int, anchor: Vector2i,
 
 
 ## `skip`-te begehbare Zelle in Ringen um `center` (dicht gepackte Aufstellung).
-func _free_cell(nav: NavGrid, center: Vector2i, skip: int) -> Vector2i:
-	var seen: int = 0
+## Naechste freie begehbare Zelle in Ringen um `center`; belegte Zellen werden
+## uebersprungen und die zurueckgegebene sofort vermerkt.
+##
+## Frueher lief das ueber einen Zaehler ("nimm die skip-te Zelle"), was nur mit
+## EINEM Anker je Seite funktioniert. Reihen-Aufstellungen (Rammen vorn,
+## Fernkampf hinten) brauchen mehrere Anker, deren Ringe sich ueberlappen — der
+## Belegungssatz ist die einzige Variante, die dabei keine Einheit auf eine
+## bereits besetzte Zelle setzt. Bei einem einzigen Anker ist die Reihenfolge
+## identisch zur alten Zaehlvariante.
+func _free_cell(nav: NavGrid, center: Vector2i, occupied: Dictionary) -> Vector2i:
 	for radius in range(0, 30):
 		for cell in AIController.ring_cells(center, radius):
-			if not nav.is_cell_walkable(cell):
+			if not nav.is_cell_walkable(cell) or occupied.has(cell):
 				continue
-			if seen >= skip:
-				return cell
-			seen += 1
+			occupied[cell] = true
+			return cell
 	return Vector2i(-1, -1)
 
 

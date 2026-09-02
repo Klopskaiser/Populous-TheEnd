@@ -9778,3 +9778,52 @@ Ramme zerfasert das Gefecht, wie schon in Nachtrag 14 gesehen.
 **Verifikation:** Ladecheck exit 0 ohne Ausgabe, **Suite 5068 Zusicherungen gruen**
 ohne Testanpassung (beide Werte werden aus `Balance` gelesen). Kein Test und kein
 Dokument kodierte sie.
+### Nachtrag 17 — der Eigenbeschuss der Ramme ist ein AUFSTELLUNGSproblem (2026-09-02)
+
+Nutzeransage: „Die Ramme gefaellt mir, ich mag das Chaos — vielleicht hilft eine
+bessere Taktik." Sie hilft, und zwar fast vollstaendig.
+
+**Erst ein Werkzeugbefund:** Das Labor stellt jede Seite als dichten **Ring um
+einen Anker** auf, und die ERSTE Aufstellungszeile landet **innen**. In
+`armee_mit_feuerrammen` standen die Rammen damit mitten im eigenen Klumpen — die
+schlechtestmoegliche Position fuer einen Flammenwerfer mit Friendly Fire. Die
+Messreihe aus Nachtrag 14 hat also nicht „die Ramme" gemessen, sondern „die Ramme
+im eigenen Haufen". `_spawn_side` nimmt jetzt ein **viertes Element** je Zeile:
+Verschiebung in Zellen Richtung Feind (negativ = dahinter). Dafuer musste
+`_free_cell` von einem Zaehler („nimm die skip-te Zelle") auf einen
+**Belegungssatz** umgebaut werden — mit mehreren Ankern je Seite ueberlappen die
+Ringe, und nur der Belegungssatz verhindert doppelt besetzte Zellen. Der Umbau ist
+verhaltensneutral: der Spiegel liefert exakt dieselbe Zeile wie vorher (4:2,
+1,09, 4,8:2,3).
+
+**Ergebnis (je 6 Wiederholungen, 32 BAe je Seite, dieselbe Gegenseite):**
+
+| Aufstellung A | Effizienz | Siege | Schaden A | Dauer |
+|---|---|---|---|---|
+| Spiegel, keine Rammen (Eichmass) | **1,09** | 4:2 | 96 % | 17 s |
+| 4 Rammen im Ring (Klumpenmitte) | **0,56** | 0:3 | 66 % | 56 s |
+| 4 Rammen **4 Zellen vorn** | **0,72** | 0:3 | 80 % | 56 s |
+| 4 Rammen **8 Zellen vorn** | **0,98** | 1:2 | 91 % | 58 s |
+| 4 Rammen 4 vorn, ZUSAETZLICH (40 gegen 32 BAe) | **0,86** | 2:1 | 97 % | 57 s |
+
+**Der Nachteil ist damit erklaert und behebbar:** 0,56 → 0,98 allein durch
+Abstand. Der Eigenbeschuss ist kein Wertproblem der Einheit, sondern eine Frage
+der Position; mit 8 Zellen Vorsprung ist die Ramme praktisch kostenneutral (0,98
+gegen 1,09 Eichmass) und bringt ihre Gebaeudewirkung obendrauf, die das Labor
+ueberhaupt nicht misst.
+
+**Der praktische Haken fuer das Spiel:** die Ramme ist mit **3,0 m/s langsamer**
+als Fusstruppen (4,0). Wer alles gemeinsam auf Angriffsbewegung schickt, bekommt
+automatisch den SCHLECHTEN Fall — die Rammen fallen zurueck und feuern aus der
+eigenen Linie. Die gute Aufstellung muss man aktiv herstellen: Rammen getrennt
+vorschicken und die Infanterie nachfuehren.
+
+**Nebenbefund zur letzten Zeile:** Rammen als ZUSATZ (gleiche Soldatenzahl wie
+der Gegner plus 4 Rammen) gewinnen die Schlacht (2:1, 97 % Schadensanteil), aber
+die Effizienz bleibt bei 0,86 — sie gewinnen Gefechte und kosten trotzdem mehr
+BAe, als sie einsparen. Wer auf Sieg spielt, nimmt sie; wer auf Substanz
+rechnet, nicht.
+
+**Verifikation:** Ladecheck exit 0 ohne Ausgabe, Suite unveraendert **5068
+Zusicherungen gruen** (das Labor ist nicht Teil der Suite). Am Spiel selbst ist
+nichts geaendert.
