@@ -380,6 +380,19 @@ const FW_FIREBALL_BLAST_FRAC: float = 0.3
 ## Bewusst ein EIGENER Wert: MINI_ROLL_DURATION haengt an Wurflandungen,
 ## Klippenstuerzen, Nahkampf-Schubsern und Gebaeudetruemmern.
 const FW_FIREBALL_ROLL_DURATION: float = 0.5
+## Ein Treffer auf ein BEREITS rollendes Ziel stoesst es nicht mehr (der 0,35-m-
+## Schubser war neben den ~2,75 m Rollstrecke bedeutungslos), sondern **lenkt**
+## die Rolle und **beschleunigt** sie: je Treffer +GAIN auf die aktuelle
+## Rollgeschwindigkeit, gedeckelt bei MAX (Nutzerentscheidung 2026-09-02:
+## aufstapeln, nicht nur auffuellen).
+##
+## Der Deckel ist PFLICHT, nicht Kosmetik: `_tick_roll` uebergibt die
+## Rollgeschwindigkeit am Scheibenrand direkt an `throw_airborne` und traegt sie
+## in Klippenstuerze — ohne Deckel schiesst eine 200er-Feuerlinie Koerper quer
+## ueber die Karte und ins All. 12 m/s entspricht dem Tornado-Auswurf, ist also
+## das schnellste, was das Spiel sonst kennt.
+const FW_FIREBALL_ROLL_BOOST_GAIN: float = 2.0
+const FW_FIREBALL_ROLL_BOOST_MAX: float = 12.0
 ## Ein FRISCHES Umwerfen reisst Nachbarn mit: Radius um das Ziel und Chance je
 ## Nachbar (die dann NEIGHBOR_ROLL_DURATION rollen). Radius 2026-09-02 von 0,9
 ## auf 1,0 m erhoeht; standen vorher als lokale Konstanten in fireball.gd und

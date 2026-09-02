@@ -9604,3 +9604,56 @@ weiter.
 
 **Verifikation:** Ladecheck exit 0 ohne Ausgabe, **Suite 5049 Zusicherungen grün**
 (0 failed, kein `SCRIPT ERROR`), +5 Zusicherungen im umgebauten Test.
+### Nachtrag 13 — Feuerball lenkt und beschleunigt rollende Ziele (Nutzerentscheidung, 2026-09-02)
+
+Nutzerbeobachtung: der Stoss ist gegen ein rollendes Ziel bedeutungslos, weil die
+Rolle selbst viel mehr Strecke zurücklegt (2,75 m gegen 0,35 m). Neu bestimmt der
+Ball deshalb **Richtung und Tempo** der Rolle, statt zu schubsen:
+
+- **Rollendes Ziel: kein Stoss mehr.** Beide bodennahen Ergebnisse rufen
+  `Fireball._steer_and_boost` — Richtung wie vorher „weg vom Schuetzen", Tempo
+  **+2,0 m/s je Treffer, gedeckelt bei 12,0** (`FW_FIREBALL_ROLL_BOOST_GAIN/MAX`).
+  Der Unterschied zwischen den Ergebnissen ist jetzt nur noch die Verlaengerung
+  der Mindestdauer (0,5 s beim Umwerfen, keine beim reinen Stoss).
+- **Warum auch das Stoss-Ergebnis lenkt:** der Schubser war seine *einzige*
+  Wirkung — ohne diese Aenderung waeren 34-42 % der Treffer auf ein rollendes
+  Ziel voellig wirkungslos geblieben.
+- **Stehende Ziele bleiben unveraendert** (Stoss wie bisher), ebenso Anheben und
+  das Mitreissen der Nachbarn (nur bei einem *frischen* Umwerfen).
+
+**Drei Dinge, die dabei wichtig waren:**
+
+1. **Aufgestapelt wird auf `roll_speed_now()`, nicht auf das rohe Feld.** Eine
+   Rolle ohne Impuls hat `_roll_init_speed == 0`, laeuft aber real mit
+   `ROLL_SPEED` 5,5 — ein naives `_roll_init_speed + 2` haette den ersten Treffer
+   zur **Bremse** auf 2 m/s gemacht. Der neue Helfer `Unit.roll_speed_now()`
+   liefert die tatsaechliche Geschwindigkeit (5,5 → 7,5 → 9,5 → 11,5 → 12).
+2. **Der Deckel ist Pflicht, nicht Kosmetik.** `_tick_roll` uebergibt die
+   Rollgeschwindigkeit am Scheibenrand direkt an `throw_airborne` und traegt sie
+   in Klippenstuerze — ohne Deckel wuerde eine 200er-Feuerlinie Koerper quer
+   ueber die Karte und ins All schieben. 12 m/s ist der Tornado-Auswurf, also das
+   schnellste, was das Spiel sonst kennt.
+3. **Die Rolle endet jetzt anders** (die am wenigsten offensichtliche Folge): mit
+   Impuls endet sie erst, wenn die Geschwindigkeit unter `ROLL_STOP_SPEED` 1,0
+   gefallen ist (Abbau `ROLL_FRICTION` 6 m/s²) — aus 7,5 also ~1,1 s, aus 12
+   ~1,8 s statt der nominellen 0,5 s. Der Rollschaden (5 HP/s) laeuft die ganze
+   Zeit weiter. Ein eigener Test haelt das fest, weil es sonst als Bug gelesen
+   wird.
+
+**Nebenwirkung, bewusst in Kauf genommen:** `apply_knockback` laedt den
+Dichte-Akkumulator `knockback_accum` (+1 je Treffer, Abbau 0,8/s). Rollende Ziele
+laden ihn nicht mehr, ihr erster Stoss nach dem Aufstehen ist also wieder schwach.
+
+**Gemessen** (Balance-Labor, 2 Wiederholungen): 200er-Anmarsch Effizienz
+**0,38 → 0,34**, Schadensanteil **71 % → 66 %**; 200er-Kontakt **0,30 → 0,27** /
+61 % → 57 %. Also praktisch neutral — der Effekt ist Optik und Verhalten, nicht
+Kampfkraft: die Koerper rollen weiter aus dem Klumpen heraus und damit aus dem
+Splash-Radius der Folgebaelle.
+
+**Verifikation:** Ladecheck exit 0 ohne Ausgabe, **Suite 5058 Zusicherungen gruen**
+(0 failed, kein `SCRIPT ERROR`), drei neue Tests. Ein Rot-Gruen-A/B geht nicht
+(ohne `roll_speed_now`/`_steer_and_boost` parst die Testdatei nicht) — und der
+Versuch zeigte prompt die dokumentierte **Falsch-Gruen-Falle**: der alte Stand
+meldete „29 passed, 0 failed" MIT drei `SCRIPT ERROR`-Zeilen im Output. Die
+Beweislast tragen die Zusicherungen selbst (kein Stoss in 20 Treffern auf ein
+rollendes Ziel, Tempo 5,5 → 7,5 → Deckel 12).

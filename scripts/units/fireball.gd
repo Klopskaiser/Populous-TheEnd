@@ -35,6 +35,9 @@ const LIFT_CHANCE: float = Balance.FW_FIREBALL_LIFT_CHANCE
 const LIFT_CHANCE_ROLLING: float = Balance.FW_FIREBALL_LIFT_CHANCE_ROLLING
 ## Rolldauer je Treffer (verlaengert einen laufenden Sturz um diese Zeit).
 const ROLL_DURATION: float = Balance.FW_FIREBALL_ROLL_DURATION
+## Speed a hit adds to an already rolling target, and the ceiling it stacks to.
+const ROLL_BOOST_GAIN: float = Balance.FW_FIREBALL_ROLL_BOOST_GAIN
+const ROLL_BOOST_MAX: float = Balance.FW_FIREBALL_ROLL_BOOST_MAX
 ## A lift REPLACES the ground shove: less horizontal, a small hop upward.
 const LIFT_PUSH: float = Balance.FW_FIREBALL_LIFT_PUSH
 const LIFT_UP: float = Balance.FW_FIREBALL_LIFT_UP
@@ -203,9 +206,16 @@ func _impact() -> void:
 			target.apply_lift(dir, LIFT_PUSH, LIFT_UP)
 			return
 		OUTCOME_ROLL:
+			if was_rolling:
+				# Already tumbling: steer and accelerate instead of shoving, and
+				# keep it down for another ROLL_DURATION.
+				_steer_and_boost(target, dir, ROLL_DURATION)
+				return
 			target.apply_knockback(dir)
 			target.start_roll(dir, ROLL_DURATION)
-			if not was_rolling and target.path_service != null:
+			# A FRESH knock-over topples tight neighbours with it (the rolling
+			# case returned above, so no was_rolling check is needed here).
+			if target.path_service != null:
 				for u in target.path_service.get_units_in_radius(
 						target.position, NEIGHBOR_ROLL_RADIUS):
 					if u == target or u.state == Unit.State.DEAD \
@@ -214,11 +224,37 @@ func _impact() -> void:
 					if randf() < NEIGHBOR_ROLL_CHANCE:
 						u.start_roll(dir, Unit.NEIGHBOR_ROLL_DURATION)
 		_:
+			if was_rolling:
+				# The plain shove was the ONLY effect this outcome had, and on a
+				# rolling body it was pointless — steer and accelerate instead, but
+				# without buying extra tumble time (that is the ROLL outcome's job).
+				_steer_and_boost(target, dir, 0.0)
+				return
 			target.apply_knockback(dir)
 	# Fire interrupts a preacher's conversion: progress is lost, the unit
 	# stands back up (phase 5c). A roll above already broke the trance.
 	if target.state == Unit.State.SIT:
 		target.reset_conversion()
+
+
+## A hit on a target that is ALREADY tumbling STEERS the roll and ACCELERATES it
+## instead of shoving it (user decision 2026-09-02): next to the ~2.75 m a roll
+## covers on its own, the 0.35 m shove was noise, and a body on the ground reads
+## better rolling on than being nudged. Direction comes from `dir` (away from the
+## shooter) exactly like the shove did.
+##
+## Stacking WITH A CEILING: each hit adds ROLL_BOOST_GAIN to the speed the roll
+## currently travels at, capped at ROLL_BOOST_MAX. The cap is not cosmetic —
+## _tick_roll hands the roll speed straight to throw_airborne at the disc rim and
+## into cliff falls, so an uncapped stack would let a firing line punt bodies
+## across the map. Building on roll_speed_now() (not on the raw field) matters:
+## a constant-speed roll reports its real 5.5 m/s, so the first hit accelerates
+## it to 7.5 instead of SLOWING it to 2.
+##
+## `extend` = extra minimum tumble time; 0 steers and accelerates only.
+func _steer_and_boost(u, dir: Vector3, extend: float) -> void:
+	var boosted: float = minf(u.roll_speed_now() + ROLL_BOOST_GAIN, ROLL_BOOST_MAX)
+	u.start_roll(dir, extend, boosted)
 
 
 ## Which of the three impact reactions a roll `r` in [0,1) selects. Pure and

@@ -1739,6 +1739,14 @@ func fall_off_cliff(horizontal_dir: Vector3, drop: float) -> void:
 
 # --- Rolling (phase 5d) --------------------------------------------------------------
 
+## Speed a running roll currently travels at: the decaying speed of a momentum
+## roll (throw landing, boosted fireball roll), else the constant tumble speed.
+## Public so a follow-up hit can build on the CURRENT speed instead of guessing
+## it — see Fireball._steer_and_boost.
+func roll_speed_now() -> float:
+	return maxf(_roll_init_speed, ROLL_SPEED)
+
+
 ## Starts (or extends) a roll along `dir`. Mini rolls on flat ground end after
 ## `duration`; on steep slopes the roll follows the fall line downhill until
 ## the ground flattens. `initial_speed` > 0 gives the roll momentum (throw

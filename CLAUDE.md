@@ -314,6 +314,13 @@ Laufzeit-Terrainverformung (Erdbeben/Vulkan/Ebene/Absinken).
   damit zur **Laufzeit nicht mehr konstant** — und gegen **rollende** Ziele
   gewinnt bewusst das Umwerfen (**50 %**, Rolldauer **+0,5 s** je Treffer,
   Nachbarn im Umkreis von **1,0 m** stürzen mit 50 % mit).
+- **Ein rollendes Ziel wird nicht gestoßen, sondern gelenkt und beschleunigt**
+  (der 0,35-m-Schubser war neben ~2,75 m Rollstrecke bedeutungslos): jeder Treffer
+  richtet die Rolle vom Schützen weg und legt **+2 m/s** drauf, **gedeckelt bei
+  12 m/s** (Tornado-Auswurftempo; der Deckel ist zwingend, weil die Rollgeschwindigkeit
+  am Scheibenrand direkt zum Wurf wird). Damit wird die Rolle zur **Impulsrolle** und
+  endet erst beim Ausrollen unter 1 m/s — deutlich später als die 0,5 s Mindestdauer,
+  bei durchlaufendem Rollschaden. Stehende Ziele werden weiterhin gestoßen.
 
 **Nachladen ist zielunabhängig:** Der Angriffs-/Nachladezähler einer Einheit (und der eines
 Turm- oder Deckschützen) wird bei einem **Zielwechsel im Kampf nicht** zurückgesetzt — ein

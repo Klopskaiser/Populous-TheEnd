@@ -252,3 +252,91 @@ func test_health_fraction_helper() -> void:
 	u.max_health = 0
 	check(u.health_fraction() >= 0.0, "max_health 0 does not divide by zero")
 	_free_world(w)
+# --- Rolling targets: steer + accelerate instead of shove (user, 2026-09-02) --
+
+## Next to the ~2.75 m a roll covers on its own the 0.35 m shove was noise, so a
+## hit on a TUMBLING body now steers its roll and accelerates it. Stacking with a
+## ceiling: every hit adds GAIN to the speed the roll currently travels at, and
+## the cap keeps a firing line from punting bodies over the disc rim (_tick_roll
+## hands the roll speed straight to throw_airborne there).
+func test_hit_on_a_rolling_target_steers_and_accelerates() -> void:
+	var w: Dictionary = _make_world()
+	var shooter: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(50, 50))
+	var victim: Unit = _tough(_spawn(w, BRAVE_SCENE, 1, Vector2(54, 50)))
+	# A roll at the plain tumble speed (no momentum), heading NORTH.
+	victim.start_roll(Vector3(0, 0, -1), Balance.MINI_ROLL_DURATION)
+	check(victim.state == Unit.State.ROLL, "the victim is tumbling")
+	check_near(victim.roll_speed_now(), Balance.ROLL_SPEED,
+		"a plain roll reports the constant tumble speed")
+	var ball: Fireball = Fireball.new()
+	ball.setup(shooter, victim, shooter.position + Vector3(0.0, 1.1, 0.0))
+	# First hit: builds on the CURRENT speed, so it accelerates instead of
+	# slowing the roll down to the bare gain.
+	ball._steer_and_boost(victim, Vector3(1, 0, 0), Balance.FW_FIREBALL_ROLL_DURATION)
+	check_near(victim.roll_speed_now(),
+		Balance.ROLL_SPEED + Balance.FW_FIREBALL_ROLL_BOOST_GAIN,
+		"the first hit adds the gain on top of the running speed")
+	check(victim.roll_dir.x > 0.9,
+		"and the roll now heads away from the shooter (%.2f)" % victim.roll_dir.x)
+	# Further hits stack — up to the ceiling, never past it.
+	for i in range(12):
+		ball._steer_and_boost(victim, Vector3(1, 0, 0), 0.0)
+	check_near(victim.roll_speed_now(), Balance.FW_FIREBALL_ROLL_BOOST_MAX,
+		"twelve more hits stop at the ceiling")
+	ball.free()
+	_free_world(w)
+
+
+## The shove is GONE for rolling targets — including the plain-shove outcome,
+## whose only effect it used to be (it steers and accelerates now instead).
+## A STANDING target still gets shoved, unchanged.
+func test_rolling_target_is_never_shoved_but_a_standing_one_is() -> void:
+	var w: Dictionary = _make_world()
+	var shooter: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(50, 50))
+	var standing: Unit = _tough(_spawn(w, BRAVE_SCENE, 1, Vector2(54, 50)))
+	_fire(shooter, standing)
+	check(standing._knockback_remaining != Vector3.ZERO
+			or standing.state == Unit.State.ROLL
+			or standing.state == Unit.State.THROWN,
+		"a standing target is shoved, rolled or lifted")
+	var rolling: Unit = _tough(_spawn(w, BRAVE_SCENE, 1, Vector2(54, 54)))
+	rolling.start_roll(Vector3(0, 0, -1), Balance.MINI_ROLL_DURATION)
+	rolling._knockback_remaining = Vector3.ZERO
+	var shoved: int = 0
+	var boosted: int = 0
+	for i in range(20):
+		if rolling.state != Unit.State.ROLL:
+			rolling.start_roll(Vector3(0, 0, -1), Balance.MINI_ROLL_DURATION)
+		var before: float = rolling.roll_speed_now()
+		_fire(shooter, rolling)
+		if rolling._knockback_remaining != Vector3.ZERO:
+			shoved += 1
+		if rolling.state == Unit.State.ROLL and rolling.roll_speed_now() > before:
+			boosted += 1
+	check(shoved == 0, "no hit on a rolling body ever shoved it (%d of 20)" % shoved)
+	check(boosted > 0, "and the hits accelerated the roll (%d of 20)" % boosted)
+	_free_world(w)
+
+
+## The boost turns the roll into a MOMENTUM roll, which ends on its decaying
+## speed rather than on the minimum time — so a boosted body keeps tumbling
+## (and taking roll damage) well past the nominal 0.5 s. Pinned because it is
+## the least obvious consequence of the change.
+func test_boosted_roll_outlasts_its_minimum_duration() -> void:
+	var w: Dictionary = _make_world()
+	var shooter: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(50, 50))
+	var victim: Unit = _tough(_spawn(w, BRAVE_SCENE, 1, Vector2(54, 50)))
+	victim.start_roll(Vector3(1, 0, 0), Balance.MINI_ROLL_DURATION)
+	var ball: Fireball = Fireball.new()
+	ball.setup(shooter, victim, shooter.position + Vector3(0.0, 1.1, 0.0))
+	ball._steer_and_boost(victim, Vector3(1, 0, 0), Balance.FW_FIREBALL_ROLL_DURATION)
+	var rolled: float = 0.0
+	while victim.state == Unit.State.ROLL and rolled < 10.0:
+		victim.tick(TICK)
+		w.unit_manager.tick(TICK)
+		rolled += TICK
+	check(rolled > Balance.FW_FIREBALL_ROLL_DURATION + 0.3,
+		"the boosted roll runs %.2f s, well past its %.2f s minimum"
+			% [rolled, Balance.FW_FIREBALL_ROLL_DURATION])
+	ball.free()
+	_free_world(w)
