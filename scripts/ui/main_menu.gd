@@ -183,19 +183,14 @@ func _build_skirmish_page() -> Control:
 func _build_options_page() -> Control:
 	var vb: VBoxContainer = _make_page("Optionen")
 
-	var volume_label: Label = Label.new()
-	volume_label.text = "Soundlautstärke"
-	volume_label.add_theme_color_override("font_color", UiTheme.GOLD_BRIGHT)
-	vb.add_child(volume_label)
-
-	var volume: HSlider = HSlider.new()
-	volume.min_value = 0.0
-	volume.max_value = 100.0
-	volume.step = 5.0
-	volume.custom_minimum_size = Vector2(220, 20)
-	volume.value = AudioSettings.master_volume_percent()
-	volume.value_changed.connect(AudioSettings.set_master_volume_percent)
-	vb.add_child(volume)
+	# Ein Regler je Kanal (Gesamt, Effekte, Bedienung, Musik & Umgebung); die
+	# Liste steht in AudioSettings.CHANNELS, der Bau in UiTheme.volume_row.
+	var sound_label: Label = Label.new()
+	sound_label.text = "Lautstärke"
+	sound_label.add_theme_color_override("font_color", UiTheme.GOLD_BRIGHT)
+	vb.add_child(sound_label)
+	for channel in AudioSettings.CHANNELS:
+		vb.add_child(UiTheme.volume_row(channel["key"] as StringName, 220))
 
 	# FPS overlay toggle (phase 8), persisted via GameSettings.
 	var fps_check: CheckButton = CheckButton.new()

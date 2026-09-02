@@ -250,3 +250,88 @@ func test_dropped_in_sound_needs_no_import() -> void:
 		"the numbered-variant scan picks it up")
 	DirAccess.remove_absolute(path)
 	check(not FileAccess.file_exists(path), "temp sound removed again")
+# --- Raumklang gegen den Kamera-Zoom ------------------------------------------
+
+## Der Lautstaerkesprung zwischen UI und Welt (Nutzerbeobachtung 2026-09-02) kam
+## von Godots Default: unit_size 10 und ein harter Abriss bei 60 m (Loops 40 m),
+## waehrend die Kamera einen Boom von bis zu 90 m hat und bei 45 startet — im
+## Startzoom lief die Welt auf ~einem Fuenftel, die Loops waren ganz weg.
+##
+## Dieser Test haelt die BEZIEHUNG fest, nicht die Zahlen: die Hoergrenze muss
+## jenseits des maximalen Zooms liegen, und volle Lautstaerke muss mindestens bis
+## in die Naehe des Start-Zooms reichen. Aendert jemand den Kamera-Boom, faellt
+## der Test um — genau dann muss man den Klang neu eichen.
+func test_audio_distances_cover_the_camera_zoom() -> void:
+	# Die Kamera-Grenzen werden aus den SKRIPT-Defaults gelesen, nicht aus einer
+	# Instanz: eine zusaetzliche Node-Allokation verschiebt die globale
+	# Instanz-Id-Phase, und test_combat_groups haengt mit seiner Drift-Schranke
+	# genau daran (siehe dortiger Kommentar) — der Test wuerde also einen
+	# fremden Test umkippen.
+	var rig_script: GDScript = load("res://scripts/core/camera_rig.gd")
+	var min_boom: float = float(rig_script.get_property_default_value("min_boom"))
+	var max_boom: float = float(rig_script.get_property_default_value("max_boom"))
+	check(max_boom > 0.0, "die Kamera-Defaults sind lesbar (max_boom %.0f)" % max_boom)
+	check(AudioSlots.SFX_MAX_DISTANCE > max_boom,
+		"Welt-Sounds reichen ueber den weitesten Zoom hinaus (%.0f > %.0f)"
+			% [AudioSlots.SFX_MAX_DISTANCE, max_boom])
+	check(AudioSlots.LOOP_MAX_DISTANCE > max_boom * 0.9,
+		"Status-Loops sind im normalen Zoombereich nicht abgeschnitten (%.0f)"
+			% AudioSlots.LOOP_MAX_DISTANCE)
+	check(AudioSlots.AUDIO_UNIT_SIZE > min_boom * 2.0,
+		"volle Lautstaerke reicht deutlich ueber den engsten Zoom hinaus (%.0f)"
+			% AudioSlots.AUDIO_UNIT_SIZE)
+	check(AudioSlots.AUDIO_UNIT_SIZE < max_boom,
+		"...aber nicht bis zum weitesten — sonst waere der Klang nicht mehr raeumlich")
+	check(AudioSlots.LOOP_MAX_DISTANCE <= AudioSlots.SFX_MAX_DISTANCE,
+		"Loops reichen nie weiter als Einzelsounds")
+# --- Lautstaerkekanaele (Nutzerwunsch 2026-09-02) -----------------------------
+
+## Vier Regler: Gesamt, Effekte, Bedienung, Musik & Umgebung. Der Test haelt die
+## Kopplung zum AudioManager fest — jeder Kanal muss auf Busse zeigen, die auch
+## angelegt werden, und jeder angelegte Bus muss von einem Regler erreichbar
+## sein. Sonst gibt es einen Bus, den niemand leiser stellen kann (genau das war
+## der Zustand vor der Aenderung: nur "Master" hatte einen Regler).
+func test_volume_channels_cover_every_bus() -> void:
+	var buses: Array = AudioManager.BUSES.duplicate()
+	buses.append("Master")   # der Master wird nicht angelegt, er existiert immer
+	var reachable: Dictionary = {}
+	for channel in AudioSettings.CHANNELS:
+		for bus_name in channel["buses"]:
+			check(buses.has(bus_name),
+				"Kanal '%s' zeigt auf einen existierenden Bus (%s)"
+					% [channel["label"], bus_name])
+			reachable[bus_name] = true
+	for bus_name in buses:
+		check(reachable.has(bus_name),
+			"Bus '%s' ist ueber einen Regler erreichbar" % bus_name)
+	check(AudioSettings.CHANNELS.size() == 4, "vier Regler")
+	check(AudioSettings.CHANNELS[0]["key"] == &"master", "Gesamt steht zuerst")
+	check(AudioSettings.label_of(&"music") != "", "jeder Kanal hat eine Beschriftung")
+	check(AudioSettings.label_of(&"gibtsnicht") == "",
+		"...und ein unbekannter Schluessel keine")
+
+
+## Setzen -> Lesen -> Anwenden, inklusive Stummschaltung bei 0. Die alten Werte
+## werden am Ende wiederhergestellt: set_volume_percent SPEICHERT (user://
+## settings.cfg), und ein Test darf die echten Einstellungen des Nutzers nicht
+## verstellen.
+func test_volume_roundtrip_and_mute() -> void:
+	var before: Dictionary = {}
+	for channel in AudioSettings.CHANNELS:
+		before[channel["key"]] = AudioSettings.volume_percent(channel["key"] as StringName)
+	AudioSettings.set_volume_percent(&"sfx", 40.0)
+	check_near(AudioSettings.volume_percent(&"sfx"), 40.0, "gesetzter Wert kommt zurueck")
+	var sfx_bus: int = AudioServer.get_bus_index("SFX")
+	if sfx_bus != -1:
+		check(not AudioServer.is_bus_mute(sfx_bus), "40 %% stummt nicht")
+		check(AudioServer.get_bus_volume_db(sfx_bus) < 0.0,
+			"40 %% liegt unter 0 dB (%.1f)" % AudioServer.get_bus_volume_db(sfx_bus))
+	AudioSettings.set_volume_percent(&"sfx", 0.0)
+	if sfx_bus != -1:
+		check(AudioServer.is_bus_mute(sfx_bus), "0 stummt den Bus")
+	AudioSettings.set_volume_percent(&"sfx", 120.0)
+	check_near(AudioSettings.volume_percent(&"sfx"), 100.0, "ueber 100 wird geklemmt")
+	for key in before:
+		AudioSettings.set_volume_percent(key as StringName, float(before[key]))
+	check_near(AudioSettings.volume_percent(&"sfx"), float(before[&"sfx"]),
+		"die Werte des Nutzers sind wiederhergestellt")

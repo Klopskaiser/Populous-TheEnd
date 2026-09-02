@@ -281,6 +281,19 @@ richtig und erwünscht.
 - Fehlende Kampfsounds werden weiterhin synthetisiert; alle anderen fehlenden Sounds
   bleiben einfach stumm.
 
+### Lautstärke und Entfernung
+
+Vier Regler in den Optionen **und** im Pausenmenü, gespeichert in
+`user://settings.cfg`: **Gesamt**, **Effekte** (Bus SFX), **Bedienung** (UI) und
+**Musik & Umgebung** (Music + Ambience). 0 stummt den Kanal.
+
+Welt-Sounds sind positioniert und werden mit dem Kamera-Abstand leiser: bis
+**25 m** volle Lautstärke, danach invers abfallend, hörbar bis **120 m**
+(Loops 100 m). Das ist auf den Kamera-Zoom geeicht (Boom 8-90 m, Start 45), damit
+alles Sichtbare hörbar bleibt. **UI-Sounds sind nicht positioniert** und spielen
+immer mit voller Lautstärke — deshalb wirken sie schnell zu präsent, wenn man
+die Dateien laut normalisiert.
+
 ### Sound-Prioritäten
 
 Es spielen nur begrenzt viele Sounds gleichzeitig (8 Slots für Welt-Sounds, 12

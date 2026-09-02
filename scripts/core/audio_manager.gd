@@ -65,7 +65,8 @@ func _ready() -> void:
 	_ui_busy.resize(UI_POOL_SIZE)
 	for i in range(SFX_POOL_SIZE):
 		var player: AudioStreamPlayer3D = AudioStreamPlayer3D.new()
-		player.max_distance = 60.0
+		player.max_distance = AudioSlots.SFX_MAX_DISTANCE
+		player.unit_size = AudioSlots.AUDIO_UNIT_SIZE
 		player.bus = "SFX"
 		add_child(player)
 		_sfx_pool.append(player)
@@ -82,6 +83,9 @@ func _ready() -> void:
 	_ambience_player.bus = "Ambience"
 	_ambience_player.finished.connect(_on_ambience_finished)
 	add_child(_ambience_player)
+	# Gespeicherte Reglerstaende anwenden — hier, nicht in _enter_tree: die
+	# Busse muessen stehen (AudioSettings ueberspringt fehlende Busse still).
+	AudioSettings.apply_all()
 	_music_tracks = AssetLibrary.stream_folder("audio/music")
 	_ambience_tracks = AssetLibrary.stream_folder("audio/ambience")
 	_start_playlists()
@@ -226,7 +230,8 @@ func _activate_loop(name: StringName, entry: Dictionary, owner: Node3D) -> void:
 	if streams.is_empty():
 		return
 	var player: AudioStreamPlayer3D = AudioStreamPlayer3D.new()
-	player.max_distance = 40.0
+	player.max_distance = AudioSlots.LOOP_MAX_DISTANCE
+	player.unit_size = AudioSlots.AUDIO_UNIT_SIZE
 	player.bus = "SFX"
 	player.stream = streams[AudioSlots.next_variant(streams.size(), -1)]
 	# Replay on finish -> loops regardless of the file's import loop flag, and
@@ -343,23 +348,3 @@ func _on_unit_died(unit: Node) -> void:
 	if key == &"":
 		return
 	play_sfx(key, (unit as Node3D).global_position, 200)
-
-
-# --- Volume helpers (session-scoped, for the options UI) ------------------------------
-
-static func bus_volume_percent(bus_name: String) -> float:
-	var idx: int = AudioServer.get_bus_index(bus_name)
-	if idx == -1 or AudioServer.is_bus_mute(idx):
-		return 0.0
-	return clampf(db_to_linear(AudioServer.get_bus_volume_db(idx)) * 100.0, 0.0, 100.0)
-
-
-static func set_bus_volume_percent(bus_name: String, value: float) -> void:
-	var idx: int = AudioServer.get_bus_index(bus_name)
-	if idx == -1:
-		return
-	if value <= 0.0:
-		AudioServer.set_bus_mute(idx, true)
-		return
-	AudioServer.set_bus_mute(idx, false)
-	AudioServer.set_bus_volume_db(idx, linear_to_db(value / 100.0))

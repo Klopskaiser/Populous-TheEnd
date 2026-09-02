@@ -60,7 +60,8 @@ func _ready() -> void:
 	_pool_busy.resize(POOL_SIZE)
 	for i in range(POOL_SIZE):
 		var player: AudioStreamPlayer3D = AudioStreamPlayer3D.new()
-		player.max_distance = 60.0
+		player.max_distance = AudioSlots.SFX_MAX_DISTANCE
+		player.unit_size = AudioSlots.AUDIO_UNIT_SIZE
 		if AudioServer.get_bus_index("SFX") != -1:
 			player.bus = "SFX"
 		add_child(player)

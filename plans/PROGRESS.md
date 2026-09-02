@@ -9922,3 +9922,63 @@ nicht lesen kann.
 Zusicherungen gruen** (das Diagnosewerkzeug ist nicht Teil der Suite). Am Spiel
 selbst ist nichts geaendert; die Testdateien in `assets/audio/ui/` sind wieder
 entfernt (der Selbsttest meldet 0 spielbare Dateien).
+### Nachtrag 20 — Raumklang auf den Zoom geeicht, vier Lautstaerkeregler (2026-09-02)
+
+Nutzerfrage: „Wirken die UI-Sounds lauter, weil Einheitensounds eine Quelle haben
+und beim Rauszoomen leiser werden?" **Ja — und schlimmer als gedacht.** Aus dem
+Code:
+
+- Welt-Sounds sind `AudioStreamPlayer3D` mit Godots Default
+  (`attenuation_model = INVERSE_DISTANCE`, `unit_size = 10`, gemessen), dazu ein
+  **harter Abriss**: `max_distance = 60` fuer Welt/Kampf, **40** fuer Loops.
+- UI-Sounds sind `AudioStreamPlayer` **ohne** Position: immer 0 dB.
+- Die Kamera hat `min_boom = 8`, **`max_boom = 90`**, Start **45**
+  (`camera_rig.gd`).
+
+Daraus folgten zwei echte Fehlabstimmungen, nicht nur ein Eindruck: im
+**Start-Zoom** lief die Welt auf etwa einem Fuenftel der Amplitude und die
+Status-Loops waren wegen der 40 m **ganz weg**, und zwischen 60 und 90 m Zoom war
+die Welt **voellig still** — waehrend ein UI-Klick daneben mit voller Lautstaerke
+kam.
+
+**Geeicht (Nutzerentscheidung „auf den Zoom eichen"):** drei Konstanten in
+`AudioSlots` (das einzige Audiomodul, das kein Node ist und daher von
+AudioManager UND CombatAudio statisch gelesen werden kann):
+`AUDIO_UNIT_SIZE = 25`, `SFX_MAX_DISTANCE = 120`, `LOOP_MAX_DISTANCE = 100`. Bis
+25 m volle Lautstaerke, danach invers abfallend, Grenze jenseits des weitesten
+Zooms. Der sichtbare Bereich ist damit bei jedem Zoom hoerbar, Weitentferntes
+bleibt leiser (Raeumlichkeit erhalten), nichts wird abgeschnitten.
+
+Ein Test haelt die **Beziehung** statt der Zahlen fest: Hoergrenze > `max_boom`,
+volle Lautstaerke deutlich ueber `min_boom` aber unter `max_boom`, Loops nie
+weiter als Einzelsounds. Wer den Kamera-Boom aendert, bekommt den Test um die
+Ohren — genau dann muss neu geeicht werden.
+
+**Dabei aufgefallen (Testhygiene):** der Test las die Kamera-Grenzen zuerst aus
+einer `CameraRig`-INSTANZ. Das kippte `test_combat_groups` um — dessen
+Drift-Schranke haengt an der globalen Instanz-Id-Phase (steht so in seinem
+Kommentar), und eine zusaetzliche Node-Allokation verschiebt sie (4,75 m → 6,36 m
+bei Schranke 6,0). Jetzt werden die Defaults ueber
+`GDScript.get_property_default_value()` gelesen, ohne zu allokieren.
+
+**Vier Lautstaerkeregler (Nutzerwunsch):** `AudioSettings` ist von zwei
+Master-Helfern zu einer Kanaltabelle geworden — **Gesamt / Effekte / Bedienung /
+Musik & Umgebung**. Ein Kanal bildet auf einen oder mehrere Busse ab; der
+Musikregler nimmt `Music` UND `Ambience` mit, sonst waere die Ambience-Spur
+unerreichbar. Neu **persistiert** (eigener Abschnitt `audio` in
+`user://settings.cfg` neben `GameSettings`, fremde Abschnitte bleiben erhalten)
+statt aus dem Bus zurueckgelesen: ein Regler, den man nach jedem Start neu ziehen
+muss, ist ein Aergernis, und der Rueckweg ueber dB/linear rundet.
+`AudioManager._ready` ruft `apply_all()`, sobald die Busse stehen.
+
+Die Regler stehen in **beiden** Menues (Hauptmenue-Optionen und Pausenmenue) und
+werden von `UiTheme.volume_row()` gebaut — vier Kanaele an zwei Stellen waeren
+sonst achtmal derselbe Block. Die beiden toten Helfer
+`AudioManager.bus_volume_percent/set_bus_volume_percent` (seit 10b ohne Aufrufer)
+sind entfallen, `AudioSettings` ersetzt sie.
+
+**Verifikation:** Ladecheck exit 0 ohne Ausgabe, **Suite 5091 Zusicherungen gruen**
+(0 failed, kein `SCRIPT ERROR`), Spielstart ohne Fehler im Log. Neue Tests: die
+Zoom-Beziehung, die Bus-Abdeckung (jeder angelegte Bus ist ueber genau einen
+Regler erreichbar — vorher hatte nur „Master" einen) und ein Setz-/Lese-/
+Stumm-Durchlauf, der die echten Nutzerwerte am Ende wiederherstellt.

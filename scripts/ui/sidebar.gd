@@ -1226,21 +1226,10 @@ func _build_pause_menu() -> void:
 	resume.pressed.connect(_toggle_pause)
 	vb.add_child(resume)
 
-	# Sound volume (master bus), session-scoped.
-	var volume_label: Label = Label.new()
-	volume_label.text = "Soundlautstärke"
-	volume_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	volume_label.add_theme_color_override("font_color", UiTheme.GOLD_BRIGHT)
-	vb.add_child(volume_label)
-
-	var volume: HSlider = HSlider.new()
-	volume.min_value = 0.0
-	volume.max_value = 100.0
-	volume.step = 5.0
-	volume.custom_minimum_size = Vector2(180, 20)
-	volume.value = AudioSettings.master_volume_percent()
-	volume.value_changed.connect(AudioSettings.set_master_volume_percent)
-	vb.add_child(volume)
+	# Lautstärke je Kanal (Gesamt, Effekte, Bedienung, Musik & Umgebung) —
+	# dieselben Regler wie im Hauptmenü, nur schmaler. Persistiert.
+	for channel in AudioSettings.CHANNELS:
+		vb.add_child(UiTheme.volume_row(channel["key"] as StringName, 180, true))
 
 	var battle: Button = Button.new()
 	battle.text = "Debugschlacht"

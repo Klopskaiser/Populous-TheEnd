@@ -12,6 +12,32 @@ class_name AudioSlots
 ## (incantations, the shaman's death cry) always wins, prio 2 (siege engine and
 ## airship deaths) beats the rest, prio 3 is everything else and may be dropped.
 
+## --- Raumklang: auf den ZOOM geeicht (Nutzerentscheidung 2026-09-02) ---
+##
+## Diese drei Werte leben hier, weil sie von BEIDEN Pools gebraucht werden — dem
+## AudioManager (Welt-Sounds, Loops) und CombatAudio (Kampftreffer) — und dies
+## das einzige Audiomodul ist, das kein Node ist und deshalb von beiden statisch
+## gelesen werden kann.
+##
+## Warum nicht Godots Standard: der ist `unit_size = 10` und (bei uns) ein harter
+## Abriss bei 60 m bzw. 40 m fuer Loops. Die RTS-Kamera hat aber einen Boom von
+## 8 bis **90** m und startet bei **45** — im Startzoom lief die Welt damit auf
+## etwa einem Fuenftel der Amplitude, die Status-Loops waren wegen der 40 m
+## **ganz** weg, und ab 60 m Zoom war die Welt voellig still, waehrend UI-Sounds
+## (nicht positioniert) weiter mit 0 dB spielen. Das war der Lautstaerkesprung
+## zwischen Klick und Welt (Nutzerbeobachtung).
+##
+## Jetzt: bis UNIT_SIZE volle Lautstaerke, danach invers abfallend — der sichtbare
+## Bildbereich ist bei jedem Zoom klar hoerbar, Weitentferntes bleibt leiser
+## (Raeumlichkeit erhalten), und die Grenze liegt JENSEITS des maximalen Booms,
+## damit nichts abgeschnitten wird, was man sieht.
+const AUDIO_UNIT_SIZE: float = 25.0
+const SFX_MAX_DISTANCE: float = 120.0
+## Loops etwas kuerzer: sie laufen dauerhaft, und ein Dutzend ferner Braende
+## wuerde den Klangraum zumatschen (die Zahl gleichzeitiger Emitter deckelt
+## LOOP_CAP_PER_NAME getrennt).
+const LOOP_MAX_DISTANCE: float = 100.0
+
 ## Caller passes this to mean "derive the priority from the sound name".
 const PRIO_AUTO: int = 0
 ## Spell incantations, shaman death — must always be heard.

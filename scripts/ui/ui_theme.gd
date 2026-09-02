@@ -62,6 +62,30 @@ static func _button_box(bg: Color, border: Color, width: int = 2) -> StyleBoxFla
 	return s
 
 
+## Ein Lautstärkeregler mit Beschriftung (Hauptmenü UND Pausenmenü nutzen
+## denselben Bau — vier Kanäle an zwei Stellen wären sonst achtmal derselbe
+## Block). Liest und schreibt direkt AudioSettings, hält also keinen Zustand.
+static func volume_row(key: StringName, width: int,
+		centered: bool = false) -> VBoxContainer:
+	var box: VBoxContainer = VBoxContainer.new()
+	var label: Label = Label.new()
+	label.text = AudioSettings.label_of(key)
+	label.add_theme_color_override("font_color", GOLD_BRIGHT)
+	if centered:
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(label)
+	var slider: HSlider = HSlider.new()
+	slider.min_value = 0.0
+	slider.max_value = 100.0
+	slider.step = 5.0
+	slider.custom_minimum_size = Vector2(width, 20)
+	slider.value = AudioSettings.volume_percent(key)
+	slider.value_changed.connect(func(v: float) -> void:
+		AudioSettings.set_volume_percent(key, v))
+	box.add_child(slider)
+	return box
+
+
 ## Applies the gold/brown button skin to any Button-derived control.
 static func style_button(btn: Button) -> void:
 	btn.add_theme_stylebox_override("normal", _button_box(BROWN_MID, GOLD_DARK))
