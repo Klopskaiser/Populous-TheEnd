@@ -9827,3 +9827,53 @@ rechnet, nicht.
 **Verifikation:** Ladecheck exit 0 ohne Ausgabe, Suite unveraendert **5068
 Zusicherungen gruen** (das Labor ist nicht Teil der Suite). Am Spiel selbst ist
 nichts geaendert.
+### Nachtrag 18 — Vorhut-Aufstellung: die Ramme wird zur besten Einheit im Feld (2026-09-02)
+
+Fortsetzung von Nachtrag 17 auf Nutzerwunsch: Rammen so weit vor die eigene
+Linie, dass sie den Feind **vor** der eigenen Infanterie treffen — dann ist
+Eigenbeschuss strukturell unmoeglich. Bei Startabstand 26 heisst das +12 (knapp
+vor der Mitte) bzw. +16 (jenseits der Mitte, naeher am Feind als an der eigenen
+Linie).
+
+**Die vollstaendige Leiter** (je 6 Wiederholungen, 32 BAe je Seite, dieselbe
+Gegenseite: 20 Krieger + 12 Feuerkrieger):
+
+| Aufstellung A | Effizienz | Siege | Schaden A | Dauer |
+|---|---|---|---|---|
+| Spiegel, keine Rammen (Eichmass) | 1,09 | 4:2 | 96 % | 17 s |
+| 4 Rammen im Ring (Klumpenmitte) | 0,56 | 0:3 | 66 % | 56 s |
+| 4 Rammen 4 Zellen vorn | 0,72 | 0:3 | 80 % | 56 s |
+| 4 Rammen 8 Zellen vorn | 0,98 | 1:2 | 91 % | 58 s |
+| 4 Rammen **12 Zellen vorn** (Vorhut) | **1,33-1,35** | 2:0 | 87-92 % | 70-204 s |
+| 4 Rammen **16 Zellen vorn** (tiefe Vorhut) | **1,7-2,3** | 1:0 / 0:0 | 83 % | 150-240 s |
+
+Von 0,56 auf ueber 2,0 — **allein durch die Aufstellung**, ohne einen einzigen
+geaenderten Balancewert. Die Ramme ist damit nicht „chaotisch stark oder
+schwach", sondern eine Einheit, deren Wert **vollstaendig** an ihrer Position
+haengt: im eigenen Klumpen halbiert sie die Armee, als Vorhut verdoppelt sie sie.
+
+**Warum die Vorhut so viel besser ist**, aus der Mechanik: sie trifft den dichten
+Gegnerklumpen als erste, ihr Brand (60 HP ueber 4 s) laeuft weiter, waehrend die
+eigene Infanterie nachkommt — und der Brand **panisiert**, der Gegner zerfaellt
+also, bevor die eigene Linie ueberhaupt Kontakt hat. Von 4 Rammen ueberlebt
+typisch **eine**; sie sind Verbrauchsmaterial, aber sie zahlen sich aus.
+
+**Warum die tiefen Zeilen nicht auslaufen** (Zustandssonde ueber die
+Ueberlebenden): am Ende stehen BEIDE Seiten im Leerlauf — A mit 14-16 Einheiten,
+B mit 3-6 Kriegern. Der Angriffsmarsch ist abgelaufen, die versprengten
+Restgegner liegen ausserhalb des Aggro-Radius (8 m fuer Nahkaempfer), und
+niemand greift mehr an. Das ist eine **Laborgrenze** (es werden keine
+Folgebefehle gegeben), keine Spieleigenschaft — im Spiel schickt die KI ihre
+Truppen nachfassen. Deutbar bleiben die Zahlen ueber die BAe-Reste
+(16-19 gegen 4,5), die Effizienz der tiefen Vorhut streut deshalb aber
+(1,7 bis 2,3 je Zeitlimit).
+
+**Der praktische Haken bleibt der aus Nachtrag 17:** die Ramme fahrt 3,0 m/s
+gegen 4,0 der Fusstruppe. Die gute Aufstellung entsteht NIE von selbst — wer
+alles gemeinsam losschickt, bekommt die Rammen automatisch nach hinten und damit
+den 0,56-Fall. Vorhut heisst: Rammen zuerst und allein losschicken, Infanterie
+mit Abstand nachfuehren.
+
+**Verifikation:** Suite unveraendert **5068 Zusicherungen gruen**, am Spiel ist
+nichts geaendert. Zwei neue Laborzeilen (`armee_rammen_vorhut`,
+`armee_rammen_vorhut_tief`); die Zustandssonde war temporaer und ist entfernt.
