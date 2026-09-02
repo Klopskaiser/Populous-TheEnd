@@ -9569,3 +9569,38 @@ ist der Puffer dazwischen, keine neue Kategorie.
 ohne Anpassung — die Tests lesen die Werte aus `Balance` statt sie zu kodieren,
 was hier zum ersten Mal getestet wurde. `assets/README.md` unberührt,
 `CLAUDE.md` §4/§6 nachgezogen.
+### Nachtrag 12 — Feuerball-Wirkungen umgewichtet (Nutzerentscheidung, 2026-09-02)
+
+Zweiter Teil der Feuerkrieger-Tarierung, diesmal an den **Wirkungen** statt am
+Schaden. Leitidee: gegen ein **rollendes** Ziel gewinnt das **Umwerfen**, das
+Anheben wird zur Ausnahme.
+
+| Wert | vorher | jetzt |
+|---|---|---|
+| `FW_FIREBALL_LIFT_HP_MAX_MULT` | 3,0 (max 12 % / 30 %) | **2,0** (max **8 %** / **16 %**) |
+| `FW_FIREBALL_LIFT_CHANCE_ROLLING` | 0,10 | **0,08** |
+| `FW_FIREBALL_ROLL_CHANCE_ROLLING` | 0,30 | **0,50** |
+| Rolldauer je Treffer | 0,35 s (`MINI_ROLL_DURATION`) | **0,50 s** (neu `FW_FIREBALL_ROLL_DURATION`) |
+| Nachbar-Rollradius | 0,9 m | **1,0 m** (neu `FW_FIREBALL_NEIGHBOR_ROLL_RADIUS`) |
+
+**Zwei Konstanten sind dabei neu entstanden, mit Absicht:**
+- Die Rolldauer bekam einen **eigenen** Wert, statt `MINI_ROLL_DURATION` zu
+  ändern — daran hängen Wurflandungen, Klippenstürze, Nahkampf-Schubser und
+  Gebäudetrümmer, die alle bei 0,35 s bleiben sollen.
+- Nachbar-Rollradius und -Chance standen als **lokale** Konstanten in
+  `fireball.gd` und damit außerhalb der Balance-Datei; sie sind jetzt dort, wo
+  die übrigen Feuerballwerte leben (Wert der Chance unverändert 50 %).
+
+**Ein Test musste nachgezogen werden** (der einzige, der Werte statt Verhalten
+festhielt): `test_firewarrior_fireball_outcome_split` nagelte die historische
+Invariante „Anheben + Umwerfen = 40 % bei rollenden Zielen" aus Phase 10c fest.
+Die bricht diese Änderung bewusst (0,08 + 0,50 = 0,58). Statt der Summe hält der
+Test jetzt die **Entscheidungen** fest: das Umwerfen rollender Ziele ist ein
+Vielfaches des stehenden Falls, das Anheben bleibt beim rollenden Ziel höher als
+beim stehenden, verliert aber gegen das Umwerfen — und die beiden vom Nutzer
+genannten Deckel (8 % bzw. 16 % kurz vor dem Tod) sind direkt gegen
+`lift_chance_for_health` geprüft. Für **stehende** Ziele gilt die alte 10-%-Summe
+weiter.
+
+**Verifikation:** Ladecheck exit 0 ohne Ausgabe, **Suite 5049 Zusicherungen grün**
+(0 failed, kein `SCRIPT ERROR`), +5 Zusicherungen im umgebauten Test.

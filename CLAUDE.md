@@ -309,9 +309,11 @@ Laufzeit-Terrainverformung (Erdbeben/Vulkan/Ebene/Absinken).
   selbst**: dass der Rollschaden danach noch tötet, ändert den Sound nicht.
 - **Verletzte fliegen leichter:** Die Anhebe-Chance des Feuerkrieger-Feuerballs
   skaliert **invers zu den Lebenspunkten** des Ziels — bei voller Gesundheit die
-  Basis, kurz vor dem Tod das Dreifache (`FW_FIREBALL_LIFT_HP_MAX_MULT`, also
-  4 % → 12 %; rollendes Ziel 10 % → 30 %). Die Summe aus Anheben und Umwerfen ist
-  damit zur **Laufzeit nicht mehr konstant** — nur die Basiswerte sind es.
+  Basis, kurz vor dem Tod das **Doppelte** (`FW_FIREBALL_LIFT_HP_MAX_MULT`, also
+  4 % → 8 %; rollendes Ziel 8 % → 16 %). Die Summe aus Anheben und Umwerfen ist
+  damit zur **Laufzeit nicht mehr konstant** — und gegen **rollende** Ziele
+  gewinnt bewusst das Umwerfen (**50 %**, Rolldauer **+0,5 s** je Treffer,
+  Nachbarn im Umkreis von **1,0 m** stürzen mit 50 % mit).
 
 **Nachladen ist zielunabhängig:** Der Angriffs-/Nachladezähler einer Einheit (und der eines
 Turm- oder Deckschützen) wird bei einem **Zielwechsel im Kampf nicht** zurückgesetzt — ein

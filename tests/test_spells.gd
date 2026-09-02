@@ -1493,20 +1493,39 @@ func test_lightning_lift_stronger_than_fireball() -> void:
 		"...and lifts higher")
 
 
-## Exhaustive on the pure decision function plus the balance invariant: the
-## lift chance was carved OUT of the old roll chance, the sum is unchanged.
+## Exhaustive on the pure decision function plus the balance decisions behind
+## the three outcomes.
 ##
-## CAREFUL (phase 10i, part 4): this pins the BASE constants only. At RUNTIME the
-## sum is deliberately NOT invariant any more — Fireball.lift_chance_for_health()
-## scales the lift chance up as the target's health drops (4 % -> 12 %), which
-## shrinks the plain-shove share. That is the intended effect, not a bug to
-## "repair" by making the numbers add up again.
+## CAREFUL, two invariants that deliberately do NOT hold:
+## - At RUNTIME the sum is not fixed — Fireball.lift_chance_for_health() scales
+##   the lift up as the target's health drops (phase 10i, part 4), which shrinks
+##   the plain-shove share. Intended, not a bug to "repair".
+## - For a TUMBLING target the old "lift + roll = 40 %" is gone (user decision
+##   2026-09-02): knocking a body that is already rolling on is now far likelier
+##   (0.50) while lifting it got rarer (0.08), so the pair sums to 0.58. Only the
+##   STANDING pair still carries the historical 10 % from phase 10c.
 func test_firewarrior_fireball_outcome_split() -> void:
 	check_near(Balance.FW_FIREBALL_LIFT_CHANCE + Balance.FW_FIREBALL_ROLL_CHANCE, 0.10,
 		"standing target: lift + roll still add up to the old 10 %")
-	check_near(Balance.FW_FIREBALL_LIFT_CHANCE_ROLLING
-		+ Balance.FW_FIREBALL_ROLL_CHANCE_ROLLING, 0.40,
-		"tumbling target: still the old 40 %")
+	check(Balance.FW_FIREBALL_ROLL_CHANCE_ROLLING
+			> Balance.FW_FIREBALL_ROLL_CHANCE * 5.0,
+		"a body already rolling is far easier to keep rolling")
+	check(Balance.FW_FIREBALL_LIFT_CHANCE_ROLLING > Balance.FW_FIREBALL_LIFT_CHANCE,
+		"...but still easier to lift than a standing one")
+	check(Balance.FW_FIREBALL_LIFT_CHANCE_ROLLING
+			< Balance.FW_FIREBALL_ROLL_CHANCE_ROLLING,
+		"and rolling it on beats hurling it up (user decision)")
+	# The user-stated ceilings: the HP scaling maxes the lift at 8 % standing
+	# and 16 % on a tumbling target.
+	check_near(Fireball.lift_chance_for_health(0.0, Balance.FW_FIREBALL_LIFT_CHANCE),
+		0.08, "lift maxes out at 8 % on a nearly dead standing target")
+	check_near(Fireball.lift_chance_for_health(0.0,
+		Balance.FW_FIREBALL_LIFT_CHANCE_ROLLING), 0.16,
+		"...and at 16 % on a nearly dead tumbling one")
+	# One fireball hit keeps its victim down longer than the generic mini roll.
+	check(Balance.FW_FIREBALL_ROLL_DURATION > Balance.MINI_ROLL_DURATION,
+		"a fireball roll (%.2f s) outlasts the generic mini roll (%.2f s)"
+			% [Balance.FW_FIREBALL_ROLL_DURATION, Balance.MINI_ROLL_DURATION])
 	var lift: float = Balance.FW_FIREBALL_LIFT_CHANCE
 	var roll: float = Balance.FW_FIREBALL_ROLL_CHANCE
 	check(Fireball.impact_outcome(0.0, lift, roll) == Fireball.OUTCOME_LIFT,

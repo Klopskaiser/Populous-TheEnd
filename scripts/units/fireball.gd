@@ -33,13 +33,15 @@ const ROLL_CHANCE_ROLLING: float = Balance.FW_FIREBALL_ROLL_CHANCE_ROLLING
 ## Chance that the hit lifts the target off the ground instead (phase 10c).
 const LIFT_CHANCE: float = Balance.FW_FIREBALL_LIFT_CHANCE
 const LIFT_CHANCE_ROLLING: float = Balance.FW_FIREBALL_LIFT_CHANCE_ROLLING
+## Rolldauer je Treffer (verlaengert einen laufenden Sturz um diese Zeit).
+const ROLL_DURATION: float = Balance.FW_FIREBALL_ROLL_DURATION
 ## A lift REPLACES the ground shove: less horizontal, a small hop upward.
 const LIFT_PUSH: float = Balance.FW_FIREBALL_LIFT_PUSH
 const LIFT_UP: float = Balance.FW_FIREBALL_LIFT_UP
 ## In tight formations the knock-over can also topple adjacent units...
-const NEIGHBOR_ROLL_RADIUS: float = 0.9
+const NEIGHBOR_ROLL_RADIUS: float = Balance.FW_FIREBALL_NEIGHBOR_ROLL_RADIUS
 ## ...each with this chance, for an even shorter tumble.
-const NEIGHBOR_ROLL_CHANCE: float = 0.5
+const NEIGHBOR_ROLL_CHANCE: float = Balance.FW_FIREBALL_NEIGHBOR_ROLL_CHANCE
 
 ## Outcomes of impact_outcome (see below).
 const OUTCOME_PUSH: int = 0
@@ -202,7 +204,7 @@ func _impact() -> void:
 			return
 		OUTCOME_ROLL:
 			target.apply_knockback(dir)
-			target.start_roll(dir, Unit.MINI_ROLL_DURATION)
+			target.start_roll(dir, ROLL_DURATION)
 			if not was_rolling and target.path_service != null:
 				for u in target.path_service.get_units_in_radius(
 						target.position, NEIGHBOR_ROLL_RADIUS):

@@ -317,11 +317,17 @@ const FIREBALL_LIFT_SPEED: float = 6.5
 const LIGHTNING_PUSH_RADIUS: float = 2.6
 const LIGHTNING_PUSH_SPEED: float = 7.0
 const LIGHTNING_LIFT_SPEED: float = 9.0
-## Feuerkrieger: Teil der Umwerf-Chance wird zu "Anheben" — Summe unverändert.
+## Feuerkrieger-Feuerball: welche der DREI exklusiven Wirkungen ein Treffer am
+## Hauptziel hat (Anheben > Umwerfen > Stossen, siehe Fireball.impact_outcome).
+## Die _ROLLING-Werte gelten fuer ein Ziel, das bereits rollt.
+##
+## 2026-09-02 (Nutzerentscheidung): gegen ROLLENDE Ziele wurde das Umwerfen
+## deutlich staerker (0,30 -> 0,50) und das Anheben schwaecher (0,10 -> 0,08) —
+## ein Koerper am Boden wird eher weitergerollt als hochgerissen.
 const FW_FIREBALL_ROLL_CHANCE: float = 0.06
 const FW_FIREBALL_LIFT_CHANCE: float = 0.04
-const FW_FIREBALL_ROLL_CHANCE_ROLLING: float = 0.30
-const FW_FIREBALL_LIFT_CHANCE_ROLLING: float = 0.10
+const FW_FIREBALL_ROLL_CHANCE_ROLLING: float = 0.50
+const FW_FIREBALL_LIFT_CHANCE_ROLLING: float = 0.08
 ## Ein Lift ERSETZT den Bodenschub: weniger Horizontale, kleiner Hüpfer.
 const FW_FIREBALL_LIFT_PUSH: float = 1.2
 const FW_FIREBALL_LIFT_UP: float = 3.0
@@ -335,9 +341,10 @@ const PREACHER_SHAMAN_DISTURB_RANGE: float = 6.0
 
 ## Anhebe-Chance bei fast totem Ziel als Vielfaches der Basis (1.0 = keine
 ## Skalierung), linear invers über die HP: je verletzter das Ziel, desto leichter
-## fliegt es. Bei 3.0 also 4 % bei voller Gesundheit und 12 % kurz vor dem Tod
-## (rollendes Ziel 10 % → 30 %).
-const FW_FIREBALL_LIFT_HP_MAX_MULT: float = 3.0
+## fliegt es. Bei 2.0 also 4 % bei voller Gesundheit und **8 %** kurz vor dem Tod
+## (rollendes Ziel 8 % → **16 %**). 2026-09-02 von 3.0 gesenkt
+## (Nutzerentscheidung, im Zug mit dem staerkeren Umwerfen).
+const FW_FIREBALL_LIFT_HP_MAX_MULT: float = 2.0
 ## Flächenschaden des Feuerkrieger-Feuerballs (Phase 10i Teil 3): Radius und
 ## Anteil am Hauptzielschaden. Trifft NUR Feinde und macht keinen Rückstoß —
 ## Feuerkrieger schießen in Massen, mit Friendly Fire würde die hintere Reihe die
@@ -366,6 +373,19 @@ const FW_FIREBALL_LIFT_HP_MAX_MULT: float = 3.0
 ## Konstanten um etwa eine Größenordnung.
 const FW_FIREBALL_BLAST_RADIUS: float = 1.3
 const FW_FIREBALL_BLAST_FRAC: float = 0.3
+## Rolldauer, die EIN Feuerball dem Ziel aufdrueckt. Trifft es ein bereits
+## rollendes Ziel, verlaengert start_roll den Sturz um diese Zeit ab dem Treffer
+## (Nutzerentscheidung 2026-09-02: 0,5 s statt der allgemeinen 0,35 s aus
+## MINI_ROLL_DURATION — der Feuerball haelt ein Ziel damit sichtbar am Boden).
+## Bewusst ein EIGENER Wert: MINI_ROLL_DURATION haengt an Wurflandungen,
+## Klippenstuerzen, Nahkampf-Schubsern und Gebaeudetruemmern.
+const FW_FIREBALL_ROLL_DURATION: float = 0.5
+## Ein FRISCHES Umwerfen reisst Nachbarn mit: Radius um das Ziel und Chance je
+## Nachbar (die dann NEIGHBOR_ROLL_DURATION rollen). Radius 2026-09-02 von 0,9
+## auf 1,0 m erhoeht; standen vorher als lokale Konstanten in fireball.gd und
+## damit ausserhalb dieser Datei — jetzt hier, wo die Feuerballwerte leben.
+const FW_FIREBALL_NEIGHBOR_ROLL_RADIUS: float = 1.0
+const FW_FIREBALL_NEIGHBOR_ROLL_CHANCE: float = 0.5
 ## Treffer auf bereits fliegende Ziele: der Lift wird IMMER verstärkt.
 const LIFT_AIRBORNE_BONUS: float = 2.0
 const LIFT_AIRBORNE_PUSH_FACTOR: float = 0.5
