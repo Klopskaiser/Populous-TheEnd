@@ -316,3 +316,59 @@ func test_spell_sound_names() -> void:
 		== AudioSlots.PRIO_CRITICAL, "die Formel erbt Prio 1 über den Präfix")
 	check(AudioSlots.default_priority(SpellAudio.effect_name(spell.id))
 		== AudioSlots.PRIO_NORMAL, "der Effektsound ist gewöhnlich")
+# --- Zeichen ueber dem Kopf ---------------------------------------------------
+
+## Die Fremdkontrolle MUSS sichtbar sein (Nutzervorgabe): sonst sieht man nicht,
+## welche Einheiten nur geliehen sind. Der Effekt war in 10k angelegt (Bit, Art,
+## MultiMesh) — aber niemand setzte das Bit, also wurde nie ein Zeichen gezeichnet
+## (Nutzerreport). status_mask/visual_mask_of sind eigene Funktionen, damit die
+## Regel ohne Viewport und Kamera pruefbar ist.
+func test_hypnotized_unit_carries_the_overlay_bit() -> void:
+	var w: Dictionary = _make_world()
+	var fx: StatusFxRenderer = StatusFxRenderer.new()
+	var victim: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50, 5, 50))
+	check(fx.status_mask(victim) & StatusFxRenderer.FX_HYPNOTIZED == 0,
+		"ein normaler Anhaenger traegt kein Zeichen")
+	check(victim.hypnotize(w.t0, 30.0), "hypnotisiert")
+	var mask: int = fx.status_mask(victim)
+	check(mask & StatusFxRenderer.FX_HYPNOTIZED != 0,
+		"der Hypnotisierte traegt das Zeichen")
+	check(StatusFxRenderer.visual_mask_of(mask) & StatusFxRenderer.FX_HYPNOTIZED != 0,
+		"...und es wird auch gezeichnet")
+	# Brand unterdrueckt jedes andere Statussymbol — nur nicht dieses: es sagt,
+	# WESSEN Einheit das ist, und die Flamme sitzt auf Koerperhoehe, das Zeichen
+	# darueber.
+	victim.ignite(victim.position)
+	var burning: int = StatusFxRenderer.visual_mask_of(fx.status_mask(victim))
+	check(burning & StatusFxRenderer.FX_BURNING != 0, "die Flamme brennt")
+	check(burning & StatusFxRenderer.FX_HYPNOTIZED != 0,
+		"das Hypnose-Zeichen ueberlebt den Brand")
+	check(burning & StatusFxRenderer.FX_PANIC == 0,
+		"Panik wird von der Flamme weiterhin verdraengt")
+	# Laeuft die Hypnose ab, verschwindet das Zeichen mit ihr.
+	victim._hypnosis_time = 0.0
+	check(fx.status_mask(victim) & StatusFxRenderer.FX_HYPNOTIZED == 0,
+		"nach Ablauf ist das Zeichen weg")
+	fx.free()
+	_free_world(w)
+
+
+## Der Platzhalter muss aus RTS-Hoehe zu sehen sein: ein Einzelpixel-Pfad auf dem
+## kleinen Quad war es nicht. Die vier Frames sind verschieden (Drehung) und
+## decken genug Flaeche ab.
+func test_hypnosis_placeholder_is_visible() -> void:
+	var frames: Array = [StatusFxRenderer._hypnotized_frame(0),
+		StatusFxRenderer._hypnotized_frame(1),
+		StatusFxRenderer._hypnotized_frame(2),
+		StatusFxRenderer._hypnotized_frame(3)]
+	var opaque: int = 0
+	var img: Image = (frames[0] as ImageTexture).get_image()
+	for y in range(img.get_height()):
+		for x in range(img.get_width()):
+			if img.get_pixel(x, y).a > 0.5:
+				opaque += 1
+	check(opaque >= 40,
+		"das Zeichen deckt genug Pixel, um sichtbar zu sein (%d)" % opaque)
+	check((frames[0] as ImageTexture).get_image().get_data()
+		!= (frames[1] as ImageTexture).get_image().get_data(),
+		"die Spirale dreht sich zwischen den Frames")

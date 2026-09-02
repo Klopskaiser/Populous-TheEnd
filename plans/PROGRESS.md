@@ -9336,3 +9336,42 @@ sind gegen den ungefixten Stand geprüft: **4 Zusicherungen fallen ohne die
 Fixes** (3 Gebäudescan, 1 Prediger-Befehl) bzw. 2 weitere ohne den
 Prediger-Fix — die Fokus-Zusicherung braucht dafür einen Bodengegner *hinter*
 dem Schiff, sonst passiert der Test in beiden Ständen.
+### Nachtrag 6 — das Hypnose-Zeichen wurde nie gezeichnet (Nutzerreport, 2026-09-02)
+
+Die Fremdkontrolle sollte seit 10k ein Zeichen über dem Kopf tragen. Der Effekt
+war **vollständig angelegt** — Bit `FX_HYPNOTIZED`, eigene MultiMesh, vier
+prozedurale Spiral-Frames, Höhe 2,25 m — aber **niemand setzte das Bit**: die
+Maskenschleife in `StatusFxRenderer._process` kannte nur Panik, Brand und
+kritischen Schaden. Beweis am alten Stand: `FX_HYPNOTIZED` kommt darin genau
+zweimal vor, in der Konstante und in `_make_effect`. Es wurde also kein einziges
+Zeichen gerendert, egal wie viele Einheiten hypnotisiert waren.
+
+**Fix:** Die Maskenberechnung ist jetzt `status_mask(unit)` und die
+Anzeigepriorität `visual_mask_of(mask)` — eigene Funktionen, weil die
+Zeichenschleife eine Kamera braucht und damit headless nicht prüfbar ist. Das
+Bit folgt `Unit.is_hypnotized()` und ist **absichtlich seitenblind**: dass ein
+Gegner mir einen Anhänger abgenommen hat, ist genauso wichtig wie zu sehen,
+welche Truppen nur geliehen sind.
+
+**Eine Regel musste dafür aufgeweicht werden:** Brand unterdrückt sonst *jedes*
+andere Statussymbol. Hypnose ist davon ausgenommen — sie ist kein Zustandsschmuck,
+sondern die Antwort auf „wessen Einheit ist das?", und sie ausgerechnet zu
+verlieren, während die Einheit brennt, wäre der schlechteste Moment. Die beiden
+kollidieren nicht: die Flamme sitzt auf Körperhöhe (1,25 m), die Spirale über dem
+Kopf (2,25 m). Panik wird von der Flamme weiterhin verdrängt.
+
+**Der Platzhalter war zusätzlich zu fein:** Die Spiralarme bestanden aus
+**Einzelpixeln** eines 14er-Bildes auf einem 0,5-m-Quad — 3,6 cm je Pixel, aus
+RTS-Kamerahöhe nicht zu erkennen, selbst wenn er gerendert worden wäre. Jetzt
+16er-Bild, 2×2-Blöcke, Quad 0,6 m; der Panik-Platzhalter zieht seine Striche aus
+demselben Grund 3 Pixel breit.
+
+**Nicht angefasst:** der abgeleitete Loop-Name `unit_hypnotized_loop` bleibt
+bewusst ungenutzt (`_priority_loop_mask` kennt nur Brand > Panik > krit. Schaden)
+— ein Dauerton für Fremdkontrolle war nie spezifiziert.
+
+**Verifikation:** Ladecheck exit 0 ohne Ausgabe, **Suite 5003 Zusicherungen grün**
+(0 failed, kein `SCRIPT ERROR`), +10 in `tests/test_hypnosis.gd`. Ein A/B gegen
+den ungefixten Stand geht hier **nicht** — ohne die neuen Funktionen parst die
+Testdatei nicht; die Beweislast trägt der Grep oben. Optisch geprüft ist es noch
+nicht: das steht beim Nutzer.

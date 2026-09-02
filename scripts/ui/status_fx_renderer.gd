@@ -63,7 +63,7 @@ func _ready() -> void:
 		_make_effect(FX_BURNING, &"burning", 1.25, Vector2(1.1, 1.3), 0.35,
 			MAX_BURNING),
 		_make_effect(FX_INJURED, &"injured", 1.55, Vector2(0.8, 0.4)),
-		_make_effect(FX_HYPNOTIZED, &"hypnotized", 2.25, Vector2(0.5, 0.5)),
+		_make_effect(FX_HYPNOTIZED, &"hypnotized", 2.25, Vector2(0.6, 0.6)),
 	]
 
 
@@ -179,17 +179,7 @@ func _process(delta: float) -> void:
 		else Vector3.ZERO
 	var counts: Array[int] = [0, 0, 0, 0]   # panic, burning, injured, hypnotized
 	for unit in _unit_manager.units:
-		var mask: int = 0
-		if unit.state != Unit.State.DEAD:
-			if unit.state == Unit.State.PANIC:
-				mask |= FX_PANIC
-			if unit.is_burning():
-				mask |= FX_BURNING
-			# Badly hurt: sprite units only (the siege engine's 1 HP is a
-			# "never targetable" convention, not damage).
-			if unit.renders_as_sprite() \
-					and unit.health <= int(float(unit.max_health) * Unit.BADLY_HURT_FRAC):
-				mask |= FX_INJURED
+		var mask: int = status_mask(unit)
 		# Visuals use the FULL additive mask; the loop SOUND is reduced to a
 		# single highest-priority state (Brand > Panik > krit. Schaden) — only
 		# ONE loop per unit at a time (user spec). _tracked holds that reduced
@@ -209,9 +199,7 @@ func _process(delta: float) -> void:
 		# Display priority (user spec): BURNING overrides every other status
 		# icon; crit damage (INJURED) is drawn as circling stars by the
 		# StarsRenderer, never here. Loop sounds above follow the FULL mask.
-		var visual_mask: int = mask & ~FX_INJURED
-		if visual_mask & FX_BURNING:
-			visual_mask = FX_BURNING
+		var visual_mask: int = visual_mask_of(mask)
 		for i in range(_effects.size()):
 			var e: Dictionary = _effects[i]
 			if visual_mask & int(e.bit) and counts[i] < int(e.cap):
@@ -275,6 +263,47 @@ func _cleanup_departed() -> void:
 			_sync_loops(unit, _tracked[unit], 0)
 			unit._status_fx_mask = 0
 		_tracked.erase(unit)
+
+
+## Full additive status mask of a unit. Its own function so the rule is testable
+## without a viewport (the draw loop needs a camera).
+##
+## FX_HYPNOTIZED marks a unit that fights for its current tribe only
+## TEMPORARILY (spell 12). The effect was declared, given art and a MultiMesh in
+## phase 10k — but nobody ever set the bit, so the sign over the head was never
+## drawn at all (user report). It is deliberately side-agnostic: that an enemy
+## took one of MY followers matters as much as seeing my own borrowed troops.
+func status_mask(unit: Unit) -> int:
+	if unit.state == Unit.State.DEAD:
+		return 0
+	var mask: int = 0
+	if unit.state == Unit.State.PANIC:
+		mask |= FX_PANIC
+	if unit.is_burning():
+		mask |= FX_BURNING
+	# Badly hurt: sprite units only (the siege engine's 1 HP is a
+	# "never targetable" convention, not damage).
+	if unit.renders_as_sprite() \
+			and unit.health <= int(float(unit.max_health) * Unit.BADLY_HURT_FRAC):
+		mask |= FX_INJURED
+	if unit.is_hypnotized():
+		mask |= FX_HYPNOTIZED
+	return mask
+
+
+## Icons actually drawn for a status mask. Display priority (user spec): crit
+## damage is drawn as circling stars by the StarsRenderer (never here), and
+## BURNING suppresses the other status icons.
+##
+## Hypnosis is the ONE exception to that suppression: it is not a status
+## flourish but the answer to "whose unit is this?", and losing it exactly while
+## the unit burns would be the worst moment. The two never collide — the flame
+## sits at body height, the spiral above the head.
+static func visual_mask_of(mask: int) -> int:
+	var visual: int = mask & ~FX_INJURED
+	if visual & FX_BURNING:
+		visual = FX_BURNING | (visual & FX_HYPNOTIZED)
+	return visual
 
 
 ## Reduces the full additive status mask to the SINGLE loop that may play
@@ -343,24 +372,29 @@ static func _burning_frame(phase: int) -> ImageTexture:
 ## Kreisende Spirale ueber dem Kopf: die Einheit steht nur VORUEBERGEHEND unter
 ## fremder Kontrolle (Hypnose, Zauber 12). Prozeduraler Platzhalter wie die
 ## anderen Zeichen, ersetzbar ueber assets/textures/effects/hypnotized.png.
-## Vier Phasen, damit die Drehung lesbar ist.
+## Hypnose-Zeichen: zwei gegenlaeufige Spiralarme, je Frame um eine
+## Vierteldrehung weiter (Fremdkontrolle, Zauber 12).
+##
+## Die Arme werden als 2x2-Bloecke gezeichnet, nicht als Einzelpixel: auf dem
+## 0,6-m-Quad ist ein Pixel des 16er-Bildes nur ~3,7 cm breit, ein einzelner
+## Pixelpfad war aus RTS-Kamerahoehe nicht zu erkennen (Nutzerreport). Der
+## Panik-Ausrufezeichen-Platzhalter zieht seine Striche aus demselben Grund
+## 3 Pixel breit.
 static func _hypnotized_frame(phase: int) -> ImageTexture:
-	var size: int = 14
+	var size: int = 16
 	var img: Image = Image.create_empty(size, size, false, Image.FORMAT_RGBA8)
-	var mid: float = float(size) * 0.5 - 0.5
-	# Zwei gegenueberliegende Spiralarme, je Phase um eine Vierteldrehung weiter.
+	var mid: float = float(size) * 0.5 - 1.0
 	var start: float = float(phase) * PI * 0.5
 	for arm in range(2):
 		var base: float = start + float(arm) * PI
-		for i in range(10):
-			var t: float = float(i) / 9.0
+		for i in range(12):
+			var t: float = float(i) / 11.0
 			var ang: float = base + t * PI * 1.1
-			var r: float = 1.2 + t * 5.2
+			var r: float = 1.0 + t * 5.6
 			var x: int = int(round(mid + cos(ang) * r))
 			var y: int = int(round(mid + sin(ang) * r))
-			if x < 0 or y < 0 or x >= size or y >= size:
-				continue
-			img.set_pixel(x, y, C_HYPNO if i % 3 != 2 else C_HYPNO_DIM)
+			img.fill_rect(Rect2i(x, y, 2, 2),
+				C_HYPNO if i % 3 != 2 else C_HYPNO_DIM)
 	return ImageTexture.create_from_image(img)
 
 

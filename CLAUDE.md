@@ -272,7 +272,7 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
 | 9 | **Ebene** | 300 | 3 | 10 m | Ebnet das Zielquadrat exakt ein (harte Kanten). |
 | 10 | **Absinken** | 350 | 3 | 10 m | Senkt das Zielgebiet ab (nie unter den Meeresboden). |
 | 11 | **Supertornado** | 1200 | 1 | 12 m | Doppelt so breiter Trichter (4,4 m), 12 m hoch, 16 s, dazu zwei normale Tornados als Satelliten. |
-| 12 | **Hypnose** | 210 | 3 | 10 m | Bekehrt gegnerische Anhänger im **4 × 4 m**-Quadrat **vorübergehend (30 s)** zum eigenen Stamm: sie sind normal steuerbar und kämpfen für den Kontrolleur, Bevölkerung und Manaerzeugung wandern mit. Ein Zeichen über dem Kopf zeigt die Fremdkontrolle. **Nur die Schamanin ist immun** — Prediger nicht. Eine Bekehrung durch einen Prediger gewinnt und ist endgültig. Wer damit die **letzten** Einheiten eines Stammes nimmt, beendet ihn. |
+| 12 | **Hypnose** | 210 | 3 | 10 m | Bekehrt gegnerische Anhänger im **4 × 4 m**-Quadrat **vorübergehend (30 s)** zum eigenen Stamm: sie sind normal steuerbar und kämpfen für den Kontrolleur, Bevölkerung und Manaerzeugung wandern mit. Ein Zeichen über dem Kopf (Spirale, 2,25 m) zeigt die Fremdkontrolle — bei **allen** hypnotisierten Einheiten, egal wessen, und es ist das **einzige** Statussymbol, das der Brand nicht verdrängt (es sagt, wessen Einheit das ist). **Nur die Schamanin ist immun** — Prediger nicht. Eine Bekehrung durch einen Prediger gewinnt und ist endgültig. Wer damit die **letzten** Einheiten eines Stammes nimmt, beendet ihn. |
 
 **Neue Mechaniken durch die Zauber:** Panik, Umherschleudern von Einheiten
 (Wurf-Parabel → Rollen bis zum Ausrollen), Gebäudezerstörung in Stufen (§5),
@@ -314,7 +314,7 @@ Laufzeit-Terrainverformung (Erdbeben/Vulkan/Ebene/Absinken).
   damit zur **Laufzeit nicht mehr konstant** — nur die Basiswerte sind es.
 
 **Zustandsanzeigen werfen keinerlei Schatten** (Sterne bei kritischer
-Verletzung, Panik, Brand): es sind UI-Glyphen über dem Kopf, und in der
+Verletzung, Panik, Brand, Hypnose): es sind UI-Glyphen über dem Kopf, und in der
 Massenschlacht würden hunderte davon die Shadow-Map fluten. Weltgeometrie
 (Gebäude, Bäume, Fahrzeuge) wirft weiterhin Schatten.
 
