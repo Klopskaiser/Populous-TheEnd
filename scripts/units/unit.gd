@@ -2685,7 +2685,15 @@ func convert_to_tribe(new_tribe: Tribe) -> void:
 	_clear_building_target()
 	_dissolve_own_group()   # everyone fighting the (now friendly) unit retargets
 	selected = false
-	_set_state(State.IDLE)
+	# NICHT aus einem laufenden Sturz reissen: ein rollender/fliegender Koerper
+	# muss seine Bewegung beenden duerfen, weil erst _end_roll bzw. die Landung
+	# den aufgeschobenen Tod vollstreckt. Ein Zustandswechsel nach IDLE liess
+	# einen `doomed` Ragdoll ewig weiterleben (Nutzerreport 2026-09-02: der
+	# brennende Hypnotisierte, der keinen Schaden nahm, nicht angegriffen wurde
+	# und allein 100 Einheiten erledigte) — der doomed-Kurzschluss in tick()
+	# ueberspringt danach Brand, Hypnose-Ablauf und Regeneration fuer immer.
+	if state != State.ROLL and state != State.THROWN:
+		_set_state(State.IDLE)
 	# A preacher's conversion is FINAL and beats a running hypnosis (10k): the
 	# unit belongs to the preacher's tribe now, so the timer must not drag it back.
 	_hypnosis_time = 0.0
@@ -2728,6 +2736,10 @@ func hypnotize(new_tribe: Tribe, duration: float) -> bool:
 		return false
 	if garrison_housed:
 		return false   # tower crew are a protected reserve (7h), like conversion
+	if doomed:
+		# Ein Koerper, der seinen toedlichen Treffer schon hat, ist kein
+		# Anhaenger, den man leihen kann — er spielt nur noch seinen Sturz aus.
+		return false
 	if new_tribe.id == tribe_id and not is_hypnotized():
 		return false   # own units cannot be hypnotized
 	# Re-hypnotizing refreshes the timer and may change the controller, but the

@@ -9982,3 +9982,41 @@ sind entfallen, `AudioSettings` ersetzt sie.
 Zoom-Beziehung, die Bus-Abdeckung (jeder angelegte Bus ist ueber genau einen
 Regler erreichbar — vorher hatte nur „Master" einen) und ein Setz-/Lese-/
 Stumm-Durchlauf, der die echten Nutzerwerte am Ende wiederherstellt.
+### Nachtrag 21 — der brennende Untote (Nutzerreport, 2026-09-02)
+
+Nutzerbericht aus der Debugschlacht: ein per Hypnose uebernommener Anhaenger
+brannte **dauerhaft** ohne Schaden zu nehmen, seine Hypnose lief **nie ab**, die
+Gegner griffen ihn **nicht an**, und er erledigte im Alleingang ~100 Einheiten.
+
+Alle vier Symptome sind **ein** Zustand: `doomed`. Der `tick()`-Kurzschluss fuer
+Ragdolls (10c) ueberspringt `_tick_knockback`, `_tick_regen`, `_tick_burning` UND
+`_tick_hypnosis` — laeuft aber `_tick_state` weiter. Ein `doomed` Koerper, der
+nicht stirbt, brennt also ewig ohne Schaden, behaelt sein Hypnose-Zeichen fuer
+immer, ist ueber `is_targetable()` fuer niemanden ein Ziel — und kaempft trotzdem.
+
+**Die Kette, wie er ueberhaupt ueberlebte:**
+1. `HypnosisSpell.units_in_square` filterte `is_targetable()` **nicht** (nur
+   Stamm, DEAD, Schamanin, `garrison_housed`) — ein toedlich getroffener,
+   rollender Koerper stand also im Wirkquadrat.
+2. `hypnotize()` hatte keinen `doomed`-Riegel und rief `convert_to_tribe()`.
+3. **`convert_to_tribe()` setzte bedingungslos `_set_state(State.IDLE)`** — und
+   riss ihn damit aus der Rolle. `_tick_roll`/`_end_roll` laufen nie wieder, und
+   nur dort wird der aufgeschobene Tod vollstreckt.
+
+**Drei Riegel, von der Ursache nach aussen:**
+- `convert_to_tribe()` laesst `State.ROLL`/`State.THROWN` **stehen** (Wurzelfix,
+  schuetzt auch den Rueckweg beim Hypnose-Ablauf und jeden kuenftigen Aufrufer).
+- `hypnotize()` weist `doomed` ab — ein Koerper mit seinem toedlichen Treffer ist
+  kein Anhaenger, den man leihen kann.
+- `units_in_square` filtert `is_targetable()` (deckt Ragdoll, Turmvorrat und
+  `in_world` in einem).
+
+**Gegenprobe mitgebaut**, damit die Riegel nicht zu viel abschneiden: ein
+**gesunder** Rollender ist weiter hypnotisierbar, rollt aus, und die Hypnose
+laeuft normal ab.
+
+**Verifikation:** Ladecheck exit 0 ohne Ausgabe, **Suite 5105 Zusicherungen
+gruen**. Gegen den ungefixten Stand fallen **6 Zusicherungen** — die
+entscheidende ist „und er stirbt trotz Stammeswechsel": im alten Code lebte der
+Koerper nach **45 simulierten Sekunden** noch, also genau der Untote aus dem
+Bericht.

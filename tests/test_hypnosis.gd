@@ -372,3 +372,69 @@ func test_hypnosis_placeholder_is_visible() -> void:
 	check((frames[0] as ImageTexture).get_image().get_data()
 		!= (frames[1] as ImageTexture).get_image().get_data(),
 		"die Spirale dreht sich zwischen den Frames")
+# --- Ragdolls sind kein Hypnoseziel (Nutzerreport 2026-09-02) -----------------
+
+## Der Untote: ein `doomed` Ragdoll (toedlicher Treffer im Sturz, stirbt
+## normalerweise beim Ausrollen) wurde hypnotisiert, und der Stammeswechsel holte
+## ihn per _set_state(IDLE) aus der Rolle — damit lief _end_roll nie, er starb
+## nie, und der doomed-Kurzschluss in tick() ueberspringt fuer immer Brand,
+## Hypnose-Ablauf und Regeneration. Im Spiel: ein dauerhaft brennender,
+## unangreifbarer Hypnotisierter, der ohne Schaden zu nehmen 100 Einheiten
+## erledigte. Drei Riegel, hier alle drei geprueft.
+func test_doomed_ragdoll_is_no_hypnosis_target() -> void:
+	var w: Dictionary = _make_world()
+	var victim: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50, 5, 50))
+	victim.throw_airborne(Vector3(1, 0, 0) * 4.0 + Vector3.UP * 4.0)
+	victim.take_damage(10000)
+	check(victim.doomed, "das Opfer ist ein Ragdoll")
+	check(not victim.is_targetable(), "und damit kein Ziel")
+	# 1) Die Flaechenauswahl nimmt ihn nicht mehr auf.
+	var picked: Array[Unit] = HypnosisSpell.units_in_square(w.um, victim.position, 0)
+	check(not picked.has(victim), "die Flaechenauswahl ueberspringt Ragdolls")
+	# 2) Und selbst direkt gerufen weist hypnotize() ihn ab.
+	check(not victim.hypnotize(w.t0, 30.0), "hypnotize() weist ein Ragdoll ab")
+	check(victim.tribe_id == 1, "es bleibt beim alten Stamm")
+	_free_world(w)
+
+
+## Und der eigentliche Riegel darunter: selbst wenn ein Stammeswechsel einen
+## stuerzenden Koerper trifft (z. B. weil die Hypnose beim Ablauf zurueckgibt),
+## darf er ihn nicht aus dem Sturz holen — der Tod muss vollstreckt werden.
+func test_tribe_switch_never_interrupts_a_deadly_tumble() -> void:
+	var w: Dictionary = _make_world()
+	var victim: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50, 5, 50))
+	victim.throw_airborne(Vector3(1, 0, 0) * 4.0 + Vector3.UP * 4.0)
+	victim.take_damage(10000)
+	check(victim.doomed and victim.state == Unit.State.THROWN, "faellt toedlich getroffen")
+	victim.convert_to_tribe(w.t0)          # der Pfad, der ihn frueher rettete
+	check(victim.state == Unit.State.THROWN or victim.state == Unit.State.ROLL,
+		"der Sturz laeuft weiter (Zustand %d)" % victim.state)
+	var ticks: int = 0
+	while victim.state != Unit.State.DEAD and ticks < 900:
+		victim.tick(0.05)
+		w.um.tick(0.05)
+		ticks += 1
+	check(victim.state == Unit.State.DEAD,
+		"und er stirbt trotz Stammeswechsel (nach %.1f s)" % (float(ticks) * 0.05))
+	_free_world(w)
+
+
+## Gegenprobe, damit die Riegel nicht zu viel abschneiden: ein GESUNDER
+## Rollender darf hypnotisiert werden, rollt aus und lebt danach normal weiter —
+## inklusive ablaufender Hypnose.
+func test_healthy_rolling_unit_can_still_be_hypnotized() -> void:
+	var w: Dictionary = _make_world()
+	var victim: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50, 5, 50))
+	victim.start_roll(Vector3(1, 0, 0), 0.35)
+	check(victim.state == Unit.State.ROLL and not victim.doomed, "rollt, aber lebt")
+	check(victim.hypnotize(w.t0, 1.0), "gesunde Rollende sind hypnotisierbar")
+	check(victim.state == Unit.State.ROLL, "die Rolle laeuft weiter")
+	var ticks: int = 0
+	while victim.is_hypnotized() and ticks < 200:
+		victim.tick(0.05)
+		w.um.tick(0.05)
+		ticks += 1
+	check(not victim.is_hypnotized(), "die Hypnose laeuft ab wie immer")
+	check(victim.state != Unit.State.DEAD, "und er lebt (kein Rollschaden-Tod)")
+	check(victim.tribe_id == 1, "und ist zurueck bei seinem Stamm")
+	_free_world(w)

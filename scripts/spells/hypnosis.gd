@@ -71,7 +71,12 @@ static func units_in_square(um: UnitManager, center: Vector3,
 			continue
 		if u.unit_kind() == &"shaman":
 			continue   # the enemy shaman is immune (user spec)
-		if u.garrison_housed:
-			continue   # protected tower reserve, like conversion
+		if not u.is_targetable():
+			# Deckt den geschuetzten Turmvorrat (garrison_housed), Einheiten
+			# ausserhalb der Welt (in_world) UND `doomed` Ragdolls ab. Letztere
+			# waren der Fehler: hypnotisiert wechselten sie den Stamm, und der
+			# Stammeswechsel holte sie aus ihrem Sturz — sie starben nie mehr
+			# (Nutzerreport 2026-09-02).
+			continue
 		result.append(u)
 	return result
