@@ -735,6 +735,12 @@ var doomed: bool = false
 ## begrenzt eine einzelne Einheit deshalb nicht (Nutzerreport 2026-09-02:
 ## nachfolgende Feuerbaelle liessen den Schrei erneut erklingen).
 var _air_death_cried: bool = false
+## Laeuft, waehrend _land_from_throw den STURZSCHADEN anwendet. Der Koerper ist
+## da schon auf dem Boden (der Zustand bleibt bis start_roll formal THROWN), ein
+## Tod hier ist also ein AUFPRALL-Tod: normaler Todes-Sound am Ende des Rollens,
+## nie der Luftschrei (Nutzerreport 2026-09-02 — der Aufprall schrie, als waere
+## die Einheit in der Luft erschossen worden).
+var _landing_impact: bool = false
 
 # --- Conversion state (preacher, phase 5c) ---------------------------------------
 ## Enemy preacher currently pacifying this unit (untyped: may be freed).
@@ -1439,7 +1445,7 @@ func take_damage(amount: int, attacker = null) -> void:
 			# Deferred: _end_roll / the landing roll finishes it. The unit is a
 			# goner though, so it drops out of the simulation NOW and only
 			# plays its ragdoll out (phase 10c, see _enter_ragdoll).
-			if state == State.THROWN:
+			if state == State.THROWN and not _landing_impact:
 				# Struck dead in mid-air: the cry happens HERE, at altitude
 				# (user request), while the death sound itself follows seconds
 				# later where the body hits. A tumble on the ground is not "in
@@ -2382,7 +2388,11 @@ func _land_from_throw(ground: float) -> void:
 				position.z = wpos.z
 	_snap_to_ground()
 	if fall_damage > 0:
+		# Der Aufprall ist kein Lufttreffer: waehrend dieses Aufrufs bleibt der
+		# Zustand formal THROWN, also muss der Luftschrei ausgeschlossen werden.
+		_landing_impact = true
 		take_damage(fall_damage)
+		_landing_impact = false
 		if state == State.DEAD:
 			return
 	var land_key: StringName = land_sfx_key()

@@ -1610,3 +1610,44 @@ func test_air_death_cry_fires_once_per_unit() -> void:
 	check(not victim._cry_air_death(),
 		"further hits on the same falling body never cry again")
 	_free_world(w)
+## Der AUFPRALL ist kein Lufttreffer (Nutzerreport 2026-09-02): stirbt eine
+## Einheit am Sturzschaden, gehoert dazu der normale Todes-Sound (nach dem
+## Rollen), nicht der Luftschrei. Der Sturzschaden wird aber angewandt, WAEHREND
+## der Zustand formal noch THROWN ist — genau dort schrie es vorher.
+func test_fall_damage_death_is_no_air_cry() -> void:
+	var w: Dictionary = _make_world()
+	var victim: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
+	# Wurf mit toedlichem Sturzschaden: er ueberlebt den Flug, stirbt am Boden.
+	victim.throw_airborne(Vector3(1, 0, 0) * 3.0 + Vector3.UP * 4.0,
+		victim.max_health + 50)
+	check(victim.state == Unit.State.THROWN, "fliegt")
+	var ticks: int = 0
+	while victim.state == Unit.State.THROWN and ticks < 400:
+		victim.tick(TICK)
+		w.unit_manager.tick(TICK)
+		ticks += 1
+	check(victim.state != Unit.State.THROWN, "ist gelandet (%d Ticks)" % ticks)
+	check(not victim._air_death_cried,
+		"der Aufprall hat NICHT den Luftschrei ausgeloest")
+	check(victim.health <= 0, "der Sturzschaden war toedlich")
+	while victim.state != Unit.State.DEAD and ticks < 900:
+		victim.tick(TICK)
+		w.unit_manager.tick(TICK)
+		ticks += 1
+	check(victim.state == Unit.State.DEAD, "und er stirbt am Ende des Rollens")
+	check(victim.death_sfx_key() == &"unit_death",
+		"mit dem normalen Todes-Sound (%s)" % victim.death_sfx_key())
+	check(not victim._air_death_cried, "auch danach kein Luftschrei")
+	_free_world(w)
+
+
+## Gegenprobe: ein toedlicher Treffer WIRKLICH in der Luft schreit weiter.
+func test_lethal_hit_in_flight_still_cries() -> void:
+	var w: Dictionary = _make_world()
+	var victim: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
+	victim.throw_airborne(Vector3(1, 0, 0) * 3.0 + Vector3.UP * 5.0)
+	victim.tick(TICK)   # ein Tick Flug, damit er wirklich oben ist
+	check(victim.state == Unit.State.THROWN, "fliegt")
+	victim.take_damage(10000)
+	check(victim._air_death_cried, "der Lufttreffer schreit")
+	_free_world(w)

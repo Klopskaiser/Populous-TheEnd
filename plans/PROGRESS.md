@@ -10020,3 +10020,30 @@ gruen**. Gegen den ungefixten Stand fallen **6 Zusicherungen** — die
 entscheidende ist „und er stirbt trotz Stammeswechsel": im alten Code lebte der
 Koerper nach **45 simulierten Sekunden** noch, also genau der Untote aus dem
 Bericht.
+### Nachtrag 22 — der Aufprall schrie wie ein Lufttreffer (Nutzerreport, 2026-09-02)
+
+`unit_air_death` loeste auch bei Tod durch **Sturzschaden** aus. Ursache ist eine
+Zustandsluecke: `_land_from_throw` wendet den Sturzschaden an, **waehrend der
+Zustand noch `THROWN` ist** — den Wechsel macht erst das nachfolgende
+`start_roll`. `take_damage` liest daraus „toedlich getroffen in der Luft",
+schreit und macht einen Ragdoll daraus, obwohl der Koerper langst am Boden liegt.
+Gehoert haette man dort den normalen Todes-Sound (nach dem Rollen) — und
+tatsaechlich kamen beide.
+
+**Behoben mit einem eng gefassten Riegel** statt einer Geometriepruefung:
+`_landing_impact` laeuft nur waehrend genau dieses einen `take_damage`-Aufrufs,
+und der Luftschrei fragt ihn ab. Warum nicht „ist der Koerper hoch genug?": ein
+Hoehenschwellwert haette den Fall „Feuerkrieger hebt an und trifft im ersten
+Frame nochmal" mit stumm gemacht, und die Umstellung der Reihenfolge (erst
+`start_roll`, dann Schaden) haette die Landungs-Sound-Regel gebrochen — dann
+haette ein am Sturz Sterbender noch `unit_land` gespielt.
+
+Der Ragdoll bleibt richtig: der Tod wird weiter zum Ende des Rollens verschoben,
+dort spielt `death_sfx_key()` das normale `unit_death`, und die Landung selbst
+bleibt stumm (`land_sfx_key()` liefert bei `health <= 0` den Leerstring).
+
+**Verifikation:** Ladecheck exit 0 ohne Ausgabe, **Suite 5114 Zusicherungen
+gruen**. Zwei neue Tests, gegen den ungefixten Stand geprueft: dort fallen
+**2 Zusicherungen** (der Aufprall schrie). Die Gegenprobe „echter Lufttreffer
+schreit weiter" laeuft in beiden Staenden gruen — der Riegel schneidet also
+nichts ab, was er nicht soll.
