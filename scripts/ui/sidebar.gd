@@ -24,6 +24,27 @@ const MINIMAP_SIZE: float = 236.0
 ## means more scrolling on tiny windows; the area still expands (SIZE_EXPAND_FILL)
 ## to the full remaining height on taller windows.
 const TAB_CONTENT_HEIGHT: float = 160.0
+## Height of the shaman portrait stage, in the project's 1920x1080 layout units
+## (canvas_items stretch scales them with the window: 72 units are 96 real pixels
+## at 1440p). Equals the placeholder sprite at scale 3 (PlaceholderSprites.H * 3);
+## bigger user sheets are scaled down INTO it so the sidebar column keeps its
+## height — see TAB_CONTENT_HEIGHT on how tight the column is.
+const PORTRAIT_HEIGHT: float = 72.0
+## Tribe colour for the portrait, applied exactly as the world renderer applies
+## it (UnitRenderer.SHADER): the L8 mask gates the multiply per pixel, so a sheet
+## that ships an <anim>_mask.png keeps its unpainted parts, and a frame without a
+## mask (every placeholder) gets the full multiply the portrait always had.
+const PORTRAIT_TINT_SHADER: String = """
+shader_type canvas_item;
+
+uniform vec4 tint : source_color = vec4(1.0);
+uniform sampler2D tint_mask : filter_nearest;
+
+void fragment() {
+	vec4 tex = texture(TEXTURE, UV);
+	COLOR = vec4(tex.rgb * mix(vec3(1.0), tint.rgb, texture(tint_mask, UV).r), tex.a);
+}
+"""
 ## Index of the auto-activating crew tab.
 const TAB_CREW: int = 3
 const MANA_SEGMENTS: int = 20
@@ -111,6 +132,11 @@ var _active_tab: int = 0
 ## Shaman portrait (below the minimap, Populous style): full live-animated
 ## figure + health bar; click centres the camera on her and selects ONLY her.
 var _portrait_sprite: AnimatedSprite2D = null
+## Mask frames parallel to _portrait_sprite.sprite_frames, feeding the portrait's
+## tint shader (see _build_shaman_portrait).
+var _portrait_masks: SpriteFrames = null
+## Uniform frame size of the portrait art (placeholder or user sheet).
+var _portrait_cell: Vector2i = Vector2i.ZERO
 var _portrait_hp: ProgressBar = null
 var _portrait_status: Label = null
 
@@ -413,14 +439,28 @@ func _build_shaman_portrait(root: Control) -> void:
 	stage.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vb.add_child(stage)
 	_portrait_sprite = AnimatedSprite2D.new()
-	_portrait_sprite.sprite_frames = PlaceholderSprites.make_frames(&"shaman")
-	_portrait_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	_portrait_sprite.scale = Vector2(3.0, 3.0)
+	# Same sheet-or-placeholder decision as the game world: whatever the player
+	# put into assets/units/shaman/ shows up in here too. Going straight to
+	# PlaceholderSprites (as this did until 2026-09-04) made the portrait the one
+	# code path that never looked at assets/ — delivered art stayed invisible.
+	var portrait: Dictionary = UnitSpriteLibrary.make_portrait_frames(&"shaman")
+	_portrait_sprite.sprite_frames = portrait.frames
+	_portrait_masks = portrait.masks
+	_portrait_cell = portrait.cell
+	_portrait_sprite.material = _make_portrait_material()
 	_portrait_sprite.animation = &"idle_front"
 	_portrait_sprite.play()
+	_portrait_sprite.frame_changed.connect(_update_portrait_mask)
+	_portrait_sprite.animation_changed.connect(_update_portrait_mask)
+	_update_portrait_mask()
 	stage.add_child(_portrait_sprite)
+	# Scale and filter belong here, not above: at build time the stage is still
+	# (0, 0), and both depend on how the art fits into it.
 	stage.resized.connect(func() -> void:
-		_portrait_sprite.position = stage.size * 0.5)
+		_portrait_sprite.position = stage.size * 0.5
+		var s: float = portrait_scale(_portrait_cell, stage.size)
+		_portrait_sprite.scale = Vector2(s, s)
+		_portrait_sprite.texture_filter = portrait_filter(s))
 
 	_portrait_hp = ProgressBar.new()
 	_portrait_hp.show_percentage = false
@@ -442,6 +482,57 @@ func _build_shaman_portrait(root: Control) -> void:
 	_portrait_status.text = ""
 	_portrait_status.visible = false
 	vb.add_child(_portrait_status)
+
+
+## Material carrying the tribe tint; the mask texture is swapped per frame by
+## _update_portrait_mask.
+func _make_portrait_material() -> ShaderMaterial:
+	var shader: Shader = Shader.new()
+	shader.code = PORTRAIT_TINT_SHADER
+	var mat: ShaderMaterial = ShaderMaterial.new()
+	mat.shader = shader
+	mat.set_shader_parameter("tint", Color.WHITE)
+	mat.set_shader_parameter("tint_mask", UnitSpriteLibrary.white_mask_texture())
+	return mat
+
+
+## Points the shader at the mask of the frame currently on screen. The mask
+## SpriteFrames is frame-for-frame parallel to the colour one, so the current
+## animation + frame index address it directly.
+func _update_portrait_mask() -> void:
+	if _portrait_sprite == null or _portrait_masks == null:
+		return
+	var mat: ShaderMaterial = _portrait_sprite.material as ShaderMaterial
+	if mat == null:
+		return
+	var anim: StringName = _portrait_sprite.animation
+	var tex: Texture2D = UnitSpriteLibrary.white_mask_texture()
+	if _portrait_masks.has_animation(anim) \
+			and _portrait_sprite.frame < _portrait_masks.get_frame_count(anim):
+		tex = _portrait_masks.get_frame_texture(anim, _portrait_sprite.frame)
+	mat.set_shader_parameter("tint_mask", tex)
+
+
+## Uniform scale that fits one frame of the portrait art into its stage: the
+## stage HEIGHT decides (the sidebar column may not grow), the width can only
+## lower the result. Pure and static so the sizing rule is assertable headless.
+## The placeholder cell (16x24) in the 72-unit stage lands on exactly 3.0.
+static func portrait_scale(cell: Vector2i, stage: Vector2) -> float:
+	if cell.x <= 0 or cell.y <= 0 or stage.y <= 0.0:
+		return 1.0
+	var s: float = stage.y / float(cell.y)
+	if stage.x > 0.0:
+		s = minf(s, stage.x / float(cell.x))
+	return s
+
+
+## Pixel art only keeps hard edges when it is magnified; art taller than the
+## stage (a 96 px sheet in 72 units) is SHRUNK, and nearest-neighbour would drop
+## pixel rows unevenly and make the walk cycle crawl. Filter those, keep the
+## placeholder's exact 3.0 magnification crisp.
+static func portrait_filter(scale: float) -> CanvasItem.TextureFilter:
+	return CanvasItem.TEXTURE_FILTER_NEAREST if scale >= 1.0 \
+		else CanvasItem.TEXTURE_FILTER_LINEAR
 
 
 func _build_tab_bar(root: Control) -> void:
@@ -1488,7 +1579,11 @@ func _refresh_portrait() -> void:
 		return
 	var player: Tribe = _player_tribe()
 	if player != null:
-		_portrait_sprite.modulate = player.color
+		# Goes through the shader, not modulate: a user sheet may carry a mask
+		# that decides WHICH pixels take the tribe colour (as in the game world).
+		var mat: ShaderMaterial = _portrait_sprite.material as ShaderMaterial
+		if mat != null:
+			mat.set_shader_parameter("tint", player.color)
 	if _player_shaman_alive():
 		var shaman: Unit = player.shaman
 		_set_portrait_anim(StringName("%s_front" % shaman.anim_base_name),

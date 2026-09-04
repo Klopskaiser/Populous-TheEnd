@@ -198,6 +198,13 @@ weiß markiert (gleiche Größe/Layout wie das Sheet; schwarz = keine Färbung, 
 teilweise). Ohne Maske wird das ganze Sprite mit der Stammesfarbe multipliziert —
 dann sollte die Art hell/fast weiß angelegt sein.
 
+**Zeile 1 zählt doppelt:** Das Schamanin-Portrait in der Seitenleiste (unter der
+Minikarte) zeigt dieselben Sheets — und zwar immer die **Front-Ansicht**, also
+Zeile 1. Im Todesfall zeigt es `dead_back.png` (Rückenlage, Gesicht sichtbar).
+Das Portrait ist 72 Layout-Einheiten hoch; größere Frames werden hineinskaliert
+(bei 64×96 also auf 75 %), das Sidebar-Layout bleibt davon unberührt. Die
+Stammesfarbe wird dort mit derselben Maskenregel angewendet wie im Spiel.
+
 **Import-Hinweis:** Unit-Sheets beim Godot-Standardimport (Lossless) belassen — keine
 VRAM-Kompression einstellen.
 

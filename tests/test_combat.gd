@@ -775,6 +775,82 @@ func test_sheet_cut_plan_row_variants() -> void:
 			"an 8-row sheet draws %s in row %d" % [view, i + 1])
 
 
+# --- Sidebar portrait frames ---------------------------------------------------------
+
+## The portrait pulls its frames through UnitSpriteLibrary, so art delivered in
+## assets/units/<kind>/ reaches the panel exactly as it reaches the battlefield.
+## It only ever needs the FRONT drawing — one animation per base, not eight.
+func test_portrait_frames_cover_every_animation_front_only() -> void:
+	var portrait: Dictionary = UnitSpriteLibrary.make_portrait_frames(&"shaman")
+	var frames: SpriteFrames = portrait.frames
+	var anims: Array[StringName] = PlaceholderSprites._anims_for(&"shaman")
+	for anim: StringName in anims:
+		check(frames.has_animation(StringName("%s_front" % anim)),
+			"the portrait knows %s_front" % anim)
+	check(frames.has_animation(&"idle_front"),
+		"idle_front exists — _set_portrait_anim falls back on it")
+	check(frames.has_animation(&"dead_front"),
+		"dead_front exists — it carries the respawn countdown")
+	check(frames.get_animation_names().size() == anims.size(),
+		"and nothing more: no eight-view explosion in the sidebar")
+
+
+## Frame for frame the portrait follows the SAME sheet-or-placeholder decision as
+## the battlefield, and its cell is uniform: the panel may not change size when
+## the animation changes. Written to hold with AND without delivered art — a test
+## that assumes an empty assets/ would fail on the artist's machine.
+func test_portrait_frames_follow_the_asset_decision() -> void:
+	var manifest: Dictionary = AssetLibrary.json("units/shaman/manifest.json")
+	var portrait: Dictionary = UnitSpriteLibrary.make_portrait_frames(&"shaman")
+	var frames: SpriteFrames = portrait.frames
+	var masks: SpriteFrames = portrait.masks
+	var cell: Vector2i = portrait.cell
+	check(cell.x >= PlaceholderSprites.W and cell.y >= PlaceholderSprites.H,
+		"the cell is never smaller than the placeholder (%dx%d)" % [cell.x, cell.y])
+	if manifest.is_empty():
+		check(cell == Vector2i(PlaceholderSprites.W, PlaceholderSprites.H),
+			"with no art at all it IS the placeholder cell")
+	for anim: StringName in PlaceholderSprites._anims_for(&"shaman"):
+		var name: StringName = StringName("%s_front" % anim)
+		var expect: int = UnitSpriteLibrary.portrait_slot_images(
+			&"shaman", anim, manifest).size()
+		check(frames.get_frame_count(name) == expect,
+			"%s carries its %d frames" % [name, expect])
+		check(frames.get_animation_speed(name) > 0.0, "%s has a play rate" % name)
+		check(masks.get_frame_count(name) == frames.get_frame_count(name),
+			"%s has one mask per frame — the tint shader indexes both in parallel" % name)
+
+
+## The corpse in the panel is the FACE-UP one. "dead_front" is the animation (the
+## side we see), dead_back.png the file (the side lying down): whoever wires the
+## two together by name silently puts a face-down corpse into the portrait.
+func test_portrait_corpse_is_the_face_up_variant() -> void:
+	var manifest: Dictionary = AssetLibrary.json("units/shaman/manifest.json")
+	var got: Array[Image] = UnitSpriteLibrary.portrait_slot_images(
+		&"shaman", &"dead", manifest)
+	check(not got.is_empty(), "the portrait corpse has frames")
+	var sheet: Dictionary = UnitSpriteLibrary._slice_sheet(&"shaman", &"dead", manifest)
+	if sheet.is_empty():
+		check(got[0].get_data()
+			== PlaceholderSprites.build_slot(&"shaman", &"dead", 0)[0].get_data(),
+			"it is variant 0 — on the back, face up")
+		check(got[0].get_data()
+			!= PlaceholderSprites.build_slot(&"shaman", &"dead", 1)[0].get_data(),
+			"and not the belly-down landing")
+		return
+	check(got[0].get_data() == (sheet.slots[0][0] as Image).get_data(),
+		"the delivered corpse comes from dead_back.png, not dead_front.png")
+
+
+## Why the portrait may simply take slot 0 of any sheet: row 1 IS the front view,
+## unmirrored, in every supported layout.
+func test_front_view_is_always_the_first_sheet_row() -> void:
+	for rows: int in [1, 5, 8]:
+		var plan: Dictionary = UnitSpriteLibrary.sheet_cut_plan(rows)
+		check(int(plan[&"front"][0]) == 0, "a %d-row sheet draws front in row 1" % rows)
+		check(not bool(plan[&"front"][1]), "a %d-row sheet never mirrors front" % rows)
+
+
 ## Bounding box of the opaque pixels of a placeholder frame.
 static func _ink_box(img: Image) -> Rect2i:
 	var x0: int = img.get_width()

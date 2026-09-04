@@ -572,3 +572,35 @@ func test_charge_eta_text_only_appears_when_waiting_is_a_decision() -> void:
 	check(Sidebar.charge_eta_text(873.0) == "14:33", "a volcano on a full bar")
 	check(Sidebar.charge_eta_text(INF) == "",
 		"nothing charging shows nothing (INF must not print)")
+
+
+# --- Shaman portrait sizing ---------------------------------------------------
+
+## The placeholder must land on exactly the scale the portrait had before the
+## asset pipeline reached it: 16x24 in the 72-unit stage is 3.0, crisp.
+func test_portrait_scale_keeps_the_placeholder_at_three() -> void:
+	var cell: Vector2i = Vector2i(PlaceholderSprites.W, PlaceholderSprites.H)
+	var stage: Vector2 = Vector2(248.0, Sidebar.PORTRAIT_HEIGHT)
+	check_near(Sidebar.portrait_scale(cell, stage), 3.0, "the placeholder stays at scale 3")
+	check(Sidebar.portrait_filter(3.0) == CanvasItem.TEXTURE_FILTER_NEAREST,
+		"a whole magnification stays nearest-neighbour")
+
+
+## Bigger user art is fitted INTO the fixed height — the sidebar column may not
+## grow (see TAB_CONTENT_HEIGHT).
+func test_portrait_scale_fits_bigger_art_into_the_fixed_height() -> void:
+	var stage: Vector2 = Vector2(248.0, Sidebar.PORTRAIT_HEIGHT)
+	check_near(Sidebar.portrait_scale(Vector2i(64, 96), stage), 0.75,
+		"96 px art shrinks into the 72-unit stage")
+	check(Sidebar.portrait_filter(0.75) == CanvasItem.TEXTURE_FILTER_LINEAR,
+		"a shrunken sheet is filtered, or the walk cycle crawls")
+	check_near(Sidebar.portrait_scale(Vector2i(496, 24), stage), 0.5,
+		"an extremely wide frame is limited by the stage WIDTH instead")
+
+
+func test_portrait_scale_degenerate_inputs_are_safe() -> void:
+	var stage: Vector2 = Vector2(248.0, Sidebar.PORTRAIT_HEIGHT)
+	check(Sidebar.portrait_scale(Vector2i.ZERO, stage) > 0.0,
+		"a zero cell still yields a usable scale")
+	check(Sidebar.portrait_scale(Vector2i(16, 24), Vector2.ZERO) > 0.0,
+		"an unsized stage (before the first resize) yields a usable scale")

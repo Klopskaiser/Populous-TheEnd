@@ -16,6 +16,11 @@ class_name UnitSpriteLibrary
 ## blitted into ONE uniform atlas cell (the max frame size over all kinds);
 ## smaller frames are upscaled nearest-neighbour, so the renderer's single
 ## frame_uv uniform keeps working unchanged.
+##
+## The SAME sheet-or-placeholder decision also feeds the sidebar's shaman
+## portrait via make_portrait_frames() — that is the whole point of this class
+## living between the renderer and PlaceholderSprites: there must be exactly ONE
+## place that asks AssetLibrary whether real art exists.
 
 const MAX_ATLAS_WIDTH: int = 4096
 
@@ -105,6 +110,102 @@ static func build_atlas(kinds: Array[StringName]) -> Dictionary:
 		"frame_uv": Vector2(float(cell_w), float(cell_h)) / atlas_size,
 		"table": table,
 	}
+
+
+## One shared 1x1 white mask for every frame that has no <anim>_mask.png. The
+## portrait shader multiplies by mix(1, tint, mask.r), so white means "tint the
+## whole pixel" — exactly what the renderer's white atlas cells do.
+static var _white_mask: ImageTexture = null
+
+
+static func white_mask_texture() -> ImageTexture:
+	if _white_mask == null:
+		var img: Image = Image.create(1, 1, false, Image.FORMAT_L8)
+		img.fill(Color.WHITE)
+		_white_mask = ImageTexture.create_from_image(img)
+	return _white_mask
+
+
+## SpriteFrames for the sidebar's shaman portrait: the FRONT drawing of every
+## animation the kind has, taken from the user's sheets where they exist and
+## from PlaceholderSprites everywhere else — the same decision build_atlas makes
+## for the game world. Returns:
+##   frames: SpriteFrames with one animation per base, named "<anim>_front"
+##   masks:  SpriteFrames frame-for-frame PARALLEL to it (the white 1x1 texture
+##           wherever a frame brought no mask), so the portrait can feed its
+##           tint shader straight from the current animation + frame index
+##   cell:   the uniform frame size, which the caller scales into its stage
+##
+## Only the front view is built. The portrait never asks for another one
+## (Sidebar._refresh_portrait plays "<anim>_front"), and slot 0 is the right
+## drawing for EVERY pose: the front row of a normal one (sheet_cut_plan maps
+## front to row 1, unmirrored, for 1/5/8-row sheets) and variant 0 of a viewless
+## one — the corpse lying on its BACK, i.e. dead_back.png, which is precisely the
+## face-up drawing the animation named "dead_front" wants.
+static func make_portrait_frames(kind: StringName) -> Dictionary:
+	var manifest: Dictionary = AssetLibrary.json("units/%s/manifest.json" % kind)
+	var anims: Array[StringName] = PlaceholderSprites._anims_for(kind)
+	# 1) Slice first: the cell size is only known once every sheet of this kind
+	#    has been seen (same two-pass shape as build_atlas).
+	var sliced: Dictionary = {}
+	var cell_w: int = PlaceholderSprites.W
+	var cell_h: int = PlaceholderSprites.H
+	for anim in anims:
+		var sheet: Dictionary = _slice_sheet(kind, anim, manifest)
+		if sheet.is_empty():
+			continue
+		sliced[anim] = sheet
+		cell_w = maxi(cell_w, int(manifest.get("frame_width", 0)))
+		cell_h = maxi(cell_h, int(manifest.get("frame_height", 0)))
+
+	# 2) Fill the two parallel resources, everything fitted into the same cell so
+	#    the portrait does not change size when the animation changes.
+	var frames: SpriteFrames = SpriteFrames.new()
+	frames.remove_animation("default")
+	var masks: SpriteFrames = SpriteFrames.new()
+	masks.remove_animation("default")
+	var white: ImageTexture = white_mask_texture()
+	for anim in anims:
+		var sheet: Dictionary = sliced.get(anim, {})
+		var images: Array[Image] = _portrait_slot(sheet, kind, anim)
+		if images.is_empty():
+			continue   # play() on a 0-frame animation would fail silently
+		var mask_images: Array = sheet.masks.get(0, []) if not sheet.is_empty() else []
+		var fps: float = float(sheet.fps) if not sheet.is_empty() \
+				else PlaceholderSprites._anim_fps(anim)
+		var name: StringName = StringName("%s_front" % anim)
+		for target: SpriteFrames in [frames, masks]:
+			target.add_animation(name)
+			target.set_animation_speed(name, fps)
+			target.set_animation_loop(name, true)
+		for i in range(images.size()):
+			frames.add_frame(name, ImageTexture.create_from_image(
+				_fit_cell(images[i], cell_w, cell_h, Image.FORMAT_RGBA8)))
+			var mask_tex: Texture2D = white
+			if i < mask_images.size():
+				mask_tex = ImageTexture.create_from_image(
+					_fit_cell(mask_images[i], cell_w, cell_h, Image.FORMAT_L8))
+			masks.add_frame(name, mask_tex)
+	return {"frames": frames, "masks": masks, "cell": Vector2i(cell_w, cell_h)}
+
+
+## The front-view images of ONE animation: the sheet's slot 0 where the kind has
+## usable art, the procedural placeholder otherwise. Stays on the Image level (no
+## ImageTexture, no RenderingServer), so the sheet-or-placeholder decision behind
+## the portrait is assertable headless.
+static func portrait_slot_images(kind: StringName, anim: StringName,
+		manifest: Dictionary) -> Array[Image]:
+	return _portrait_slot(_slice_sheet(kind, anim, manifest), kind, anim)
+
+
+## Shared by both entry points above so the decision exists exactly once.
+static func _portrait_slot(sheet: Dictionary, kind: StringName,
+		anim: StringName) -> Array[Image]:
+	if sheet.is_empty():
+		return PlaceholderSprites.build_slot(kind, anim, 0)
+	var images: Array[Image] = []
+	images.assign(sheet.slots[0])
+	return images
 
 
 ## Slices one animation's user art into SLOT-keyed frame lists, matching the

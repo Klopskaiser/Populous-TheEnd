@@ -11,9 +11,11 @@ class_name PlaceholderSprites
 ## Directional views: every animation exists in eight variants named
 ## "<anim>_<view>" with view in front/back/right/left plus the four diagonals
 ## front_right/front_left/back_right/back_left (e.g. "walk_back_right").
-## The Unit picks the view from its facing relative to the camera. To replace
-## the placeholders with real art later, provide a SpriteFrames resource with
-## the same animation names — nothing else has to change.
+## The Unit picks the view from its facing relative to the camera. Real art does
+## NOT replace this class: it is dropped into assets/units/<kind>/ and picked up
+## by UnitSpriteLibrary, which falls back on these frames per (kind, animation).
+## Nothing here may build SpriteFrames for a consumer — a second, asset-blind
+## frame path is exactly how the sidebar portrait ended up stuck on placeholders.
 ## Placeholder telltales: front = two eyes, back = hair patch, side = one eye
 ## (left is the mirrored right view); the diagonals are 3/4 profiles — the two
 ## front diagonals show both eyes plus a back-of-head hair sliver, the two back
@@ -95,13 +97,6 @@ const VIEWLESS_POSES: Dictionary = {
 }
 
 
-## One shared SpriteFrames per kind — building the frames is expensive and
-## AnimatedSprite3D instances can share the resource (each keeps its own
-## frame index). Without the cache, spawning hundreds of units rebuilt all
-## images per unit and caused visible hitches.
-static var _cache: Dictionary[StringName, SpriteFrames] = {}
-
-
 ## True for the horizontal poses (see FLAT_ANIMS). Single source of truth for
 ## the renderer's screen roll, the pick rectangle and the sidebar portrait.
 static func anim_lies_flat(anim: StringName) -> bool:
@@ -162,27 +157,6 @@ static func _anims_for(kind: StringName) -> Array[StringName]:
 	if kind == &"firewarrior":
 		anims.append(&"throw")
 	return anims
-
-
-## Builds the SpriteFrames (idle/walk/attack/strikes, plus cast for casters),
-## each in all eight directional views.
-static func make_frames(unit_kind: StringName) -> SpriteFrames:
-	if _cache.has(unit_kind):
-		return _cache[unit_kind]
-	var frames: SpriteFrames = SpriteFrames.new()
-	frames.remove_animation("default")
-	for anim in _anims_for(unit_kind):
-		for view in VIEWS:
-			var full_name: StringName = StringName("%s_%s" % [anim, view])
-			# A viewless pose has no per-view drawing: every view key gets its
-			# FIRST variant (the corpse on its back, the flying body belly-down).
-			# Without this the sidebar portrait would ask for e.g. "airborne_front"
-			# and get a face-up figure the game never renders.
-			var images: Array[Image] = build_slot(unit_kind, anim, 0) \
-				if anim_is_viewless(anim) else _build_frames(unit_kind, anim, view)
-			_add_animation(frames, full_name, images, _anim_fps(anim))
-	_cache[unit_kind] = frames
-	return frames
 
 
 ## Builds one texture atlas with ALL frames of the given kinds, for the
@@ -488,15 +462,6 @@ static func _decorate_shaman(img: Image, view: StringName, bob: int) -> void:
 	for y in range(14, 24):
 		var half: int = mini(3 + (y - 14) / 2, 7)
 		img.fill_rect(Rect2i(8 - half, y, half * 2, 1), C_DRESS)
-
-
-static func _add_animation(frames: SpriteFrames, anim: StringName,
-		images: Array[Image], fps: float) -> void:
-	frames.add_animation(anim)
-	frames.set_animation_speed(anim, fps)
-	frames.set_animation_loop(anim, true)
-	for img in images:
-		frames.add_frame(anim, ImageTexture.create_from_image(img))
 
 
 # --- Body part painters ----------------------------------------------------------

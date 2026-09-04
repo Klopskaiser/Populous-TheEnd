@@ -10047,3 +10047,81 @@ gruen**. Zwei neue Tests, gegen den ungefixten Stand geprueft: dort fallen
 **2 Zusicherungen** (der Aufprall schrie). Die Gegenprobe „echter Lufttreffer
 schreit weiter" laeuft in beiden Staenden gruen — der Riegel schneidet also
 nichts ab, was er nicht soll.
+
+
+### Nachtrag 23 — das Portrait sah die gelieferten Sprites nie (Nutzerreport, 2026-09-04)
+
+**Report:** Die Schamanin-Ansicht unter der Minikarte zeigt immer den
+Platzhalter, obwohl die Sheets (`dead`, `airborne`) vorhanden sind und im Spiel
+korrekt erscheinen.
+
+**Ursache: zwei Wege zu Einheitenframes, und nur einer kannte `assets/`.**
+`Sidebar._build_shaman_portrait` holte sich seine `SpriteFrames` direkt bei
+`PlaceholderSprites.make_frames(&"shaman")` — eine rein prozedurale Klasse, die
+`AssetLibrary` nie fragt. Die einzige Stelle mit Asset-Pruefung war
+`UnitSpriteLibrary.build_atlas`, die aber nur den MultiMesh-Atlas des
+`UnitRenderer` liefert (texture/uvs/table), kein `SpriteFrames` fuer eine
+`AnimatedSprite2D`. Das Portrait war damit **strukturell** platzhaltergebunden,
+unabhaengig davon, was geliefert wurde.
+
+**Neu: `UnitSpriteLibrary.make_portrait_frames(kind)`** — dieselbe
+Sheet-oder-Platzhalter-Entscheidung wie im Spiel, als
+`{frames, masks, cell}`. Dazu `portrait_slot_images(kind, anim, manifest)` als
+reine, headless pruefbare Fassung derselben Entscheidung, und
+`white_mask_texture()`. `PlaceholderSprites.make_frames`, `_add_animation` und
+der `_cache` sind **geloescht** — genau die Existenz eines zweiten, asset-blinden
+Frame-Pfads war der Fehler.
+
+**Nur die Front-Ansicht.** Das Portrait spielt ausschliesslich `"<anim>_front"`
+(bzw. `dead_front`), also wird auch nur Slot 0 gebaut: acht Ansichten waeren zu
+7/8 Verschwendung (~720 statt ~90 `ImageTexture`). Slot 0 ist fuer **jede** Pose
+das Richtige — bei normalen Posen die Front-Zeile (`sheet_cut_plan` bildet
+`front` in allen Layouts auf Zeile 1 ohne Spiegelung ab), bei den
+blickrichtungslosen Posen die Variante 0. **Die Falle dabei:** die Animation
+`dead_front` (= gesehene Seite, Gesicht nach oben) wird von `dead_back.png`
+(= Lage auf dem Ruecken) gespeist. Wer die beiden ueber den Namen verdrahtet,
+bekommt still den Bauchlage-Leichnam ins Portrait; deshalb laeuft alles ueber
+`_slice_sheet`/`build_slot` und nie ueber selbstgebaute Dateinamen.
+
+**Stammesfarbe jetzt per Shader statt `modulate`.** Ein Sheet darf eine
+`<anim>_mask.png` mitbringen, die im Spiel entscheidet, WELCHE Pixel die
+Stammesfarbe annehmen. `modulate` faerbt dagegen immer das ganze Sprite. Das
+Portrait bekommt deshalb `Sidebar.PORTRAIT_TINT_SHADER` mit dem woertlich
+gleichen Ausdruck wie `UnitRenderer.SHADER`
+(`tex.rgb * mix(vec3(1.0), tint.rgb, mask.r)`); die Maskentextur wird per
+`frame_changed`/`animation_changed` nachgefuehrt. Die Masken-`SpriteFrames` ist
+frame-fuer-frame parallel zur Farb-Fassung (weisse 1x1-Textur, wo keine Maske
+kam) — dadurch braucht der Handler keinen Sonderfall. Ohne Maske ist das
+rechnerisch identisch zum alten `modulate`, das Bild ohne Kunst also unveraendert.
+Die Tonung in die Images einzubacken waere ein `get_pixel`/`set_pixel`-Lauf ueber
+hunderttausende Pixel beim Sidebar-Aufbau gewesen.
+
+**Groesse: Hoehe bleibt bei 72 Layout-Einheiten** (Nutzerentscheidung). Alle
+Frames werden per `_fit_cell` auf **eine** Zellgroesse gebracht, sonst spraenge
+das Portrait beim Wechsel zwischen einer Sheet-Animation (z. B. 64x96) und einer
+Platzhalter-Animation (16x24). Statt der harten `scale = 3` rechnen
+`Sidebar.portrait_scale(cell, stage)` (Hoehe entscheidet, Breite kann nur
+senken) und `Sidebar.portrait_filter(scale)` (NEAREST ab 1,0, sonst LINEAR —
+eine auf 0,75 geschrumpfte Pixelart flimmert sonst im Laufzyklus). Der
+Platzhalter landet weiterhin exakt auf 3,0/NEAREST. Wegen
+`stretch/mode="canvas_items"` sind 72 Einheiten je nach Fenster 72/96/144 echte
+Pixel — ein 96 px hohes Sheet ist bei 1440p also faktisch pixelgenau.
+
+**Verifikation:** Ladecheck exit 0, **Suite 5195 Zusicherungen gruen**, kein
+`SCRIPT ERROR`. Sieben neue Tests. Weil in diesem Arbeitsverzeichnis **keine**
+PNG unter `assets/` liegt (es war auch nie eine in git), wurde der Fix zusaetzlich
+mit einem **synthetischen** Schamanin-Sheet gegengeprueft (64x96, `dead_back.png`
+rot, `dead_front.png` blau, `manifest.json` mit `dead: fps 3`), danach wieder
+entfernt: `cell` wurde `(64, 96)`, `dead_front` bekam 2 Frames mit fps 3 und das
+**rote** Pixel — also `dead_back.png`, wie es sein muss —, `idle_front` blieb
+Platzhalter, auf dieselbe Zelle gefittet. Der Shader wurde im **echten**
+Renderer (nicht headless) uebersetzt: beide Uniforms da, keine Fehler. Die Tests
+sind bewusst so formuliert, dass sie **mit und ohne** gelieferte Kunst gruen
+sind — eine Zusicherung auf „leeres assets/" waere auf dem Rechner des
+Kuenstlers rot geworden.
+
+**Nebenbefund (nicht angefasst):** `test_fireball_applies_knockback` in
+`tests/test_combat.gd` ist **flaky** — etwa jeder sechste Lauf faellt mit
+3 Zusicherungen, weil der Feuerball-Treffer wuerfelt (anheben/umwerfen statt
+stossen). Auf dem unveraenderten Stand gegengeprueft: gleicher Ausfall, gleiche
+Rate. Hat mit dieser Aenderung nichts zu tun.
