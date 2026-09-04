@@ -16,6 +16,10 @@ func _initialize() -> void:
 		quit(1)
 		return
 	var instance: Object = script.new()
+	# Same per-file seeding as run_tests.gd — without it this helper drew a
+	# different RNG stream than the suite, and an RNG-dependent test looked
+	# flaky here while being perfectly reproducible there.
+	seed(TestBase.TEST_SEED)
 	var only: String = args[1] if args.size() > 1 else ""
 	for method in instance.get_method_list():
 		var name: String = method.name

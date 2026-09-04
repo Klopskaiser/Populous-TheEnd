@@ -926,7 +926,18 @@ func test_knockback_accumulates_and_decays() -> void:
 
 
 ## A fireball impact knocks the target away from the shooter.
+##
+## SEEDED, and it has to be: the impact rolls ONE of three exclusive outcomes
+## (Fireball.impact_outcome). Shove and knock-over both call apply_knockback, but
+## the uppercut (LIFT, 4 % at full health) replaces it with a throw and would
+## leave every assertion below false. Without a local seed the test hangs on
+## where in the file's RNG stream it happens to sit, so inserting an unrelated
+## test above it could flip it — which is precisely how it flaked. The
+## bands themselves are covered separately and deterministically by
+## test_firewarrior_fireball_outcome_split (tests/test_spells.gd), which drives
+## the pure Fireball.impact_outcome across all three slices.
 func test_fireball_applies_knockback() -> void:
+	seed(0xF18E8A11)
 	var w: Dictionary = _make_world()
 	var shooter: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(26, 30))
 	var enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))

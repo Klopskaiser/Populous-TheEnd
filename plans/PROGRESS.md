@@ -10120,8 +10120,43 @@ sind bewusst so formuliert, dass sie **mit und ohne** gelieferte Kunst gruen
 sind — eine Zusicherung auf „leeres assets/" waere auf dem Rechner des
 Kuenstlers rot geworden.
 
-**Nebenbefund (nicht angefasst):** `test_fireball_applies_knockback` in
-`tests/test_combat.gd` ist **flaky** — etwa jeder sechste Lauf faellt mit
-3 Zusicherungen, weil der Feuerball-Treffer wuerfelt (anheben/umwerfen statt
-stossen). Auf dem unveraenderten Stand gegengeprueft: gleicher Ausfall, gleiche
-Rate. Hat mit dieser Aenderung nichts zu tun.
+**Nebenbefund:** `test_fireball_applies_knockback` in `tests/test_combat.gd`
+war **flaky** — etwa jeder sechste Lauf fiel mit 3 Zusicherungen, weil der
+Feuerball-Treffer wuerfelt. Auf dem unveraenderten Stand gegengeprueft: gleicher
+Ausfall, gleiche Rate, hat mit dieser Aenderung nichts zu tun. Behoben in
+Nachtrag 24.
+
+
+### Nachtrag 24 — der flaky Feuerball-Knockback lag am Runner (2026-09-04)
+
+**Symptom:** `test_fireball_applies_knockback` fiel etwa in jedem sechsten Lauf
+mit drei Zusicherungen — aber **nur** ueber `tests/run_one.gd`; in der vollen
+Suite war er immer gruen.
+
+**Ursache, zwei Schichten.** Der Treffer wuerfelt genau **eine** von drei
+exklusiven Wirkungen (`Fireball.impact_outcome`): Stossen und Umwerfen rufen
+beide `apply_knockback`, der **Uppercut** (4 % bei voller Gesundheit) ersetzt ihn
+durch einen Wurf — dann sind alle drei Zusicherungen falsch. Damit das
+reproduzierbar bleibt, setzt `run_tests.gd` vor **jeder Datei** `seed(TEST_SEED)`.
+`run_one.gd` — der Schnell-Helfer fuer genau eine Datei — tat das **nicht**.
+Derselbe Test lief also im Helfer auf einem anderen RNG-Strom als in der Suite:
+in der Suite deterministisch gruen, im Helfer echtes Gluecksspiel. Zweite
+Schicht: auch in der Suite haengt der Test daran, **an welcher Stelle** der Datei
+er sitzt — ein oberhalb eingefuegter Test mit Zufallsziehung haette ihn gekippt.
+
+**Fix.** `TEST_SEED` wandert nach `TestBase` (beide Runner muessen denselben Wert
+benutzen, und getrennte Kopien waeren genau der naechste Drift), `run_one.gd`
+setzt den Seed jetzt ebenso vor dem Lauf. Zusaetzlich bekommt der Test ein
+**lokales** `seed(0xF18E8A11)` und wird damit unabhaengig von seiner Position in
+der Datei — dasselbe Muster, das `test_combat_kernels.gd` und
+`test_combat_groups.gd` schon verwenden. Die Wahrscheinlichkeitsbaender selbst
+prueft weiterhin deterministisch die reine Funktion
+(`test_firewarrior_fireball_outcome_split` in `tests/test_spells.gd`) — das Wuerfeln wird also nicht wegdefiniert, nur aus dem
+Wirkungstest herausgehalten.
+
+**Verifikation:** sechs Laeufe der ganzen Datei ueber `run_one.gd` mit
+**identischen 448 Zusicherungen** (vorher schwankte die Zahl zwischen 444 und
+447), drei Laeufe der Einzelmethode identisch, Suite **5195 gruen** ohne
+`SCRIPT ERROR`. Die Gesamtzahl der Suite blieb unveraendert — der lokale Seed
+verschiebt zwar den Strom fuer die nachfolgenden Tests der Datei, kippt dort aber
+nichts.
