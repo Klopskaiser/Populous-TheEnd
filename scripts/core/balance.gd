@@ -22,10 +22,15 @@ class_name Balance
 ## `_idle_anim_interval()` überschreiben (Muster WARRIOR_SHOVE_CHANCE).
 ## **0.0 stellt die alte Dauerschleife wieder her.**
 const UNIT_IDLE_ANIM_INTERVAL: float = 8.0
-## Streuung der Ruhezeit als Anteil des Intervalls: bei 0,4 liegt der Abstand
-## zweier Wiedergaben zwischen 60 % und 140 % davon, im Mittel genau beim
-## Intervall. Ohne Streuung zuckte eine angekommene Gruppe im Gleichtakt.
-const UNIT_IDLE_ANIM_JITTER: float = 0.4
+## Streuung der Ruhezeit als Anteil des Intervalls: bei 0,8 liegt der Abstand
+## zweier Wiedergaben zwischen 20 % und 180 % davon (bei 8 s also 1,6 bis
+## 14,4 s), im Mittel genau beim Intervall. Ohne Streuung zuckte eine
+## angekommene Gruppe im Gleichtakt; 2026-09-05 von 0,4 verdoppelt, weil die
+## Abstände im Spiel noch zu gleichmäßig wirkten (Nutzerurteil).
+## **Obergrenze:** der Renderer deckelt die Streuung bei
+## `1 - Animationsdauer/Intervall` — sie muss kleiner bleiben, sonst könnten
+## sich zwei Durchläufe überlappen. Für 8 s und die 1-s-Idle sind das 0,875.
+const UNIT_IDLE_ANIM_JITTER: float = 0.8
 
 # --- Brave (Gefolgsmann) ---
 const BRAVE_HP: int = 60

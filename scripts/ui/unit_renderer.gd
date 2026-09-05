@@ -258,7 +258,9 @@ static func idle_frame(elapsed_ms: int, seed_value: int, interval_ms: int,
 	if play_ms >= interval_ms:
 		return _loop_frame(elapsed, count, fps)   # longer than the pause: no pause
 	# Subtracting play_ms keeps the whole run inside its own cycle window, so it
-	# is never cut off at the cycle boundary.
+	# is never cut off at the cycle boundary — and it caps the spread at exactly
+	# the point where two runs could start overlapping: the smallest possible gap
+	# is interval - span, so span <= interval - play_ms keeps them disjoint.
 	var span: int = mini(int(float(interval_ms) * IDLE_ANIM_JITTER),
 		interval_ms - play_ms)
 	var cycle: int = elapsed / interval_ms

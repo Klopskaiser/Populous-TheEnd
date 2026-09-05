@@ -10190,7 +10190,8 @@ Zug je Einheit neben `lies_face_down` haette jede spaetere Auswuerfelung in
 fremden Tests verschoben (K.-o.-Kriterium fuer die naheliegende Feld-Loesung).
 Der Basisversatz zieht `play_ms` ab, damit eine Wiedergabe nie an der
 Zyklusgrenze abgeschnitten wird; der Abstand zweier Wiedergaben liegt dadurch in
-`[0,6 x I, 1,4 x I]` mit Mittelwert exakt `I`. Rueckfallebene ohne Sonderfall:
+`[(1-j) x I, (1+j) x I]` mit Mittelwert exakt `I` (Streuung `j`, siehe
+Nachtrag 26). Rueckfallebene ohne Sonderfall:
 `UNIT_IDLE_ANIM_INTERVAL = 0.0` liefert Frame fuer Frame wieder die alte Schleife,
 ebenso eine Animation, die laenger dauert als die Pause.
 
@@ -10230,3 +10231,25 @@ RNG, ohne Renderer, ohne `assets/`-Inhalte. Dazu zwei temporaere Sonden am
 - Statistische Gegenprobe zur Entkopplung: 200 fortlaufende Instanz-IDs verteilen
   sich auf alle 16 Zeitfenster des Zyklus, das dichteste haelt 17 von 200 — Godots
   fortlaufende IDs fallen also nicht durch den Hash.
+
+### Nachtrag 26 — Idle-Streuung verdoppelt (Nutzerurteil im Spiel, 2026-09-05)
+
+Nach der Sichtpruefung: "funktioniert grundsaetzlich, aber der Randomspread
+sollte groesser sein, mindestens doppelt so gross."
+`UNIT_IDLE_ANIM_JITTER` von **0,4 auf 0,8**. Gemessen an derselben Einheit ueber
+240 s: Abstaende jetzt **3,0 bis 13,0 s** statt 6,3 bis 9,5 s, Mittelwert
+unveraendert 7,96 s. Zwanzig gleichzeitig anhaltende Einheiten verteilen ihren
+ersten Durchlauf ueber **0,87 bis 6,41 s** statt ueber 3,8 bis 7,0 s.
+
+**Die Obergrenze steht im Code und ist keine Willkuer:** `span` wird bei
+`interval - play` gedeckelt, und weil der kleinste moegliche Abstand
+`interval - span` ist, haelt genau dieser Deckel zwei Durchlaeufe
+ueberschneidungsfrei. Fuer 8 s Intervall und die 1-s-Idle liegt er bei 0,875 —
+0,8 passt also noch ohne Kappung hindurch. Eine **laengere** gelieferte
+Idle-Animation senkt die Grenze (bei 2 s Idle auf 0,75) und die Streuung wird
+dann still auf diesen Wert gekappt; das ist gewollt, weil ueberlappende
+Durchlaeufe schlimmer waeren als eine etwas kleinere Streuung.
+
+Die Tests lesen den Wert aus `Balance`, das Jitterband und der Mittelwert werden
+also weiter gegen die konfigurierte Streuung geprueft, nicht gegen eine fest
+eingetragene Zahl.
