@@ -10355,3 +10355,24 @@ Test in `tests/test_airship.gd` (Spaltenabstand, Slot-Hoehe = Deck + Bob,
 gepinnter Passagier traegt die Hoehe nach einem Tick, Wrack ohne Bob). Der
 Bob ist zeitabhaengig, deshalb prueft der Test gegen `hover_bob_y()` desselben
 Moments mit kleiner Toleranz statt gegen eine feste Zahl.
+
+### Nachtrag 30 — assets/README: alle Modellnamen vollstaendig (Nutzerwunsch, 2026-09-05)
+
+Der Modellabschnitt nannte nur acht Gebaeude, ein Fahrzeug und einen Baum — und zwei
+Footprints falsch (Foersterei 3x3 statt **2x4**, Werkstatt 8x4 statt **7x4**; die
+Werte stehen in `Balance.*_FOOTPRINT`). Neu aufgebaut, direkt aus dem Code:
+
+- **Gebaeude** (`models/buildings/<kind>.glb`, `Building.asset_kind()`): alle zwoelf
+  Schluessel inkl. `fireram_workshop`, `airship_wharf`, `wood_depot` — und die
+  **Huettenstufen `hut1`…`hut4`**, die je ein eigenes Modell brauchen (ohne `hut2.glb`
+  zeigt Stufe 2 den Platzhalter, kein Rueckfall auf `hut.glb`; Stufentexturen heissen
+  entsprechend `hut2_stage1.png`).
+- **Fahrzeuge** (`models/units/<kind>.glb`): `siege_engine`, `fire_ram`, `airship`, mit
+  Sondernodes (`Arm` nur Katapult, `Flag` optional), Platzhaltergroessen als Referenz
+  und der Deckhoehe `DECK_Y` 0,6 m samt Passagierraster fuer den Zeppelin.
+- **Baeume** (`models/trees/<kind>.glb`): `tree`, `tree_leaf`, `tree_bamboo` mit den
+  `stage_scales` aus `Balance.TREE_TYPE_PARAMS` — Modell in ausgewachsener Groesse,
+  das Spiel skaliert.
+- Gemeinsame Regeln (Massstab, Ursprung am Boden, Vorderseite +Z, `Flag`, Schatten)
+  einmal vorangestellt statt pro Objekt wiederholt; der Ordnerbaum oben nachgezogen
+  (der nie implementierte Eintrag `<kind>_stage<n>.glb` ist raus).

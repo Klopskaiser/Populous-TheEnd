@@ -18,11 +18,12 @@ assets/
 │   ├── <anim>.png               # Spritesheet pro Animation (s. u.)
 │   └── <anim>_mask.png          # optional: Graustufen-Maske für die Stammesfarbe
 ├── models/
-│   ├── buildings/<kind>.glb     # hut | warrior_camp | firewarrior_camp | temple |
-│   │                            # forester | workshop | watchtower | reincarnation_site
-│   ├── buildings/<kind>_stage<1..3>.glb   # optional: Zerstörungsstufen (später)
-│   ├── units/siege_engine.glb   # Katapult
-│   └── trees/tree.glb
+│   ├── buildings/<kind>.glb     # hut hut1 hut2 hut3 hut4 | warrior_camp | firewarrior_camp |
+│   │                            # temple | forester | workshop | fireram_workshop |
+│   │                            # airship_wharf | watchtower | wood_depot | reincarnation_site
+│   ├── units/<kind>.glb         # siege_engine | fire_ram | airship  (die drei Fahrzeuge;
+│   │                            # Fußeinheiten sind Sprites, s. units/)
+│   └── trees/<kind>.glb         # tree | tree_leaf | tree_bamboo
 ├── textures/
 │   ├── terrain/                 # sand.png, grass.png, rock.png, water.png (water optional)
 │   ├── effects/                 # optional: panic.png, burning.png, injured.png (Status-Icons),
@@ -231,20 +232,77 @@ VRAM-Kompression einstellen.
 
 ## 3D-Modelle (.glb)
 
-- **Ursprung:** am Boden, mittig im Footprint des Gebäudes.
-- **Ausrichtung:** Eingang zeigt Richtung **+Z (Süden)** — die Drehung aufs Gelände
-  übernimmt das Spiel.
-- **Maßstab:** 1 Godot-Einheit = 1 m; das Modell muss in den Gebäude-Footprint passen:
-  Hütte (`hut`) 4×4, Kaserne (`warrior_camp`) 5×5, Feuertempel (`firewarrior_camp`) 8×8,
-  Tempel (`temple`) 6×6, Förster (`forester`) 3×3, Werkstatt (`workshop`) 8×4 (breit×tief),
-  Wachturm (`watchtower`) 2×2, Reinkarnationsplatz (`reincarnation_site`) 3×3.
-- **Stammesfarbe:** Ein `MeshInstance3D` mit dem Namen `Flag` im Modell wird automatisch
-  in der Stammesfarbe eingefärbt (gilt auch für `siege_engine.glb`).
-- **Katapult-Extras (`siege_engine.glb`):** Ein optionaler Node namens `Arm` wird beim
-  Feuern als Wurfarm-Pivot animiert (Drehung um X, Ruheposition = gespannt).
-- **Bau-/Zerstörungs-Optik:** Ohne die unten genannten Stufen-Texturen übernimmt das Spiel
-  die prozedurale Optik (Bau = Wachsen aus dem Boden, Schaden = dunkle Bruchstücke).
+**Der Dateiname ist der Schlüssel.** Das Spiel sucht jedes Modell unter genau einem Pfad;
+liegt dort keine importierte `.glb`, bleibt der prozedurale Platzhalter aktiv. Alles
+Weitere (Bau-/Schadensoptik, Flagge, Schatten) hängt das Spiel selbst an.
 
+**Gemeinsame Regeln für alle Modelle:**
+
+- **Maßstab:** 1 Godot-Einheit = 1 m.
+- **Ursprung:** am Boden (y = 0), mittig unter dem Objekt. Das Spiel setzt den Ursprung
+  auf die Geländehöhe.
+- **Ausrichtung:** die Vorderseite zeigt nach **+Z**. Bei Gebäuden ist das der **Eingang**
+  (Süden bei Orientierung 0), bei Fahrzeugen die **Fahrtrichtung**; gedreht wird zur
+  Laufzeit.
+- **Stammesfarbe:** ein `MeshInstance3D` namens **`Flag`** (irgendwo im Baum) bekommt die
+  Stammesfarbe als Material. Gebäude ohne `Flag` erhalten eine kleine prozedurale Flagge
+  vom Spiel; Fahrzeuge ohne `Flag` zeigen einfach keine.
+- **Schatten:** Fahrzeugmodelle werfen keinen Echtzeit-Schatten (das Spiel legt einen
+  Blob-Schatten unter sie); Gebäude und Bäume werfen Schatten.
+
+### Gebäude — `models/buildings/<kind>.glb`
+
+Das Modell muss in den Footprint passen (Breite × Tiefe in Metern, Tiefe = Z-Achse, der
+Eingang liegt an der +Z-Kante). Bau- und Zerstörungsoptik laufen über Textur-Tausch
+auf demselben Modell (Abschnitt unten) — es gibt **keine** getrennten Stufenmodelle.
+
+| Datei | Gebäude | Footprint (B × T) | Bemerkung |
+|---|---|---|---|
+| `hut.glb` | Hütte, Stufe 0 | 4 × 4 | |
+| `hut1.glb` … `hut4.glb` | Hütte, Ausbaustufe 1–4 (`hut4` = Wohnpalast) | 4 × 4 | **Jede Stufe braucht ihr eigenes Modell.** Fehlt z. B. `hut2.glb`, zeigt eine Hütte auf Stufe 2 den Platzhalter — sie fällt **nicht** auf `hut.glb` zurück. Die Bodensilhouette darf über die Stufen nicht wachsen. |
+| `warrior_camp.glb` | Kaserne (Krieger) | 5 × 5 | |
+| `firewarrior_camp.glb` | Feuertempel (Feuerkrieger) | 8 × 8 | |
+| `temple.glb` | Tempel (Prediger) | 6 × 6 | |
+| `forester.glb` | Försterei | 2 × 4 | schmal und tief |
+| `workshop.glb` | Katapultwerkstatt | 7 × 4 | breit und flach |
+| `fireram_workshop.glb` | Feuerrammenwerkstatt | 6 × 4 | Schreibweise ohne Unterstrich zwischen fire und ram |
+| `airship_wharf.glb` | Luftschiffwerft | 8 × 8 | |
+| `watchtower.glb` | Wachturm | 2 × 2 | Besatzung wird vom Spiel auf zwei Plattformslots gesetzt |
+| `wood_depot.glb` | Holzstation | 1 × 1 | |
+| `reincarnation_site.glb` | Reinkarnationsplatz | 3 × 3 | unverwundbar, wird nie beschädigt dargestellt |
+
+Die zugehörigen Stufentexturen heißen ebenfalls nach dem `<kind>` — für die Hütten also
+`hut_stage1.png`, aber `hut2_stage1.png` für die zweite Ausbaustufe.
+
+### Fahrzeuge — `models/units/<kind>.glb`
+
+Nur die drei Fahrzeuge sind 3D; alle Fußeinheiten sind Spritesheets (Abschnitt oben).
+Vorderseite +Z, Ursprung am Boden mittig. Als Größenreferenz die Platzhalter:
+
+| Datei | Fahrzeug | Platzhaltergröße | Sondernodes |
+|---|---|---|---|
+| `siege_engine.glb` | Katapult | Rumpf ~0,9 × 1,9 m, Räder ⌀ 0,56 m | **`Arm`** (`Node3D`, optional): Wurfarm-Pivot, dreht beim Feuern um seine X-Achse; Ruhelage = gespannt. `Flag` optional. |
+| `fire_ram.glb` | Feuerramme | Rumpf ~1,0 × 1,7 m (Platzhalter auf 85 % skaliert) | `Flag` optional. |
+| `airship.glb` | Luftschiff (Zeppelin) | Ballon ~6 m lang × 2 m breit, Unterkante ca. 2,5 m über dem Ursprung; Gondel/Deck 1,6 × 3,6 m | `Flag` optional. **Das Deck muss bei y = 0,6 m liegen** (`Airship.DECK_Y`): dort stellt das Spiel die Passagiere hin — zwei Spalten ±0,44 m neben der Mittelachse, drei Ränge im Abstand 0,85 m. Der Rumpf wippt ±0,15 m (Periode ~5 s), die Passagiere schweben mit. Der Ursprung ist der Punkt **unter** dem Schiff am Boden; die Flughöhe setzt das Spiel. |
+
+Das Katapult ohne `Arm` feuert trotzdem — nur ohne die Schnapp-Animation.
+
+### Bäume — `models/trees/<kind>.glb`
+
+Ein Modell je Baumtyp, gezeichnet in **ausgewachsener** Größe (Platzhalter: rund 3 m
+hoch). Die Wachstumsstufen skaliert das Spiel als Ganzes:
+
+| Datei | Typ | Stufen-Skalierung (Stufe 0 → max) | Bemerkung |
+|---|---|---|---|
+| `tree.glb` | Standardbaum (Nadel) | 0,28 · 0,35 · 0,55 · 0,8 · 1,0 | überall |
+| `tree_leaf.glb` | Laubbaum | 0,28 · 0,35 · 0,55 · 0,8 · 1,0 | wächst auf Gras schneller |
+| `tree_bamboo.glb` | Bambus | 0,3 · 0,65 · 1,0 (nur 3 Stufen) | nur auf Gras, steht dicht |
+
+- Stufe 0 ist der Sämling: **0,28-fach** — das Modell sollte auch so klein noch lesbar
+  sein (dünner Stamm, kleine Krone).
+- Ein brennender Baum **schrumpft** bis zum Verschwinden; das gilt für die `.glb` genauso.
+  Das Flackern/Ausblenden der Krone gibt es nur beim Platzhalter.
+- Ursprung am Fuß des Stamms, Stamm entlang +Y.
 ## Bau-/Zerstörungs-Stufentexturen (`textures/buildings/`)
 
 Optionaler Textur-Tausch auf dem **gemeinsamen Basismodell** `<kind>.glb`. Die Texturen
