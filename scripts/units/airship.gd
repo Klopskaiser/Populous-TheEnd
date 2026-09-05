@@ -40,6 +40,11 @@ const DRIFT_SPEED: float = Balance.AIRSHIP_DRIFT_SPEED
 const UNLOAD_RANGE: float = Balance.AIRSHIP_UNLOAD_RANGE
 ## Deck height of the passenger slots above the hull origin.
 const DECK_Y: float = 0.6
+## Gentle hover bob of the hull model: amplitude (m) and angular rate (rad/ms,
+## ~5.2 s period). The passengers ride the SAME bob (crew_slot_position), so
+## they no longer hang still while the deck moves under them.
+const HOVER_BOB_AMP: float = 0.15
+const HOVER_BOB_RATE: float = 0.0012
 ## Throttles (seconds): drift condition check, drift anchor re-pick.
 const DRIFT_CHECK_INTERVAL: float = 1.0
 const ANCHOR_REPICK_INTERVAL: float = 5.0
@@ -103,7 +108,10 @@ func _init() -> void:
 	separation_speed_mult = Balance.AIRSHIP_SEPARATION_SPEED_MULT
 	vehicle_ring_scale = 5.0
 	# Passengers stand well inside the 1.6 m wide gondola deck.
-	crew_side_offset = 0.55
+	# Two passenger columns 0.88 m apart (was 1.10 m): the rows read as one
+	# crew on the narrow deck instead of two lines at the rails (user request
+	# 2026-09-05, -20 %). Ranks keep the base 0.85 m.
+	crew_side_offset = 0.44
 
 
 func unit_kind() -> StringName:
@@ -311,7 +319,17 @@ func crew_slot_position(unit) -> Vector3:
 		else Vector3(0, 0, 1)
 	var right: Vector3 = Vector3(-forward.z, 0.0, forward.x)
 	return position + right * side * crew_side_offset \
-		+ forward * rank * crew_rank_spacing + Vector3(0.0, DECK_Y, 0.0)
+		+ forward * rank * crew_rank_spacing + Vector3(0.0, DECK_Y + hover_bob_y(), 0.0)
+
+
+## Current vertical offset of the hover bob: ONE function for the hull model and
+## the deck slots, so passengers and deck move in lockstep (user request
+## 2026-09-05 — the crew used to hang still while the deck bobbed under them).
+## Zero once the ship is dead: the wreck does not bob.
+func hover_bob_y() -> float:
+	if state == State.DEAD:
+		return 0.0
+	return HOVER_BOB_AMP * sin(float(Time.get_ticks_msec()) * HOVER_BOB_RATE)
 
 
 ## Drops a passenger to the ground near `around` (nearest walkable cell, a
@@ -1083,7 +1101,7 @@ func _tick_visual(delta: float) -> void:
 	if not is_inside_tree():
 		return
 	if _model != null and state != State.DEAD:
-		_model.position.y = 0.15 * sin(float(Time.get_ticks_msec()) * 0.0012)
+		_model.position.y = hover_bob_y()
 	if _ground_shadow != null and terrain_data != null:
 		var ground: float = maxf(terrain_data.get_height(position.x, position.z),
 			TerrainData.SEA_LEVEL)

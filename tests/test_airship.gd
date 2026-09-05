@@ -1350,3 +1350,31 @@ func test_deck_passenger_cries_only_on_the_first_lethal_hit() -> void:
 	check(not rider._cry_air_death(),
 		"the ball that catches him falling stays silent")
 	_free_world(w)
+
+# --- Deck geometry (user request 2026-09-05) --------------------------------------
+
+## The two passenger columns stand closer together (0.88 m instead of 1.10 m),
+## and the passengers ride the hull's hover bob instead of hanging still while
+## the deck moves under them: slot height = deck height + the current bob, and
+## the pinned passenger carries that height itself after a tick.
+func test_deck_passengers_ride_the_hover_bob_in_two_tight_columns() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 0, Vector3(40, 5, 40))
+	var a: Unit = _board(w, ship, WARRIOR_SCENE)
+	var b: Unit = _board(w, ship, WARRIOR_SCENE)
+	check(a.siege_boarded and b.siege_boarded, "two passengers aboard")
+	var pa: Vector3 = ship.crew_slot_position(a)
+	var pb: Vector3 = ship.crew_slot_position(b)
+	check_near(Vector2(pa.x - pb.x, pa.z - pb.z).length(), 2.0 * 0.44,
+		"the two columns stand 0.88 m apart (was 1.10 m)", 0.01)
+	check(absf(ship.hover_bob_y()) <= Airship.HOVER_BOB_AMP + 0.0001,
+		"the bob stays within its amplitude")
+	check_near(pa.y, ship.position.y + Airship.DECK_Y + ship.hover_bob_y(),
+		"a deck slot sits at deck height PLUS the current hover bob", 0.002)
+	_tick_world(w)
+	check_near(a.position.y, ship.position.y + Airship.DECK_Y + ship.hover_bob_y(),
+		"the pinned passenger rides the bobbing deck", 0.01)
+	# The wreck does not bob — and neither would anyone still counted aboard.
+	ship._set_state(Unit.State.DEAD)
+	check(ship.hover_bob_y() == 0.0, "a dead hull has no bob")
+	_free_world(w)

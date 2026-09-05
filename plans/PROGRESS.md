@@ -10334,3 +10334,24 @@ Raeuber im Turm steht oder der Turm ueber 30 % beschaedigt ist. Das Flag friert
 dann ein (Sitzende konvertieren weiter, neue werden nicht mehr pazifiziert) —
 konsistent mit "ein gestuermtes Gebaeude produziert nicht", aber wert, es zu
 kennen, falls der Haenger wieder auftaucht.
+
+### Nachtrag 29 — Zeppelin-Deck: engere Spalten, Passagiere reiten den Bob (Nutzerwunsch, 2026-09-05)
+
+Beim Einbau des Zeppelin-Modells zwei Wuensche zur Deckbesatzung:
+
+- **Die zwei Passagierspalten stehen enger:** `crew_side_offset` des Luftschiffs
+  von 0,55 auf **0,44** (Abstand 0,88 statt 1,10 m, minus 20 %). Die Reihen
+  (Raenge in Fahrtrichtung, `crew_rank_spacing` 0,85) bleiben.
+- **Die Passagiere schweben mit.** Der Rumpf wippte ueber `_model.position.y`
+  sanft auf und ab, die Insassen hingen dabei still an `position + DECK_Y` — sie
+  standen also mal ueber, mal im Deck. Neu liefert `Airship.hover_bob_y()` den
+  Bob als EINE Funktion der Zeit fuer Rumpf UND Deckslots
+  (`crew_slot_position`), damit beide im Gleichschritt gehen; Konstanten
+  `HOVER_BOB_AMP` 0,15 m / `HOVER_BOB_RATE` 0,0012 rad/ms (~5,2 s Periode). Ein
+  totes Schiff bobt nicht.
+
+**Verifikation:** Ladecheck exit 0, Suite gruen ohne `SCRIPT ERROR`, ein neuer
+Test in `tests/test_airship.gd` (Spaltenabstand, Slot-Hoehe = Deck + Bob,
+gepinnter Passagier traegt die Hoehe nach einem Tick, Wrack ohne Bob). Der
+Bob ist zeitabhaengig, deshalb prueft der Test gegen `hover_bob_y()` desselben
+Moments mit kleiner Toleranz statt gegen eine feste Zahl.
