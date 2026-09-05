@@ -10160,3 +10160,73 @@ Wirkungstest herausgehalten.
 `SCRIPT ERROR`. Die Gesamtzahl der Suite blieb unveraendert — der lokale Seed
 verschiebt zwar den Strom fuer die nachfolgenden Tests der Datei, kippt dort aber
 nichts.
+
+
+### Nachtrag 25 — Idle wippt nicht mehr durch: Ruhepose plus Zufallstakt (Nutzerwunsch, 2026-09-04)
+
+**Anlass:** Die Idle-Animation lief wie jede andere in Dauerschleife (Platzhalter:
+2 Frames à 2 fps). Bei hunderten stehenden Einheiten war das dauerhafte Wippen
+"viel Unruhe im Spielbild". Neu haelt eine ruhende Einheit einen **statischen
+Standframe** und spielt ihre Idle-Animation im Schnitt alle **8 s genau einmal**
+daraus heraus.
+
+**Die Entscheidung faellt im Renderer, nicht in der Unit.** `&"idle"` zeigen nicht
+nur Einheiten in `State.IDLE`, sondern auch wartende Kaempfer der zweiten Reihe
+(`unit.gd:_anim_base`, ATTACK mit `_combat_waiting`), die Zeppelin-Deckcrew, Braves
+im Trainingsslot und die Turmbesatzung. Drei dieser Faelle **ticken gar nicht jeden
+Frame** (`garrison_housed` kehrt sofort aus `tick()` zurueck, Kernel-Hold
+ueberspringt den Objekt-Tick ganz) — ein `tick(delta)`-Timer waere dort stehen
+geblieben. Im Renderer liegen dagegen `now_ms`, Framezahl und fps ohnehin
+beieinander, und **`anim_base_name` bleibt `&"idle"`**: Sidebar-Portrait,
+Pick-Rechteck und fuenf bestehende Idle-Tests bleiben dadurch unberuehrt.
+
+**Der Zeitplan ist zustandslos und ohne Zufallszahlen.** Statt Timerfeldern
+berechnet `UnitRenderer.idle_frame()` den Abspielzeitpunkt als reine Funktion aus
+`(elapsed, seed, interval)`: pro Zyklus ein **gehashter** Versatz. Damit gibt es
+keine Reset-Punkte — Zustandswechsel, recycelter Render-Slot und eine
+ausgefallene `VISUAL_SLICES`-Auswertung koennen nichts entkoppeln. Und es gibt
+**kein `randf()`**: die Suite seedet den globalen RNG pro Datei, ein zusaetzlicher
+Zug je Einheit neben `lies_face_down` haette jede spaetere Auswuerfelung in
+fremden Tests verschoben (K.-o.-Kriterium fuer die naheliegende Feld-Loesung).
+Der Basisversatz zieht `play_ms` ab, damit eine Wiedergabe nie an der
+Zyklusgrenze abgeschnitten wird; der Abstand zweier Wiedergaben liegt dadurch in
+`[0,6 x I, 1,4 x I]` mit Mittelwert exakt `I`. Rueckfallebene ohne Sonderfall:
+`UNIT_IDLE_ANIM_INTERVAL = 0.0` liefert Frame fuer Frame wieder die alte Schleife,
+ebenso eine Animation, die laenger dauert als die Pause.
+
+**Neue Animation `stand`** (`PlaceholderSprites.STAND_ANIM`), prozedural **ein**
+Frame — mit eigenem `match`-Zweig, denn im Default waere die Ruhepose selbst eine
+Zwei-Frame-Wippe geworden. Sie ist die **einzige Animation ohne eigenen
+Platzhalter im Atlas**: ohne geliefertes `stand.png` legt `build_atlas` gar keinen
+`stand`-Eintrag an, und `UnitRenderer.rest_frames()` bildet jeden Slot auf
+**Frame 0 des eigenen Idle desselben Slots** ab. Zwei Fallen dabei bewusst
+vermieden — handgezeichnetes Idle wuerde sonst zwischen seinen Durchlaeufen auf
+einer prozeduralen Strichfigur ruhen, und ein Alias auf Slot 0 statt auf den
+eigenen Slot haette jede ruhende Einheit ploetzlich nach vorn schauen lassen.
+Da der prozedurale Standframe **bitgleich** mit dem heutigen Idle-Frame 0 ist,
+sieht eine stehende Einheit ohne geliefertes Sheet genauso aus wie vorher — sie
+hoert nur auf zu wippen.
+
+**Nebenbei ein Performance-Gewinn:** bisher schrieb jede ruhende Einheit zweimal
+pro Sekunde Custom-Data in den MultiMesh, jetzt rund zweimal pro 8 s. Der
+Early-Return in `_update_frame` macht den gehaltenen Frame praktisch kostenlos.
+`_idle_interval_ms` und `_idle_seed` werden **einmal** in `register_unit` gefuellt
+— ein virtueller Aufruf plus `get_instance_id()` pro Einheit und Frame haette
+genau das gefressen, was die `VISUAL_SLICES`-Staffelung einspart.
+
+**Verifikation:** Ladecheck exit 0, **Suite 5516 Zusicherungen gruen** ohne
+`SCRIPT ERROR` (vorher 5195), neun neue Tests — alle ueber reine Funktionen, ohne
+RNG, ohne Renderer, ohne `assets/`-Inhalte. Dazu zwei temporaere Sonden am
+**echten** Renderer, danach wieder entfernt:
+- ohne Sheet: Ruhetabelle `[0, 2, 4, 6, 8, 10, 12, 14]` (je Slot dessen Idle-Frame
+  0), ueber 30 s zu **93 %** auf dem Standframe, Wiedergaben bei 5,35 / 13,3 /
+  21,75 / 29,1 s (Abstaende 7,95 / 8,45 / 7,35 s), `walk` unveraendert
+  durchlaufend;
+- mit synthetischem `stand.png` (8 Zeilen x 1 Spalte): Ruhetabelle springt auf die
+  **eigenen** Atlas-Zeilen `[268 … 275]`, dazwischen laeuft das vollstaendige Idle
+  (Frame 0 -> 1) und kehrt zurueck. Die neuen Atlas-Tests bleiben in beiden
+  Staenden gruen — eine Zusicherung auf "leeres assets/" waere auf dem Rechner des
+  Zeichners rot geworden.
+- Statistische Gegenprobe zur Entkopplung: 200 fortlaufende Instanz-IDs verteilen
+  sich auf alle 16 Zeitfenster des Zyklus, das dichteste haelt 17 von 200 — Godots
+  fortlaufende IDs fallen also nicht durch den Hash.

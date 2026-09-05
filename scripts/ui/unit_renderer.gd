@@ -14,6 +14,12 @@ class_name UnitRenderer extends MultiMeshInstance3D
 ## linger a few seconds before expiring.
 const MAX_UNITS: int = 8192
 const VISUAL_SLICES: int = 3
+## Animations a unit HOLDS on a single frame between occasional playbacks (see
+## idle_frame). A list, not an `== &"idle"`, so adding the standing carry pose
+## later is a constant and not a refactor.
+const RESTING_ANIMS: Array[StringName] = [&"idle"]
+## Spread of the resting interval, as a fraction of it (Balance).
+const IDLE_ANIM_JITTER: float = Balance.UNIT_IDLE_ANIM_JITTER
 ## On-screen quad size in metres — constant regardless of the frame resolution
 ## in the atlas (16x24 placeholders at the historical 0.06 m/px, or real art).
 const SPRITE_WORLD_W: float = 0.96
@@ -150,6 +156,8 @@ var _units: Array[Unit] = []
 var _multimesh: MultiMesh = null
 var _uvs: PackedVector2Array = PackedVector2Array()
 var _table: Dictionary = {}
+## kind -> PackedInt32Array of the resting frame per view slot (see rest_frames).
+var _rest: Dictionary = {}
 var _visual_phase: int = 0
 ## Blob-shadow MultiMesh, slot-synchronous with _multimesh (same indices).
 var _blob_multimesh: MultiMesh = null
@@ -204,10 +212,86 @@ static func pose_slot(base: StringName, view: int, face_down: bool) -> int:
 	return 1 if face_down and PlaceholderSprites.slot_count(base) > 1 else 0
 
 
+## Global atlas frame of the RESTING pose per kind, one entry per view slot —
+## what a unit shows while its idle animation is not running. Derived once from
+## the atlas table: a kind that delivered a stand.png gets its own drawing, every
+## other kind points at frame 0 of its OWN idle (of the SAME slot — reading slot
+## 0 for all of them would have every resting unit face the camera). Pure, so the
+## fallback is assertable headless without a single texture.
+static func rest_frames(table: Dictionary) -> Dictionary:
+	var rest: Dictionary = {}
+	for kind: StringName in table:
+		var per_base: Dictionary = table[kind]
+		var source: Array = per_base.get(PlaceholderSprites.STAND_ANIM,
+			per_base[&"idle"])
+		var frames: PackedInt32Array = PackedInt32Array()
+		for slot in range(PlaceholderSprites.VIEWS.size()):
+			frames.append(int((source[slot] as Array)[0]))
+		rest[kind] = frames
+	return rest
+
+
+## Which frame of a RESTING animation to draw, or -1 for "hold the stand frame".
+##
+## A unit standing around used to loop its idle for ever, and a few hundred of
+## them made the picture restless. Instead the animation runs ONCE per cycle of
+## `interval_ms`, at a per-unit offset inside that cycle, and the unit rests in
+## between. The offset is HASHED from (seed, cycle) rather than drawn and stored:
+##   * no state, hence no reset points — a state change, a recycled render slot
+##     or a skipped VISUAL_SLICES pass simply cannot desynchronise anything;
+##   * no randf(), which matters because the test suite seeds the global RNG per
+##     file (TestBase.TEST_SEED) and an extra draw per unit would shift every
+##     later roll in unrelated tests;
+##   * re-hashed per CYCLE, so a unit's rhythm is irregular instead of metronomic.
+## The gap between two runs is interval + (offset(n+1) - offset(n)), i.e. inside
+## [(1-jitter)*interval, (1+jitter)*interval] with the mean exactly `interval`.
+static func idle_frame(elapsed_ms: int, seed_value: int, interval_ms: int,
+		count: int, fps: float) -> int:
+	# Guard first, and in this order: it also rules out the division below.
+	if interval_ms <= 0 or count <= 1 or fps <= 0.0:
+		return _loop_frame(elapsed_ms, count, fps)
+	# A unit can be handed an anim_start_ms from later in the same frame
+	# (Firewarrior sets it on firing), which would otherwise floor-divide into
+	# cycle -1 and put the run in the past.
+	var elapsed: int = maxi(elapsed_ms, 0)
+	var play_ms: int = int(ceil(float(count) / fps * 1000.0))
+	if play_ms >= interval_ms:
+		return _loop_frame(elapsed, count, fps)   # longer than the pause: no pause
+	# Subtracting play_ms keeps the whole run inside its own cycle window, so it
+	# is never cut off at the cycle boundary.
+	var span: int = mini(int(float(interval_ms) * IDLE_ANIM_JITTER),
+		interval_ms - play_ms)
+	var cycle: int = elapsed / interval_ms
+	var start: int = cycle * interval_ms + (interval_ms - play_ms - span) \
+		+ _mix(seed_value, cycle) % (span + 1)
+	if elapsed < start or elapsed >= start + play_ms:
+		return -1
+	return mini(int(float(elapsed - start) * 0.001 * fps), count - 1)
+
+
+## The plain looping frame selection every other animation uses.
+static func _loop_frame(elapsed_ms: int, count: int, fps: float) -> int:
+	if count <= 1:
+		return 0
+	return int(float(maxi(elapsed_ms, 0)) * 0.001 * fps) % count
+
+
+## Integer hash of two values, in [0, 2^31). Godot parses no literal >= 2^63, so
+## every constant stays below 2^31 and the result is masked positive — a negative
+## operand of % would produce a negative offset and pull a run into the previous
+## cycle.
+static func _mix(a: int, b: int) -> int:
+	var h: int = (a * 0x9E3779B1 + b * 0x85EBCA77) & 0x7FFFFFFF
+	h = (h ^ (h >> 15)) * 0x2545F491
+	h = (h ^ (h >> 13)) & 0x7FFFFFFF
+	return h
+
+
 func _ready() -> void:
 	var atlas: Dictionary = UnitSpriteLibrary.build_atlas(KINDS)
 	_uvs = atlas.uvs
 	_table = atlas.table
+	_rest = rest_frames(_table)
 
 	var quad: QuadMesh = QuadMesh.new()
 	quad.size = Vector2(SPRITE_WORLD_W, SPRITE_WORLD_H)
@@ -266,6 +350,11 @@ func register_unit(unit: Unit) -> void:
 	unit._render_pos = Vector3.INF
 	unit._render_frame = -1
 	unit._blob_hidden = false
+	# Idle pacing, read ONCE here: _update_frame runs for a third of all units
+	# every frame, and a virtual call plus get_instance_id() per unit per frame
+	# would eat exactly what the VISUAL_SLICES stagger saves.
+	unit._idle_interval_ms = int(unit._idle_anim_interval() * 1000.0)
+	unit._idle_seed = unit.get_instance_id()
 	_units.append(unit)
 	_multimesh.set_instance_color(unit._render_index,
 		Unit.TRIBE_COLORS[unit.tribe_id % Unit.TRIBE_COLORS.size()])
@@ -274,10 +363,10 @@ func register_unit(unit: Unit) -> void:
 	# only once the slice rotation reaches this index (up to VISUAL_SLICES frames
 	# later) — without this seed a new unit would flash up as the previous
 	# owner's frame, and with the roll flag as a tipped-over corpse.
-	var per_base: Dictionary = _table.get(unit._render_kind, _table[KINDS[0]])
-	var idle_uv: Vector2 = _uvs[int((per_base[&"idle"][0] as Array)[0])]
+	var rest: PackedInt32Array = _rest.get(unit._render_kind, _rest[KINDS[0]])
+	var rest_uv: Vector2 = _uvs[rest[0]]
 	_multimesh.set_instance_custom_data(unit._render_index,
-		Color(idle_uv.x, idle_uv.y, 0.0, 0.0))
+		Color(rest_uv.x, rest_uv.y, 0.0, 0.0))
 	_multimesh.visible_instance_count = _units.size()
 	_blob_multimesh.visible_instance_count = _units.size()
 
@@ -362,17 +451,29 @@ func _update_frame(unit: Unit, cam_forward: Vector3, cam_right: Vector3,
 		_blob_multimesh.set_instance_transform(unit._render_index,
 			Transform3D(Basis.IDENTITY.scaled(Vector3.ZERO), Vector3.ZERO))
 	var view: int = Unit.view_index(unit.facing, cam_forward, cam_right)
-	var per_base: Dictionary = _table.get(unit._render_kind, _table[KINDS[0]])
+	# ONE kind lookup for both tables: the fallback to KINDS[0] has to pick the
+	# same kind in _table and _rest, or a resting unit would rest as someone else.
+	var kind: StringName = unit._render_kind if _table.has(unit._render_kind) \
+		else KINDS[0]
+	var per_base: Dictionary = _table[kind]
 	var base: StringName = unit.anim_base_name
 	var views: Array = per_base.get(base, per_base[&"idle"])
-	var info: Array = views[pose_slot(base, view, unit.lies_face_down)]   # [start, count, fps]
+	var slot: int = pose_slot(base, view, unit.lies_face_down)
+	var info: Array = views[slot]   # [start, count, fps]
 	var frame: int
 	if unit.hop_visual and base == &"jump":
 		# Frame-driven by the hop phase: arms up in the air, down on landing.
 		frame = 1 if hop_offset > HOP_FRAME_THRESHOLD else 0
+	elif base in RESTING_ANIMS:
+		# Held on the stand frame, with the animation running once in a while.
+		frame = idle_frame(now_ms - unit.anim_start_ms, unit._idle_seed,
+			unit._idle_interval_ms, int(info[1]), float(info[2]))
 	else:
 		frame = int(float(now_ms - unit.anim_start_ms) * 0.001 * float(info[2])) % int(info[1])
-	var global_frame: int = int(info[0]) + frame
+	# -1 = resting. The stand frame lives in its own atlas row (or, with no
+	# stand.png, IS idle's frame 0 — then the hand-over costs nothing at all).
+	var global_frame: int = (_rest[kind] as PackedInt32Array)[slot] if frame < 0 \
+		else int(info[0]) + frame
 	if global_frame == unit._render_frame:
 		return
 	unit._render_frame = global_frame

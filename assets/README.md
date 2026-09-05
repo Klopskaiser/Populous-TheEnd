@@ -142,11 +142,13 @@ einzeln nachgeliefert werden.
     sie sind grundsätzlich blickrichtungslos, jede Datei wird immer aus **Zeile 1**
     geschnitten (weitere Zeilen werden ignoriert). Siehe unten.
 - **Frames (Spalten):** Anzahl = `Bildbreite / frame_width`, frei wählbar pro Animation.
-- **Animationsnamen** (Dateiname = `<anim>.png`): `idle, walk, attack, punch, kick,
-  shove, jump, carry, carry_walk, sit, roll, drown` — zusätzlich `cast` (nur
+- **Animationsnamen** (Dateiname = `<anim>.png`): `idle, stand, walk, attack, punch,
+  kick, shove, jump, carry, carry_walk, sit, roll, drown` — zusätzlich `cast` (nur
   Schamanin/Prediger), `throw` (nur Feuerkrieger) und die liegenden Posen
   `airborne`, `dead_back`, `dead_front` (siehe unten). Fehlt eine Datei, wird nur
   diese Animation prozedural dargestellt.
+  - `stand` = die **Ruhepose**, siehe eigener Abschnitt unten. Sie ist die einzige
+    Datei, deren Fehlen **nicht** zum Platzhalter führt.
   - `roll` = Purzeln **am Boden**, `airborne` = Flug **durch die Luft** (Wurf,
     Tornado, Sturz vom Luftschiff) — bewusst zwei verschiedene Posen.
   - `roll` und `drown` bleiben bildschirmaufrecht und werden **nicht** gerollt.
@@ -155,6 +157,25 @@ einzeln nachgeliefert werden.
     der undurchsichtigen Wasserfläche abgeschnitten, sollte also nicht die
     Bildaussage tragen.
 - **fps** pro Animation optional im Manifest; sonst gelten die eingebauten Defaults.
+
+### Die Ruhepose: `stand.png`
+
+**Eine Spalte, sonst wie jedes andere Sheet** (8, 5 oder 1 Zeile — die Zeilen sind
+Blickrichtungen wie oben). Das ist der Frame, den eine herumstehende Einheit die
+**meiste Zeit** zeigt: die Idle-Animation läuft nicht mehr in Dauerschleife, sondern
+im Schnitt alle 8 s **einmal** aus dieser Pose heraus und wieder in sie zurück
+(`Balance.UNIT_IDLE_ANIM_INTERVAL`; hunderte dauernd wippende Figuren machten das
+Spielbild unruhig). Zeichne `idle.png` deshalb so, dass es in der Ruhepose
+**beginnt und endet** — sonst springt die Figur beim Übergang.
+
+- **`stand.png` ist optional.** Fehlt es, ruht die Einheit auf **Frame 1 ihres
+  eigenen `idle.png`**. Es ist damit die einzige Animation, deren Fehlen nicht auf
+  den Platzhalter zurückfällt — eine handgezeichnete Idle-Animation soll nie
+  zwischen ihren Durchläufen auf einer prozeduralen Strichfigur ruhen.
+- **Mindestens ~0,4 s Idle-Länge.** Der Renderer wertet jede Einheit nur jeden
+  dritten Bildschirmframe aus; eine kürzere Animation könnte zwischen zwei
+  Auswertungen komplett durchlaufen und gelegentlich unsichtbar bleiben.
+- Maske wie üblich: `stand_mask.png`.
 
 ### Die liegenden Posen: `dead_back`, `dead_front`, `airborne`
 

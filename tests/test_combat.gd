@@ -775,6 +775,52 @@ func test_sheet_cut_plan_row_variants() -> void:
 			"an 8-row sheet draws %s in row %d" % [view, i + 1])
 
 
+## The procedural rest pose IS idle's frame 0 — a single frame, the same drawing.
+## That is what makes dropping the idle loop invisible: without delivered art a
+## standing unit looks exactly as before, it just stops bobbing.
+func test_stand_placeholder_is_idle_frame_zero() -> void:
+	for kind: StringName in [&"brave", &"warrior", &"shaman"]:
+		var stand: Array[Image] = PlaceholderSprites.build_slot(
+			kind, PlaceholderSprites.STAND_ANIM, 0)
+		check(stand.size() == 1, "%s rests on ONE frame, not a two-frame bob" % kind)
+		check(stand[0].get_data()
+			== PlaceholderSprites.build_slot(kind, &"idle", 0)[0].get_data(),
+			"%s rests on exactly its idle frame 0" % kind)
+	# View 2 too: the rest pose keeps its eight drawings.
+	check(PlaceholderSprites.build_slot(&"brave", PlaceholderSprites.STAND_ANIM, 2)[0]
+			.get_data()
+		!= PlaceholderSprites.build_slot(&"brave", PlaceholderSprites.STAND_ANIM, 0)[0]
+			.get_data(),
+		"the rest pose is drawn per view (front differs from right)")
+
+
+## The rest pose is the ONE animation without a placeholder of its own in the
+## atlas: without stand.png the table has no "stand" key at all and rest_frames()
+## aliases each slot onto that kind's own idle frame 0 — so hand-drawn idle can
+## never rest on a procedural stick figure. Written to hold with and without
+## delivered art.
+func test_stand_sheet_is_all_or_nothing() -> void:
+	var manifest: Dictionary = AssetLibrary.json("units/brave/manifest.json")
+	var sheet: Dictionary = UnitSpriteLibrary._slice_sheet(
+		&"brave", PlaceholderSprites.STAND_ANIM, manifest)
+	var atlas: Dictionary = UnitSpriteLibrary.build_atlas([&"brave"] as Array[StringName])
+	var per_base: Dictionary = (atlas.table as Dictionary)[&"brave"]
+	var rest: Dictionary = UnitRenderer.rest_frames(atlas.table)
+	var frames: PackedInt32Array = rest[&"brave"]
+	if sheet.is_empty():
+		check(not per_base.has(PlaceholderSprites.STAND_ANIM),
+			"with no stand.png the atlas carries no rest pose of its own")
+		for slot in range(PlaceholderSprites.VIEWS.size()):
+			check(int(frames[slot]) == int((per_base[&"idle"][slot] as Array)[0]),
+				"slot %d rests on its own idle frame 0" % slot)
+		return
+	check(per_base.has(PlaceholderSprites.STAND_ANIM),
+		"a delivered stand.png gets its own atlas rows")
+	for slot in range(PlaceholderSprites.VIEWS.size()):
+		check(int(frames[slot]) == int((per_base[PlaceholderSprites.STAND_ANIM][slot]
+			as Array)[0]), "slot %d rests on the delivered drawing" % slot)
+
+
 # --- Sidebar portrait frames ---------------------------------------------------------
 
 ## The portrait pulls its frames through UnitSpriteLibrary, so art delivered in

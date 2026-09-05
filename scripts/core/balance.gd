@@ -15,6 +15,18 @@ class_name Balance
 # EINHEITEN — Leben, Tempo, Kampfwerte
 # =============================================================================
 
+## Mittlere Ruhezeit (s) einer stehenden Einheit, bevor ihre Idle-Animation
+## EINMAL durchläuft. Dazwischen zeigt sie einen statischen Standframe — eine
+## dauernd wippende Armee machte das Spielbild unruhig. Pro Typ überschreibbar:
+## `<TYP>_IDLE_ANIM_INTERVAL` anlegen und in der Unterklasse
+## `_idle_anim_interval()` überschreiben (Muster WARRIOR_SHOVE_CHANCE).
+## **0.0 stellt die alte Dauerschleife wieder her.**
+const UNIT_IDLE_ANIM_INTERVAL: float = 8.0
+## Streuung der Ruhezeit als Anteil des Intervalls: bei 0,4 liegt der Abstand
+## zweier Wiedergaben zwischen 60 % und 140 % davon, im Mittel genau beim
+## Intervall. Ohne Streuung zuckte eine angekommene Gruppe im Gleichtakt.
+const UNIT_IDLE_ANIM_JITTER: float = 0.4
+
 # --- Brave (Gefolgsmann) ---
 const BRAVE_HP: int = 60
 const BRAVE_SPEED: float = 4.0

@@ -317,6 +317,181 @@ func test_pose_slot_picks_view_or_variant() -> void:
 		"both corpse landings actually occur")
 
 
+# --- Idle: stand frame with an occasional playback ------------------------------------
+
+## Sampling helper: every playback the schedule produces over `span_ms`, as
+## [start_ms, [frames...]]. Pure input -> pure output, no renderer, no RNG.
+func _idle_playbacks(seed_value: int, interval_ms: int, count: int, fps: float,
+		span_ms: int, step_ms: int) -> Array:
+	var runs: Array = []
+	var current: Array = []
+	var start: int = -1
+	for t in range(0, span_ms, step_ms):
+		var f: int = UnitRenderer.idle_frame(t, seed_value, interval_ms, count, fps)
+		if f < 0:
+			if not current.is_empty():
+				runs.append([start, current])
+				current = []
+			continue
+		if current.is_empty():
+			start = t
+		current.append(f)
+	if not current.is_empty():
+		runs.append([start, current])
+	return runs
+
+
+## The whole point: a standing unit RESTS almost all of the time and plays its
+## idle animation only now and then — whole, from the first frame to the last.
+func test_idle_rests_between_playbacks() -> void:
+	var interval: int = int(Balance.UNIT_IDLE_ANIM_INTERVAL * 1000.0)
+	var count: int = 2
+	var fps: float = 2.0
+	var span: int = 120000
+	var step: int = 50
+	var resting: int = 0
+	for t in range(0, span, step):
+		if UnitRenderer.idle_frame(t, 4711, interval, count, fps) < 0:
+			resting += 1
+	var rest_share: float = float(resting) / float(span / step)
+	check(rest_share > 0.8,
+		"a standing unit rests %.0f %% of the time (0 %% with the old loop)"
+			% (rest_share * 100.0))
+	var runs: Array = _idle_playbacks(4711, interval, count, fps, span, step)
+	check(runs.size() >= 12 and runs.size() <= 18,
+		"roughly one playback per %.0f s (%d in 120 s)"
+			% [Balance.UNIT_IDLE_ANIM_INTERVAL, runs.size()])
+	for run: Array in runs:
+		var frames: Array = run[1]
+		check(int(frames[0]) == 0, "every playback starts at frame 0, never mid-animation")
+		check(int(frames[frames.size() - 1]) == count - 1,
+			"every playback reaches its last frame (no cut-off at the cycle edge)")
+		var monotone: bool = true
+		for i in range(1, frames.size()):
+			if int(frames[i]) < int(frames[i - 1]) or int(frames[i]) >= count:
+				monotone = false
+		check(monotone, "frames run forward and stay inside the animation")
+
+
+## The gap is jittered so a group that arrived together does not twitch in step,
+## but its MEAN stays the configured interval.
+func test_idle_gap_stays_within_the_jitter_band() -> void:
+	var interval: int = 8000
+	var runs: Array = _idle_playbacks(20260904, interval, 2, 2.0, interval * 60, 10)
+	check(runs.size() > 40, "enough playbacks to judge the spread (%d)" % runs.size())
+	var lo: float = float(interval) * (1.0 - Balance.UNIT_IDLE_ANIM_JITTER)
+	var hi: float = float(interval) * (1.0 + Balance.UNIT_IDLE_ANIM_JITTER)
+	var total: int = 0
+	var in_band: bool = true
+	var varies: bool = false
+	for i in range(1, runs.size()):
+		var gap: int = int(runs[i][0]) - int(runs[i - 1][0])
+		total += gap
+		if float(gap) < lo - 20.0 or float(gap) > hi + 20.0:
+			in_band = false
+		if absi(gap - interval) > 200:
+			varies = true
+	check(in_band, "every gap sits inside [%.1f s, %.1f s]" % [lo * 0.001, hi * 0.001])
+	check(varies, "and the gap actually varies — not a metronome")
+	check_near(float(total) / float(runs.size() - 1), float(interval),
+		"the mean gap is the configured interval", 400.0)
+
+
+## Units that start resting in the SAME frame must not animate in unison. Godot
+## hands out consecutive instance IDs, so this is really a test of the hash.
+func test_idle_schedule_desynchronises_units() -> void:
+	# Both magnitudes matter: a small counter AND the ~10^11 range Godot actually
+	# hands out (seen in a live run), because the two exercise different bits.
+	for base: int in [300000, 78181829619]:
+		var interval: int = 8000
+		var buckets: Dictionary = {}
+		var first: Array = []
+		for i in range(200):
+			var runs: Array = _idle_playbacks(base + i, interval, 2, 2.0, interval, 10)
+			check(runs.size() == 1, "unit %d plays exactly once in the first cycle" % i)
+			var start: int = int(runs[0][0])
+			first.append(start)
+			var b: int = start / 200
+			buckets[b] = int(buckets.get(b, 0)) + 1
+		var same_as_neighbour: int = 0
+		for i in range(1, first.size()):
+			if int(first[i]) == int(first[i - 1]):
+				same_as_neighbour += 1
+		check(same_as_neighbour < 10,
+			"consecutive IDs from %d get their own start times (%d collisions of 199)"
+				% [base, same_as_neighbour])
+		var worst: int = 0
+		for b: int in buckets:
+			worst = maxi(worst, int(buckets[b]))
+		check(worst < 40,
+			"no 200 ms window collects a crowd (worst %d of 200, base %d)"
+				% [worst, base])
+		check(buckets.size() > 8,
+			"the starts spread over the whole window (%d windows, base %d)"
+				% [buckets.size(), base])
+
+
+## The renderer evaluates a unit only every VISUAL_SLICES-th frame, so at 20 fps
+## up to 150 ms pass between two samples. No playback may slip through unseen.
+func test_idle_survives_a_dropped_visual_slice() -> void:
+	var runs: Array = _idle_playbacks(99, 8000, 2, 2.0, 120000, 150)
+	check(runs.size() >= 12, "the playbacks are still all there (%d)" % runs.size())
+	for run: Array in runs:
+		check((run[1] as Array).size() >= 2,
+			"a 1 s playback is sampled at least twice even at 150 ms")
+
+
+## The escape hatch: interval 0 is exactly the old behaviour, frame for frame.
+func test_idle_interval_zero_restores_the_loop() -> void:
+	var count: int = 2
+	var fps: float = 2.0
+	var matches: bool = true
+	for t in range(0, 20000, 25):
+		if UnitRenderer.idle_frame(t, 12345, 0, count, fps) \
+				!= int(float(t) * 0.001 * fps) % count:
+			matches = false
+	check(matches, "interval 0 loops frame for frame like before")
+	check(UnitRenderer.idle_frame(500, 12345, 1000, 4, 2.0) >= 0,
+		"an animation longer than the interval keeps looping")
+	check(UnitRenderer.idle_frame(0, 12345, 8000, 1, 2.0) == 0,
+		"a single-frame animation is its own rest pose")
+
+
+## The rest pose per kind: its own stand.png where delivered, otherwise frame 0
+## of that kind's OWN idle — and of the SAME slot, or every resting unit would
+## suddenly face the camera.
+func test_rest_frame_falls_back_on_idle_frame_zero() -> void:
+	var idle_rows: Array = []
+	var stand_rows: Array = []
+	for slot in range(PlaceholderSprites.VIEWS.size()):
+		idle_rows.append([100 + slot * 2, 2, 2.0])
+		stand_rows.append([900 + slot, 1, 2.0])
+	var without: Dictionary = UnitRenderer.rest_frames({&"brave": {&"idle": idle_rows}})
+	var with_sheet: Dictionary = UnitRenderer.rest_frames(
+		{&"brave": {&"idle": idle_rows, &"stand": stand_rows}})
+	for slot in range(PlaceholderSprites.VIEWS.size()):
+		check(int((without[&"brave"] as PackedInt32Array)[slot]) == 100 + slot * 2,
+			"with no stand.png slot %d rests on ITS OWN idle frame 0" % slot)
+		check(int((with_sheet[&"brave"] as PackedInt32Array)[slot]) == 900 + slot,
+			"a delivered stand.png wins for slot %d" % slot)
+
+
+## The rest pose is an ordinary upright pose with eight views — if it ever ended
+## up in FLAT_ANIMS or VIEWLESS_POSES, resting units would lie down.
+func test_stand_is_an_upright_viewed_pose() -> void:
+	check(not PlaceholderSprites.anim_lies_flat(PlaceholderSprites.STAND_ANIM),
+		"the rest pose stands, it does not lie")
+	check(not PlaceholderSprites.anim_is_viewless(PlaceholderSprites.STAND_ANIM),
+		"the rest pose has views")
+	check(UnitRenderer.pose_roll(PlaceholderSprites.STAND_ANIM) == 0.0,
+		"and is therefore never rolled")
+	for v in range(PlaceholderSprites.VIEWS.size()):
+		check(UnitRenderer.pose_slot(PlaceholderSprites.STAND_ANIM, v, true) == v,
+			"the rest pose reads its view (%d), not a landing variant" % v)
+	var size_m: Vector2 = SelectionManager.sprite_pick_size(PlaceholderSprites.STAND_ANIM)
+	check(size_m.y > size_m.x, "the pick rectangle stays upright for the rest pose")
+
+
 func test_facing_follows_movement() -> void:
 	var td: TerrainData = _flat_terrain()
 	var unit: Unit = _make_unit(td)

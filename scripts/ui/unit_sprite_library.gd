@@ -59,6 +59,14 @@ static func build_atlas(kinds: Array[StringName]) -> Dictionary:
 		var per_base: Dictionary = {}
 		for anim in PlaceholderSprites._anims_for(kind):
 			var sheet: Dictionary = kind_sheets.get(anim, {})
+			# The resting pose is the ONE animation that gets no placeholder of
+			# its own. Without a stand.png the table simply has no "stand" key
+			# and UnitRenderer.rest_frames() falls back on frame 0 of this kind's
+			# OWN idle — otherwise a hand-drawn idle would rest on a procedural
+			# stick figure between its runs. It also keeps the atlas from growing
+			# by 8 cells per kind for art nobody delivered.
+			if anim == PlaceholderSprites.STAND_ANIM and sheet.is_empty():
+				continue
 			var per_view: Array = []
 			var slots: int = PlaceholderSprites.slot_count(anim)
 			for slot in range(PlaceholderSprites.VIEWS.size()):

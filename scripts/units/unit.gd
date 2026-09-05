@@ -105,6 +105,9 @@ const MELEE_SHOVE: int = Balance.MELEE_SHOVE
 ## overrides _shove_chance() to shove rarely (he punches/kicks instead).
 const KICK_CHANCE: float = Balance.KICK_CHANCE
 const SHOVE_CHANCE: float = Balance.SHOVE_CHANCE
+## Mean seconds a resting unit holds its stand frame before its idle animation
+## runs once (see _idle_anim_interval).
+const IDLE_ANIM_INTERVAL: float = Balance.UNIT_IDLE_ANIM_INTERVAL
 ## Fireball impact damage (slightly above a brave punch; thrown by the
 ## firewarrior from medium range, see Firewarrior/Fireball).
 const FIREBALL_DAMAGE: int = Balance.FIREWARRIOR_FIREBALL_DAMAGE
@@ -590,6 +593,13 @@ var _render_index: int = -1
 var _render_kind: StringName = &"unit"
 var _render_pos: Vector3 = Vector3.INF
 var _render_frame: int = -1
+## Idle-animation pacing, both filled ONCE in UnitRenderer.register_unit. These
+## are DERIVED CONSTANTS, not a schedule: when the animation actually runs is a
+## pure function of them plus the elapsed time (UnitRenderer.idle_frame), so
+## there is deliberately nothing here to reset on a state change or a recycled
+## render slot.
+var _idle_interval_ms: int = 0
+var _idle_seed: int = 0
 ## True once the renderer collapsed this unit's blob shadow (corpses).
 var _blob_hidden: bool = false
 ## Belly instead of back for the horizontal poses (dead/airborne): the renderer
@@ -1011,6 +1021,14 @@ func _shove_chance() -> float:
 ## override point, same pattern as _shove_chance(); the remainder is a punch.
 func _kick_chance() -> float:
 	return KICK_CHANCE
+
+
+## Mean seconds between two runs of this unit's idle animation; in between it
+## holds its stand frame (UnitRenderer.idle_frame). Per-kind override point, same
+## pattern as _shove_chance(). Read ONCE per unit, in UnitRenderer.register_unit —
+## never per frame. Zero restores the old continuous loop.
+func _idle_anim_interval() -> float:
+	return IDLE_ANIM_INTERVAL
 
 
 ## Hook called when combat overrides the current activity — Brave uses it to

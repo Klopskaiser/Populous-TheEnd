@@ -77,6 +77,15 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
 - **Einheiten:** **2D-Sprites mit Billboarding** – `Sprite3D`/`AnimatedSprite3D` mit
   `billboard = BILLBOARD_ENABLED`, immer zur Kamera gedreht.
   Benötigte Animationen pro Einheit: **Idle, Walk, Attack, Cast** (Cast nur Schamanin/Prediger).
+  **Idle läuft NICHT in Dauerschleife:** eine herumstehende Einheit hält ihre
+  **Ruhepose** (`stand`, eine Spalte je Blickrichtung) und spielt die Idle-Animation
+  im Schnitt alle 8 s **einmal** daraus heraus — gestreut über die Einheiten
+  (`Balance.UNIT_IDLE_ANIM_INTERVAL`/`_JITTER`, `UnitRenderer.idle_frame`), weil
+  hunderte dauernd wippende Figuren das Spielbild unruhig machten. Der Zeitpunkt ist
+  **gehasht statt gewürfelt** (kein `randf()`, damit der geseedete Test-RNG-Strom
+  unberührt bleibt) und deshalb zustandslos. Fehlt `stand.png`, ruht die Einheit auf
+  **Frame 1 ihres eigenen `idle.png`** — die einzige Animation, deren Fehlen nicht
+  auf den Platzhalter zurückfällt.
   **Liegende Posen (`dead`, `airborne`) werden aufrecht in die hochkante
   Sprite-Zelle gezeichnet und vom Renderer um 90° auf dem Bildschirm gerollt**
   (`PlaceholderSprites.FLAT_ANIMS`, `UnitRenderer.LIE_ROLL`): so wird die

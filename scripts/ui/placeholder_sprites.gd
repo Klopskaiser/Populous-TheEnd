@@ -75,6 +75,12 @@ const DIAGONAL_PAINT_VIEWS: Array[StringName] = [&"front_right", &"back_right"]
 ## screen-upright poses and deliberately NOT listed here.
 const FLAT_ANIMS: Array[StringName] = [&"dead", &"airborne"]
 
+## The RESTING pose: a single frame per view, held while a unit stands around.
+## It exists so idle does not have to loop for ever (UnitRenderer.idle_frame);
+## the idle animation then runs out of THIS pose and returns to it. Procedurally
+## it is literally idle's frame 0, and a user sheet supplies it as stand.png.
+const STAND_ANIM: StringName = &"stand"
+
 ## Poses whose FACING carries no information, so views make no sense for them: a
 ## body lying on the ground or tumbling through the air has no "front" the camera
 ## could circle. Both flat poses are of that kind, and the consequences run deep
@@ -151,7 +157,7 @@ static func _anims_for(kind: StringName) -> Array[StringName]:
 	var anims: Array[StringName] = [
 		&"idle", &"walk", &"attack", &"jump", &"carry", &"carry_walk",
 		&"punch", &"kick", &"shove", &"dead", &"sit", &"roll",
-		&"airborne", &"drown"]
+		&"airborne", &"drown", &"stand"]
 	if kind in CASTER_KINDS:
 		anims.append(&"cast")
 	if kind == &"firewarrior":
@@ -323,6 +329,15 @@ static func _build_frames(kind: StringName, anim: StringName, view: StringName) 
 				_frame_drown(paint_view, 2),
 			]
 			bobs = [0, 1, 0]
+		&"stand":
+			# ONE frame, and it must stay one: this is the pose a resting unit
+			# holds between two runs of its idle animation. Falling through to
+			# the default below would make the resting pose bob by itself —
+			# exactly what the stand frame exists to stop. Deliberately the same
+			# drawing as idle's frame 0, so dropping the loop changes nothing
+			# about how a standing unit LOOKS.
+			images = [_frame_stand(paint_view, 0)]
+			bobs = [0]
 		_:
 			images = [_frame_stand(paint_view, 0), _frame_stand(paint_view, 1)]
 			bobs = [0, 1]
