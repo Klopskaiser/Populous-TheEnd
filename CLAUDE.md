@@ -134,6 +134,14 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
   müssen Sammelpunkte per UI oder Rechtsklick setzbar sein. Neu erzeugte/ausgebildete
   Einheiten laufen automatisch zum Rally Point.
 - **`Entf` reißt alle selektierten eigenen Gebäude ab** (Details in §5).
+- **Ein expliziter Befehl holt eine Einheit aus einem Gebäude zurück:** Wer gerade
+  ein feindliches Gebäude von innen demoliert (`State.RAID`, aus der Welt entfernt,
+  nicht anklickbar), kommt bei Bewegungs-, Angriffs- oder Zauberbefehl am
+  Gebäuderand wieder heraus und führt den Befehl aus (`Building.release_raider`,
+  `Unit._leave_building_for_order`). Praktisch betrifft das die **Schamanin**, die
+  über ihr Portrait auch im Gebäude anwählbar bleibt — alle anderen fallen beim
+  Betreten aus der Selektion (`UnitManager.unit_left_world`). Die KI schickt ihren
+  Demolierern bewusst keine Marschbefehle nach (`_marching_only`).
 - **Beim Platzieren selektierte Braves bauen automatisch mit** — kein zusätzlicher
   Rechtsklick nötig. Braves auf einer **anderen Insel** werden nicht mitgeschickt
   (sie könnten den Bauplatz nie erreichen).

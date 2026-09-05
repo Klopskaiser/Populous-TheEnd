@@ -309,13 +309,19 @@ func _flat_dir(from: Vector3, to: Vector3) -> Vector3:
 	return d.normalized() if d.length_squared() > 0.000001 else Vector3(0.0, 0.0, 1.0)
 
 
-## Nearest living, targetable enemy within `radius` of `origin`.
+## Nearest living, targetable enemy within `radius` of `origin`. Sitting converts
+## are skipped like everywhere else (Firewarrior._melee_threat, the airship deck):
+## a unit under a preacher's spell is no valid target, and every ball on it reset
+## the conversion — a tower with a preacher AND firewarriors on it kept knocking
+## its own sermon over (user report 2026-09-05: braves that never converted).
 func _nearest_enemy(origin: Vector3, radius: float) -> Unit:
 	var best: Unit = null
 	var best_d: float = radius
 	for u in unit_manager.get_units_in_radius(origin, radius):
 		if u.tribe_id == tribe_id or u.state == Unit.State.DEAD or not u.is_targetable():
 			continue
+		if u.state == Unit.State.SIT:
+			continue   # sitting converts keep sitting
 		var d: float = _flat_dist(origin, u.position)
 		if d <= best_d:
 			best_d = d

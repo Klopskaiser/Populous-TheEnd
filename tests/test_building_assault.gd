@@ -294,6 +294,93 @@ func test_move_order_cancels_building_assault() -> void:
 	_free_world(w)
 
 
+## A unit that is INSIDE an enemy building (demolishing) can be recalled by an
+## explicit move order: the building releases it at the perimeter, it is back in
+## the world and walks off — the assault is over. Until 2026-09-05 the RAID check
+## in can_take_orders swallowed the order silently (user report: the shaman,
+## selectable through her portrait while inside, could not be pulled out).
+func test_move_order_recalls_a_raider() -> void:
+	var w: Dictionary = _make_world()
+	var hut: Building = w.bm.place(HUT_SCENE, w.tribe1, Vector2i(30, 30), 0, true)
+	for scene: PackedScene in [SHAMAN_SCENE, WARRIOR_SCENE]:
+		var unit: Unit = w.unit_manager.spawn_unit(scene, 0, Vector3(28, 0, 30))
+		check(hut.admit_raider(unit), "the unit enters the building as a raider")
+		check(unit.state == Unit.State.RAID and not unit.in_world,
+			"inside: RAID and out of the world")
+		unit.order_move(Vector3(20, 0, 20))
+		check(unit.state != Unit.State.RAID, "%s: the move order brings it back out" % unit.unit_kind())
+		check(unit.raiding_building == null, "no longer counted as inside")
+		check(unit.in_world and unit in w.unit_manager.units,
+			"re-registered — it ticks and is drawn again")
+		check(not (unit in hut.raiders), "the building forgot the raider")
+		check(unit.attack_building == null, "the assault is broken off, not resumed")
+		check(unit.state == Unit.State.MOVE or unit._pending_target != Vector3.INF,
+			"and the move itself is under way")
+	_free_world(w)
+
+
+## The same recall for the other explicit orders: attacking a unit, attacking a
+## DIFFERENT building, and — for the shaman — casting. Ordering the raider at the
+## very building it is already demolishing is a no-op: it stays inside.
+func test_other_orders_recall_a_raider_but_the_same_building_keeps_it() -> void:
+	var w: Dictionary = _make_world()
+	var hut: Building = w.bm.place(HUT_SCENE, w.tribe1, Vector2i(30, 30), 0, true)
+	var other: Building = w.bm.place(HUT_SCENE, w.tribe1, Vector2i(40, 30), 0, true)
+	# Far from both entrances: a defender near a door would refuse the entry.
+	var foe: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 1, Vector3(60, 0, 60))
+
+	var w1: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, Vector3(28, 0, 30))
+	check(hut.admit_raider(w1), "the first warrior enters the building")
+	w1.order_attack_building(hut)
+	check(w1.state == Unit.State.RAID and w1 in hut.raiders,
+		"ordered at the building it is already in: stays inside")
+
+	w1.order_attack(foe)
+	check(w1.state == Unit.State.ATTACK and w1.attack_target == foe,
+		"an attack order on a unit pulls the raider out and into that fight")
+
+	var w2: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, Vector3(28, 0, 30))
+	check(hut.admit_raider(w2), "the second warrior enters the building")
+	w2.order_attack_building(other)
+	check(w2.state == Unit.State.ATTACK and w2.attack_building == other,
+		"an order at ANOTHER building pulls the raider out and re-targets it")
+	check(not (w2 in hut.raiders), "the first building forgot it")
+
+	var sh: Shaman = w.unit_manager.spawn_unit(SHAMAN_SCENE, 0, Vector3(28, 0, 30)) as Shaman
+	check(hut.admit_raider(sh), "the shaman enters the building")
+	var spell: Spell = Spell.new()
+	spell.id = &"test"
+	spell.cast_range = 50.0
+	check(sh.order_cast(spell, Vector3(30, 0, 34), SpellContext.new()),
+		"a cast order is accepted while she is inside")
+	check(sh.state == Unit.State.CAST and sh.raiding_building == null,
+		"…and it brought her out of the building first")
+	_free_world(w)
+
+
+## A selected unit that vanishes into a building leaves the player's selection
+## at once. Unit.enter_building_as_raider only cleared the unit's own flag, so
+## the SelectionManager's list kept it: invisible, yet still addressed by the
+## next right-click — which, now that an order recalls a demolisher, would have
+## pulled the whole storming party back out of the building.
+func test_raider_drops_out_of_the_selection() -> void:
+	var w: Dictionary = _make_world()
+	var hut: Building = w.bm.place(HUT_SCENE, w.tribe1, Vector2i(30, 30), 0, true)
+	var sel: SelectionManager = SelectionManager.new()
+	sel.player_tribe_id = 0
+	sel.setup(w.unit_manager)
+	var raider: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, Vector3(28, 0, 30))
+	var bystander: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, Vector3(20, 0, 20))
+	sel.select_units([raider, bystander] as Array[Unit])
+	check(sel.selected.size() == 2, "both selected")
+	hut.admit_raider(raider)
+	check(sel.selected.size() == 1 and sel.selected[0] == bystander,
+		"entering the building dropped the raider from the selection")
+	check(not raider.selected, "and cleared its own flag")
+	sel.free()
+	_free_world(w)
+
+
 # --- Full pipeline: ordered warriors storm and level a building ---------------
 
 func test_ordered_warriors_storm_and_level_building() -> void:

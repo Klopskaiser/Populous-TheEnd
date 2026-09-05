@@ -1369,6 +1369,12 @@ func _marching_only(squad: Array[Unit]) -> Array[Unit]:
 		var target = u.attack_building
 		if target != null and is_instance_valid(target) and target.health > 0:
 			continue
+		# Already INSIDE, demolishing (State.RAID clears attack_building on
+		# entry). Since 2026-09-05 an explicit order pulls a raider back out of
+		# the building — this refresh must therefore skip them too, or the AI
+		# would yank its own demolishers out every ATTACK_ORDER_TICKS.
+		if u.raiding_building != null and is_instance_valid(u.raiding_building):
+			continue
 		out.append(u)
 	return out
 

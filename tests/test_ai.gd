@@ -2591,3 +2591,23 @@ func test_ai_spell_choice_is_deterministic_on_equal_costs() -> void:
 	var b: Array = [_spell_entry("aaa", 100.0), _spell_entry("bbb", 100.0)]
 	var second: Array[StringName] = AIState.spells_to_charge(b, 5.0, 120.0)
 	check(first == second, "equal costs resolve by id, not by input order")
+
+
+## The AI's march refresh leaves units that are INSIDE a building alone. Since an
+## explicit order recalls a demolisher (2026-09-05), re-issuing the attack-move
+## to them every ATTACK_ORDER_TICKS would have yanked the AI's own raiders back
+## out of the building they were tearing down.
+func test_marching_only_skips_demolishers_inside() -> void:
+	var w: Dictionary = _make_world()
+	var ai: AIController = _make_ai(w, w.tribes[0], Vector2i(64, 64))
+	var hut: Building = w.building_manager.place(HUT_SCENE, w.tribes[1], Vector2i(40, 40), 0, true)
+	var inside: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, Vector3(38, 0, 40))
+	var marching: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, Vector3(20, 0, 20))
+	var storming: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, Vector3(25, 0, 25))
+	storming.order_attack_building(hut)
+	check(hut.admit_raider(inside), "one warrior is inside the building")
+	var out: Array[Unit] = ai._marching_only([inside, marching, storming] as Array[Unit])
+	check(out.size() == 1 and out[0] == marching,
+		"only the plain marcher gets the refresh; storming and inside units keep their assault")
+	ai.free()
+	_free_world(w)

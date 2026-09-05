@@ -1264,12 +1264,32 @@ func can_take_orders() -> bool:
 		and not garrison_housed
 
 
+## An EXPLICIT order to a unit that is inside an enemy building (demolishing,
+## State.RAID) first brings it back out: the building releases it at its
+## perimeter — re-registered, idle — and the order then proceeds as for anyone
+## else. Only the explicit entry points (order_move / order_attack /
+## order_attack_building / Shaman.order_cast) call this; every automatic path
+## keeps refusing RAID through can_take_orders, so nothing pulls a demolisher
+## out on its own. Until 2026-09-05 the RAID check in can_take_orders swallowed
+## the order silently — the shaman, selectable through her portrait while inside,
+## could not be recalled from a building at all (user report).
+## Returns false when the unit could not be freed (the order is then dropped).
+func _leave_building_for_order() -> bool:
+	if state != State.RAID:
+		return true
+	var b = raiding_building
+	if b == null or not is_instance_valid(b):
+		return false   # no building to step out of: nothing sane to do here
+	b.release_raider(self)
+	return state != State.RAID
+
+
 ## Move order. queue_up appends the target as an additional waypoint
 ## (Shift+right-click), otherwise the current route is replaced. `aggressive`
 ## selects attack-move (engage enemies on the way) vs. plain move (default —
 ## also the flee order: breaks off the current fight).
 func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = false) -> void:
-	if not can_take_orders():
+	if not _leave_building_for_order() or not can_take_orders():
 		return
 	leave_crew()   # an explicit move order pulls the unit off its siege engine
 	garrison_target = null   # a move order abandons a pending garrison approach
@@ -2687,6 +2707,14 @@ func reset_conversion() -> void:
 	_stand_up(false)
 
 
+## Leaves SIT. A duel with the preacher comes first; otherwise the unit RESUMES
+## a building assault it was pulled out of (begin_conversion ends the unit
+## fight but deliberately keeps attack_building, exactly like a stumble does —
+## see _resume_after_stumble). Without this a brave whose sermon was broken
+## stood next to the tower for good: braves are no combatants, so their idle
+## tick re-engages nothing, and they took no orders while sitting either
+## (user report 2026-09-05: braves at a preacher tower that never converted
+## and never did anything else again).
 func _stand_up(fight_preacher: bool) -> void:
 	var p = converting_preacher
 	converting_preacher = null
@@ -2694,6 +2722,9 @@ func _stand_up(fight_preacher: bool) -> void:
 	_set_state(State.IDLE)
 	if fight_preacher and p != null and is_instance_valid(p) and p.state != State.DEAD:
 		_begin_attack(p)
+		return
+	if _building_target_valid() and attack_building.is_attackable():
+		_set_state(State.ATTACK)
 
 
 ## Switches this unit to `new_tribe` (conversion complete): tribe lists are
@@ -3165,6 +3196,8 @@ func _begin_attack(enemy: Unit) -> void:
 ## Public order entry used by TribeCommands.order_attack (UI + AI). Marks the
 ## target as ORDERED so ranged units stick to it instead of auto-retargeting.
 func order_attack(enemy: Unit) -> void:
+	if not _leave_building_for_order():
+		return
 	_begin_attack(enemy)
 	if attack_target == enemy:
 		_target_ordered = true
@@ -3191,6 +3224,10 @@ func _building_target_valid() -> bool:
 ## route is cleared. Firewarriors bombard, everyone else storms the entrance.
 func order_attack_building(building) -> void:
 	if building == null or not is_instance_valid(building) or building.health <= 0:
+		return
+	if state == State.RAID and raiding_building == building:
+		return   # already inside this very building, demolishing: stay
+	if not _leave_building_for_order():
 		return
 	if building.tribe_id == tribe_id or not can_take_orders():
 		return

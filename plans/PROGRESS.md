@@ -10253,3 +10253,84 @@ Durchlaeufe schlimmer waeren als eine etwas kleinere Streuung.
 Die Tests lesen den Wert aus `Balance`, das Jitterband und der Mittelwert werden
 also weiter gegen die konfigurierte Streuung geprueft, nicht gegen eine fest
 eingetragene Zahl.
+
+
+### Nachtrag 27 — Schamanin aus dem Gebaeude zurueckrufen (Nutzerreport, 2026-09-05)
+
+**Report:** Ist die Schamanin in ein feindliches Gebaeude zum Demolieren
+geschickt, laesst sie sich per Rechtsklick nicht mehr herausholen — obwohl sie
+ueber das Portrait weiterhin anwaehlbar ist.
+
+**Ursache:** `Unit.can_take_orders()` schliesst `State.RAID` pauschal aus, und
+`order_move()` bricht in seiner ersten Zeile daran ab — stumm, ohne Rueckmeldung.
+Eine Einheit im Gebaeude ist zudem **aus der Welt entfernt** (`remove_from_world`
+-> `unregister`): nicht gezeichnet, nicht klickbar, kein Tick. Es gab keinen
+Weg, eine EINZELNE Einheit auf Befehl herauszuholen — nur die drei
+Sammelpfade des Gebaeudes (Eingangsbedrohung, Einsturz, Katapultschuss).
+
+**Fix:** `Building.release_raider(unit)` laesst eine einzelne Einheit am Rand
+wieder heraus (re-registriert, IDLE, ohne Gebaeudeziel). `Unit._leave_building_for_order()`
+ruft das an den **expliziten** Befehlseingaengen auf — `order_move`,
+`order_attack`, `order_attack_building` (ausser auf genau das Gebaeude, in dem
+die Einheit schon steckt: dann bleibt sie drin) und `Shaman.order_cast`. Die
+automatischen Pfade (`_begin_attack`, Scans) lehnen RAID weiter ueber
+`can_take_orders` ab, es zieht also nichts von selbst einen Demolierer heraus.
+Das Re-Registrieren ist Pflicht: ohne `unit_manager.register()` bekaeme die
+Einheit zwar `State.MOVE`, wuerde aber nie wieder getickt oder gezeichnet.
+
+**Zwei Folgeschaeden, die der Rueckruf sichtbar gemacht haette:**
+- **Die Selektion leckte.** `enter_building_as_raider` setzte nur das eigene
+  `selected`-Feld, die Liste des `SelectionManager` behielt die Einheit — unsichtbar,
+  aber vom naechsten Rechtsklick weiter adressiert. Solange RAID jeden Befehl
+  schluckte, war das folgenlos; mit dem Rueckruf haette ein Rechtsklick nach dem
+  Sturm die **ganze Truppe** wieder aus dem Gebaeude gezogen. Neu: `UnitManager`
+  meldet `unit_left_world`, der `SelectionManager` wirft die Einheit sofort aus
+  der Selektion (gilt ebenso fuer Trainees, Huettenreserve, Werkstatt-/Foersterei-
+  Besatzung). Wer die Schamanin danach per Portrait **neu** anwaehlt, kann sie
+  herausholen — genau der gewuenschte Weg.
+- **Die KI haette ihre eigenen Raeuber herausgerissen.** `_tick_attack`/`_tick_defend`
+  erneuern den Marschbefehl alle `ATTACK_ORDER_TICKS` fuer die ganze Armee, und
+  `cache.army` kommt aus `tribe.units` — Raeuber bleiben Stammesmitglieder.
+  `_marching_only` filterte nur `attack_building`, das beim Betreten genullt wird.
+  Neu filtert es auch `raiding_building`.
+
+### Nachtrag 28 — Braves am Predigerturm, die nie bekehrt wurden (Nutzerreport, 2026-09-05)
+
+**Report:** Braves greifen einen Wachturm mit zwei Predigern an; Feuerkrieger auf
+dem Nachbarturm schiessen ein paar Mal, dann nicht mehr. Die Braves werden danach
+nie bekehrt, "sie sassen nur da".
+
+**Reproduktion:** Headless in zwei Geometrien (Braves in Reichweite; Braves
+marschieren von 18 m heran, Feuerkrieger-Turm 6 m neben dem Eingang) — beide
+Male sind nach 20 s alle Braves bekehrt oder tot. Der exakte Haenger liess sich
+nicht nachstellen. Zwei Defekte im Ablauf sind aber eindeutig und passen zur
+Beobachtung; beide sind behoben und getestet.
+
+**Defekt 1 — der Turm beschoss Sitzende.** `Watchtower._nearest_enemy` filterte
+`State.SIT` nicht, anders als `Firewarrior._melee_threat` und das Zeppelindeck.
+Laut Regelwerk (CLAUDE.md §4) sind Einheiten in Bekehrung kein Ziel fuer Nah-
+und Fernkampf; und jeder Feuerball auf einen Sitzenden ruft `reset_conversion()`
+— Fortschritt weg, Einheit steht auf. Ein Turm mit Prediger UND Feuerkriegern
+(oder der Nachbarturm) warf seine eigene Predigt immer wieder um. Genau das hat
+der Nutzer gesehen ("haben ein paar Mal draufgeschossen"). Neu ueberspringt der
+Turmschuetze Sitzende.
+
+**Defekt 2 — ein aus der Predigt gerissener Brave blieb fuer immer stehen.**
+`begin_conversion` beendet den Einheitenkampf (`_end_attack`), behaelt aber
+**absichtlich** `attack_building`. `_stand_up` ging danach blind nach IDLE — und
+ein Brave ist kein Kombattant: sein `_tick_idle` greift nichts wieder an, Befehle
+nahm er im Sitzen nicht an. Nach dem ersten Reset stand er also neben dem Turm
+und tat nie wieder etwas; lag er dabei ausserhalb der 8 m des Turmscans, wurde er
+auch nicht erneut pazifiziert. Neu nimmt `_stand_up` einen gueltigen
+Gebaeudeangriff **wieder auf** — dasselbe Muster wie `_resume_after_stumble`
+nach einem Sturz. Das Predigerduell (`fight_preacher`) hat weiter Vorrang, und
+eine Einheit ohne Gebaeudeziel geht wie bisher nach IDLE. Ende-zu-Ende im Test:
+der zurueckgekehrte Brave laeuft wieder in die Predigt und wird bekehrt — das
+Ergebnis, das im Report fehlte.
+
+**Nicht angefasst, aber notiert:** `station_channeling` des Turmpredigers wird nur
+in `_tick_active` gepflegt, und `Building.tick` sperrt `_tick_active`, sobald ein
+Raeuber im Turm steht oder der Turm ueber 30 % beschaedigt ist. Das Flag friert
+dann ein (Sitzende konvertieren weiter, neue werden nicht mehr pazifiziert) —
+konsistent mit "ein gestuermtes Gebaeude produziert nicht", aber wert, es zu
+kennen, falls der Haenger wieder auftaucht.

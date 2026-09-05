@@ -930,6 +930,22 @@ func _eject_raiders_to_fight() -> void:
 	raiders.clear()
 
 
+## Lets ONE demolisher step back out at the perimeter, alive and idle, without
+## a building target — the hook behind an explicit order to a unit that is
+## inside (Unit._leave_building_for_order). The caller issues the actual order
+## afterwards; re-registering here is mandatory, or the unit would carry its
+## new state around unregistered, never ticked and never drawn.
+func release_raider(unit) -> void:
+	var idx: int = raiders.find(unit)
+	if idx >= 0:
+		raiders.remove_at(idx)
+	if not is_instance_valid(unit) or unit.state == Unit.State.DEAD:
+		return
+	if unit_manager != null:
+		unit_manager.register(unit)
+	unit.exit_building_as_raider(edge_spawn_position())
+
+
 ## Releases the demolishers back into the world at the perimeter (alive, IDLE)
 ## when the building collapses — they tear it down and step out.
 func _release_raiders() -> void:

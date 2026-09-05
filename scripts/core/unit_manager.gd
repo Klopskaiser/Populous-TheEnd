@@ -117,6 +117,13 @@ var path_worker: PathWorker = null
 var units: Array[Unit] = []
 ## Live projectiles (Fireball), ticked here after the units.
 var projectiles: Array = []
+
+## A live unit left the simulated world into a building (raider, trainee, hut
+## reserve, workshop/forester crew). The SelectionManager drops it from the
+## player's selection on this — the unit's own `selected` flag going false was
+## not enough, the manager's list kept it and a later right-click still
+## addressed it.
+signal unit_left_world(unit: Unit)
 ## Registered combat groups (phase 8.2); pruned in _apply_combat_groups.
 var combat_groups: Array = []
 var _path_requests: Array[Unit] = []
@@ -1308,6 +1315,7 @@ func unregister(unit: Unit) -> void:
 ## combat unit. (unregister already leaves the tribe list alone.)
 func remove_from_world(unit: Unit) -> void:
 	unregister(unit)
+	unit_left_world.emit(unit)
 
 
 func _on_unit_died(unit: Unit) -> void:

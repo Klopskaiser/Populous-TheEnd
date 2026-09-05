@@ -100,6 +100,24 @@ func setup(p_unit_manager: UnitManager, p_tribe_commands: TribeCommands = null,
 	_build_menu = p_build_menu
 	_spell_targeting = p_spell_targeting
 	_building_manager = p_building_manager
+	if _unit_manager != null \
+			and not _unit_manager.unit_left_world.is_connected(_on_unit_left_world):
+		_unit_manager.unit_left_world.connect(_on_unit_left_world)
+
+
+## A selected unit vanished into a building (demolisher, trainee, hut reserve):
+## drop it right away. Unit.enter_building_as_raider only cleared the unit's own
+## flag, so the list here kept it — invisible (no ring, not in the world) yet
+## still addressed by the next right-click. That was harmless while RAID units
+## swallowed every order; since an order recalls a demolisher (2026-09-05) a
+## stale entry would pull the whole storming party back out of the building.
+func _on_unit_left_world(unit: Unit) -> void:
+	if unit == null or not is_instance_valid(unit):
+		return
+	var idx: int = selected.find(unit)
+	if idx >= 0:
+		selected.remove_at(idx)
+		unit.set_selected(false)
 
 
 func _ready() -> void:

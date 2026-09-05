@@ -288,6 +288,62 @@ func test_tower_preacher_chants_while_converting() -> void:
 	_free_world(w)
 
 
+# --- Sermon vs. the rest of the tower (user report 2026-09-05) ----------------
+
+## A tower firewarrior must NOT shoot a sitting convert: the ground firewarrior
+## and the airship deck already skip SIT, the tower did not — and every ball on a
+## sitter reset the conversion, so a tower with preacher AND firewarriors on it
+## knocked its own sermon over again and again.
+func test_tower_firewarrior_spares_sitting_converts() -> void:
+	var w: Dictionary = _make_world()
+	var tower: Watchtower = _tower(w, w.tribe0)
+	var fire: Unit = w.unit_manager.spawn_unit(FIREWARRIOR_SCENE, 0, Vector3(31, 0, 32))
+	tower.admit_crew(fire)
+	var foe: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, Vector3(33, 0, 31))
+	foe._set_state(Unit.State.SIT)
+	var hp: int = foe.health
+	for i in range(60):
+		w.unit_manager.tick(TICK)
+		w.bm.tick(TICK)
+	check(foe.health == hp, "a sitting convert at the tower foot is not fired at")
+	# Control: the same brave standing up IS shot at — the gunner was not idle.
+	foe._set_state(Unit.State.IDLE)
+	var fired: int = _run(w, [], func() -> bool: return foe.health < hp)
+	check(fired < MAX_TICKS, "…but once it stands up the fireballs come")
+	_free_world(w)
+
+
+## A brave storming a tower gets pacified by the tower preacher and then loses
+## the sermon (a fireball reset here). It must RESUME the assault, not freeze:
+## braves are no combatants, so their idle tick re-engages nothing — before this
+## fix a brave whose conversion was interrupted stood next to the tower for good,
+## never attacking, never converted (user report: "they just sat there").
+func test_brave_released_from_sermon_resumes_the_assault() -> void:
+	var w: Dictionary = _make_world()
+	var tower: Watchtower = _tower(w, w.tribe0)
+	var preacher: Unit = w.unit_manager.spawn_unit(PREACHER_SCENE, 0, Vector3(31, 0, 32))
+	tower.admit_crew(preacher)
+	var brave: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, Vector3(45, 0, 31))
+	brave.order_attack_building(tower)
+	var sat: int = _run(w, [brave], func() -> bool: return brave.state == Unit.State.SIT)
+	check(sat < MAX_TICKS, "the storming brave is pacified on its way in")
+	check(brave.attack_building == tower, "the building order survives the sermon")
+	brave.reset_conversion()   # what a fireball hit does to a sitter
+	check(brave.state == Unit.State.ATTACK, "released: it resumes the assault")
+	check(brave.attack_building == tower, "…on the same tower")
+	# And a released unit WITHOUT a building order simply goes idle as before.
+	var loner: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, Vector3(36, 0, 31))
+	var sat2: int = _run(w, [loner], func() -> bool: return loner.state == Unit.State.SIT)
+	check(sat2 < MAX_TICKS, "a bystander is pacified too")
+	loner.reset_conversion()
+	check(loner.state == Unit.State.IDLE, "released without an order: idle, as before")
+	# End to end: left alone with the preacher, the storming brave gets converted
+	# after all — which is the outcome the report was missing.
+	var converted: int = _run(w, [brave], func() -> bool: return brave.tribe_id == 0)
+	check(converted < MAX_TICKS, "the resumed assault walks it back into the sermon and it converts")
+	_free_world(w)
+
+
 # --- Range bonus: shaman casts from the tower --------------------------------
 
 func test_shaman_casts_from_tower_with_range_bonus() -> void:

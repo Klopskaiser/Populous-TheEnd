@@ -102,7 +102,7 @@ func order_cast(spell: Spell, target: Vector3, ctx: SpellContext,
 			_emit_spell_cast(spell, target)
 			return true
 		return false
-	if not can_take_orders():
+	if not _leave_building_for_order() or not can_take_orders():
 		return false
 	_end_attack()
 	waypoint_queue.clear()
