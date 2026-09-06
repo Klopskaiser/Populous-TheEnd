@@ -9,6 +9,26 @@ Verifikationsstand. Auch bei nachträglichen Erweiterungen außerhalb einer Phas
 
 ---
 
+## Balance-Labor nach der Feuerkrieger-Zieldisziplin (2026-09-06)
+
+A/B über `git worktree` (Stand `86120c2` vor der Zielwahl-Änderung gegen `6b42d27`
+danach), je 5 Wiederholungen, 200 gegen 200, flache Karte:
+
+| Paarung (A = Feuerkrieger) | Siege | B übrig vorher → nachher | Schaden FK vorher → nachher | Effizienz A |
+|---|---|---|---|---|
+| gegen Krieger, ~46 m Anmarsch | 0:5 → 0:5 | 133,0 → **102,0** | 64 % → **78 %** | 0,34 → **0,49** |
+| gegen Krieger, Sofortkontakt | 0:5 → 0:5 | 142,2 → **111,6** | 60 % → **73 %** | 0,29 → **0,44** |
+| gegen Prediger, Anmarsch | 0:5 → 0:5 | 112,6 → **74,8** | 54 % → **70 %** | 1,83 → 1,47 (Bekehrte 152 → **115**) |
+
+Lesart: „Reichweite vor Verfolgen" bringt den Feuerkriegern in allen drei Paarungen
+**+13 bis +16 Prozentpunkte Schadensanteil** und nimmt den Predigern ein Viertel ihrer
+Bekehrungen — sie verlieren aber weiterhin alle Paarungen glatt. Das ist der Zustand
+seit dem Wegfall des Freischusses (Nachtrag 10/11: Effizienz 2,68 → 0,18 → 0,38 → jetzt
+0,49); die Kampfkraft der Feuerkrieger selbst (Cooldown 1,5 s, 9 HP, Splash 30 %/1,3 m)
+ist unverändert und eine offene Balance-Entscheidung. Die Effizienz gegen Prediger sinkt
+scheinbar (1,83 → 1,47), weil die Feuerkrieger jetzt weiter kämpfen statt bekehrt zu
+werden — „verlorene BÄ" zählt Bekehrte wie Tote.
+
 ## Golem-Nachschärfung + Zieldisziplin Golem/Feuerkrieger (2026-09-06, Spieltest 2)
 
 Nutzer: „der Golem ist viel zu schwach" und Feuerkrieger/Golem verfolgen Ziele, statt
