@@ -9,6 +9,32 @@ Verifikationsstand. Auch bei nachträglichen Erweiterungen außerhalb einer Phas
 
 ---
 
+## Golem-Nachschärfung + Zieldisziplin Golem/Feuerkrieger (2026-09-06, Spieltest 2)
+
+Nutzer: „der Golem ist viel zu schwach" und Feuerkrieger/Golem verfolgen Ziele, statt
+zu schlagen, was vor ihnen steht.
+- **Golem** (`balance.gd`): 400 → **800 LP**, +3 → **+6 s je Kill**, Effektchance 25/25 →
+  **30/30 %**. Wirkfeld jetzt **gesamte Hitbox** (`GOLEM_BODY_HALF_WIDTH` 2,0 ×
+  `GOLEM_BODY_HALF_DEPTH` 1,5) **plus** das 2 × 3-Feld davor (bis along 4,5) —
+  `Golem.in_strike_area(along, side)` als statisches Prädikat, Gebäude-Samples laufen
+  von −1,0 bis 4,0 mit der Halbbreite ihrer Region. Vorher begann das Feld im
+  Golem-Zentrum, Gegner neben oder hinter ihm blieben unversehrt.
+- **Golem-Zielwahl** (`Golem._tick_attack`): ist das Ziel außer Reichweite oder in der
+  Luft, wird zuerst `_nearest_enemy_in_reach()` (3 m, stehend, kein Sitzender/Flieger/
+  Gerät) angegriffen; nur ohne nahen Gegner wird verfolgt, ein fliegendes Ziel wird
+  abgewartet statt gejagt. Der Retarget behält den Cooldown (State bleibt ATTACK).
+- **Feuerkrieger** (`firewarrior.gd`): `_retarget_by_reach()` ersetzt den alten
+  Priester-Swap im Scan-Fenster — Priester in **Feuerreichweite** immer, sonst bei Ziel
+  außer Reichweite der nächste Gegner **in** Reichweite, erst ohne Schießbares der
+  Priester bis zum Aggro-Radius. `_scan_for_enemy` in derselben Reihenfolge (Priester
+  ≤ 8 m, Gegner ≤ 8 m, Priester ≤ radius, Gegner ≤ radius). Alt-Tests zur
+  Priesterpriorität bleiben grün (ihre Priester stehen in Reichweite).
+- Tests: `test_golem.gd` (Hitbox-Feld mit 8 Positionen, Retarget-vor-Verfolgen, neue
+  Zahlen), `test_combat.gd::test_firewarrior_shoots_in_range_enemy_instead_of_chasing_far_priest`.
+  **Stolperstein:** ein `%` mit folgendem Leerzeichen in einer `check()`-Meldung ist ein
+  ungültiges Format („String formatting error"), der Test läuft trotzdem grün — Meldung
+  ohne Prozentzeichen schreiben.
+
 ## Schamanin-Luftschrei, Feuerregen ohne Freund/Feind, Zauber 13 „Golem beschwören" (2026-09-06)
 
 Drei Nutzerwünsche aus dem Spieltest.

@@ -64,13 +64,8 @@ func _tick_attack(delta: float) -> void:
 		var threat: Unit = _melee_threat()
 		if threat != null:
 			_begin_attack(threat)
-		elif not _target_ordered and attack_target.unit_kind() != &"preacher":
-			# Priest priority: while not brawling AND not on an explicit order,
-			# switch to an enemy preacher in range — killing it stops mass
-			# conversions. An ordered target is honoured and never auto-swapped.
-			var priest: Unit = _nearest_enemy_priest(aggro_radius())
-			if priest != null and priest != attack_target:
-				_begin_attack(priest)
+		elif not _target_ordered:
+			_retarget_by_reach(attack_target)
 	var target: Unit = attack_target
 	var dist: float = _flat_dist(position, target.position)
 	if dist <= MELEE_RANGE:
@@ -122,11 +117,46 @@ func _tick_attack(delta: float) -> void:
 		_enter_soa_hold(maxf(_target_search_timer, 0.0), UnitManager.HOLD_FIRE)
 
 
-## Target selection prefers an enemy preacher in range (firewarriors hunt
-## priests, which convert whole squads); otherwise the base nearest-enemy logic.
-## Used by the idle/attack-move engage and by re-targeting after a kill.
+## Auto retarget while fighting (not under an explicit order). Reach beats
+## priority (user feedback 2026-09-06 — firewarriors used to run after a priest
+## across the field while enemies stood right in front of them):
+## 1. a priest INSIDE fire range is always taken (priests convert whole squads);
+## 2. otherwise, if the current target is OUT of fire range, whoever is already
+##    in range is shot instead of chasing;
+## 3. only with nobody in range at all is a priest out to the aggro radius hunted.
+func _retarget_by_reach(current: Unit) -> void:
+	var priest_near: Unit = _nearest_enemy_priest(FIRE_RANGE)
+	if priest_near != null:
+		if priest_near != current:
+			_begin_attack(priest_near)
+		return
+	if _flat_dist(position, current.position) <= FIRE_RANGE:
+		return   # the current target is shootable — stay on it
+	var near: Unit = super._scan_for_enemy(FIRE_RANGE)
+	if near != null and near != current:
+		_begin_attack(near)
+		return
+	if near == null and current.unit_kind() != &"preacher":
+		var priest: Unit = _nearest_enemy_priest(aggro_radius())
+		if priest != null and priest != current:
+			_begin_attack(priest)
+
+
+## Target selection: a priest INSIDE fire range first (firewarriors hunt priests,
+## which convert whole squads), then the nearest enemy in fire range, then — with
+## nobody shootable from here — a priest out to `radius`, then the nearest enemy
+## out to `radius`. Used by the idle/attack-move engage and by re-targeting after
+## a kill. Until 2026-09-06 a priest anywhere in the aggro radius won outright,
+## which sent firewarriors chasing priests past enemies already in range.
 func _scan_for_enemy(radius: float, max_examined: int = 0) -> Unit:
-	var priest: Unit = _nearest_enemy_priest(radius)
+	var near_radius: float = minf(radius, FIRE_RANGE)
+	var priest: Unit = _nearest_enemy_priest(near_radius)
+	if priest != null:
+		return priest
+	var near: Unit = super._scan_for_enemy(near_radius, max_examined)
+	if near != null or radius <= FIRE_RANGE:
+		return near
+	priest = _nearest_enemy_priest(radius)
 	if priest != null:
 		return priest
 	return super._scan_for_enemy(radius, max_examined)

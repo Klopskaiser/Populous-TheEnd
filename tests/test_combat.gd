@@ -395,6 +395,36 @@ func test_firewarrior_prioritises_enemy_priests() -> void:
 	_free_world(w)
 
 
+## Reichweite schlaegt Prioritaet (Nutzerfeedback 2026-09-06): ein Priester
+## AUSSERHALB der Feuerreichweite zieht den Feuerkrieger nicht von einem Gegner
+## weg, der schon in Reichweite steht — erst wenn niemand mehr schiessbar ist,
+## wird der Priester gejagt.
+func test_firewarrior_shoots_in_range_enemy_instead_of_chasing_far_priest() -> void:
+	var w: Dictionary = _make_world()
+	var fw: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(30, 30))
+	fw.max_health = 100000
+	fw.health = 100000
+	var brave_enemy: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(35, 30))   # 5 m: in fire range
+	brave_enemy.max_health = 100000
+	brave_enemy.health = 100000
+	var priest: Unit = _spawn(w, PREACHER_SCENE, 1, Vector2(41, 30))     # 11 m: aggro, NOT fire range
+	priest.max_health = 100000
+	priest.health = 100000
+	w.unit_manager.tick(TICK)
+	check(fw._scan_for_enemy(fw.aggro_radius()) == brave_enemy,
+		"the idle scan takes the brave in range, not the far priest")
+	_run(w, [fw], func() -> bool: return fw.attack_target == brave_enemy)
+	for i in range(30):   # several scan windows: no flip to the far priest
+		fw.tick(TICK)
+		w.unit_manager.tick(TICK)
+	check(fw.attack_target == brave_enemy, "it keeps shooting the brave in range")
+	# The brave is gone: nobody shootable from here -> now the priest is hunted.
+	brave_enemy.take_damage(1000000)
+	_run(w, [fw], func() -> bool: return fw.attack_target == priest)
+	check(fw.attack_target == priest, "with nobody in range it goes for the priest")
+	_free_world(w)
+
+
 ## An AUTO-acquired firewarrior (idle engage, no explicit order) still switches to
 ## an enemy priest that comes into range mid-fight — priest priority is preserved
 ## for auto targets.

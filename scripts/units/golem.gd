@@ -5,12 +5,14 @@ class_name Golem extends Unit
 ## (GOLEM_HP), langsam schlagend und zeitlich begrenzt.
 ##
 ## Kampf: FLAECHEN-Nahkampf. Sobald das Ziel innerhalb GOLEM_REACH steht, schlaegt
-## der Golem alle GOLEM_STRIKE_COOLDOWN Sekunden in ein Rechteck VOR sich
-## (GOLEM_FIELD_WIDTH x GOLEM_FIELD_LENGTH, im Blickrahmen wie die Flamme der
-## Feuerramme): jeder Feind darin nimmt GOLEM_DAMAGE, ueberlebende werden mit je
-## 25 % hochgewirbelt oder ins Rollen gebracht — vom Golem weg; jedes feindliche
-## Gebaeude im Feld verliert eine Zerstoerungsstufe. Sitzende (Bekehrung) werden
-## wie beim Katapult mitgetroffen; eigene Einheiten nie.
+## der Golem alle GOLEM_STRIKE_COOLDOWN Sekunden in seine GESAMTE Hitbox (4 x 3 m)
+## PLUS ein Rechteck VOR ihr (GOLEM_FIELD_WIDTH x GOLEM_FIELD_LENGTH, im
+## Blickrahmen wie die Flamme der Feuerramme): jeder Feind darin nimmt
+## GOLEM_DAMAGE, Ueberlebende werden mit je 30 % hochgewirbelt oder ins Rollen
+## gebracht — vom Golem weg; jedes feindliche Gebaeude im Feld verliert eine
+## Zerstoerungsstufe. Sitzende (Bekehrung) werden wie beim Katapult
+## mitgetroffen; eigene Einheiten nie. Ziele in Reichweite gehen immer vor dem
+## Verfolgen weggeschleuderter (_tick_attack).
 ##
 ## Der Golem haelt sich NICHT an die Kampfgruppenregeln (3er-Ringe, Warteringe):
 ## `_is_ranged()` ist der vorhandene Schalter dafuer — kein _bind_to_fight, der
@@ -25,8 +27,14 @@ class_name Golem extends Unit
 ## brennt nur mit GOLEM_BURN_DPS und ohne Panik. Nimmt sonst normalen Schaden.
 
 const REACH: float = Balance.GOLEM_REACH
+## Strike area in the heading frame (along = forward, side = right):
+## the whole body box |side| <= BODY_HALF_WIDTH, -BODY_HALF_DEPTH <= along <=
+## BODY_HALF_DEPTH, plus the field in front |side| <= FIELD_HALF_WIDTH,
+## BODY_HALF_DEPTH < along <= FIELD_END.
+const BODY_HALF_WIDTH: float = Balance.GOLEM_BODY_HALF_WIDTH
+const BODY_HALF_DEPTH: float = Balance.GOLEM_BODY_HALF_DEPTH
 const FIELD_HALF_WIDTH: float = Balance.GOLEM_FIELD_WIDTH * 0.5
-const FIELD_LENGTH: float = Balance.GOLEM_FIELD_LENGTH
+const FIELD_END: float = Balance.GOLEM_BODY_HALF_DEPTH + Balance.GOLEM_FIELD_LENGTH
 const STRIKE_COOLDOWN: float = Balance.GOLEM_STRIKE_COOLDOWN
 ## Fraction of REACH the golem walks in to when closing on a building (see
 ## Unit.stand_off_point / SiegeEngine.APPROACH_RANGE_FRACTION).
@@ -174,16 +182,28 @@ func _begin_attack(enemy: Unit) -> void:
 ## Lean attack loop without the group machinery: close to REACH, then strike the
 ## field in front on cooldown. Stays object-ticked (no SoA melee hold) — there are
 ## only ever a handful of golems.
+##
+## Target discipline (user feedback 2026-09-06): the golem does NOT run after a
+## target it just hurled away while other enemies stand within reach — it turns
+## on the nearest one in reach instead. Only when nobody is in reach does it
+## chase; a target still in the air is waited for, not followed.
 func _tick_attack(delta: float) -> void:
 	if not _unit_target_attackable(attack_target) or attack_target.tribe_id == tribe_id:
 		_tick_no_unit_target(delta)
 		return
 	var target: Unit = attack_target
-	if target.is_airborne():
-		_retarget_or_idle()
-		return
 	var dist: float = _flat_dist(position, target.position)
-	if dist > REACH:
+	if dist > REACH or target.is_airborne():
+		var near: Unit = _nearest_enemy_in_reach()
+		if near != null and near != target:
+			_begin_attack(near)   # retarget keeps the cooldown (state stays ATTACK)
+			return
+		if target.is_airborne():
+			_in_melee = false
+			if _has_path():
+				_clear_path()
+			_face_point(target.position)   # wait for the body to land
+			return
 		_in_melee = false
 		if not _approach(target.position, delta):
 			_mark_target_unreachable(target)
@@ -199,6 +219,26 @@ func _tick_attack(delta: float) -> void:
 	if _attack_cooldown <= 0.0:
 		_attack_cooldown = STRIKE_COOLDOWN
 		_smash()
+
+
+## Nearest living, standing enemy within REACH that the golem can strike (no
+## flyers, no sitting converts, no devices); null when nobody is that close.
+func _nearest_enemy_in_reach() -> Unit:
+	if path_service == null:
+		return null
+	var best: Unit = null
+	var best_d: float = INF
+	for u in path_service.get_units_in_radius(position, REACH):
+		if u == self or u.tribe_id == tribe_id or u.state == State.DEAD \
+				or u.state == State.SIT:
+			continue
+		if not u.is_targetable() or u.is_airborne() or u is CrewedVehicle:
+			continue
+		var d: float = _flat_dist(position, u.position)
+		if d < best_d:
+			best_d = d
+			best = u
+	return best
 
 
 ## Building assault from OUTSIDE (the _is_ranged() dispatch lands here): walk to
@@ -226,9 +266,18 @@ func _bombard_building(building, delta: float) -> void:
 			building.apply_destruction_stages(Balance.GOLEM_BUILDING_STAGES)
 
 
-## The area strike: everything in the FIELD_LENGTH x 2*FIELD_HALF_WIDTH rectangle
-## in front of the golem (heading frame, flat in XZ — same geometry as the fire
-## ram's flame). Returns the buildings it hit (keys) so _bombard_building can
+## True when the point at (along, side) in the heading frame lies inside the
+## strike area: the golem's own body box or the field in front of it.
+static func in_strike_area(along: float, side: float) -> bool:
+	if along >= -BODY_HALF_DEPTH and along <= BODY_HALF_DEPTH \
+			and absf(side) <= BODY_HALF_WIDTH:
+		return true
+	return along > BODY_HALF_DEPTH and along <= FIELD_END and absf(side) <= FIELD_HALF_WIDTH
+
+
+## The area strike: everything inside in_strike_area — the golem's whole body box
+## plus the field in front of it (heading frame, flat in XZ — same geometry as the
+## fire ram's flame). Returns the buildings it hit (keys) so _bombard_building can
 ## top up its target. Kills extend the lifetime.
 func _smash() -> Dictionary:
 	attack_anim = &"punch"
@@ -242,8 +291,9 @@ func _smash() -> Dictionary:
 	var right: Vector3 = Vector3(-forward.z, 0.0, forward.x)
 	var struck_buildings: Dictionary = {}
 	if path_service != null:
-		var centre: Vector3 = position + forward * (FIELD_LENGTH * 0.5)
-		var broad: float = FIELD_LENGTH * 0.5 + FIELD_HALF_WIDTH + 0.5
+		# Broad phase: a circle around the middle of the whole area (body + field).
+		var centre: Vector3 = position + forward * ((FIELD_END - BODY_HALF_DEPTH) * 0.5)
+		var broad: float = (FIELD_END + BODY_HALF_DEPTH) * 0.5 + BODY_HALF_WIDTH + 0.5
 		for u in path_service.get_units_in_radius(centre, broad):
 			if u == self or u.state == State.DEAD or u.tribe_id == tribe_id:
 				continue
@@ -252,7 +302,7 @@ func _smash() -> Dictionary:
 			var rel: Vector3 = u.position - position
 			var along: float = rel.x * forward.x + rel.z * forward.z
 			var side: float = rel.x * right.x + rel.z * right.z
-			if along < 0.0 or along > FIELD_LENGTH or absf(side) > FIELD_HALF_WIDTH:
+			if not in_strike_area(along, side):
 				continue
 			u.take_damage(Balance.GOLEM_DAMAGE, self)
 			if not is_instance_valid(u) or u.state == State.DEAD or u.doomed:
@@ -274,17 +324,22 @@ func _smash() -> Dictionary:
 		# Centreline samples like the ram's blast; duplicate() because a stage
 		# can level a construction site and mutate the list.
 		var candidates: Array = building_manager.buildings.duplicate()
-		for i in range(int(FIELD_LENGTH)):
-			var sample: Vector3 = position + forward * (0.5 + float(i))
+		# Centreline samples from the back of the body to the end of the field,
+		# each with the half-width of the region it lies in.
+		var along: float = -BODY_HALF_DEPTH + 0.5
+		while along < FIELD_END:
+			var sample: Vector3 = position + forward * along
 			var flat: Vector2 = Vector2(sample.x, sample.z)
+			var half: float = BODY_HALF_WIDTH if along <= BODY_HALF_DEPTH else FIELD_HALF_WIDTH
 			for b in candidates:
 				if not is_instance_valid(b) or b.health <= 0 or struck_buildings.has(b):
 					continue
 				if b.tribe_id == tribe_id or not b.is_attackable():
 					continue
-				if b.footprint_distance_to(flat) <= FIELD_HALF_WIDTH:
+				if b.footprint_distance_to(flat) <= half:
 					struck_buildings[b] = true
 					b.apply_destruction_stages(Balance.GOLEM_BUILDING_STAGES)
+			along += 1.0
 	return struck_buildings
 
 

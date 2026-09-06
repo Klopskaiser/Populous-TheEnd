@@ -2,10 +2,10 @@ extends TestBase
 
 ## Zauber 13 "Golem beschwören" (2026-09-06): beschwoert am Zielpunkt einen
 ## grossen, zeitlich begrenzten Steinriesen mit Flaechen-Nahkampf. Diese Datei
-## nagelt die Nutzer-Spezifikation fest: 400 LP, 3,5 m/s, Reichweite 3 m,
-## Wirkfeld 2 x 3 m vor ihm, 20 Schaden, 1 Gebaeudestufe je Schlag, 2 s
-## Nachladen, je 25 % Hochwirbeln/Rollen, keine Kampfgruppen, 180 s Lebenszeit
-## (+3 s je Kill), immun gegen Bekehrung/Hypnose/Panik/Wurf/Rollen, brennt nur
+## nagelt die Nutzer-Spezifikation fest: 800 LP, 3,5 m/s, Reichweite 3 m,
+## Wirkfeld = ganze Hitbox + 2 x 3 m davor, 20 Schaden, 1 Gebaeudestufe je Schlag, 2 s
+## Nachladen, je 30 % Hochwirbeln/Rollen, keine Kampfgruppen, 180 s Lebenszeit
+## (+6 s je Kill), immun gegen Bekehrung/Hypnose/Panik/Wurf/Rollen, brennt nur
 ## mit 5 Schaden/s.
 
 const GameStateScript: GDScript = preload("res://scripts/core/game_state.gd")
@@ -108,7 +108,7 @@ func test_summon_spawns_a_golem_and_spends_a_charge() -> void:
 		check(g.tribe_id == 0 and g in w.t0.units, "it belongs to the caster")
 		check(Vector2(g.position.x - 50.0, g.position.z - 50.0).length() < 1.5,
 			"it stands at (or right next to) the target point")
-		check(g.health == 400 and is_equal_approx(g.speed, 3.5), "400 LP, 3,5 m/s")
+		check(g.health == 800 and is_equal_approx(g.speed, 3.5), "800 LP, 3,5 m/s")
 	check(w.t0.population() == pop, "a golem is not population")
 	check(is_equal_approx(w.t0.mana_rate(), rate), "and produces no mana")
 	_free_world(w)
@@ -159,28 +159,68 @@ func test_golem_engages_without_a_melee_seat() -> void:
 	_free_world(w)
 
 
-func test_smash_hits_the_field_in_front_and_spares_friends() -> void:
+## Wirkfeld = die ganze Hitbox (4 x 3 m: |side| <= 2, along -1,5..1,5) PLUS das
+## 2 x 3-m-Feld davor (along 1,5..4,5, |side| <= 1). Golem bei (50, 50), Blick +Z.
+func test_smash_hits_body_box_and_field_in_front_and_spares_friends() -> void:
 	var w: Dictionary = _make_world()
 	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
 	g.facing = Vector3(0, 0, 1)
-	var in_a: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50.0, 5, 51.5))    # centre line
-	var in_b: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50.8, 5, 52.5))    # side 0,8 <= 1
-	var out_side: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(52.0, 5, 51.0))  # side 2,0
-	var out_far: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50.0, 5, 54.0))   # along 4,0
-	var behind: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50.0, 5, 48.5))    # along < 0
+	var in_front_a: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50.0, 5, 52.5))   # field, centre
+	var in_front_b: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50.8, 5, 54.3))   # field, side 0,8, along 4,3
+	var beside: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(51.8, 5, 50.0))       # body box, side 1,8
+	var in_back: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50.0, 5, 48.7))      # body box, along -1,3
+	var out_field_side: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(51.5, 5, 52.5))  # field row, side 1,5
+	var out_far: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50.0, 5, 55.0))      # along 5,0 > 4,5
+	var out_back: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50.0, 5, 47.8))     # along -2,2 < -1,5
+	var out_side: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(52.4, 5, 50.0))     # side 2,4 > 2
 	var friend: Unit = _spawn(w, BRAVE_SCENE, 0, Vector3(50.0, 5, 52.0))
-	for u in [in_a, in_b, out_side, out_far, behind, friend]:
+	for u in [in_front_a, in_front_b, beside, in_back, out_field_side, out_far, out_back,
+			out_side, friend]:
 		u.max_health = 1000
 		u.health = 1000
 	g._smash()
-	check(in_a.health == 1000 - Balance.GOLEM_DAMAGE, "the brave on the centre line takes 20")
-	check(in_b.health == 1000 - Balance.GOLEM_DAMAGE, "the brave 0,8 m to the side takes 20")
-	check(out_side.health == 1000, "2 m to the side is outside the 2-m-wide field")
-	check(out_far.health == 1000, "4 m ahead is beyond the 3-m field")
-	check(behind.health == 1000, "nothing behind the golem is hit")
-	check(friend.health == 1000, "own units in the field are never hit")
+	check(in_front_a.health == 1000 - Balance.GOLEM_DAMAGE, "centre of the field takes 20")
+	check(in_front_b.health == 1000 - Balance.GOLEM_DAMAGE, "0,8 m aside at 4,3 m takes 20")
+	check(beside.health == 1000 - Balance.GOLEM_DAMAGE, "standing IN the body box takes 20")
+	check(in_back.health == 1000 - Balance.GOLEM_DAMAGE, "the back of the body box counts too")
+	check(out_field_side.health == 1000, "1,5 m aside in the front field is outside (2 m wide)")
+	check(out_far.health == 1000, "5 m ahead is beyond the field (ends at 4,5 m)")
+	check(out_back.health == 1000, "2,2 m behind is outside the body box")
+	check(out_side.health == 1000, "2,4 m aside is outside the 4-m-wide body box")
+	check(friend.health == 1000, "own units in the area are never hit")
 	check(g.attack_anim == &"punch", "the strike plays the punch animation")
+	check(Golem.in_strike_area(0.0, 0.0) and Golem.in_strike_area(4.5, 1.0)
+		and not Golem.in_strike_area(4.51, 0.0) and not Golem.in_strike_area(1.6, 1.1),
+		"the area predicate has the documented edges")
 	_free_world(w)
+
+
+## Zielwahl (Nutzerfeedback): wer in Reichweite steht, wird geschlagen — dem
+## weggeschleuderten Ziel wird erst nachgelaufen, wenn niemand mehr nah ist.
+func test_golem_turns_on_the_nearest_enemy_in_reach_before_chasing() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
+	var far: Unit = _spawn(w, WARRIOR_SCENE, 1, Vector3(57, 5, 50))    # 7 m: out of reach
+	var near: Unit = _spawn(w, WARRIOR_SCENE, 1, Vector3(52, 5, 50))   # 2 m: in reach
+	for u in [far, near]:
+		u.max_health = 100000
+		u.health = 100000
+	g.order_attack(far)
+	check(g.attack_target == far, "ordered onto the far one")
+	_tick_world(w)
+	check(g.attack_target == near, "...but turns on the enemy already in reach")
+	# Nobody in reach any more: now it chases.
+	near.take_damage(1000000)
+	_tick_world(w)
+	for i in range(20):
+		_tick_world(w)
+	check(g.attack_target == far, "with nobody near it goes for the far one")
+	check(_flat_dist(g.position, far.position) < 7.0, "and closes in on it")
+	_free_world(w)
+
+
+func _flat_dist(a: Vector3, b: Vector3) -> float:
+	return Vector2(a.x - b.x, a.z - b.z).length()
 
 
 func test_smash_throws_or_rolls_a_quarter_each_away_from_the_golem() -> void:
@@ -205,11 +245,11 @@ func test_smash_throws_or_rolls_a_quarter_each_away_from_the_golem() -> void:
 			untouched += 1
 		v.take_damage(100000)   # clear the field for the next trial
 		w.um.tick(TICK)
-	check(lifted > trials * 0.15 and lifted < trials * 0.35,
-		"about a quarter are whirled up (%d of %d)" % [lifted, trials])
-	check(rolled > trials * 0.15 and rolled < trials * 0.35,
-		"about a quarter are sent rolling (%d of %d)" % [rolled, trials])
-	check(untouched > trials * 0.35, "the rest just take the hit (%d of %d)" % [untouched, trials])
+	check(lifted > trials * 0.2 and lifted < trials * 0.4,
+		"about 30 percent are whirled up (%d of %d)" % [lifted, trials])
+	check(rolled > trials * 0.2 and rolled < trials * 0.4,
+		"about 30 percent are sent rolling (%d of %d)" % [rolled, trials])
+	check(untouched > trials * 0.25, "the rest just take the hit (%d of %d)" % [untouched, trials])
 	_free_world(w)
 
 
@@ -276,13 +316,14 @@ func test_lifetime_runs_out_and_kills_extend_it() -> void:
 	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
 	check(is_equal_approx(g.life_left, Balance.GOLEM_LIFETIME), "starts with 180 s")
 	g.facing = Vector3(0, 0, 1)
-	var weak: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50, 5, 51.5))
+	var weak: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50, 5, 52.5))
 	weak.health = 10
 	g._smash()
 	check(weak.state == Unit.State.DEAD, "the strike killed the weak brave")
 	check(g.kills == 1, "the kill is credited")
-	check(is_equal_approx(g.life_left, Balance.GOLEM_LIFETIME + Balance.GOLEM_LIFE_PER_KILL),
-		"and buys 3 more seconds")
+	check(is_equal_approx(g.life_left, Balance.GOLEM_LIFETIME + Balance.GOLEM_LIFE_PER_KILL)
+		and is_equal_approx(Balance.GOLEM_LIFE_PER_KILL, 6.0),
+		"and buys 6 more seconds")
 	g.life_left = 1.0
 	for i in range(12):
 		g.tick(TICK)
@@ -312,7 +353,7 @@ func test_immunities() -> void:
 	check(not g.can_crew_siege() and not g.can_garrison(), "neither crew nor garrison")
 	check(g.is_targetable(), "but it IS a normal attack target")
 	g.take_damage(50)
-	check(g.health == 350, "and takes normal damage")
+	check(g.health == 750, "and takes normal damage")
 	check(not g.renders_as_sprite() and g.pick_size_m().x > 0.0,
 		"drawn as a 3D model with a hull-sized pick rect")
 	_free_world(w)
@@ -325,7 +366,7 @@ func test_burning_is_a_trickle_without_panic() -> void:
 	check(g.is_burning(), "fire does catch")
 	check(g.state != Unit.State.PANIC, "but the golem does not panic")
 	var after_contact: int = g.health
-	check(after_contact == 400 - Balance.LAVA_CONTACT_DAMAGE, "the lava contact hit applies")
+	check(after_contact == 800 - Balance.LAVA_CONTACT_DAMAGE, "the lava contact hit applies")
 	for i in range(10):   # 1 s of burning
 		g.tick(TICK)
 	check(g.health == after_contact - int(Balance.GOLEM_BURN_DPS),

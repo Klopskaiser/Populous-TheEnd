@@ -49,19 +49,26 @@ const WARRIOR_SHOVE_CHANCE: float = 0.04
 # --- Golem (beschworene Einheit, Zauber 13, 2026-09-06) ---
 ## Steinkonstrukt: 3 m tief x 4 m breit x 4 m hoch, eigenes 3D-Modell, lebt
 ## GOLEM_LIFETIME Sekunden (+GOLEM_LIFE_PER_KILL je Kill) und zerfaellt dann.
-const GOLEM_HP: int = 400
+## 400 -> 800 nach dem ersten Spieltest ("viel zu schwach", 2026-09-06).
+const GOLEM_HP: int = 800
 const GOLEM_SPEED: float = 3.5
 ## Nahkampf-Reichweite (Abstand zum Ziel, ab dem geschlagen wird — gross, damit
-## der Riese nicht an seinem Opfer klebt) und das Wirkfeld des Schlags VOR ihm.
+## der Riese nicht an seinem Opfer klebt).
 const GOLEM_REACH: float = 3.0
+## Wirkfeld des Schlags: die GESAMTE Hitbox des Golems (GOLEM_BODY_* Halbmasse:
+## 4 m breit, 3 m tief) PLUS ein Feld GOLEM_FIELD_WIDTH x GOLEM_FIELD_LENGTH
+## direkt vor der Hitbox. Alles flach in XZ im Blickrahmen.
+const GOLEM_BODY_HALF_WIDTH: float = 2.0
+const GOLEM_BODY_HALF_DEPTH: float = 1.5
 const GOLEM_FIELD_WIDTH: float = 2.0
 const GOLEM_FIELD_LENGTH: float = 3.0
 const GOLEM_DAMAGE: int = 20
 const GOLEM_STRIKE_COOLDOWN: float = 2.0
-## Je Opfer, das den Schlag ueberlebt: 25 % Hochwirbeln, 25 % Ins-Rollen — beides
-## VOM Golem weg. Der Rest wird nur getroffen.
-const GOLEM_LIFT_CHANCE: float = 0.25
-const GOLEM_ROLL_CHANCE: float = 0.25
+## Je Opfer, das den Schlag ueberlebt: 30 % Hochwirbeln, 30 % Ins-Rollen — beides
+## VOM Golem weg (25/25 -> 30/30 nach dem ersten Spieltest). Der Rest wird nur
+## getroffen.
+const GOLEM_LIFT_CHANCE: float = 0.3
+const GOLEM_ROLL_CHANCE: float = 0.3
 ## Wurfstaerke des Schlags (waagerecht / senkrecht, m/s) — deutlich schwerer als
 ## der Feuerkrieger-Uppercut (1,2 / 3,0).
 const GOLEM_LIFT_PUSH: float = 3.0
@@ -71,7 +78,8 @@ const GOLEM_ROLL_SPEED: float = 4.0
 ## Gebaeudestufen je Schlag auf jedes feindliche Gebaeude im Wirkfeld.
 const GOLEM_BUILDING_STAGES: int = 1
 const GOLEM_LIFETIME: float = 180.0
-const GOLEM_LIFE_PER_KILL: float = 3.0
+## 3 -> 6 s nach dem ersten Spieltest.
+const GOLEM_LIFE_PER_KILL: float = 6.0
 ## Stein brennt schlecht: statt 15 Schaden/s nur ein Rinnsal, und keine Panik.
 const GOLEM_BURN_DPS: float = 5.0
 ## Abstand, den andere grosse Koerper (Fahrzeuge, Golems) zum Golem halten.
