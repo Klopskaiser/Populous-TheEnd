@@ -47,6 +47,17 @@ const SHORE_BAND: float = 0.9
 ## margin is far larger than the wave trough, so nothing shows through.
 const SEABED_CULL_MARGIN: float = 0.6
 
+## Anti-tiling level of the terrain shader (shaders/terrain_triplanar.gdshader).
+## 0 = off (1 fetch per layer), 1 = two tiling scales plus a procedural macro
+## variation mask (2 fetches), 2 = stochastic hex sampling after Heitz/Neyret
+## (3 fetches). One tile is 4 m and the camera sees 60-100 m of ground, so
+## without this the repetition reads as a grid.
+## Only the LEVEL lives here, because it decides the per-pixel fetch cost. Every
+## finer knob (macro_*, hex_*, seam_blend) stays a uniform default in the shader:
+## those are image tuning, not code state, and are meant to be turned live on the
+## material in the inspector.
+const TERRAIN_ANTI_TILE_MODE: int = 1
+
 var data: TerrainData = null
 
 var _chunks_root: Node3D = null
@@ -108,6 +119,15 @@ func _create_material() -> Material:
 	var sand: Texture2D = AssetLibrary.texture("textures/terrain/sand.png")
 	var grass: Texture2D = AssetLibrary.texture("textures/terrain/grass.png")
 	var rock: Texture2D = AssetLibrary.texture("textures/terrain/rock.png")
+	# Shader test without art: `-- terrain-debug-tex` stands in for the missing
+	# files with procedural tiles built to make BOTH tiling symptoms as loud as
+	# possible (see _debug_tile). Without it the shader branch is unreachable
+	# while assets/textures/terrain/ is empty, so the shader never even compiles.
+	if sand == null and grass == null and rock == null \
+			and OS.get_cmdline_user_args().has("terrain-debug-tex"):
+		sand = _debug_tile(COLOR_SAND)
+		grass = _debug_tile(COLOR_GRASS)
+		rock = _debug_tile(COLOR_ROCK)
 	if sand != null and grass != null and rock != null:
 		var shader_mat: ShaderMaterial = ShaderMaterial.new()
 		shader_mat.shader = preload("res://shaders/terrain_triplanar.gdshader")
@@ -116,11 +136,48 @@ func _create_material() -> Material:
 		shader_mat.set_shader_parameter("rock_tex", rock)
 		shader_mat.set_shader_parameter("sand_top", SAND_TOP)
 		shader_mat.set_shader_parameter("rock_bottom", ROCK_BOTTOM)
+		shader_mat.set_shader_parameter("anti_tile_mode", TERRAIN_ANTI_TILE_MODE)
 		return shader_mat
 	var mat: StandardMaterial3D = StandardMaterial3D.new()
 	mat.vertex_color_use_as_albedo = true
 	mat.roughness = 1.0
 	return mat
+
+
+## Procedural 128x128 test tile for the `-- terrain-debug-tex` switch: base
+## tone, noise speckle, a brightness ramp across the full width (guarantees a
+## HARD SEAM at every tile border) and one bright blob off-centre (makes the
+## REPETITION instantly readable). A real texture would be too well behaved to
+## show what the shader has to fix — the fix is only assessable against a
+## reproduced fault.
+## Mipmaps are mandatory: without them filter_linear_mipmap_anisotropic has
+## nothing to filter and the distance shimmers instead.
+## Never reached in a normal game or in tests.
+func _debug_tile(base: Color) -> ImageTexture:
+	const N: int = 128
+	var img: Image = Image.create_empty(N, N, true, Image.FORMAT_RGBA8)
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	# Seeded from the base tone so the three tiles differ but stay reproducible,
+	# and so no draw ever touches the global RNG stream the tests rely on.
+	rng.seed = hash(base)
+	for y in range(N):
+		for x in range(N):
+			# 0.75 at the left edge to 1.25 at the right: the wrap is a 50 %
+			# brightness step, i.e. exactly the seam we want to see and cure.
+			var ramp: float = 0.75 + 0.5 * (float(x) / float(N - 1))
+			var speckle: float = 0.9 + 0.2 * rng.randf()
+			var f: float = ramp * speckle
+			# The repetition marker, deliberately off-centre so it cannot be
+			# mistaken for the seam.
+			var d: float = Vector2(float(x) - 0.3 * N, float(y) - 0.7 * N).length()
+			if d < 0.09 * N:
+				f *= 1.9
+			img.set_pixel(x, y, Color(
+				clampf(base.r * f, 0.0, 1.0),
+				clampf(base.g * f, 0.0, 1.0),
+				clampf(base.b * f, 0.0, 1.0)))
+	img.generate_mipmaps()
+	return ImageTexture.create_from_image(img)
 
 
 ## The sea: one OPAQUE plane. Nothing below it is ever seen, which is exactly
