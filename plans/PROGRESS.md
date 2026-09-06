@@ -10580,3 +10580,93 @@ Werte stehen in `Balance.*_FOOTPRINT`). Neu aufgebaut, direkt aus dem Code:
 - Gemeinsame Regeln (Massstab, Ursprung am Boden, Vorderseite +Z, `Flag`, Schatten)
   einmal vorangestellt statt pro Objekt wiederholt; der Ordnerbaum oben nachgezogen
   (der nie implementierte Eintrag `<kind>_stage<n>.glb` ist raus).
+
+### Nachtrag 31 — Zauberreichweiten-Untergrenze, Feuerball-Bodenflug, Nahkampfchancen, stumme Fahrzeuge (Nutzerwuensche, 2026-09-07)
+
+Vier unabhaengige Punkte aus einem Spieltest.
+
+**1. Kein Zauber unter 9 m Reichweite.** Betroffen war genau eine Konstante —
+`Balance.SPELL_FIREBALL_CAST_RANGE` 8,0 → **9,0**. Alle uebrigen zwoelf lagen
+schon bei 9–12 m, der Basisklassen-Default `Spell.cast_range` ohnehin bei 9,0.
+Weil die Reichweite zentral in `Balance` liegt und jeder Spell sie nur
+zuweist, war das eine reine Balance-Datei-Aenderung; Anmarsch der Schamanin,
+Turm-/Deckbonus, Reichweitenring und die KI-Zielpunkte ziehen automatisch mit.
+
+**2. Der Feuerkrieger-Feuerball ging im Gelaende verloren** (Nutzerreport).
+`Fireball` flog auf einer **geraden 3D-Linie** von der Hand (1,1 m) zur
+Zielbrust (0,8 m) — ueber 9 m Feuerreichweite also knapp ein Meter
+Bodenfreiheit. Jede Kuppe, Rampenkante und Heightmap-Welle dazwischen lag
+ueber dieser Sehne, `_hits_terrain()` schlug an und der Ball **verpuffte
+still**: kein Schaden, kein Event, kein Effekt. Bergab-Schuesse tauchten
+zusaetzlich frueh ab, weil das Homing `_dest.y` sofort auf das tiefere Ziel
+nachzog.
+
+Neu (`Fireball._follow_ground_or_block`, Vorbild `FireRam._tick_visual`):
+Der Boden ist eine **Untergrenze**, keine Wand. Liegt der Ball unter
+`get_height(x,z) + GROUND_CLEARANCE`, wird er daraufgehoben und gleitet ueber
+die Erhebung. `GROUND_CLEARANCE == TARGET_HEIGHT` (0,8 m) ist Absicht: er
+faehrt auf genau der Hoehe, auf die er zielt, damit der Schlussanflug ueber
+ebenem Grund in `HIT_RANGE` landet. Nach **unten** wird nie gedrueckt —
+Schuesse vom Wachturm/Deck und die Jagd auf Luftziele behalten ihre Hoehe.
+
+**Stolperstein dabei:** Der erste Entwurf verglich den noetigen Hub
+(`floor_y - position.y`) mit der Schrittweite. Das mischt die **eigene
+Sinkbewegung** des Balls (er zielt hinter den Kamm, also abwaerts) mit dem
+Anstieg des Bodens — auf einem steilen, aber begehbaren Ruecken summierte sich
+beides fast bis zur Blockschwelle. Jetzt wird die **Steigung des Gelaendes
+allein** gemessen (`get_height(jetzt) - get_height(vorher)` je Meter
+XZ-Strecke) und gegen `TerrainData.MAX_SLOPE` (1,5) geprueft — bewusst dieselbe
+Konstante, die ueber die Begehbarkeit einer Zelle entscheidet: *der Ball kommt
+ueber alles, was eine Einheit hochlaufen koennte, und verpufft an allem
+andere*. Der Klippenreport aus Phase 10 bleibt damit erfuellt
+(`test_fireball_blocked_by_cliff_face`), neu dazu
+`test_fireball_glides_over_a_walkable_ridge` — der einzige Fall zwischen
+`_flat_terrain` und harter Klippe, den bisher kein Test abdeckte.
+
+**3. Nahkampfchancen neu** (Nutzervorgabe). `Unit._roll_attack_kind` waehlt
+kumulativ auf **einem** `randf()`, **Punch ist immer nur der Rest** — gesetzt
+werden also nur Shove und Kick:
+
+| Einheit | shove | kick | punch | melee_strength |
+|---|---|---|---|---|
+| Krieger | 0,00 (war 0,04) | 0,35 (war 0,20) | 0,65 | **2,5** (war 3,0) |
+| Prediger | 0,60 (war 0,50) | 0,00 (war 0,10) | 0,40 | 1,0 |
+| Feuerkrieger | 0,40 (war 0,15) | 0,60 (war 0,20) | **0,00** | 1,0 |
+
+Beim Feuerkrieger summieren sich die beiden zu 1,0, der Faustschlag entfaellt
+damit **bewusst vollstaendig** (ausdruecklich bestaetigt). Krieger und
+Feuerkrieger brauchten je einen neuen `_kick_chance()`-Override; im
+Feuerkrieger heissen die Konstanten `FIREWARRIOR_SHOVE_CHANCE`/`_KICK_CHANCE`,
+weil `Unit` schon `SHOVE_CHANCE`/`KICK_CHANCE` fuehrt und ein gleichnamiger
+Kind-Konstantenname ein **Parse Error** ist ("member already exists in parent
+class"). Neuer Vertragstest `test_melee_attack_kind_split_per_unit`; der alte
+`test_warrior_hits_three_times_harder` prueft jetzt gegen
+`Balance.WARRIOR_MELEE_STRENGTH` statt gegen die Literal-3 und heisst
+`test_warrior_hits_harder_than_a_brave`.
+
+**4. Neutrale Fahrzeuge sind beim Anwaehlen stumm.** Der Selektionsruf hat
+genau eine Ausloesestelle (`SelectionManager._set_selection`); neu haengt er an
+`_selection_has_audible_unit()`, das ein `CrewedVehicle` mit `is_neutral()`
+ueberspringt. Ein daneben mitselektierter Fussgaenger bringt den Ruf zurueck,
+die Schamanin schlaegt weiter alles. Gewaehlt wurde bewusst `is_neutral()`
+(niemand an Bord **handlungsfaehig**) statt `boarded_count() == 0` — dieselbe
+Grenze wie graue Flagge und Angriffsverbot.
+
+**Erkenntnis / Testschuld: `test_combat_groups.gd` Zentroid-Drift.** Der Test
+liess bis 6,0 m Drift zu und fiel nach der Nahkampfaenderung mit 6,08 m. Eine
+Drift-Trace (alle 25 Ticks, volle Suite) zeigte: der Drift ist **kein
+beschraenktes Schwingen**, wie der Testkommentar behauptete, sondern waechst ab
+Feindkontakt (~t 100) **monoton** — und zwar **auch vor der Aenderung**
+(4,92 m bei t = 375 vorher, 5,58 m nachher; Peaks 5,34 → 6,08 m). Ursache ist
+die Tickreihenfolge (Blau wird zuerst gespawnt und getickt und drueckt die
+Masse in seine Richtung), nicht die Balance-Stellschrauben. Die Grenze wurde
+auf **9,0 m** angehoben und der Kommentar auf den gemessenen Befund korrigiert;
+der eigentliche Waechter bleibt die andere **Groessenordnung** (−35 m im
+Originalbug). **Die Tickreihenfolge-Asymmetrie selbst ist offen** und verdient
+eine eigene Untersuchung.
+
+**Verifikation:** Ladecheck (`--headless --quit`) exit 0 ohne Fehler; volle
+Suite **5938 passed, 0 failed, 47,8 s**, `grep -c 'SCRIPT ERROR'` = 0
+(Referenz vorher 5922 — die 16 neuen Zusicherungen sind die drei neuen Tests
+plus der wieder gruene Drift-Check). Balance-Labor 200 vs 200 nach dieser
+Runde noch **nicht** nachgemessen.

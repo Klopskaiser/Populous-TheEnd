@@ -300,6 +300,7 @@ func test_status_overlays_never_cast_shadows() -> void:
 
 const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
 const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
+const SIEGE_SCENE: PackedScene = preload("res://scenes/units/siege_engine.tscn")
 
 
 func _make_selection() -> SelectionManager:
@@ -354,6 +355,32 @@ func test_converted_unit_leaves_selection() -> void:
 	check(sel.selected.size() == 1, "an own unit is never dropped")
 	mine.free()
 	lost.free()
+	sel.free()
+
+
+## User request 2026-09-07: an UNMANNED (neutral) vehicle must not answer the
+## selection call — nobody aboard can serve it. The gate is the same predicate
+## the grey flag and the attack ban use, CrewedVehicle.is_neutral().
+func test_neutral_vehicle_stays_silent_on_selection() -> void:
+	var sel: SelectionManager = _make_selection()
+	var engine: SiegeEngine = SIEGE_SCENE.instantiate() as SiegeEngine
+	engine.tribe_id = 0
+	check(engine.is_neutral(), "a freshly built engine has no crew aboard")
+
+	sel.selected = [engine] as Array[Unit]
+	check(not sel._selection_has_audible_unit(),
+		"a lone neutral vehicle gives no selection cry")
+
+	var brave: Unit = BRAVE_SCENE.instantiate() as Unit
+	brave.tribe_id = 0
+	sel.selected = [engine, brave] as Array[Unit]
+	check(sel._selection_has_audible_unit(),
+		"a unit selected alongside it brings the cry back")
+
+	sel.selected = [] as Array[Unit]
+	check(not sel._selection_has_audible_unit(), "an empty selection is silent")
+	brave.free()
+	engine.free()
 	sel.free()
 
 

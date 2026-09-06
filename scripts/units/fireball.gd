@@ -4,10 +4,13 @@ class_name Fireball extends Node3D
 ## accumulator and the hand-sprite toggle follow in phase 5c).
 ##
 ## No physics: flies in tick(delta) (driven by the UnitManager's projectile
-## list; tests tick it manually) STRAIGHT at the target, homing on its current
-## position while it lives. The hit is a distance check and applies damage
-## exactly once, then `done` flips and the manager frees it. A hard lifetime
-## cap guarantees the ball can never linger (it fizzles without damage).
+## list; tests tick it manually) straight at the target IN XZ, homing on its
+## current position while it lives. In Y the ground is a FLOOR, not a wall: the
+## ball glides over hills at GROUND_CLEARANCE instead of burying itself in them
+## (see _follow_ground_or_block — the fire ram's flame does the same, FireRam
+## _tick_visual). The hit is a distance check and applies damage exactly once,
+## then `done` flips and the manager frees it. A hard lifetime cap guarantees
+## the ball can never linger (it fizzles without damage).
 ## Shooter/target references are untyped — either may be freed mid-flight.
 
 const SPEED: float = Balance.FIREWARRIOR_FIREBALL_SPEED
@@ -19,6 +22,15 @@ const AIR_MAX_SPEED: float = Balance.FIREWARRIOR_FIREBALL_AIR_MAX_SPEED
 const HIT_RANGE: float = 0.5
 ## Aim at chest height rather than the feet.
 const TARGET_HEIGHT: float = 0.8
+## Height the ball keeps above the ground while gliding (2026-09-07). Same value
+## as TARGET_HEIGHT on purpose: it cruises at exactly the height it aims for, so
+## the final approach over level ground still lands inside HIT_RANGE.
+const GROUND_CLEARANCE: float = TARGET_HEIGHT
+## How steeply rising ground may push the ball up (metres of rise per metre
+## travelled) before it counts as a WALL instead of a hill. Deliberately the same
+## limit that decides whether a terrain cell is walkable: the ball glides over
+## everything a unit could run up and fizzles against everything it could not.
+const MAX_CLIMB_SLOPE: float = TerrainData.MAX_SLOPE
 ## Safety net: after this many seconds the ball fizzles no matter what.
 const MAX_LIFETIME: float = 3.0
 
@@ -105,9 +117,10 @@ func tick(delta: float) -> void:
 		_dest = target.position + Vector3(0.0, TARGET_HEIGHT, 0.0)
 		if target.is_airborne():
 			_speed = minf(_speed + AIR_ACCEL * delta, AIR_MAX_SPEED)
+	var was: Vector3 = position
 	position = position.move_toward(_dest, _speed * delta)
-	if _hits_terrain():
-		done = true   # smacked into a cliff face / the ground — no damage
+	if not _follow_ground_or_block(was):
+		done = true   # smacked into a cliff face — no damage
 		return
 	if position.distance_to(_dest) <= HIT_RANGE or _age >= MAX_LIFETIME:
 		_impact()
@@ -118,8 +131,9 @@ func _tick_building(delta: float) -> void:
 		done = true
 		return
 	_dest = target_building.center_world() + Vector3(0.0, TARGET_HEIGHT, 0.0)
+	var was: Vector3 = position
 	position = position.move_toward(_dest, SPEED * delta)
-	if _hits_terrain():
+	if not _follow_ground_or_block(was):
 		done = true
 		return
 	if position.distance_to(_dest) <= BUILDING_HIT_RANGE or _age >= MAX_LIFETIME:
@@ -139,12 +153,38 @@ func _impact_building() -> void:
 			events.combat_hit.emit(&"fireball", position)
 
 
-## True when the ball's current position lies below the terrain surface —
-## it flew into the ground or a cliff face (e.g. a Flatten edge). Upward
-## flight stays free; only terrain blocks (user bug report, Ebene-Klippen).
-func _hits_terrain() -> bool:
-	return terrain_data != null \
-		and position.y < terrain_data.get_height(position.x, position.z)
+## Keeps the ball GROUND_CLEARANCE above the terrain and reports whether it
+## survived (2026-09-07, user report "the shots get lost in the terrain").
+##
+## The straight line from the thrower's hand (1.1 m) to the target's chest
+## (0.8 m) has barely a metre of headroom over 9 m of fire range, so every
+## hilltop, ramp edge and heightmap ripple in between used to swallow the ball
+## silently — no damage, no effect. Now the ground is only a FLOOR: the ball is
+## lifted onto it and glides over the hill (the fire ram's flame samples its
+## height the same way, FireRam._tick_visual).
+##
+## A real WALL still stops it, which is the whole point of the distinction: if
+## the ground demands more rise than MAX_CLIMB_SLOPE per metre travelled, this is
+## a cliff or a Flatten edge, not a slope, and the ball fizzles against it as
+## before (user bug report, Ebene-Klippen). The ball is never pushed DOWN — shots
+## from a watchtower or an airship deck and chases after airborne targets keep
+## their own height.
+func _follow_ground_or_block(was: Vector3) -> bool:
+	if terrain_data == null:
+		return true   # old tests without terrain: no ground at all
+	var ground: float = terrain_data.get_height(position.x, position.z)
+	var floor_y: float = ground + GROUND_CLEARANCE
+	if position.y >= floor_y:
+		return true   # flying free; never pushed DOWN onto the ground
+	# Hill or wall? Asked of the TERRAIN alone (rise per metre travelled), not of
+	# the ball's own descent — a ball diving at a target behind the crest must not
+	# read the sum of both as a wall.
+	var step: float = Vector2(position.x - was.x, position.z - was.z).length()
+	var rise: float = ground - terrain_data.get_height(was.x, was.z)
+	if rise > MAX_CLIMB_SLOPE * maxf(step, 0.001):
+		return false
+	position.y = floor_y
+	return true
 
 
 func _building_alive() -> bool:

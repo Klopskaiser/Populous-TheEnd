@@ -161,20 +161,45 @@ func test_melee_pursues_when_out_of_range() -> void:
 
 # --- Warrior strength --------------------------------------------------------------
 
-func test_warrior_hits_three_times_harder() -> void:
+## The warrior's punch is Balance.WARRIOR_MELEE_STRENGTH times a brave's. Kept
+## against the constant, not a literal: the multiplier is a balance dial (3.0 ->
+## 2.5 on 2026-09-07) and the CONTRACT is "scaled base damage, harder than a
+## brave", not any one number.
+func test_warrior_hits_harder_than_a_brave() -> void:
 	var warrior: Warrior = WARRIOR_SCENE.instantiate() as Warrior
 	var brave: Brave = BRAVE_SCENE.instantiate() as Brave
-	check(warrior.melee_damage(&"punch") == Unit.MELEE_PUNCH * 3,
-		"warrior punch = 3x base")
+	var mult: float = Balance.WARRIOR_MELEE_STRENGTH
+	check(mult > 1.0, "warrior melee multiplier is above a brave's")
+	check(warrior.melee_damage(&"punch")
+			== int(round(float(Unit.MELEE_PUNCH) * mult)),
+		"warrior punch = base x WARRIOR_MELEE_STRENGTH")
 	check(brave.melee_damage(&"punch") == Unit.MELEE_PUNCH, "brave punch = base")
-	check(warrior.melee_damage(&"punch") == brave.melee_damage(&"punch") * 3,
-		"warrior deals exactly 3x a brave")
+	check(warrior.melee_damage(&"punch") > brave.melee_damage(&"punch"),
+		"warrior punches harder than a brave")
 	check(Unit.attack_base_damage(&"kick") > Unit.attack_base_damage(&"punch"),
 		"a kick hurts more than a punch")
 	check(Unit.attack_base_damage(&"shove") < Unit.attack_base_damage(&"punch"),
 		"a shove hurts less than a punch")
 	warrior.free()
 	brave.free()
+
+
+## Melee attack-kind split per unit type (user spec 2026-09-07). Punch is only
+## ever the REMAINDER in Unit._roll_attack_kind, so shove + kick must never
+## exceed 1.0 — at exactly 1.0 the punch is gone on purpose (firewarrior).
+func test_melee_attack_kind_split_per_unit() -> void:
+	var cases: Array = [
+		[WARRIOR_SCENE, 0.0, 0.35, "warrior"],
+		[PREACHER_SCENE, 0.6, 0.0, "preacher"],
+		[FIREWARRIOR_SCENE, 0.4, 0.6, "firewarrior"],
+	]
+	for c in cases:
+		var u: Unit = (c[0] as PackedScene).instantiate() as Unit
+		check_near(u._shove_chance(), c[1] as float, "%s shove chance" % c[3])
+		check_near(u._kick_chance(), c[2] as float, "%s kick chance" % c[3])
+		check(u._shove_chance() + u._kick_chance() <= 1.0 + 1e-6,
+			"%s: shove + kick leaves no negative punch share" % c[3])
+		u.free()
 
 
 # --- Slot system --------------------------------------------------------------------
@@ -1609,6 +1634,58 @@ func test_fireball_blocked_by_cliff_face() -> void:
 		ball.tick(TICK)
 	check(ball.done, "cliff fireball finished")
 	check(target.health == hp_before, "no damage through the cliff face")
+	ball.free()
+	_free_world(w)
+
+
+## Terrain with a WALKABLE ridge between x = 30 and x = 40: 5 m on both sides,
+## rising to 10 m at the crest in 1 m steps (well under TerrainData.MAX_SLOPE,
+## so units could run over it — and so must the fireball).
+func _ridge_terrain() -> TerrainData:
+	var td: TerrainData = TerrainData.new()
+	for vz in range(td.verts):
+		for vx in range(td.verts):
+			var h: float = 5.0
+			if vx > 30 and vx < 40:
+				h = 5.0 + minf(float(vx - 30), float(40 - vx))
+			td.heights[vz * td.verts + vx] = h
+	return td
+
+
+## A fireball fired ACROSS a walkable ridge glides over it and connects (user
+## report 2026-09-07: the shots vanished in the terrain). The straight line from
+## the thrower's hand to the target's chest passes right through the crest — only
+## the ground-following floor gets the ball across.
+func test_fireball_glides_over_a_walkable_ridge() -> void:
+	var td: TerrainData = _ridge_terrain()
+	var nav: NavGrid = NavGrid.new(td)
+	var tribe0: Tribe = Tribe.new(0)
+	var tribe1: Tribe = Tribe.new(1)
+	var um: UnitManager = UnitManager.new()
+	um.setup(td, nav, [tribe0, tribe1] as Array[Tribe])
+	var w: Dictionary = {"td": td, "nav": nav, "tribe0": tribe0,
+		"tribe1": tribe1, "unit_manager": um}
+	var shooter: Unit = _spawn(w, FIREWARRIOR_SCENE, 0, Vector2(30, 30))
+	shooter.position.y = td.get_height(30.0, 30.0)
+	shooter._sync_soa_pos()
+	var target: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(38, 30))
+	target.position.y = td.get_height(38.0, 30.0)
+	target._sync_soa_pos()
+	# The crest really is in the way: the straight line dips below the ground.
+	var from: Vector3 = shooter.position + Vector3(0.0, 1.1, 0.0)
+	var to: Vector3 = target.position + Vector3(0.0, Fireball.TARGET_HEIGHT, 0.0)
+	var mid: Vector3 = from.lerp(to, 0.5)
+	check(mid.y < td.get_height(mid.x, mid.z),
+		"the ridge really blocks the straight line of flight")
+	var hp_before: int = target.health
+	var ball: Fireball = Fireball.new()
+	ball.setup(shooter, target, from)
+	ball.terrain_data = td
+	for i in range(60):
+		if ball.done:
+			break
+		ball.tick(TICK)
+	check(target.health < hp_before, "the fireball glides over the ridge and hits")
 	ball.free()
 	_free_world(w)
 

@@ -690,7 +690,7 @@ func _set_selection(units: Array[Unit]) -> void:
 			kept.append(unit)
 			unit.set_selected(true)
 	selected = kept
-	if not kept.is_empty() and is_inside_tree():
+	if _selection_has_audible_unit() and is_inside_tree():
 		var audio: Node = get_node_or_null("/root/AudioManager")
 		if audio != null:
 			# One sound per selection action; the shaman in the group overrides.
@@ -949,6 +949,20 @@ func _selection_has_shaman() -> bool:
 	for unit in selected:
 		if is_instance_valid(unit) and unit.unit_kind() == &"shaman":
 			return true
+	return false
+
+
+## Whether anything in the selection can answer the call (user request
+## 2026-09-07). A NEUTRAL vehicle stays silent: nobody aboard is able to serve
+## it, it flies the grey flag and takes no orders — a machine, not a voice. One
+## living crew member (or any unit selected alongside it) brings the cry back.
+func _selection_has_audible_unit() -> bool:
+	for unit in selected:
+		if not is_instance_valid(unit):
+			continue
+		if unit is CrewedVehicle and (unit as CrewedVehicle).is_neutral():
+			continue
+		return true
 	return false
 
 

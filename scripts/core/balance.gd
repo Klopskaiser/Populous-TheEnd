@@ -42,9 +42,14 @@ const BRAVE_IDLE_AGGRO_RADIUS: float = 3.0
 const WARRIOR_HP: int = 120
 const WARRIOR_SPEED: float = 4.0
 ## Nahkampf-Multiplikator auf die Basis-Schlagwerte (Punch/Kick/Shove).
-const WARRIOR_MELEE_STRENGTH: float = 3.0
-## Krieger schubsen fast nie (sie hauen lieber zu).
-const WARRIOR_SHOVE_CHANCE: float = 0.04
+## 3,0 -> 2,5 (Nutzervorgabe 2026-09-07): der Krieger schlaegt weniger hart zu,
+## tritt dafuer deutlich oefter (s. WARRIOR_KICK_CHANCE).
+const WARRIOR_MELEE_STRENGTH: float = 2.5
+## Nahkampf-Attackenchancen (Rest = Punch, s. Unit._roll_attack_kind):
+## Der Krieger schubst GAR NICHT mehr (2026-09-07, vorher 0,04) und tritt in
+## 35 % der Schlaege — 65 % bleiben der Faustschlag.
+const WARRIOR_SHOVE_CHANCE: float = 0.0
+const WARRIOR_KICK_CHANCE: float = 0.35
 
 # --- Golem (beschworene Einheit, Zauber 13, 2026-09-06) ---
 ## Steinkonstrukt: 3 m tief x 4 m breit x 4 m hoch, eigenes 3D-Modell, lebt
@@ -104,6 +109,12 @@ const FIREWARRIOR_FIREBALL_AIR_ACCEL: float = 22.0
 const FIREWARRIOR_FIREBALL_AIR_MAX_SPEED: float = 34.0
 ## Schaden eines Feuerballs an Gebäuden.
 const FIREWARRIOR_BUILDING_DAMAGE: int = 5
+## Nahkampf-Attackenchancen (Rest = Punch, s. Unit._roll_attack_kind). Neu
+## 2026-09-07 (vorher die Standardwerte 0,15 / 0,20): Der Feuerkrieger ist im
+## Nahkampf ein Draengler und Treter — die beiden Chancen summieren sich zu
+## 1,0, der Faustschlag entfaellt damit BEWUSST vollstaendig (Nutzervorgabe).
+const FIREWARRIOR_SHOVE_CHANCE: float = 0.4
+const FIREWARRIOR_KICK_CHANCE: float = 0.6
 
 # --- Prediger ---
 ## 90 -> 85 (Nutzerentscheidung 2026-09-06, Labor-Schritt 3).
@@ -114,9 +125,10 @@ const PREACHER_CONVERT_RANGE: float = 5.0
 const PREACHER_CONVERT_TIME_MIN: float = 4.0
 const PREACHER_CONVERT_TIME_MAX: float = 9.0
 ## Nahkampf-Attackenchancen (Rest = Punch): schubst viel häufiger als der
-## Standard, kickt seltener.
-const PREACHER_SHOVE_CHANCE: float = 0.5
-const PREACHER_KICK_CHANCE: float = 0.1
+## Standard und tritt GAR NICHT (2026-09-07, vorher 0,5 / 0,1) — er draengt den
+## Gegner weg, statt ihn zu verletzen. 40 % bleiben der Faustschlag.
+const PREACHER_SHOVE_CHANCE: float = 0.6
+const PREACHER_KICK_CHANCE: float = 0.0
 
 # --- Schamanin ---
 const SHAMAN_HP: int = 240              # 4 x Brave
@@ -539,7 +551,9 @@ const LAVA_VISUAL_INTERVAL: float = 0.2
 
 const SPELL_FIREBALL_CHARGE_COST: float = 30.0
 const SPELL_FIREBALL_MAX_CHARGES: int = 4
-const SPELL_FIREBALL_CAST_RANGE: float = 8.0
+## 8 -> 9 m (Nutzervorgabe 2026-09-07: KEIN Zauber unter 9 m Reichweite — der
+## Feuerball war der einzige, der die Schamanin naeher heranzwang).
+const SPELL_FIREBALL_CAST_RANGE: float = 9.0
 
 const SPELL_LIGHTNING_CHARGE_COST: float = 200.0
 const SPELL_LIGHTNING_MAX_CHARGES: int = 4

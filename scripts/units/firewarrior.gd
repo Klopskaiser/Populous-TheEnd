@@ -20,6 +20,11 @@ const RANGED_AGGRO: float = Balance.FIREWARRIOR_AGGRO_RADIUS
 ## DPS-equivalent: 5 HP / FIRE_COOLDOWN (1.5 s) ≈ 3.3 HP/s vs. a raider's
 ## 6 HP/s (Building.RAID_DPS_PER_RAIDER). Balance in phase 8.
 const BUILDING_FIRE_DAMAGE: int = Balance.FIREWARRIOR_BUILDING_DAMAGE
+## Melee attack-kind chances (see Unit._roll_attack_kind). Forced into melee he
+## shoves and kicks — the two add up to 1.0, so he never throws a punch at all
+## (deliberate, user spec 2026-09-07): his hands are busy with the fire.
+const FIREWARRIOR_SHOVE_CHANCE: float = Balance.FIREWARRIOR_SHOVE_CHANCE
+const FIREWARRIOR_KICK_CHANCE: float = Balance.FIREWARRIOR_KICK_CHANCE
 
 
 func _init() -> void:
@@ -38,6 +43,14 @@ func _is_combatant() -> bool:
 
 func _is_ranged() -> bool:
 	return true
+
+
+func _shove_chance() -> float:
+	return FIREWARRIOR_SHOVE_CHANCE
+
+
+func _kick_chance() -> float:
+	return FIREWARRIOR_KICK_CHANCE
 
 
 func aggro_radius() -> float:

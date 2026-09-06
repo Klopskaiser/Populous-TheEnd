@@ -22,7 +22,7 @@ const FIGHT_INERTIA_CHANCE: float = 0.4
 const PREACH_SOUND_INTERVAL: float = 2.0
 
 ## Melee attack-kind chances (see Unit._roll_attack_kind): shoves much more
-## often than the default, kicks less often (the rest falls back to punch).
+## often than the default and never kicks (the rest falls back to punch).
 const PREACHER_SHOVE_CHANCE: float = Balance.PREACHER_SHOVE_CHANCE
 const PREACHER_KICK_CHANCE: float = Balance.PREACHER_KICK_CHANCE
 
