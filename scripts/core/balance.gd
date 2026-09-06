@@ -88,7 +88,8 @@ const GOLEM_SEPARATION: float = 2.0
 # --- Feuerkrieger ---
 const FIREWARRIOR_HP: int = 65
 const FIREWARRIOR_SPEED: float = 4.0
-const FIREWARRIOR_FIRE_RANGE: float = 8.0
+## 8 -> 9 m (Nutzerentscheidung 2026-09-06 nach dem 200-gegen-200-Labor).
+const FIREWARRIOR_FIRE_RANGE: float = 9.0
 const FIREWARRIOR_FIRE_COOLDOWN: float = 1.5
 const FIREWARRIOR_AGGRO_RADIUS: float = 13.0
 ## Schaden eines Feuerballs an Einheiten.

@@ -29,6 +29,23 @@ ist unverändert und eine offene Balance-Entscheidung. Die Effizienz gegen Predi
 scheinbar (1,83 → 1,47), weil die Feuerkrieger jetzt weiter kämpfen statt bekehrt zu
 werden — „verlorene BÄ" zählt Bekehrte wie Tote.
 
+### Nachtrag: Feuerreichweite 8 → 9 m (Nutzerentscheidung, 2026-09-06)
+
+`Balance.FIREWARRIOR_FIRE_RANGE` 8,0 → **9,0** (Deck/Turm-Bonus +3 unverändert, also 12 m).
+Dieselben drei Paarungen, 5 Wiederholungen:
+
+| Paarung (A = Feuerkrieger) | Siege | B übrig 8 m → 9 m | Schaden FK 8 m → 9 m |
+|---|---|---|---|
+| gegen Krieger, Anmarsch | 0:5 | 102,0 → 96,2 | 78 % → 77 % |
+| gegen Krieger, Sofortkontakt | 0:5 | 111,6 → 120,6 | 73 % → 71 % |
+| gegen Prediger, Anmarsch | 0:5 → 0:4 (1 unentschieden) | 74,8 → 91,2 | 70 % → 62 % (Bekehrte 115 → 131) |
+
+Lesart: **ein Meter Reichweite ändert das Bild nicht** — die Abweichungen liegen in der
+Streuung (Krieger) bzw. sogar leicht dagegen (Prediger). Der Engpass der Feuerkrieger in
+der Masse ist Durchsatz (Schaden je Sekunde), nicht Distanz: in einem 200er-Klumpen
+stehen fast alle Schützen ohnehin in Reichweite, und die Nahkämpfer schließen den
+letzten Meter in einer Viertelsekunde. Suite 5981 grün.
+
 ## Golem-Nachschärfung + Zieldisziplin Golem/Feuerkrieger (2026-09-06, Spieltest 2)
 
 Nutzer: „der Golem ist viel zu schwach" und Feuerkrieger/Golem verfolgen Ziele, statt
