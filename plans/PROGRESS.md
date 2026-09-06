@@ -10670,3 +10670,47 @@ Suite **5938 passed, 0 failed, 47,8 s**, `grep -c 'SCRIPT ERROR'` = 0
 (Referenz vorher 5922 — die 16 neuen Zusicherungen sind die drei neuen Tests
 plus der wieder gruene Drift-Check). Balance-Labor 200 vs 200 nach dieser
 Runde noch **nicht** nachgemessen.
+
+### Nachtrag 32 — Balance-Labor: lohnt die Beimischung von Feuerkriegern? (Nutzerfrage, 2026-09-07)
+
+Vier neue Paarungen in `tests/balance_lab.gd`, je 200 BAe auf beiden Seiten;
+es aendert sich NUR die Zusammensetzung von Seite A. Je 9 Wiederholungen,
+flaches Gelaende, Stand nach der Balance-Runde aus Nachtrag 31.
+
+| Aufstellung A | Gegner B | Siege A:B | A uebrig | zer/ver A |
+|---|---|---|---|---|
+| 100 FK + 100 Prediger (Anmarsch) | 200 Prediger | 7:0 (2 unent.) | 149/200 | **3,92** |
+| 100 FK + 100 Prediger (Kontakt) | 200 Prediger | 9:0 | 151/200 | **4,11** |
+| 100 FK + 100 Krieger (Anmarsch) | 200 Krieger | 0:9 | 0/200 | **0,47** |
+| 100 FK + 100 Krieger (Kontakt) | 200 Krieger | 0:9 | 0/200 | **0,47** |
+
+Referenzzeilen zum Einordnen (ebenfalls 9 Wdh.):
+200 FK gegen 200 Krieger **0,59** (Anmarsch) / **0,57** (Kontakt);
+200 FK gegen 200 Prediger **1,55** (A verliert trotzdem, s. u.).
+
+**Befund 1 — die Mischung ist schlechter als BEIDE reinen Varianten.**
+Gegen 200 Krieger schneidet halb/halb (0,47) schlechter ab als reine
+Feuerkrieger (0,57–0,59) und weit schlechter als der Spiegel (~1,0). Die
+gemischte Armee teilt sogar weniger Schaden aus als die reine
+Feuerkrieger-Armee (18 008 gegen 19 720 HP) und stirbt schneller. **Ursache
+unbekannt** — das Labor misst Ausgaenge, nicht Mechanik; eine eigene
+Untersuchung waere noetig, bevor daraus eine KI-Mischungsregel wird.
+
+**Befund 2 — das Prediger-Szenario misst etwas anderes als erwartet.**
+`Unit.is_conversion_immune()` (`scripts/units/unit.gd:2611`) macht Schamanin
+UND **Prediger** unbekehrbar (Originalregel). Prediger gegen Prediger ist damit
+ein reiner Faustkampf — der Bekehrungszaehler steht folgerichtig auf 0,0 in
+beide Richtungen (dass er funktioniert, zeigen die Referenzen: 123,9 bei
+FK gegen Prediger, 19,9 bei Krieger gegen Prediger). Gemessen wurden also
+100 Feuerkrieger + 100 SCHWACHE NAHKAEMPFER (85 LP, 1x Brave-Schaden, 60 %
+der Schlaege sind 3er-Schubser) gegen 200 davon — der Erdrutsch ist damit
+erwartbar und sagt nichts ueber die Bekehrung aus.
+
+**Befund 3 — der "Anmarsch" bringt im Labor bei 200 gegen 200 fast nichts.**
+Feuerkrieger rein: 0,59 mit 46 m Anmarsch gegen 0,57 bei Sofortkontakt; im
+Mix ist die Differenz gar nicht messbar (0,47 = 0,47). Der Kommentar an
+`feuerkrieger_vs_krieger_200_anmarsch` rechnet mit "~11 s Anmarsch, sieben
+Salven" — das gilt aber nur gegen einen STEHENDEN Gegner. Beide Seiten laufen
+aufeinander zu, die Annaeherungsgeschwindigkeit ist 8 m/s, und ab der
+Feuerreichweite (9 m) bleibt gut eine Sekunde. Wer den Wert der Reichweite
+messen will, braucht `hold_b: true`, nicht mehr Startabstand.

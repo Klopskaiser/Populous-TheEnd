@@ -241,6 +241,31 @@ const SCENARIOS: Array = [
 	 "frage": "Gleiche Ausbildungszeit (~100 s): 20 Prediger gegen 33 Krieger"},
 	{"name": "prediger_vs_feuerkrieger_zeitgleich", "a": [[&"prediger", 20]], "b": [[&"feuerkrieger", 25]],
 	 "frage": "Gleiche Ausbildungszeit (100 s): 20 Prediger gegen 25 Feuerkrieger"},
+
+	# --- Lohnt die BEIMISCHUNG von Feuerkriegern? (Nutzerfrage 2026-09-07) ---
+	# Nicht "Feuerkrieger gegen X", sondern: bringt es etwas, die HAELFTE einer
+	# 200er Armee in Feuerkrieger zu stecken, statt sortenrein zu bauen? Beide
+	# Seiten 200 BAe, es aendert sich NUR die Zusammensetzung von A.
+	# Startabstand 60 (~46 m zwischen den Klumpenraendern) ist hier Pflicht: die
+	# Beimischung lebt von den Salven im Anmarsch, bei Sofortkontakt misst man
+	# einen anderen Kampf. Die Kontakt-Gegenproben stehen darunter, die Differenz
+	# IST der Wert der Reichweite in der gemischten Armee.
+	# Reihenfolge wie bei mix_40_30_30: keine Zeilen-Offsets, damit die Zahlen mit
+	# den bestehenden Mix-Zeilen vergleichbar bleiben (erste Zeile steht innen).
+	{"name": "mix_fw_prediger_vs_reine_prediger_anmarsch",
+	 "a": [[&"feuerkrieger", 100], [&"prediger", 100]], "b": [[&"prediger", 200]],
+	 "separation": 60,
+	 "frage": "100 FK + 100 Prediger gegen 200 Prediger, mit Anmarsch (200 BAe je Seite)"},
+	{"name": "mix_fw_prediger_vs_reine_prediger_kontakt",
+	 "a": [[&"feuerkrieger", 100], [&"prediger", 100]], "b": [[&"prediger", 200]],
+	 "frage": "Dieselbe Paarung bei Sofortkontakt (Gegenprobe zum Anmarsch)"},
+	{"name": "mix_fw_krieger_vs_reine_krieger_anmarsch",
+	 "a": [[&"feuerkrieger", 100], [&"krieger", 100]], "b": [[&"krieger", 200]],
+	 "separation": 60,
+	 "frage": "100 FK + 100 Krieger gegen 200 Krieger, mit Anmarsch (200 BAe je Seite)"},
+	{"name": "mix_fw_krieger_vs_reine_krieger_kontakt",
+	 "a": [[&"feuerkrieger", 100], [&"krieger", 100]], "b": [[&"krieger", 200]],
+	 "frage": "Dieselbe Paarung bei Sofortkontakt (Gegenprobe zum Anmarsch)"},
 ]
 
 
