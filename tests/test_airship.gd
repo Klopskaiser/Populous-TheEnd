@@ -348,6 +348,8 @@ func test_catapult_intercept_two_hits_no_lava() -> void:
 	# Ship first (its spawn ticks the world until it settled at cruise
 	# height) — a crewed catapult would use that time to shoot it down early.
 	var ship: Airship = _spawn_ship(w, 1, w.nav.cell_to_world(Vector2i(68, 60)))
+	# A passenger aboard: a neutral (empty) ship is no target since 2026-09-06.
+	_board(w, ship, BRAVE_SCENE, 1)
 	var engine: SiegeEngine = w.unit_manager.spawn_unit(
 		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(60, 60))) as SiegeEngine
 	# Full-crew the catapult quickly (2 needed to fire).
@@ -1377,4 +1379,28 @@ func test_deck_passengers_ride_the_hover_bob_in_two_tight_columns() -> void:
 	# The wreck does not bob — and neither would anyone still counted aboard.
 	ship._set_state(Unit.State.DEAD)
 	check(ship.hover_bob_y() == 0.0, "a dead hull has no bob")
+	_free_world(w)
+
+
+# --- Neutral rule for airships (2026-09-06) ------------------------------------------------
+
+## "All seats free" = capturable at once: an airship with nobody aboard is
+## neutral and takeable even while the owner's recruits are still walking toward
+## it (they never boarded; add_crew releases them). No 10-s timer for ships.
+func test_neutral_airship_with_inbound_owner_recruits_is_captured_at_once() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
+	var owner_recruit: Unit = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 0, ship.position + Vector3(20.0, 0.0, 0.0))
+	owner_recruit.position.y = 0.0
+	owner_recruit.order_crew(ship)
+	check(owner_recruit.siege_engine == ship and not owner_recruit.siege_boarded,
+		"the owner's recruit is inbound, not aboard")
+	check(ship.is_neutral() and ship.capturable_by(1),
+		"nobody aboard: the ship is neutral and capturable right away")
+	var raider: Unit = _board(w, ship, BRAVE_SCENE, 1)
+	check(raider.siege_boarded and ship.tribe_id == 1, "the raider takes the ship over")
+	check(owner_recruit.siege_engine != ship, "the old owner's inbound recruit is released")
+	check(not ship.is_neutral() and not ship.capturable_by(0),
+		"served by the new crew: no longer neutral, the old owner cannot take it back")
 	_free_world(w)

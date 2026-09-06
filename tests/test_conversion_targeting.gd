@@ -32,7 +32,8 @@ func _make_world() -> Dictionary:
 	var bm: BuildingManager = BuildingManager.new()
 	bm.setup(td, nav, um, wpm)
 	um.building_manager = bm
-	return {"td": td, "nav": nav, "um": um, "bm": bm, "tm": tm, "wpm": wpm}
+	return {"td": td, "nav": nav, "um": um, "bm": bm, "tm": tm, "wpm": wpm,
+		"t0": t0, "t1": t1}
 
 
 func _free_world(w: Dictionary) -> void:
@@ -146,6 +147,45 @@ func test_ordered_preacher_walks_to_convert_far_enemy() -> void:
 			break
 	check(sat, "the preacher reaches the far enemy and pacifies it")
 	check(enemy.converting_preacher == pa, "the ordered enemy is converted by this preacher")
+	_free_world(w)
+
+
+## Attack-move (2026-09-06): a preacher on the march converts what it meets and
+## then CARRIES ON to its destination like every other unit. Until then every
+## CAST exit was a bare IDLE and the preacher stood at the first sermon for good.
+func test_attack_move_preacher_resumes_after_conversion() -> void:
+	var w: Dictionary = _make_world()
+	var pa: Preacher = w.um.spawn_unit(PREACHER_SCENE, 0, Vector3(50, 5, 50)) as Preacher
+	var victim: Unit = w.um.spawn_unit(BRAVE_SCENE, 1, Vector3(54, 5, 50))
+	var dest: Vector3 = Vector3(70, 5, 50)
+	pa.order_move(dest, false, true)
+	check(pa.state == Unit.State.MOVE and pa.move_aggressive, "attack-move issued")
+	var ticks: int = 0
+	while pa.state != Unit.State.CAST and ticks < 600:
+		for u in w.um.units.duplicate():
+			if is_instance_valid(u):
+				u.tick(0.1)
+		w.um.tick(0.1)
+		ticks += 1
+	check(pa.state == Unit.State.CAST, "the marching preacher stops to preach (%d ticks)" % ticks)
+	check(pa.waypoint_queue.size() == 1 and pa.waypoint_queue[0] == dest,
+		"the destination survives the sermon")
+	# The victim joins the preacher's tribe (conversion done): nothing left to convert.
+	victim.convert_to_tribe(w.t0)
+	pa._refresh_conversion()
+	check(pa.state == Unit.State.MOVE, "with nobody left to convert the preacher marches on")
+	check(pa.move_aggressive and pa.waypoint_queue.size() == 1
+		and pa.waypoint_queue[0] == dest, "toward the original attack-move destination")
+	_free_world(w)
+
+
+## Without a pending route the very same exit still ends in IDLE (no ghost march).
+func test_preacher_without_route_goes_idle_after_conversion() -> void:
+	var w: Dictionary = _make_world()
+	var pa: Preacher = w.um.spawn_unit(PREACHER_SCENE, 0, Vector3(50, 5, 50)) as Preacher
+	pa._set_state(Unit.State.CAST)
+	pa._refresh_conversion()
+	check(pa.state == Unit.State.IDLE, "no route, nobody to convert -> idle")
 	_free_world(w)
 
 

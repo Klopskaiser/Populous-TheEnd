@@ -60,6 +60,13 @@ var id: int = 0
 var color: Color = Color.WHITE
 var mana: float = 0.0
 var units: Array[Unit] = []
+## Believers among `units` (counts_population): vehicles are devices and stay
+## out of population, mana and the defeat checks. Kept as a counter because
+## population() runs every tick from the mana economy, the huts, the AI cache
+## and the sidebar. Until 2026-09-06 population() was units.size() and the
+## `counts_population` flag was dead code — every catapult/ram/airship produced
+## mana and occupied hut housing.
+var _population: int = 0
 var buildings: Array[Building] = []
 ## The tribe's single spell caster; kept in sync by add_unit/remove_unit
 ## (null while she is dead — the reincarnation site respawns her).
@@ -98,11 +105,14 @@ func _init(p_id: int = 0, p_color: Color = Color.WHITE) -> void:
 
 # --- Derived values ---------------------------------------------------------
 
+## Followers (believers) of the tribe — vehicles excluded, their crew counted
+## like anyone else. Drives mana income and the hut housing limit.
 func population() -> int:
-	return units.size()
+	return _population
 
 
-## At or above the hard unit cap (phase 7i).
+## At or above the hard unit cap (phase 7i). Deliberately counts EVERY unit,
+## vehicles included (CLAUDE.md §4) — unlike population().
 func at_unit_cap() -> bool:
 	return units.size() >= MAX_UNITS
 
@@ -406,6 +416,8 @@ func add_unit(unit: Unit) -> void:
 		return
 	units.append(unit)
 	unit.tribe = self
+	if unit.counts_population:
+		_population += 1
 	if unit.unit_kind() == &"shaman":
 		shaman = unit
 	elif unit.unit_kind() == &"preacher" and unit not in preachers:
@@ -414,6 +426,8 @@ func add_unit(unit: Unit) -> void:
 
 
 func remove_unit(unit: Unit) -> void:
+	if unit in units and unit.counts_population:
+		_population -= 1
 	units.erase(unit)
 	if shaman == unit:
 		shaman = null

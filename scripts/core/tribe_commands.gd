@@ -727,7 +727,9 @@ func order_attack(units: Array[Unit], enemy: Unit) -> void:
 	# Vehicles are not targetable directly — only their crew. Exception: an
 	# AIRSHIP may be ordered as a target (catapults intercept its hull); each
 	# unit's _begin_attack/_may_target_vehicle filters who actually engages.
-	if not enemy.is_targetable() and not (enemy is Airship):
+	# A NEUTRAL ship (nobody serving aboard) is no target for anyone (2026-09-06).
+	if not enemy.is_targetable() \
+			and not (enemy is Airship and enemy.auto_attackable()):
 		return
 	for unit in units:
 		if unit == null or not is_instance_valid(unit) \

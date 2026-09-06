@@ -3154,8 +3154,11 @@ func _begin_attack(enemy: Unit) -> void:
 	# Never lock onto a non-targetable unit (a siege engine / a garrisoned tower
 	# crew): attackers go for the crew instead, so a stray scan must not leave
 	# them swinging at the vehicle for no damage. The only exception is a
-	# catapult bombarding another vehicle (_may_target_vehicle).
-	if not enemy.is_targetable() and not _may_target_vehicle(enemy):
+	# catapult bombarding another vehicle (_may_target_vehicle) — and never a
+	# NEUTRAL one (no active crew): neutral vehicles are nobody's target
+	# (2026-09-06). `enemy` is a CrewedVehicle whenever _may_target_vehicle is true.
+	if not enemy.is_targetable() \
+			and not (_may_target_vehicle(enemy) and enemy.auto_attackable()):
 		return
 	# Airborne targets (airship deck crew, whirled units) are out of reach for
 	# melee — only ranged attacks can touch them.
@@ -4068,10 +4071,13 @@ func _target_valid(target) -> bool:
 ## _target_valid PLUS targetable: an ongoing attack must also drop a target
 ## that left the live world (building occupant) or turned into a protected
 ## reserve — otherwise the attacker keeps striking an invisible unit at its old
-## position. Vehicles stay attackable for the units allowed to target them.
+## position. Vehicles stay attackable for the units allowed to target them —
+## until they turn NEUTRAL (whole crew out of action): then even a running
+## bombardment drops the target (2026-09-06).
 func _unit_target_attackable(target) -> bool:
 	return _target_valid(target) \
-		and (target.is_targetable() or _may_target_vehicle(target))
+		and (target.is_targetable() \
+			or (_may_target_vehicle(target) and target.auto_attackable()))
 
 
 ## True at most every TARGET_SEARCH_INTERVAL (staggered per unit) — scans are

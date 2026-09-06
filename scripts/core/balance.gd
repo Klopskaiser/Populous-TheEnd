@@ -119,6 +119,14 @@ const SIEGE_CREW_LEASH: float = 8.0
 ## Fahrzeug galt überall als unbemannt/neutral und war weder angreifbar noch
 ## bemannbar. Wer es in dieser Zeit nicht an Bord schafft, kommt gar nicht.
 const VEHICLE_CREW_BOARD_TIMEOUT: float = 45.0
+## Neutral-Regel (2026-09-06): Ein Fahrzeug ohne HANDLUNGSFÄHIGE Besatzung
+## (niemand in State.CREW an Bord — alle sitzen in Bekehrung, panieren, brennen,
+## rollen oder kämpfen einzeln) ist neutral: kein Angriffsziel, fährt und feuert
+## nicht. Ein Bodenfahrzeug, das so lange neutral bleibt, ohne dass die alte
+## Besatzung zurückkehrt, darf danach von JEDEM bemannt (gekapert) werden —
+## ein wirklich verlassenes (keine Crew zugeordnet) sofort. Luftschiffe sind
+## sofort kaperbar, sobald niemand mehr an Deck ist.
+const VEHICLE_NEUTRAL_TAKEOVER_TIME: float = 10.0
 ## Brenndauer des Fahrzeugs nach Feuerzauber-Treffer, dann versinkt das Wrack.
 const SIEGE_VEHICLE_BURN_TIME: float = 3.0
 const SIEGE_FIRE_RANGE: float = 15.0

@@ -72,6 +72,8 @@ func _tribe_has_no_followers() -> bool:
 			continue
 		if unit == tribe.shaman:
 			continue
+		if not unit.counts_population:
+			continue   # a vehicle is no follower (2026-09-06)
 		return false
 	return true
 

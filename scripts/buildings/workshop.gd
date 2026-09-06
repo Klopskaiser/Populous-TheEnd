@@ -32,8 +32,12 @@ class_name Workshop extends Building
 ## drain each other (stock_wood / the production take skip reserved piles).
 ##
 ## The finished catapult appears at the entrance; up to AUTO_CREW braves
-## idling nearby board it automatically (one shot — nobody near means it
-## stays, blocking the next production until manned and moved off).
+## idling nearby board it automatically. The recruiting REPEATS every
+## AUTO_CREW_RETRY seconds while the vehicle waits unmanned at the exit (until
+## 2026-09-06 it was a single shot at spawn time, which missed every brave that
+## was busy or walking to its idle group at that exact instant — user report).
+## Nobody near for good means it stays, blocking the next production until
+## manned and moved off.
 
 const WOOD_COST: int = Balance.WORKSHOP_WOOD_COST
 ## Twice the hut's area (hut 4x4): authored 8 wide x 4 deep, entrance south.
@@ -49,9 +53,11 @@ const CATAPULT_WOOD: int = Balance.WORKSHOP_CATAPULT_WOOD
 ## A finished engine within this range of the entrance blocks the exit.
 const EXIT_CLEAR_RADIUS: float = 3.0
 ## Auto-manning: this many IDLE braves within AUTO_CREW_RADIUS board the
-## fresh catapult (one shot at spawn; nobody near -> it stays unmanned).
+## fresh catapult; re-scanned every AUTO_CREW_RETRY seconds while it waits at
+## the exit under-crewed and not yet dispatched (see class doc).
 const AUTO_CREW: int = 2
 const AUTO_CREW_RADIUS: float = 12.0
+const AUTO_CREW_RETRY: float = 1.0
 
 const SIEGE_SCENE: PackedScene = preload("res://scenes/units/siege_engine.tscn")
 
@@ -71,6 +77,8 @@ var pending_engine = null
 ## True once the fresh engine was ordered off the entrance pad (so it is not
 ## re-ordered every tick).
 var _engine_dispatched: bool = false
+## Countdown to the next auto-crew re-scan for the pending engine.
+var _auto_crew_timer: float = 0.0
 
 
 func _init() -> void:
@@ -295,6 +303,7 @@ func can_start_production() -> bool:
 func _tick_active(delta: float) -> void:
 	_prune_occupants()
 	_maybe_dispatch_engine()
+	_tick_auto_crew(delta)
 	# Wood-stall re-check (mirrors the construction sites).
 	if wood_stalled:
 		_wood_recheck_timer -= delta
@@ -341,7 +350,7 @@ func _tick_active(delta: float) -> void:
 
 
 ## Rolls the finished vehicle out of the entrance and auto-mans it with up
-## to AUTO_CREW idle braves nearby (one shot — see class doc).
+## to AUTO_CREW idle braves nearby (first scan now, re-scans in _tick_auto_crew).
 func _finish_catapult() -> void:
 	production_active = false
 	work_done = 0.0
@@ -353,13 +362,42 @@ func _finish_catapult() -> void:
 		return
 	pending_engine = engine
 	_engine_dispatched = false
-	var crewed: int = 0
+	_auto_crew_timer = AUTO_CREW_RETRY
+	_recruit_auto_crew()
+
+
+## Re-scans for idle braves while the fresh vehicle still waits at the exit
+## under-crewed and has not been sent off yet (see class doc). Stops on its own:
+## exit_blocked() / _maybe_dispatch_engine drop pending_engine once it leaves.
+func _tick_auto_crew(delta: float) -> void:
+	var e = pending_engine
+	if e == null or not is_instance_valid(e) or e.state == Unit.State.DEAD \
+			or _engine_dispatched:
+		return
+	_auto_crew_timer -= delta
+	if _auto_crew_timer > 0.0:
+		return
+	_auto_crew_timer = AUTO_CREW_RETRY
+	_recruit_auto_crew()
+
+
+## Orders idle own braves within AUTO_CREW_RADIUS of the entrance onto the
+## pending engine until AUTO_CREW are registered as crew (boarded or inbound).
+## Braves only — the military auto-recrew (CrewedVehicle._tick_auto_recrew) is a
+## separate, tribe-wide rule; this is the workshop handing its product over.
+func _recruit_auto_crew() -> void:
+	var engine = pending_engine
+	if engine == null or not is_instance_valid(engine) or unit_manager == null:
+		return
+	var crewed: int = engine.crew_count()
+	if crewed >= AUTO_CREW:
+		return
 	for u in unit_manager.get_units_in_radius(entrance_world(), AUTO_CREW_RADIUS):
 		if crewed >= AUTO_CREW:
 			break
 		if u.tribe_id != tribe_id or u.state != Unit.State.IDLE:
 			continue
-		if not (u is Brave):
+		if not (u is Brave) or u.siege_engine != null or not u.can_take_orders():
 			continue
 		u.order_crew(engine)
 		if u.siege_engine == engine:

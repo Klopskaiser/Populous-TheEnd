@@ -195,13 +195,15 @@ func test_multiple_catapults_to_one_point_settle_apart() -> void:
 
 
 ## Catapult-vs-catapult (ranged) IS allowed: a catapult may aim at an enemy
-## catapult (its shot's splash then hits the crew).
+## catapult (its shot's splash then hits the crew) — a SERVED one; a neutral
+## (unmanned) vehicle is nobody's target since 2026-09-06.
 func test_catapult_may_target_enemy_catapult() -> void:
 	var w: Dictionary = _make_world()
 	var mine: SiegeEngine = w.unit_manager.spawn_unit(
 		SIEGE_SCENE, 0, Vector3(40, 0, 40)) as SiegeEngine
 	var foe: SiegeEngine = w.unit_manager.spawn_unit(
 		SIEGE_SCENE, 1, Vector3(48, 0, 40)) as SiegeEngine
+	_board_crew(w, foe, 1)
 	check(mine._may_target_vehicle(foe), "a catapult may target another catapult")
 	mine.order_attack(foe)
 	check(mine.attack_target == foe, "catapult locks onto the enemy catapult")
@@ -234,16 +236,204 @@ func test_catapult_scan_skips_unmanned_ground_vehicle() -> void:
 	_free_world(w)
 
 
-## Zeppelins are exempt from the unmanned-vehicle rule: a drifting (crewless)
-## airship stays auto-attackable, exactly as before.
-func test_catapult_scan_still_takes_unmanned_airship() -> void:
+## Neutral rule (2026-09-06): the old zeppelin exemption is gone — a crewless
+## airship is neutral like every other vehicle and is skipped by the scan; with
+## somebody aboard it is a target again.
+func test_catapult_scan_skips_neutral_airship() -> void:
 	var w: Dictionary = _make_world()
 	var cat: SiegeEngine = w.unit_manager.spawn_unit(
 		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(60, 60))) as SiegeEngine
 	var ship: Airship = w.unit_manager.spawn_unit(
 		AIRSHIP_SCENE, 1, cat.position + Vector3(8.0, 0, 0)) as Airship
-	check(cat._nearest_enemy_unit(SiegeEngine.FIRE_RANGE) == ship,
-		"an unmanned zeppelin is still auto-acquired (unchanged)")
+	check(ship.is_neutral(), "an unmanned zeppelin is neutral")
+	check(cat._nearest_enemy_unit(SiegeEngine.FIRE_RANGE) == null,
+		"a neutral zeppelin is NOT auto-acquired any more")
+	var crew: Brave = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, ship.position + Vector3(1.0, 0.0, 0.0)) as Brave
+	crew.order_crew(ship)
+	var ticks: int = 0
+	while not crew.siege_boarded and ticks < MAX_TICKS:
+		_tick_world(w)
+		ticks += 1
+	check(not ship.is_neutral(), "a passenger aboard makes the ship served again")
+	var found: Unit = cat._nearest_enemy_unit(SiegeEngine.FIRE_RANGE)
+	check(found == ship or found == crew, "the served ship (or its crew) is a target")
+	_free_world(w)
+
+
+# --- Neutral vehicles (2026-09-06) --------------------------------------------------
+
+const GameStateScript: GDScript = preload("res://scripts/core/game_state.gd")
+const PREACHER_SCENE_NEUTRAL: PackedScene = preload("res://scenes/units/preacher.tscn")
+
+
+## A crew that fights on foot beside its vehicle (self-defence) no longer serves
+## it: the vehicle turns neutral, drops its route and refuses orders until the
+## crew returns to its post — then it takes orders again.
+func test_vehicle_turns_neutral_while_whole_crew_fights() -> void:
+	var w: Dictionary = _make_world()
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(60, 60))) as SiegeEngine
+	var crew: Brave = _board_crew(w, engine, 0)
+	engine.order_move(w.nav.cell_to_world(Vector2i(80, 60)))
+	check(engine.state == Unit.State.MOVE and not engine.is_neutral(),
+		"served catapult drives")
+	var foe: Unit = w.unit_manager.spawn_unit(
+		WARRIOR_SCENE, 1, engine.position + Vector3(3.0, 0.0, 0.0))
+	crew._begin_attack(foe)
+	check(crew.state == Unit.State.ATTACK, "the crew member fights on foot")
+	check(engine.boarded_count() == 1, "it still counts as boarded (ownership)")
+	check(engine.active_crew_count() == 0, "but a fighting member does not serve")
+	check(engine.is_neutral(), "the whole crew fighting -> the vehicle is neutral")
+	_tick_world(w)
+	check(engine.state == Unit.State.IDLE and engine.waypoint_queue.is_empty(),
+		"a neutral vehicle stops and drops its route")
+	engine.order_move(w.nav.cell_to_world(Vector2i(80, 60)))
+	check(engine.state == Unit.State.IDLE, "a neutral vehicle refuses move orders")
+	# The fight ends: the member falls back to IDLE and is re-summoned to its post.
+	foe.take_damage(9999)
+	var ticks: int = 0
+	while engine.is_neutral() and ticks < 100:
+		_tick_world(w)
+		ticks += 1
+	check(not engine.is_neutral(), "the returning crew serves the vehicle again")
+	engine.order_move(w.nav.cell_to_world(Vector2i(80, 60)))
+	check(engine.state == Unit.State.MOVE, "and it takes orders again")
+	_free_world(w)
+
+
+## Neutral vehicles are nobody's target: an explicit attack order on an unmanned
+## enemy catapult is refused; once served it is a target, and a target that turns
+## neutral mid-bombardment is dropped by the validity check.
+func test_neutral_vehicle_is_no_target_even_when_ordered() -> void:
+	var w: Dictionary = _make_world()
+	var cat: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(60, 60))) as SiegeEngine
+	_board_crew(w, cat, 0)
+	_board_crew(w, cat, 0)
+	var foe: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 1, cat.position + Vector3(8.0, 0.0, 0.0)) as SiegeEngine
+	check(foe.is_neutral(), "the unmanned enemy catapult is neutral")
+	cat.order_attack(foe)
+	check(cat.attack_target == null, "an explicit order on a neutral vehicle is refused")
+	var foe_crew: Brave = _board_crew(w, foe, 1)
+	check(not foe.is_neutral(), "with crew the enemy catapult is served")
+	cat.order_attack(foe)
+	check(cat.attack_target == foe, "a served enemy vehicle can be ordered as target")
+	check(cat._unit_target_attackable(foe), "and it is a valid target")
+	foe_crew.take_damage(9999)
+	foe._prune_crew()
+	check(foe.is_neutral(), "crew dead -> neutral again")
+	check(not cat._unit_target_attackable(foe),
+		"a target that turned neutral mid-fight is no longer valid")
+	_free_world(w)
+
+
+## Takeover timer (user spec): a ground vehicle whose registered crew is out of
+## action (sitting under a preacher) cannot be boarded by the enemy right away —
+## only after VEHICLE_NEUTRAL_TAKEOVER_TIME of neutrality. The taker then owns
+## it and the old crew loses its seats. A genuinely abandoned vehicle (no crew
+## registered) is takeable at once, as before.
+func test_neutral_ground_vehicle_takeover_after_timer() -> void:
+	var w: Dictionary = _make_world()
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(60, 60))) as SiegeEngine
+	var crew: Brave = _board_crew(w, engine, 0)
+	var preacher: Unit = w.unit_manager.spawn_unit(
+		PREACHER_SCENE_NEUTRAL, 1, engine.position + Vector3(3.0, 0.0, 0.0))
+	preacher._set_state(Unit.State.CAST)
+	check(crew.begin_conversion(preacher, 120.0), "the crew member is pacified")
+	check(engine.is_neutral(), "a vehicle with only a sitting crew is neutral")
+	check(not engine.capturable_by(1), "but not capturable before the timer runs out")
+	var raider: Brave = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, engine.position + Vector3(-1.5, 0.0, 0.0)) as Brave
+	raider.order_crew(engine)
+	check(raider.siege_engine == null, "an early takeover attempt is refused")
+	# Let the vehicle stand neutral past the timer.
+	var ticks: int = 0
+	while not engine.capturable_by(1) and ticks < 200:
+		_tick_world(w)
+		ticks += 1
+	check(crew.state == Unit.State.SIT, "the old crew is still sitting (test premise)")
+	check(engine.capturable_by(1),
+		"after %.0f s of neutrality anyone may take it (took %d ticks)" % [
+			Balance.VEHICLE_NEUTRAL_TAKEOVER_TIME, ticks])
+	check(ticks * TICK >= Balance.VEHICLE_NEUTRAL_TAKEOVER_TIME - TICK,
+		"the timer really waited")
+	raider.order_crew(engine)
+	check(raider.siege_engine == engine, "the takeover order is accepted now")
+	ticks = 0
+	while not raider.siege_boarded and ticks < MAX_TICKS:
+		_tick_world(w)
+		ticks += 1
+	check(raider.siege_boarded and engine.tribe_id == 1,
+		"the raider boards and the catapult changes owner")
+	check(not (crew in engine.crew) and crew.siege_engine != engine,
+		"the old (sitting) crew lost its seats")
+	check(not engine.is_neutral(), "the new crew serves it")
+	_free_world(w)
+
+
+## Vehicles are devices, not followers (2026-09-06): they neither count as
+## population (mana, housing) nor keep a tribe alive in the defeat checks.
+## Their crew counts like every other unit.
+func test_vehicles_do_not_count_as_population() -> void:
+	var w: Dictionary = _make_world()
+	var pop: int = w.tribe.population()
+	var rate: float = w.tribe.mana_rate()
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(60, 60))) as SiegeEngine
+	check(w.tribe.population() == pop, "a catapult is not population")
+	check(is_equal_approx(w.tribe.mana_rate(), rate), "and produces no mana")
+	check(w.tribe.units.has(engine), "it is still a unit of the tribe (caps, wave)")
+	_board_crew(w, engine, 0)
+	check(w.tribe.population() == pop + 1, "the crew member counts once, aboard or not")
+	# Defeat chain: a tribe left with nothing but a vehicle is out.
+	var foe: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 1, w.nav.cell_to_world(Vector2i(40, 40))) as SiegeEngine
+	check(GameStateScript.is_tribe_defeated(w.tribe1),
+		"a tribe with only an unmanned vehicle left is defeated")
+	var site: Building = w.building_manager.place(SITE_SCENE_10G, w.tribe1,
+		Vector2i(30, 30), 0, true)
+	check(site._tribe_has_no_followers(),
+		"the reincarnation circle sees no follower in a lone vehicle")
+	var follower: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, foe.position + Vector3(2, 0, 0))
+	check(not GameStateScript.is_tribe_defeated(w.tribe1), "one follower keeps the tribe in")
+	check(not site._tribe_has_no_followers(), "and the circle sees him")
+	check(w.tribe1.population() == 1, "population counts the follower only")
+	follower.take_damage(9999)
+	w.tribe1.remove_unit(follower)
+	check(w.tribe1.population() == 0, "removing him brings the count back to zero")
+	_free_world(w)
+
+
+## The workshop keeps recruiting idle braves for its finished vehicle instead of
+## the old single shot at spawn time (user report: braves standing next to a
+## fresh vehicle never boarded it).
+func test_workshop_keeps_recruiting_until_manned() -> void:
+	var w: Dictionary = _make_world()
+	var ws: Workshop = _place_workshop(w)
+	w.wood_pile_manager.deposit(ws.delivery_point(), 20)
+	var worker: Brave = _house_worker(w, ws)
+	check(worker.workshop_inside, "producer housed")
+	for i in range(91):
+		ws._tick_active(1.0)
+	var engines: Array = _siege_units(w)
+	check(engines.size() == 1, "catapult finished with nobody idle around")
+	if engines.size() != 1:
+		_free_world(w)
+		return
+	var engine: SiegeEngine = engines[0]
+	check(engine.crew_count() == 0, "no crew at spawn time")
+	# Braves become idle next to the workshop only AFTER the vehicle rolled out.
+	var late1: Brave = w.unit_manager.spawn_unit(BRAVE_SCENE, 0,
+		ws.entrance_world() + Vector3(2.0, 0.0, 2.0)) as Brave
+	var late2: Brave = w.unit_manager.spawn_unit(BRAVE_SCENE, 0,
+		ws.entrance_world() + Vector3(-2.0, 0.0, 2.0)) as Brave
+	ws._tick_active(Workshop.AUTO_CREW_RETRY)
+	ws._tick_active(Workshop.AUTO_CREW_RETRY)
+	check(late1.siege_engine == engine and late2.siege_engine == engine,
+		"the re-scan recruits braves that turned idle later")
 	_free_world(w)
 
 

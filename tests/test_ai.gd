@@ -2611,3 +2611,20 @@ func test_marching_only_skips_demolishers_inside() -> void:
 		"only the plain marcher gets the refresh; storming and inside units keep their assault")
 	ai.free()
 	_free_world(w)
+
+
+## A preacher mid-sermon (State.CAST) is left alone by the attack-wave refresh:
+## re-issuing order_move every ATTACK_ORDER_TICKS broke every AI conversion
+## (2026-09-06). The preacher resumes the march itself once it is done.
+func test_marching_only_skips_casting_preacher() -> void:
+	var w: Dictionary = _make_world()
+	var ai: AIController = _make_ai(w, w.tribes[0], Vector2i(64, 64))
+	var preaching: Unit = w.unit_manager.spawn_unit(
+		preload("res://scenes/units/preacher.tscn"), 0, Vector3(30, 0, 30))
+	var marching: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, Vector3(20, 0, 20))
+	preaching._set_state(Unit.State.CAST)
+	var out: Array[Unit] = ai._marching_only([preaching, marching] as Array[Unit])
+	check(out.size() == 1 and out[0] == marching,
+		"the casting preacher is skipped, the marcher gets the refresh")
+	ai.free()
+	_free_world(w)

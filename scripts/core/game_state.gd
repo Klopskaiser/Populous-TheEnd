@@ -115,7 +115,10 @@ static func is_tribe_defeated(tribe: Tribe) -> bool:
 	if tribe.eliminated:
 		return true
 	for unit in tribe.units:
-		if is_instance_valid(unit) and unit.state != Unit.State.DEAD:
+		# Vehicles are devices, not followers: a tribe left with nothing but an
+		# empty catapult has nobody to man it and is out (2026-09-06).
+		if is_instance_valid(unit) and unit.state != Unit.State.DEAD \
+				and unit.counts_population:
 			return false
 	return true
 

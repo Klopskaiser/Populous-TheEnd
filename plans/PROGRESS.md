@@ -9,6 +9,54 @@ Verifikationsstand. Auch bei nachträglichen Erweiterungen außerhalb einer Phas
 
 ---
 
+## Spieltest-Fixes: Fahrzeug-Neutralstatus, Bevölkerungszählung, Werkstatt-Bemannung, Prediger-Angriffsmove (2026-09-06)
+
+Vier Nutzerbeobachtungen, alle im Code verifiziert:
+
+1. **Fahrzeuge zählten als Bevölkerung.** `Tribe.population()` war `units.size()`; das Flag
+   `Unit.counts_population` (Fahrzeuge `false`) wurde **nirgends gelesen** — toter Code seit
+   7f. Jedes Katapult erzeugte Mana, belegte Hüttenwohnraum und hielt den Stamm in
+   `GameState.is_tribe_defeated`/`ReincarnationSite._tribe_has_no_followers` am Leben.
+   **Fix:** Zähler `Tribe._population` in `add_unit`/`remove_unit`; beide Siegprüfungen
+   überspringen `not counts_population`. `at_unit_cap()` bleibt bewusst auf `units.size()`
+   (Hardcap zählt Fahrzeuge, CLAUDE.md §4). Besatzung zählt weiter (Nutzerentscheidung).
+2. **Neutral-Status** (`scripts/units/crewed_vehicle.gd`): `active_crew_count()` zählt nur
+   noch Mitglieder in `State.CREW` (vorher auch `can_take_orders()` → Crew im
+   Einzel-Nahkampf hielt das Katapult feuerbereit). Neu `is_neutral()` (= 0 aktive),
+   `auto_attackable()` = `not is_neutral()` (Zeppelin-Ausnahme gestrichen),
+   `capturable_by(tribe)` (niemand an Bord → sofort; Crew außer Gefecht → nach
+   `Balance.VEHICLE_NEUTRAL_TAKEOVER_TIME` 10 s, Timer `_neutral_time` im `tick`), graue
+   Flagge `C_NEUTRAL_FLAG`. Der Befehls-Reset im `tick` hängt an `is_neutral()` statt
+   `boarded_count()==0`. Verbraucher: `Unit._begin_attack`/`_unit_target_attackable`
+   (`_may_target_vehicle and auto_attackable`), `TribeCommands.order_attack`,
+   `SelectionManager._enemy_airship_under_cursor`/`_try_crew_assignment`,
+   `AIController._attack_target_position` (kein neutrales Fahrzeug als Wellenziel) und
+   der Wellen-Cache (`active_crew_count`). `_tick_auto_recrew` bleibt für Fremde
+   strenger (kein Crew-Eintrag ODER Timer) — sonst schnappte im Test ein danebenstehender
+   Feindkrieger das Katapult, während der eigene Rekrut noch hinlief.
+   **Stolperstein:** `capturable_by` darf **nicht** `crew_count()` rufen — das prunt, und
+   `_prune_crew` fragt selbst `capturable_by` → Stack Overflow in der halben Suite.
+3. **Werkstatt-Bemannung** (`scripts/buildings/workshop.gd`): Rekrutierung aus
+   `_finish_catapult` in `_recruit_auto_crew()` ausgelagert und per `_tick_auto_crew`
+   jede `AUTO_CREW_RETRY` (1 s) wiederholt, solange `pending_engine` steht, nicht
+   dispatcht und unter `AUTO_CREW`. Vorher ein einziger Scan im Fertigstellungs-Tick,
+   der jeden Brave verpasste, der gerade zu seiner Idle-Gruppe lief.
+4. **Prediger-Angriffsmove** (`scripts/units/preacher.gd`): alle CAST-Ausstiege
+   (`:208` Ziel unerreichbar, Schamanin stört, nichts mehr zu bekehren) gehen über
+   `_resume_route_or_idle()` — Gebäudeziel → ATTACK, sonst `waypoint_queue[0]` neu
+   starten, sonst IDLE. Bewusst nicht `Unit._retarget_or_idle` (das würde Bekehrbare in
+   den Nahkampf schicken). KI: `_marching_only` überspringt `State.CAST`, der 4-s-Refresh
+   riss vorher jede KI-Bekehrung ab (und kaschierte den Fehler zugleich).
+
+**Tests:** neu `test_siege.gd` (Neutral bei kämpfender Crew, kein Ziel trotz Befehl,
+Kaper-Timer, Bevölkerung/Siegprüfung, Werkstatt-Retry; `…skips_neutral_airship` ersetzt
+die alte Zeppelin-Ausnahme), `test_fire_ram.gd` (Befehl auf neutrales Fahrzeug
+abgewiesen), `test_airship.gd` (Sofort-Kapern trotz einlaufender Besitzer-Rekruten),
+`test_conversion_targeting.gd` (Angriffsmove wird nach Bekehrung fortgesetzt / ohne Route
+IDLE), `test_ai.gd` (`_marching_only` schont CAST). Drei Alt-Tests bemannen ihr
+Zielfahrzeug jetzt vor dem Angriffsbefehl. **Suite: 5822 passed, 0 failed, ~42 s**,
+keine SCRIPT ERROR; `--headless --quit` fehlerfrei. Manueller Spieltest offen.
+
 ## Bugfix: Tornado-Fahrzeugtod ohne Berst-Effekt (2026-07-20)
 
 **Symptom:** Vom Tornado hochgehobene Rammen/Katapulte „zerplatzten" nicht sichtbar — der

@@ -31,6 +31,8 @@ const UNCREWED_LIFETIME: float = 180.0
 ## a small radius — cheap because vehicles are few (see _tick_auto_recrew).
 const RECREW_SCAN_INTERVAL: float = 1.0
 const RECREW_SCAN_RADIUS: float = 3.0
+## Flag colour while the vehicle is neutral (no active crew) — reads as "nobody's".
+const C_NEUTRAL_FLAG: Color = Color(0.62, 0.62, 0.6)
 const C_WOOD: Color = Color(0.42, 0.29, 0.15)
 const C_WOOD_DARK: Color = Color(0.3, 0.2, 0.1)
 const C_METAL: Color = Color(0.45, 0.45, 0.48)
@@ -61,6 +63,13 @@ var _recrew_timer: float = 0.0
 ## walking over count as crew). At UNCREWED_LIFETIME an abandoned siege engine
 ## bursts. Reset the moment anyone is aboard or inbound.
 var _no_crew_time: float = 0.0
+## Seconds this vehicle has been NEUTRAL (no active crew, see is_neutral) in a
+## row; reset the moment anyone serves it again. At
+## Balance.VEHICLE_NEUTRAL_TAKEOVER_TIME a ground vehicle becomes capturable by
+## any tribe even though its (incapacitated) old crew is still registered.
+var _neutral_time: float = 0.0
+## Last neutral state the flag was painted for (repaint only on a change).
+var _flag_neutral: bool = false
 ## Seconds of burn left after a fire-spell/lava hit (0 = not burning).
 var _vehicle_burn: float = 0.0
 ## The destroyed wreck sinks into the ground (burn/water death).
@@ -102,12 +111,44 @@ func is_targetable() -> bool:
 	return false  # attackers go for the crew
 
 
-## Auto-aggro rule (user request): an unmanned GROUND vehicle is harmless —
-## and capturable loot — so auto-acquisition ignores it; only an explicit
-## attack order engages it. Airships opt out: a drifting zeppelin stays
-## auto-attackable as before.
+## NEUTRAL (2026-09-06): nobody aboard is able to serve — the vehicle is
+## unmanned, or its whole crew sits under a preacher, panics, burns, tumbles or
+## fights on foot beside it. A neutral vehicle is no attack target for anyone
+## (auto-acquisition AND explicit orders, every vehicle type — the old "drifting
+## zeppelin stays attackable" exception is gone), cannot move or fire, drops its
+## pending orders (tick) and flies the grey flag. It stays neutral until someone
+## serves it again: the old crew returning to State.CREW, an own backfill, or a
+## takeover under the capturable_by rules.
+func is_neutral() -> bool:
+	return active_crew_count() == 0
+
+
+## Whether attackers may lock onto this vehicle at all: never while neutral.
+## Consulted by the catapult/ram scans, Unit._begin_attack and the target
+## validity check, TribeCommands.order_attack and the UI picks.
 func auto_attackable() -> bool:
-	return crew_rides_on_deck() or boarded_count() > 0
+	return not is_neutral()
+
+
+## Whether a unit of `other_tribe` may board (and thereby take over) this
+## vehicle. Own units always may (backfill). Foreign units:
+## - right away when nobody is ABOARD ("all seats free" — the airship rule, and
+##   the genuinely abandoned ground vehicle): the owner's inbound, not yet
+##   boarded recruits do not defend it, add_crew releases them (user report: a
+##   catapult whose crew had just died could not be taken while replacements
+##   were still walking over);
+## - a ground vehicle whose boarded crew is merely out of action (sitting under a
+##   preacher, panicking, fighting on foot) only once it has stood NEUTRAL for
+##   Balance.VEHICLE_NEUTRAL_TAKEOVER_TIME without the crew coming back (user
+##   spec 2026-09-06 — the old crew loses its seats then).
+## Deliberately built on boarded_count()/active_crew_count() only — both count
+## without pruning, so _prune_crew may ask this question itself.
+func capturable_by(other_tribe: int) -> bool:
+	if other_tribe == tribe_id:
+		return true
+	if boarded_count() == 0:
+		return true
+	return is_neutral() and _neutral_time >= Balance.VEHICLE_NEUTRAL_TAKEOVER_TIME
 
 
 ## Vehicles never play the man-sized death cry — they have their own burn/burst
@@ -401,15 +442,16 @@ func add_crew(unit) -> bool:
 	if unit in crew:
 		return true
 	if unit.tribe_id != tribe_id:
-		if boarded_count() > 0:
-			return false   # manned vehicles cannot be hijacked while served
-		# Genuinely UNMANNED vehicle: the owner's not-yet-boarded reservations do
-		# not defend it. They used to hold their slots until
+		if not capturable_by(unit.tribe_id):
+			return false   # served (or not yet neutral long enough): no hijack
+		# Capturable vehicle: the owner's not-yet-boarded reservations do not
+		# defend it. They used to hold their slots until
 		# VEHICLE_CREW_BOARD_TIMEOUT (45 s), so a catapult whose crew had just died
 		# could not be taken over at all while five recruits were still walking
 		# towards it — user report: "I could not crew an enemy catapult although it
 		# had no crew left, only after quite a while." Nothing is lost by releasing
-		# them: they never boarded.
+		# them: they never boarded. (Boarded-but-incapacitated members of the old
+		# crew stay registered until the takeover completes in on_crew_boarded.)
 		_release_unboarded_crew(unit.tribe_id)
 	if crew.size() >= max_crew:
 		return false
@@ -427,12 +469,14 @@ func free_slots_for(unit) -> int:
 	var foreign: bool = unit != null and is_instance_valid(unit) \
 		and unit.tribe_id != tribe_id
 	if foreign:
-		if boarded_count() > 0:
+		if not capturable_by(unit.tribe_id):
 			return 0   # a served vehicle cannot be hijacked (add_crew agrees)
 		for m in crew:
-			# Only the OWNER's reservations are discounted — the takeover party's own
-			# inbound recruits legitimately hold their slots.
-			if is_instance_valid(m) and not m.siege_boarded 					and m.tribe_id != unit.tribe_id:
+			# Only the OWNER's members are discounted — the takeover party's own
+			# inbound recruits legitimately hold their slots. Unboarded owner
+			# reservations are released by add_crew; boarded-but-incapacitated
+			# ones (timer takeover) are dropped when the first taker boards.
+			if is_instance_valid(m) and m.tribe_id != unit.tribe_id:
 				taken -= 1
 	return maxi(0, max_crew - taken)
 
@@ -478,16 +522,20 @@ func crew_count() -> int:
 	return crew.size()
 
 
-## Boarded members currently ABLE to serve: pacified (SIT under a preacher),
-## panicking/burning and tumbling members still count as boarded (ownership,
-## hijack protection) but cannot drive or fire — a vehicle whose whole crew
-## is incapacitated does nothing until they recover (user spec).
+## Boarded members currently ABLE to serve: only those actually at their post
+## (State.CREW, within the leash, not on fire). Pacified (SIT under a preacher),
+## panicking/burning, tumbling AND individually fighting members (State.ATTACK —
+## self-defence on foot beside the vehicle) still count as boarded (ownership,
+## hijack protection) but cannot drive or fire — a vehicle whose whole crew is
+## out of action is NEUTRAL (is_neutral) until someone returns to the post.
+## Until 2026-09-06 a fighting member (`can_take_orders()` true) counted as
+## active, so a catapult kept bombarding with its entire crew brawling.
 func active_crew_count() -> int:
 	var count: int = 0
 	for m in crew:
-		if is_instance_valid(m) and m.state != State.DEAD and m.siege_boarded \
-				and _flat_dist(m.position, position) <= CREW_LEASH \
-				and (m.state == State.CREW or m.can_take_orders()):
+		if is_instance_valid(m) and m.state == State.CREW and m.siege_boarded \
+				and not m.is_burning() \
+				and _flat_dist(m.position, position) <= CREW_LEASH:
 			count += 1
 	return count
 
@@ -499,10 +547,12 @@ func on_crew_boarded(unit) -> void:
 	if not (unit in crew):
 		return
 	if unit.tribe_id != tribe_id:
-		if boarded_count() > 0:
+		if not capturable_by(unit.tribe_id):
 			crew.erase(unit)
 			unit.leave_crew()
 			return
+		# Takeover: _switch_owner + the prune below drop the previous owner's
+		# members (boarded-but-incapacitated ones included — timer rule).
 		_switch_owner(unit.tribe)
 	unit.siege_boarded = true
 	unit._sync_soa_flags()   # seated: excluded from the separation kernel
@@ -578,21 +628,21 @@ func _age_recruits(delta: float) -> void:
 func _prune_crew() -> void:
 	var kept: Array = []
 	var dropped: Array = []
-	# Once ANYBODY is aboard the vehicle is served, so foreign recruits still
-	# walking over are no longer legitimate takeover candidates (below).
-	var served: bool = boarded_count() > 0
 	for m in crew:
 		if not is_instance_valid(m) or m.state == State.DEAD or m.siege_engine != self:
 			continue
-		# A foreign member is dropped whether or not it boarded. Only dropping
-		# BOARDED ones left the enemy's inbound recruits sitting in the crew of a
-		# vehicle that had just changed hands — holding slots forever and pinning
-		# boarded_count() to 0, so the ship read as "unmanned/neutral" everywhere
-		# (user report: 6 invisible enemy firewarriors on a captured zeppelin).
-		if m.tribe_id != tribe_id and (m.siege_boarded or served):
+		# A foreign member is dropped whether or not it boarded — unless it is a
+		# legitimate takeover recruit still walking over (capturable_by). Only
+		# dropping BOARDED ones left the enemy's inbound recruits sitting in the
+		# crew of a vehicle that had just changed hands — holding slots forever and
+		# pinning boarded_count() to 0, so the ship read as "unmanned/neutral"
+		# everywhere (user report: 6 invisible enemy firewarriors on a captured
+		# zeppelin).
+		if m.tribe_id != tribe_id \
+				and (m.siege_boarded or not capturable_by(m.tribe_id)):
 			dropped.append(m)   # converted away / vehicle changed hands
 			continue
-		# Foreign members that have NOT boarded an UNSERVED vehicle are legitimate
+		# Foreign members that have NOT boarded a CAPTURABLE vehicle are legitimate
 		# takeover recruits walking over — on_crew_boarded settles who wins.
 		if m.siege_boarded and _flat_dist(m.position, position) > CREW_LEASH:
 			dropped.append(m)
@@ -773,12 +823,13 @@ func tick(delta: float) -> void:
 					_destroy_vehicle(true)
 			else:
 				_no_crew_time = 0.0
-	# Truly unmanned (nobody aboard — not merely incapacitated): drop EVERY
-	# pending order so a later takeover / auto-recrew starts idle and never drives
-	# off on the previous owner's route or target (user report). Gated on
-	# boarded_count (not active), so a boarded-but-pacified/panicking crew keeps
-	# its target to resume on recovery.
-	if state != State.DEAD and not _sinking and boarded_count() == 0:
+	# NEUTRAL (nobody able to serve — unmanned OR the whole crew incapacitated /
+	# fighting on foot): the vehicle is inert. Drop EVERY pending order so it
+	# never drives off on the previous owner's route or target after a takeover
+	# (user report) and waits for fresh orders once someone serves it again
+	# (user spec 2026-09-06). The neutral timer feeds the takeover rule.
+	if state != State.DEAD and not _sinking and is_neutral():
+		_neutral_time += delta
 		if state == State.MOVE or state == State.ATTACK or _has_path() \
 				or not waypoint_queue.is_empty() or attack_building != null:
 			waypoint_queue.clear()
@@ -787,12 +838,14 @@ func tick(delta: float) -> void:
 			_end_attack()
 			if state != State.IDLE:
 				_set_state(State.IDLE)
-	# An under-crewed / incapacitated-crew (but still boarded) vehicle rolls to a
-	# stop mid-route; it keeps its target and resumes once the crew recovers.
-	elif state == State.MOVE and active_crew_count() < min_move_crew:
-		waypoint_queue.clear()
-		_clear_path()
-		_set_state(State.IDLE)
+	else:
+		_neutral_time = 0.0
+		# Under-crewed (someone serves, but not enough to drive) mid-route: roll
+		# to a stop; the route is kept for when the crew is back up to strength.
+		if state == State.MOVE and active_crew_count() < min_move_crew:
+			waypoint_queue.clear()
+			_clear_path()
+			_set_state(State.IDLE)
 	_refresh_nav_block()   # park/unpark as a nav obstacle for other vehicles
 	_tick_auto_recrew(delta)
 	super.tick(delta)
@@ -839,9 +892,14 @@ func _tick_auto_recrew(delta: float) -> void:
 		if u.tribe == null or not u.tribe.auto_recrew_vehicles:
 			continue   # the CANDIDATE's tribe governs (own backfill + neutral takeover)
 		# Own vehicles are backfilled at any crew level; a FOREIGN unit only claims a
-		# genuinely abandoned vehicle (no boarded OR inbound crew) — it never snipes
-		# one the owner is actively manning (recruits still walking over count).
-		if u.tribe_id != tribe_id and members > 0:
+		# genuinely abandoned vehicle (no boarded OR inbound crew — `members`
+		# counts the owner's recruits still walking over) or one that has stood
+		# neutral for VEHICLE_NEUTRAL_TAKEOVER_TIME. Stricter than the explicit
+		# order (capturable_by ignores inbound recruits): an AUTOMATIC snipe must
+		# not beat the owner's own replacements to the seats.
+		if u.tribe_id != tribe_id and members > 0 \
+				and not (is_neutral()
+					and _neutral_time >= Balance.VEHICLE_NEUTRAL_TAKEOVER_TIME):
 			continue
 		u.order_crew(self)   # add_crew/on_crew_boarded enforce the hijack rules
 
@@ -904,10 +962,14 @@ func _finish_model(root: Node3D) -> void:
 	root.add_child(blob)
 
 
+## Owner colour, or the grey neutral flag while nobody serves the vehicle.
 func _refresh_flag_color() -> void:
 	if _flag_mesh == null:
 		return
-	_flag_mesh.material_override = _mat(TRIBE_COLORS[tribe_id % TRIBE_COLORS.size()])
+	_flag_neutral = is_neutral()
+	var color: Color = C_NEUTRAL_FLAG if _flag_neutral \
+		else TRIBE_COLORS[tribe_id % TRIBE_COLORS.size()]
+	_flag_mesh.material_override = _mat(color)
 
 
 func _mat(color: Color) -> StandardMaterial3D:
@@ -932,3 +994,6 @@ func _tick_visual(delta: float) -> void:
 	var heading: Vector3 = _model_heading()
 	if heading.length_squared() > 0.000001:
 		rotation.y = atan2(heading.x, heading.z)
+	# Neutral <-> served: repaint the flag (grey while nobody serves).
+	if _flag_mesh != null and state != State.DEAD and is_neutral() != _flag_neutral:
+		_refresh_flag_color()

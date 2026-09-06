@@ -517,8 +517,10 @@ func build_tick_cache() -> TickCache:
 				if unit.state != Unit.State.CREW:
 					cache.army.append(unit)
 			&"siege", &"fireram", &"airship":
-				# Manned vehicles march/fly with the wave (7f).
-				if (unit as CrewedVehicle).boarded_count() \
+				# Manned vehicles march/fly with the wave (7f) — manned by ACTIVE
+				# crew: a neutral one (crew pacified/fighting on foot) refuses the
+				# order anyway (2026-09-06).
+				if (unit as CrewedVehicle).active_crew_count() \
 						>= (unit as CrewedVehicle).min_move_crew:
 					cache.army.append(unit)
 				if kind == &"airship" \
@@ -1375,6 +1377,12 @@ func _marching_only(squad: Array[Unit]) -> Array[Unit]:
 		# would yank its own demolishers out every ATTACK_ORDER_TICKS.
 		if u.raiding_building != null and is_instance_valid(u.raiding_building):
 			continue
+		# Mid-cast (a preacher channelling a conversion, the shaman's wind-up): a
+		# fresh order_move would break the sermon every ATTACK_ORDER_TICKS — the
+		# preacher resumes the attack-move on its own once the conversion is done
+		# (Preacher._resume_route_or_idle, 2026-09-06).
+		if u.state == Unit.State.CAST:
+			continue
 		out.append(u)
 	return out
 
@@ -1410,6 +1418,10 @@ func _attack_target_position() -> Vector3:
 	for unit in unit_manager.units:
 		if not is_instance_valid(unit) or unit.tribe_id == tribe.id \
 				or unit.state == Unit.State.DEAD:
+			continue
+		# A neutral enemy vehicle (nobody serving it) is no target — marching the
+		# wave at an abandoned catapult would siege scrap (2026-09-06).
+		if unit is CrewedVehicle and not (unit as CrewedVehicle).auto_attackable():
 			continue
 		var d: float = unit.position.distance_to(anchor_world)
 		if d < best_dist:

@@ -268,6 +268,7 @@ func test_flames_ignite_enemy_ground_vehicles() -> void:
 	var ram: FireRam = _armed_ram(w)
 	var foe: SiegeEngine = w.unit_manager.spawn_unit(
 		SIEGE_SCENE, 1, ram.position + Vector3(0, 0, 3.0)) as SiegeEngine
+	_board_crew(w, foe, 1)   # served: a neutral vehicle could not be ordered (2026-09-06)
 	ram.order_attack(foe)
 	var ticks: int = 0
 	while not foe.is_burning() and ticks < MAX_TICKS:
@@ -682,9 +683,10 @@ func test_ram_does_not_regenerate_without_crew() -> void:
 
 
 ## Auto-aggro (user request): an unmanned enemy GROUND vehicle is harmless and
-## capturable — the armed ram's auto-acquisition ignores it; an explicit order
-## still burns it.
-func test_armed_ram_ignores_unmanned_vehicle_until_ordered() -> void:
+## capturable and NEUTRAL (2026-09-06) — the armed ram's auto-acquisition ignores
+## it, and since the neutral rule so does an explicit order. Once the enemy
+## mans it, the order is accepted.
+func test_armed_ram_ignores_neutral_vehicle_even_when_ordered() -> void:
 	var w: Dictionary = _make_world()
 	var ram: FireRam = _armed_ram(w)
 	var foe: SiegeEngine = w.unit_manager.spawn_unit(
@@ -695,7 +697,17 @@ func test_armed_ram_ignores_unmanned_vehicle_until_ordered() -> void:
 		"the unmanned enemy catapult is never auto-acquired")
 	check(not foe.is_burning(), "no flames were opened on it")
 	ram.order_attack(foe)
-	check(ram.attack_target == foe, "an explicit order still burns it")
+	check(ram.attack_target == null, "an explicit order on a neutral vehicle is refused")
+	var foe_crew: Brave = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, foe.position + Vector3(1.0, 0.0, 0.0)) as Brave
+	foe_crew.order_crew(foe)
+	var ticks: int = 0
+	while not foe_crew.siege_boarded and ticks < MAX_TICKS:
+		_tick_world(w)
+		ticks += 1
+	check(not foe.is_neutral(), "the enemy catapult is served now")
+	ram.order_attack(foe)
+	check(ram.attack_target == foe, "a served enemy vehicle can be ordered as target")
 	_free_world(w)
 
 

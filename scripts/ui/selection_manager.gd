@@ -1007,13 +1007,16 @@ func enemy_device_at(screen_pos: Vector2, camera: Camera3D = null) -> Unit:
 
 
 ## Enemy airship under the cursor (dedicated pass — the generic enemy pick
-## skips non-targetable vehicles), or null.
+## skips non-targetable vehicles), or null. A NEUTRAL ship (nobody serving
+## aboard) is no attack target: it is skipped here so the click falls through to
+## the plain move (or, before this, to the crew/takeover order).
 func _enemy_airship_under_cursor(screen_pos: Vector2, camera: Camera3D) -> Unit:
 	var best: Unit = null
 	var best_dist: float = INF
 	for unit in _unit_manager.units:
 		if not (unit is Airship) or unit.state == Unit.State.DEAD \
-				or unit.tribe_id == player_tribe_id:
+				or unit.tribe_id == player_tribe_id \
+				or not (unit as Airship).auto_attackable():
 			continue
 		var sprite: Rect2 = _unit_screen_rect(unit, camera)
 		if sprite.size.y <= 0.0 or not sprite.grow(PICK_MARGIN_PX).has_point(screen_pos):
@@ -1036,15 +1039,12 @@ func _try_crew_assignment(screen_pos: Vector2, camera: Camera3D, queue_up: bool 
 	for unit in _unit_manager.units:
 		if unit.state == Unit.State.DEAD or not (unit is CrewedVehicle):
 			continue
-		# A foreign vehicle may only be taken when it is GENUINELY abandoned —
-		# nobody aboard AND nobody inbound. crew_count() (which prunes first) is
-		# the right test; boarded_count() ignores occupied slots, so an enemy ship
-		# with inbound recruits read as capturable, the click was swallowed as a
-		# crew order that then failed silently on the full slot list, and the
-		# attack order below never ran (user report: enemy zeppelin could neither
-		# be attacked nor crewed). Same test the auto-recrew already uses.
-		if unit.tribe_id != player_tribe_id \
-				and (unit as CrewedVehicle).crew_count() > 0:
+		# A foreign vehicle may only be taken when the vehicle says so
+		# (CrewedVehicle.capturable_by — the same truth add_crew, free_slots_for and
+		# the auto-recrew use): a ground vehicle genuinely abandoned or neutral for
+		# VEHICLE_NEUTRAL_TAKEOVER_TIME, an airship with nobody aboard. Anything
+		# else is not a crew order, so the click falls through to the attack pick.
+		if not (unit as CrewedVehicle).capturable_by(player_tribe_id):
 			continue   # a manned or claimed enemy vehicle cannot be taken
 		var sprite: Rect2 = _unit_screen_rect(unit, camera)
 		if sprite.size.y <= 0.0 or not sprite.grow(PICK_MARGIN_PX).has_point(screen_pos):

@@ -923,7 +923,8 @@ func _build_followers_tab() -> Control:
 	_auto_recrew_check.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_auto_recrew_check.tooltip_text = "Eigene Militäreinheiten (Krieger, Feuerkrieger," \
 		+ " Prediger) besetzen nahe Bodenfahrzeuge (max. 3 m) automatisch nach oder" \
-		+ " übernehmen neutrale — auch im Kampf, außer im Nahkampf. Schamanin und" \
+		+ " übernehmen fremde: verlassene sofort, neutrale (Besatzung außer Gefecht)" \
+		+ " nach 10 s — auch im Kampf, außer im Nahkampf. Schamanin und" \
 		+ " Braves sind ausgenommen; Luftschiffe ebenfalls."
 	UiTheme.style_button(_auto_recrew_check)
 	_auto_recrew_check.toggled.connect(_on_auto_recrew_toggled)
@@ -1154,13 +1155,15 @@ func _crew_view(target: Object) -> Dictionary:
 	if target is Airship:
 		var a: Airship = target as Airship
 		return {"members": a.crew, "cap": a.max_crew,
-			"info": "Passagiere: %d/%d  (Kampf nur im Stand, +3 Reichweite)" % [
-				a.boarded_count(), a.max_crew]}
+			"info": "Passagiere: %d/%d  (Kampf nur im Stand, +3 Reichweite)%s" % [
+				a.boarded_count(), a.max_crew,
+				"  — neutral" if a.is_neutral() else ""]}
 	if target is CrewedVehicle:
 		var e: CrewedVehicle = target as CrewedVehicle
 		return {"members": e.crew, "cap": e.max_crew,
-			"info": "Besatzung: %d/%d  %s" % [
-				e.boarded_count(), e.max_crew, _vehicle_crew_hint(e)]}
+			"info": "Besatzung: %d/%d  %s%s" % [
+				e.boarded_count(), e.max_crew, _vehicle_crew_hint(e),
+				"  — neutral" if e.is_neutral() else ""]}
 	if target is TrainingBuilding:
 		var tb: TrainingBuilding = target as TrainingBuilding
 		var queue: int = tb.incoming.size() + (1 if is_instance_valid(tb.trainee) else 0)

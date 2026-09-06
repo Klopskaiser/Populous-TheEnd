@@ -204,8 +204,7 @@ func _tick_convert(delta: float) -> void:
 		elif _flat_dist(position, ot.position) > CONVERT_RANGE * 0.85:
 			if not _approach(ot.position, delta):
 				_target_ordered = false   # unreachable (cliff) -> drop the order
-				_convert_target = null
-				_set_state(State.IDLE)
+				_resume_route_or_idle()
 				return
 			_face_point(ot.position)
 			return   # still closing in — skip the auto-rescan that would drop it
@@ -258,7 +257,7 @@ func _refresh_conversion() -> void:
 	# preacher would keep standing in CAST over nobody. Cheap here because the
 	# whole scan is already throttled by _due_to_scan.
 	if _preach_disturbed_by_enemy_shaman(self):
-		_set_state(State.IDLE)
+		_resume_route_or_idle()
 		return
 	# "Responsible" = at least one in-range convertible that is MINE to handle
 	# (I just pacified it, or it already sits under me). A unit already sitting
@@ -336,12 +335,28 @@ func _refresh_conversion() -> void:
 	if nearest != null:
 		_set_convert_target(nearest)
 		return
-	_convert_target = null
 	# Nothing of my own to convert (everyone in range is a peer's already, and
-	# nothing free is near): resume a building assault if one is pending, else go
-	# idle — do NOT stand channeling over another preacher's victim.
+	# nothing free is near): resume a building assault or the pending
+	# (attack-)move, else go idle — do NOT stand channeling over another
+	# preacher's victim.
+	_resume_route_or_idle()
+
+
+## Leaves CAST the way every other unit leaves a fight (Unit._retarget_or_idle):
+## a pending building assault first, then the pending (attack-)move route, else
+## idle. Until 2026-09-06 every CAST exit was a bare IDLE — the attack-move's
+## waypoint_queue survived untouched, but nothing ever restarted it, so a preacher
+## sent on an attack-move stopped for good after its first conversion (user
+## report) and a patrol route broke at the first sermon. Deliberately NOT the
+## base _retarget_or_idle: that scans and _begin_attack()s the nearest enemy,
+## which for a preacher means brawling a convertible instead of preaching — the
+## resumed march re-enters CAST itself via _tick_move -> _engage_on_sight.
+func _resume_route_or_idle() -> void:
+	_convert_target = null
 	if _building_target_valid():
 		_set_state(State.ATTACK)
+	elif not waypoint_queue.is_empty():
+		_start_path_to(waypoint_queue[0])
 	else:
 		_set_state(State.IDLE)
 

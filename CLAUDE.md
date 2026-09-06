@@ -116,8 +116,39 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
 | **Brave (Gefolgsmann)** | Basis-Einheit. Sammelt **passiv Holz** und baut Gebäude aus. Wird von Hütten gespawnt. |
 | **Krieger** | Nahkampf-Einheit. Ausbildung in der **Kaserne** (Krieger-Trainingslager). |
 | **Feuerkrieger** | Fernkampf-Einheit (Feuerbälle). Ausbildung im **Feuertempel** (Feuerkrieger-Trainingslager). Der Feuerball macht **Flächenschaden** (**30 %** des Hauptschadens im Umkreis von **1,3 m**, **nur Feinde**, kein Rückstoß auf Umstehende) — ohne ihn teilten Feuerkrieger viel Schaden aus und töteten fast nichts. Der Radius ist an der Einheitengeometrie ausgerichtet: 1,3 m fasst **ein 6er-Pack** (max. 1,10 m breit) bzw. eine Nahkampfgruppe (0,9-m-Ring) und lässt die Nachbargruppe (2,2 m) draußen. Gemessen **flach in XZ**, der Bereich ist also ein senkrechter Zylinder. **Die Wirkung skaliert mit der Dichte:** im 200er-Klumpen nimmt fast jeder Ball ~3 Umstehende mit, bei 20 gegen 20 meist keinen — Feuerkrieger sind damit bewusst eine **Masseneinheit**. |
-| **Prediger** | **Konvertiert** feindliche Einheiten zum eigenen Stamm. Ausbildung im **Tempel**. Mehrere Prediger verteilen sich auf verschiedene Ziele; **Einheiten in Bekehrung sind kein gültiges Ziel** für Nah-/Fernkampf (Katapult ausgenommen). Eine **kämpfende feindliche Schamanin** im Umkreis von 6 m **unterbricht die Predigt** — laufende Bekehrungen brechen ab, neue beginnen nicht, und das gilt für alle Prediger in ihrem Radius. Bloßes Herumstehen stört nicht. **Gegnerische Prediger singen hörbar anders** als die eigenen (`preach_enemy` statt `preach`, Perspektive Spieler) — eine fremde Predigt soll man erkennen. **Luftschiffinsassen sind kein Bekehrungsziel** (am Deck unerreichbar) und werden gar nicht erst gewählt — weder vom Prediger am Boden noch von einem im Wachturm oder auf einem Deck, und ein Rechtsklick darauf wird abgewiesen. |
+| **Prediger** | **Konvertiert** feindliche Einheiten zum eigenen Stamm. Ausbildung im **Tempel**. Mehrere Prediger verteilen sich auf verschiedene Ziele; **Einheiten in Bekehrung sind kein gültiges Ziel** für Nah-/Fernkampf (Katapult ausgenommen). Eine **kämpfende feindliche Schamanin** im Umkreis von 6 m **unterbricht die Predigt** — laufende Bekehrungen brechen ab, neue beginnen nicht, und das gilt für alle Prediger in ihrem Radius. Bloßes Herumstehen stört nicht. **Gegnerische Prediger singen hörbar anders** als die eigenen (`preach_enemy` statt `preach`, Perspektive Spieler) — eine fremde Predigt soll man erkennen. **Luftschiffinsassen sind kein Bekehrungsziel** (am Deck unerreichbar) und werden gar nicht erst gewählt — weder vom Prediger am Boden noch von einem im Wachturm oder auf einem Deck, und ein Rechtsklick darauf wird abgewiesen. **Im Angriffsmove bekehrt der Prediger, was er trifft, und marschiert danach weiter** zum Zielpunkt wie jede andere Einheit (`Preacher._resume_route_or_idle`, 2026-09-06 — vorher endete jede Predigt in IDLE und die Route war vergessen); die KI schont Prediger mitten in der Bekehrung bei ihrem Wellen-Refresh (`_marching_only` überspringt `State.CAST`). |
 | **Belagerungswaffe (Katapult)** | Fernkampf-Fahrzeug mit Crew, gebaut in der **Werkstatt** (Phase 7f). |
+
+> **Fahrzeuge sind Geräte, keine Anhänger (2026-09-06):** Katapult, Feuerramme und
+> Luftschiff zählen **nie** zur Bevölkerung, erzeugen kein Mana, belegen keinen
+> Wohnraum und halten einen Stamm in der Siegprüfung nicht am Leben (Stamm mit nur
+> noch einem Fahrzeug ist besiegt, der Reinkarnationsplatz versinkt). Die
+> **Besatzung** zählt weiter wie jede Einheit. Einziger Schalter ist
+> `Unit.counts_population` (auf Fahrzeugen `false`), ausgewertet in `Tribe.add_unit`/
+> `remove_unit` (Zähler), `GameState.is_tribe_defeated` und
+> `ReincarnationSite._tribe_has_no_followers`. Der Einheiten-Hardcap (unten) zählt
+> Fahrzeuge dagegen bewusst mit.
+>
+> **Neutral-Status:** Ein Fahrzeug ohne **handlungsfähige** Besatzung ist **neutral**
+> (`CrewedVehicle.is_neutral()`) — niemand an Bord in `State.CREW`: unbemannt, oder die
+> ganze Crew sitzt in Bekehrung, paniert, brennt, rollt oder **kämpft einzeln zu Fuß**
+> daneben. Neutral heißt: **kein Angriffsziel** für irgendwen (Auto-Zielwahl **und**
+> Rechtsklick, alle Fahrzeugtypen — die alte Ausnahme „leerer Zeppelin bleibt
+> beschießbar" ist weg; ein laufender Beschuss lässt das Ziel fallen), **inert** (fährt
+> und feuert nicht, alle Befehle werden gelöscht) und **graue Flagge**. Zauber treffen
+> es weiterhin. Wieder bemannt wird es durch die Rückkehr der alten Crew an ihren
+> Platz, eigenes Nachbesetzen oder Kapern. **Kapern** (`capturable_by`): Sobald
+> **niemand an Bord** ist, darf jeder einsteigen — einlaufende Rekruten des Besitzers
+> zählen nicht (Luftschiff-Regel „alle Plätze frei", gilt auch am Boden). Ist die Crew
+> nur **außer Gefecht** (sitzt/paniert/kämpft), fällt das Bodenfahrzeug erst nach
+> **10 s** Neutralität an den ersten fremden Einsteiger (`Balance.
+> VEHICLE_NEUTRAL_TAKEOVER_TIME`); die alte Crew verliert dann ihre Plätze. Das
+> **automatische** Nachbesetzen durch fremdes Militär ist strenger und wartet auch bei
+> lediglich einlaufenden Besitzer-Rekruten auf den Timer.
+>
+> **Werkstatt-Bemannung:** Die Werkstatt rekrutiert **wiederholt** (jede Sekunde) bis zu
+> zwei untätige eigene Braves im 12-m-Radius für das fertige Fahrzeug, solange es
+> unbemannt am Ausgang steht — nicht mehr nur einmalig im Moment der Fertigstellung.
 
 > **Einheiten-Hardcap:** max. **1000 Einheiten pro Stamm** (`Balance.TRIBE_MAX_UNITS`,
 > zusätzlich zum Bevölkerungslimit der Hütten). *(In Phase 10e von 1500 auf 1000
