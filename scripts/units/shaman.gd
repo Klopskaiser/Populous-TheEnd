@@ -49,6 +49,12 @@ func death_sfx_key() -> StringName:
 	return &"shaman_death"
 
 
+## Her own scream for a lethal hit in the air (2026-09-06) — the generic
+## unit_air_death is for everyone else.
+func air_death_sfx_key() -> StringName:
+	return &"shaman_air_death"
+
+
 func melee_strength() -> float:
 	return SHAMAN_MELEE_STRENGTH
 

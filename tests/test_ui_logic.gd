@@ -150,8 +150,8 @@ func test_build_entries_training_buildings_active() -> void:
 
 func test_spell_entries_count() -> void:
 	var entries: Array[Dictionary] = Sidebar.default_spell_entries()
-	check(entries.size() == 12,
-		"twelve spells registered (phase 6 + 7c + supertornado + hypnosis)")
+	check(entries.size() == 13,
+		"thirteen spells registered (phase 6 + 7c + supertornado + hypnosis + golem)")
 	# Entry order and max_charges must match the tribes' spell set — the UI
 	# builds its pips from these values.
 	var by_id: Dictionary = {}

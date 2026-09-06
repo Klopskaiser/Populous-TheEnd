@@ -161,6 +161,8 @@ static func icon(key: StringName) -> ImageTexture:
 			_draw_sink(img)
 		&"hypnosis":
 			_draw_hypnosis(img)
+		&"golem":
+			_draw_golem(img)
 		&"shaman":
 			_draw_shaman(img)
 		&"pause":
@@ -457,6 +459,23 @@ static func _draw_hypnosis(img: Image) -> void:
 			var x: int = int(round(mid + cos(ang) * r))
 			var y: int = int(round(mid + sin(ang) * r))
 			_rect(img, x, y, 2, 2, I_GOLD if i % 3 != 2 else I_LIGHT)
+
+
+static func _draw_golem(img: Image) -> void:
+	# Klobige Steinfigur: breite Schultern, kleiner Kopf, haengende Arme, kurze
+	# Beine — dasselbe Motiv wie das prozedurale 3D-Modell (Golem._create_model).
+	var stone: Color = Color(0.62, 0.61, 0.58)
+	var dark: Color = Color(0.40, 0.39, 0.37)
+	_rect(img, 9, 2, 6, 5, stone)          # Kopf
+	_rect(img, 10, 4, 1, 1, I_GOLD)        # Augen (Stammes-"Rune")
+	_rect(img, 13, 4, 1, 1, I_GOLD)
+	_rect(img, 4, 7, 16, 3, dark)          # Schultern
+	_rect(img, 6, 10, 12, 8, stone)        # Rumpf
+	_rect(img, 10, 12, 4, 4, I_GOLD)       # Brust-Rune
+	_rect(img, 2, 9, 4, 10, dark)          # Arme
+	_rect(img, 18, 9, 4, 10, dark)
+	_rect(img, 6, 18, 5, 5, dark)          # Beine
+	_rect(img, 13, 18, 5, 5, dark)
 
 
 static func _draw_shaman(img: Image) -> void:

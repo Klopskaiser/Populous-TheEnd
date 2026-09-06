@@ -47,6 +47,11 @@ var whirl_splash: float = Balance.FIREBALL_WHIRL_SPLASH
 ## Sets victims on fire (firestorm) and damages buildings in the splash radius.
 var ignites: bool = false
 var building_damage: int = 0
+## Friendly fire (firestorm, 2026-09-06): with this the bolt hits, burns and
+## pushes the CASTER's own units and damages the caster's own buildings too —
+## a rain of fire knows no friends. Off for the fireball spell and the
+## firewarriors' bolts.
+var friendly_fire: bool = false
 ## Explicitly handed in for the building damage (pattern: LavaSurge.setup) —
 ## relying on unit_manager.building_manager would make the effect depend on a
 ## wiring the caller cannot see, and it is not set in every test world.
@@ -116,7 +121,7 @@ func _explode() -> void:
 	# ONE query over the wider push radius; the damage test below narrows it
 	# back down to the splash radius.
 	for u in unit_manager.get_units_in_radius(target_pos, maxf(SPLASH_RADIUS, PUSH_RADIUS)):
-		if u.state == Unit.State.DEAD or u.tribe_id == tribe_id:
+		if u.state == Unit.State.DEAD or (u.tribe_id == tribe_id and not friendly_fire):
 			continue
 		var flat_d: float = Vector2(u.position.x - target_pos.x,
 			u.position.z - target_pos.z).length()
@@ -191,7 +196,8 @@ func _damage_buildings() -> void:
 	if bm == null:
 		return
 	for b in bm.buildings:
-		if not is_instance_valid(b) or b.health <= 0 or b.tribe_id == tribe_id:
+		if not is_instance_valid(b) or b.health <= 0 \
+				or (b.tribe_id == tribe_id and not friendly_fire):
 			continue
 		if not b.is_attackable():
 			continue   # the reincarnation circle is never a target (10g)

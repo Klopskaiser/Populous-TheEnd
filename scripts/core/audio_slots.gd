@@ -129,8 +129,9 @@ static func next_variant(count: int, current: int) -> int:
 ## airship.gd, crewed_vehicle.gd).
 static func default_priority(name: StringName) -> int:
 	var s: String = String(name)
-	if s.begins_with("spell_voice_") or s == "shaman_death":
+	if s.begins_with("spell_voice_") or s == "shaman_death" or s == "shaman_air_death":
 		return PRIO_CRITICAL
-	if s == "airship_death" or s == "siege_death_burn" or s == "siege_death_burst":
+	if s == "airship_death" or s == "siege_death_burn" or s == "siege_death_burst" \
+			or s == "golem_death":
 		return PRIO_IMPORTANT
 	return PRIO_NORMAL

@@ -870,6 +870,14 @@ func land_sfx_key() -> StringName:
 	return &"" if doomed or health <= 0 else &"unit_land"
 
 
+## Sound key of the cry for a lethal hit IN THE AIR (see _cry_air_death). The
+## shaman overrides it with her own scream (user request 2026-09-06) — the
+## most important unit in the game must not die sounding like a brave. Empty =
+## silent, same convention as death_sfx_key().
+func air_death_sfx_key() -> StringName:
+	return &"unit_air_death"
+
+
 ## True for units that seek out enemies on their own while idle (Warrior/
 ## Firewarrior/Preacher). Braves are false: they only retaliate when hit.
 func _is_combatant() -> bool:
@@ -1545,7 +1553,9 @@ func _cry_air_death() -> bool:
 	if _air_death_cried:
 		return false
 	_air_death_cried = true
-	_play_sfx(&"unit_air_death", AIR_DEATH_SFX_INTERVAL_MS)
+	var key: StringName = air_death_sfx_key()
+	if key != &"":
+		_play_sfx(key, AIR_DEATH_SFX_INTERVAL_MS)
 	return true
 
 
@@ -2344,6 +2354,13 @@ func is_burning() -> bool:
 	return _burn_time > 0.0
 
 
+## Damage per second while alight: the whole BURN_TOTAL_DAMAGE spread over
+## BURN_DURATION (15/s — lethal to a brave). The golem overrides it with a
+## trickle (stone does not burn well, 2026-09-06).
+func burn_damage_per_second() -> float:
+	return float(BURN_TOTAL_DAMAGE) / BURN_DURATION
+
+
 ## Size multiplier for the shared StatusFxRenderer flame (vehicles override).
 func burn_fx_scale() -> float:
 	return 1.0
@@ -2391,7 +2408,7 @@ func _tick_burning(delta: float) -> void:
 	if _burn_time <= 0.0 or state == State.DEAD:
 		return
 	_burn_time -= delta
-	_burn_frac += float(BURN_TOTAL_DAMAGE) / BURN_DURATION * delta
+	_burn_frac += burn_damage_per_second() * delta
 	var whole: int = int(_burn_frac)
 	if whole > 0:
 		_burn_frac -= float(whole)
@@ -2600,6 +2617,13 @@ func is_panic_immune() -> bool:
 	return false
 
 
+## Immune to the hypnosis spell (10k). Deliberately NOT is_conversion_immune():
+## preachers are conversion-immune but hypnotizable (user spec). Only the shaman
+## — and the golem, a construct nobody can lend (override).
+func is_hypnosis_immune() -> bool:
+	return unit_kind() == &"shaman"
+
+
 ## Pacified by an enemy preacher: stop everything and sit down. The conversion
 ## completes after `duration` seconds of uninterrupted channeling (_tick_sit).
 ## Returns false when this unit cannot be converted. Rolling, airborne and
@@ -2791,7 +2815,7 @@ func hypnosis_remaining() -> float:
 func hypnotize(new_tribe: Tribe, duration: float) -> bool:
 	if new_tribe == null or state == State.DEAD:
 		return false
-	if unit_kind() == &"shaman":
+	if is_hypnosis_immune():
 		return false
 	if garrison_housed:
 		return false   # tower crew are a protected reserve (7h), like conversion

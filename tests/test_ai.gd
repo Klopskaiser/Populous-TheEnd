@@ -850,7 +850,10 @@ func test_ai_casts_firestorm_on_big_cluster() -> void:
 	var w: Dictionary = _make_world()
 	var ai_tribe: Tribe = w.tribes[1]
 	var ai: AIController = _make_ai(w, ai_tribe, Vector2i(40, 40))
-	w.unit_manager.spawn_unit(SHAMAN_SCENE, 1, Vector3(40, 5, 40))
+	# The shaman stands OUTSIDE the rain's spread radius (7,2 m) of the cluster:
+	# since 2026-09-06 the firestorm burns friends too and the AI holds it when
+	# an own unit — herself included — would stand in it.
+	w.unit_manager.spawn_unit(SHAMAN_SCENE, 1, Vector3(34, 5, 40))
 	for i in range(5):
 		w.unit_manager.spawn_unit(BRAVE_SCENE, 0,
 			Vector3(44 + 0.6 * float(i % 3), 5, 40 + 0.6 * float(i % 2)))
@@ -858,6 +861,46 @@ func test_ai_casts_firestorm_on_big_cluster() -> void:
 	ai._cast_spells()
 	check(_pending_spell_id(ai_tribe) == &"firestorm",
 		"big enemy cluster -> firestorm before fireball")
+	ai.free()
+	_free_world(w)
+
+
+## Feuerregen kennt keine Freunde (2026-09-06): steht eine eigene Einheit im
+## Zielgebiet, laesst die KI die Salve aus und wirft den Feuerball.
+func test_ai_holds_the_firestorm_when_own_units_stand_in_it() -> void:
+	var w: Dictionary = _make_world()
+	var ai_tribe: Tribe = w.tribes[1]
+	var ai: AIController = _make_ai(w, ai_tribe, Vector2i(40, 40))
+	w.unit_manager.spawn_unit(SHAMAN_SCENE, 1, Vector3(40, 5, 40))
+	for i in range(5):
+		w.unit_manager.spawn_unit(BRAVE_SCENE, 0,
+			Vector3(44 + 0.6 * float(i % 3), 5, 40 + 0.6 * float(i % 2)))
+	w.unit_manager.spawn_unit(WARRIOR_SCENE, 1, Vector3(45, 5, 41))   # own man in the melee
+	_arm_only(ai_tribe, &"firestorm")
+	ai._cast_spells()
+	check(_pending_spell_id(ai_tribe) == &"",
+		"no firestorm onto the own warrior (fireball is not armed here)")
+	ai.free()
+	_free_world(w)
+
+
+## Golem (2026-09-06): mit Ladung und einem Feindgebaeude in Zauberreichweite
+## beschwoert die KI den Golem zwischen Schamanin und Gebaeude; ein beschworener
+## Golem zaehlt im Wellen-Cache als Armee.
+func test_ai_summons_a_golem_at_an_enemy_building() -> void:
+	var w: Dictionary = _make_world()
+	var ai_tribe: Tribe = w.tribes[1]
+	var ai: AIController = _make_ai(w, ai_tribe, Vector2i(40, 40))
+	w.unit_manager.spawn_unit(SHAMAN_SCENE, 1, Vector3(40, 5, 40))
+	var hut: Building = w.building_manager.place(HUT_SCENE, w.tribes[0], Vector2i(46, 40), 0, true)
+	check(hut != null, "enemy hut in spell range")
+	_arm_only(ai_tribe, &"golem")
+	ai._cast_spells()
+	check(_pending_spell_id(ai_tribe) == &"golem", "the AI summons a golem at the building")
+	var golem: Unit = w.unit_manager.spawn_unit(
+		preload("res://scenes/units/golem.tscn"), 1, Vector3(38, 5, 40))
+	var cache: AIController.TickCache = ai.build_tick_cache()
+	check(golem in cache.army and cache.army_count >= 1, "a golem marches with the wave")
 	ai.free()
 	_free_world(w)
 

@@ -9,6 +9,63 @@ Verifikationsstand. Auch bei nachträglichen Erweiterungen außerhalb einer Phas
 
 ---
 
+## Schamanin-Luftschrei, Feuerregen ohne Freund/Feind, Zauber 13 „Golem beschwören" (2026-09-06)
+
+Drei Nutzerwünsche aus dem Spieltest.
+
+1. **Luft-Todesschrei der Schamanin** (`scripts/units/unit.gd`): neuer Hook
+   `air_death_sfx_key()` (Default `unit_air_death`, leer = stumm), von `_cry_air_death()`
+   gelesen; `Shaman` liefert `shaman_air_death`, `AudioSlots.default_priority` stuft ihn
+   wie `shaman_death` als kritisch ein. Test `test_combat.gd::test_shaman_air_death_has_its_own_cry`.
+2. **Feuerregen trifft alle** (`scripts/spells/fireball_bolt.gd`): Feld `friendly_fire`
+   (Default aus) hebt den Stammfilter in `_explode()` und `_damage_buildings()` auf; der
+   Feuerregen setzt es (`firestorm.gd::_launch_bolt`). Eigene Einheiten brennen und nehmen
+   Schaden, eigene Gebäude die 20 HP je Ball; Feuerball-Zauber und Feuerkrieger-Bälle
+   unverändert. Der Panik-Ring (`_panic_the_onlookers`) bleibt gegnerisch — Brennende
+   panieren ohnehin (Brand-Invariante). KI (`ai_controller.gd::_cast_spells`): kein
+   Feuerregen, wenn eine eigene Einheit (auch die Schamanin) im Spread-Radius steht
+   (`_own_units_near`); `test_ai_casts_firestorm_on_big_cluster` rückt die Schamanin
+   deshalb aus dem Zielgebiet. Tests: `test_firestorm_bolt_burns_own_units_and_buildings`,
+   `test_firestorm_panic_ring_spares_own_onlookers`, `test_ai_holds_the_firestorm_when_own_units_stand_in_it`.
+3. **Golem** — Zauber `scripts/spells/golem_spell.gd` (900 Mana, 2 Ladungen, 10 m; Ziel auf
+   `nav_grid.nearest_walkable_cell` geschnappt, kein Platz/Hardcap → `false`, Ladung
+   bleibt) spawnt `scripts/units/golem.gd` (`scenes/units/golem.tscn`). Einheit: 400 LP,
+   3,5 m/s, `push_immune`, `vehicle_separation` 2 m, `counts_population = false`,
+   `_is_ranged() = true` als „keine Kampfgruppen"-Schalter (eigenes `_tick_attack` ohne
+   Gruppenlogik, Luftziele in `_begin_attack` abgelehnt, Gebäude von außen via
+   `_bombard_building` mit `stand_off_point`). `_smash()`: Rechteck 2 × 3 m im
+   Blickrahmen (Geometrie der Rammen-Flamme), 20 Schaden je Feind (Sitzende ja, eigene
+   nie, Fahrzeuge/Flieger nein), Überlebende per `Fireball.impact_outcome(randf(), 0.25,
+   0.25)` hochgewirbelt (`apply_lift` 3,0/4,5) oder gerollt, vom Golem weg; feindliche
+   angreifbare Gebäude im Feld `apply_destruction_stages(1)`, Zielgebäude garantiert.
+   Kills (+3 s) über `take_damage`-Ergebnis (DEAD/doomed). Lebenszeit 180 s im
+   `tick()`-Override, `_crumble()` → `_die()`; Leiche versinkt in `_tick_visual`.
+   Immunitäten über neue Basis-Hooks `Unit.is_hypnosis_immune()` (Default: Schamanin;
+   in `hypnotize` und `hypnosis.gd` benutzt) und `Unit.burn_damage_per_second()` (Default
+   15; Golem 5) plus `is_conversion_immune/is_panic_immune/can_crew_siege/can_garrison`
+   und No-op `throw_airborne/start_roll/displace`. Modell: `renders_as_sprite() false`,
+   `_create_model()` lädt `models/units/golem.glb` (Nodes `Arm`, `Flag`) oder baut einen
+   Box-Steinriesen 3 × 4 × 4 m mit Arm-Pivot und leuchtender Brust-Rune; Blob-Schatten
+   wie die Fahrzeuge. Verdrahtung: `Spell.create_default_set`, `Balance` (`GOLEM_*`,
+   `SPELL_GOLEM_*`), Sidebar-Eintrag (Hotkey X) + Gefolgsleute-Zeile „Golems",
+   `SpellTargeting.HOTKEY_SPELLS`, `project.godot` `cast_spell_13` (physical 88),
+   `InputSettings`, `UiTheme._draw_golem`, KI-Cache (`army`) und KI-Cast (3 m vor der
+   Schamanin Richtung Feindgebäude, vor der Vulkan-Leiter).
+   **Erkenntnis:** `--check-only` meldet für Skripte mit zugehöriger `.tscn` scheinbar
+   „referenced non-existent resource" — Artefakt des Check-Modus (auch bei `shaman.gd`),
+   kein Fehler. Neue `class_name`-Skripte brauchen vor dem Testlauf `--headless --import`.
+   Tests: neu `tests/test_golem.gd` (115 Zusicherungen: Beschwörung/Ladung, kein Boden →
+   Ladung bleibt, kein Anhänger/Siegprüfung, Kampf ohne Sitz, Wirkfeld in/aus/hinten/
+   eigen, 25/25-Statistik über 200 Schläge, Gebäudestufe nur Feind, Belagerung von
+   außen mit 2-s-Takt, Luftziel abgelehnt, Lebenszeit + Kill-Bonus, Immunitäten, Brand
+   5/s ohne Panik); `test_spells`/`test_ui_logic` auf 13 Zauber; `test_ai` Golem-Cast +
+   Wellen-Cache. Doku: CLAUDE.md §4/§6, `docs/game_mechanics.md`, `assets/README.md`
+   (Sound-Keys, `golem.glb`).
+
+**Verifikation:** Suite **5963 passed, 0 failed, ~46 s**, keine SCRIPT ERROR;
+`--headless --quit` fehlerfrei. Manueller Spieltest offen (Optik des Platzhalter-Golems,
+Schlag-Schwung, Hotkey X).
+
 ## Spieltest-Fixes: Fahrzeug-Neutralstatus, Bevölkerungszählung, Werkstatt-Bemannung, Prediger-Angriffsmove (2026-09-06)
 
 Vier Nutzerbeobachtungen, alle im Code verifiziert:

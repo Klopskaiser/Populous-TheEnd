@@ -270,7 +270,7 @@ frei. Der Effekt tritt je Zauber **verzögert** ein (`Spell.effect_delay`):
 
 | Verzögerung | Zauber | Gesamt |
 |---|---|---|
-| **sofort** | Feuerball, Blitz, Schwarm, Hypnose, Tornado, Landbrücke, Ebene | 0,5 s |
+| **sofort** | Feuerball, Blitz, Schwarm, Hypnose, Tornado, Landbrücke, Ebene, Golem beschwören | 0,5 s |
 | **+0,5 s** | Feuerregen, Absinken | 1,0 s |
 | **+1,0 s** | Vulkan, Erdbeben, Supertornado | 1,5 s |
 
@@ -293,11 +293,12 @@ sonst vor angehobenen Gebäuden (Vulkan) stehen, statt zu zaubern.
 | 5 | **Tornado** | 220 | 3 | 11 m | Windhose (10 s, r = 2,2 m), wandert zufällig; Gebäude **+1 Stufe alle 2 s**. Einheiten werden hochgewirbelt und weggeschleudert (Sturzschaden 30 HP + Rollschaden; ins Wasser = Tod). |
 | 6 | **Erdbeben** | 400 | 2 | 11 m | Hebt/senkt Terrain entlang einer zufälligen Verwerfung (r = 7 m); Gebäude **+2 Stufen**, Einheiten 15 HP, Lava in der Spalte. |
 | 7 | **Vulkan** | 1600 | 1 | 12 m | Teuerster Zauber: hebt einen Vulkankegel mit **echtem Krater** (r = 7 m, Rand bei 0,55 × R, Kratertiefe 1,5 m), **eine** Lavawelle (8 s), die den Krater zu einem Plateau **auffüllt**; aktive Zone 20 s. |
-| 8 | **Feuerregen** | 775 | 2 | 12 m | **Verbotszone** über **20 s**: Bälle in zufälligen Abständen (Ø 0,3 s) auf Zufallspunkte im Gebiet (r = 7,2 m), je 20/10 HP, **kein** Hochwirbeln, dafür **Brand** und **20 HP Gebäudeschaden je Ball**. Wer außen herum zusieht (bis 11,5 m), gerät in **Panik**. |
+| 8 | **Feuerregen** | 775 | 2 | 12 m | **Verbotszone** über **20 s**: Bälle in zufälligen Abständen (Ø 0,3 s) auf Zufallspunkte im Gebiet (r = 7,2 m), je 20/10 HP, **kein** Hochwirbeln, dafür **Brand** und **20 HP Gebäudeschaden je Ball**. **Trifft auch eigene Einheiten und Gebäude** (kennt keine Freunde). Wer außen herum zusieht (bis 11,5 m) und **Gegner** ist, gerät in **Panik**. |
 | 9 | **Ebene** | 300 | 3 | 10 m | Ebnet das Zielquadrat (9×9 m) exakt ein, harte Kanten. |
 | 0 | **Absinken** | 350 | 3 | 10 m | Senkt das Zielgebiet (r = 6 m) um bis zu 3 m ab — nie unter den Meeresboden. |
 | 11 | **Supertornado** | 1200 | 1 | 12 m | Doppelt so breite (r = 4,4 m) und 12 m hohe Windhose über 16 s, mit **2 Satelliten**-Tornados im Abstand von 6 m. |
 | 12 | **Hypnose** | 210 | 3 | 10 m | Übernimmt für **30 s** alle feindlichen Einheiten im **4×4-m**-Quadrat: sie gehorchen dem Zauberer und tragen ein Zeichen über dem Kopf. **Prediger können sie bekehren** — das gewinnt und ist dauerhaft. Der Stammeswechsel ist der **volle** (Bevölkerung, Manaerzeugung, Selektion wandern mit), wer also die **letzten** Einheiten eines Stammes hypnotisiert, beendet ihn. **Immun:** die Schamanin und Wachturm-Besatzung. Nach Ablauf fällt die Einheit zurück — außer der Ursprungsstamm ist inzwischen ausgeschieden, dann bleibt sie. |
+| 13 | **Golem beschwören** | 900 | 2 | 10 m | Beschwört einen **Golem**: Steinriese mit 3D-Modell (3 × 4 × 4 m), **400 LP**, 3,5 m/s, lebt **180 s + 3 s je Kill**. Schlägt alle **2 s** in ein Feld **2 × 3 m** vor sich: **20 Schaden**, je **25 %** Hochwirbeln/Rollen vom Golem weg, **1 Gebäudestufe** je feindlichem Gebäude im Feld. Keine Kampfgruppen, steuerbar wie jede Einheit, immun gegen Bekehrung/Hypnose/Panik/Wurf/Rollen, brennt nur mit 5 Schaden/s. Kein Anhänger (kein Mana, kein Wohnraum). Kein Platz oder Hardcap → Ladung bleibt. |
 
 **Terrainverformung** (Landbrücke, Erdbeben, Vulkan, Ebene, Absinken) ändert
 Heightmap, Kollision und Navigation zur Laufzeit.

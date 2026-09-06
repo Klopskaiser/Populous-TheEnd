@@ -516,6 +516,11 @@ func build_tick_cache() -> TickCache:
 				# Vehicle/deck crew rides along — never pull it off.
 				if unit.state != Unit.State.CREW:
 					cache.army.append(unit)
+			&"golem":
+				# A summoned golem is army: it marches with the wave and counts as
+				# military for the state machine (2026-09-06).
+				cache.army_count += 1
+				cache.army.append(unit)
 			&"siege", &"fireram", &"airship":
 				# Manned vehicles march/fly with the wave (7f) — manned by ACTIVE
 				# crew: a neutral one (crew pacified/fighting on foot) refuses the
@@ -1501,6 +1506,14 @@ func _cast_spells() -> void:
 		SPELL_SCAN_RADIUS)
 	if target_building != null:
 		var center: Vector3 = target_building.center_world()
+		# A golem next to the shaman, facing the building (2026-09-06): three
+		# minutes of a 400-HP wrecker that takes a stage per swing and scatters
+		# the defenders. The spell snaps the point onto walkable ground itself.
+		var toward: Vector3 = Vector3(center.x - shaman.position.x, 0.0,
+			center.z - shaman.position.z)
+		if toward.length_squared() > 0.001:
+			if _cast(&"golem", shaman.position + toward.normalized() * 3.0):
+				return
 		# Building priorities (7c): volcano on clusters, sink floods coastal
 		# plots, flatten breaks foundations on slopes, then the old
 		# tornado/quake/lightning ladder.
@@ -1529,11 +1542,25 @@ func _cast_spells() -> void:
 	var cluster: Vector3 = _densest_cluster(enemies)
 	if cluster != Vector3.INF:
 		# A big pile is worth the salvo; smaller ones get the single fireball.
+		# The firestorm burns friend and foe alike (2026-09-06): never rain it
+		# down where own units stand — in a melee that is the whole wave.
 		if _count_enemies_near(enemies, cluster, FirestormSpell.SPREAD_RADIUS) \
-				>= FIRESTORM_MIN_ENEMIES:
+				>= FIRESTORM_MIN_ENEMIES \
+				and not _own_units_near(cluster, FirestormSpell.SPREAD_RADIUS):
 			if _cast(&"firestorm", cluster):
 				return
 		_cast(&"fireball", cluster)
+
+
+## True when any living own unit stands within `radius` of `at` (friendly-fire
+## guard for the firestorm).
+func _own_units_near(at: Vector3, radius: float) -> bool:
+	if unit_manager == null:
+		return false
+	for u in unit_manager.get_units_in_radius(at, radius):
+		if u.tribe_id == tribe.id and u.state != Unit.State.DEAD:
+			return true
+	return false
 
 
 ## Nearest ATTACKABLE enemy building whose centre is within `radius` of `pos`.

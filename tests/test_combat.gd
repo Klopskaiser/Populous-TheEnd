@@ -1743,6 +1743,22 @@ func test_air_death_cry_fires_once_per_unit() -> void:
 	check(not victim._cry_air_death(),
 		"further hits on the same falling body never cry again")
 	_free_world(w)
+
+
+## Die Schamanin schreit in der Luft anders als alle anderen (Nutzerwunsch
+## 2026-09-06): eigener Key `shaman_air_death`, sonst der generische.
+func test_shaman_air_death_has_its_own_cry() -> void:
+	var w: Dictionary = _make_world()
+	var brave: Unit = _spawn(w, BRAVE_SCENE, 1, Vector2(30, 30))
+	var shaman: Unit = _spawn(w, preload("res://scenes/units/shaman.tscn"), 1, Vector2(34, 30))
+	check(brave.air_death_sfx_key() == &"unit_air_death", "a brave cries the generic cry")
+	check(shaman.air_death_sfx_key() == &"shaman_air_death", "the shaman has her own")
+	check(AudioSlots.default_priority(&"shaman_air_death") == AudioSlots.PRIO_CRITICAL,
+		"and it is as critical as her death cry")
+	shaman.throw_airborne(Vector3(1, 0, 0) * 4.0 + Vector3.UP * 5.0)
+	shaman.take_damage(100000)
+	check(shaman._air_death_cried, "the lethal hit in the air cries out once")
+	_free_world(w)
 ## Der AUFPRALL ist kein Lufttreffer (Nutzerreport 2026-09-02): stirbt eine
 ## Einheit am Sturzschaden, gehoert dazu der normale Todes-Sound (nach dem
 ## Rollen), nicht der Luftschrei. Der Sturzschaden wird aber angewandt, WAEHREND

@@ -46,6 +46,37 @@ const WARRIOR_MELEE_STRENGTH: float = 3.0
 ## Krieger schubsen fast nie (sie hauen lieber zu).
 const WARRIOR_SHOVE_CHANCE: float = 0.04
 
+# --- Golem (beschworene Einheit, Zauber 13, 2026-09-06) ---
+## Steinkonstrukt: 3 m tief x 4 m breit x 4 m hoch, eigenes 3D-Modell, lebt
+## GOLEM_LIFETIME Sekunden (+GOLEM_LIFE_PER_KILL je Kill) und zerfaellt dann.
+const GOLEM_HP: int = 400
+const GOLEM_SPEED: float = 3.5
+## Nahkampf-Reichweite (Abstand zum Ziel, ab dem geschlagen wird — gross, damit
+## der Riese nicht an seinem Opfer klebt) und das Wirkfeld des Schlags VOR ihm.
+const GOLEM_REACH: float = 3.0
+const GOLEM_FIELD_WIDTH: float = 2.0
+const GOLEM_FIELD_LENGTH: float = 3.0
+const GOLEM_DAMAGE: int = 20
+const GOLEM_STRIKE_COOLDOWN: float = 2.0
+## Je Opfer, das den Schlag ueberlebt: 25 % Hochwirbeln, 25 % Ins-Rollen — beides
+## VOM Golem weg. Der Rest wird nur getroffen.
+const GOLEM_LIFT_CHANCE: float = 0.25
+const GOLEM_ROLL_CHANCE: float = 0.25
+## Wurfstaerke des Schlags (waagerecht / senkrecht, m/s) — deutlich schwerer als
+## der Feuerkrieger-Uppercut (1,2 / 3,0).
+const GOLEM_LIFT_PUSH: float = 3.0
+const GOLEM_LIFT_UP: float = 4.5
+const GOLEM_ROLL_DURATION: float = 1.0
+const GOLEM_ROLL_SPEED: float = 4.0
+## Gebaeudestufen je Schlag auf jedes feindliche Gebaeude im Wirkfeld.
+const GOLEM_BUILDING_STAGES: int = 1
+const GOLEM_LIFETIME: float = 180.0
+const GOLEM_LIFE_PER_KILL: float = 3.0
+## Stein brennt schlecht: statt 15 Schaden/s nur ein Rinnsal, und keine Panik.
+const GOLEM_BURN_DPS: float = 5.0
+## Abstand, den andere grosse Koerper (Fahrzeuge, Golems) zum Golem halten.
+const GOLEM_SEPARATION: float = 2.0
+
 # --- Feuerkrieger ---
 const FIREWARRIOR_HP: int = 65
 const FIREWARRIOR_SPEED: float = 4.0
@@ -549,6 +580,14 @@ const SPELL_HYPNOSIS_CAST_RANGE: float = 10.0
 ## Kantenlänge des Wirkquadrats (m) und Dauer des Kontrollwechsels (s).
 const HYPNOSIS_AREA_SIZE: float = 4.0
 const HYPNOSIS_DURATION: float = 30.0
+
+## --- Golem beschwören (Zauber 13, 2026-09-06) ---
+## Beschwoert am Zielpunkt einen Golem (Werte GOLEM_* oben). Zwischen Feuerregen
+## (775) und Supertornado (1200): 400 LP und drei Minuten Lebenszeit sind stark,
+## aber der Golem ist beschiessbar und zeitlich begrenzt (Nutzerentscheidung).
+const SPELL_GOLEM_CHARGE_COST: float = 900.0
+const SPELL_GOLEM_MAX_CHARGES: int = 2
+const SPELL_GOLEM_CAST_RANGE: float = 10.0
 
 # =============================================================================
 # ZAUBER — Effektwerte

@@ -69,8 +69,8 @@ static func units_in_square(um: UnitManager, center: Vector3,
 			continue
 		if absf(u.position.x - center.x) > half or absf(u.position.z - center.z) > half:
 			continue
-		if u.unit_kind() == &"shaman":
-			continue   # the enemy shaman is immune (user spec)
+		if u.is_hypnosis_immune():
+			continue   # the enemy shaman (and the golem) is immune (user spec)
 		if not u.is_targetable():
 			# Deckt den geschuetzten Turmvorrat (garrison_housed), Einheiten
 			# ausserhalb der Welt (in_world) UND `doomed` Ragdolls ab. Letztere

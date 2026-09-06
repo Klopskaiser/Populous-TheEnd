@@ -320,7 +320,7 @@ func test_effect_delay_tiers() -> void:
 	for spell in Spell.create_default_set():
 		by_id[spell.id] = spell.effect_delay
 	for id in [&"fireball", &"lightning", &"swarm", &"hypnosis", &"tornado",
-			&"landbridge", &"flatten"]:
+			&"landbridge", &"flatten", &"golem"]:
 		check_near(float(by_id[id]), 0.0, "%s lands right away" % id)
 	for id in [&"firestorm", &"sink"]:
 		check_near(float(by_id[id]), Balance.SPELL_EFFECT_DELAY_MID,
@@ -471,15 +471,16 @@ func _free_world_with_buildings(w: Dictionary) -> void:
 
 func test_default_set_charge_counts() -> void:
 	var spells: Array[Spell] = Spell.create_default_set()
-	check(spells.size() == 12,
-		"twelve spells in the default set (phase 6 + 7c + supertornado + hypnosis)")
+	check(spells.size() == 13,
+		"thirteen spells in the default set (phase 6 + 7c + supertornado + hypnosis + golem)")
 	# 7c charge counts are binding: volcano 1, firestorm/earthquake 2,
 	# flatten/sink 3 (see plans/07c_new_spells.md). Supertornado: 1 charge.
 	var expected: Dictionary = {
 		&"fireball": 4, &"lightning": 4, &"swarm": 4, &"landbridge": 4,
 		&"tornado": 3, &"earthquake": 2, &"volcano": 1, &"firestorm": 2,
 		&"flatten": 3, &"sink": 3, &"supertornado": 1,
-		&"hypnosis": Balance.SPELL_HYPNOSIS_MAX_CHARGES}
+		&"hypnosis": Balance.SPELL_HYPNOSIS_MAX_CHARGES,
+		&"golem": Balance.SPELL_GOLEM_MAX_CHARGES}
 	for spell in spells:
 		check(expected.has(spell.id), "known spell id: %s" % spell.id)
 		check(spell.max_charges == expected.get(spell.id, -1),
@@ -2153,6 +2154,69 @@ func test_firestorm_panics_onlookers_outside_the_impacts() -> void:
 		"a bystander outside the impacts panics")
 	check(far.state != Unit.State.PANIC,
 		"someone well beyond the panic radius stays calm")
+	_free_world(w)
+
+
+## Feuerregen kennt keine Freunde (Nutzerentscheidung 2026-09-06): ein Ball
+## verletzt und zuendet die EIGENE Einheit und nimmt dem EIGENEN Gebaeude die 20
+## HP ab. Der Feuerball-Zauber (friendly_fire aus) verschont beide weiterhin.
+func test_firestorm_bolt_burns_own_units_and_buildings() -> void:
+	var w: Dictionary = _make_world_with_buildings()
+	var hut: Building = w.bm.place(HUT_SCENE_T, w.tribe0, Vector2i(40, 40), 0, true)
+	check(hut != null, "an OWN hut stands there")
+	var at: Vector3 = hut.center_world() + Vector3(2.5, 0, 0)
+	var own: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 0, at)
+	own.max_health = 10000
+	own.health = 10000
+	var hut_before: int = hut.health
+	# Control first: a plain (fireball-spell) bolt of the same tribe spares both.
+	var plain: FireballBolt = FireballBolt.new()
+	plain.setup(0, at + Vector3(-6, 0, 0), at, null, w.unit_manager, w.td)
+	plain.ignites = true
+	plain.building_damage = Balance.FIRESTORM_BUILDING_DAMAGE
+	plain.building_manager = w.bm
+	plain._explode()
+	check(own.health == 10000 and not own.is_burning(),
+		"a fireball-spell bolt still spares the caster's own unit")
+	check(hut.health == hut_before, "and the caster's own building")
+	# The firestorm bolt: friendly fire on.
+	var bolt: FireballBolt = FireballBolt.new()
+	bolt.setup(0, at + Vector3(-6, 0, 0), at, null, w.unit_manager, w.td)
+	bolt.direct_damage = Balance.FIRESTORM_DIRECT_DAMAGE
+	bolt.whirl_direct = 0.0
+	bolt.whirl_splash = 0.0
+	bolt.ignites = true
+	bolt.building_damage = Balance.FIRESTORM_BUILDING_DAMAGE
+	bolt.building_manager = w.bm
+	bolt.friendly_fire = true
+	bolt._explode()
+	check(own.health < 10000, "a firestorm bolt hurts the caster's own unit")
+	check(own.is_burning(), "and sets it alight")
+	check(hut.health == hut_before - Balance.FIRESTORM_BUILDING_DAMAGE,
+		"and takes the 20 HP off the caster's own building")
+	_free_world_with_buildings(w)
+
+
+## Der Panik-Ring um den Regen bleibt gegnerisch: eigene Zuschauer geraten
+## nicht in Panik, feindliche schon.
+func test_firestorm_panic_ring_spares_own_onlookers() -> void:
+	var w: Dictionary = _make_world()
+	w.unit_manager.spawn_unit(SHAMAN_SCENE, 0, Vector3(30, 0, 30))
+	var target: Vector3 = Vector3(40, 5, 30)
+	var mid: float = (Balance.FIRESTORM_SPREAD_RADIUS
+		+ Balance.FIRESTORM_PANIC_RADIUS) * 0.5
+	var own: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 0, target + Vector3(mid, 0, 0))
+	own.max_health = 100000
+	own.health = 100000
+	var foe: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE_T, 1, target + Vector3(-mid, 0, 0))
+	foe.max_health = 100000
+	foe.health = 100000
+	var spell: FirestormSpell = FirestormSpell.new()
+	check(spell.execute(w.tribe0, target, w.ctx), "firestorm cast succeeds")
+	for i in range(30):
+		w.unit_manager.tick(0.1)
+	check(foe.state == Unit.State.PANIC, "the enemy bystander panics")
+	check(own.state != Unit.State.PANIC, "the own bystander keeps its nerve")
 	_free_world(w)
 
 

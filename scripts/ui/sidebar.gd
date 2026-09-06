@@ -66,6 +66,7 @@ const FOLLOWER_ROWS: Array[Dictionary] = [
 	{"kind": &"siege", "name": "Belagerungswaffe", "active": true},
 	{"kind": &"fireram", "name": "Feuerrammen", "active": true},
 	{"kind": &"airship", "name": "Luftschiffe", "active": true},
+	{"kind": &"golem", "name": "Golems", "active": true},
 	{"kind": &"shaman", "name": "Schamanin", "active": true},
 ]
 
@@ -283,6 +284,8 @@ static func default_spell_entries() -> Array[Dictionary]:
 			"max_charges": 1, "hotkey": "ß"},
 		{"id": &"hypnosis", "name": "Hypnose", "icon": &"hypnosis",
 			"max_charges": Balance.SPELL_HYPNOSIS_MAX_CHARGES, "hotkey": "´"},
+		{"id": &"golem", "name": "Golem beschwören", "icon": &"golem",
+			"max_charges": Balance.SPELL_GOLEM_MAX_CHARGES, "hotkey": "X"},
 	]
 
 

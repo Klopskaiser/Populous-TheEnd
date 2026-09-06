@@ -154,4 +154,8 @@ class FirestormShower extends Node3D:
 		bolt.ignites = true
 		bolt.building_damage = Balance.FIRESTORM_BUILDING_DAMAGE
 		bolt.building_manager = building_manager
+		# Kennt keine Freunde (Nutzerentscheidung 2026-09-06): eigene Einheiten
+		# und eigene Gebaeude im Regen brennen genauso. Nur der Panik-Ring der
+		# Zuschauer (_panic_the_onlookers) bleibt gegnerisch.
+		bolt.friendly_fire = true
 		unit_manager.register_projectile(bolt)

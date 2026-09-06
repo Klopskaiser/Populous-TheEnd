@@ -21,8 +21,8 @@ assets/
 │   ├── buildings/<kind>.glb     # hut hut1 hut2 hut3 hut4 | warrior_camp | firewarrior_camp |
 │   │                            # temple | forester | workshop | fireram_workshop |
 │   │                            # airship_wharf | watchtower | wood_depot | reincarnation_site
-│   ├── units/<kind>.glb         # siege_engine | fire_ram | airship  (die drei Fahrzeuge;
-│   │                            # Fußeinheiten sind Sprites, s. units/)
+│   ├── units/<kind>.glb         # siege_engine | fire_ram | airship | golem  (Fahrzeuge + Golem;
+│   │                            # alle anderen Fußeinheiten sind Sprites, s. units/)
 │   └── trees/<kind>.glb         # tree | tree_leaf | tree_bamboo
 ├── textures/
 │   ├── terrain/                 # sand.png, grass.png, rock.png, water.png (water optional)
@@ -274,10 +274,11 @@ auf demselben Modell (Abschnitt unten) — es gibt **keine** getrennten Stufenmo
 Die zugehörigen Stufentexturen heißen ebenfalls nach dem `<kind>` — für die Hütten also
 `hut_stage1.png`, aber `hut2_stage1.png` für die zweite Ausbaustufe.
 
-### Fahrzeuge — `models/units/<kind>.glb`
+### Fahrzeuge und Golem — `models/units/<kind>.glb`
 
-Nur die drei Fahrzeuge sind 3D; alle Fußeinheiten sind Spritesheets (Abschnitt oben).
-Vorderseite +Z, Ursprung am Boden mittig. Als Größenreferenz die Platzhalter:
+Nur die drei Fahrzeuge und der beschworene Golem sind 3D; alle anderen Fußeinheiten
+sind Spritesheets (Abschnitt oben). Vorderseite +Z, Ursprung am Boden mittig. Als
+Größenreferenz die Platzhalter:
 
 | Datei | Fahrzeug | Platzhaltergröße | Sondernodes |
 |---|---|---|---|
@@ -285,7 +286,10 @@ Vorderseite +Z, Ursprung am Boden mittig. Als Größenreferenz die Platzhalter:
 | `fire_ram.glb` | Feuerramme | Rumpf ~1,0 × 1,7 m (Platzhalter auf 85 % skaliert) | `Flag` optional. |
 | `airship.glb` | Luftschiff (Zeppelin) | Ballon ~6 m lang × 2 m breit, Unterkante ca. 2,5 m über dem Ursprung; Gondel/Deck 1,6 × 3,6 m | `Flag` optional. **Das Deck muss bei y = 0,6 m liegen** (`Airship.DECK_Y`): dort stellt das Spiel die Passagiere hin — zwei Spalten ±0,44 m neben der Mittelachse, drei Ränge im Abstand 0,85 m. Der Rumpf wippt ±0,15 m (Periode ~5 s), die Passagiere schweben mit. Der Ursprung ist der Punkt **unter** dem Schiff am Boden; die Flughöhe setzt das Spiel. |
 
-Das Katapult ohne `Arm` feuert trotzdem — nur ohne die Schnapp-Animation.
+| `golem.glb` | Golem (Zauber 13) | **3 m tief × 4 m breit × 4 m hoch**, Ursprung an den Füßen mittig; Platzhalter: Beine, Rumpf 3,0 × 2,2 m, Schultern, Kopf, zwei hängende Arme | **`Arm`** (`Node3D`, optional): Schulter-Pivot beider Arme, schwingt beim Schlag um seine X-Achse (heben, dann niederschmettern, ~0,5 s); Ruhelage = hängend. **`Flag`** (`MeshInstance3D`, optional): Brust-Rune in Stammesfarbe (leuchtet leicht). |
+
+Das Katapult ohne `Arm` feuert trotzdem — nur ohne die Schnapp-Animation; der Golem
+ohne `Arm` schlägt trotzdem — nur ohne Schwung.
 
 ### Bäume — `models/trees/<kind>.glb`
 
@@ -388,8 +392,8 @@ bekommt (`scripts/core/audio_slots.gd`):
 
 | Prio | Sounds | Verhalten |
 |---|---|---|
-| **1** | `spell_voice_*`, `shaman_death` | Verdrängen bei Bedarf laufende Sounds niedrigerer Priorität |
-| **2** | `airship_death`, `siege_death_burn`, `siege_death_burst` | Verdrängen Prio 3 |
+| **1** | `spell_voice_*`, `shaman_death`, `shaman_air_death` | Verdrängen bei Bedarf laufende Sounds niedrigerer Priorität |
+| **2** | `airship_death`, `siege_death_burn`, `siege_death_burst`, `golem_death` | Verdrängen Prio 3 |
 | **3** | alles Übrige | Wird als Erstes verworfen, wenn kein Slot frei ist |
 
 Solange ein Slot frei ist, wird **nie** etwas verworfen — unabhängig von der
@@ -452,7 +456,10 @@ Vorbis).
 | `shaman_hurt.ogg` | Schamanin erleidet Schaden (max. alle 1,2 s; mehrere Varianten empfohlen) |
 | `shaman_death.ogg` | Tod der Schamanin |
 | `unit_land.ogg` | Einheit landet nach Wurf/Sturz auf dem Boden und **überlebt** die Landung (späterer Rollschaden zählt nicht; max. alle 0,15 s) |
-| `unit_air_death.ogg` | Einheit erleidet **in der Luft** tödlichen Schaden (auch vom Luftschiffdeck geschossene Besatzung) — der Tod selbst folgt beim Aufprall mit `unit_death.ogg` (max. alle 0,2 s) |
+| `unit_air_death.ogg` | Einheit (nicht Schamanin) erleidet **in der Luft** tödlichen Schaden (auch vom Luftschiffdeck geschossene Besatzung) — der Tod selbst folgt beim Aufprall mit `unit_death.ogg` (max. alle 0,2 s) |
+| `shaman_air_death.ogg` | Dasselbe für die **Schamanin**: ihr eigener Schrei beim tödlichen Treffer in der Luft (Prio 1 wie `shaman_death`) |
+| `golem_strike.ogg` | Golem schlägt zu (alle 2 s im Kampf; max. alle 0,2 s) |
+| `golem_death.ogg` | Golem zerfällt (Lebenszeit abgelaufen oder erschlagen; Prio 2) |
 
 **Status-Loops** — `audio/sfx/` (laufen in Dauerschleife, **solange der Zustand
 anhält**; max. 4 gleichzeitige Emitter pro Sound, weitere Einheiten rücken nach,
@@ -513,7 +520,7 @@ Zeitpunkten**:
   **tatsächlich eintritt** — bei Wurf-/Terrainzaubern also deutlich später als
   die Formel — und dort, wo er passiert.
 
-Die zwölf gültigen IDs (aus `scripts/spells/*.gd`):
+Die dreizehn gültigen IDs (aus `scripts/spells/*.gd`):
 
 | Formel | Effekt | Zauber | Effekt spielt |
 |---|---|---|---|
@@ -529,6 +536,7 @@ Die zwölf gültigen IDs (aus `scripts/spells/*.gd`):
 | `spell_voice_sink.ogg` | `spell_sink.ogg` | Absinken | wenn sich der Boden zu senken beginnt |
 | `spell_voice_supertornado.ogg` | `spell_supertornado.ogg` | Supertornado | wenn der Haupttrichter erscheint |
 | `spell_voice_hypnosis.ogg` | `spell_hypnosis.ogg` | Hypnose | im Moment der Übernahme (nur wenn wirklich jemand übernommen wird) |
+| `spell_voice_golem.ogg` | `spell_golem.ogg` | Golem beschwören | wenn der Golem erscheint (nur bei erfolgreicher Beschwörung) |
 
 **Zusatzsounds der Zauber** — `audio/sfx/` (Fallback = stumm):
 

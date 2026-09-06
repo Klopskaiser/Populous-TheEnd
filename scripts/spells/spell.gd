@@ -109,6 +109,7 @@ static func create_default_set() -> Array[Spell]:
 		SinkSpell.new(),
 		SupertornadoSpell.new(),
 		HypnosisSpell.new(),
+		GolemSpell.new(),
 	]
 
 
