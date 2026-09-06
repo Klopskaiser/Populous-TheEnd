@@ -93,7 +93,8 @@ const FIREWARRIOR_FIRE_RANGE: float = 9.0
 const FIREWARRIOR_FIRE_COOLDOWN: float = 1.5
 const FIREWARRIOR_AGGRO_RADIUS: float = 13.0
 ## Schaden eines Feuerballs an Einheiten.
-const FIREWARRIOR_FIREBALL_DAMAGE: int = 9
+## 9 -> 10 (Nutzerentscheidung 2026-09-06, zweiter Labor-Schritt nach der Reichweite).
+const FIREWARRIOR_FIREBALL_DAMAGE: int = 10
 ## Fluggeschwindigkeit (m/s) des Feuerkrieger-Feuerballs (zielsuchend).
 const FIREWARRIOR_FIREBALL_SPEED: float = 12.0
 ## Verfolgt der Ball ein LUFTZIEL (geschleuderte Einheit, Zeppelin), gewinnt er

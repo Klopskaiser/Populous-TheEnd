@@ -46,6 +46,26 @@ der Masse ist Durchsatz (Schaden je Sekunde), nicht Distanz: in einem 200er-Klum
 stehen fast alle Schützen ohnehin in Reichweite, und die Nahkämpfer schließen den
 letzten Meter in einer Viertelsekunde. Suite 5981 grün.
 
+### Nachtrag: Feuerballschaden 9 → 10 (Nutzerentscheidung, 2026-09-06)
+
+`Balance.FIREWARRIOR_FIREBALL_DAMAGE` 9 → **10** (Splash 30 % → 3 HP). Labor, 5 Wiederholungen:
+
+| Paarung (A = Feuerkrieger) | Siege | B übrig 9 HP → 10 HP | Schaden FK |
+|---|---|---|---|
+| gegen Krieger, Anmarsch | 0:5 | 96,2 → 95,0 | 77 % → 78 % |
+| gegen Krieger, Sofortkontakt | 0:5 | 120,6 → 96,4 | 71 % → 77 % |
+| gegen Prediger, Anmarsch | 0:5 | 91,2 → 87,8 | 62 % → 64 % (Bekehrte 131 → 118) |
+
+Lesart: +11 % Schaden je Ball verschiebt die Krieger-Paarung um wenige Prozent, der
+Sofortkontakt-Wert liegt nur wieder da, wo er vor dem Reichweiten-Schritt war (Streuung).
+Die Feuerkrieger verlieren weiterhin 0:5 mit null Überlebenden.
+
+**Suite-Drift behoben:** `test_golem.gd::test_smash_throws_or_rolls_a_quarter_each…` hatte
+eine `check()` **je hochgewirbeltem Opfer** in der 200er-Schleife — die Anzahl ist
+RNG-abhängig (Scan-Takt hängt an `get_instance_id()`), die Suite schwankte 5980/5981.
+Jetzt eine aggregierte Zusicherung (`all_away`); die ~58 Einzelprüfungen entfallen, neue Referenz **5922** (stabil über drei Läufe der Datei). Dasselbe Muster wie
+die Baumdrift von 2026-08-03 (siehe Gedächtnis „Suite-Referenzwert & Drift").
+
 ## Golem-Nachschärfung + Zieldisziplin Golem/Feuerkrieger (2026-09-06, Spieltest 2)
 
 Nutzer: „der Golem ist viel zu schwach" und Feuerkrieger/Golem verfolgen Ziele, statt

@@ -231,6 +231,10 @@ func test_smash_throws_or_rolls_a_quarter_each_away_from_the_golem() -> void:
 	var rolled: int = 0
 	var untouched: int = 0
 	var trials: int = 200
+	# ONE aggregated assertion for the direction (not one per lifted victim): the
+	# number of lifts is random, and a check() inside the loop would make the
+	# suite's assertion count drift from run to run.
+	var all_away: bool = true
 	for i in range(trials):
 		var v: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50.0, 5, 51.5))
 		v.max_health = 1000
@@ -238,13 +242,14 @@ func test_smash_throws_or_rolls_a_quarter_each_away_from_the_golem() -> void:
 		g._smash()
 		if v.state == Unit.State.THROWN:
 			lifted += 1
-			check(v._throw_velocity.z > 0.0, "a lifted victim flies AWAY from the golem (+Z)")
+			all_away = all_away and v._throw_velocity.z > 0.0
 		elif v.state == Unit.State.ROLL:
 			rolled += 1
 		else:
 			untouched += 1
 		v.take_damage(100000)   # clear the field for the next trial
 		w.um.tick(TICK)
+	check(all_away, "every lifted victim flies AWAY from the golem (+Z)")
 	check(lifted > trials * 0.2 and lifted < trials * 0.4,
 		"about 30 percent are whirled up (%d of %d)" % [lifted, trials])
 	check(rolled > trials * 0.2 and rolled < trials * 0.4,
