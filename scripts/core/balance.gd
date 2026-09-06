@@ -106,7 +106,8 @@ const FIREWARRIOR_FIREBALL_AIR_MAX_SPEED: float = 34.0
 const FIREWARRIOR_BUILDING_DAMAGE: int = 5
 
 # --- Prediger ---
-const PREACHER_HP: int = 90
+## 90 -> 85 (Nutzerentscheidung 2026-09-06, Labor-Schritt 3).
+const PREACHER_HP: int = 85
 const PREACHER_SPEED: float = 4.0
 const PREACHER_CONVERT_RANGE: float = 5.0
 ## Bekehrdauer: pro Ziel zufällig aus [MIN, MAX] gewürfelt.

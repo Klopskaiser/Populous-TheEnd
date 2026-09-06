@@ -66,6 +66,22 @@ RNG-abhängig (Scan-Takt hängt an `get_instance_id()`), die Suite schwankte 598
 Jetzt eine aggregierte Zusicherung (`all_away`); die ~58 Einzelprüfungen entfallen, neue Referenz **5922** (stabil über drei Läufe der Datei). Dasselbe Muster wie
 die Baumdrift von 2026-08-03 (siehe Gedächtnis „Suite-Referenzwert & Drift").
 
+### Nachtrag: Prediger-LP 90 → 85 (Nutzerentscheidung, 2026-09-06)
+
+`Balance.PREACHER_HP` 90 → **85**. Labor, 5 Wiederholungen:
+
+| Paarung | Siege | B übrig 90 → 85 LP | Bekehrte | Schaden A |
+|---|---|---|---|---|
+| 200 Feuerkrieger vs 200 Prediger, Anmarsch | 0:5 | 87,8 → 71,4 | 118 → 111 | 64 % → 70 % |
+| 20 Feuerkrieger vs 20 Prediger | 0:5 | 17,2 (alle 20 FK bekehrt) | 17,2 | 44 % |
+| 20 Krieger vs 20 Prediger | 0:5 | 20,0 (alle 20 Krieger bekehrt) | 20,0 | **0 %** |
+
+Lesart: 5 LP weniger bringen den Feuerkriegern in der Masse ~16 Prediger mehr, ohne die
+Paarung zu drehen. **Auffällig, nicht angefasst:** 20 Krieger gegen 20 Prediger endet mit
+**null ausgeteiltem Schaden** — die Krieger werden auf dem letzten Meter (5 m
+Bekehrungsreichweite gegen 1,2 m Nahkampf) alle in SIT gezogen, bevor ein Schlag fällt.
+Suite 5922 grün.
+
 ## Golem-Nachschärfung + Zieldisziplin Golem/Feuerkrieger (2026-09-06, Spieltest 2)
 
 Nutzer: „der Golem ist viel zu schwach" und Feuerkrieger/Golem verfolgen Ziele, statt
