@@ -10714,3 +10714,145 @@ Salven" — das gilt aber nur gegen einen STEHENDEN Gegner. Beide Seiten laufen
 aufeinander zu, die Annaeherungsgeschwindigkeit ist 8 m/s, und ab der
 Feuerreichweite (9 m) bleibt gut eine Sekunde. Wer den Wert der Reichweite
 messen will, braucht `hold_b: true`, nicht mehr Startabstand.
+
+### Nachtrag 33 — Gebaeude +50 % LP, Rammenwerkstatt 3x6, zwei Bugfixes (Nutzervorgaben, 2026-09-08)
+
+**1. Alle Gebaeude-LP um 50 % erhoeht** (`scripts/core/balance.gd`): Huette
+450/510/570/630/720 je Ausbaustufe (war 300..480), Kaserne 600, Tempel 660,
+Feuertempel 900, Foerster 375, beide Werkstaetten 525, Luftschiffwerft 750,
+Holzstation 180, Wachturm 300, Reinkarnationsplatz 750. `HUT_HP` (die ungenutzte
+Referenzkonstante) mitgezogen.
+
+**Belagerungswaffen brauchten dafuer KEINE Aenderung** — und das war die
+Nutzervorgabe. `Building.apply_destruction_stages()` rechnet
+`ceil(BUILDING_STAGE_DAMAGE * max_health) * count`, also **relativ**: Katapult
+(`SIEGE_SHOT_BUILDING_STAGES = 1`), Feuerrammen-Flamme (`add_lava_contact`, eine
+Stufe je 5 s Kontakt) und Rammen-Todesexplosion bleiben bei genau einer Stufe pro
+Treffer, vier Treffer = zerstoert. Ebenso automatisch mitskaliert: Blitz (+2),
+Erdbeben (+2), Tornado (+1 je 2 s), Golem (+1), Lava und die Reparaturkosten in
+Holz (`floor(Schadensanteil * wood_cost)`).
+
+**Bewusst NICHT nachgezogen** (Nebenwirkung der Vorgabe, im Balance-Kommentar
+dokumentiert): Quellen mit festem HP-Betrag sind relativ ein Drittel schwaecher —
+`FIREWARRIOR_BUILDING_DAMAGE` (5/Schuss), `FIRESTORM_BUILDING_DAMAGE` (20/Ball,
+aus ~67 Baellen je Gebaeude werden ~100) und `RAID_DPS_PER_RAIDER` (6 HP/s, der
+Nahkampf-Abriss dauert 50 % laenger). Reparatur-*Arbeit* steigt ebenfalls um 50 %,
+Reparatur-*Holz* nicht.
+
+**2. `FIRERAM_WORKSHOP_FOOTPRINT` 6x4 -> 3x6** (schmale Front, tiefe Halle).
+Einzige Fundstelle; Bauplatzsuche der KI, Ghost-Preview, Orientierungstausch,
+Planierung, NavGrid-Sperrung, Klickbox und Platzhalter-Mesh lesen alle daraus.
+Nebenwirkung von selbst: die Flaeche faellt 24 -> 18 Zellen, also setzt
+`AIState.site_worker_target(footprint.x * footprint.y, ...)` etwas weniger
+Bauarbeiter an.
+
+**3. Bugfix — Turmbesatzung panierte endlos** (`scripts/units/unit.gd`).
+*Ursache:* Die Turmbesatzung ist die EINZIGE Gebaeudereserve, die in der Welt
+registriert bleibt (sie steht sichtbar auf der Plattform, `watchtower.gd` ruft
+`unit_manager.register` idempotent). `SwarmCloud._panic_nearby` und
+`FirestormShower` laufen ueber `get_units_in_radius`, das keinen
+`is_targetable()`-Filter hat — sie fanden die Besatzung also und `start_panic`
+nahm sie an. `Unit.tick()` steigt fuer `garrison_housed` aber frueh aus, also lief
+`_tick_panic` nie und `_panic_time` stand fuer immer auf 6,0 s (rotes "!" plus
+Panik-Loop bis Spielende). Dieselbe Falle wie der `doomed`-Ragdoll in
+`HypnosisSpell.units_in_square`.
+*Fix, drei Stellen:*
+- `start_panic`: Guard `if garrison_housed: return` neben dem vorhandenen
+  `rides_airborne()`-Guard (derselbe Fall auf dem Zeppelindeck). Deckt damit ALLE
+  Quellen auf einmal ab — Schwarm, Feuerregen, `ignite`, `scorch` und den
+  Brand-Reassert in `_tick_burning`.
+- `tick()`: fuer `garrison_housed` wird jetzt `_tick_burning(delta)` aufgerufen,
+  BEVOR zurueckgekehrt wird. Nutzervorgabe war ausdruecklich "Brand zaehlt, aber
+  es muss eben nach der normalen Zeit enden" — ohne den Aufruf fror auch
+  `_burn_time` ein (Flammensymbol und Loop-Sound blieben ewig).
+- `_die()`: loest die Stationierung (`garrison_housed`/`garrison_target` zurueck,
+  `_sync_soa_flags`). Vorher tickte eine im Turm getoetete Einheit nie
+  `_tick_dead` — die Leiche verrottete nie und klebte auf der Plattform. Der Fall
+  war ueber Schwarm-Stiche schon erreichbar und wird durch den Brandtod haeufig.
+  Bewusst NICHT `leave_garrison()`: das hopst durch `State.IDLE` (ein zusaetzliches
+  `state_changed` direkt vor DEAD) und raeumt `push_immune` ab, das manche
+  Einheiten aus eigenen Gruenden halten.
+*Nicht geaendert* (Nutzerentscheidung): Flaechen-SCHADEN trifft die Turmbesatzung
+weiter — Schwarm-Stich, Feuerregen-Splash, Lava-Entzuendung.
+
+**4. Bugfix — Fahrzeuge ignorierten den Angriffsmove.**
+*Ursache:* Der Angriffsmove ist nur das Flag `move_aggressive`; `Unit._tick_move`
+ruft dafuer `_engage_on_sight`. Fahrzeuge ueberschreiben den Haken mit ihrem
+eigenen `_auto_acquire`, und deren `_nearest_enemy_unit` benutzte noch die
+**vor-8.2-Abfrage** `get_units_in_radius(pos, r, SCAN_MAX_CANDIDATES)`. Die haengt
+ALLES im Radius-AABB an — eigene Einheiten, die eigene Besatzung (bis 6!),
+Leichen — in Rasterreihenfolge und bricht bei 24 Kandidaten ab. Ein Katapult, das
+mit der eigenen Welle marschiert, verbrauchte sein Budget auf Freunde und fand
+KEINEN Feind: es fuhr weiter, obwohl Gegner im Feuerband standen. Fuer Fusstruppen
+war das in 8.2 behoben (`Unit._scan_for_enemy` -> `get_enemy_candidate_indices`),
+die Fahrzeuge wurden nie nachgezogen. Der C2-Hold-Kernel ist NICHT beteiligt
+(Fahrzeuge sind ueber `vehicle_separation > 0.0` ausgeschlossen).
+*Fix:*
+- `Airship._best_enemy`: direkter Austausch gegen `get_enemy_candidates(position,
+  radius, tribe_id, SCAN_MAX_CANDIDATES)` — der Helfer filtert eigenen Stamm, DEAD
+  und `FLAG_TARGETABLE` selbst, also genau die drei Bedingungen der alten Schleife.
+- `SiegeEngine._nearest_enemy_unit` und `FireRam._nearest_enemy_unit`: zwei
+  Durchgaenge. Regulaere Feinde aus `get_enemy_candidates`, feindliche
+  **Fahrzeuge** aus dem neuen `UnitManager.get_enemy_vehicles_in_radius`. Der
+  zweite Durchgang ist noetig, weil Fahrzeuge `is_targetable() == false` sind und
+  der Zellenvorfilter `_cell_tribes` (in `_rebuild_grid`) NUR anvisierbare
+  Einheiten eintraegt — eine Zelle mit ausschliesslich einem feindlichen Katapult
+  wird sonst wegmaskiert. Die Filterschleife im Rumpf blieb unveraendert (kein
+  SIT-Skip, `auto_attackable()`, Mindestreichweite, beim Ram Frisch-vor-Brennend).
+- `UnitManager`: neue Liste `vehicles` (gepflegt in `register`/`unregister` ueber
+  `vehicle_separation > 0.0`) plus `get_enemy_vehicles_in_radius`. O(Anzahl
+  Fahrzeuge) — bei den Stammes-Caps eine Handvoll, also **billiger** als die
+  Abfrage, die sie ersetzt.
+*Bewusst nicht angefasst:* der Mindestabstand des Katapults (3 m) bleibt
+Ausschlusskriterium der Zielaufnahme (die Wurfparabel trifft dort wirklich nicht,
+`_bombard_unit` behandelt den Fall schon), `AIController._marching_only` (nur KI)
+und der passive Abmarsch frisch gebauter Fahrzeuge vom Werkstatthof (wie jede
+Rally-Point-Bewegung im Spiel).
+
+**Erkenntnis (beide Bugs):** Es waren zwei Instanzen derselben zwei Muster, die
+das Projekt an anderer Stelle schon geloest hatte. (a) `garrison_housed` heisst
+"kein eigener Welt-Tick" — JEDER Timer, den man so einer Einheit setzt, friert
+ein; der Guard gehoert an die Setz-Stelle, nicht in jede Effektquelle.
+(b) `get_units_in_radius` ist fuer Kampfscans die falsche Abfrage; sie war fuer
+Fusstruppen ersetzt worden, und der Grund stand als Kommentar direkt daneben —
+die drei Fahrzeugscans hatte niemand mitgezogen.
+
+**Tests.** Angepasst (harte Zahlen relativiert, Muster
+`int(ceil(Building.STAGE_DAMAGE * float(x.max_health)))` wie schon in
+`test_building_assault.gd:564`, plus ein `_stage_hp()`-Helfer in
+`test_building_destruction.gd`): `test_building_destruction.gd`,
+`test_building_assault.gd`, `test_construction_assault.gd`, `test_watchtower.gd`,
+`test_fire_ram.gd` (Footprint 3x6). `_board_crew` in `test_siege.gd` ist jetzt auf
+`CrewedVehicle` typisiert statt `SiegeEngine` — die Feuerramme ist eine
+Schwesterklasse, keine Unterklasse.
+
+Neu (alle gegen den unveraenderten Code als ROT verifiziert):
+- `test_watchtower.gd`: `test_garrisoned_crew_never_panics`,
+  `test_garrisoned_crew_burns_and_the_burn_runs_out`,
+  `test_crew_killed_inside_the_tower_decays` — ohne den Fix fielen 9 der
+  Zusicherungen.
+- `test_siege.gd`: `test_catapult_attack_move_engages_from_inside_the_own_army`
+  und `test_fire_ram_attack_move_engages_from_inside_the_own_army` — 30 eigene
+  Braves um das Fahrzeug, Feind auf 6,5 m dahinter. Ohne den Fix blieb das
+  Katapult in MOVE und die Ramme ging IDLE: exakt das gemeldete Verhalten. Der
+  Blob liegt bewusst bei KLEINEREM z als der Feind, weil die alte Abfrage die
+  Rasterzellen von `kz0` aufwaerts durchlief und vor der Zelle des Feindes am
+  Budget war. Vorher gab es **keinen einzigen** Angriffsmove-Test fuer Fahrzeuge
+  (`order_move` wurde dort immer passiv gerufen).
+- `test_airship.gd`: `test_deck_scan_finds_the_enemy_over_the_own_army`.
+
+**Verifikation:** Ladecheck (`--headless --quit`) exit 0 ohne Fehler; volle Suite
+**5963 passed, 0 failed**, `grep -c 'SCRIPT ERROR'` = 0 (Referenz vorher 5938 —
+die 25 neuen Zusicherungen sind die sechs neuen Tests, die gedrehte
+Rammenwerkstatt und die relativierten Prueflinien). Laufzeit 51-60 s ueber
+mehrere Laeufe HINTEREINANDER auf derselben Maschine, Referenz 47,8 s: das ist
+Maschinenrauschen (die neuen Tests spawnen je 30 Statisten), keine belastbare
+Aussage — Laufzeit nur gegen denselben Commit vergleichen.
+**Funktionaler Test im Spiel steht noch aus** (Optik der 3x6-Halle, Abmarsch der
+fertigen Ramme, Turm unter Schwarm/Flamme, Fahrzeuge im Angriffsmove).
+
+**Doku:** `CLAUDE.md` §4 (Katapult-Zielsuche) und §5 (Gebaeude-LP mit der
+Siege-Regel, Rammenwerkstatt 3x6, Turmbesatzungs-Regel, Feuerregen ~100 statt ~67
+Baelle); `docs/game_mechanics.md` HP-Spalte nachgezogen — die uebrigen Zahlen
+dieser Tabelle (Holzkosten, Foerster 5x2, Werkstatt 8x4, Beten-Mana) sind aelter
+als der Code und stehen jetzt unter einem Vorbehaltshinweis.

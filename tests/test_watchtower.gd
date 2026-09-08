@@ -425,6 +425,87 @@ func test_garrisoned_crew_is_protected() -> void:
 	_free_world(w)
 
 
+## Bug (Nutzerreport 2026-09-08): stationierte Einheiten konnten in Panik
+## geraten (Insektenschwarm) und kamen NIE wieder heraus. Ursache: die
+## Turmbesatzung ist die einzige Gebaeudereserve, die in der Welt REGISTRIERT
+## bleibt (sichtbar auf der Plattform), also findet sie die ungefilterte
+## Radiusabfrage des Schwarms — aber Unit.tick gibt ihr keinen eigenen Tick,
+## also lief _tick_panic nie und _panic_time stand fuer immer.
+func test_garrisoned_crew_never_panics() -> void:
+	var w: Dictionary = _make_world()
+	var tower: Watchtower = _tower(w, w.tribe0)
+	var fire: Unit = w.unit_manager.spawn_unit(FIREWARRIOR_SCENE, 0, Vector3(31, 0, 32))
+	tower.admit_crew(fire)
+	check(fire.state == Unit.State.GARRISON and fire.garrison_housed,
+		"der Feuerkrieger ist stationiert")
+	fire.start_panic(Vector3(31, 0, 34))   # wie SwarmCloud._panic_nearby
+	check(fire.state == Unit.State.GARRISON,
+		"stationierte Besatzung nimmt keine Panik an (State %d)" % fire.state)
+	for i in range(int(Unit.PANIC_DURATION / TICK) + 20):
+		w.unit_manager.tick_units(TICK)
+		w.unit_manager.tick(TICK)
+		w.bm.tick(TICK)
+	check(fire.state == Unit.State.GARRISON, "und bleibt es auch danach")
+	check(fire in tower.crew, "sie bleibt Besatzung des Turms")
+	_free_world(w)
+
+
+## Nutzervorgabe zum selben Bug: "Brand zaehlt, aber es muss eben nach der
+## normalen Zeit enden." Der Brand laeuft also weiter — und weil Unit.tick fuer
+## stationierte Einheiten _tick_burning aufruft, zaehlt er auch normal ab.
+func test_garrisoned_crew_burns_and_the_burn_runs_out() -> void:
+	var w: Dictionary = _make_world()
+	var tower: Watchtower = _tower(w, w.tribe0)
+	var warrior: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, Vector3(31, 0, 32))
+	tower.admit_crew(warrior)
+	var hp_before: int = warrior.health
+	warrior.ignite(Vector3(31, 0, 34))
+	check(warrior.is_burning(), "die Turmbesatzung brennt")
+	check(warrior.state == Unit.State.GARRISON, "aber sie paniert deswegen nicht")
+	for i in range(int(Unit.BURN_DURATION / TICK) + 10):
+		w.unit_manager.tick_units(TICK)
+		w.unit_manager.tick(TICK)
+		w.bm.tick(TICK)
+	check(not warrior.is_burning(),
+		"der Brand endet nach BURN_DURATION (%.1f s) statt einzufrieren"
+			% Unit.BURN_DURATION)
+	check(warrior.health < hp_before,
+		"und hat unterwegs Schaden gemacht (%d -> %d)" % [hp_before, warrior.health])
+	check(warrior.state == Unit.State.GARRISON and warrior in tower.crew,
+		"danach ist sie wieder normale Besatzung")
+	_free_world(w)
+
+
+## Dritter Zweig desselben Einfrier-Fehlers: eine IM Turm getoetete Einheit
+## behielt garrison_housed = true, Unit.tick stieg weiter vor _tick_dead aus und
+## die Leiche verrottete nie — sie klebte fuer den Rest der Partie auf der
+## Plattform. Durch den Brandtod (oben) ist der Fall jetzt haeufig erreichbar.
+func test_crew_killed_inside_the_tower_decays() -> void:
+	var w: Dictionary = _make_world()
+	var tower: Watchtower = _tower(w, w.tribe0)
+	var fire: Unit = w.unit_manager.spawn_unit(FIREWARRIOR_SCENE, 0, Vector3(31, 0, 32))
+	tower.admit_crew(fire)
+	# 20 Kontaktschaden + 60 Brandschaden > 65 LP: der Feuerkrieger stirbt im Turm.
+	fire.ignite(Vector3(31, 0, 34))
+	var ticks: int = 0
+	while fire.state != Unit.State.DEAD and ticks < 200:
+		w.unit_manager.tick_units(TICK)
+		w.unit_manager.tick(TICK)
+		w.bm.tick(TICK)
+		ticks += 1
+	check(fire.state == Unit.State.DEAD, "die Besatzung stirbt am Brand im Turm")
+	check(not fire.garrison_housed,
+		"der Tod loest die Stationierung — sonst tickt die Leiche nie")
+	check(not (fire in tower.crew), "der Turm hat sie aus der Besatzung geworfen")
+	var depth_start: float = fire.corpse_sink_depth()
+	for i in range(int((Unit.CORPSE_DURATION + Unit.CORPSE_SINK_DURATION) / TICK) + 10):
+		w.unit_manager.tick_units(TICK)
+		w.unit_manager.tick(TICK)
+	check(fire.corpse_sink_depth() > depth_start,
+		"die Leiche versinkt wirklich (Verfall laeuft)")
+	_free_world(w)
+
+
 # --- 7g integration ----------------------------------------------------------
 
 func test_tower_raider_cap_is_five() -> void:
@@ -466,8 +547,10 @@ func test_ranged_stage1_hurts_crew() -> void:
 	tower.admit_crew(warrior)
 	tower.admit_crew(fire)
 	var pop_before: int = w.tribe1.population()
-	# 30% of 200 HP = 60 damage via RANGED fire crosses into stage 1.
-	tower.take_damage(60, Building.DMG_RANGED)
+	# One destruction stage' worth of RANGED fire crosses into stage 1. Derived
+	# from max_health, not hardcoded (the tower HP grew by 50 % on 2026-09-08).
+	tower.take_damage(int(ceil(Building.STAGE_DAMAGE * float(tower.max_health))),
+		Building.DMG_RANGED)
 	check(tower.destruction_stage() == 1, "tower at stage 1")
 	check(tower.crew.is_empty(), "crew ejected")
 	check(warrior.state == Unit.State.ROLL and fire.state == Unit.State.ROLL,
@@ -499,7 +582,8 @@ func test_spell_stage1_ejects_crew_alive() -> void:
 	var warrior: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 1, Vector3(31, 0, 32))
 	tower.admit_crew(warrior)
 	# Generic (spell) damage crossing stage 1 keeps the living eject.
-	tower.take_damage(60, Building.DMG_GENERIC)
+	tower.take_damage(int(ceil(Building.STAGE_DAMAGE * float(tower.max_health))),
+		Building.DMG_GENERIC)
 	check(tower.destruction_stage() == 1, "tower at stage 1")
 	check(tower.crew.is_empty(), "crew ejected")
 	check(warrior.state != Unit.State.DEAD and warrior in w.unit_manager.units,

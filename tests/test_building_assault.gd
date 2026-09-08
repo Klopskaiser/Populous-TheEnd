@@ -164,8 +164,10 @@ func test_ranged_stage1_kills_occupants() -> void:
 	var camp: TrainingBuilding = _camp_with_trainee(w)
 	var trainee: Brave = camp.trainee
 	var pop_before: int = w.tribe0.population()
-	# 30% of 400 HP = 120 damage crosses into stage 1 via RANGED fire.
-	camp.take_damage(120, Building.DMG_RANGED)
+	# One destruction stage' worth of RANGED fire crosses into stage 1. Derived
+	# from max_health, not hardcoded (the camp HP grew by 50 % on 2026-09-08).
+	camp.take_damage(int(ceil(Building.STAGE_DAMAGE * float(camp.max_health))),
+		Building.DMG_RANGED)
 	check(camp.destruction_stage() == 1, "camp at stage 1")
 	check(camp.trainee == null, "bay cleared")
 	check(is_instance_valid(trainee) and trainee.state == Unit.State.ROLL,
@@ -185,7 +187,8 @@ func test_spell_stage1_ejects_occupants_alive() -> void:
 	var camp: TrainingBuilding = _camp_with_trainee(w)
 	var trainee: Brave = camp.trainee
 	# Generic (spell) damage crossing stage 1 keeps the living eject.
-	camp.take_damage(120, Building.DMG_GENERIC)
+	camp.take_damage(int(ceil(Building.STAGE_DAMAGE * float(camp.max_health))),
+		Building.DMG_GENERIC)
 	check(camp.destruction_stage() == 1, "camp at stage 1")
 	check(is_instance_valid(trainee) and trainee.state != Unit.State.DEAD,
 		"spell stage-1 damage ejects the occupant ALIVE")
@@ -202,7 +205,8 @@ func test_ranged_after_melee_storm_no_double_eject() -> void:
 		"trainee ejected alive at storm start")
 	# Ranged fire now crosses stage 1 — but the occupants are already out, so
 	# there is no second (killing) eject.
-	camp.take_damage(200, Building.DMG_RANGED)
+	camp.take_damage(int(ceil(Building.STAGE_DAMAGE * float(camp.max_health))),
+		Building.DMG_RANGED)
 	check(is_instance_valid(trainee) and trainee.state != Unit.State.DEAD,
 		"already-ejected trainee is not killed by the later ranged stage-1 hit")
 	_free_world(w)

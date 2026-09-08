@@ -1050,7 +1050,13 @@ func _on_combat_interrupt() -> void:
 func tick(delta: float) -> void:
 	# Stationed tower crew (phase 7h) are fully driven by the tower (position,
 	# facing, animation, fire/convert): they have no world tick of their own.
+	# The ONE exception is the burn: it still applies to them (user spec
+	# 2026-09-08 "Brand zählt") and therefore has to count DOWN normally too —
+	# without this call _burn_time froze and the flame icon plus its loop sound
+	# stayed on for the rest of the match. Panic is refused outright instead
+	# (see start_panic), so the re-assert inside _tick_burning is a no-op here.
 	if garrison_housed:
+		_tick_burning(delta)
 		return
 	# Corpses only decay (knockback/regen/burning already no-op when DEAD, and the
 	# pose was locked in _die): skip the four dead-weight calls per corpse per
@@ -1582,6 +1588,20 @@ func _die() -> void:
 	# Release our own binding, then dissolve the fight around us so attackers
 	# and the second row retarget onto fresh enemies right away.
 	leave_crew()
+	# A unit killed INSIDE a tower (swarm sting, firestorm splash, now also the
+	# burn) kept garrison_housed = true — tick() then returned before _tick_dead
+	# and the corpse never decayed, stuck on the platform forever. The tower drops
+	# it from its crew list on its own once garrison_target is null (_prune_crew).
+	# Deliberately NOT leave_garrison(): that hops through State.IDLE (an extra
+	# state_changed emit right before DEAD) and clears push_immune, which some
+	# units own for their own reasons. A corpse's push immunity is irrelevant —
+	# the separation pass skips dead defenders anyway.
+	if garrison_housed:
+		garrison_housed = false
+		garrison_target = null
+		garrison_reached = false
+		man_hut_manual = false
+		_sync_soa_flags()
 	_end_attack()
 	_clear_building_target()
 	_dissolve_own_group()
@@ -2469,6 +2489,16 @@ func start_panic(source_pos: Vector3, duration: float = PANIC_DURATION) -> void:
 		return
 	if rides_airborne():
 		return   # deck passengers cannot scramble around at 12 m
+	# Stationed tower crew NEVER panics (user report 2026-09-08). They are the
+	# one in-building reserve that stays REGISTERED in the world (visible on the
+	# platform), so the unfiltered radius queries of the swarm/firestorm find
+	# them — but tick() gives them no world tick, so _tick_panic would never run
+	# and _panic_time would sit at its start value FOREVER. Same class of trap as
+	# the doomed ragdoll in HypnosisSpell.units_in_square (see hypnosis.gd).
+	# Guarding here covers every source at once (swarm, firestorm, ignite,
+	# scorch and the burn re-assert in _tick_burning).
+	if garrison_housed:
+		return
 	if is_panic_immune():
 		return
 	panic_source = source_pos

@@ -115,16 +115,20 @@ Der Förster-Job hat eigene Phasen (einziehen → Pflanzstelle → knien → zur
 Der Eingang liegt stets auf der Südseite; beim Platzieren kann gedreht werden
 (Taste R). Baukosten werden als Holz physisch angeliefert.
 
+> **HP-Spalte auf Stand 2026-09-08** (+50 % gegenüber der Vorversion). Die
+> übrigen Zahlen dieser Tabelle sind teils älter als der Code — maßgeblich ist
+> immer `scripts/core/balance.gd`.
+
 | Gebäude | Footprint | Holz | HP | Funktion |
 |---|---|---|---|---|
-| **Hütte** | 4×4 | 12 | 300 | +40 Bevölkerungsplatz; spawnt Braves (10 s bei voller Besatzung von 4; leer = nichts). |
-| **Kaserne** | 5×5 | 10 | 400 | Bildet Braves in **3 s** zu **Kriegern** aus. |
-| **Tempel** | 6×6 | 15 | 440 | Bildet Braves in **5 s** zu **Predigern** aus. |
-| **Feuertempel** | 8×8 | 20 | 600 | Bildet Braves in **4 s** zu **Feuerkriegern** aus. |
-| **Förster** | 5×2 | 18 | 250 | Bis 4 Arbeiter pflanzen Setzlinge (60 Arbeiter-Sekunden je Baum → 4 Arbeiter = alle 15 s einer). **Unterhalt: 1,5 Mana/s je aktivem Arbeiter** — reicht das Mana nicht, pausieren Arbeiter. |
-| **Werkstatt** | 8×4 | 15 | 350 | Baut **Katapulte**: 60 Arbeiter-Sekunden (3 Arbeiter → 20 s) + 5 Holz je Stück. |
-| **Wachturm** | 2×2 | 4 | 200 | 2 Plätze für Kampfeinheiten/Schamanin (keine Braves); stationierte Fernkämpfer/Prediger erhalten **+3 m Reichweite**. Klein: max. 5 gleichzeitige Abreißer statt 15. |
-| **Reinkarnationsplatz** | 3×3 | — | 500 | Respawn-Ort der Schamanin; Braves beten hier (Mana-Bonus). Kann **nicht von Einheiten gestürmt** werden (nur Beschuss/Zauber). |
+| **Hütte** | 4×4 | 12 | 450 | +40 Bevölkerungsplatz; spawnt Braves (10 s bei voller Besatzung von 4; leer = nichts). |
+| **Kaserne** | 5×5 | 10 | 600 | Bildet Braves in **3 s** zu **Kriegern** aus. |
+| **Tempel** | 6×6 | 15 | 660 | Bildet Braves in **5 s** zu **Predigern** aus. |
+| **Feuertempel** | 8×8 | 20 | 900 | Bildet Braves in **4 s** zu **Feuerkriegern** aus. |
+| **Förster** | 5×2 | 18 | 375 | Bis 4 Arbeiter pflanzen Setzlinge (60 Arbeiter-Sekunden je Baum → 4 Arbeiter = alle 15 s einer). **Unterhalt: 1,5 Mana/s je aktivem Arbeiter** — reicht das Mana nicht, pausieren Arbeiter. |
+| **Werkstatt** | 8×4 | 15 | 525 | Baut **Katapulte**: 60 Arbeiter-Sekunden (3 Arbeiter → 20 s) + 5 Holz je Stück. |
+| **Wachturm** | 2×2 | 4 | 300 | 2 Plätze für Kampfeinheiten/Schamanin (keine Braves); stationierte Fernkämpfer/Prediger erhalten **+3 m Reichweite**. Klein: max. 5 gleichzeitige Abreißer statt 15. |
+| **Reinkarnationsplatz** | 3×3 | — | 750 | Respawn-Ort der Schamanin; Braves beten hier (Mana-Bonus). Kann **nicht von Einheiten gestürmt** werden (nur Beschuss/Zauber). |
 
 **Ausbildung:** Brave per Rechtsklick ins Trainingsgebäude schicken → nach der
 Trainingszeit kommt die Kampfeinheit heraus und läuft zum **Rally Point**.

@@ -1208,6 +1208,8 @@ func register(unit: Unit) -> void:
 		return
 	unit._idx = units.size()
 	units.append(unit)
+	if unit.vehicle_separation > 0.0:
+		vehicles.append(unit)
 	unit.in_world = true
 	# SoA slots (Stufe C1): captured from the unit's current fields; position
 	# writers double-write from here on, flags mirror at their event sites.
@@ -1248,6 +1250,8 @@ func register(unit: Unit) -> void:
 ## grid entries pointing at the old last slot are dropped by the queries' index
 ## guard until the next rebuild.
 func unregister(unit: Unit) -> void:
+	if unit.vehicle_separation > 0.0:
+		vehicles.erase(unit)   # no-op when it was never in the list
 	var index: int = unit._idx
 	if index >= 0:
 		var last: int = units.size() - 1
@@ -1392,6 +1396,35 @@ func hash_key(pos: Vector3) -> Vector2i:
 ## All units within radius (XZ distance) around pos. `max_count` > 0 caps the
 ## result (early out) — in a mega-crowd on one spot an uncapped query builds
 ## a thousands-entry array PER CALLER and dominates the tick.
+## Every registered unit with a vehicle body (vehicle_separation > 0: catapult,
+## fire ram, airship — plus the golem, a big body rather than a vehicle proper).
+## Deliberately its own tiny list: enemy VEHICLES are is_targetable() == false
+## and therefore invisible to get_enemy_candidates, whose cell prefilter
+## (_cell_tribes, see _rebuild_grid) only marks TARGETABLE units — a cell holding
+## nothing but an enemy catapult is masked away. The catapult/ram scans walk
+## this list for their vehicle targets instead.
+var vehicles: Array[Unit] = []
+
+
+## Living vehicles of a tribe OTHER than `enemy_of` within `radius` (flat XZ).
+## O(number of vehicles) — the per-tribe caps keep that at a handful, so this is
+## cheaper than the radius query it replaces.
+func get_enemy_vehicles_in_radius(pos: Vector3, radius: float,
+		enemy_of: int) -> Array[Unit]:
+	var result: Array[Unit] = []
+	var r2: float = radius * radius
+	for u in vehicles:
+		if not is_instance_valid(u) or u.state == Unit.State.DEAD:
+			continue
+		if u.tribe_id == enemy_of:
+			continue
+		var dx: float = u.position.x - pos.x
+		var dz: float = u.position.z - pos.z
+		if dx * dx + dz * dz <= r2:
+			result.append(u)
+	return result
+
+
 func get_units_in_radius(pos: Vector3, radius: float, max_count: int = 0) -> Array[Unit]:
 	var result: Array[Unit] = []
 	var n: int = units.size()

@@ -104,7 +104,14 @@ func test_fire_ram_workshop_produces_a_ram() -> void:
 	check(ws.wood_cost == Balance.FIRERAM_WORKSHOP_WOOD_COST,
 		"die Rammenwerkstatt uebernimmt FIRERAM_WORKSHOP_WOOD_COST (%d) aus Balance"
 			% Balance.FIRERAM_WORKSHOP_WOOD_COST)
-	check(ws.footprint == Vector2i(6, 4), "6x4 footprint")
+	check(ws.footprint == Balance.FIRERAM_WORKSHOP_FOOTPRINT
+			and ws.footprint == Vector2i(3, 6),
+		"3x6 footprint (schmale Front, tiefe Halle), got %s" % str(ws.footprint))
+	# Nicht-quadratisch: gedreht muss der Grundriss mitdrehen (BuildingManager).
+	var turned: FireRamWorkshop = w.building_manager.place(
+		RAM_WORKSHOP_SCENE, w.tribe, Vector2i(40, 40), 1, true) as FireRamWorkshop
+	check(turned.footprint == Vector2i(6, 3),
+		"nach Osten gedreht wird daraus 6x3, got %s" % str(turned.footprint))
 	check(ws.worker_slots() == 3, "3 worker slots")
 	check(ws.display_name() == "Feuerrammenwerkstatt", "display name")
 	_house_worker(w, ws)

@@ -497,6 +497,28 @@ func test_attack_move_stops_to_fight_and_resumes() -> void:
 	_free_world(w)
 
 
+## Blob blindness (Nutzerreport 2026-09-08, gleicher Defekt wie bei Katapult
+## und Feuerramme): die alte gekappte Zielabfrage liess eigene Einheiten und
+## Leichen die 24 Kandidatenplaetze auffressen — ein Zeppelin ueber der EIGENEN
+## Armee fand deshalb keinen Feind mehr. Der Blob liegt bei kleinerem z als der
+## Feind, weil die alte Abfrage die Rasterzellen von kz0 aufwaerts durchlief.
+func test_deck_scan_finds_the_enemy_over_the_own_army() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(50, 60)))
+	_board(w, ship, FIREWARRIOR_SCENE)
+	for i in range(30):
+		var off: Vector3 = Vector3(
+			float(i % 6) - 2.5, 0.0, float(i / 6) - 4.0)
+		var at: Vector3 = ship.position + off
+		w.unit_manager.spawn_unit(BRAVE_SCENE, 0, at)
+	var foe: Unit = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, ship.position + Vector3(0.0, 0.0, 8.0))
+	w.unit_manager.tick(TICK)   # Rasterneuaufbau, damit die Abfrage alle sieht
+	check(ship._best_enemy(Firewarrior.RANGED_AGGRO + Airship.RANGE_BONUS) == foe,
+		"der Deckscan findet den Feind trotz 30 eigener Einheiten davor")
+	_free_world(w)
+
+
 func test_passive_move_never_stops_and_warrior_ship_never_engages() -> void:
 	var w: Dictionary = _make_world()
 	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(50, 60)))

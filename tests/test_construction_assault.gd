@@ -108,8 +108,10 @@ func test_finish_restores_full_hp_minus_damage() -> void:
 	var w: Dictionary = _make_world()
 	var site: Building = _site(w)
 	_deliver_wood(w, site, Balance.HUT_WOOD_COST)   # voller Preis
+	var cap: int = int(round(float(site.max_health) * Building.SITE_HP_CAP_FRACTION))
 	site.take_damage(100)
-	check(site.health == 125, "damaged site at 225 - 100 HP (got %d)" % site.health)
+	check(site.health == cap - 100,
+		"damaged site at %d - 100 HP (got %d)" % [cap, site.health])
 	site.finish_construction()
 	check(not site.under_construction, "construction finished")
 	check(site.health == site.max_health - 100,

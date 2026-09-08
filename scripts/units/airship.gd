@@ -919,9 +919,13 @@ func _best_enemy(radius: float) -> Unit:
 	var best: Unit = null
 	var best_pri: int = -1
 	var best_d: float = INF
-	for u in path_service.get_units_in_radius(position, radius, SCAN_MAX_CANDIDATES):
-		if u.tribe_id == tribe_id or u.state == State.DEAD or not u.is_targetable():
-			continue
+	# get_enemy_candidates already filters exactly those three conditions (own
+	# tribe, DEAD, FLAG_TARGETABLE) — and unlike the old capped
+	# get_units_in_radius it never spends its candidate budget on friendly units
+	# or corpses, so a zeppelin over its OWN army stops going blind (same defect
+	# as the catapult/ram scans, user report 2026-09-08).
+	for u in path_service.get_enemy_candidates(
+			position, radius, tribe_id, SCAN_MAX_CANDIDATES):
 		if u.state == State.SIT:
 			continue   # sitting converts keep sitting (a preacher aboard works)
 		var d: float = _flat_dist(position, u.position)

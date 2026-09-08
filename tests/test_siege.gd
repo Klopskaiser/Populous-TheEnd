@@ -80,7 +80,9 @@ func _siege_units(w: Dictionary, tribe_id: int = 0) -> Array:
 
 
 ## Spawns a brave and boards it onto the engine (ticking until it serves).
-func _board_crew(w: Dictionary, engine: SiegeEngine, tribe_id: int = 0) -> Brave:
+## Typed CrewedVehicle, not SiegeEngine: the fire ram is a sibling class, not a
+## subclass, and order_crew works for either.
+func _board_crew(w: Dictionary, engine: CrewedVehicle, tribe_id: int = 0) -> Brave:
 	var brave: Brave = w.unit_manager.spawn_unit(
 		BRAVE_SCENE, tribe_id, engine.position + Vector3(1.0, 0.0, 0.0)) as Brave
 	brave.order_crew(engine)
@@ -233,6 +235,90 @@ func test_catapult_scan_skips_unmanned_ground_vehicle() -> void:
 	var found: Unit = cat._nearest_enemy_unit(SiegeEngine.FIRE_RANGE)
 	check(found == ram or found == crew,
 		"the manned ram (or its crew) is auto-acquirable again")
+	_free_world(w)
+
+
+## Blob blindness (Nutzerreport 2026-09-08): "Belagerungswaffen ignorieren
+## manchmal Angriffsmove-Befehle, dann fahren sie nur vorwaerts". Ursache war
+## die alte gekappte Zielabfrage — eigene Einheiten und Leichen frassen die
+## 24 Kandidatenplaetze auf, und ein Katapult, das MIT der eigenen Welle
+## marschiert, fand deshalb keinen Feind. Der Blob liegt bewusst bei
+## KLEINEREM z als der Feind: die alte Abfrage lief die Rasterzellen von
+## kz0 aufwaerts und war nach dem Blob am Budget, bevor sie die Zelle des
+## Feindes erreichte.
+func _friendly_blob(w: Dictionary, centre: Vector3, count: int) -> Array[Unit]:
+	var blob: Array[Unit] = []
+	for i in range(count):
+		var col: int = i % 6
+		var row: int = i / 6
+		var at: Vector3 = centre + Vector3(float(col) - 2.5, 0.0, float(row) - 4.0)
+		blob.append(w.unit_manager.spawn_unit(BRAVE_SCENE, 0, at))
+	return blob
+
+
+## Ticks only the named units plus the managers, so the parked blob stays put.
+func _tick_actors(w: Dictionary, actors: Array) -> void:
+	w.building_manager.tick(TICK)
+	for u in actors:
+		if is_instance_valid(u) and u.state != Unit.State.DEAD:
+			u.tick(TICK)
+	w.unit_manager.tick(TICK)
+
+
+func test_catapult_attack_move_engages_from_inside_the_own_army() -> void:
+	var w: Dictionary = _make_world()
+	var cat: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(50, 60))) as SiegeEngine
+	_board_crew(w, cat)
+	_board_crew(w, cat)
+	check(cat.boarded_count() >= 2, "zwei Mann Besatzung (feuerfaehig)")
+	var blob: Array[Unit] = _friendly_blob(w, cat.position, 30)
+	check(blob.size() == 30, "30 eigene Braves stehen um das Katapult")
+	# Feind im Feuerband (6,5 m: ueber MIN_RANGE, unter FIRE_RANGE) und in einer
+	# Rasterzelle HINTER dem Blob.
+	var foe: Brave = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, cat.position + Vector3(0.0, 0.0, 6.5)) as Brave
+	var actors: Array = [cat, foe]
+	actors.append_array(cat.crew)
+	cat.order_move(cat.position + Vector3(0.0, 0.0, 20.0), false, true)
+	check(cat.state == Unit.State.MOVE and cat.move_aggressive,
+		"der Angriffsmove ist angenommen")
+	cat._target_search_timer = 0.0
+	var ticks: int = 0
+	while cat.state != Unit.State.ATTACK and ticks < 60:
+		_tick_actors(w, actors)
+		ticks += 1
+	check(cat.state == Unit.State.ATTACK,
+		"das Katapult haelt und greift an statt durchzufahren (State %d)" % cat.state)
+	check(cat.attack_target == foe,
+		"und zwar den Feind im Feuerband, nicht irgendetwas anderes")
+	_free_world(w)
+
+
+func test_fire_ram_attack_move_engages_from_inside_the_own_army() -> void:
+	var w: Dictionary = _make_world()
+	var ram: FireRam = w.unit_manager.spawn_unit(
+		FIRE_RAM_SCENE, 0, w.nav.cell_to_world(Vector2i(50, 60))) as FireRam
+	_board_crew(w, ram)
+	check(ram.boarded_count() >= 1, "ein Mann Besatzung reicht der Ramme")
+	var blob: Array[Unit] = _friendly_blob(w, ram.position, 30)
+	check(blob.size() == 30, "30 eigene Braves stehen um die Ramme")
+	# Feind im Aggro-Radius der Ramme (12 m), Zelle hinter dem Blob.
+	var foe: Brave = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, ram.position + Vector3(0.0, 0.0, 6.5)) as Brave
+	var actors: Array = [ram, foe]
+	actors.append_array(ram.crew)
+	ram.order_move(ram.position + Vector3(0.0, 0.0, 20.0), false, true)
+	check(ram.state == Unit.State.MOVE and ram.move_aggressive,
+		"der Angriffsmove ist angenommen")
+	ram._target_search_timer = 0.0
+	var ticks: int = 0
+	while ram.state != Unit.State.ATTACK and ticks < 60:
+		_tick_actors(w, actors)
+		ticks += 1
+	check(ram.state == Unit.State.ATTACK,
+		"die Feuerramme haelt und greift an statt durchzufahren (State %d)" % ram.state)
+	check(ram.attack_target == foe, "und zwar den Feind hinter dem eigenen Blob")
 	_free_world(w)
 
 

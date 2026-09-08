@@ -623,7 +623,15 @@ func _nearest_enemy_unit(max_range: float) -> Unit:
 	var best_fresh_d: float = max_range
 	var best_burn: Unit = null
 	var best_burn_d: float = max_range
-	for u in path_service.get_units_in_radius(position, max_range, SCAN_MAX_CANDIDATES):
+	# Same fix as SiegeEngine._nearest_enemy_unit (see the reasoning there): the
+	# capped get_units_in_radius let friendly units and corpses eat the candidate
+	# budget, so a ram rolling along with its own wave found nothing to burn.
+	# The vehicle pass is separate because enemy vehicles are not targetable.
+	var cands: Array[Unit] = path_service.get_enemy_candidates(
+		position, max_range, tribe_id, SCAN_MAX_CANDIDATES)
+	cands.append_array(
+		path_service.get_enemy_vehicles_in_radius(position, max_range, tribe_id))
+	for u in cands:
 		if u == self or u.state == State.DEAD or u.tribe_id == tribe_id:
 			continue
 		if not u.is_targetable() and not _may_target_vehicle(u):

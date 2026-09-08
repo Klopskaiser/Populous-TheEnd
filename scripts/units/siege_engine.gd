@@ -274,7 +274,21 @@ func _nearest_enemy_unit(max_range: float) -> Unit:
 		return null
 	var best: Unit = null
 	var best_d: float = max_range
-	for u in path_service.get_units_in_radius(position, max_range, SCAN_MAX_CANDIDATES):
+	# get_enemy_candidates is the phase-8.2 query: friendly units and corpses do
+	# NOT consume the candidate budget, and buckets are walked ring-outward. The
+	# old get_units_in_radius(..., SCAN_MAX_CANDIDATES) went BLIND inside the own
+	# army — its 24 slots were spent on the own crew, the escorting wave and
+	# corpses, so a catapult attack-moving with its own troops found no enemy at
+	# all and simply drove on (user report 2026-09-08). Foot units were fixed in
+	# 8.2 (Unit._scan_for_enemy); the vehicles were never pulled along.
+	# Enemy VEHICLES need the second, dedicated pass: they are
+	# is_targetable() == false, and the cell prefilter behind get_enemy_candidates
+	# only marks targetable units, so their cell is masked away entirely.
+	var cands: Array[Unit] = path_service.get_enemy_candidates(
+		position, max_range, tribe_id, SCAN_MAX_CANDIDATES)
+	cands.append_array(
+		path_service.get_enemy_vehicles_in_radius(position, max_range, tribe_id))
+	for u in cands:
 		if u == self or u.state == State.DEAD or u.tribe_id == tribe_id:
 			continue
 		# NOTE (phase 7i): unlike foot units, the catapult MAY bombard units that

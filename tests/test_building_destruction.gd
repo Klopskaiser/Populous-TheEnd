@@ -13,6 +13,14 @@ const WARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/warrior_
 const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
 
 
+## Damage worth exactly ONE destruction stage — the same arithmetic
+## Building.apply_destruction_stages uses. Derived instead of hardcoded: the
+## building HP were raised by 50 % on 2026-09-08 and every absolute number in
+## here broke (pattern already used in test_building_assault.gd).
+func _stage_hp(b: Building) -> int:
+	return int(ceil(Building.STAGE_DAMAGE * float(b.max_health)))
+
+
 func _flat_terrain(h: float = 5.0) -> TerrainData:
 	var td: TerrainData = TerrainData.new()
 	for i in range(td.heights.size()):
@@ -59,17 +67,18 @@ func test_destruction_stage_thresholds() -> void:
 	var w: Dictionary = _make_world()
 	var hut: Building = w.bm.place(HUT_SCENE, w.tribe0, Vector2i(30, 30), 0, true)
 	check(hut.destruction_stage() == 0 and hut.is_usable(), "intact hut = stage 0, usable")
-	hut.take_damage(89)   # 29.7% damage
+	var stage: int = _stage_hp(hut)
+	hut.take_damage(stage - 1)   # knapp unter 30 %
 	check(hut.destruction_stage() == 0 and hut.is_usable(), "below 30% still stage 0")
 	hut.take_damage(1)    # 30%
 	check(hut.destruction_stage() == 1, "30% damage = stage 1")
 	check(not hut.is_usable(), "stage 1 is unusable")
-	hut.take_damage(90)   # 60%
+	hut.take_damage(stage)   # 60%
 	check(hut.destruction_stage() == 2, "60% damage = stage 2")
-	hut.take_damage(90)   # 90%
+	hut.take_damage(stage)   # 90%
 	check(hut.destruction_stage() == 3, "90% damage = stage 3")
 	check(not w.nav.is_cell_walkable(Vector2i(31, 31)), "footprint blocked while standing")
-	hut.take_damage(30)   # 100%
+	hut.take_damage(hut.health)   # 100%
 	check(hut.destruction_stage() == 4, "100% = stage 4 (destroyed)")
 	check(hut.health == 0, "destroyed at 0 HP")
 	check(hut not in w.bm.buildings, "deregistered from the building manager")
@@ -82,7 +91,10 @@ func test_apply_destruction_stages_deals_stage_damage() -> void:
 	var w: Dictionary = _make_world()
 	var hut: Building = w.bm.place(HUT_SCENE, w.tribe0, Vector2i(30, 30), 0, true)
 	hut.apply_destruction_stages(2)   # lightning: +2 stages = 60% of max HP
-	check(hut.health == 120, "+2 stages = 60% max-HP damage (300 -> 120)")
+	var expect: int = hut.max_health - 2 * _stage_hp(hut)
+	check(hut.health == expect,
+		"+2 stages = 60%% max-HP damage (%d -> %d, got %d)"
+			% [hut.max_health, expect, hut.health])
 	check(hut.destruction_stage() == 2, "building sits at stage 2")
 	hut.apply_destruction_stages(1)
 	check(hut.destruction_stage() == 3, "another stage on top -> stage 3")
@@ -103,7 +115,7 @@ func test_damaged_hut_stops_production_and_capacity() -> void:
 	w.bm.tick(3.0)
 	check(hut.spawn_timer < Balance.HUT_SPAWN_SECONDS_PER_WORKER,
 		"intact manned hut works toward a spawn")
-	hut.take_damage(90)   # stage 1 -> unusable, crew ejected
+	hut.take_damage(_stage_hp(hut))   # stage 1 -> unusable, crew ejected
 	check(hut.housing_capacity() == 0, "damaged hut houses nobody")
 	check_near(hut.production_progress(), -1.0, "no production bar while damaged")
 	var frozen: float = hut.spawn_timer
@@ -145,7 +157,7 @@ func test_damaged_camp_releases_trainee_and_queue() -> void:
 func test_repair_stalls_without_wood() -> void:
 	var w: Dictionary = _make_world()
 	var hut: Building = w.bm.place(HUT_SCENE, w.tribe0, Vector2i(30, 30), 0, true)
-	hut.take_damage(270)   # 90% damage, health 30
+	hut.take_damage(3 * _stage_hp(hut))   # 90 % Schaden
 	# Aus Balance abgeleitet statt hart: die Huettenkosten sind mehrfach gesunken
 	# (12 -> 8 -> 7), und jede feste Zahl hier brach beim naechsten Balancing.
 	var owed: int = int(floor(0.9 * float(Balance.HUT_WOOD_COST)))
@@ -154,7 +166,8 @@ func test_repair_stalls_without_wood() -> void:
 	var brave: Brave = w.unit_manager.spawn_unit(BRAVE_SCENE, 0, Vector3(28, 0, 28))
 	brave.order_repair(hut)
 	_run(w, [brave], func() -> bool: return brave.state == Unit.State.IDLE)
-	check(hut.health == 30, "no repair progress without wood")
+	var left: int = hut.max_health - 3 * _stage_hp(hut)
+	check(hut.health == left, "no repair progress without wood")
 	check(hut.wood_stalled, "site stalls when no wood source exists")
 	check(brave.state == Unit.State.IDLE, "worker gives up instead of hammering")
 	_free_world(w)
@@ -163,7 +176,7 @@ func test_repair_stalls_without_wood() -> void:
 func test_repair_consumes_floored_wood_and_restores_usability() -> void:
 	var w: Dictionary = _make_world()
 	var hut: Building = w.bm.place(HUT_SCENE, w.tribe0, Vector2i(30, 30), 0, true)
-	hut.take_damage(270)   # 90 % Schaden
+	hut.take_damage(3 * _stage_hp(hut))   # 90 % Schaden
 	# Genau die geschuldete Menge als Stapel im Absorptionsradius des Eingangs
 	# ablegen, aus Balance abgeleitet (die Huettenkosten sind mehrfach gesunken).
 	var owed: int = int(floor(0.9 * float(Balance.HUT_WOOD_COST)))
@@ -189,11 +202,12 @@ func test_repair_consumes_floored_wood_and_restores_usability() -> void:
 func test_partial_repair_lowers_stage() -> void:
 	var w: Dictionary = _make_world()
 	var hut: Building = w.bm.place(HUT_SCENE, w.tribe0, Vector2i(30, 30), 0, true)
-	hut.take_damage(200)   # health 100 -> 66.7% damage, stage 2
+	hut.take_damage(2 * _stage_hp(hut))   # 60 % Schaden, Stufe 2
 	check(hut.destruction_stage() == 2, "start at stage 2")
 	hut.repair_wood = 99   # plenty of wood delivered
-	check(hut.repair(50.0), "repair works with wood in the buffer")
-	check(hut.destruction_stage() == 1, "stage drops as HP returns (150/300 = 50%)")
-	check(hut.repair(200.0), "repair up to full")
+	check(hut.repair(float(_stage_hp(hut)) * 0.5),
+		"repair works with wood in the buffer")
+	check(hut.destruction_stage() == 1, "stage drops as HP returns (45 % Schaden)")
+	check(hut.repair(float(hut.max_health)), "repair up to full")
 	check(hut.health == hut.max_health, "clamped at max HP")
 	_free_world(w)

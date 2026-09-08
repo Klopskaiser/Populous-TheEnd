@@ -760,6 +760,15 @@ const CLIFF_LAUNCH_UP: float = 3.5
 # =============================================================================
 
 ## Schadensanteil pro Zerstörungsstufe (Stufen bei 30/60/90/100 %).
+##
+## ALLE Gebäude-HP wurden am 2026-09-08 um 50 % erhöht (Nutzervorgabe). Die
+## Zerstörungsstufen sind bewusst RELATIV: apply_destruction_stages() rechnet
+## ceil(BUILDING_STAGE_DAMAGE * max_health), also bleibt es bei jedem HP-Stand
+## bei genau einer Stufe je Katapult-/Rammentreffer (vier Treffer = zerstört) —
+## dieselbe Vorgabe. Schadensquellen mit FESTEM HP-Betrag wurden dabei bewusst
+## NICHT nachgezogen und sind damit relativ ein Drittel schwächer:
+## FIREWARRIOR_BUILDING_DAMAGE, FIRESTORM_BUILDING_DAMAGE (~67 -> ~100 Bälle je
+## Gebäude) und RAID_DPS_PER_RAIDER (Nahkampf-Abriss 50 % länger).
 const BUILDING_STAGE_DAMAGE: float = 0.3
 ## Schaden am Insassen beim Fernkampf-Rauswurf (Feuerkrieger-Stufe-1,
 ## Katapult-Treffer): 1 x Brave-Leben. Braves/Feuerkrieger sterben daran beim
@@ -807,7 +816,9 @@ const TEMPLE_FOOTPRINT: Vector2i = Vector2i(6, 6)
 const FIREWARRIOR_CAMP_FOOTPRINT: Vector2i = Vector2i(8, 8)
 const FORESTER_FOOTPRINT: Vector2i = Vector2i(2, 4)
 const WORKSHOP_FOOTPRINT: Vector2i = Vector2i(7, 4)
-const FIRERAM_WORKSHOP_FOOTPRINT: Vector2i = Vector2i(6, 4)
+## Schmale Front, tiefe Halle (2026-09-08, war 6 x 4): die Rammenwerkstatt
+## ist damit keine breite Kopie der Katapultwerkstatt mehr.
+const FIRERAM_WORKSHOP_FOOTPRINT: Vector2i = Vector2i(3, 6)
 const AIRSHIP_WHARF_FOOTPRINT: Vector2i = Vector2i(8, 8)
 const WATCHTOWER_FOOTPRINT: Vector2i = Vector2i(2, 2)
 const WOOD_DEPOT_FOOTPRINT: Vector2i = Vector2i(1, 1)
@@ -815,14 +826,14 @@ const REINCARNATION_SITE_FOOTPRINT: Vector2i = Vector2i(3, 3)
 
 # --- Hütte (Phase 10f: klein und billig, in vier Stufen zum Wohnpalast) ---
 const HUT_WOOD_COST: int = 7               # war 12, dann 8 (10h)
-const HUT_HP: int = 300                    # == HUT_HP_PER_STAGE[0]
+const HUT_HP: int = 450                    # == HUT_HP_PER_STAGE[0]
 ## Plätze/Arbeiter/Leben je Ausbaustufe (Index = Stufe 0..4). Stufe 4 bringt
 ## bewusst +11 statt +8 Plätze — der Wohnpalast ist der Lohn für den Vollausbau.
 ## Ein Platz kostet damit 0,8 Holz auf Stufe 0 (8/10) und 0,62 im Vollausbau
 ## (28/45) — vorher waren es 0,3 (12/40), Wohnraum ist also doppelt so teuer.
 const HUT_CAPACITY_PER_STAGE: Array[int] = [10, 18, 26, 34, 45]
 const HUT_CREW_PER_STAGE: Array[int] = [2, 3, 4, 5, 6]
-const HUT_HP_PER_STAGE: Array[int] = [300, 340, 380, 420, 480]
+const HUT_HP_PER_STAGE: Array[int] = [450, 510, 570, 630, 720]
 const HUT_MAX_UPGRADE_STAGE: int = 4
 ## Sekunden je Brave und ARBEITER: die Rate ist linear in der Besatzung, es gibt
 ## keinen Voll-Besatzungs-Bonus mehr. Stufe 0 (2 Arbeiter) 15 s/Brave,
@@ -845,22 +856,22 @@ const HUT_UPGRADE_STALL_TIMEOUT: float = 120.0
 
 # --- Kaserne (Krieger) ---
 const WARRIOR_CAMP_WOOD_COST: int = 10
-const WARRIOR_CAMP_HP: int = 400
+const WARRIOR_CAMP_HP: int = 600
 const WARRIOR_CAMP_TRAINING_TIME: float = 3.0
 
 # --- Tempel (Prediger) ---
 const TEMPLE_WOOD_COST: int = 15
-const TEMPLE_HP: int = 440
+const TEMPLE_HP: int = 660
 const TEMPLE_TRAINING_TIME: float = 5.0
 
 # --- Feuertempel (Feuerkrieger) ---
 const FIREWARRIOR_CAMP_WOOD_COST: int = 18  # war 20 (10h)
-const FIREWARRIOR_CAMP_HP: int = 600
+const FIREWARRIOR_CAMP_HP: int = 900
 const FIREWARRIOR_CAMP_TRAINING_TIME: float = 4.0
 
 # --- Förster ---
 const FORESTER_WOOD_COST: int = 18
-const FORESTER_HP: int = 250
+const FORESTER_HP: int = 375
 ## Mana/s je aktivem Arbeiter im Gebäude (Phase 10k: 1,5 -> 0,6; eine volle
 ## Försterei kostet damit 2,4 Mana/s). Mit 1,5 hätten fünf Förstereien nach der
 ## gedämpften Manakurve das GESAMTE Einkommen aufgefressen.
@@ -870,7 +881,7 @@ const FORESTER_PLANT_WORK_PER_TREE: float = 50.0
 
 # --- Katapultwerkstatt ---
 const WORKSHOP_WOOD_COST: int = 12          # war 13 (10h)
-const WORKSHOP_HP: int = 350
+const WORKSHOP_HP: int = 525
 ## Arbeiter-Sekunden pro Katapult (3 Arbeiter -> 20 s).
 ## Regel: Produktionsaufwand = Holzkosten des Fahrzeugs x 10 Arbeiter-Sekunden.
 const WORKSHOP_WORK_PER_CATAPULT: float = 60.0
@@ -878,14 +889,14 @@ const WORKSHOP_CATAPULT_WOOD: int = 6
 
 # --- Feuerrammenwerkstatt ---
 const FIRERAM_WORKSHOP_WOOD_COST: int = 10  # war 11 (10h)
-const FIRERAM_WORKSHOP_HP: int = 350
+const FIRERAM_WORKSHOP_HP: int = 525
 ## Arbeiter-Sekunden pro Feuerramme (3 Arbeiter -> ~13 s); 4 Holz x 10.
 const FIRERAM_WORK_PER_RAM: float = 40.0
 const FIRERAM_WOOD: int = 4
 
 # --- Luftschiffwerft ---
 const AIRSHIP_WHARF_WOOD_COST: int = 20
-const AIRSHIP_WHARF_HP: int = 500
+const AIRSHIP_WHARF_HP: int = 750
 const WHARF_WORKER_SLOTS: int = 4
 ## Arbeiter-Sekunden pro Luftschiff (4 Arbeiter -> 20 s); 8 Holz x 10.
 const WHARF_WORK_PER_AIRSHIP: float = 80.0
@@ -893,20 +904,20 @@ const WHARF_AIRSHIP_WOOD: int = 8
 
 # --- Holzstation ---
 const WOOD_DEPOT_WOOD_COST: int = 1
-const WOOD_DEPOT_HP: int = 120
+const WOOD_DEPOT_HP: int = 180
 ## Storage cap = 4 stock piles x WoodPile.MAX_AMOUNT.
 const WOOD_DEPOT_CAPACITY: int = 20
 
 # --- Wachturm ---
 const WATCHTOWER_WOOD_COST: int = 4
-const WATCHTOWER_HP: int = 200
+const WATCHTOWER_HP: int = 300
 ## Reichweiten-Bonus für stationierte Fernkämpfer/Prediger.
 const WATCHTOWER_RANGE_BONUS: float = 3.0
 ## Wachtürme sind klein: weniger gleichzeitige Abreißer als der Standard.
 const WATCHTOWER_MAX_RAIDERS: int = 5
 
 # --- Reinkarnationsplatz ---
-const REINCARNATION_SITE_HP: int = 500
+const REINCARNATION_SITE_HP: int = 750
 
 # =============================================================================
 # STAMM / WIRTSCHAFT
