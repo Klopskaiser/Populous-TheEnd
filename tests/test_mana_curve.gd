@@ -17,6 +17,7 @@ const TICK: float = 0.5
 
 const HUT_SCENE: PackedScene = preload("res://scenes/buildings/hut.tscn")
 const WARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/warrior_camp.tscn")
+const TRAINING_HALL_SCENE: PackedScene = preload("res://scenes/buildings/training_hall.tscn")
 const WORKSHOP_SCENE: PackedScene = preload("res://scenes/buildings/workshop.tscn")
 const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
 
@@ -196,6 +197,41 @@ func test_queued_braves_cost_nothing() -> void:
 		camp.tick(0.05)
 	check(camp.trainee == null, "nobody was admitted (paused)")
 	check_near(w.tribe.upkeep_debt(), before, "a queue alone costs nothing")
+	_free_world(w)
+
+
+## Every training building pays the same rate — the booking sits on
+## TrainingBuilding, so a new one inherits it. Checked on the training hall
+## (2026-09-09) because that is the one added last: an override of _tick_active
+## in a subclass would silently drop the charge.
+func test_the_training_hall_pays_the_same_rate() -> void:
+	var w: Dictionary = _make_world()
+	var hall: TrainingHall = w.bm.place(
+		TRAINING_HALL_SCENE, w.tribe, Vector2i(30, 30), 0, true) as TrainingHall
+	check(hall != null, "the training hall stands")
+	var idle_before: float = w.tribe.upkeep_debt()
+	for i in range(10):
+		hall.tick(TICK)
+	check_near(w.tribe.upkeep_debt(), idle_before, "an idle hall costs nothing")
+
+	var brave: Brave = w.um.spawn_unit(BRAVE_SCENE, 0,
+		w.nav.cell_to_world(Vector2i(30, 36))) as Brave
+	w.commands.order_train(hall, [brave] as Array[Unit])
+	for i in range(2000):
+		brave.tick(0.05)
+		hall.tick(0.05)
+		if hall.trainee != null:
+			break
+	check(hall.trainee != null, "the brave is inside training")
+	# Measured well inside the hall's 10 s, so the window cannot run past the end.
+	var window: float = 1.0
+	var mid: float = w.tribe.upkeep_debt()
+	for i in range(20):
+		hall.tick(window / 20.0)
+	check(hall.trainee != null, "still training after the measured window")
+	check_near(w.tribe.upkeep_debt() - mid,
+		Balance.TRAINING_MANA_PER_BUILDING * window,
+		"the hall books TRAINING_MANA_PER_BUILDING per second, like every camp")
 	_free_world(w)
 
 
