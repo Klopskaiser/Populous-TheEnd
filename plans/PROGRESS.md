@@ -11028,3 +11028,40 @@ tragen jetzt ein drittes Feld (Technikerbesatzung ja/nein).
 Verifiziert ist der **Ladecheck** (exit 0) und die volle Suite (6127 passed,
 0 failed) — die Debugschlacht selbst ist ein Laufzeitszenario ohne Testabdeckung
 und muss im Spiel angesehen werden.
+
+### Nachtrag: TTK-Tabelle und Technikerbesatzung im Labor (2026-09-09)
+
+**`tests/diag_ttk.gd`** (neu, kein Test — Diag-Kategorie): druckt Schaden, Takt,
+DPS und die Time-to-kill-Matrix aller Einheiten, gerechnet aus dem LEBENDEN Code
+(`Unit.melee_damage` samt der Rundung je Schlagart, `Balance`, die statischen
+Cooldown-Formeln der Fahrzeuge). Bewusst kein Doku-Text: eine handgerechnete
+Tabelle driftet bei der ersten Balance-Aenderung.
+
+**`tests/balance_lab.gd`**: neue Einheitenart `techniker` (10 s Ausbildung) und
+die Rumpfvarianten `katapult_tech` / `feuerramme_tech` (gleicher Rumpf,
+`crew_kind = techniker`). Sechs neue Paarungen, alle mit VOLLER Besatzung, damit
+je Seite dieselben BAe stehen und wirklich nur die BesatzungsART variiert.
+
+Messergebnis (5 Wiederholungen je Paarung, flache Karte, 24 BAe je Seite):
+
+| Paarung | zer/ver | Schaden A | eigene Verluste |
+|---|---|---|---|
+| 4 Katapulte, 6 Braves, vs 24 Krieger | 0,77 | 1591 HP | 16,2 BAe |
+| 4 Katapulte, 6 Techniker, vs 24 Krieger | **1,50** | 2016 HP | 11,2 BAe |
+| 6 Rammen, 4 Braves, vs 24 Krieger | 2,73 | 2688 HP | 8,2 BAe |
+| 6 Rammen, 4 Techniker, vs 24 Krieger | **4,63** | 2664 HP | 4,8 BAe |
+
+Deutung: Beim **Katapult** zahlt der Bonus in Schaden (+27 %) — deutlich weniger
+als die +83 % Feuerrate, weil in der Fusstruppen-Schlacht nicht das Nachladen
+begrenzt, sondern Zielverfuegbarkeit und Mindestreichweite. Bei der **Ramme**
+bleibt der ausgeteilte Schaden praktisch gleich; sie gewinnt ueber die eigenen
+Verluste (8,2 -> 4,8 BAe), also ueber die Resistenzen, nicht ueber die +30 %
+Feuerrate. Das Labor kann Resistenz und Tempo nicht voneinander trennen.
+
+**Nicht verwertbar** sind die beiden A/B-Zeilen Fahrzeug gegen baugleiches
+Fahrzeug: beide enden mit "KEIN KONTAKT" bei ~19 m. Zwei reine
+Fahrzeugaufstellungen bleiben am Rand des Aggro-Radius (20 m) stehen, statt in
+die Feuerreichweite (16 m) zu fahren, und teilen ueber 90 s null Schaden aus —
+obwohl `test_siege.gd` Katapult-gegen-Katapult isoliert als erlaubt festnagelt.
+Die Zeilen bleiben als **Verhaltens-Befund** stehen (sie warnen selbst); ob das
+ein Fehler in der Fahrzeug-Zielaufnahme ist, ist NICHT untersucht.

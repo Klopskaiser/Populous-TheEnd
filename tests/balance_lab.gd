@@ -54,6 +54,7 @@ const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
 const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
 const FIREWARRIOR_SCENE: PackedScene = preload("res://scenes/units/firewarrior.tscn")
 const PREACHER_SCENE: PackedScene = preload("res://scenes/units/preacher.tscn")
+const TECHNICIAN_SCENE: PackedScene = preload("res://scenes/units/technician.tscn")
 const SHAMAN_SCENE: PackedScene = preload("res://scenes/units/shaman.tscn")
 const SIEGE_SCENE: PackedScene = preload("res://scenes/units/siege_engine.tscn")
 const FIRERAM_SCENE: PackedScene = preload("res://scenes/units/fire_ram.tscn")
@@ -86,6 +87,17 @@ const KINDS: Dictionary = {
 		"crew_kind": &"brave"},
 	&"luftschiff":  {"scene": AIRSHIP_SCENE,     "crew": 3, "wood": 8, "time": 80.0,
 		"crew_kind": &"feuerkrieger"},
+	# Technikerbesatzungen (2026-09-09). Gleicher Rumpf, gleiche BAe-Zahl wie
+	# eine gleich grosse Brave-Besatzung — der EINZIGE Unterschied ist der Bonus
+	# (Tempo und Feuerrate; die Ramme gibt ihren Technikern zusaetzlich die drei
+	# Resistenzen). In der ZEIT-Spalte sind sie dagegen teuer: 10 s Ausbildung je
+	# Techniker gegen 0 s fuer einen Brave.
+	&"techniker":   {"scene": TECHNICIAN_SCENE,  "crew": 0, "wood": 0, "time": 10.0,
+		"crew_kind": &"brave"},
+	&"katapult_tech":   {"scene": SIEGE_SCENE,   "crew": 6, "wood": 6, "time": 60.0,
+		"crew_kind": &"techniker"},
+	&"feuerramme_tech": {"scene": FIRERAM_SCENE, "crew": 4, "wood": 4, "time": 40.0,
+		"crew_kind": &"techniker"},
 }
 
 ## Aufstellung = Liste von [art, anzahl] oder [art, anzahl, besatzung].
@@ -225,6 +237,36 @@ const SCENARIOS: Array = [
 	 "a": [[&"feuerramme", 4, 2, 4], [&"krieger", 20, 0, 0], [&"feuerkrieger", 12, 0, -3]],
 	 "b": [[&"krieger", 20], [&"feuerkrieger", 12]],
 	 "frage": "Dieselbe Armee wie der Gegner PLUS 4 Rammen vorn (40 gegen 32 BAe)"},
+
+	# --- Was bringt eine TECHNIKERBESATZUNG? (Nutzerfrage 2026-09-09) ---
+	# Alle sechs Zeilen fahren VOLLE Besatzungen (Katapult 6, Ramme 4), damit die
+	# BAe je Seite gleich bleiben und wirklich nur die BesatzungsART variiert.
+	# Die Techniker selbst kaempfen exakt wie Braves (gleiche Werte) — was die
+	# Zahlen unterscheidet, ist ausschliesslich der Fahrzeugbonus.
+	# Erwartung aus den Konstanten: Katapult +83 % Feuerrate, Ramme +30 %, beide
+	# +33 % Tempo; die Rammentechniker sind zusaetzlich feuer-, panik- und
+	# bekehrungsresistent (relevant gegen den eigenen Flammen-Ruecklauf).
+	{"name": "katapult_bravecrew_vs_krieger", "a": [[&"katapult", 4, 6]], "b": [[&"krieger", 24]],
+	 "frage": "Eichmass: 4 Katapulte mit VOLLER Brave-Crew (24 BAe) gegen 24 Krieger"},
+	{"name": "katapult_technikercrew_vs_krieger", "a": [[&"katapult_tech", 4, 6]], "b": [[&"krieger", 24]],
+	 "frage": "Dieselben 4 Katapulte mit 6 TECHNIKERN je Stueck — was bringt der Bonus?"},
+	{"name": "feuerramme_bravecrew_vs_krieger", "a": [[&"feuerramme", 6, 4]], "b": [[&"krieger", 24]],
+	 "frage": "Eichmass: 6 Rammen mit VOLLER Brave-Crew (24 BAe) gegen 24 Krieger"},
+	{"name": "feuerramme_technikercrew_vs_krieger", "a": [[&"feuerramme_tech", 6, 4]], "b": [[&"krieger", 24]],
+	 "frage": "Dieselben 6 Rammen mit 4 TECHNIKERN je Stueck — Bonus plus Resistenzen"},
+	# Als direkte A/B-Probe gedacht (identische Aufstellung, nur die Besatzung
+	# unterscheidet sich) — sie MISST aber nichts: beide Zeilen enden mit
+	# "KEIN KONTAKT" bei ~19 m. Zwei reine Fahrzeugaufstellungen bleiben also am
+	# Rand des Aggro-Radius (20 m) stehen, statt in ihre Feuerreichweite (16 m
+	# Katapult) zu fahren, und teilen ueber 90 s NULL Schaden aus. Sie bleiben
+	# als Verhaltens-Befund stehen (der Lauf ist billig und die Zeile warnt von
+	# selbst); die belastbare Bonus-Messung sind die vier Zeilen darueber.
+	{"name": "katapult_technikercrew_vs_bravecrew",
+	 "a": [[&"katapult_tech", 4, 6]], "b": [[&"katapult", 4, 6]],
+	 "frage": "Katapult gegen baugleiches Katapult, nur die Besatzung unterscheidet sich"},
+	{"name": "feuerramme_technikercrew_vs_bravecrew",
+	 "a": [[&"feuerramme_tech", 6, 4]], "b": [[&"feuerramme", 6, 4]],
+	 "frage": "Ramme gegen baugleiche Ramme, nur die Besatzung unterscheidet sich"},
 
 	# --- Werte oder Verhalten? Die verteidigende Seite steht und schiesst. ---
 	{"name": "krieger_vs_haltende_feuerkrieger", "a": [[&"krieger", 20]], "b": [[&"feuerkrieger", 20]],
