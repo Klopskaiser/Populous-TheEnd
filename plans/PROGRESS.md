@@ -11065,3 +11065,37 @@ die Feuerreichweite (16 m) zu fahren, und teilen ueber 90 s null Schaden aus —
 obwohl `test_siege.gd` Katapult-gegen-Katapult isoliert als erlaubt festnagelt.
 Die Zeilen bleiben als **Verhaltens-Befund** stehen (sie warnen selbst); ob das
 ein Fehler in der Fahrzeug-Zielaufnahme ist, ist NICHT untersucht.
+
+### Nachtrag: Golem-Balance (2026-09-09, Nutzervorgabe)
+
+Vier Aenderungen an `Balance`/`golem.gd`:
+
+| | vorher | jetzt |
+|---|---|---|
+| Schlagtakt | 2,0 s | **1,8 s** |
+| Schaden je Feind | 20 | **25** |
+| Feld vor der Hitbox | 2 x 3 m | **3 x 3 m** (quadratisch) |
+| Heilung je Kill | — | **10 LP**, gedeckelt bei GOLEM_HP |
+
+Takt und Schaden zusammen: 10,0 -> **13,9 Schaden je Sekunde und Ziel** (+39 %).
+Die TTK gegen einen Krieger faellt damit von 12,0 auf 8,6 s
+(`tests/diag_ttk.gd`). Der Flaechenzuwachs kommt obendrauf und ist in dieser
+Zahl NICHT enthalten — das Feld waechst von 6 auf 9 m^2, die getroffene
+Gesamtflaeche (Hitbox 12 m^2 + Feld) von 18 auf 21 m^2.
+
+**Lesart des Auftrags, die ich gewaehlt habe:** "Schadensgebiet auf 3x3" meint
+das *Feld vor der Hitbox* (`GOLEM_FIELD_WIDTH` 2,0 -> 3,0; die Laenge stand
+schon auf 3,0). Die Hitbox selbst bleibt 4 x 3 m — sie ist die Koerpergroesse
+des Golems und liesse sich nicht auf 3 m verschmaelern, ohne dass Modell und
+Wirkfeld auseinanderlaufen.
+
+**Heilung:** sitzt an derselben Stelle wie der Lebenszeit-Bonus in
+`Golem._smash` (`health = mini(health + GOLEM_HP_PER_KILL, max_health)`), gilt
+also nur fuer Kills durch den FLAECHENSCHLAG — nicht fuer Gegner, die anderswo
+sterben.
+
+**Tests:** `test_golem.gd` — das Wirkfeld-Muster auf die neue Breite gezogen
+(neuer Innen-Fall bei side 1,4, der Aussen-Fall auf 1,7 verschoben, Praedikat-
+Kanten nachgezogen) plus `test_kills_heal_the_golem_up_to_its_maximum` (heilt
+exakt 10, deckelt bei max_health, ohne Kill keine Heilung). Suite 6140 passed,
+0 failed.

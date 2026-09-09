@@ -65,10 +65,15 @@ const GOLEM_REACH: float = 3.0
 ## direkt vor der Hitbox. Alles flach in XZ im Blickrahmen.
 const GOLEM_BODY_HALF_WIDTH: float = 2.0
 const GOLEM_BODY_HALF_DEPTH: float = 1.5
-const GOLEM_FIELD_WIDTH: float = 2.0
+## Das Feld vor der Hitbox: 2x3 -> 3x3 m (Nutzervorgabe 2026-09-09). Es ist
+## damit quadratisch und genau so breit wie tief; die Hitbox selbst (4 m) bleibt
+## breiter.
+const GOLEM_FIELD_WIDTH: float = 3.0
 const GOLEM_FIELD_LENGTH: float = 3.0
-const GOLEM_DAMAGE: int = 20
-const GOLEM_STRIKE_COOLDOWN: float = 2.0
+## 20 -> 25 und 2,0 -> 1,8 s (Nutzervorgabe 2026-09-09): zusammen 10 -> 13,9
+## Schaden je Sekunde und Ziel, also +39 %.
+const GOLEM_DAMAGE: int = 25
+const GOLEM_STRIKE_COOLDOWN: float = 1.8
 ## Je Opfer, das den Schlag ueberlebt: 30 % Hochwirbeln, 30 % Ins-Rollen — beides
 ## VOM Golem weg (25/25 -> 30/30 nach dem ersten Spieltest). Der Rest wird nur
 ## getroffen.
@@ -85,6 +90,9 @@ const GOLEM_BUILDING_STAGES: int = 1
 const GOLEM_LIFETIME: float = 180.0
 ## 3 -> 6 s nach dem ersten Spieltest.
 const GOLEM_LIFE_PER_KILL: float = 6.0
+## Je Kill heilt der Golem zusaetzlich (Nutzervorgabe 2026-09-09) — gedeckelt
+## bei GOLEM_HP, geheilt wird also nur echter Schaden.
+const GOLEM_HP_PER_KILL: int = 10
 ## Stein brennt schlecht: statt 15 Schaden/s nur ein Rinnsal, und keine Panik.
 const GOLEM_BURN_DPS: float = 5.0
 ## Abstand, den andere grosse Koerper (Fahrzeuge, Golems) zum Golem halten.

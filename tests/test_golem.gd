@@ -160,38 +160,46 @@ func test_golem_engages_without_a_melee_seat() -> void:
 
 
 ## Wirkfeld = die ganze Hitbox (4 x 3 m: |side| <= 2, along -1,5..1,5) PLUS das
-## 2 x 3-m-Feld davor (along 1,5..4,5, |side| <= 1). Golem bei (50, 50), Blick +Z.
+## Feld davor (along 1,5..4,5, |side| <= 1,5). Das Feld war bis 2026-09-09 nur
+## 2 m breit und ist jetzt quadratisch (3 x 3 m, Nutzervorgabe) — deshalb steht
+## unten ein Fall bei side 1,4 DRIN, der vorher draussen war.
+## Golem bei (50, 50), Blick +Z.
 func test_smash_hits_body_box_and_field_in_front_and_spares_friends() -> void:
 	var w: Dictionary = _make_world()
 	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
 	g.facing = Vector3(0, 0, 1)
 	var in_front_a: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50.0, 5, 52.5))   # field, centre
 	var in_front_b: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50.8, 5, 54.3))   # field, side 0,8, along 4,3
+	var in_front_wide: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(51.4, 5, 52.5))  # field, side 1,4
 	var beside: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(51.8, 5, 50.0))       # body box, side 1,8
 	var in_back: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50.0, 5, 48.7))      # body box, along -1,3
-	var out_field_side: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(51.5, 5, 52.5))  # field row, side 1,5
+	var out_field_side: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(51.7, 5, 52.5))  # field row, side 1,7
 	var out_far: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50.0, 5, 55.0))      # along 5,0 > 4,5
 	var out_back: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50.0, 5, 47.8))     # along -2,2 < -1,5
 	var out_side: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(52.4, 5, 50.0))     # side 2,4 > 2
 	var friend: Unit = _spawn(w, BRAVE_SCENE, 0, Vector3(50.0, 5, 52.0))
-	for u in [in_front_a, in_front_b, beside, in_back, out_field_side, out_far, out_back,
-			out_side, friend]:
+	for u in [in_front_a, in_front_b, in_front_wide, beside, in_back, out_field_side,
+			out_far, out_back, out_side, friend]:
 		u.max_health = 1000
 		u.health = 1000
 	g._smash()
-	check(in_front_a.health == 1000 - Balance.GOLEM_DAMAGE, "centre of the field takes 20")
-	check(in_front_b.health == 1000 - Balance.GOLEM_DAMAGE, "0,8 m aside at 4,3 m takes 20")
-	check(beside.health == 1000 - Balance.GOLEM_DAMAGE, "standing IN the body box takes 20")
-	check(in_back.health == 1000 - Balance.GOLEM_DAMAGE, "the back of the body box counts too")
-	check(out_field_side.health == 1000, "1,5 m aside in the front field is outside (2 m wide)")
+	var hit: int = 1000 - Balance.GOLEM_DAMAGE
+	check(in_front_a.health == hit, "centre of the field takes GOLEM_DAMAGE")
+	check(in_front_b.health == hit, "0,8 m aside at 4,3 m takes GOLEM_DAMAGE")
+	check(in_front_wide.health == hit, "1,4 m aside is inside the 3-m-wide field")
+	check(beside.health == hit, "standing IN the body box counts")
+	check(in_back.health == hit, "the back of the body box counts too")
+	check(out_field_side.health == 1000, "1,7 m aside in the front field is outside (3 m wide)")
 	check(out_far.health == 1000, "5 m ahead is beyond the field (ends at 4,5 m)")
 	check(out_back.health == 1000, "2,2 m behind is outside the body box")
 	check(out_side.health == 1000, "2,4 m aside is outside the 4-m-wide body box")
 	check(friend.health == 1000, "own units in the area are never hit")
 	check(g.attack_anim == &"punch", "the strike plays the punch animation")
-	check(Golem.in_strike_area(0.0, 0.0) and Golem.in_strike_area(4.5, 1.0)
-		and not Golem.in_strike_area(4.51, 0.0) and not Golem.in_strike_area(1.6, 1.1),
+	check(Golem.in_strike_area(0.0, 0.0) and Golem.in_strike_area(4.5, 1.5)
+		and not Golem.in_strike_area(4.51, 0.0) and not Golem.in_strike_area(1.6, 1.6),
 		"the area predicate has the documented edges")
+	check_near(Balance.GOLEM_FIELD_WIDTH, Balance.GOLEM_FIELD_LENGTH,
+		"the field in front is square (user spec 2026-09-09)")
 	_free_world(w)
 
 
@@ -334,6 +342,39 @@ func test_lifetime_runs_out_and_kills_extend_it() -> void:
 		g.tick(TICK)
 	check(g.state == Unit.State.DEAD, "at zero the golem crumbles")
 	check(g.death_sfx_key() == &"golem_death", "with its own death sound")
+	_free_world(w)
+
+
+## Ein Kill flickt den Golem ausserdem um GOLEM_HP_PER_KILL (Nutzervorgabe
+## 2026-09-09) — gedeckelt bei GOLEM_HP, es wird also nur echter Schaden geheilt.
+func test_kills_heal_the_golem_up_to_its_maximum() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
+	g.facing = Vector3(0, 0, 1)
+	g.health = g.max_health - 30
+	var weak: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50, 5, 52.5))
+	weak.health = 5
+	g._smash()
+	check(weak.state == Unit.State.DEAD, "the strike killed the brave")
+	check(g.health == g.max_health - 30 + Balance.GOLEM_HP_PER_KILL,
+		"the kill healed exactly GOLEM_HP_PER_KILL")
+
+	# Nearly full: the heal must not push him past his maximum.
+	g.health = g.max_health - 2
+	var weak2: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50, 5, 52.5))
+	weak2.health = 5
+	g._smash()
+	check(weak2.state == Unit.State.DEAD, "the second brave died too")
+	check(g.health == g.max_health, "and the heal is capped at max_health")
+
+	# A strike that kills nobody heals nothing.
+	g.health = g.max_health - 40
+	var tough: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50, 5, 52.5))
+	tough.max_health = 1000
+	tough.health = 1000
+	g._smash()
+	check(tough.state != Unit.State.DEAD, "the tough one survived")
+	check(g.health == g.max_health - 40, "a strike without a kill heals nothing")
 	_free_world(w)
 
 

@@ -20,7 +20,8 @@ class_name Golem extends Unit
 ## _bombard_building (von aussen, ohne Raider-Platz). Luftziele lehnt er ab
 ## (Nahkampf).
 ##
-## Lebenszeit GOLEM_LIFETIME, +GOLEM_LIFE_PER_KILL je Kill; danach zerfaellt er
+## Lebenszeit GOLEM_LIFETIME, +GOLEM_LIFE_PER_KILL je Kill (der ihn ausserdem um
+## GOLEM_HP_PER_KILL heilt, gedeckelt bei GOLEM_HP); danach zerfaellt er
 ## (golem_death) und versinkt. Kein Anhaenger: zaehlt nicht als Bevoelkerung
 ## (kein Mana, kein Wohnraum, haelt keinen Stamm am Leben), aber gegen den
 ## Einheiten-Hardcap. Immun gegen Bekehrung, Hypnose, Panik, Wurf und Rollen;
@@ -278,7 +279,7 @@ static func in_strike_area(along: float, side: float) -> bool:
 ## The area strike: everything inside in_strike_area — the golem's whole body box
 ## plus the field in front of it (heading frame, flat in XZ — same geometry as the
 ## fire ram's flame). Returns the buildings it hit (keys) so _bombard_building can
-## top up its target. Kills extend the lifetime.
+## top up its target. Kills extend the lifetime AND heal the golem.
 func _smash() -> Dictionary:
 	attack_anim = &"punch"
 	anim_base_name = attack_anim
@@ -306,8 +307,12 @@ func _smash() -> Dictionary:
 				continue
 			u.take_damage(Balance.GOLEM_DAMAGE, self)
 			if not is_instance_valid(u) or u.state == State.DEAD or u.doomed:
+				# A kill buys time AND patches the construct up (user spec
+				# 2026-09-09) — capped at max_health, so it only ever repairs
+				# real damage.
 				kills += 1
 				life_left += Balance.GOLEM_LIFE_PER_KILL
+				health = mini(health + Balance.GOLEM_HP_PER_KILL, max_health)
 				continue
 			var away: Vector3 = Vector3(u.position.x - position.x, 0.0,
 				u.position.z - position.z)
