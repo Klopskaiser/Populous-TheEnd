@@ -35,6 +35,11 @@ const FX_INJURED: int = 4
 ## Fremdkontrolle durch Hypnose (Zauber 12, Phase 10k) — zeigt an, dass die
 ## Einheit nur VORUEBERGEHEND fuer den Kontrolleur kaempft.
 const FX_HYPNOTIZED: int = 8
+## Sammelsymbol fuer JEDEN aktiven Buff (Feuer-/Panik-/Bekehrungsresistenz,
+## Regeneration, Staerke). Bewusst EIN Zeichen statt eines je Effekt: in der
+## Massenschlacht waeren fuenf Glyphen ueber jedem Kopf unlesbar. NEUE Bits
+## immer HINTEN anhaengen — BURNING_INDEX zeigt in dieselbe Liste.
+const FX_BUFF: int = 16
 
 var _unit_manager: UnitManager = null
 var _tree_manager: TreeManager = null
@@ -64,6 +69,7 @@ func _ready() -> void:
 			MAX_BURNING),
 		_make_effect(FX_INJURED, &"injured", 1.55, Vector2(0.8, 0.4)),
 		_make_effect(FX_HYPNOTIZED, &"hypnotized", 2.25, Vector2(0.6, 0.6)),
+		_make_effect(FX_BUFF, &"buff", 1.55, Vector2(0.5, 0.5)),
 	]
 
 
@@ -119,6 +125,8 @@ func _load_textures(fx_name: StringName) -> Array[Texture2D]:
 		&"hypnotized":
 			return [_hypnotized_frame(0), _hypnotized_frame(1),
 				_hypnotized_frame(2), _hypnotized_frame(3)]
+		&"buff":
+			return [_buff_frame(0), _buff_frame(1)]
 		_:
 			return [_injured_frame(0), _injured_frame(1)]
 
@@ -177,7 +185,7 @@ func _process(delta: float) -> void:
 	# like the flame in front of the unit's own billboard.
 	var toward: Vector3 = camera.global_transform.basis.z if camera != null \
 		else Vector3.ZERO
-	var counts: Array[int] = [0, 0, 0, 0]   # panic, burning, injured, hypnotized
+	var counts: Array[int] = [0, 0, 0, 0, 0]   # panic, burning, injured, hypnotized, buff
 	for unit in _unit_manager.units:
 		var mask: int = status_mask(unit)
 		# Visuals use the FULL additive mask; the loop SOUND is reduced to a
@@ -288,6 +296,8 @@ func status_mask(unit: Unit) -> int:
 		mask |= FX_INJURED
 	if unit.is_hypnotized():
 		mask |= FX_HYPNOTIZED
+	if unit.has_any_buff():
+		mask |= FX_BUFF
 	return mask
 
 
@@ -299,10 +309,15 @@ func status_mask(unit: Unit) -> int:
 ## flourish but the answer to "whose unit is this?", and losing it exactly while
 ## the unit burns would be the worst moment. The two never collide — the flame
 ## sits at body height, the spiral above the head.
+## The buff glyph has the LOWEST priority of all: it says something helpful is
+## running, which matters less than "this one is on fire / panicking / not
+## really mine". Burning, panic and hypnosis all push it aside.
 static func visual_mask_of(mask: int) -> int:
 	var visual: int = mask & ~FX_INJURED
 	if visual & FX_BURNING:
 		visual = FX_BURNING | (visual & FX_HYPNOTIZED)
+	elif visual & (FX_PANIC | FX_HYPNOTIZED):
+		visual &= ~FX_BUFF
 	return visual
 
 
@@ -340,6 +355,8 @@ const C_FLAME_CORE: Color = Color(1.0, 0.85, 0.25)
 const C_HYPNO: Color = Color(0.72, 0.45, 0.95)
 const C_HYPNO_DIM: Color = Color(0.42, 0.24, 0.62)
 const C_BLOOD: Color = Color(0.8, 0.08, 0.08)
+const C_BUFF: Color = Color(0.45, 0.95, 0.6)      # buff glyph: friendly green
+const C_BUFF_DIM: Color = Color(0.22, 0.55, 0.32)
 
 
 ## Red exclamation mark, wobbling one pixel between the two frames.
@@ -395,6 +412,22 @@ static func _hypnotized_frame(phase: int) -> ImageTexture:
 			var y: int = int(round(mid + sin(ang) * r))
 			img.fill_rect(Rect2i(x, y, 2, 2),
 				C_HYPNO if i % 3 != 2 else C_HYPNO_DIM)
+	return ImageTexture.create_from_image(img)
+
+
+## Buff placeholder: an upward chevron ("something is lifting this one"),
+## breathing between two sizes. Green, so it never reads as damage, and drawn
+## in 2-pixel blocks for the same reason as the hypnosis spiral — a single
+## pixel is ~3.7 cm on the quad and invisible from RTS camera height.
+static func _buff_frame(phase: int) -> ImageTexture:
+	var size: int = 16
+	var img: Image = Image.create_empty(size, size, false, Image.FORMAT_RGBA8)
+	var lift: int = 0 if phase % 2 == 0 else 1
+	for i in range(6):
+		var y: int = 4 + i - lift
+		var col: Color = C_BUFF if i < 4 else C_BUFF_DIM
+		img.fill_rect(Rect2i(7 - i, y, 2, 2), col)
+		img.fill_rect(Rect2i(7 + i, y, 2, 2), col)
 	return ImageTexture.create_from_image(img)
 
 

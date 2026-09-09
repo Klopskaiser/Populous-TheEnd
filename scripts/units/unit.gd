@@ -407,7 +407,8 @@ func _sync_soa_target() -> void:
 func _enter_soa_hold(scan_timer: float = -1.0,
 		mode: int = UnitManager.HOLD_MELEE) -> void:
 	var i: int = _idx
-	if i < 0 or _burn_time > 0.0 or _knockback_remaining != Vector3.ZERO:
+	if i < 0 or _burn_time > 0.0 or _knockback_remaining != Vector3.ZERO \
+			or _has_pending_buff_work():
 		return
 	var t: Unit = attack_target
 	if t == null or not is_instance_valid(t):
@@ -437,7 +438,8 @@ func _enter_soa_hold(scan_timer: float = -1.0,
 func _enter_soa_wait_hold(scan_timer: float, goal: Vector3,
 		mode: int = UnitManager.HOLD_WAIT) -> void:
 	var i: int = _idx
-	if i < 0 or _burn_time > 0.0 or _knockback_remaining != Vector3.ZERO:
+	if i < 0 or _burn_time > 0.0 or _knockback_remaining != Vector3.ZERO \
+			or _has_pending_buff_work():
 		return
 	if mode == UnitManager.HOLD_WAIT_WALK \
 			and (vehicle_separation > 0.0 or flies or terrain_data == null
@@ -469,7 +471,8 @@ func _enter_soa_wait_hold(scan_timer: float, goal: Vector3,
 func _enter_soa_path_hold(mode: int, wp: Vector3, goal: Vector3 = Vector3.ZERO,
 		scan_timer: float = -1.0) -> void:
 	var i: int = _idx
-	if i < 0 or _burn_time > 0.0 or _knockback_remaining != Vector3.ZERO:
+	if i < 0 or _burn_time > 0.0 or _knockback_remaining != Vector3.ZERO \
+			or _has_pending_buff_work():
 		return
 	if vehicle_separation > 0.0 or flies or terrain_data == null:
 		return
@@ -497,7 +500,8 @@ func _enter_soa_path_hold(mode: int, wp: Vector3, goal: Vector3 = Vector3.ZERO,
 ## past COMBAT_DIRECT_RANGE (back to the A* leg).
 func _enter_soa_direct_hold(offset: Vector3) -> void:
 	var i: int = _idx
-	if i < 0 or _burn_time > 0.0 or _knockback_remaining != Vector3.ZERO:
+	if i < 0 or _burn_time > 0.0 or _knockback_remaining != Vector3.ZERO \
+			or _has_pending_buff_work():
 		return
 	if vehicle_separation > 0.0 or flies or terrain_data == null:
 		return
@@ -523,7 +527,7 @@ func _enter_soa_direct_hold(offset: Vector3) -> void:
 func _enter_soa_cast_hold(span: float) -> void:
 	var i: int = _idx
 	if i < 0 or span <= 0.0 or _burn_time > 0.0 \
-			or _knockback_remaining != Vector3.ZERO:
+			or _knockback_remaining != Vector3.ZERO or _has_pending_buff_work():
 		return
 	_soa_hold[i] = span
 	_soa_mode[i] = UnitManager.HOLD_CAST
@@ -544,7 +548,8 @@ func _on_hold_elapsed(_elapsed: float) -> void:
 ## from the elapsed held time on drop (entry value parked in goal.x).
 func _enter_soa_panic_hold() -> void:
 	var i: int = _idx
-	if i < 0 or _burn_time > 0.0 or _knockback_remaining != Vector3.ZERO:
+	if i < 0 or _burn_time > 0.0 or _knockback_remaining != Vector3.ZERO \
+			or _has_pending_buff_work():
 		return
 	if vehicle_separation > 0.0 or flies or terrain_data == null:
 		return
@@ -1056,6 +1061,7 @@ func tick(delta: float) -> void:
 	# stayed on for the rest of the match. Panic is refused outright instead
 	# (see start_panic), so the re-assert inside _tick_burning is a no-op here.
 	if garrison_housed:
+		_tick_buffs(delta)
 		_tick_burning(delta)
 		return
 	# Corpses only decay (knockback/regen/burning already no-op when DEAD, and the
@@ -1072,6 +1078,7 @@ func tick(delta: float) -> void:
 		_apply_animation(false)
 		return
 	_tick_knockback(delta)
+	_tick_buffs(delta)   # early-outs when this unit carries nothing
 	_tick_regen(delta)
 	_tick_burning(delta)
 	_tick_hypnosis(delta)   # early-outs when not hypnotized (10k)
@@ -1588,6 +1595,7 @@ func _die() -> void:
 	# Release our own binding, then dissolve the fight around us so attackers
 	# and the second row retarget onto fresh enemies right away.
 	leave_crew()
+	clear_buffs()   # nothing may cling to a corpse (auras, spells, sermon)
 	# A unit killed INSIDE a tower (swarm sting, firestorm splash, now also the
 	# burn) kept garrison_housed = true — tick() then returned before _tick_dead
 	# and the corpse never decayed, stuck on the platform forever. The tower drops
@@ -2376,7 +2384,9 @@ func is_burning() -> bool:
 
 ## Damage per second while alight: the whole BURN_TOTAL_DAMAGE spread over
 ## BURN_DURATION (15/s — lethal to a brave). The golem overrides it with a
-## trickle (stone does not burn well, 2026-09-06).
+## trickle (stone does not burn well, 2026-09-06). The fire-resist buff caps it
+## at the same trickle, but from OUTSIDE (effective_burn_dps) — a cap inside
+## this virtual would be lost to every subclass that overrides it.
 func burn_damage_per_second() -> float:
 	return float(BURN_TOTAL_DAMAGE) / BURN_DURATION
 
@@ -2407,7 +2417,8 @@ func ignite(source_pos: Vector3, _source = null) -> void:
 		take_damage(LAVA_CONTACT_DAMAGE)
 		if state == State.DEAD:
 			return
-	start_panic(source_pos, BURN_DURATION)
+	if not is_fire_panic_immune():
+		start_panic(source_pos, BURN_DURATION)
 
 
 ## Flame contact (fire ram): burn + panic exactly like lava, but WITHOUT the
@@ -2421,14 +2432,15 @@ func scorch(source_pos: Vector3, _source = null) -> void:
 	if not is_burning():
 		_play_sfx(&"unit_burning", 200)
 	_burn_time = BURN_DURATION
-	start_panic(source_pos, BURN_DURATION)
+	if not is_fire_panic_immune():
+		start_panic(source_pos, BURN_DURATION)
 
 
 func _tick_burning(delta: float) -> void:
 	if _burn_time <= 0.0 or state == State.DEAD:
 		return
 	_burn_time -= delta
-	_burn_frac += burn_damage_per_second() * delta
+	_burn_frac += effective_burn_dps() * delta
 	var whole: int = int(_burn_frac)
 	if whole > 0:
 		_burn_frac -= float(whole)
@@ -2436,10 +2448,11 @@ func _tick_burning(delta: float) -> void:
 	# Invariant: burning ALWAYS panics (visible scramble). ignite()'s own
 	# start_panic is refused while the unit is mid-air/tumbling — without this
 	# re-assert such a unit finished its tumble, then burned standing around
-	# and could even fight. Immune units (shaman) burn standing on purpose.
+	# and could even fight. Immune units (shaman) burn standing on purpose, and
+	# so does anyone carrying the fire-resist buff.
 	if _burn_time > 0.0 and state != State.PANIC and state != State.DEAD \
 			and state != State.THROWN and state != State.ROLL \
-			and not is_panic_immune():
+			and not is_fire_panic_immune():
 		start_panic(position, _burn_time)
 
 
@@ -2612,7 +2625,12 @@ func _tick_regen(delta: float) -> void:
 		_no_combat_timer = 0.0
 		return
 	_no_combat_timer += delta
-	if _no_combat_timer < REGEN_DELAY or health >= max_health:
+	if health >= max_health:
+		return
+	# The regeneration buff heals right through a fight — it is the ONE thing
+	# that skips the out-of-combat delay (the fire ram's life regen does the
+	# same for vehicles). The rate itself is unchanged.
+	if _no_combat_timer < REGEN_DELAY and buff_mask & BUFF_REGEN == 0:
 		return
 	_regen_frac += REGEN_RATE * delta
 	if _regen_frac >= 1.0:
@@ -2643,8 +2661,10 @@ func is_conversion_immune() -> bool:
 
 
 ## Shamans are immune to the swarm's panic effect (phase 6, Shaman overrides).
+## The panic-resist buff grants the same immunity — the DAMAGE of a swarm or a
+## flame still lands, only the scramble is shrugged off.
 func is_panic_immune() -> bool:
-	return false
+	return buff_mask & BUFF_PANIC_RESIST != 0
 
 
 ## Immune to the hypnosis spell (10k). Deliberately NOT is_conversion_immune():
@@ -2671,6 +2691,13 @@ func begin_conversion(preacher: Unit, duration: float,
 		return false   # airship passengers are out of a preacher's reach
 	if _preach_disturbed_by_enemy_shaman(preacher):
 		return false   # a fighting enemy shaman breaks the sermon (10i, part 2)
+	# Conversion resistance: the preacher has to work on this one for
+	# BUFF_CONVERT_DELAY seconds before it sits down at all. Checked AFTER every
+	# other refusal and BEFORE the combat interrupt below — a mere warm-up must
+	# not yet pull the target out of its fight.
+	if buff_mask & BUFF_CONVERT_RESIST != 0 and not _sermon_ready(preacher):
+		return false
+	reset_sermon()
 	_on_combat_interrupt()
 	_end_attack()
 	waypoint_queue.clear()
@@ -2773,6 +2800,7 @@ func _stand_up(fight_preacher: bool) -> void:
 	var p = converting_preacher
 	converting_preacher = null
 	conversion_progress = 0.0
+	reset_sermon()   # a broken-off sermon costs the resistant unit's warm-up too
 	_set_state(State.IDLE)
 	if fight_preacher and p != null and is_instance_valid(p) and p.state != State.DEAD:
 		_begin_attack(p)
@@ -2787,6 +2815,7 @@ func _stand_up(fight_preacher: bool) -> void:
 ## target.
 func convert_to_tribe(new_tribe: Tribe) -> void:
 	leave_crew()   # a converted crew member no longer serves the old engine
+	reset_sermon()
 	if tribe != null:
 		tribe.remove_unit(self)
 	tribe_id = new_tribe.id
@@ -2882,6 +2911,276 @@ func _tick_hypnosis(delta: float) -> void:
 	convert_to_tribe(origin)
 
 
+# --- Buffs (generic effect system) -------------------------------------------------
+
+## Timed unit effects. First user are the technician's vehicle auras, but all
+## five effects are deliberately generic so later spells can hand them out.
+##
+## Design decisions worth knowing before touching this:
+##  * ONE bit per effect, read straight out of `buff_mask` — no Dictionary in
+##    the hot paths (melee_damage, _tick_regen, is_panic_immune, _tick_burning).
+##  * TWO sources per bit, kept apart: a timed grant (spell) counts down, an
+##    AURA (the technician aboard a vehicle) has no timer at all and is simply
+##    re-stated every tick by its holder. An expiring spell therefore cannot
+##    cancel a running aura, and an aura cannot leak: the moment its holder
+##    stops stating it, it is gone.
+##  * Countdowns, not absolute times. Almost every test ticks units directly
+##    (unit.tick(0.1)) instead of driving a UnitManager, so a shared clock would
+##    stand still there — and a static one would leak across the whole suite.
+##    The price is the SoA hold: a unit the flat kernel holds gets no tick(), so
+##    the six _enter_soa_* gates refuse to hold a unit with buff work pending,
+##    exactly as they already do for `_burn_time`.
+const BUFF_FIRE_RESIST: int = 1 << 0
+const BUFF_CONVERT_RESIST: int = 1 << 1
+const BUFF_PANIC_RESIST: int = 1 << 2
+const BUFF_REGEN: int = 1 << 3
+const BUFF_STRENGTH: int = 1 << 4
+const BUFF_COUNT: int = 5
+const BUFF_ALL: int = (1 << BUFF_COUNT) - 1
+
+const BUFF_FIRE_RESIST_DPS: float = Balance.BUFF_FIRE_RESIST_DPS_CAP
+const BUFF_STRENGTH_MULT: float = Balance.BUFF_STRENGTH_MULT
+const BUFF_CONVERT_DELAY: float = Balance.BUFF_CONVERT_RESIST_DELAY
+const BUFF_SERMON_GRACE: float = Balance.BUFF_CONVERT_RESIST_GRACE
+
+## Effective mask = _buff_aura | _buff_timed, kept redundantly so the hot paths
+## read ONE field instead of or-ing two.
+var buff_mask: int = 0
+var _buff_aura: int = 0
+var _buff_timed: int = 0
+## Remaining seconds per bit index, allocated LAZILY on the first timed grant —
+## a unit that never sees a spell pays nothing for this.
+var _buff_time: PackedFloat32Array = PackedFloat32Array()
+## Strength stacks per source plus the cached factor 1.5^(aura + timed): the
+## multiplier is recomputed on CHANGE, so melee_damage and the fireball read a
+## plain float instead of calling pow() per hit.
+var _strength_aura: int = 0
+var _strength_timed: int = 0
+var _strength_mult: float = 1.0
+
+## Conversion-resistance warm-up, held on the TARGET because only the target
+## sees all four begin_conversion callers (ground, ordered, tower, deck). The
+## first preacher to start takes the slot; a second one has to wait until the
+## incumbent gives up, otherwise two preachers would reset each other every
+## scan and the unit would be unconvertible.
+var _sermon_preacher = null   # untyped: the preacher may be freed
+var _sermon_progress: float = 0.0
+var _sermon_idle: float = 0.0
+
+
+## True while `bit` (exactly ONE bit) is active, from either source.
+func has_buff(bit: int) -> bool:
+	return buff_mask & bit != 0
+
+
+## Any buff at all — the overlay glyph's question.
+func has_any_buff() -> bool:
+	return buff_mask != 0
+
+
+## Stack count. Only BUFF_STRENGTH really stacks; the others answer 1 or 0.
+func buff_stacks(bit: int) -> int:
+	if bit == BUFF_STRENGTH:
+		return _strength_aura + _strength_timed
+	return 1 if buff_mask & bit != 0 else 0
+
+
+## Seconds left on a TIMED grant (0 for a pure aura). UI and tests only.
+func buff_remaining(bit: int) -> float:
+	var slot: int = buff_slot(bit)
+	if slot < 0 or _buff_timed & bit == 0 or slot >= _buff_time.size():
+		return 0.0
+	return maxf(_buff_time[slot], 0.0)
+
+
+## Slot index of a buff bit (1 -> 0, 2 -> 1, 4 -> 2 ...); -1 for a non-bit.
+static func buff_slot(bit: int) -> int:
+	match bit:
+		BUFF_FIRE_RESIST: return 0
+		BUFF_CONVERT_RESIST: return 1
+		BUFF_PANIC_RESIST: return 2
+		BUFF_REGEN: return 3
+		BUFF_STRENGTH: return 4
+	return -1
+
+
+## Grants one TIMED buff (a spell). Refreshing keeps the LONGER time instead of
+## stacking it, the same rule as ignite()/start_panic(). `stack` only means
+## something for BUFF_STRENGTH: true adds a stack, false sets it to one.
+## Returns false when the buff cannot land (dead, ragdoll, unknown bit).
+func apply_buff(bit: int, duration: float, stack: bool = false) -> bool:
+	var slot: int = buff_slot(bit)
+	if slot < 0 or duration <= 0.0 or state == State.DEAD or doomed:
+		return false
+	if _buff_time.size() < BUFF_COUNT:
+		_buff_time.resize(BUFF_COUNT)
+	var running: bool = _buff_timed & bit != 0
+	_buff_time[slot] = maxf(_buff_time[slot], duration) if running else duration
+	_buff_timed |= bit
+	if bit == BUFF_STRENGTH:
+		_strength_timed = (_strength_timed + 1) if (stack and running) else maxi(_strength_timed, 1)
+	_refresh_buff_state()
+	# A timed buff needs the object tick to count down — the flat kernel would
+	# freeze it (same reason ignite() drops the hold).
+	_clear_soa_hold()
+	return true
+
+
+## AURA grant with REPLACE semantics: `mask` is the COMPLETE set of bits this
+## unit's holder currently grants and `strength_stacks` its stack count. No
+## timer, idempotent, cheap to call every tick — and the moment the holder
+## stops calling it with the bit set (or calls set_aura_buffs(0)), it is gone.
+func set_aura_buffs(mask: int, strength_stacks: int = 0) -> void:
+	mask &= BUFF_ALL
+	var stacks: int = maxi(strength_stacks, 0) if mask & BUFF_STRENGTH != 0 else 0
+	if mask == _buff_aura and stacks == _strength_aura:
+		return   # nothing changed: the common case, tick after tick
+	_buff_aura = mask
+	_strength_aura = stacks
+	_refresh_buff_state()
+	if mask != 0:
+		_clear_soa_hold()
+
+
+## Ends one buff completely (timed AND aura share of it).
+func remove_buff(bit: int) -> void:
+	if buff_mask & bit == 0:
+		return
+	var slot: int = buff_slot(bit)
+	if slot >= 0 and slot < _buff_time.size():
+		_buff_time[slot] = 0.0
+	_buff_timed &= ~bit
+	_buff_aura &= ~bit
+	if bit == BUFF_STRENGTH:
+		_strength_timed = 0
+		_strength_aura = 0
+	_refresh_buff_state()
+
+
+## Wipes every buff and the sermon warm-up (death, tribe switch, test teardown).
+func clear_buffs() -> void:
+	_buff_timed = 0
+	_buff_aura = 0
+	_strength_timed = 0
+	_strength_aura = 0
+	if not _buff_time.is_empty():
+		_buff_time.fill(0.0)
+	_refresh_buff_state()
+	reset_sermon()
+
+
+## Recomputes the effective mask and the cached strength factor. The ONE place
+## that writes buff_mask.
+func _refresh_buff_state() -> void:
+	buff_mask = _buff_aura | _buff_timed
+	var stacks: int = _strength_aura + _strength_timed
+	if buff_mask & BUFF_STRENGTH == 0 or stacks <= 0:
+		_strength_mult = 1.0
+	else:
+		_strength_mult = pow(BUFF_STRENGTH_MULT, float(stacks))
+
+
+## Damage multiplier from buffs. ONE entry point for melee AND ranged: melee_damage
+## scales with it and the firewarrior's fireball takes it along at launch.
+## Deliberately NOT folded into melee_strength() — warrior and shaman override
+## that virtual with a constant and would swallow the buff.
+func attack_multiplier() -> float:
+	return _strength_mult
+
+
+## Burn damage per second after buffs: the unit's own rate (overridden by the
+## golem) capped by fire resistance. The cap sits here and not in the virtual
+## burn_damage_per_second(), for the same reason as above.
+func effective_burn_dps() -> float:
+	var dps: float = burn_damage_per_second()
+	return minf(dps, BUFF_FIRE_RESIST_DPS) if buff_mask & BUFF_FIRE_RESIST != 0 else dps
+
+
+## True when FIRE must not panic this unit. Deliberately separate from
+## is_panic_immune(): fire resistance calms the flames, an insect swarm still
+## scares its bearer.
+func is_fire_panic_immune() -> bool:
+	return buff_mask & BUFF_FIRE_RESIST != 0 or is_panic_immune()
+
+
+## Does this unit need its object tick because of buffs? Asked by all six
+## _enter_soa_* gates, exactly like `_burn_time > 0.0` next to it.
+##  * a timed buff has to count down — held, it would never expire;
+##  * a sermon warm-up has to count up and lapse;
+##  * REGENERATION even as a pure aura: healing "through a fight" is worthless
+##    if the fight is precisely when the melee hold takes _tick_regen away.
+func _has_pending_buff_work() -> bool:
+	return _buff_timed != 0 or _sermon_preacher != null \
+		or buff_mask & BUFF_REGEN != 0
+
+
+## Counts timed buffs down and lets the sermon warm-up lapse. Early-out like
+## _tick_hypnosis: without buff work the call costs one comparison.
+func _tick_buffs(delta: float) -> void:
+	if _buff_timed != 0:
+		var still: int = 0
+		for i in BUFF_COUNT:
+			var bit: int = 1 << i
+			if _buff_timed & bit == 0:
+				continue
+			_buff_time[i] -= delta
+			if _buff_time[i] > 0.0:
+				still |= bit
+			else:
+				_buff_time[i] = 0.0
+				if bit == BUFF_STRENGTH:
+					_strength_timed = 0
+		if still != _buff_timed:
+			_buff_timed = still
+			_refresh_buff_state()
+	if _sermon_preacher == null:
+		return
+	# The warm-up runs on the TARGET's own clock: every attempt clears the idle
+	# timer, so progress accrues for as long as the preacher keeps at it.
+	var p = _sermon_preacher
+	if not is_instance_valid(p) or p.state == State.DEAD:
+		reset_sermon()
+		return
+	_sermon_idle += delta
+	if _sermon_idle > BUFF_SERMON_GRACE:
+		reset_sermon()   # sermon broken off: the slot is free again
+		return
+	_sermon_progress += delta
+
+
+## Forgets a running sermon warm-up (conversion started, unit stood up, tribe
+## switched, holder died).
+func reset_sermon() -> void:
+	_sermon_preacher = null
+	_sermon_progress = 0.0
+	_sermon_idle = 0.0
+
+
+## True while `preacher` is still preaching this unit down but it has not sat
+## yet — the tower and deck preachers ask this so they keep their chant
+## animation and sound running through the warm-up.
+func sermon_warming_for(preacher) -> bool:
+	return preacher != null and _sermon_preacher == preacher
+
+
+## Gate in front of begin_conversion for BUFF_CONVERT_RESIST. The first preacher
+## to start takes the slot and has to keep at it for BUFF_CONVERT_DELAY seconds;
+## a competing preacher is turned away meanwhile (without the incumbent rule two
+## of them would reset each other every scan and the unit could never be taken).
+func _sermon_ready(preacher) -> bool:
+	var inc = _sermon_preacher
+	if inc != null and (not is_instance_valid(inc) or inc.state == State.DEAD):
+		inc = null
+	if inc != null and inc != preacher:
+		return false
+	if inc == null:
+		_sermon_preacher = preacher
+		_sermon_progress = 0.0
+		_clear_soa_hold()   # the warm-up counts in the object tick
+	_sermon_idle = 0.0
+	return _sermon_progress >= BUFF_CONVERT_DELAY
+
+
 # --- Siege crew (phase 7f) ---------------------------------------------------------
 
 ## Assigns this unit to a vehicle's crew (right-click on the vehicle, the
@@ -2920,6 +3219,9 @@ func leave_crew(except = null) -> void:
 	_sync_soa_flags()   # no longer seated: separation applies again
 	station_channeling = false
 	crew_action_anim = &""
+	# THE funnel every crew exit passes through (order, conversion, ragdoll,
+	# death, prune, capture): the vehicle's aura ends here, no matter the path.
+	set_aura_buffs(0)
 	if engine != null and engine != except and is_instance_valid(engine):
 		engine.remove_crew(self)
 	if state == State.CREW:
@@ -3192,8 +3494,11 @@ static func attack_base_damage(kind: StringName) -> int:
 
 
 ## Damage this unit deals with the given attack kind (base * melee_strength()).
+## Buffs multiply on top of the per-kind strength, so subclass overrides of
+## melee_strength() stay untouched.
 func melee_damage(kind: StringName) -> int:
-	return int(round(float(attack_base_damage(kind)) * melee_strength()))
+	return int(round(float(attack_base_damage(kind)) * melee_strength()
+		* _strength_mult))
 
 
 # --- Target selection & slots -------------------------------------------------

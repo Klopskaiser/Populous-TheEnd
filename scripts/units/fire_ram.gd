@@ -119,6 +119,7 @@ var _flame_frame_t: float = 0.0
 func _init() -> void:
 	super()
 	speed = Balance.FIRERAM_SPEED
+	base_speed = speed
 	max_crew = MAX_CREW
 	min_move_crew = MIN_MOVE_CREW
 	min_fire_crew = MIN_FIRE_CREW
@@ -187,7 +188,7 @@ func tick(delta: float) -> void:
 			# flame_cooldown_for_crew would return INF, which maxf() could never
 			# decay — the ram would stay unable to fire even after re-crewing
 			# (user bug). Compute the reload as if at least a firing crew.
-			_reload = flame_cooldown_for_crew(maxi(active_crew_count(), MIN_FIRE_CREW))
+			_reload = flame_cooldown_now(maxi(active_crew_count(), MIN_FIRE_CREW))
 			_show_flame_cone(false)
 	_tick_fire_regen(delta)
 	super.tick(delta)
@@ -220,6 +221,18 @@ func _tick_fire_regen(delta: float) -> void:
 				_seen_attacks.clear()
 	else:
 		_life_regen_frac = 0.0
+
+
+## Working the ram's flame gear hardens a technician: while he serves here he is
+## fire-, panic- and conversion-resistant. Only the technicians themselves get
+## it, not the rest of the crew (user spec 2026-09-09) — and only they, because
+## a first technician grants this ram no fire-rate bonus at all: the resistances
+## ARE his first-man contribution.
+func crew_aura_for(member) -> Vector2i:
+	if member == null or member.unit_kind() != &"technician":
+		return Vector2i.ZERO
+	return Vector2i(Unit.BUFF_FIRE_RESIST | Unit.BUFF_PANIC_RESIST
+		| Unit.BUFF_CONVERT_RESIST, 0)
 
 
 # --- Fire resistance (3 lives) --------------------------------------------------------
@@ -607,6 +620,18 @@ static func flame_cooldown_for_crew(count: int) -> float:
 	var t: float = float(clampi(count, MIN_FIRE_CREW, MAX_CREW) - MIN_FIRE_CREW) \
 		/ float(MAX_CREW - MIN_FIRE_CREW)
 	return lerpf(COOLDOWN_MIN_CREW, COOLDOWN_FULL_CREW, t)
+
+
+## Reload of THIS ram: the static crew formula divided by the technician
+## surcharge. Unlike the catapult the FIRST technician gives nothing here — he
+## pays in resistances for the technicians aboard instead (user spec
+## 2026-09-09); every further one adds 10 %, so a full crew of four is +30 %.
+func flame_cooldown_now(count: int) -> float:
+	var base: float = flame_cooldown_for_crew(count)
+	if is_inf(base):
+		return base
+	return base / _tech_rate_multiplier(
+		Balance.TECHNICIAN_FIRERAM_FIRERATE_BASE, Balance.TECHNICIAN_FIRERATE_PER_EXTRA)
 
 
 ## Nearest enemy unit inside `max_range` that the ram may burn (its splash-like

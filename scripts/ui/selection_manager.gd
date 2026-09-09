@@ -270,7 +270,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("harvest_area_arm", false, true):
 		# Key B arms the harvest rectangle; the next left DRAG fires it.
 		_prune_selection()
-		if not selected_braves().is_empty():
+		if not selected_wood_workers().is_empty():
 			cancel_armed_modes()   # armed modes are mutually exclusive
 			harvest_arm_active = true
 			queue_redraw()
@@ -344,7 +344,7 @@ func _fire_harvest(screen_rect: Rect2, drag_dist: float) -> void:
 	if drag_dist < DRAG_THRESHOLD_PX or _tribe_commands == null:
 		return
 	_prune_selection()
-	var braves: Array[Unit] = selected_braves()
+	var braves: Array[Unit] = selected_wood_workers()
 	if braves.is_empty():
 		return
 	# TL, TR, BR, BL — screen-to-ground is a projective map, so this cyclic order
@@ -810,6 +810,17 @@ func selected_braves() -> Array[Unit]:
 				and u.tribe_id == player_tribe_id:
 			braves.append(u)
 	return braves
+
+
+## Those of them who may actually do wood work — the harvest rectangle (key B)
+## asks THIS one. A technician builds but never chops, so a pure technician
+## selection must not arm a harvest cursor whose every order would be refused.
+func selected_wood_workers() -> Array[Unit]:
+	var workers: Array[Unit] = []
+	for u in selected_braves():
+		if u.can_gather_wood():
+			workers.append(u)
+	return workers
 
 
 ## Tracks the building under the cursor so it can show its production bar on

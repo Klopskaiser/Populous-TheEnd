@@ -10872,3 +10872,140 @@ das Katapult scannt weiterhin weiter, als es schiesst.
 historische Absatz weiter oben in dieser Datei ("Katapult-Crew auf 15 m bleibt
 ausser Bekehrreichweite") bleibt als Protokolleintrag stehen; die 8-m-Grenze der
 Bekehrung liegt weiterhin deutlich darunter.
+
+---
+
+## 2026-09-09: Buff-System, Techniker, Ausbildungshalle, Fahrzeugboni
+
+Drei Dinge in einem Zug, weil das unterste das Fundament der beiden oberen ist.
+
+### 1. Generisches Buff-System (`scripts/units/unit.gd`, Abschnitt `# --- Buffs ---`)
+
+Fuenf Effekte als Bits auf `Unit`: `BUFF_FIRE_RESIST`, `BUFF_CONVERT_RESIST`,
+`BUFF_PANIC_RESIST`, `BUFF_REGEN`, `BUFF_STRENGTH`. API: `apply_buff(bit, duration,
+stack)` (befristet, Refresh nimmt die laengere Zeit wie `ignite`/`start_panic`),
+`set_aura_buffs(mask, stacks)` (Aura, REPLACE-Semantik, ohne Timer),
+`remove_buff`, `clear_buffs`, `has_buff`, `has_any_buff`, `buff_stacks`,
+`buff_remaining`, `attack_multiplier()`, `effective_burn_dps()`,
+`is_fire_panic_immune()`.
+
+**Zwei Entwurfsentscheidungen, beide bewusst gegen die naheliegende Variante:**
+
+- **Countdown statt gemeinsamer Uhr.** Eine `static var sim_clock` auf `Unit`,
+  hochgezaehlt von `UnitManager.tick_units`, waere hold-immun gewesen — aber fast
+  alle Tests der Suite ticken Einheiten DIREKT (`unit.tick(0.1)`, Muster
+  `test_hypnosis.gd`), dort haette die Uhr stillgestanden und Zeittests haetten
+  still das Falsche geprueft. Zusaetzlich waere ein `static` ueber die ganze
+  Suite hinweg geteilter, monoton wachsender Zustand. Preis: eine Einheit mit
+  Buff-Arbeit muss den SoA-Hold verweigern — `_has_pending_buff_work()` steht
+  jetzt in **allen sechs** `_enter_soa_*`-Gates neben `_burn_time > 0.0`. Ohne
+  das waere `BUFF_REGEN` (heilt im Kampf) ausgerechnet im Kampf wirkungslos,
+  weil der Melee-Hold `_tick_regen` wegnimmt.
+- **Auren ohne Timer.** Der erste Entwurf frischte die Aura jeden Tick mit 0,5 s
+  Restdauer auf. Das braucht wieder einen Countdown, also wieder den Objekt-Tick,
+  also friert es im Hold ein — und eine desertierte Crew behielte den Buff fuer
+  immer. Stattdessen: `_buff_aura` und `_buff_timed` getrennt, die Aura ist eine
+  reine Aussage des Halters (das gebe ich dir gerade), die er jeden Tick
+  wiederholt. Ein ablaufender Zauber loescht damit keine laufende Aura und
+  umgekehrt. `buff_mask` ist die redundant gehaltene Vereinigung, damit die Hot
+  Paths EIN Feld lesen.
+
+Einhaengepunkte: `effective_burn_dps()` in `_tick_burning` (die Kappe darf NICHT
+in die virtuelle `burn_damage_per_second()` — Golem ueberschreibt sie),
+`is_fire_panic_immune()` in `ignite`/`scorch`/Re-Assert, `is_panic_immune()` (Bit
+direkt), `_tick_regen` (Delay-Gate), `melee_damage` (`_strength_mult`, NICHT
+`melee_strength()` — Krieger und Schamanin ueberschreiben die und wuerden den
+Buff schlucken), `Fireball.strength_mult` (beim Abwurf eingefroren, wirkt auf
+Treffer, Splash und Gebaeudeschaden). Aufraeumen: `_die` -> `clear_buffs`,
+`leave_crew` -> `set_aura_buffs(0)` (der EINE Trichter, durch den jeder
+Crew-Austritt laeuft), `_stand_up`/`convert_to_tribe` -> `reset_sermon`.
+
+**3-s-Vorlauf der Bekehrungsresistenz** ohne Umbau der vier `begin_conversion`-
+Aufrufer: Der Zaehler liegt auf dem ZIEL und laeuft in dessen eigenem Tick
+(`_sermon_progress`), jeder Versuch nullt nur `_sermon_idle`. Der erste Prediger
+belegt den Platz (`_sermon_ready`), ein zweiter wird abgewiesen — ohne diese
+Inhaber-Regel setzten sich zwei konkurrierende Prediger im 0,25-s-Scan-Takt
+gegenseitig zurueck und das Ziel waere UNBEKEHRBAR. Turm- und Deckprediger
+behalten ihre Gesangsanimation waehrend des Vorlaufs (`sermon_warming_for`).
+
+Anzeige: `StatusFxRenderer.FX_BUFF` (Bit 16, HINTEN angehaengt, `BURNING_INDEX`
+bleibt gueltig), ein Sammelsymbol mit der niedrigsten Prioritaet, kein Loop-Sound.
+
+### 2. Techniker (`scripts/units/technician.gd`, `scenes/units/technician.tscn`)
+
+`class_name Technician extends Brave`. Die Alternative (`extends Unit` plus
+ausgelagerte Bau-/Reparaturlogik) haette ~700 Zeilen aus `brave.gd` bewegt und
+alle 55 `Brave`-Typstellen in 11 Dateien umgehaengt — das verstoesst gegen
+"kleine, gezielte Aenderungen".
+
+Neuer Hook auf `Brave`: **`can_gather_wood()`** (Default true), Waechter in
+`order_pickup`, `order_chop`, `order_chop_area`, `order_depot_haul`,
+`order_supply_wood` und im Baumzweig von `_try_fetch_wood`. Der Techniker nimmt
+also weiter Holz vom Stapel/aus der Holzstation fuer SEINE Baustelle, faellt aber
+nie einen Baum (Nutzervorgabe: er baut nur, wenn Holz in der Naehe ist).
+
+**Die gefaehrlichste Stelle des ganzen Features** und der Grund fuer
+`test_technician_never_stalls_a_site`: `_choose_job_task`, `_choose_repair_task`
+und `_choose_upgrade_task` rufen bei fehlendem Holz `job.mark_wood_stalled()`.
+Ein Techniker haette damit eine Baustelle 30 s lang als gestallt markiert — und
+`BuildingManager._recruit_workers` ueberspringt gestallte Baustellen, haette also
+genau die Braves ferngehalten, die das Holz holen koennen. Fuer Nicht-Sammler
+steht dort jetzt `_end_subtask(TASK_RETRY)`.
+
+Huettenbesatzung ist gratis ausgeschlossen: `Hut._find_idle_brave_near` und
+`Unit.order_man_hut` pruefen `unit_kind() == &"brave"`, nicht den Typ. Gesperrt
+per leerem Override: `order_train` (sonst liesse sich der 10-s-Techniker zum
+Krieger umschulen), `order_forester`, `order_workshop` (Produktionsslot — das
+FAHRZEUG bemannen bleibt selbstverstaendlich offen).
+
+`SelectionManager.selected_wood_workers()` neu neben `selected_braves()`: das
+Holzfaell-Rechteck (Taste B) fragt jetzt die erste — eine reine
+Techniker-Selektion schaerfte sonst einen Cursor, dessen jeder Befehl abgelehnt
+wird. Die Bauplatzierung nimmt weiter alle Braves inkl. Techniker.
+
+Registriert in `unit_renderer.gd KINDS`, `placeholder_sprites.gd`
+(`_decorate_technician`: Werkzeugguertel + Hammer), `ui_theme.gd` (`_draw_wrench`),
+`sidebar.gd` (`FOLLOWER_ROWS`, `_crew_kind_label`).
+
+### 3. Ausbildungshalle (`scripts/buildings/training_hall.gd`)
+
+10 Holz, 4x4, 450 LP, 10 s Trainingszeit (Nutzerentscheid; der Design-Vorschlag
+14 Holz / 5x7 wurde verworfen). Muster `warrior_camp.gd`; Platzhaltermesh ist
+eine Werkhalle mit Satteldach, Tor, Schornstein, Wagenrad und Werkbank. Im
+Baumenue hinter dem Tempel. **Kein Hotkey, keine KI-Anbindung** (Nutzerentscheid
+— die KI-Bauformeln leiten die Lagerzahl aus Armeeanteilen ab, ein Techniker
+gehoert dort nicht hinein und braeuchte zusaetzlich eine Crew-Auswahllogik).
+
+### 4. Fahrzeugboni (`crewed_vehicle.gd`, `siege_engine.gd`, `fire_ram.gd`, `airship.gd`)
+
+`technician_crew_count()` neben `active_crew_count()` mit exakt denselben
+Gueltigkeitsbedingungen — ein pazifizierter, panischer oder zu Fuss kaempfender
+Techniker gibt nichts. Tempo ueber ein neues Feld **`base_speed`** (in allen drei
+`_init` gesetzt): `speed = base_speed * mult`, nie additiv, sonst summierte sich
+der Aufschlag ueber die Prune-Zyklen auf; berechnet im 0,5-s-Prune-Block.
+
+Feuerrate ueber **Instanz-Wrapper** `SiegeEngine.fire_cooldown_now` /
+`FireRam.flame_cooldown_now` — die **statischen** Formeln bleiben unangetastet,
+weil `test_siege.gd:805` und `test_fire_ram.gd:390` sie direkt aufrufen.
+Aufschlaege sind additiv: Katapult `0,33 + 0,10 * (n-1)`, Ramme `0,10 * (n-1)`.
+
+Auren ueber `crew_aura_for(member)` (Basis leer): Ramme gibt die drei
+Resistenzen **nur an Techniker**, Luftschiff `BUFF_STRENGTH` mit
+`technician_crew_count() - 1` Stapeln an **alle** Insassen.
+`Airship._tick_hull_regen` ist das 1:1-Analogon zu `FireRam._tick_fire_regen` auf
+`_hull_hits`; das `_hull_on_fire = false` beim Erreichen von 0 ist zwingend,
+sonst brennt ein reparierter Zeppelin bis zum Spielende weiter (`is_burning()`
+speist den StatusFxRenderer). Die Sidebar zeigt die aktiven Boni im
+Besatzungs-Tab (`_technician_hint`).
+
+### Verifikation
+
+Ladecheck (`--headless --quit`) exit 0 ohne Fehler; volle Suite **6127 passed,
+0 failed** (Referenz vorher 5963 — die 164 neuen Zusicherungen sind
+`tests/test_buffs.gd` (94), `tests/test_technician.gd` (66) und die
+Techniker-Zeile in der Attacken-Split-Tabelle von `test_combat.gd`),
+`grep -c 'SCRIPT ERROR'` = 0. Laufzeit 49-51 s (Referenz 45 s auf demselben
+Stand ohne die neuen Tests). Nach dem Anlegen der neuen `class_name`-Skripte
+lief einmal `--headless --import`.
+**Funktionaler Test im Spiel steht noch aus** (Optik der Halle und des
+Techniker-Platzhalters, Buff-Symbol, spuerbarer Tempo-/Feuerratenunterschied).

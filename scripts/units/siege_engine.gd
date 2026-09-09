@@ -47,6 +47,7 @@ var _arm_anim: float = 1.0
 func _init() -> void:
 	super()
 	speed = SIEGE_SPEED
+	base_speed = SIEGE_SPEED
 	max_crew = MAX_CREW
 	min_move_crew = MIN_MOVE_CREW
 	min_fire_crew = MIN_FIRE_CREW
@@ -230,7 +231,7 @@ func _bombard_point(target_pos: Vector3, delta: float, approach: bool) -> void:
 	_fire_cooldown -= delta
 	if _fire_cooldown > 0.0:
 		return
-	_fire_cooldown = fire_cooldown_for_crew(crew_now)
+	_fire_cooldown = fire_cooldown_now(crew_now)
 	_launch_shot(target_pos)
 
 
@@ -242,6 +243,19 @@ static func fire_cooldown_for_crew(count: int) -> float:
 	var t: float = float(clampi(count, MIN_FIRE_CREW, MAX_CREW) - MIN_FIRE_CREW) \
 		/ float(MAX_CREW - MIN_FIRE_CREW)
 	return lerpf(COOLDOWN_MIN_CREW, COOLDOWN_FULL_CREW, t)
+
+
+## Reload of THIS catapult: the static crew formula divided by the technician
+## surcharge (+33 % from the first, +10 % per further one, additive — a full
+## crew of six shoots 83 % faster). The bonus sits here and not in the static
+## formula because the tests and the planning code call that one without an
+## instance.
+func fire_cooldown_now(count: int) -> float:
+	var base: float = fire_cooldown_for_crew(count)
+	if is_inf(base):
+		return base
+	return base / _tech_rate_multiplier(
+		Balance.TECHNICIAN_SIEGE_FIRERATE_BASE, Balance.TECHNICIAN_FIRERATE_PER_EXTRA)
 
 
 func _launch_shot(target_pos: Vector3) -> void:

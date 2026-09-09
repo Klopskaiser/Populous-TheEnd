@@ -32,7 +32,8 @@ const BLOB_SIZE: float = 0.7
 const BLOB_Y: float = 0.04
 const BLOB_COLOR: Color = Color(0.0, 0.0, 0.0, 0.4)
 ## Kinds baked into the atlas.
-const KINDS: Array[StringName] = [&"brave", &"warrior", &"firewarrior", &"preacher", &"shaman"]
+const KINDS: Array[StringName] = [&"brave", &"warrior", &"firewarrior", &"preacher",
+	&"shaman", &"technician"]
 ## Sprite Y offset while airborne selects the arms-up jump frame.
 const HOP_FRAME_THRESHOLD: float = 0.12
 ## Small extra depth nudge toward the camera (metres) so a sprite standing on

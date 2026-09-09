@@ -125,6 +125,8 @@ static func icon(key: StringName) -> ImageTexture:
 			_draw_crew(img)
 		&"warrior_camp", &"warrior":
 			_draw_sword(img)
+		&"training_hall", &"technician":
+			_draw_wrench(img)
 		&"firewarrior_camp", &"fireball", &"firewarrior":
 			_draw_flame(img)
 		&"temple":
@@ -250,6 +252,16 @@ static func _draw_crew(img: Image) -> void:
 	_rect(img, 6, 5, 12, 16, Color(0.09, 0.06, 0.03))   # opening
 	_disc(img, 12, 10, 3, I_LIGHT)            # head
 	_rect(img, 9, 14, 7, 7, I_GOLD)           # body
+
+
+## Technician / training hall: an open-ended wrench, standing upright. Reads as
+## "tool" next to the sword, the flame and the catapult.
+static func _draw_wrench(img: Image) -> void:
+	_rect(img, 11, 8, 2, 13, I_LIGHT)   # shaft
+	_rect(img, 9, 3, 2, 5, I_LIGHT)     # jaw, left
+	_rect(img, 13, 3, 2, 5, I_LIGHT)    # jaw, right
+	_rect(img, 9, 7, 6, 2, I_LIGHT)     # jaw bridge
+	_rect(img, 10, 20, 4, 2, I_DARK)    # grip end
 
 
 static func _draw_sword(img: Image) -> void:

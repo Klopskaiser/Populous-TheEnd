@@ -48,6 +48,10 @@ var min_fire_crew: int = Balance.SIEGE_MIN_FIRE_CREW
 var crew_side_offset: float = 0.95
 var crew_rank_spacing: float = 0.85
 var vehicle_ring_scale: float = 4.5
+## Base speed WITHOUT the technician bonus. Every vehicle sets it next to
+## `speed` in its _init: `speed` itself is recomputed at runtime
+## (_refresh_speed_bonus) and is therefore no longer the source of truth.
+var base_speed: float = 0.0
 ## Chassis sample half-extents (along facing x sideways).
 var chassis_half_length: float = 1.1
 var chassis_half_width: float = 0.7
@@ -540,6 +544,63 @@ func active_crew_count() -> int:
 	return count
 
 
+## Technicians among the crew ABLE to serve — same conditions as
+## active_crew_count on purpose: a technician sitting under a preacher,
+## panicking or brawling on foot is not working the machine and grants nothing.
+## Compares unit_kind() instead of `is Technician`, the established pattern
+## (Airship._has_deck_crew_of_kind, Hut._find_idle_brave_near) — it keeps this
+## file free of a dependency on the unit class.
+func technician_crew_count() -> int:
+	var count: int = 0
+	for m in crew:
+		if is_instance_valid(m) and m.state == State.CREW and m.siege_boarded \
+				and not m.is_burning() \
+				and m.unit_kind() == &"technician" \
+				and _flat_dist(m.position, position) <= CREW_LEASH:
+			count += 1
+	return count
+
+
+## Additive fire-rate surcharge of the technician crew: `first` for the first
+## one, `each` for every further one. Returns the factor the cooldown is DIVIDED
+## by, so 1.0 means no bonus at all.
+func _tech_rate_multiplier(first: float, each: float) -> float:
+	var n: int = technician_crew_count()
+	if n <= 0:
+		return 1.0
+	return 1.0 + first + each * float(n - 1)
+
+
+## `speed` = base_speed x technician bonus. NEVER add onto `speed`: this runs
+## every prune cycle and a surcharge would compound. The bonus is granted once,
+## from the first technician on — more of them do not make it faster
+## (user spec 2026-09-09).
+func _refresh_speed_bonus() -> void:
+	if base_speed <= 0.0:
+		base_speed = speed   # self-heal if a subclass' _init forgot it
+	var mult: float = 1.0
+	if technician_crew_count() > 0:
+		mult += Balance.TECHNICIAN_VEHICLE_SPEED_BONUS
+	speed = base_speed * mult
+
+
+## Buff bits (x) and strength stacks (y) this vehicle currently grants `member`.
+## Base: none — the fire ram and the airship override it.
+func crew_aura_for(_member) -> Vector2i:
+	return Vector2i.ZERO
+
+
+## Re-states every crew member's aura. REPLACE semantics (Unit.set_aura_buffs),
+## so the moment a technician leaves, dies or stops serving the bonus is gone on
+## the next tick — there is no cleanup path left to forget.
+func _refresh_crew_auras() -> void:
+	for m in crew:
+		if not is_instance_valid(m) or m.state == State.DEAD:
+			continue
+		var a: Vector2i = crew_aura_for(m)
+		m.set_aura_buffs(a.x, a.y)
+
+
 ## A recruit reached the vehicle: it boards. First boarder of another tribe
 ## takes the (unmanned) device over; a foreign recruit racing a fresh crew
 ## loses and is turned away.
@@ -801,6 +862,9 @@ func tick(delta: float) -> void:
 		_crew_prune_timer = 0.5
 		_prune_crew()
 		_resummon_crew()
+		# The technician count only changes when someone boards or leaves, so
+		# 2 Hz is plenty for the speed bonus.
+		_refresh_speed_bonus()
 		# Water is fatal to a siege engine no matter HOW it got there (phase
 		# 10a). The spell-driven flooding is caught by SpellContext, but this
 		# self-check closes every other route (a wreck drifting, a morph outside
@@ -847,6 +911,7 @@ func tick(delta: float) -> void:
 			_clear_path()
 			_set_state(State.IDLE)
 	_refresh_nav_block()   # park/unpark as a nav obstacle for other vehicles
+	_refresh_crew_auras()
 	_tick_auto_recrew(delta)
 	super.tick(delta)
 	_tick_visual(delta)

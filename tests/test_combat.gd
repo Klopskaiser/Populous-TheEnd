@@ -12,6 +12,7 @@ const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
 const BRAVE_SCENE: PackedScene = preload("res://scenes/units/brave.tscn")
 const FIREWARRIOR_SCENE: PackedScene = preload("res://scenes/units/firewarrior.tscn")
 const PREACHER_SCENE: PackedScene = preload("res://scenes/units/preacher.tscn")
+const TECHNICIAN_SCENE: PackedScene = preload("res://scenes/units/technician.tscn")
 
 
 func _flat_terrain(h: float = 5.0) -> TerrainData:
@@ -192,6 +193,7 @@ func test_melee_attack_kind_split_per_unit() -> void:
 		[WARRIOR_SCENE, 0.0, 0.35, "warrior"],
 		[PREACHER_SCENE, 0.6, 0.0, "preacher"],
 		[FIREWARRIOR_SCENE, 0.4, 0.6, "firewarrior"],
+		[TECHNICIAN_SCENE, 0.0, 0.5, "technician"],
 	]
 	for c in cases:
 		var u: Unit = (c[0] as PackedScene).instantiate() as Unit

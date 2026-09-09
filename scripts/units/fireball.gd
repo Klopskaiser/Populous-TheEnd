@@ -64,6 +64,9 @@ const OUTCOME_ROLL: int = 1
 const OUTCOME_LIFT: int = 2
 
 var shooter = null   # untyped: may be freed mid-flight
+## The shooter's attack multiplier (strength buff), FROZEN at launch: the
+## firewarrior can die or lose the buff while the ball is in the air.
+var strength_mult: float = 1.0
 var target = null    # untyped: may be freed mid-flight
 ## Terrain for in-flight collision: the ball fizzles against ground/cliff
 ## faces instead of passing through them (null in old tests = no check).
@@ -90,6 +93,7 @@ var _launch_from: Vector3 = Vector3.ZERO
 
 func setup(p_shooter, p_target, from: Vector3) -> void:
 	shooter = p_shooter
+	strength_mult = _shooter_strength(p_shooter)
 	target = p_target
 	position = from
 	_launch_from = from
@@ -100,6 +104,7 @@ func setup(p_shooter, p_target, from: Vector3) -> void:
 ## deals half-melee HP damage on impact (Firewarrior.BUILDING_FIRE_DAMAGE).
 func setup_building(p_shooter, p_building, from: Vector3) -> void:
 	shooter = p_shooter
+	strength_mult = _shooter_strength(p_shooter)
 	target_building = p_building
 	position = from
 	_launch_from = from
@@ -146,7 +151,8 @@ func _impact_building() -> void:
 		return
 	if not target_building.is_attackable():
 		return   # e.g. the reincarnation site — only spells/catapults harm it
-	target_building.take_damage(Firewarrior.BUILDING_FIRE_DAMAGE, Building.DMG_RANGED)
+	target_building.take_damage(_scaled(Firewarrior.BUILDING_FIRE_DAMAGE),
+		Building.DMG_RANGED)
 	if is_inside_tree():
 		var events: Node = get_node_or_null("/root/Events")
 		if events != null:
@@ -206,7 +212,7 @@ func _impact() -> void:
 	# (with the lift, "hurl it up and shoot it" became a reliable combo, and the
 	# accelerating chase makes the balls connect); halved again to +10 % when the
 	# area damage was raised. The factor lives in Balance, never inline.
-	var dmg: int = Unit.FIREBALL_DAMAGE
+	var dmg: int = _scaled(Unit.FIREBALL_DAMAGE)
 	if target.is_airborne():
 		dmg = int(roundf(float(dmg) * Balance.FIREWARRIOR_AIRBORNE_MULT))
 	target.take_damage(dmg, shooter)
@@ -320,7 +326,7 @@ func _apply_blast() -> void:
 	if shooter == null or not is_instance_valid(shooter) or shooter.path_service == null:
 		return   # without the shooter friend/foe is undecidable; guessing is not an option
 	var um = shooter.path_service
-	var base: int = maxi(1, int(roundf(float(Unit.FIREBALL_DAMAGE)
+	var base: int = maxi(1, int(roundf(float(_scaled(Unit.FIREBALL_DAMAGE))
 		* Balance.FW_FIREBALL_BLAST_FRAC)))
 	for u in um.get_units_in_radius(position, Balance.FW_FIREBALL_BLAST_RADIUS):
 		if u == target or u.state == Unit.State.DEAD or u.tribe_id == shooter.tribe_id:
@@ -380,3 +386,18 @@ func _ready() -> void:
 	sphere.material = mat
 	mesh.mesh = sphere
 	add_child(mesh)
+
+
+## Attack multiplier of the shooter at launch time (1.0 without one, and for a
+## shooter that is already gone).
+static func _shooter_strength(p_shooter) -> float:
+	if p_shooter == null or not is_instance_valid(p_shooter):
+		return 1.0
+	return p_shooter.attack_multiplier()
+
+
+## `amount` scaled by the frozen strength multiplier; never below 1.
+func _scaled(amount: int) -> int:
+	if is_equal_approx(strength_mult, 1.0):
+		return amount
+	return maxi(1, int(roundf(float(amount) * strength_mult)))

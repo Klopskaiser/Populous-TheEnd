@@ -176,6 +176,14 @@ func unit_kind() -> StringName:
 	return &"brave"
 
 
+## May this worker fell trees, pick wood up and haul it around? The technician
+## says no: he builds and repairs, but wood is not his job (user spec
+## 2026-09-09). Guards every wood order below plus the automatic sourcing in
+## _try_fetch_wood / _choose_supply_task.
+func can_gather_wood() -> bool:
+	return true
+
+
 ## Before the brave starts fighting (retaliation or an explicit attack order),
 ## release its worker claims / drop carried wood so nothing is left stranded.
 func _on_combat_interrupt() -> void:
@@ -226,7 +234,7 @@ const IDLE_AGGRO_RADIUS: float = Balance.BRAVE_IDLE_AGGRO_RADIUS
 ## for the standing AREA order (key B): there the player asked for a whole patch to
 ## be cleared, not for a hand-placed load.
 func order_pickup(pile: WoodPile) -> void:
-	if not can_take_orders():
+	if not can_take_orders() or not can_gather_wood():
 		return
 	if pile == null or not is_instance_valid(pile) or pile.amount <= 0:
 		return
@@ -267,7 +275,7 @@ func holds_wood_for_drop() -> bool:
 ## OTHER depot in a pendulum loop. Without a second depot (or with an empty
 ## source) the brave just walks there — a plain move (user decision).
 func order_depot_haul(depot: WoodDepot) -> void:
-	if not can_take_orders():
+	if not can_take_orders() or not can_gather_wood():
 		return
 	if depot == null or not is_instance_valid(depot) or not depot.is_usable():
 		return
@@ -288,7 +296,7 @@ func order_depot_haul(depot: WoodDepot) -> void:
 ## count, even when the tree's harvest slots are full. Returns whether the order
 ## was taken — the UI only blinks its confirmation ring for an accepted one.
 func order_chop(tree: TreeResource) -> bool:
-	if not can_take_orders():
+	if not can_take_orders() or not can_gather_wood():
 		return false
 	if tree == null or not is_instance_valid(tree) or tree.felled_flag:
 		return false
@@ -328,7 +336,7 @@ func has_supply_job() -> bool:
 ## building until it no longer wants any. Source is picked per trip: the nearest
 ## rack, else a ground pile, else a tree.
 func order_supply_wood(target: Building) -> bool:
-	if not can_take_orders():
+	if not can_take_orders() or not can_gather_wood():
 		return false
 	if target == null or not is_instance_valid(target) or target.health <= 0:
 		return false
@@ -440,7 +448,7 @@ func _nearest_depot_with_stock(drop: Vector3) -> WoodDepot:
 ## order was taken.
 func order_chop_area(area: Rect2,
 		poly: PackedVector2Array = PackedVector2Array()) -> bool:
-	if not can_take_orders():
+	if not can_take_orders() or not can_gather_wood():
 		return false
 	if area.size.x <= 0.0 or area.size.y <= 0.0:
 		return false
@@ -891,6 +899,13 @@ func _choose_job_task() -> void:
 	# reached: the site stalls (re-checked after WOOD_RECHECK_INTERVAL) and
 	# this worker quits instead of hammering forever.
 	if job.wants_more_wood() and job.build_progress >= job.progress_cap() - 0.0001:
+		if not can_gather_wood():
+			# Missing wood is not THIS worker's failure — a technician cannot
+			# fetch it. Stalling here would freeze the site for 30 s and keep
+			# the braves that CAN fetch it away (BuildingManager._recruit_workers
+			# skips stalled sites). Wait and re-check instead.
+			_end_subtask(TASK_RETRY)
+			return
 		job.mark_wood_stalled()
 		_stop_all()
 		return
@@ -910,7 +925,8 @@ func _choose_workshop_task() -> void:
 	if not ws.production_active and ws.wants_more_stock_wood():
 		if _try_fetch_wood():
 			return
-		ws.mark_wood_stalled()   # nothing reachable: re-checked on an interval
+		if can_gather_wood():
+			ws.mark_wood_stalled()   # nothing reachable: re-checked on an interval
 	task = Task.PRODUCE   # walk to the entrance and be housed again
 	_reset_seek()
 
@@ -943,8 +959,8 @@ func _choose_repair_task() -> void:
 	# absorption, deadlocking a lightly damaged workshop that still holds stock.
 	# wood_incoming() and the absorb source share delivery_point()/ABSORB_RADIUS,
 	# so counted wood is always bankable (no endless wait).
-	if job.wood_incoming() > 0:
-		_end_subtask(TASK_RETRY)
+	if job.wood_incoming() > 0 or not can_gather_wood():
+		_end_subtask(TASK_RETRY)   # see _choose_job_task: never stall for a non-fetcher
 		return
 	job.mark_wood_stalled()
 	_stop_all()
@@ -961,8 +977,8 @@ func _choose_upgrade_task() -> void:
 		task = Task.UPGRADE
 		_reset_seek()
 		return
-	if job.wood_incoming() > 0:
-		_end_subtask(TASK_RETRY)
+	if job.wood_incoming() > 0 or not can_gather_wood():
+		_end_subtask(TASK_RETRY)   # see _choose_job_task: never stall for a non-fetcher
 		return
 	job.mark_wood_stalled()
 	_stop_all()
@@ -981,7 +997,9 @@ func _try_fetch_wood() -> bool:
 			task = Task.PICKUP
 			_reset_seek()
 			return true
-	if tree_manager != null:
+	# Felling a tree for the site is still wood work: the technician takes what
+	# already lies around (pile above) and otherwise waits for a brave.
+	if tree_manager != null and can_gather_wood():
 		var tree: TreeResource = _claim_safe_tree()
 		if tree != null:
 			task_tree = tree

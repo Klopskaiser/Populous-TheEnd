@@ -114,6 +114,7 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
 |---|---|
 | **Schamanin** | Wichtigste Einheit, einzige Zauberwirkerin. **HP = 4 × Brave**, **Nahkampfschaden = 2 × Brave**. Stirbt sie, **respawnt** sie nach einer Wartezeit am **Reinkarnationsplatz** (Reincarnation Site); der Stamm des Tötenden bekommt einmalig **10 % der minütlichen Manaproduktion ihres Stammes** auf seine aktiven Aufladeraten verteilt. Pro Stamm genau eine. |
 | **Brave (Gefolgsmann)** | Basis-Einheit. Sammelt **passiv Holz** und baut Gebäude aus. Wird von Hütten gespawnt. |
+| **Techniker** | Ausbildung in der **Ausbildungshalle** (10 s). Werte wie ein Brave, Nahkampf **50 % Tritt / 50 % Schlag** (kein Schubser). Zivil **baut und repariert** er wie ein Brave, **fällt aber nie einen Baum** und **bemannt keine Hütten** — er verbaut nur Holz, das schon in Reichweite liegt (Stapel/Holzstation). Sein Wert liegt an Bord: **jedes Fahrzeug mit mindestens einem Techniker fährt 33 % schneller** (einmalig, stapelt nicht). **Katapult:** +33 % Feuerrate vom ersten Techniker, **+10 % je weiterem, additiv** (6er-Crew = +83 %). **Feuerramme:** vom ersten **kein** Feuerratenbonus — stattdessen sind **die Techniker an Bord** (nur sie) feuer-, panik- und bekehrungsresistent; jeder weitere gibt +10 % (4er-Crew = +30 %). **Luftschiff:** repariert die Hülle wie die Feuerramme ihre Feuer-Leben (1 Trefferpunkt je 30 s, bei `AIRSHIP_HULL_HITS = 2` also genau ein zurückgewinnbarer Treffer, das Hüllenfeuer geht dabei aus), und **jeder Techniker nach dem ersten** gibt **allen Insassen** einen **Stärke**-Stack. Boni zählen nur für Techniker, die wirklich am Posten sind (dieselben Bedingungen wie `active_crew_count`) — ein bekehrter, panischer oder zu Fuß kämpfender Techniker zählt nicht. |
 | **Krieger** | Nahkampf-Einheit. Ausbildung in der **Kaserne** (Krieger-Trainingslager). Nahkampf-Multiplikator **2,5 x Brave** (2026-09-07, vorher 3,0), dafuer haeufiger der harte Tritt: **65 % Schlag / 35 % Tritt**, er **schubst nicht mehr**. |
 | **Feuerkrieger** | Fernkampf-Einheit (Feuerbälle). Ausbildung im **Feuertempel** (Feuerkrieger-Trainingslager). **Zielwahl: Reichweite schlägt Priorität** (2026-09-06, `Firewarrior._retarget_by_reach`/`_scan_for_enemy`): ein Priester **innerhalb** der Feuerreichweite (9 m, seit 2026-09-06; vorher 8) geht immer vor; steht das Ziel außer Reichweite, wird geschossen, wer schon in Reichweite steht, statt zu verfolgen; erst wenn niemand schießbar ist, wird ein Priester bis zum Aggro-Radius (13 m) gejagt. Vorher zog ein Priester irgendwo im Aggro-Radius die Feuerkrieger an den Gegnern vor ihrer Nase vorbei. Der Feuerball macht **Flächenschaden** (**30 %** des Hauptschadens im Umkreis von **1,3 m**, **nur Feinde**, kein Rückstoß auf Umstehende) — ohne ihn teilten Feuerkrieger viel Schaden aus und töteten fast nichts. Der Radius ist an der Einheitengeometrie ausgerichtet: 1,3 m fasst **ein 6er-Pack** (max. 1,10 m breit) bzw. eine Nahkampfgruppe (0,9-m-Ring) und lässt die Nachbargruppe (2,2 m) draußen. Gemessen **flach in XZ**, der Bereich ist also ein senkrechter Zylinder. **Die Wirkung skaliert mit der Dichte:** im 200er-Klumpen nimmt fast jeder Ball ~3 Umstehende mit, bei 20 gegen 20 meist keinen — Feuerkrieger sind damit bewusst eine **Masseneinheit**. **Der Ball gleitet ueber den Boden** (2026-09-07, `Fireball._follow_ground_or_block`): der Boden ist eine **Untergrenze**, keine Wand — der Ball wird auf 0,8 m ueber Grund angehoben und nimmt Kuppen, Rampenkanten und Heightmap-Wellen mit, wie die Flamme der Feuerramme. Vorher flog er auf einer geraden 3D-Linie mit knapp einem Meter Bodenfreiheit und **verpuffte still** an jeder Erhebung dazwischen. Nach **unten** wird er nie gedrueckt: Schuesse vom Wachturm/Luftschiffdeck und die Jagd auf Luftziele behalten ihre Hoehe. Eine echte **Steilwand blockt weiter** — Grenze ist `TerrainData.MAX_SLOPE` (1,5 m je Meter), also genau die Begehbarkeitsgrenze: *der Ball kommt ueber alles, was eine Einheit hochlaufen koennte.* Im **Nahkampf** schubst (40 %) und tritt (60 %) er nur noch — den Faustschlag hat er nicht mehr. |
 | **Prediger** | **Konvertiert** feindliche Einheiten zum eigenen Stamm. Ausbildung im **Tempel**. Im Nahkampf **schubst** er (60 %) statt zu verletzen und **tritt gar nicht** (2026-09-07); 40 % bleiben der Faustschlag. Mehrere Prediger verteilen sich auf verschiedene Ziele; **Einheiten in Bekehrung sind kein gültiges Ziel** für Nah-/Fernkampf (Katapult ausgenommen). Eine **kämpfende feindliche Schamanin** im Umkreis von 6 m **unterbricht die Predigt** — laufende Bekehrungen brechen ab, neue beginnen nicht, und das gilt für alle Prediger in ihrem Radius. Bloßes Herumstehen stört nicht. **Gegnerische Prediger singen hörbar anders** als die eigenen (`preach_enemy` statt `preach`, Perspektive Spieler) — eine fremde Predigt soll man erkennen. **Luftschiffinsassen sind kein Bekehrungsziel** (am Deck unerreichbar) und werden gar nicht erst gewählt — weder vom Prediger am Boden noch von einem im Wachturm oder auf einem Deck, und ein Rechtsklick darauf wird abgewiesen. **Im Angriffsmove bekehrt der Prediger, was er trifft, und marschiert danach weiter** zum Zielpunkt wie jede andere Einheit (`Preacher._resume_route_or_idle`, 2026-09-06 — vorher endete jede Predigt in IDLE und die Route war vergessen); die KI schont Prediger mitten in der Bekehrung bei ihrem Wellen-Refresh (`_marching_only` überspringt `State.CAST`). |
@@ -227,7 +228,9 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
     eingezogen.
 - **Trainingsgebäude:** **Kaserne** (Krieger, 5 Holz/3 s), **Feuertempel** (Feuerkrieger,
   **18 Holz**/4 s, großer vieleckiger Bau, 8×8), **Tempel** (Prediger, **15 Holz**/5 s,
-  doppelt so groß, 6×6). Ablauf: Brave betritt das Gebäude → kommt nach Ausbildungszeit als
+  doppelt so groß, 6×6), **Ausbildungshalle** (Techniker, **10 Holz**/**10 s**, 4×4 —
+  die langsamste Ausbildung im Spiel; der Techniker ist über seine Fahrzeugboni bezahlt,
+  nicht über seine Werte). Ablauf: Brave betritt das Gebäude → kommt nach Ausbildungszeit als
   entsprechende Kampfeinheit heraus → läuft zum Rally Point.
 - **Weitere Gebäude:** **Förster** (Setzlinge/Holzwirtschaft, Phase 7d),
   **Katapultwerkstatt** (**12 Holz**, 7×4) und **Feuerrammenwerkstatt** (**10 Holz**,
@@ -408,6 +411,38 @@ Turm- oder Deckschützen) wird bei einem **Zielwechsel im Kampf nicht** zurückg
 sterbendes Ziel ist keine nachgeladene Waffe. Nur die **frische** Aufnahme eines Kampfes
 (aus Leerlauf/Marsch oder per Befehl) schlägt sofort zu. Bis 2026-09-02 gab jeder Kill einen
 Gratisschuss, was massierte Feuerkrieger auf das 1,44-Fache ihrer Feuerrate brachte.
+
+**Buff-System (2026-09-09, `Unit.BUFF_*`):** ein generisches Effektsystem für
+Einheiten, gedacht als Grundlage für spätere Zauber; erster Nutzer sind die
+Fahrzeugauren des Technikers. Fünf Effekte:
+- **Feuerresistenz** — der Brand macht höchstens **5 HP/s** statt 15 und löst
+  **keine Panik** aus (ein Insektenschwarm dagegen schon: Feuerresistenz gilt nur
+  für Feuer).
+- **Bekehrungsresistenz** — ein Prediger muss **3 s** auf das Ziel einreden, bevor
+  es sich überhaupt hinsetzt; danach läuft die Bekehrung normal. Der **erste**
+  Prediger belegt den Platz, ein zweiter wird abgewiesen, solange der erste
+  weitermacht (sonst setzten zwei Prediger einander im Scan-Takt zurück und das
+  Ziel wäre unbekehrbar). Bricht die Predigt **0,6 s** ab, verfällt der Vorlauf.
+- **Panikresistenz** — der Panikeffekt greift nicht, der **Schaden zählt trotzdem**.
+- **Regeneration** — heilt **auch im Kampf** (überspringt nur die 8-s-Wartezeit,
+  die Rate bleibt).
+- **Stärke** — Angriffsmultiplikator **×1,5 je Stapel, multiplikativ** und **ohne
+  Deckel**. Wirkt auf **Nahkampf UND Fernkampf**: der Feuerball des Feuerkriegers
+  friert den Multiplikator **beim Abwurf** ein (der Schütze kann im Flug sterben).
+  Katapult und Feuerramme sind bewusst außen vor — deren Schaden ist Stufen-/
+  Flächenlogik, keine HP eines Angreifers.
+
+Zwei Entwurfsentscheidungen, die man kennen muss, bevor man daran arbeitet:
+**Auren haben keinen Timer** (`set_aura_buffs`, Replace-Semantik — das Fahrzeug
+sagt jeden Tick neu, was es gibt; verschwindet der Techniker, ist der Buff im
+selben Tick weg, es gibt keinen Aufräumpfad zum Vergessen), und **befristete
+Buffs zählen im eigenen Tick herunter** statt gegen eine gemeinsame Uhr — fast
+alle Tests ticken Einheiten direkt, eine Manager-Uhr stünde dort still. Preis
+davon: eine Einheit mit Buff-Arbeit **verweigert den SoA-Hold**
+(`_has_pending_buff_work`, wie schon `_burn_time`), sonst liefe „heilt im Kampf"
+ausgerechnet im Kampf nie. Angezeigt wird **ein** Sammelsymbol über dem Kopf
+(`StatusFxRenderer.FX_BUFF`) mit der **niedrigsten** Priorität — Brand, Panik und
+die Hypnose-Spirale verdrängen es.
 
 **Zustandsanzeigen werfen keinerlei Schatten** (Sterne bei kritischer
 Verletzung, Panik, Brand, Hypnose): es sind UI-Glyphen über dem Kopf, und in der

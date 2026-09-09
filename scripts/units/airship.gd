@@ -65,6 +65,8 @@ const DECK_SCAN_INTERVAL: float = 0.2
 
 ## Hull hits taken (fireball-spell bolts + catapult air-intercepts).
 var _hull_hits: int = 0
+## Fractional accumulator of the technician hull repair (pattern: FireRam._life_regen_frac).
+var _hull_regen_frac: float = 0.0
 ## Fire cooldown per firewarrior passenger (watchtower pattern — deck crew
 ## has no own combat tick; preachers channel via begin_conversion/SIT).
 var _fire_cd: Dictionary = {}
@@ -96,6 +98,7 @@ var _hull_on_fire: bool = false
 func _init() -> void:
 	super()
 	speed = Balance.AIRSHIP_SPEED
+	base_speed = speed
 	board_range = Balance.AIRSHIP_BOARD_RANGE
 	max_crew = MAX_CREW
 	min_move_crew = MIN_MOVE_CREW
@@ -489,6 +492,33 @@ func _best_reach() -> float:
 
 # --- Hull damage & explosion ------------------------------------------------------------
 
+## With at least one technician aboard the crew patches the hull: one hit point
+## every AIRSHIP_HULL_REGEN_TIME, the fire ram's lives model applied to the
+## airship (FireRam._tick_fire_regen). With HULL_HITS = 2 that means exactly one
+## recoverable hit — the ship has "one life", as before.
+func _tick_hull_regen(delta: float) -> void:
+	if _hull_hits > 0 and state != State.DEAD and technician_crew_count() > 0:
+		_hull_regen_frac += delta
+		if _hull_regen_frac >= Balance.AIRSHIP_HULL_REGEN_TIME:
+			_hull_regen_frac -= Balance.AIRSHIP_HULL_REGEN_TIME
+			_hull_hits = maxi(_hull_hits - 1, 0)
+			if _hull_hits == 0:
+				# MUST be cleared: is_burning() feeds the StatusFxRenderer, and
+				# a patched-up ship would otherwise burn on for the whole match.
+				_hull_on_fire = false
+	else:
+		_hull_regen_frac = 0.0
+
+
+## Every technician AFTER the first buffs EVERY passenger with strength (stacks
+## multiply). One technician alone gives speed and hull repair, no strength.
+func crew_aura_for(_member) -> Vector2i:
+	var stacks: int = technician_crew_count() - 1
+	if stacks <= 0:
+		return Vector2i.ZERO
+	return Vector2i(Unit.BUFF_STRENGTH, stacks)
+
+
 ## One hull hit (fireball-spell bolt or catapult air-intercept). The first
 ## hit sets the hull visibly on fire; HULL_HITS explode the ship.
 func register_hull_hit(_source_pos: Vector3 = Vector3.ZERO) -> void:
@@ -554,6 +584,7 @@ func tick(delta: float) -> void:
 		return
 	# Hover height follows the (deformable) terrain every tick (soft model).
 	_tick_altitude(delta)
+	_tick_hull_regen(delta)
 	# Deck crew re-pin: the base crew tick may lag one frame behind a moving
 	# hull — pin boarded passengers to their slots right after the hull moved.
 	for m in crew:
@@ -883,6 +914,10 @@ func _tick_deck_preacher(pr, delta: float) -> void:
 			if d < nearest_d:
 				nearest_d = d
 				nearest = u
+		elif u.sermon_warming_for(pr):
+			# Conversion-resistant target: it does not sit yet, but the sermon
+			# IS running — keep the chant animation and sound going.
+			channeling = true
 	pr.station_channeling = channeling
 	if channeling:
 		if nearest != null:

@@ -385,6 +385,8 @@ static func _decorate(img: Image, kind: StringName, view: StringName, bob: int) 
 			_decorate_preacher(img, view, bob)
 		&"shaman":
 			_decorate_shaman(img, view, bob)
+		&"technician":
+			_decorate_technician(img, view, bob)
 		_:
 			pass
 
@@ -392,6 +394,26 @@ static func _decorate(img: Image, kind: StringName, view: StringName, bob: int) 
 ## Front/back show both shield (left) and raised sword (right). The two side
 ## views differ: facing right shows the SWORD, facing left shows the SHIELD
 ## (the far-hand item is hidden behind the body).
+## Technician: a tool belt across the hips (visible from every side, so the
+## silhouette reads even from behind) plus a short hammer in the near hand.
+## Deliberately low-contrast next to the warrior — he is a worker, not a soldier.
+static func _decorate_technician(img: Image, view: StringName, bob: int) -> void:
+	img.fill_rect(Rect2i(4, 13 + bob, 8, 1), C_HELMET)       # tool belt
+	match view:
+		&"right":
+			img.fill_rect(Rect2i(7, 8 + bob, 1, 4), C_WOOD)      # haft in the near hand
+			img.fill_rect(Rect2i(6, 7 + bob, 3, 2), C_SHIELD)    # hammer head
+		&"left":
+			img.fill_rect(Rect2i(8, 8 + bob, 1, 4), C_WOOD)
+			img.fill_rect(Rect2i(7, 7 + bob, 3, 2), C_SHIELD)
+		&"front_right", &"back_right":
+			img.fill_rect(Rect2i(12, 8 + bob, 1, 4), C_WOOD)
+			img.fill_rect(Rect2i(11, 7 + bob, 3, 2), C_SHIELD)
+		_:
+			img.fill_rect(Rect2i(12, 8 + bob, 1, 4), C_WOOD)     # hammer, right hand
+			img.fill_rect(Rect2i(11, 7 + bob, 3, 2), C_SHIELD)
+
+
 static func _decorate_warrior(img: Image, view: StringName, bob: int) -> void:
 	match view:
 		&"right":

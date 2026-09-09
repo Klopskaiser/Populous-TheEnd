@@ -1248,3 +1248,55 @@ const BRAVE_CARRY_HOLD_TIMEOUT: float = 30.0
 const AI_MAX_HUT_RACKS: int = 4
 ## Mindestbestand eines Huetten-Regals: genau ein Ausbau.
 const AI_HUT_RACK_STOCK: int = HUT_UPGRADE_WOOD_COST
+
+# =============================================================================
+# BUFFS (generisches Effektsystem)
+# =============================================================================
+
+## Feuerresistenz: der Brand macht hoechstens so viel Schaden je Sekunde
+## (statt der ueblichen 15) und loest KEINE Panik aus. Gleicher Wert wie beim
+## Golem, der dieselbe Kappe fest verdrahtet hat (GOLEM_BURN_DPS).
+const BUFF_FIRE_RESIST_DPS_CAP: float = 5.0
+## Bekehrungsresistenz: so lange muss ein Prediger auf das Ziel einreden, BEVOR
+## es sich ueberhaupt hinsetzt. Danach laeuft die Bekehrung normal.
+const BUFF_CONVERT_RESIST_DELAY: float = 3.0
+## Der Vorlauf verfaellt, wenn so lange kein Bekehrungsversuch mehr kam — der
+## Prediger hat aufgehoert. Muss ueber dem Scan-Takt (0,25 s) liegen.
+const BUFF_CONVERT_RESIST_GRACE: float = 0.6
+## Staerke: Angriffsmultiplikator je Stapel, multiplikativ (2 Stapel = 2,25x).
+## Wirkt auf Nahkampf UND die Feuerbaelle des Feuerkriegers.
+const BUFF_STRENGTH_MULT: float = 1.5
+## Auren (z. B. die Fahrzeugboni des Technikers) werden jeden Tick mit dieser
+## Restdauer aufgefrischt: faellt die Quelle weg, erlischt der Buff von selbst.
+const BUFF_AURA_REFRESH: float = 0.5
+
+# =============================================================================
+# TECHNIKER
+# =============================================================================
+
+## Werte wie ein Brave — eigene Konstanten, damit sie getrennt justierbar sind.
+const TECHNICIAN_HP: int = BRAVE_HP
+const TECHNICIAN_SPEED: float = BRAVE_SPEED
+## Nahkampf: halb Tritt, halb Faustschlag, kein Schubser.
+const TECHNICIAN_SHOVE_CHANCE: float = 0.0
+const TECHNICIAN_KICK_CHANCE: float = 0.5
+## Fahrzeugboni ab dem ersten Techniker in der Besatzung.
+## Tempo: einmalig, stapelt NICHT.
+const TECHNICIAN_VEHICLE_SPEED_BONUS: float = 0.33
+## Feuerrate: additive Aufschlaege. Das Katapult bekommt den Grundbonus schon
+## vom ersten Techniker, die Feuerramme nicht (dort zahlt der erste in
+## Resistenzen fuer die Techniker an Bord).
+const TECHNICIAN_SIEGE_FIRERATE_BASE: float = 0.33
+const TECHNICIAN_FIRERAM_FIRERATE_BASE: float = 0.0
+const TECHNICIAN_FIRERATE_PER_EXTRA: float = 0.10
+## Zeppelin: Huellenreparatur wie die Feuerramme, Sekunden je Trefferpunkt.
+const AIRSHIP_HULL_REGEN_TIME: float = 30.0
+
+# =============================================================================
+# AUSBILDUNGSHALLE
+# =============================================================================
+
+const TRAINING_HALL_FOOTPRINT: Vector2i = Vector2i(4, 4)
+const TRAINING_HALL_WOOD_COST: int = 10
+const TRAINING_HALL_HP: int = 450
+const TRAINING_HALL_TRAINING_TIME: float = 10.0

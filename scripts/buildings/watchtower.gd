@@ -281,6 +281,10 @@ func _tick_crew_preacher(pr, delta: float) -> void:
 			if d < nearest_d:
 				nearest_d = d
 				nearest = u
+		elif u.sermon_warming_for(pr):
+			# Conversion-resistant target: it does not sit yet, but the sermon
+			# IS running — keep the chant animation and sound going.
+			channeling = true
 	pr.station_channeling = channeling
 	if channeling:
 		if nearest != null:

@@ -60,6 +60,7 @@ const WOOD_NEAR_RADIUS: float = 12.0
 ## Follower rows: kind key -> German label.
 const FOLLOWER_ROWS: Array[Dictionary] = [
 	{"kind": &"brave", "name": "Gefolgsleute", "active": true},
+	{"kind": &"technician", "name": "Techniker", "active": true},
 	{"kind": &"warrior", "name": "Krieger", "active": true},
 	{"kind": &"firewarrior", "name": "Feuerkrieger", "active": true},
 	{"kind": &"preacher", "name": "Prediger", "active": true},
@@ -72,6 +73,7 @@ const FOLLOWER_ROWS: Array[Dictionary] = [
 
 const HUT_SCENE: PackedScene = preload("res://scenes/buildings/hut.tscn")
 const WARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/warrior_camp.tscn")
+const TRAINING_HALL_SCENE: PackedScene = preload("res://scenes/buildings/training_hall.tscn")
 const FIREWARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/firewarrior_camp.tscn")
 const TEMPLE_SCENE: PackedScene = preload("res://scenes/buildings/temple.tscn")
 const FORESTER_SCENE: PackedScene = preload("res://scenes/buildings/forester.tscn")
@@ -240,6 +242,8 @@ static func default_build_entries() -> Array[Dictionary]:
 			"icon": &"firewarrior_camp", "wood_cost": FirewarriorCamp.WOOD_COST, "enabled": true},
 		{"id": &"temple", "name": "Tempel", "scene": TEMPLE_SCENE,
 			"icon": &"temple", "wood_cost": Temple.WOOD_COST, "enabled": true},
+		{"id": &"training_hall", "name": "Ausbildungshalle", "scene": TRAINING_HALL_SCENE,
+			"icon": &"training_hall", "wood_cost": TrainingHall.WOOD_COST, "enabled": true},
 		{"id": &"forester", "name": "Försterei", "scene": FORESTER_SCENE,
 			"icon": &"forester", "wood_cost": Forester.WOOD_COST, "enabled": true},
 		{"id": &"workshop", "name": "Katapultwerkstatt", "scene": WORKSHOP_SCENE,
@@ -1015,6 +1019,8 @@ static func _crew_kind_label(kind: StringName) -> String:
 	match kind:
 		&"brave":
 			return "Gefolgsmann"
+		&"technician":
+			return "Techniker"
 		&"warrior":
 			return "Krieger"
 		&"firewarrior":
@@ -1158,14 +1164,15 @@ func _crew_view(target: Object) -> Dictionary:
 	if target is Airship:
 		var a: Airship = target as Airship
 		return {"members": a.crew, "cap": a.max_crew,
-			"info": "Passagiere: %d/%d  (Kampf nur im Stand, +3 Reichweite)%s" % [
-				a.boarded_count(), a.max_crew,
+			"info": "Passagiere: %d/%d  (Kampf nur im Stand, +3 Reichweite)%s%s" % [
+				a.boarded_count(), a.max_crew, _technician_hint(a),
 				"  — neutral" if a.is_neutral() else ""]}
 	if target is CrewedVehicle:
 		var e: CrewedVehicle = target as CrewedVehicle
 		return {"members": e.crew, "cap": e.max_crew,
-			"info": "Besatzung: %d/%d  %s%s" % [
+			"info": "Besatzung: %d/%d  %s%s%s" % [
 				e.boarded_count(), e.max_crew, _vehicle_crew_hint(e),
+				_technician_hint(e),
 				"  — neutral" if e.is_neutral() else ""]}
 	if target is TrainingBuilding:
 		var tb: TrainingBuilding = target as TrainingBuilding
@@ -1182,6 +1189,32 @@ func _vehicle_crew_hint(e: CrewedVehicle) -> String:
 		&"fireram":
 			return "(min. 1 fahren & feuern)"
 	return ""
+
+
+## What the technicians aboard are currently worth — empty without one. The
+## bonuses are invisible otherwise: the player would see a faster catapult and
+## not know why (and would not know it drops again when the technician is
+## converted away).
+func _technician_hint(e: CrewedVehicle) -> String:
+	var n: int = e.technician_crew_count()
+	if n <= 0:
+		return ""
+	var speed_pct: int = int(round(Balance.TECHNICIAN_VEHICLE_SPEED_BONUS * 100.0))
+	match e.unit_kind():
+		&"siege":
+			var s_rate: float = Balance.TECHNICIAN_SIEGE_FIRERATE_BASE 				+ Balance.TECHNICIAN_FIRERATE_PER_EXTRA * float(n - 1)
+			return "  — %d Techniker: +%d %% Tempo, +%d %% Feuerrate" % [
+				n, speed_pct, int(round(s_rate * 100.0))]
+		&"fireram":
+			var r_rate: float = Balance.TECHNICIAN_FIRERAM_FIRERATE_BASE 				+ Balance.TECHNICIAN_FIRERATE_PER_EXTRA * float(n - 1)
+			return "  — %d Techniker: +%d %% Tempo, +%d %% Feuerrate, resistent" % [
+				n, speed_pct, int(round(r_rate * 100.0))]
+		&"airship":
+			if n < 2:
+				return "  — 1 Techniker: +%d %% Tempo, Hüllenreparatur" % [speed_pct]
+			return "  — %d Techniker: +%d %% Tempo, Hüllenreparatur, Stärke x%d" % [
+				n, speed_pct, n - 1]
+	return "  — %d Techniker: +%d %% Tempo" % [n, speed_pct]
 
 
 ## Whether the target has a production the player can pause (crew tab toggle).
