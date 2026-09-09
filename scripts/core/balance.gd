@@ -183,7 +183,7 @@ const VEHICLE_CREW_BOARD_TIMEOUT: float = 45.0
 const VEHICLE_NEUTRAL_TAKEOVER_TIME: float = 10.0
 ## Brenndauer des Fahrzeugs nach Feuerzauber-Treffer, dann versinkt das Wrack.
 const SIEGE_VEHICLE_BURN_TIME: float = 3.0
-const SIEGE_FIRE_RANGE: float = 15.0
+const SIEGE_FIRE_RANGE: float = 16.0
 ## Ziele näher dran kann der Bogenschuss nicht treffen.
 const SIEGE_MIN_RANGE: float = 3.0
 const SIEGE_AGGRO_RADIUS: float = 20.0

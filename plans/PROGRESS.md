@@ -10856,3 +10856,19 @@ Siege-Regel, Rammenwerkstatt 3x6, Turmbesatzungs-Regel, Feuerregen ~100 statt ~6
 Baelle); `docs/game_mechanics.md` HP-Spalte nachgezogen — die uebrigen Zahlen
 dieser Tabelle (Holzkosten, Foerster 5x2, Werkstatt 8x4, Beten-Mana) sind aelter
 als der Code und stehen jetzt unter einem Vorbehaltshinweis.
+
+---
+
+## Balance 2026-09-09: Katapult-Reichweite 15 -> 16 m
+
+`Balance.SIEGE_FIRE_RANGE` von 15,0 auf **16,0** (Nutzerwunsch). Eine Zeile —
+alles andere liest die Konstante symbolisch (`SiegeEngine.FIRE_RANGE`,
+`RangeRenderer.range_for_kind(&"siege")`, samtliche Prueflinien in
+`test_siege.gd`), es war also keine Testanpassung noetig. Angrenzende Werte
+bleiben stimmig: `SIEGE_MIN_RANGE` 3,0 und `SIEGE_AGGRO_RADIUS` 20,0 > 16,0 —
+das Katapult scannt weiterhin weiter, als es schiesst.
+
+**Doku:** `docs/game_mechanics.md` Katapult-Zeile (3-15 m -> 3-16 m). Der
+historische Absatz weiter oben in dieser Datei ("Katapult-Crew auf 15 m bleibt
+ausser Bekehrreichweite") bleibt als Protokolleintrag stehen; die 8-m-Grenze der
+Bekehrung liegt weiterhin deutlich darunter.
