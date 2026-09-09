@@ -18,6 +18,7 @@ const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
 const FIREWARRIOR_SCENE: PackedScene = preload("res://scenes/units/firewarrior.tscn")
 const PREACHER_SCENE: PackedScene = preload("res://scenes/units/preacher.tscn")
 const SHAMAN_SCENE: PackedScene = preload("res://scenes/units/shaman.tscn")
+const TECHNICIAN_SCENE: PackedScene = preload("res://scenes/units/technician.tscn")
 const SIEGE_SCENE: PackedScene = preload("res://scenes/units/siege_engine.tscn")
 const FIRE_RAM_SCENE: PackedScene = preload("res://scenes/units/fire_ram.tscn")
 const AIRSHIP_SCENE: PackedScene = preload("res://scenes/units/airship.tscn")
@@ -73,6 +74,14 @@ const DEBUG_ZEPPELINS: int = 3
 const DEBUG_CATAPULTS: int = 2
 const DEBUG_FIRERAMS: int = 4
 const DEBUG_REAR_OFFSET: int = 14      # cells behind the army anchor (rear direction)
+## Technicians in the debug battle (user request 2026-09-09): HALF the ground
+## vehicles per side run on an all-technician crew, so a boosted catapult/ram
+## stands right next to an identical plain one and the difference is visible in
+## the same battle. Exactly ONE zeppelin per side carries 3 technicians and
+## 3 firewarriors — two strength stacks for everyone aboard (1.5^2 = 2.25x
+## fireball damage) plus hull repair.
+const DEBUG_TECH_ZEPPELINS: int = 1
+const DEBUG_ZEPPELIN_TECHS: int = 3
 
 ## Stress-test match (main-menu "Stresstest", phase 8.2 follow-up): four full
 ## armies (tribe 0 stays player-controllable, the other three are scripted —
@@ -531,9 +540,21 @@ func _place_chamber_buildings(tribe: Tribe, plan: Array, nav: NavGrid) -> void:
 func _crew_vehicle_full(vehicle: CrewedVehicle, tribe_id: int) -> void:
 	if vehicle == null:
 		return
+	var scenes: Array[PackedScene] = []
 	for i in range(vehicle.max_crew):
-		var scene: PackedScene = FIREWARRIOR_SCENE if i % 2 == 0 else PREACHER_SCENE
-		var u: Unit = _unit_manager.spawn_unit(scene, tribe_id, vehicle.position)
+		scenes.append(FIREWARRIOR_SCENE if i % 2 == 0 else PREACHER_SCENE)
+	_crew_vehicle_with(vehicle, tribe_id, scenes)
+
+
+## Boards one unit per entry in `scenes` onto the vehicle, instantly (no
+## walk-in). The caller decides the exact composition — the debug battle uses it
+## to put a plain crew and an all-technician crew side by side.
+func _crew_vehicle_with(vehicle: CrewedVehicle, tribe_id: int,
+		scenes: Array[PackedScene]) -> void:
+	if vehicle == null:
+		return
+	for i in range(mini(scenes.size(), vehicle.max_crew)):
+		var u: Unit = _unit_manager.spawn_unit(scenes[i], tribe_id, vehicle.position)
 		if u == null:
 			continue
 		u.order_crew(vehicle)
@@ -576,7 +597,9 @@ func _setup_debug_battle(nav: NavGrid) -> void:
 	_spawn_debug_shaman(0, blue_anchor + Vector2i(-6, 0), nav)
 	_spawn_debug_shaman(1, red_anchor + Vector2i(6, 0), nav)
 	# Reinforcements per side: 3 zeppelins, 2 catapults, 4 fire rams (all fully
-	# crewed) plus 100 extra foot units, spawned in each army's rear.
+	# crewed — half the ground vehicles by technicians, and one zeppelin with a
+	# 3 technicians + 3 firewarriors deck) plus 100 extra foot units, spawned in
+	# each army's rear.
 	_spawn_debug_reinforcements(0, blue_anchor, Vector2i(-1, 0), nav)
 	_spawn_debug_reinforcements(1, red_anchor, Vector2i(1, 0), nav)
 	# March each army at the enemy anchor (attack-move: combatants engage on
@@ -606,22 +629,54 @@ func _orderable_units(tribe_id: int) -> Array[Unit]:
 func _spawn_debug_reinforcements(tribe_id: int, anchor: Vector2i, dir: Vector2i,
 		nav: NavGrid) -> void:
 	var rear: Vector2i = anchor + dir * DEBUG_REAR_OFFSET
+	# Third element of an entry: true = all-technician crew (ground vehicles),
+	# or the zeppelin's mixed technician deck. The first DEBUG_TECH_ZEPPELINS
+	# zeppelins and the first half of each ground vehicle type get technicians.
 	var plan: Array = []
 	for i in range(DEBUG_ZEPPELINS):
-		plan.append([AIRSHIP_SCENE, Vector2i(0, -18 + i * 6)])
+		plan.append([AIRSHIP_SCENE, Vector2i(0, -18 + i * 6),
+			i < DEBUG_TECH_ZEPPELINS])
 	for i in range(DEBUG_CATAPULTS):
-		plan.append([SIEGE_SCENE, Vector2i(dir.x * 6, -4 + i * 8)])
+		plan.append([SIEGE_SCENE, Vector2i(dir.x * 6, -4 + i * 8),
+			i < DEBUG_CATAPULTS / 2])
 	for i in range(DEBUG_FIRERAMS):
-		plan.append([FIRE_RAM_SCENE, Vector2i(dir.x * 6, 8 + i * 5)])
+		plan.append([FIRE_RAM_SCENE, Vector2i(dir.x * 6, 8 + i * 5),
+			i < DEBUG_FIRERAMS / 2])
 	for entry in plan:
 		var cell: Vector2i = _find_walkable_near(rear + entry[1], nav, 0)
 		if cell.x < 0:
 			continue
 		var vehicle: CrewedVehicle = _unit_manager.spawn_unit(
 			entry[0], tribe_id, nav.cell_to_world(cell)) as CrewedVehicle
-		_crew_vehicle_full(vehicle, tribe_id)
+		if not bool(entry[2]):
+			_crew_vehicle_full(vehicle, tribe_id)
+		elif entry[0] == AIRSHIP_SCENE:
+			_crew_vehicle_with(vehicle, tribe_id,
+				_debug_deck_crew(vehicle.max_crew))
+		else:
+			_crew_vehicle_with(vehicle, tribe_id,
+				_debug_technician_crew(vehicle.max_crew))
 	# 100 extra foot units (brave/warrior/firewarrior/preacher mix).
 	_spawn_debug_extra_army(tribe_id, rear + dir * 4, DEBUG_EXTRA_ARMY, nav)
+
+
+## An all-technician crew list: every bonus at once (+33 % speed and the full
+## additive fire-rate stack; on the ram also the three resistances).
+func _debug_technician_crew(size: int) -> Array[PackedScene]:
+	var out: Array[PackedScene] = []
+	for i in range(size):
+		out.append(TECHNICIAN_SCENE)
+	return out
+
+
+## The technician zeppelin's deck: DEBUG_ZEPPELIN_TECHS technicians, the rest
+## firewarriors. The technicians never shoot from the deck — they are there for
+## the strength stacks the firewarriors beside them fire with.
+func _debug_deck_crew(size: int) -> Array[PackedScene]:
+	var out: Array[PackedScene] = []
+	for i in range(size):
+		out.append(TECHNICIAN_SCENE if i < DEBUG_ZEPPELIN_TECHS else FIREWARRIOR_SCENE)
+	return out
 
 
 ## Fills walkable cells ring by ring around the anchor with a brave/warrior/

@@ -11009,3 +11009,22 @@ Stand ohne die neuen Tests). Nach dem Anlegen der neuen `class_name`-Skripte
 lief einmal `--headless --import`.
 **Funktionaler Test im Spiel steht noch aus** (Optik der Halle und des
 Techniker-Platzhalters, Buff-Symbol, spuerbarer Tempo-/Feuerratenunterschied).
+
+### Nachtrag: Debugschlacht mit Technikern (2026-09-09)
+
+`main.gd`: In der Debugschlacht ist jetzt **die Haelfte der Bodenfahrzeuge je
+Seite komplett von Technikern bemannt** (1 von 2 Katapulten, 2 von 4 Feuerrammen)
+und **ein Zeppelin je Seite** faehrt mit **3 Technikern + 3 Feuerkriegern** —
+zwei Staerkestapel fuer alle an Deck (2,25x Feuerballschaden) plus
+Huellenreparatur. Damit steht in derselben Schlacht ein geboostetes Fahrzeug
+neben einem baugleichen ohne Techniker.
+
+`_crew_vehicle_full` ist dafuer auf ein allgemeineres `_crew_vehicle_with(
+vehicle, tribe_id, scenes)` aufgeteilt (eine Szene je Platz, sofortiges
+Einsteigen ohne Anmarsch); die Zusammensetzung liefern `_debug_technician_crew`
+und `_debug_deck_crew`. Die Planeintraege in `_spawn_debug_reinforcements`
+tragen jetzt ein drittes Feld (Technikerbesatzung ja/nein).
+
+Verifiziert ist der **Ladecheck** (exit 0) und die volle Suite (6127 passed,
+0 failed) — die Debugschlacht selbst ist ein Laufzeitszenario ohne Testabdeckung
+und muss im Spiel angesehen werden.
