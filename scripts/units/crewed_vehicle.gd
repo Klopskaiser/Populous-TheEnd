@@ -197,10 +197,23 @@ func crew_rides_on_deck() -> bool:
 	return false
 
 
-## Fire-ram rule: the crew ignores ranged harassment and only defends against
-## direct melee (checked by Unit._maybe_retaliate).
+## Vehicle crew ignores ranged harassment and defends only against direct melee
+## pressure (checked by Unit._maybe_retaliate).
+##
+## Introduced for the fire ram, made the rule for EVERY ground vehicle after a
+## user report on the catapult (2026-09-09): a single fireball on a crew member
+## sent it charging across the field at the shooter, and because a member past
+## CREW_LEASH is DROPPED from the crew (_prune_crew), the catapult permanently
+## lost 2-4 of its men — and with them its rate of fire, its technician bonuses
+## and, below min_fire_crew, its ability to shoot at all. Standing next to a
+## siege engine is the crew's job; chasing archers is not.
+##
+## Melee at the vehicle is still answered (see _maybe_retaliate): that fight
+## happens within FLEE_MELEE_RANGE, so the member stays inside the leash.
+## Airship deck crew never retaliates at all (rides_airborne), so this is about
+## ground vehicles only.
 func crew_defends_melee_only() -> bool:
-	return false
+	return true
 
 
 ## Big ring enclosing the vehicle and its side crew (selecting a crew member

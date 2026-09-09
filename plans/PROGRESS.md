@@ -11099,3 +11099,34 @@ sterben.
 Kanten nachgezogen) plus `test_kills_heal_the_golem_up_to_its_maximum` (heilt
 exakt 10, deckelt bei max_health, ohne Kill keine Heilung). Suite 6140 passed,
 0 failed.
+
+### Bugfix: Fahrzeugbesatzung rannte dem Fernbeschuss hinterher (2026-09-09)
+
+**Nutzerreport (Debugschlacht):** ein vollbesetztes Technikerkatapult steht weit
+hinten und wird selbst nicht beschossen — ploetzlich laufen 2-4 Techniker nach
+vorn in den Nahkampf.
+
+**Ursache** (kein Technikerproblem, das Katapult war immer so):
+`Unit._maybe_retaliate` laesst eine Einheit in `State.CREW` gegen JEDEN
+Angreifer zurueckschlagen. Die Ausnahme `crew_defends_melee_only` — nur
+Nahkampf zaehlt — hatte bis dahin ausschliesslich die **Feuerramme**
+(`CrewedVehicle` gab `false` zurueck). Das Fahrzeug selbst ist nicht
+anvisierbar, die Crew steht aber sichtbar daneben und ist ein voellig normales
+Ziel: ein einziger Feuerball genuegte. Und weil `_prune_crew` ein Mitglied
+jenseits von `CREW_LEASH` (8 m) nicht zurueckruft, sondern **aus der Crew
+loescht**, war der Mann dauerhaft weg — mitsamt Feuerrate, Technikerbonus und,
+unter `min_fire_crew`, der Schussfaehigkeit des Katapults.
+
+**Fix:** `CrewedVehicle.crew_defends_melee_only()` liefert jetzt `true`, der
+inzwischen redundante Override in `fire_ram.gd` ist raus. Nahkampf am Fahrzeug
+wird weiter beantwortet (innerhalb `FLEE_MELEE_RANGE` = 1,8 m, also innerhalb
+der Leine). Fuer das Luftschiff aendert sich nichts — Deckbesatzung faellt schon
+vorher ueber `rides_airborne()` aus der Vergeltung.
+
+**Tests** (`test_fire_ram.gd`): `test_catapult_crew_still_retaliates_vs_ranged`
+nagelte das alte Verhalten fest und ist zu
+`test_catapult_crew_ignores_ranged_harassment_too` umgedreht; neu dazu
+`test_ranged_harassment_never_costs_the_catapult_its_crew`, das den eigentlichen
+Schaden misst (ein Feuerkrieger beschiesst die Crew 20 s lang, die Crewstaerke
+muss konstant bleiben). Beide gegen den unveraenderten Code als ROT verifiziert.
+Suite 6144 passed, 0 failed.

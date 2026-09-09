@@ -151,6 +151,19 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
 > **automatische** Nachbesetzen durch fremdes Militär ist strenger und wartet auch bei
 > lediglich einlaufenden Besitzer-Rekruten auf den Timer.
 >
+> **Fahrzeugbesatzung wehrt sich nur gegen Nahkampf** (2026-09-09,
+> `CrewedVehicle.crew_defends_melee_only`, ausgewertet in
+> `Unit._maybe_retaliate`): Beschuss aus der Ferne zieht **niemanden** vom
+> Fahrzeug. Vorher galt das nur für die Feuerramme — ein Nutzerreport aus der
+> Debugschlacht zeigte, warum es für alle gelten muss: ein weit hinten
+> stehendes Katapult verlor durch **einen** Feuerball auf ein Crewmitglied
+> plötzlich 2–4 Mann, die quer über das Feld zum Schützen rannten. Jenseits der
+> Leine (`SIEGE_CREW_LEASH`, 8 m) wird ein Mitglied nämlich **aus der Crew
+> gelöscht** (`_prune_crew`) — mit ihm gehen Feuerrate, Technikerboni und unter
+> `min_fire_crew` die Schussfähigkeit. **Nahkampf am Fahrzeug wird weiter
+> beantwortet**; dieser Kampf bleibt mit `FLEE_MELEE_RANGE` (1,8 m) innerhalb
+> der Leine. Luftschiff-Deckbesatzung wehrt sich ohnehin nie (`rides_airborne`).
+>
 > **Werkstatt-Bemannung:** Die Werkstatt rekrutiert **wiederholt** (jede Sekunde) bis zu
 > zwei untätige eigene Braves im 12-m-Radius für das fertige Fahrzeug, solange es
 > unbemannt am Ausgang steht — nicht mehr nur einmalig im Moment der Fertigstellung.

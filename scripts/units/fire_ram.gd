@@ -14,8 +14,10 @@ class_name FireRam extends CrewedVehicle
 ##   vehicles ignite properly, buildings accrue lava-contact stage damage,
 ##   trees and wood piles catch fire. Friendly fire: flames burn everything
 ##   (consistent with lava and the catapult splash).
-## - Crew is immune to ranged distraction (crew_defends_melee_only): being
-##   shot at never pulls it off the vehicle — only direct melee pressure does.
+## - Crew is immune to ranged distraction: being shot at never pulls it off the
+##   vehicle — only direct melee pressure does. Since 2026-09-09 that is the
+##   rule for EVERY ground vehicle (CrewedVehicle.crew_defends_melee_only), so
+##   the ram no longer overrides it.
 ## - Destruction/boarding/capture exactly like the catapult (CrewedVehicle).
 
 const MAX_CREW: int = Balance.FIRERAM_MAX_CREW
@@ -146,10 +148,6 @@ func pick_size_m() -> Vector2:
 ## far above the flame cone.
 func _may_target_vehicle(enemy: Unit) -> bool:
 	return enemy is CrewedVehicle and not enemy.crew_rides_on_deck()
-
-
-func crew_defends_melee_only() -> bool:
-	return true
 
 
 func aggro_radius() -> float:

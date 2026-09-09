@@ -371,7 +371,13 @@ func test_ram_crew_ignores_ranged_harassment() -> void:
 	_free_world(w)
 
 
-func test_catapult_crew_still_retaliates_vs_ranged() -> void:
+## Bis 2026-09-09 war der Katapultkrieg das Gegenstueck ("retaliates vs ranged").
+## Nutzerreport aus der Debugschlacht: ein weit hinten stehendes, gar nicht
+## beschossenes Katapult verlor ploetzlich 2-4 Mann, die nach vorn in den
+## Nahkampf rannten — ein einziger Feuerball auf ein Crewmitglied genuegte, und
+## jenseits der Leine wird es aus der Crew GELOESCHT (_prune_crew). Seitdem gilt
+## die Ramme-Regel fuer jedes Bodenfahrzeug.
+func test_catapult_crew_ignores_ranged_harassment_too() -> void:
 	var w: Dictionary = _make_world()
 	var engine: SiegeEngine = w.unit_manager.spawn_unit(
 		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(60, 60))) as SiegeEngine
@@ -379,8 +385,38 @@ func test_catapult_crew_still_retaliates_vs_ranged() -> void:
 	var shooter: Unit = w.unit_manager.spawn_unit(
 		FIREWARRIOR_SCENE, 1, engine.position + Vector3(-6.0, 0, 0))
 	crew._maybe_retaliate(shooter)
-	check(crew.attack_target == shooter,
-		"catapult crew behaviour is unchanged (retaliates vs ranged)")
+	check(crew.state == Unit.State.CREW,
+		"catapult crew stays at its post when shot at from range")
+	check(crew.attack_target == null, "and locks no counter-target")
+	# Direct melee at the vehicle IS answered — that fight stays inside the leash.
+	var brawler: Unit = w.unit_manager.spawn_unit(
+		WARRIOR_SCENE, 1, crew.position + Vector3(0.8, 0, 0))
+	crew._maybe_retaliate(brawler)
+	check(crew.attack_target == brawler, "direct melee IS retaliated")
+	_free_world(w)
+
+
+## Der eigentliche Schaden des alten Verhaltens: wer dem Schuetzen nachlaeuft,
+## reisst die Leine und ist die Crew LOS. Diese Zusicherung faellt, sobald
+## jemand crew_defends_melee_only wieder auf false setzt.
+func test_ranged_harassment_never_costs_the_catapult_its_crew() -> void:
+	var w: Dictionary = _make_world()
+	var engine: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(60, 60))) as SiegeEngine
+	for i in range(3):
+		_board_crew(w, engine)
+	var before: int = engine.active_crew_count()
+	check(before == 3, "three men serve the catapult")
+	# A firewarrior 8 m away really shoots at the crew for a while.
+	var shooter: Unit = w.unit_manager.spawn_unit(
+		FIREWARRIOR_SCENE, 1, engine.position + Vector3(-8.0, 0, 0))
+	shooter.order_attack(engine.crew[0])
+	for i in range(400):
+		_tick_world(w)
+		if engine.active_crew_count() < before:
+			break
+	check(engine.active_crew_count() == before,
+		"nobody left the catapult to chase the shooter")
 	_free_world(w)
 
 
