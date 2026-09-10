@@ -1068,6 +1068,44 @@ func test_unload_drops_all_passengers_at_the_target() -> void:
 	_free_world(w)
 
 
+## Ein herrenloses Luftschiff ist kein Dauerzustand (Nutzervorgabe 2026-09-10):
+## es treibt zwar heim, sprengt sich aber wie jedes andere Fahrzeug nach
+## CrewedVehicle.UNCREWED_LIFETIME ohne Besatzung. Bis dahin war der Zeppelin
+## der EINZIGE Fahrzeugtyp, der sich davon ausgenommen hat.
+##
+## Der Zaehler wird vorgestellt statt 180 s auszuticken: der gepruefte Pfad
+## (Prune-Block -> _no_crew_time -> _destroy_vehicle) laeuft damit vollstaendig,
+## nur eben ohne 1800 Leertakte.
+func test_an_abandoned_airship_blows_up_like_every_vehicle() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(40, 40)))
+	check(ship.destroys_when_uncrewed(),
+		"the airship is no longer exempt from the crewless self-destruct")
+	check(ship.crew.is_empty(), "and it really has nobody aboard")
+	ship._no_crew_time = CrewedVehicle.UNCREWED_LIFETIME - 2.0
+	var ticks: int = 0
+	while ship.state != Unit.State.DEAD and ticks < 200:
+		_tick_world(w)
+		ticks += 1
+	check(ship.state == Unit.State.DEAD,
+		"the abandoned ship destroyed itself (%.1f s of grace)"
+		% CrewedVehicle.UNCREWED_LIFETIME)
+	_free_world(w)
+
+
+## Gegenprobe: mit Besatzung laeuft der Zaehler gar nicht erst.
+func test_a_crewed_airship_never_times_out() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(40, 40)))
+	_board(w, ship, BRAVE_SCENE)
+	ship._no_crew_time = CrewedVehicle.UNCREWED_LIFETIME - 2.0
+	for i in range(200):
+		_tick_world(w)
+	check(ship.state != Unit.State.DEAD, "a manned ship is never abandoned")
+	check_near(ship._no_crew_time, 0.0, "and the timer was reset by its crew")
+	_free_world(w)
+
+
 func test_empty_ship_drifts_toward_the_start_island() -> void:
 	var td: TerrainData = _flat_terrain()
 	for z in range(td.size):

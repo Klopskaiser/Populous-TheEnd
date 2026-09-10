@@ -11172,3 +11172,36 @@ gemessen — kein Mehraufwand. (Absolut lagen beide Werte deutlich ueber den
 ~47 s vom Vortag; die Maschine war an diesem Tag durchgehend langsamer, auch bei
 Testdateien ohne jeden Fahrzeugbezug. Genau dafuer gilt die Regel, Laufzeiten nur
 gegen denselben Commit auf derselben Maschine zu vergleichen.)
+
+### Herrenlose Zeppeline sprengen sich jetzt auch (2026-09-10)
+
+**Nutzerfrage:** greift die automatische Zerstoerung unbemannter Fahrzeuge auch
+beim Zeppelin? **Nein** — er war der EINZIGE Typ, der sich davon ausgenommen
+hatte: `Airship.destroys_when_uncrewed()` lieferte hart `false`, mit der
+Begruendung "leere Schiffe treiben heim statt zu bersten" (`_tick_drift`). Der
+Rest der Regel steht in `CrewedVehicle.tick`: Crewliste leer -> `_no_crew_time`
+laeuft im 0,5-s-Prune-Block hoch -> bei `UNCREWED_LIFETIME` (180 s)
+`_destroy_vehicle(true)`.
+
+**Geaendert:** der Override ist raus, das Luftschiff erbt die Regel. Das
+Heimtreiben bleibt — es ist jetzt eine Gnadenfrist, kein Freibrief. Zusaetzlich
+routet `Airship._destroy_vehicle()` auf die schiffseigene `explode()`
+(Huellentruemmer in der Luft) statt auf den Bodenwrack-Pfad der Basisklasse, der
+ein Wrack in das Gelaende WEIT UNTER dem Schiff versinken liesse. Davon
+profitiert auch der zweite Aufrufer, der Gelaende-Riss-Tod.
+
+**Tests** (`test_airship.gd`, beide ohne die Aenderung rot):
+`test_an_abandoned_airship_blows_up_like_every_vehicle` und die Gegenprobe
+`test_a_crewed_airship_never_times_out`. Der Zaehler wird vorgestellt statt
+180 s auszuticken — der geprueste Pfad laeuft dadurch vollstaendig, nur ohne
+1800 Leertakte.
+
+**Nebenbefund, NICHT behoben:** der Zweig direkt darueber im selben Block,
+`_chassis_height_span() > BREAK_HEIGHT_SPAN -> _destroy_vehicle(true)`, ist
+**nicht** mit `not flies` abgesichert (der Wasser-Zweig darueber schon).
+`_chassis_height_span()` misst die Gelaendehoehen UNTER dem Rumpf, ohne die
+Flughoehe zu beachten — ein Luftschiff ueber einer Klippe oder Vulkanflanke
+erfuellt die 3,5-m-Bedingung also und zerplatzt. Ob das im Spiel wirklich
+ausloest, ist nicht geprueft; der Einzeiler waere `and not flies`.
+
+**Verifikation:** Ladecheck exit 0, Suite **6165 passed, 0 failed**.

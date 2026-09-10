@@ -25,7 +25,11 @@ class_name Airship extends CrewedVehicle
 ##   deck and falls ~12 m (the throw path applies the crash damage again as
 ##   fall damage; water landing drowns). The hull bursts into debris.
 ## - Empty airships DRIFT slowly toward terrain reachable from the start
-##   bases (nearest reincarnation site's island) so they never strand.
+##   bases (nearest reincarnation site's island) so they never strand — but the
+##   drift is a grace period, not a reprieve: like every vehicle they blow up
+##   after CrewedVehicle.UNCREWED_LIFETIME without a crew (user spec 2026-09-10;
+##   until then the airship opted out of that rule and an abandoned ship drifted
+##   forever).
 
 const MAX_CREW: int = Balance.AIRSHIP_MAX_CREW
 const MIN_MOVE_CREW: int = Balance.AIRSHIP_MIN_MOVE_CREW
@@ -572,10 +576,13 @@ func explode() -> void:
 
 # --- Ticking ------------------------------------------------------------------------------
 
-## Empty airships must not burst like a stranded siege engine — they drift home
-## (see _tick_drift), so they opt out of the crewless self-destruct.
-func destroys_when_uncrewed() -> bool:
-	return false
+## An abandoned ship blows up like any other vehicle (see
+## CrewedVehicle.destroys_when_uncrewed, inherited) — but through its OWN
+## explosion, not the ground wreck: hull debris in the air instead of a chassis
+## sinking into the terrain far below it. Also the right path for the
+## terrain-rip death, which used to leave a "sunken" hull at altitude.
+func _destroy_vehicle(_burst: bool) -> void:
+	explode()
 
 
 func tick(delta: float) -> void:

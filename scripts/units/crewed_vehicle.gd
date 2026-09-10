@@ -336,8 +336,10 @@ func drown() -> void:
 # --- Vehicle destruction --------------------------------------------------------
 
 ## Whether this vehicle self-destructs after UNCREWED_LIFETIME without crew.
-## True for ground siege engines (catapult, fire ram); the airship overrides it
-## to false so empty ships keep drifting home instead of bursting.
+## True for EVERY vehicle including the airship (user spec 2026-09-10): an empty
+## ship still drifts home, but that is a grace period, not an exemption. The
+## hook stays because it is the natural switch for a future vehicle that should
+## survive abandonment.
 func destroys_when_uncrewed() -> bool:
 	return true
 
@@ -906,8 +908,9 @@ func tick(delta: float) -> void:
 		elif state != State.DEAD and _chassis_height_span() > BREAK_HEIGHT_SPAN:
 			_destroy_vehicle(true)
 		# Abandoned: no crew (and none inbound, crew already pruned above) for
-		# UNCREWED_LIFETIME seconds -> the siege engine bursts. Airships opt out
-		# (empty ones drift home instead, see destroys_when_uncrewed).
+		# UNCREWED_LIFETIME seconds -> the vehicle bursts. Airships included
+		# since 2026-09-10; they drift home first, but an empty ship nobody
+		# re-mans is gone like any other abandoned vehicle.
 		elif state != State.DEAD and destroys_when_uncrewed():
 			if crew.is_empty():
 				_no_crew_time += 0.5

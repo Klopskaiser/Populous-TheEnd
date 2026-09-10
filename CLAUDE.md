@@ -151,6 +151,16 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
 > **automatische** Nachbesetzen durch fremdes Militär ist strenger und wartet auch bei
 > lediglich einlaufenden Besitzer-Rekruten auf den Timer.
 >
+> **Herrenlose Fahrzeuge sprengen sich nach 3 Minuten** (`CrewedVehicle.
+> UNCREWED_LIFETIME` = 180 s, Schalter `destroys_when_uncrewed`): sobald die
+> Crewliste **leer** ist — anlaufende Rekruten zählen mit und setzen den Zähler
+> zurück — läuft die Uhr, danach zerplatzt das Fahrzeug. Das gilt seit
+> 2026-09-10 **auch für das Luftschiff**, das sich vorher als einziger Typ davon
+> ausgenommen hatte: ein leerer Zeppelin treibt weiter heim (`_tick_drift`),
+> aber das ist eine Gnadenfrist und kein Freibrief. Der Zeppelin stirbt dabei
+> über seine **eigene** `explode()` (Hüllentrümmer in der Luft) statt als
+> Bodenwrack zu versinken.
+>
 > **Fahrzeugbesatzung wehrt sich nur gegen Nahkampf** (2026-09-09,
 > `CrewedVehicle.crew_defends_melee_only`, ausgewertet in
 > `Unit._maybe_retaliate`): Beschuss aus der Ferne zieht **niemanden** vom
