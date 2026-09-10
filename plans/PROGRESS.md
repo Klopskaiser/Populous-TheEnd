@@ -11130,3 +11130,45 @@ nagelte das alte Verhalten fest und ist zu
 Schaden misst (ein Feuerkrieger beschiesst die Crew 20 s lang, die Crewstaerke
 muss konstant bleiben). Beide gegen den unveraenderten Code als ROT verifiziert.
 Suite 6144 passed, 0 failed.
+
+### Nachtrag: brennende Technikerbesatzung bedient die Feuerramme weiter (2026-09-10)
+
+Nutzervorgabe. Ausgangslage: `active_crew_count()` schloss jedes brennende
+Mitglied vom Dienst aus. Die Feuerramme faehrt aber durch ihren EIGENEN
+Flammenkegel und zuendet dabei ihre Besatzung an — eine reine Technikercrew
+setzte sich damit selbst ausser Gefecht, das Fahrzeug wurde neutral und hoerte
+auf zu feuern, obwohl der Brand den feuerresistenten Technikern kaum etwas tut
+(5 statt 15 HP/s, keine Panik).
+
+**Umsetzung:** die Dienstbedingung liegt jetzt in EINEM Praedikat
+`CrewedVehicle._crew_serves(m)` (vorher zweimal ausgeschrieben in
+`active_crew_count` und `technician_crew_count`, mit dem Risiko auseinander zu
+laufen). Der Brand nimmt ein Mitglied nur dann aus dem Dienst, wenn es KEINE
+Feuerresistenz hat:
+
+    if m.is_burning() and not m.has_buff(Unit.BUFF_FIRE_RESIST):
+        return false
+
+Der Aufhaenger ist bewusst der **Buff**, nicht die Einheitenart (Nutzervorgabe
+"bzw. mit dem Feuerresistenzbuff"). Damit ist die Ausnahme automatisch genau so
+weit, wie sie sein soll: nur die Feuerramme verteilt diese Aura, und nur an
+Techniker (`FireRam.crew_aura_for`). Ein brennender Brave auf derselben Ramme
+faellt weiter aus, ein brennender Techniker auf dem Katapult ebenfalls — dort
+gibt es die Aura nicht. Ein spaeterer Feuerresistenz-ZAUBER wuerde die Regel
+erben, was gewollt ist.
+
+**Tests** (`test_technician.gd`, alle vier gegen den unveraenderten Code als ROT
+verifiziert): brennender Techniker dient weiter und haelt die Ramme nicht-neutral;
+die Ramme zuendet ihr Ziel an, WAEHREND die eigene Crew brennt (der Techniker
+wird dafuer jeden Tick neu angezuendet — ohne das laeuft der 4-s-Brand einfach ab
+und der Test waere zahnlos); brennender Brave auf der Ramme faellt aus;
+brennender Techniker auf dem Katapult faellt aus. Die beiden Gegenproben
+bekommen per Hand Panikresistenz, damit sie wirklich das BRENNEN messen und
+nicht die Panik, die ein brennendes Mitglied sonst ohnehin vom Posten wirft.
+
+**Verifikation:** Ladecheck exit 0, Suite **6160 passed, 0 failed**. Laufzeit
+73,3 s gegen 76,7 s auf dem unveraenderten HEAD, unmittelbar hintereinander
+gemessen — kein Mehraufwand. (Absolut lagen beide Werte deutlich ueber den
+~47 s vom Vortag; die Maschine war an diesem Tag durchgehend langsamer, auch bei
+Testdateien ohne jeden Fahrzeugbezug. Genau dafuer gilt die Regel, Laufzeiten nur
+gegen denselben Commit auf derselben Maschine zu vergleichen.)

@@ -334,6 +334,87 @@ func test_airship_strength_aura_starts_with_the_second_technician() -> void:
 	_free_world(w)
 
 
+## Brennende Technikerbesatzung bedient die Feuerramme weiter (Nutzervorgabe
+## 2026-09-10). Die Ramme faehrt durch ihren eigenen Flammenkegel und zuendet
+## dabei die eigene Crew an — mit Feuerresistenz ist das folgenlos (5 statt
+## 15 HP/s, keine Panik), also darf es sie auch nicht aus dem Dienst nehmen.
+func test_a_burning_technician_keeps_serving_the_fire_ram() -> void:
+	var w: Dictionary = _make_world()
+	var ram: FireRam = _spawn(w, FIRERAM_SCENE, Vector2i(30, 30)) as FireRam
+	var tech: Unit = _board(w, ram, TECHNICIAN_SCENE)
+	for i in range(10):
+		_tick_world(w)
+	check(tech.has_buff(Unit.BUFF_FIRE_RESIST), "the ram made him heat-proof")
+	check(ram.active_crew_count() == 1, "he serves")
+	tech.scorch(tech.position + Vector3(1.0, 0, 0))
+	check(tech.is_burning(), "and now he is on fire")
+	check(tech.state == Unit.State.CREW, "fire resistance keeps him at his post")
+	check(ram.active_crew_count() == 1, "a burning technician still serves the ram")
+	check(ram.technician_crew_count() == 1, "and still counts for the bonus")
+	check(not ram.is_neutral(), "so the ram never falls neutral")
+	_free_world(w)
+
+
+## Und er FEUERT auch wirklich weiter — der eigentliche Punkt der Vorgabe.
+func test_a_burning_technician_crew_still_fires_the_ram() -> void:
+	var w: Dictionary = _make_world()
+	var ram: FireRam = _spawn(w, FIRERAM_SCENE, Vector2i(30, 30)) as FireRam
+	var tech: Unit = _board(w, ram, TECHNICIAN_SCENE)
+	for i in range(10):
+		_tick_world(w)
+	var foe: Unit = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 1, ram.position + Vector3(0, 0, 2.2))
+	ram.order_attack(foe)
+	# Re-lit EVERY tick: without that the 4-s burn simply lapses and the ram
+	# fires afterwards — the test would pass with or without the rule.
+	var ticks: int = 0
+	while not foe.is_burning() and ticks < 200:
+		tech.scorch(tech.position + Vector3(1.0, 0, 0))
+		_tick_world(w)
+		ticks += 1
+	check(tech.is_burning(), "the crew is still alight at the end")
+	check(foe.is_burning(),
+		"the ram burnt its target while its own crew was on fire (%d ticks)" % ticks)
+	_free_world(w)
+
+
+## Gegenprobe 1: ein brennender BRAVE auf derselben Ramme faellt aus — er
+## bekommt die Aura nicht (sie gilt nur Technikern).
+func test_a_burning_brave_on_the_ram_still_drops_out() -> void:
+	var w: Dictionary = _make_world()
+	var ram: FireRam = _spawn(w, FIRERAM_SCENE, Vector2i(30, 30)) as FireRam
+	var brave: Unit = _board(w, ram, BRAVE_SCENE)
+	for i in range(10):
+		_tick_world(w)
+	check(not brave.has_buff(Unit.BUFF_FIRE_RESIST), "no aura for a brave")
+	check(ram.active_crew_count() == 1, "he serves while unhurt")
+	# Panikresistenz per Hand, damit der Test WIRKLICH das Brennen misst und
+	# nicht die Panik, die einen brennenden Brave ohnehin vom Posten wirft.
+	brave.apply_buff(Unit.BUFF_PANIC_RESIST, 60.0)
+	brave.scorch(brave.position + Vector3(1.0, 0, 0))
+	check(brave.state == Unit.State.CREW, "he stays put (panic-proof for the test)")
+	check(ram.active_crew_count() == 0,
+		"but burning WITHOUT fire resistance takes him out of service")
+	_free_world(w)
+
+
+## Gegenprobe 2: derselbe Techniker auf einem KATAPULT faellt aus — dort gibt es
+## die Aura nicht, die Ausnahme haengt am Buff und nicht an der Einheitenart.
+func test_a_burning_technician_on_a_catapult_drops_out() -> void:
+	var w: Dictionary = _make_world()
+	var cat: SiegeEngine = _spawn(w, SIEGE_SCENE, Vector2i(30, 30)) as SiegeEngine
+	var tech: Unit = _board(w, cat, TECHNICIAN_SCENE)
+	for i in range(10):
+		_tick_world(w)
+	check(not tech.has_buff(Unit.BUFF_FIRE_RESIST), "the catapult grants no aura")
+	tech.apply_buff(Unit.BUFF_PANIC_RESIST, 60.0)
+	tech.scorch(tech.position + Vector3(1.0, 0, 0))
+	check(tech.state == Unit.State.CREW, "he stays put (panic-proof for the test)")
+	check(cat.active_crew_count() == 0,
+		"a burning technician without the ram's aura is out of service")
+	_free_world(w)
+
+
 func test_airship_hull_repair_needs_a_technician() -> void:
 	var w: Dictionary = _make_world()
 	var plain: Airship = _spawn(w, AIRSHIP_SCENE, Vector2i(30, 30)) as Airship

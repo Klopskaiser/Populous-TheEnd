@@ -540,24 +540,42 @@ func crew_count() -> int:
 
 
 ## Boarded members currently ABLE to serve: only those actually at their post
-## (State.CREW, within the leash, not on fire). Pacified (SIT under a preacher),
-## panicking/burning, tumbling AND individually fighting members (State.ATTACK —
-## self-defence on foot beside the vehicle) still count as boarded (ownership,
-## hijack protection) but cannot drive or fire — a vehicle whose whole crew is
+## (see _crew_serves below). Pacified (SIT under a preacher),
+## panicking, tumbling, burning-without-fire-resistance AND individually fighting
+## members (State.ATTACK — self-defence on foot beside the vehicle) still count
+## as boarded (ownership, hijack protection) but cannot drive or fire — a vehicle whose whole crew is
 ## out of action is NEUTRAL (is_neutral) until someone returns to the post.
 ## Until 2026-09-06 a fighting member (`can_take_orders()` true) counted as
 ## active, so a catapult kept bombarding with its entire crew brawling.
 func active_crew_count() -> int:
 	var count: int = 0
 	for m in crew:
-		if is_instance_valid(m) and m.state == State.CREW and m.siege_boarded \
-				and not m.is_burning() \
-				and _flat_dist(m.position, position) <= CREW_LEASH:
+		if _crew_serves(m):
 			count += 1
 	return count
 
 
-## Technicians among the crew ABLE to serve — same conditions as
+## Is this member at its post AND able to work the machine? The one place that
+## answers it, so active_crew_count and technician_crew_count cannot drift.
+##
+## Burning normally takes a member out of service. The exception is a member
+## carrying FIRE RESISTANCE (user spec 2026-09-10): the flames barely scratch it
+## (5 HP/s instead of 15) and it does not panic, so nothing actually stops it
+## from working. In practice that is the fire ram's own technicians — the ram is
+## the only thing handing that buff to its crew (crew_aura_for) — and that is
+## exactly the case that mattered: a ram driving through its own flame cone must
+## not fall neutral because its heat-proof crew is alight. A burning BRAVE on the
+## same ram, and a burning technician on a catapult (no aura there), still drop
+## out of service.
+func _crew_serves(m) -> bool:
+	if not is_instance_valid(m) or m.state != State.CREW or not m.siege_boarded:
+		return false
+	if m.is_burning() and not m.has_buff(Unit.BUFF_FIRE_RESIST):
+		return false
+	return _flat_dist(m.position, position) <= CREW_LEASH
+
+
+## Technicians among the crew ABLE to serve — same predicate as
 ## active_crew_count on purpose: a technician sitting under a preacher,
 ## panicking or brawling on foot is not working the machine and grants nothing.
 ## Compares unit_kind() instead of `is Technician`, the established pattern
@@ -566,10 +584,7 @@ func active_crew_count() -> int:
 func technician_crew_count() -> int:
 	var count: int = 0
 	for m in crew:
-		if is_instance_valid(m) and m.state == State.CREW and m.siege_boarded \
-				and not m.is_burning() \
-				and m.unit_kind() == &"technician" \
-				and _flat_dist(m.position, position) <= CREW_LEASH:
+		if _crew_serves(m) and m.unit_kind() == &"technician":
 			count += 1
 	return count
 
