@@ -356,6 +356,7 @@ func setup(p_tribes: Array[Tribe], p_player_id: int, p_unit_manager: UnitManager
 func _process(delta: float) -> void:
 	_refresh_crew_tab()   # responsive to selection changes (cheap: a few widgets)
 	_advance_charge_sweeps(delta)   # every frame: the sweep must look continuous
+	_sync_portrait_rest()   # every frame: it shows single frames of the idle run
 	_follower_timer -= delta
 	if _follower_timer <= 0.0:
 		_follower_timer = FOLLOWER_INTERVAL
@@ -1103,12 +1104,19 @@ func _selected_crew_target() -> Object:
 		if is_instance_valid(u) and u is CrewedVehicle and u.state != Unit.State.DEAD \
 				and u.tribe_id == _player_id:
 			return u
+		# A selected golem shows its level, size, health and lifetime in this panel
+		# (user request 2026-11-15) — it has no crew, the slots stay empty.
+		if is_instance_valid(u) and u is Golem and u.state != Unit.State.DEAD \
+				and u.tribe_id == _player_id:
+			return u
 	return null
 
 
 ## Normalised occupancy view of a crew target: occupants list, slot capacity
 ## and info line (bridges the crew/occupants field split across the classes).
 func _crew_view(target: Object) -> Dictionary:
+	if target is Golem:
+		return {"info": (target as Golem).status_text(), "members": [], "cap": 0}
 	if target is Hut:
 		var hut: Hut = target as Hut
 		# 10f: capacity is per upgrade stage, so `cap` (which drives how many slot
@@ -1625,8 +1633,13 @@ func _refresh_portrait() -> void:
 			mat.set_shader_parameter("tint", player.color)
 	if _player_shaman_alive():
 		var shaman: Unit = player.shaman
-		_set_portrait_anim(StringName("%s_front" % shaman.anim_base_name),
-			shaman.anim_base_name)
+		# A standing shaman is frame-driven from _sync_portrait_rest (rest pose,
+		# idle only once in a while) — everything else plays as an animation.
+		if not (shaman.anim_base_name in UnitRenderer.RESTING_ANIMS):
+			_set_portrait_anim(StringName("%s_front" % shaman.anim_base_name),
+				shaman.anim_base_name)
+		else:
+			_sync_portrait_rest()
 		_portrait_hp.value = float(shaman.health) / float(maxi(shaman.max_health, 1))
 		_portrait_status.text = ""
 		_portrait_status.visible = false
@@ -1644,6 +1657,39 @@ func _refresh_portrait() -> void:
 	else:
 		_portrait_status.text = "Keine Wiederkehr"
 	_portrait_status.visible = true
+
+
+## The portrait used to LOOP the idle animation while the shaman stood around —
+## but the world does not (user report 2026-11-15): a standing unit holds its
+## rest pose and the idle animation runs only once every few seconds
+## (UnitRenderer.idle_frame, hashed per unit). The portrait now asks the same
+## function with the same inputs and shows exactly the frame the world shows:
+## the rest pose (stand, or frame 1 of idle without a stand sheet) or the
+## current frame of the idle run. Frame-driven, hence called every frame.
+func _sync_portrait_rest() -> void:
+	if _portrait_sprite == null or not _player_shaman_alive():
+		return
+	var shaman: Unit = _player_tribe().shaman
+	if not (shaman.anim_base_name in UnitRenderer.RESTING_ANIMS):
+		return
+	var frames: SpriteFrames = _portrait_sprite.sprite_frames
+	var idle: StringName = &"idle_front"
+	if frames == null or not frames.has_animation(idle):
+		return
+	var run: int = UnitRenderer.idle_frame(Time.get_ticks_msec() - shaman.anim_start_ms,
+		shaman._idle_seed, shaman._idle_interval_ms, frames.get_frame_count(idle),
+		frames.get_animation_speed(idle))
+	var anim: StringName = idle
+	var frame: int = maxi(run, 0)
+	if run < 0 and frames.has_animation(&"stand_front"):
+		anim = &"stand_front"
+		frame = 0
+	_portrait_sprite.rotation = 0.0
+	if _portrait_sprite.animation != anim:
+		_portrait_sprite.animation = anim
+	_portrait_sprite.pause()
+	if _portrait_sprite.frame != frame:
+		_portrait_sprite.frame = frame
 
 
 func _set_portrait_anim(anim: StringName, base: StringName = &"idle") -> void:

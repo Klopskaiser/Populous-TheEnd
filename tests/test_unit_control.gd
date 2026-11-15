@@ -454,3 +454,78 @@ func test_double_click_kind_filter() -> void:
 	check(picked.size() == 2, "dead units are filtered out")
 	for unit in all_units:
 		unit.free()
+
+
+# --- Move orders and water (user report 2026-11-15) ---------------------------------
+
+## A world with a gently shelving east coast — the ground drops from 5 m at
+## x = 76 to the sea bed at x = 84, the waterline (2 m) lies at x = 80,8 —
+## plus the command API.
+func _make_coast_world() -> Dictionary:
+	var w: Dictionary = _make_world()
+	for vz in range(w.td.verts):
+		for vx in range(76, w.td.verts):
+			w.td.heights[vz * w.td.verts + vx] = maxf(0.0, 5.0 - 0.625 * float(vx - 76))
+	w.nav.update_region(Rect2i(0, 0, w.td.size, w.td.size))
+	var tc: TribeCommands = TribeCommands.new()
+	tc.setup(w.nav, w.building_manager, w.unit_manager, w.tree_manager)
+	w["commands"] = tc
+	return w
+
+
+func _squad(w: Dictionary, count: int, at: Vector2) -> Array[Unit]:
+	var units: Array[Unit] = []
+	for i in range(count):
+		units.append(w.unit_manager.spawn_unit(BRAVE_SCENE, 0,
+			Vector3(at.x + float(i % 4) * 0.8, 5.0, at.y + float(i / 4) * 0.8)))
+	return units
+
+
+## A click on OPEN WATER sends no foot unit anywhere: no target on the sea, and
+## nobody sets off toward it.
+func test_move_order_onto_open_water_is_refused() -> void:
+	var w: Dictionary = _make_coast_world()
+	var units: Array[Unit] = _squad(w, 8, Vector2(60, 60))
+	var sea: Vector3 = Vector3(95.0, 0.0, 62.0)
+	check(w.commands.is_water(sea) and w.commands.land_point(sea) == Vector3.INF,
+		"15 m off the coast is open water: no place for a foot unit")
+	var sent: int = w.commands.order_move(units, sea)
+	check(sent == 0, "the order is refused (nobody was sent)")
+	var moving: int = 0
+	for u in units:
+		if u.state == Unit.State.MOVE or not u.waypoint_queue.is_empty():
+			moving += 1
+	check(moving == 0, "and nobody sets off")
+	_free_world(w)
+
+
+## A click ON THE SHORE lines the group up along it: every unit's target lies on
+## land, none in the water — although the formation would reach out over the sea.
+func test_move_order_at_the_shore_keeps_every_target_on_land() -> void:
+	var w: Dictionary = _make_coast_world()
+	var units: Array[Unit] = _squad(w, 24, Vector2(60, 60))
+	var shore: Vector3 = Vector3(79.5, 2.8, 62.0)
+	check(not w.commands.is_water(shore), "the click point is on land, right at the water")
+	var sent: int = w.commands.order_move(units, shore)
+	check(sent == units.size(), "everyone gets the order")
+	var wet: int = 0
+	var far_off: int = 0
+	for u in units:
+		var goal: Vector3 = u.waypoint_queue[u.waypoint_queue.size() - 1]
+		if w.commands.is_water(goal):
+			wet += 1
+		if Vector2(goal.x - shore.x, goal.z - shore.z).length() > 14.0:
+			far_off += 1
+	check(wet == 0, "no unit's target lies in the water")
+	check(far_off == 0, "and all of them stay around the clicked spot")
+	# A click a metre INTO the water still counts as the shore.
+	var paddle: Vector3 = Vector3(81.6, 1.5, 62.0)
+	check(w.commands.is_water(paddle) and w.commands.land_point(paddle) != Vector3.INF,
+		"a metre off the beach is still a click on the shore")
+	check(w.commands.order_move(units, paddle) == units.size(), "so that order is taken too")
+	var wet2: int = 0
+	for u in units:
+		if w.commands.is_water(u.waypoint_queue[u.waypoint_queue.size() - 1]):
+			wet2 += 1
+	check(wet2 == 0, "with every target on land again")
+	_free_world(w)

@@ -83,6 +83,8 @@ var _riders: Array = []
 var _siege_timers: Dictionary = {}
 ## Captured siege engines riding the funnel: {unit, rise: float, angle: float}.
 var _siege_riders: Array = []
+## The visible funnel (built in _ready, so null outside the tree / in tests).
+var _visual: TornadoVisual = null
 
 
 func setup(p_tribe_id: int, at: Vector3, p_unit_manager: UnitManager,
@@ -140,6 +142,8 @@ func tick(delta: float) -> void:
 	_life -= delta
 	if _life <= 0.0:
 		_release_all_riders()
+		if _visual != null and is_instance_valid(_visual):
+			_visual.dissipate()   # outlives this node by its fade-out
 		done = true
 		return
 	_tick_drift(delta)
@@ -422,22 +426,9 @@ func _ready() -> void:
 		# The howl follows the funnel and is released automatically once this
 		# node is freed (AudioManager._process).
 		SpellAudio.start_loop(self, SpellAudio.effect_name(sfx_id, &"_loop"))
-	# Placeholder funnel: a dense stack of widening grey rings.
-	var mat: StandardMaterial3D = StandardMaterial3D.new()
-	mat.albedo_color = Color(0.75, 0.75, 0.78, 0.8)
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	var count: int = 11
-	for i in range(count):
-		var ring: MeshInstance3D = MeshInstance3D.new()
-		var torus: TorusMesh = TorusMesh.new()
-		var t: float = float(i) / float(count - 1)
-		# Narrow where it touches down, flared at the mouth — and the mouth is
-		# exactly the radius the effect uses up there (TOP_WIDEN).
-		var r: float = lerpf(radius * 0.16, radius * TOP_WIDEN, t)
-		torus.inner_radius = r - 0.22 * (radius / 2.2)
-		torus.outer_radius = r
-		ring.mesh = torus
-		ring.material_override = mat
-		ring.position.y = lerpf(0.3, top_height, t)
-		add_child(ring)
+	# The funnel itself (in-tree only): narrow where it touches down, flared at
+	# the mouth — and the mouth is exactly the radius the effect uses up there
+	# (TOP_WIDEN). See TornadoVisual for the look and its readability rules.
+	_visual = TornadoVisual.new()
+	_visual.setup(radius, top_height, global_position)
+	add_child(_visual)

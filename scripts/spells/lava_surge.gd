@@ -8,8 +8,9 @@ class_name LavaSurge extends Node3D
 ## would have to climb. While molten it ignites every unit it covers
 ## (Unit.ignite — lava knows no friends); the sheet then cools sector by sector
 ## and stays behind as a black scorch skirt until the node expires. Visual: a
-## terrain-conforming radial mesh with a ragged front, in-game only. Ticked via
-## the UnitManager projectile list.
+## sheet built on the TERRAIN'S OWN GRID (so it lies exactly parallel to the
+## ground and no rock can poke through), with a ragged front drawn by the lava
+## shader; in-game only. Ticked via the UnitManager projectile list.
 
 const INNER_RADIUS: float = 0.5      # crater rim
 ## How long a patch keeps glowing after the front passed it.
@@ -22,17 +23,20 @@ const SINK_TIME: float = 1.2
 const SINK_DEPTH: float = 0.9
 const CHECK_INTERVAL: float = Balance.LAVA_CONTACT_INTERVAL
 const VISUAL_INTERVAL: float = Balance.LAVA_VISUAL_INTERVAL
-## Independent fronts around the crater; also the mesh's angular resolution.
+## Independent fronts around the crater.
 const LAVA_SECTORS: int = 20
-const RING_STEP: float = 0.6
-## How far the sheet floats above the ground it covers. A flat ring mesh cuts
-## CHORDS through a curved surface, so on the volcano's cone the rock poked
-## back through the lava (user report). The error grows with the slope —
-## roughly slope x the chord sagitta — hence the slope term on top of the flat
-## base offset. Capped so the sheet never visibly hovers on a cliff face.
-const SURFACE_LIFT: float = 0.10
-const SURFACE_LIFT_PER_SLOPE: float = 0.25
-const SURFACE_LIFT_MAX: float = 0.5
+## How far the sheet floats above the ground it covers. The sheet used to be a
+## polar ring mesh, whose triangles cut CHORDS through the curved terrain — on
+## the volcano's cone the rock poked back through the lava however much lift
+## was added (user reports, twice). Since 2026-11-15 the sheet reuses the
+## terrain's own vertices and its own triangle split, so it is the ground
+## surface moved up by exactly this much — a few centimetres are enough.
+const SURFACE_LIFT: float = 0.08
+## Width of the soft edge the shader frays (metres): the coverage falls from 1
+## to 0 over this distance in front of a sector's front, and the sheet reaches
+## EDGE_REACH beyond the front so the visible edge sits on it, not inside it.
+const EDGE_WIDTH: float = 0.9
+const EDGE_REACH: float = 0.35
 
 var done: bool = false
 var unit_manager: UnitManager = null
@@ -59,7 +63,8 @@ var _sector_radius: PackedFloat32Array = PackedFloat32Array()
 var _sector_front_time: PackedFloat32Array = PackedFloat32Array()
 ## Terrain steepness at each sector's front, taken from the same gradient
 ## probe that drives the flow — the mesh reuses it to lift itself clear of
-## the rock (see SURFACE_LIFT_PER_SLOPE), so it costs no extra samples.
+## the rock, so it costs no extra samples (the mesh no longer needs it since it
+## follows the terrain grid, 2026-11-15).
 var _sector_slope: PackedFloat32Array = PackedFloat32Array()
 var _front_radius: float = INNER_RADIUS   # largest sector radius (hull circle)
 
@@ -130,7 +135,7 @@ func _advance_sectors(step: float) -> void:
 				var grad: Vector3 = LavaCommon.downhill(terrain_data,
 					position.x + dir.x * r, position.z + dir.z * r)
 				slope = grad.dot(dir)
-				_sector_slope[i] = grad.length()   # reused by the mesh lift
+				_sector_slope[i] = grad.length()
 			var advance: float = LavaCommon.flow_speed(slope) * step
 			if advance > 0.0:
 				r = minf(r + advance, max_radius)
@@ -210,9 +215,22 @@ func _band_color(i: int, r: float) -> Color:
 	return LavaCommon.color_for(age, MOLTEN_TIME, age >= MOLTEN_TIME, true)
 
 
-## Terrain-conforming radial triangle strips from the crater rim out to each
-## sector's own front — bands that a slow sector has not reached yet collapse
-## to zero width, which is what makes the front ragged. Rebuilt throttled.
+## Front radius in the direction (dx, dz), interpolated between the two
+## neighbouring sectors — the mesh edge must not jump at a sector boundary.
+func _front_at(dx: float, dz: float) -> float:
+	var f: float = fposmod(atan2(dz, dx), TAU) / TAU * float(LAVA_SECTORS)
+	var i: int = int(f) % LAVA_SECTORS
+	return lerpf(_sector_radius[i], _sector_radius[(i + 1) % LAVA_SECTORS], f - floorf(f))
+
+
+## The sheet, built on the terrain's own grid: every terrain cell the lava
+## reaches contributes its two triangles — the same vertices and the same
+## diagonal as the terrain mesh (Terrain: tl-tr-bl, tr-br-bl) — lifted by
+## SURFACE_LIFT. It therefore lies exactly parallel to the ground; nothing can
+## poke through. The ragged front is not geometry any more: each vertex carries
+## its COVERAGE (1 inside, 0 beyond the front) and the shader frays the edge.
+## Geometry is static for unchanged fronts (no animated factor in here).
+## Rebuilt throttled.
 func _rebuild_mesh() -> void:
 	if _mesh == null or terrain_data == null:
 		return
@@ -220,33 +238,62 @@ func _rebuild_mesh() -> void:
 	im.clear_surfaces()
 	if _front_radius <= INNER_RADIUS + 0.05:
 		return
-	var rings: Array[float] = []
-	var r: float = INNER_RADIUS
-	while r < _front_radius:
-		rings.append(r)
-		r += RING_STEP
-	rings.append(_front_radius)
-	for band in range(rings.size() - 1):
-		var r0: float = rings[band]
-		var r1: float = rings[band + 1]
-		im.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP)
-		for a in range(LAVA_SECTORS + 1):
-			var i: int = a % LAVA_SECTORS
-			var dir: Vector3 = _sector_dir(i)
-			var front: float = _sector_radius[i]
-			# NO per-band bulge: it scaled only the OUTER edge of each band, so
-			# whenever the factor fell below 1 a ring-shaped GAP opened between
-			# band k and band k+1 and the rock showed through — and because the
-			# factor was animated, the whole ragged edge appeared to rotate
-			# (both reported by the user). Adjacent bands now share the exact
-			# same radius; the uneven front comes from the per-sector fronts
-			# alone, which is the real terrain-driven raggedness.
-			var o1: float = minf(r1, front)
-			var o0: float = minf(r0, front)
-			im.surface_set_color(_band_color(i, o1))
-			im.surface_add_vertex(_sheet_point(dir, o1, i))
-			im.surface_set_color(_band_color(i, o0))
-			im.surface_add_vertex(_sheet_point(dir, o0, i))
+	var td: TerrainData = terrain_data
+	var cs: float = TerrainData.CELL_SIZE
+	var reach: float = _front_radius + EDGE_REACH + cs
+	var x0: int = clampi(int(floor((position.x - reach) / cs)), 0, td.size - 1)
+	var x1: int = clampi(int(floor((position.x + reach) / cs)), 0, td.size - 1)
+	var z0: int = clampi(int(floor((position.z - reach) / cs)), 0, td.size - 1)
+	var z1: int = clampi(int(floor((position.z + reach) / cs)), 0, td.size - 1)
+	var cols: int = x1 - x0 + 2
+	var rows: int = z1 - z0 + 2
+	var sink: float = _sink_offset()
+	# One pass over the grid vertices: position, colour, heat and coverage.
+	var pts: PackedVector3Array = PackedVector3Array()
+	var colors: PackedColorArray = PackedColorArray()
+	var uvs: PackedVector2Array = PackedVector2Array()
+	pts.resize(cols * rows)
+	colors.resize(cols * rows)
+	uvs.resize(cols * rows)
+	for rz in range(rows):
+		for rx in range(cols):
+			var vx: int = x0 + rx
+			var vz: int = z0 + rz
+			var xz: Vector2 = td.vertex_mesh_xz(vx, vz)
+			var dx: float = xz.x - position.x
+			var dz: float = xz.y - position.z
+			var r: float = sqrt(dx * dx + dz * dz)
+			var k: int = rz * cols + rx
+			pts[k] = Vector3(dx, td.heights[vz * td.verts + vx] + SURFACE_LIFT - sink
+				- position.y, dz)
+			var sector: int = int(fposmod(atan2(dz, dx), TAU) / TAU
+				* float(LAVA_SECTORS)) % LAVA_SECTORS
+			var inside: float = minf(r, _sector_radius[sector])
+			var age: float = _band_age(sector, inside)
+			var cooled: bool = age >= MOLTEN_TIME
+			colors[k] = LavaCommon.color_for(age, MOLTEN_TIME, cooled, true)
+			uvs[k] = Vector2(LavaCommon.heat_for(age, MOLTEN_TIME, cooled),
+				clampf((_front_at(dx, dz) + EDGE_REACH - r) / EDGE_WIDTH, 0.0, 1.0))
+	var begun: bool = false
+	for rz in range(rows - 1):
+		for rx in range(cols - 1):
+			var tl: int = rz * cols + rx
+			var tr: int = tl + 1
+			var bl: int = tl + cols
+			var br: int = bl + 1
+			if uvs[tl].y <= 0.0 and uvs[tr].y <= 0.0 and uvs[bl].y <= 0.0 \
+					and uvs[br].y <= 0.0:
+				continue   # the lava has not reached this cell
+			if not td.has_ground((float(x0 + rx) + 0.5) * cs, (float(z0 + rz) + 0.5) * cs):
+				continue   # the void beyond the disc's rim
+			if not begun:
+				im.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+				begun = true
+			for k in [tl, tr, bl, tr, br, bl]:
+				im.surface_set_color(colors[k])
+				im.surface_set_uv(uvs[k])
+				im.surface_add_vertex(pts[k])
+	if begun:
 		im.surface_end()
 
 
@@ -256,28 +303,12 @@ func _sink_offset() -> float:
 	return t * SINK_DEPTH
 
 
-## One mesh vertex, lifted clear of the rock it covers: the triangle strips
-## are chords through a curved surface, so on a steep cone the terrain pokes
-## back through a sheet that merely sits 8 cm up (user report, volcano).
-func _sheet_point(dir: Vector3, r: float, sector: int) -> Vector3:
-	var wx: float = position.x + dir.x * r
-	var wz: float = position.z + dir.z * r
-	var lift: float = minf(SURFACE_LIFT
-		+ SURFACE_LIFT_PER_SLOPE * _sector_slope[sector], SURFACE_LIFT_MAX)
-	return Vector3(wx - position.x,
-		terrain_data.get_height(wx, wz) + lift - _sink_offset() - position.y,
-		wz - position.z)
-
-
 func _ready() -> void:
 	# Shared by every lava source (volcano surge, catapult puddle) — throttled
 	# because an eruption stacks several of these.
 	SpellAudio.play_named(self, &"lava_start", global_position, 250)
 	_mesh = MeshInstance3D.new()
 	_mesh.mesh = ImmediateMesh.new()
-	var mat: StandardMaterial3D = StandardMaterial3D.new()
-	mat.vertex_color_use_as_albedo = true
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	_mesh.material_override = mat
+	_mesh.material_override = LavaCommon.make_material()
+	_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(_mesh)

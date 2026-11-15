@@ -366,6 +366,12 @@ func _sync_soa_flags() -> void:
 		_soa_flags[_idx] = _compute_soa_flags()
 
 
+## True for a unit that walks straight through other units (see
+## UnitManager.FLAG_NO_COLLISION). Call _sync_soa_flags() when the answer changes.
+func ignores_unit_collision() -> bool:
+	return false
+
+
 func _compute_soa_flags() -> int:
 	var f: int = 0
 	if flies:
@@ -374,6 +380,8 @@ func _compute_soa_flags() -> int:
 		f |= UnitManager.FLAG_PUSH_IMMUNE
 	if is_crew_seated():
 		f |= UnitManager.FLAG_CREW_SEATED
+	if ignores_unit_collision():
+		f |= UnitManager.FLAG_NO_COLLISION
 	if is_targetable():
 		f |= UnitManager.FLAG_TARGETABLE
 	if unit_kind() == &"preacher":

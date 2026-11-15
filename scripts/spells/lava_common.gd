@@ -34,6 +34,22 @@ static func color_for(age: float, molten_time: float, cooled: bool,
 	return COLOR_HOT.lerp(COLOR_MID, t)
 
 
+## Heat of a patch for the lava shader (UV.x): 1 = just poured, 0 = cooled.
+static func heat_for(age: float, molten_time: float, cooled: bool) -> float:
+	if cooled:
+		return 0.0
+	return 1.0 - clampf(age / maxf(molten_time, 0.01), 0.0, 1.0)
+
+
+## The surface material every lava body uses (shaders/lava.gdshader): the age
+## ramp above stays the base colour, the shader adds the churning melt, crust
+## plates, glowing veins and the ragged edge. One instance per body.
+static func make_material() -> ShaderMaterial:
+	var mat: ShaderMaterial = ShaderMaterial.new()
+	mat.shader = preload("res://shaders/lava.gdshader")
+	return mat
+
+
 ## Downhill direction at a world XZ, with the LENGTH of the local gradient
 ## (rise per metre) — callers need both, and a second probe just to measure
 ## the slope would double the height samples.

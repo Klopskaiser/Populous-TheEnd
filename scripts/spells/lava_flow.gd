@@ -36,6 +36,8 @@ const SURFACE_LIFT_PER_SLOPE: float = 0.25
 const SURFACE_LIFT_MAX: float = 0.5
 ## Mesh resolution across a wide body (metres per lane).
 const LANE_WIDTH: float = 1.0
+## Width of the soft edge the lava shader frays (metres), see LavaSurge.EDGE_WIDTH.
+const EDGE_WIDTH: float = 0.6
 ## Hard cap on how fast the head may swing round (rad/s). A viscous mass does
 ## not pirouette — and without the cap the head coiled up on itself: past the
 ## bottom of a trough the local gradient reverses, it turned back, turned again,
@@ -278,6 +280,7 @@ func _rebuild_ribbon() -> void:
 	var across: PackedVector3Array = PackedVector3Array()
 	var widths: PackedFloat32Array = PackedFloat32Array()
 	var cols: Array[Color] = []
+	var heats: PackedFloat32Array = PackedFloat32Array()
 	for i in range(n):
 		var p: Vector3 = points[i].pos
 		var next: Vector3 = points[mini(i + 1, n - 1)].pos
@@ -295,20 +298,35 @@ func _rebuild_ribbon() -> void:
 		across.append(Vector3(-along.z, 0.0, along.x))
 		widths.append(w)
 		cols.append(_point_color(points[i]))
+		# Heat for the lava shader; both ENDS of the ribbon taper to nothing
+		# (coverage 0), so the tip and the tail fray instead of ending square.
+		heats.append(LavaCommon.heat_for(maxf(float(points[i].age), 0.0), molten_time,
+			bool(points[i].cooled)))
 	# Lanes ACROSS the body. A rivulet needs only its two edges, but a broad
 	# carpet spanning a whole scarp would cut straight through every bump in
 	# between — so it gets an intermediate lane per metre of width.
-	var lanes: int = maxi(1, int(ceil(half_width * 2.0 / LANE_WIDTH)))
+	# At least TWO lanes: the shader frays the edge from the per-vertex coverage,
+	# which needs a centre line that is fully covered.
+	var lanes: int = maxi(2, int(ceil(half_width * 2.0 / LANE_WIDTH)))
+	if lanes % 2 == 1:
+		lanes += 1
+	# Coverage across the body: 1 in the middle, 0 at the edge, over EDGE_WIDTH.
+	var edge_scale: float = maxf(half_width / EDGE_WIDTH, 1.0)
 	for lane in range(lanes):
 		var t0: float = -1.0 + 2.0 * float(lane) / float(lanes)
 		var t1: float = -1.0 + 2.0 * float(lane + 1) / float(lanes)
 		im.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP)
 		for i in range(n):
 			var slope: float = float(points[i].slope)
+			var end: float = 0.0 if (i == 0 or i == n - 1) else 1.0
 			im.surface_set_color(cols[i])
+			im.surface_set_uv(Vector2(heats[i],
+				clampf((1.0 - absf(t0)) * edge_scale, 0.0, 1.0) * end))
 			im.surface_add_vertex(_body_point(centres[i], across[i],
 				widths[i] * t0, slope))
 			im.surface_set_color(cols[i])
+			im.surface_set_uv(Vector2(heats[i],
+				clampf((1.0 - absf(t1)) * edge_scale, 0.0, 1.0) * end))
 			im.surface_add_vertex(_body_point(centres[i], across[i],
 				widths[i] * t1, slope))
 		im.surface_end()
@@ -343,10 +361,6 @@ func _ready() -> void:
 	SpellAudio.play_named(self, &"lava_start", global_position, 250)
 	_ribbon = MeshInstance3D.new()
 	_ribbon.mesh = ImmediateMesh.new()
-	var mat: StandardMaterial3D = StandardMaterial3D.new()
-	mat.vertex_color_use_as_albedo = true
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	_ribbon.material_override = mat
+	_ribbon.material_override = LavaCommon.make_material()
+	_ribbon.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(_ribbon)

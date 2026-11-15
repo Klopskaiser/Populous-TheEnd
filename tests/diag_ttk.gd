@@ -78,13 +78,21 @@ func _initialize() -> void:
 		% ["Feuerkr. (F)", Unit.FIREBALL_DAMAGE, Balance.FIREWARRIOR_FIRE_RANGE]
 		+ "%6.2f   %.1fs  %5.2f" % [float(Unit.FIREBALL_DAMAGE),
 			Balance.FIREWARRIOR_FIRE_COOLDOWN, fw_dps])
-	var golem_dps: float = float(Balance.GOLEM_DAMAGE) / Balance.GOLEM_STRIKE_COOLDOWN
-	print("%-13s %4d   Flaechenschlag %d     ganze Hitbox + Feld davor  "
-		% ["Golem", Balance.GOLEM_HP, Balance.GOLEM_DAMAGE]
-		+ "%6.2f   %.1fs  %5.2f" % [float(Balance.GOLEM_DAMAGE),
+	# Zwei Angriffe im selben Takt: Handschlag (Kreis rundherum) und Tritt (Schneise).
+	var golem_dps: float = float(Balance.GOLEM_SLAM_DAMAGE) / Balance.GOLEM_STRIKE_COOLDOWN
+	var golem_kick_dps: float = float(Balance.GOLEM_KICK_DAMAGE) / Balance.GOLEM_STRIKE_COOLDOWN
+	print("%-13s %4d   Handschlag %d         Kreis %.1f m rundherum      "
+		% ["Golem (Hand)", Balance.GOLEM_HP, Balance.GOLEM_SLAM_DAMAGE, Balance.GOLEM_SLAM_RADIUS]
+		+ "%6.2f   %.1fs  %5.2f" % [float(Balance.GOLEM_SLAM_DAMAGE),
 			Balance.GOLEM_STRIKE_COOLDOWN, golem_dps])
+	print("%-13s %4d   Tritt %d              Schneise %.1f x %.1f m      "
+		% ["Golem (Tritt)", Balance.GOLEM_HP, Balance.GOLEM_KICK_DAMAGE,
+			Balance.GOLEM_KICK_WIDTH, Balance.GOLEM_KICK_LENGTH]
+		+ "%6.2f   %.1fs  %5.2f" % [float(Balance.GOLEM_KICK_DAMAGE),
+			Balance.GOLEM_STRIKE_COOLDOWN, golem_kick_dps])
 	attackers.append(["Feuerkr. (F)", fw_dps])
-	attackers.append(["Golem", golem_dps])
+	attackers.append(["Golem (Hand)", golem_dps])
+	attackers.append(["Golem (Tritt)", golem_kick_dps])
 
 	# Fahrzeuge: Crew-abhaengiger Takt, mit und ohne Technikerbesatzung.
 	print("")

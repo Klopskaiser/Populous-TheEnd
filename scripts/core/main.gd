@@ -433,7 +433,8 @@ func _tree_too_close(cell: Vector2i) -> bool:
 
 ## Debug-Testkammer (Startmission, user request): blue base on the WEST side
 ## — one building of each kind, one unmanned vehicle of each kind and
-## CHAMBER_BRAVES braves. Red on the EAST side: one building of each kind but
+## CHAMBER_BRAVES braves. Red on the EAST side: one building of each kind (and
+## FOUR huts instead of one) but
 ## THREE fully manned watchtowers, two fully manned vehicles of each kind
 ## (firewarrior/preacher crews) and CHAMBER_RED_ARMY warriors/firewarriors/
 ## preachers. The red BUILDINGS face the player base; site, vehicles and army
@@ -482,7 +483,15 @@ func _setup_chamber_red(red: Tribe, center: Vector2i, nav: NavGrid) -> void:
 		[WORKSHOP_SCENE, banchor + Vector2i(16, -12)],
 		[FIRERAM_WORKSHOP_SCENE, banchor + Vector2i(16, 0)],
 		[AIRSHIP_WHARF_SCENE, banchor + Vector2i(17, 10)],
+		# Three more huts for the enemy (user request 2026-11-15): more buildings to
+		# bring down — and a red tribe that keeps growing new followers.
+		[HUT_SCENE, banchor + Vector2i(9, -15)],
+		[HUT_SCENE, banchor + Vector2i(2, 5)],
+		[HUT_SCENE, banchor + Vector2i(8, 16)],
 	], nav)
+	# ...their huts fully manned, so the red tribe grows from the first second
+	# (user request 2026-11-15).
+	_fill_huts(red)
 	# ...three fully manned watchtowers as the front line...
 	var towers: Array = [
 		[Vector2i(-5, -9), [PREACHER_SCENE, PREACHER_SCENE]],
@@ -520,6 +529,20 @@ func _setup_chamber_red(red: Tribe, center: Vector2i, nav: NavGrid) -> void:
 			entry[0], red.id, nav.cell_to_world(cell)) as CrewedVehicle
 		_crew_vehicle_full(vehicle, red.id)
 	_spawn_chamber_army(red.id, rear + Vector2i(8, 0), CHAMBER_RED_ARMY, nav)
+
+
+## Mans every hut of `tribe` up to its crew capacity with fresh braves (test
+## chamber; skips the walk-in, like the manned watchtowers).
+func _fill_huts(tribe: Tribe) -> void:
+	for b in tribe.buildings:
+		if not is_instance_valid(b) or not (b is Hut):
+			continue
+		var hut: Hut = b as Hut
+		while hut.has_crew_room():
+			var brave: Unit = _unit_manager.spawn_unit(
+				BRAVE_SCENE, tribe.id, hut.edge_spawn_position())
+			if brave == null or not hut.admit_crew(brave):
+				break
 
 
 ## Places pre-built buildings from a [scene, anchor] plan; _find_plot searches

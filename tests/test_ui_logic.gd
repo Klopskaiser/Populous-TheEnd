@@ -631,3 +631,23 @@ func test_portrait_scale_degenerate_inputs_are_safe() -> void:
 		"a zero cell still yields a usable scale")
 	check(Sidebar.portrait_scale(Vector2i(16, 24), Vector2.ZERO) > 0.0,
 		"an unsized stage (before the first resize) yields a usable scale")
+
+
+## Nutzerreport 2026-11-15: Rot besiegt, aber Kreis und Bauruine standen noch.
+## Tribe.eliminate reisst die Gebaeude im selben Tick ab, in dem das Match
+## entschieden ist — die sofortige Pause fror sie aufrecht ein. Der Endbildschirm
+## wartet deshalb laenger, als ein Wrack zum Versinken braucht.
+func test_end_screen_waits_for_the_wrecks_to_sink() -> void:
+	check(EndScreen.RESULT_DELAY > Building.SINK_DURATION,
+		"the overlay comes later than a wreck needs to sink")
+	var screen: EndScreen = EndScreen.new()
+	screen.visible = false   # what _ready does (no tree here)
+	screen.show_result(0)
+	check(not screen.visible and screen._result_pending,
+		"the decided match does not show (and pause) at once")
+	screen._process(Building.SINK_DURATION)
+	check(not screen.visible and screen._result_pending and screen._delay_left > 0.0,
+		"still running while the wrecks sink")
+	screen.show_result(1)
+	check(screen._pending_winner == 0, "a second result does not replace the pending one")
+	screen.free()

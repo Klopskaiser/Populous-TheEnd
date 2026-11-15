@@ -131,9 +131,12 @@ func death_sfx_key() -> StringName:
 	return &"airship_death"
 
 
-## Anyone may board — including the shaman; only vehicles never crew.
+## Anyone may board — including the shaman; only vehicles and the golem never
+## crew. The golem was missing here until 2026-11-15 (user bug report): its
+## can_crew_siege() == false only bars the GROUND vehicles, which ask the unit;
+## the airship decides on its own and let the giant climb aboard.
 func accepts_crew_unit(unit) -> bool:
-	return not (unit is CrewedVehicle)
+	return not (unit is CrewedVehicle or unit is Golem)
 
 
 func crew_rides_on_deck() -> bool:

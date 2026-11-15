@@ -286,10 +286,18 @@ Größenreferenz die Platzhalter:
 | `fire_ram.glb` | Feuerramme | Rumpf ~1,0 × 1,7 m (Platzhalter auf 85 % skaliert) | `Flag` optional. |
 | `airship.glb` | Luftschiff (Zeppelin) | Ballon ~6 m lang × 2 m breit, Unterkante ca. 2,5 m über dem Ursprung; Gondel/Deck 1,6 × 3,6 m | `Flag` optional. **Das Deck muss bei y = 0,6 m liegen** (`Airship.DECK_Y`): dort stellt das Spiel die Passagiere hin — zwei Spalten ±0,44 m neben der Mittelachse, drei Ränge im Abstand 0,85 m. Der Rumpf wippt ±0,15 m (Periode ~5 s), die Passagiere schweben mit. Der Ursprung ist der Punkt **unter** dem Schiff am Boden; die Flughöhe setzt das Spiel. |
 
-| `golem.glb` | Golem (Zauber 13) | **3 m tief × 4 m breit × 4 m hoch**, Ursprung an den Füßen mittig; Platzhalter: Beine, Rumpf 3,0 × 2,2 m, Schultern, Kopf, zwei hängende Arme | **`Arm`** (`Node3D`, optional): Schulter-Pivot beider Arme, schwingt beim Schlag um seine X-Achse (heben, dann niederschmettern, ~0,5 s); Ruhelage = hängend. **`Flag`** (`MeshInstance3D`, optional): Brust-Rune in Stammesfarbe (leuchtet leicht). |
+| `golem.glb` | Golem (Zauber 13) | Modell **4 m hoch gebaut** (`Golem.MODEL_HEIGHT`) — das Spiel skaliert es auf `Balance.GOLEM_HEIGHT` (5,25 m, so hoch wie der Wachturm); schlanke Figur, im Spiel 2,3 m breit × 1,8 m tief, Ursprung an den Füßen mittig; Platzhalter: Beine, Rumpf, Schultern, Kopf, zwei hängende Arme | **`AnimationPlayer`** (optional) mit den Clips `idle` / `walk` / `slam` / `kick` / `swat` / `death` (s. u.). **`Flag`** (`MeshInstance3D`, optional): Teil in Stammesfarbe (leuchtet leicht) — beim Projektmodell die **Krawattenschleife**. **`Arm`** (`Node3D`, optional, nur für Modelle ohne Clips): Schulter-Pivot beider Arme, schwingt beim Angriff um seine X-Achse. |
 
 Das Katapult ohne `Arm` feuert trotzdem — nur ohne die Schnapp-Animation; der Golem
-ohne `Arm` schlägt trotzdem — nur ohne Schwung.
+ohne Clips und ohne `Arm` greift trotzdem an — nur ohne Bewegung.
+
+**Golem-Animationen (optional, `AnimationPlayer` im Modell):** `idle` und `walk` (das Spiel
+schaltet beide auf Schleife; `walk` auf der Stelle, das Abspieltempo folgt der echten
+Geschwindigkeit über `Golem.WALK_CLIP_SPEED`), `slam` (Handschlag, **Aufschlag bei 0,8 s**),
+`kick` (Tritt, **Aufschlag bei 0,5 s**), `swat` (Schlag nach oben gegen Luftschiffe, **Aufschlag bei 0,5 s**)
+und `death` (einmalig; danach versinkt die Figur).
+Die Aufschlagzeiten müssen zu `Balance.GOLEM_SLAM_WINDUP` / `GOLEM_KICK_WINDUP` / `GOLEM_SWAT_WINDUP` passen — dort
+fällt der Schaden. Das Modell des Projekts erzeugt `D:\game\gymnastikschuh\golem_export.mjs`.
 
 ### Bäume — `models/trees/<kind>.glb`
 
@@ -458,7 +466,7 @@ Vorbis).
 | `unit_land.ogg` | Einheit landet nach Wurf/Sturz auf dem Boden und **überlebt** die Landung (späterer Rollschaden zählt nicht; max. alle 0,15 s) |
 | `unit_air_death.ogg` | Einheit (nicht Schamanin) erleidet **in der Luft** tödlichen Schaden (auch vom Luftschiffdeck geschossene Besatzung) — der Tod selbst folgt beim Aufprall mit `unit_death.ogg` (max. alle 0,2 s) |
 | `shaman_air_death.ogg` | Dasselbe für die **Schamanin**: ihr eigener Schrei beim tödlichen Treffer in der Luft (Prio 1 wie `shaman_death`) |
-| `golem_strike.ogg` | Golem schlägt zu (alle 2 s im Kampf; max. alle 0,2 s) |
+| `golem_strike.ogg` | Aufschlag eines Golem-Angriffs, Handschlag wie Tritt (alle 1,8 s im Kampf; max. alle 0,2 s) |
 | `golem_death.ogg` | Golem zerfällt (Lebenszeit abgelaufen oder erschlagen; Prio 2) |
 
 **Status-Loops** — `audio/sfx/` (laufen in Dauerschleife, **solange der Zustand

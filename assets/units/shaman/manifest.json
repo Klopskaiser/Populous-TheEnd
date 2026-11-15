@@ -1,0 +1,15 @@
+{
+  "anims": {
+    "cast": {
+      "fps": 8.0
+    },
+    "idle": {
+      "fps": 4.0
+    },
+    "walk": {
+      "fps": 10.0
+    }
+  },
+  "frame_height": 96,
+  "frame_width": 64
+}

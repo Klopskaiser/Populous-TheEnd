@@ -36,5 +36,9 @@ func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:
 	var golem: Unit = ctx.unit_manager.spawn_unit(GOLEM_SCENE, tribe.id, pos)
 	if golem == null:
 		return false   # unit cap reached — the charge is kept
+	if golem is Golem:
+		# The level-7 giant levels the ground it stands on — a terrain morph,
+		# which needs the spell context.
+		(golem as Golem).terrain_ctx = ctx
 	SpellAudio.play_effect(ctx.unit_manager, id, pos)
 	return true

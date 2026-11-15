@@ -11205,3 +11205,683 @@ erfuellt die 3,5-m-Bedingung also und zerplatzt. Ob das im Spiel wirklich
 ausloest, ist nicht geprueft; der Einzeiler waere `and not flies`.
 
 **Verifikation:** Ladecheck exit 0, Suite **6165 passed, 0 failed**.
+
+### Wirbelsturm: Trichter aus Shader-Lagen statt Ringstapel (2026-11-15)
+
+**Nutzervorgabe:** der Wirbelsturm sah billig aus; neu machen, Performance
+beachten, und **hochgewirbelte Einheiten muessen erkennbar bleiben**.
+
+**Vorher:** elf starre graue `TorusMesh`-Ringe mit einem gemeinsamen
+Alpha-Material — keine Drehung, kein Staub, erschien und verschwand schlagartig.
+Nachgemessen war das auch nicht billig: 4096 Dreiecke je Ring (Godot-Standardteilung),
+also **45.056 Dreiecke und 11 transparente Draw Calls je Tornado**.
+
+**Gebaut:**
+- `scripts/spells/tornado_visual.gd` (`TornadoVisual`): baut vier Lagen —
+  **Kern** (dichter innerer Trichter), **Schleier** (duenne Aussenlage, Muendung
+  exakt der Fangradius `radius * TornadoVortex.TOP_WIDEN` wie der alte oberste
+  Ring), **Staub** (flacher Kragen am Fuss), **Brocken** (ein MultiMesh aus 26
+  Quads). Die Netze entstehen einmal in Einheitsgroesse und werden von allen
+  Tornados geteilt; ein Trichter unterscheidet sich nur in der Knotenskalierung
+  (x/z = Radius, y = Hoehe). Der Supertornado ist dasselbe Bild, groesser, mit
+  entsprechend mehr Streifen und langsamerer Drehung.
+- `shaders/tornado_funnel.gdshader`: Streifenrauschen, das um die Achse laeuft,
+  sich mit der Hoehe neigt und aufsteigt, dazu duenne Windlinien, ein schwankender
+  Schlauch und weiche Raender. Prozedural (kein Texturzugriff), **kein
+  Bildschirm- oder Tiefenpuffer-Zugriff**.
+- `shaders/tornado_specks.gdshader`: die Bahn der Brocken wird im Vertex-Shader
+  aus `TIME` gerechnet.
+- `TornadoVortex._ready` haengt nur noch ein `TornadoVisual` an; beim Ablauf ruft
+  `tick` `_visual.dissipate()`: der Trichter loest sich vom Wirbel, bleibt stehen,
+  weitet sich und blendet in 0,6 s aus, dann gibt er sich selbst frei. Aufbau:
+  waechst in 0,7 s aus dem Boden.
+- **Kosten je Tornado: 4 Draw Calls, 1780 Dreiecke** (3 x 576 + 52). Pro Bild
+  laeuft Skript nur waehrend Auf- und Abbau (ein paar `set_shader_parameter`),
+  im Stand nichts.
+
+**Lesbarkeit der Hochgewirbelten (die harte Vorgabe).** Reiter kreisen auf
+`0,8 * radius_at_height(h)`, also 0,8 r am Boden und 1,36 r an der Spitze.
+Zwei Regeln, beide als Konstanten in `TornadoVisual` und in dessen Klassendoku:
+1. Der **Kern bleibt innerhalb dieser Bahn** (hoechstens 0,7 davon:
+   `CORE_R_TOP = 0,95` gegen 1,36). Ein Reiter wird nur abgedunkelt, waehrend er
+   genau hinter dem Kern durchzieht.
+2. Vor einem Reiter kann nur die **kameranahe Wand des Schleiers** liegen, und
+   die ist auf `VEIL_ALPHA * VEIL_NEAR_SHARE` = 0,275 begrenzt; die kameraferne
+   Wand traegt die Form (Shader-Uniform `near_alpha`, ausgewertet ueber
+   `FRONT_FACING` — das Netz ist so gewickelt, dass die INNENSEITE Vorderseite ist).
+Einheiten-Sprites sind Alpha-Discard-Quads im Opaque-Pass und schreiben Tiefe; die
+Trichterlagen schreiben keine (`depth_draw_never`), verdecken sich also nie hart.
+
+**Kein `randf()`:** Phase je Tornado und Brockenverteilung sind gehasht, der
+geseedete Test-RNG-Strom bleibt unberuehrt (Suite-Zahl unveraendert).
+
+**Neues Diagnoseskript** `tests/diag_tornado_look.gd` (nicht Teil der Suite,
+braucht einen echten Renderer, also OHNE `--headless`): rendert fuenf Standbilder
+— alter Ringstapel neben neuem Trichter, Standardzoom, Aufbau, Supertornado mit
+Satelliten, Aufloesung — jeweils mit liegenden Platzhalter-Sprites genau auf der
+Reiterbahn, auch hinter dem Kern. Shaderfehler zeigen sich erst beim Zeichnen;
+die headless-Suite sieht sie nie. Das Skript prueft ausserdem die Uebergabe am
+Ende eines ECHTEN `TornadoVortex` (Trichter ueberlebt den Wirbel, gibt sich nach
+dem Ausblenden frei).
+
+**Erkenntnisse:**
+- Die erste Fassung (nur weiches Rauschen, Kern 0,78 r, Schleier 0,2) war in der
+  Standard-Zoomstufe (Boom 45) **blasser als die alten Ringe**. Abhilfe ohne die
+  Reiter zu verdecken: Koerperfuellung zwischen den Streifen (`fill`), Windlinien
+  (`wisps`), breiterer Kern, und die Trennung nahe/ferne Schleierwand.
+- `Node3D.look_at()` vor dem Eintritt in den Baum wirft einen Fehler —
+  im Skript `look_at_from_position()`.
+- `--headless --import` hat nebenbei drei fehlende `.uid`-Dateien fuer bestehende
+  Tests erzeugt (`diag_ttk`, `test_buffs`, `test_technician`).
+
+**Verifikation:** Ladecheck exit 0, Suite **6165 passed, 0 failed** (unveraendert),
+kein `SCRIPT ERROR`. Diagnoseskript lief ohne Shaderfehler; die Standbilder wurden
+angesehen (Einheiten in allen fuenf erkennbar, im Standbild mit WEISSEN
+Platzhaltern ohne Stammesfarbe — der unguenstigste Kontrast). **Nicht geprueft:**
+das Bild in Bewegung und im echten Spiel (Gelaende mit Gefaelle, Wasser,
+Stammesfarben, mehrere Tornados in einer Schlacht) sowie eine Bildratenmessung.
+
+### Golem: schlanke Figur mit Skelettanimation, Handschlag und Tritt (2026-11-15)
+
+**Nutzervorgabe:** der Golem (Klotz aus Quadern, 4 x 3 m breit) wird die „finale
+Form" der Figur aus dem Nachbarprojekt `D:\game\gymnastikschuh`; die Trefferzone
+wird entsprechend schmaler; **zwei Angriffe** — Tritt (wie Fussball: Schneise, mehr
+Schaden, viel Rueckstoss, weniger Flaeche) und Handschlag auf den Boden (vorher
+buecken: Flaechenschaden rundherum); Modell vereinfachen, aber wesentlich
+detaillierter als der alte Golem.
+
+**Spielregeln (`scripts/units/golem.gd`, `scripts/core/balance.gd`):**
+- **Koerper** 1,8 m breit x 1,4 m tief (vorher 4 x 3), weiter 4 m hoch
+  (`GOLEM_BODY_HALF_*`); Auswahlring 2,8, Pick-Breite 2,2 m, Blob-Schatten und
+  `GOLEM_SEPARATION` 2,0 -> 1,2 angepasst. `GOLEM_REACH` bleibt 3 m.
+- **Handschlag** (`Golem.ATTACK_SLAM`, `in_slam_area`): Kreis `GOLEM_SLAM_RADIUS`
+  2,6 m um den Punkt `GOLEM_SLAM_FORWARD` 0,8 m vor ihr — 21 m2, die Flaeche des
+  alten Schlags. `GOLEM_SLAM_DAMAGE` 25, je 30 % Hochwirbeln/Rollen wie bisher.
+- **Tritt** (`ATTACK_KICK`, `in_kick_lane`): Schneise `GOLEM_KICK_WIDTH` 1,8 m x
+  `GOLEM_KICK_LENGTH` 5 m nach vorn (9 m2). `GOLEM_KICK_DAMAGE` 45, und JEDER
+  Ueberlebende wird mit `GOLEM_KICK_PUSH` 9 / `GOLEM_KICK_UP` 5,5 in
+  Trittrichtung geworfen (der Handschlag wirft mit 3 / 4,5 vom Golem weg).
+- **Wahl** (`_choose_attack`): ab `GOLEM_SLAM_MIN_TARGETS` (3) Feinden in der
+  Flaeche des Handschlags der Handschlag, sonst der Tritt. Vom Nutzer nicht
+  vorgegeben — eigene Festlegung.
+- **Ausholzeit** (`GOLEM_SLAM_WINDUP` 0,8 s, `GOLEM_KICK_WINDUP` 0,5 s):
+  `_wind_up` setzt den Angriff an (Animation startet), `_tick_pending_attack`
+  laesst ihn nach der Ausholzeit landen (`_land_attack`), in der dann aktuellen
+  Blickrichtung. Solange steht sie und wechselt kein Ziel. Der Takt bleibt
+  `GOLEM_STRIKE_COOLDOWN` 1,8 s — der Cooldown laeuft waehrend des Ausholens
+  weiter. Das garantierte Stufen-Nachlegen beim Gebaeudeangriff haengt jetzt am
+  Aufschlag (`_pending_building`).
+- `_smash()` / `_kick()` bleiben als direkte Aufschlag-Funktionen (Tests).
+  `in_strike_area`, `GOLEM_FIELD_*` und `GOLEM_DAMAGE` gibt es nicht mehr.
+- **Die Zahlen fuer Schaden, Flaechen und Rueckstoss sind ein Vorschlag**, im
+  Spiel noch nicht gegengeprueft. TTK (`diag_ttk.gd`, zwei Zeilen fuer den Golem):
+  Brave 4,3 s per Handschlag, 2,4 s per Tritt.
+
+**Darstellung:**
+- `golem.gd` sucht im Modell einen `AnimationPlayer` und spielt `idle` / `walk`
+  (beide werden hier auf Schleife gestellt — glTF kennt kein Schleifen-Merkmal),
+  `slam` / `kick` (einmal je Angriff) und `death`. Gehen wird an der ECHTEN
+  Bodengeschwindigkeit erkannt (Positionsdifferenz je Tick), das Abspieltempo
+  ist `Geschwindigkeit / WALK_CLIP_SPEED` (2,658 m/s: Schrittweg des Clips je
+  1-s-Zyklus), bei 3,5 m/s also 1,32. Ueberblenden 0,15 s.
+- **Beschwoeren:** die Figur steigt in `RISE_TIME` 0,9 s aus dem Boden (nur
+  Optik, die Einheit handelt ab dem ersten Tick).
+- **Zerfall:** `death` spielt, das Versinken beginnt `SINK_DELAY` 1,2 s spaeter.
+- Der **Platzhalter** (ohne `golem.glb`) hat die neue schlanke Groesse und
+  schwingt weiter nur den `Arm`-Knoten.
+
+**Modell** (`assets/models/units/golem.glb`, erzeugt von
+`D:\game\gymnastikschuh\golem_export.mjs`; dort auch `golem_bewegung.mjs` mit den
+Posen und `golem_pruefen.mjs` als Rechenpruefung): 14.669 Dreiecke (Vorlage
+64.558), 20 Knochen, 0,96 MB, Texturen hoechstens 512 px. Godot legt beim Import
+sechs Texturen als `golem_*.png` samt `.import` daneben (zusammen rund 0,33 MB).
+Clips: `idle` 5,0 s, `walk` 1,0 s (auf der Stelle), `kick` 1,2 s (Fuss vorn bei
+0,50 s, Fussspitze 2,05 m vor dem Ursprung), `slam` 1,5 s (Haende am Boden bei
+0,80 s, 0,95 m vor dem Ursprung), `death` 1,4 s. Netz **`Flag` = der ganze
+Schuhstoff** (Fuesse, Haende, Kopf) — die Kreuzbaender allein waren aus der
+Spielkamera kaum zu sehen. Beleuchtetes Material ohne Toon-Schattierung.
+`tests/diag_golem_model.gd` rendert die Clips der GLB als Standbilder (ohne
+`--headless`).
+
+**Offen / nicht geprueft:**
+- **Lizenz des Avatars** (steht in der VRM-Datei): `commercialUsage:
+  personalNonProfit`, Namensnennung Pflicht, `allowExcessivelyViolentUsage:
+  false`. Das Repo steht unter Apache-2.0. **Vor dem Einchecken der Modell-
+  Dateien klaeren**; ohne sie laeuft das Spiel mit dem Platzhalter.
+- Das Bild in Bewegung und im echten Spiel (Ueberblenden, Lauftempo gegen
+  Fussrutschen, Gelaende mit Gefaelle) wurde nicht angesehen — nur Standbilder
+  des echten Golem-Knotens in jeder Pose und halb aufgestiegen.
+- Der Rock haengt starr an Huefte und Oberschenkeln; am Ende von `death` taucht
+  sein Saum 6,9 cm in den Boden. Gebueckt wird am Gesaess eine schwarze Flaeche
+  der Hauttextur sichtbar.
+- Der Aufschlagpunkt der Haende im Clip (0,95 m) und `GOLEM_SLAM_FORWARD` (0,8 m)
+  weichen 15 cm ab.
+
+**Tests:** `test_golem.gd` 98 Zusicherungen (vorher 79): Kreis des Handschlags,
+Schneise des Tritts samt Wurf aller Ueberlebenden, Angriffswahl, Ausholzeit.
+`test_golem_turns_on_the_nearest_enemy_in_reach_before_chasing` prueft das
+Nachlaufen jetzt an der Position des Golems statt am Abstand — ein getretenes
+Ziel fliegt weiter weg, als es vorher stand.
+
+**Verifikation:** Ladecheck exit 0, Suite **6184 passed, 0 failed** (vorher 6165),
+kein `SCRIPT ERROR`. Golem-Knoten im Szenenbaum ohne Laufzeitfehler, mit und ohne
+Modell.
+
+### Nachtrag Golem: Wachturmhoehe, Stammesfarbe an der Schleife, Kreuzbaender (2026-11-15)
+
+Drei Nutzerkorrekturen nach dem ersten Blick ins Spiel:
+
+1. **Die Kreuzbaender fehlten.** Fehler im Export: in der Variante "Schuhstoff =
+   Flag" landeten die Kreuzbaender weder im Netz `Schuhe` noch im Netz `Flag`.
+   Sie gehoeren jetzt immer zum Modell. Weil sie weiss auf weissem Stoff ohne die
+   Konturlinie des Originals nicht zu erkennen waeren, sind sie leicht grau
+   abgesetzt (`KREUZ_TON` in `golem_export.mjs`, eigenes Material `Schuh_Kreuzband`).
+2. **Stammesfarbe an der Krawattenschleife, Schuhe weiss.** Der Export loest die
+   Schleife aus dem Oberteil heraus (dunkle Dreiecke vorn in der Koerpermitte
+   unterhalb des Knotens, per Texturprobe: 34 Dreiecke) und gibt sie als Netz
+   `Flag` aus. Neue Vorgabe `--flagge=schleife`; `--flagge=kragen` nimmt den
+   Matrosenkragen dazu, falls die Schleife allein im Spiel zu klein ist.
+3. **So gross wie der Wachturm.** Neu `Balance.GOLEM_HEIGHT` = 5,25 m (Schaft
+   4,2 m + Plattform bis 4,75 m + Zinnen bis 5,25 m), vorher 4 m. Das Modell
+   bleibt auf 4 m gebaut (`Golem.MODEL_HEIGHT`), `golem.gd` skaliert den
+   Modellknoten mit `MODEL_SCALE` (1,3125) — der Platzhalter skaliert mit.
+   Daran haengen jetzt: Aufstiegstiefe, Schrittweg des Geh-Clips
+   (`WALK_CLIP_SPEED` 3,49 m/s — passt damit fast genau zu `GOLEM_SPEED` 3,5),
+   Pick-Hoehe, Brandeffekt-Hoehe, Schatten. Koerper-Halbmasse 0,9/0,7 -> 1,15/0,9,
+   `GOLEM_SEPARATION` 1,2 -> 1,5, Auswahlring 3,6. `GOLEM_SLAM_FORWARD` 0,8 ->
+   1,2 (die Haende treffen bei 5,25 m Hoehe 1,25 m vor ihr auf). **Die
+   Wirkflaechen und Schadenswerte der Angriffe sind NICHT mitgewachsen**
+   (Kreis 2,6 m, Schneise 1,8 x 5 m).
+
+**Tests:** neuer `test_golem_is_as_tall_as_the_watchtower`; die Lagen im
+Handschlag-Test sind auf den Aufschlagpunkt 1,2 m umgestellt. `test_golem.gd`
+102 Zusicherungen.
+
+### Golem: Stufensystem (2026-11-15, Nutzervorgabe)
+
+**Anlass:** der Golem ist gut, stirbt aber recht schnell. Er soll mit seinen Kills
+wachsen.
+
+**Regeln** (alles in `scripts/units/golem.gd`, Werte `GOLEM_LEVEL_*`,
+`GOLEM_KILLS_PER_LEVEL`, `GOLEM_MAX_LEVEL`, `GOLEM_TRAMPLE_*` in `balance.gd`):
+- Stufe 0 beim Beschwoeren, **alle 6 Kills eine Stufe**, Maximum **5**
+  (`level_for_kills`). Gezaehlt wird in `_credit_kill()` — der gemeinsame Ort
+  fuer Kills durch Angriffe UND durchs Trampeln.
+- Je Stufe: **+20 s Lebenszeit** (einmalig, zusaetzlich zu den 6 s je Kill),
+  **+3 LP/s Dauerheilung** (`_tick_level_regen`, auch im Kampf), **+5 Schaden**
+  (`attack_damage`, `trample_damage`), **+20 % der Ausgangsgroesse**
+  (`size_factor_for`: LINEAR, Stufe 5 = 2,0 = 10,5 m).
+- **Lebensobergrenze abgeschafft:** Kill-Heilung und Dauerheilung addieren ohne
+  Deckel. `max_health` bleibt 800 (Startleben) — es ist nur noch die Bezugsgroesse
+  fuer die "schwer verletzt"-Sterne; die eingebaute Ruheheilung der Basisklasse
+  hoert dort weiter auf.
+- **Reichweite und Wirkflaechen** wachsen mit `size_factor()`: `reach()`,
+  `in_slam_area` / `in_kick_lane` haben einen Massstabsparameter, `_victims` und
+  `_building_in_area` rechnen damit. Die Opfer eines Angriffs stehen fest, bevor
+  ein Kill die Stufe hebt — die Flaeche waechst nie mitten im Aufschlag.
+- **Tempo:** `speed_for(level) = GOLEM_SPEED * sqrt(Groesse)` — 3,50 / 3,83 /
+  4,14 / 4,43 / 4,70 / 4,95 m/s. Der Geh-Clip laeuft mit
+  `Tempo / (WALK_CLIP_SPEED * Groesse)`, auf Stufe 5 also mit 0,71 der
+  Ausgangsfrequenz; Tritt und Handschlag bleiben unveraendert schnell.
+- **Ab Stufe 1 keine Kollision mit Einheiten:** neue Flagge
+  `UnitManager.FLAG_NO_COLLISION` (64), gespeist aus dem neuen virtuellen
+  `Unit.ignores_unit_collision()`. Der Abstands-Pass ueberspringt solche
+  Einheiten auf BEIDEN Seiten (`SEPARATION_SKIP_FLAGS`, dieselbe Bitpruefung wie
+  bisher fuer sitzende Besatzung — keine Mehrkosten im heissen Pfad).
+  `vehicle_separation` bleibt absichtlich gesetzt: es ist in `unit.gd` auch der
+  Schalter "kein Kernel-Laufen".
+- **Trampeln ab Stufe 1** (`_tick_trample`): jeder Feind im Radius
+  `BODY_HALF_WIDTH * Groesse` nimmt 15 (+5 je Stufe), solange der Golem in diesem
+  Tick schneller als 0,5 m/s gelaufen ist; je Opfer hoechstens einmal je Sekunde
+  (Woerterbuch Instanz-ID -> Restzeit). Gleiche Opferregeln wie die Angriffe.
+- **Stufe 5:** die Lebenszeit laeuft nicht mehr ab.
+- Das Modell waechst nach einem Aufstieg sichtbar nach (`GROW_SPEED` 0,25 je
+  Sekunde); Auswahlring, Pick-Hoehe, Schatten und Brandeffekt wachsen mit.
+
+**Eigene Festlegungen (nicht vorgegeben):** lineares statt aufgezinstes Wachstum
+(20 % der Ausgangsgroesse je Stufe; aufgezinst waeren es auf Stufe 5 das 2,49-Fache);
+Tempo ueber die Wurzel der Groesse; Trampelschaden 15 und sein Takt von 1 s; die
+6 s und 10 LP je Kill bleiben neben den Stufenboni bestehen.
+
+**Nicht umgesetzt:** eine Anzeige der Stufe (im Spiel wird LP nie angezeigt; die
+Stufe erkennt man nur an der Groesse) und ein Ton beim Aufstieg.
+
+**Tests** (`test_golem.gd`, jetzt 140 Zusicherungen): Stufengrenzen und
+Lebenszeitbonus; Groesse, Reichweite, Flaechen, Schaden und Tempo je Stufe samt
+einem echten Handschlag auf Stufe 2; Dauerheilung; Kollisionsflagge samt
+"niemand wird weggeschoben" (Gegenprobe ohne die Flagge: rot); Trampeln nur im
+Laufen, nur Feinde, mit Takt, Kill zaehlt; Stufe 5 ohne Lebenszeitende. Der alte
+Deckel-Test heisst jetzt `test_kills_heal_the_golem_without_an_upper_limit`.
+
+**Verifikation:** Ladecheck exit 0, Suite **6226 passed, 0 failed**, kein
+`SCRIPT ERROR`. Standbild der sechs Stufen mit dem echten Golem-Knoten angesehen
+(5,25 bis 10,5 m). **Nicht geprueft:** das Verhalten im laufenden Spiel — vor allem
+ob ein Stufe-5-Golem zu stark ist, wie das Durchlaufen von Truppen aussieht und ob
+die 10 m hohe Figur Wege und Kamera stoert.
+
+### Nachtrag Golem-Stufen: aufgezinstes Wachstum, Luftschlag ab Stufe 5 (2026-11-15)
+
+**1. Groesse aufgezinst (Nutzerentscheidung).** `Golem.size_factor_for` ist jetzt
+`pow(1 + GOLEM_LEVEL_GROWTH, Stufe)` statt linear:
+
+| Stufe | Groesse | Hoehe | Reichweite | Handschlag-Radius | Schneise | Tempo |
+|---|---|---|---|---|---|---|
+| 0 | 1,00 | 5,25 m | 3,0 m | 2,6 m | 1,8 x 5,0 m | 3,50 m/s |
+| 1 | 1,20 | 6,30 m | 3,6 m | 3,1 m | 2,2 x 6,0 m | 3,83 m/s |
+| 2 | 1,44 | 7,56 m | 4,3 m | 3,7 m | 2,6 x 7,2 m | 4,20 m/s |
+| 3 | 1,73 | 9,07 m | 5,2 m | 4,5 m | 3,1 x 8,6 m | 4,60 m/s |
+| 4 | 2,07 | 10,89 m | 6,2 m | 5,4 m | 3,7 x 10,4 m | 5,04 m/s |
+| 5 | 2,49 | 13,06 m | 7,5 m | 6,5 m | 4,5 x 12,4 m | 5,52 m/s |
+
+Die Flaeche des Handschlags waechst damit von 21 auf 131 m2. Der Geh-Clip laeuft
+auf Stufe 5 mit 0,63 der Ausgangsfrequenz.
+
+**2. Luftschlag ab Stufe 5 (Nutzervorgabe).** Der Golem schlaegt nach bemannten
+feindlichen Luftschiffen in seiner Reichweite (flach gemessen, `reach()`):
+- `Golem.ATTACK_SWAT` / `_swat` / `_land_swat`; Ausholzeit
+  `GOLEM_SWAT_WINDUP` 0,5 s. Ein Treffer = `Airship.register_hull_hit` — derselbe
+  Weg wie der Katapulttreffer, `AIRSHIP_HULL_HITS` (2) zerstoeren das Schiff, der
+  erste setzt die Huelle in Brand.
+- Ausloeser an zwei Stellen: im Nahkampf fragt die Angriffsschleife bei jedem
+  faelligen Angriff zuerst `_airship_in_reach()` (das Schiff geht vor);
+  ausserhalb (stehen, gehen, annaehern) laeuft `_tick_air_strike`. Beide teilen
+  einen Takt: `_wind_up` setzt `_air_cooldown` auf `GOLEM_STRIKE_COOLDOWN`.
+- Ziele kommen aus `UnitManager.get_enemy_vehicles_in_radius` (Fahrzeuge sind
+  nicht "anvisierbar" und fehlen im normalen Scan), gefiltert auf `Airship` und
+  `auto_attackable()` — neutrale Schiffe sind fuer niemanden ein Ziel.
+- Der Schlag verfehlt, wenn das Schiff waehrend des Ausholens mehr als 15 % ueber
+  die Reichweite hinaus abgetrieben ist (`SWAT_SLACK`) oder seine Besatzung
+  verloren hat.
+- **Neuer Clip `swat`** in `golem_bewegung.mjs` (1,2 s, Aufschlag 0,5 s): kurz
+  ducken und nach rechts wegdrehen, dann schwingt der rechte Arm in einem
+  seitlichen Bogen ueber den Kopf nach vorn oben, der Rumpf streckt sich, der
+  Blick geht hoch; beide Fuesse bleiben stehen. `golem.glb` neu exportiert (1,01 MB).
+- **Nicht umgesetzt:** ein ausdruecklicher Angriffsbefehl auf ein Luftschiff und
+  das selbststaendige Nachlaufen — der Golem schlaegt, was in seine Reichweite
+  kommt; hinlaufen laesst man ihn mit einem Bewegungsbefehl.
+
+**Tests:** `test_max_level_golem_swats_airships_out_of_the_sky` (Stufe 4 nein,
+Stufe 5 ja; Reichweite flach; Ausholen, erster Treffer brennt, zweiter zerstoert)
+und `test_swat_spares_own_and_neutral_airships`; die Groessen-Zusicherungen stehen
+auf 1,44 bzw. 2,49. `test_golem.gd` 155 Zusicherungen.
+
+**Verifikation:** Ladecheck exit 0, Suite **6241 passed, 0 failed**, kein
+`SCRIPT ERROR`; Rechenpruefung des Modells 0 Fehler; der Clip `swat` als
+Filmstreifen aus Godot angesehen. **Nicht geprueft:** der Luftschlag im laufenden
+Spiel, und ob ein 13 m hoher Golem mit 6,5 m Schlagradius spielbar bleibt.
+
+### Nachtrag Golem-Stufen 2: Lebensobergrenze, Reichweite, Stufe 6, Verfolgung (2026-11-15)
+
+Vier Nutzerkorrekturen an der Balance:
+
+1. **Die Lebensobergrenze gilt wieder.** Ohne sie heilte er sich passiv unendlich
+   hoch. `_credit_kill`: `max_health += GOLEM_MAX_HP_PER_KILL` (5), danach
+   `health = min(health + 10, max_health)`. `_tick_level_regen` hoert an
+   `max_health` auf. Die Obergrenze waechst also nur ueber Kills (36 Kills bis
+   Stufe 6 = 980).
+2. **Reichweite und Wirkflaechen wachsen nur 10 % je Stufe.** Neu
+   `GOLEM_LEVEL_REACH_GROWTH` 0,1 und `Golem.reach_factor()` (1,1 hoch Stufe);
+   `reach()`, `_victims` und `_building_in_area` rechnen damit statt mit
+   `size_factor()`. Der KOERPER waechst weiter 20 % je Stufe (Modell,
+   Trampelradius, Auswahl, Tempo).
+3. **Maximalstufe 6** (`GOLEM_MAX_LEVEL`). Die Endboni — keine
+   Lebenszeitbegrenzung, Luftschlag — haengen an `GOLEM_MAX_LEVEL` und sind
+   damit von 5 auf 6 gewandert.
+4. **Er verfolgt Luftschiffe, sofern erreichbar** (`_tick_air_chase`, nur
+   hoechste Stufe): ein UNTAETIGER Golem sucht alle 0,7 s das naechste bemannte
+   feindliche Schiff im Umkreis `GOLEM_AIR_CHASE_RADIUS` (25 m) und gibt sich
+   selbst einen Angriffsmove unter das Schiff; ab 80 % der Reichweite bleibt er
+   stehen und schlaegt. "Erreichbar" (`_chase_point`): die naechste begehbare
+   Zelle unter dem Schiff liegt in Schlagweite UND auf derselben Insel
+   (`NavGrid.same_island`) — ein Schiff ueber offenem Wasser oder dem Void laesst
+   er ziehen. Ein Befehl von aussen (`order_move` / `order_attack` /
+   `order_attack_building`) beendet die Verfolgung; die eigenen Befehle der
+   Verfolgung laufen ueber das Flag `_own_order`. Im Kampf ruht sie.
+
+| Stufe | Kills | Hoehe | Reichweite | Handschlag-Radius | Schneise | Tempo | Handschlag / Tritt / Trampeln | Heilung |
+|---|---|---|---|---|---|---|---|---|
+| 0 | 0 | 5,25 m | 3,0 m | 2,6 m | 1,8 x 5,0 m | 3,50 m/s | 25 / 45 / – | – |
+| 1 | 6 | 6,30 m | 3,3 m | 2,9 m | 2,0 x 5,5 m | 3,83 m/s | 30 / 50 / 20 | 3/s |
+| 2 | 12 | 7,56 m | 3,6 m | 3,1 m | 2,2 x 6,1 m | 4,20 m/s | 35 / 55 / 25 | 6/s |
+| 3 | 18 | 9,07 m | 4,0 m | 3,5 m | 2,4 x 6,7 m | 4,60 m/s | 40 / 60 / 30 | 9/s |
+| 4 | 24 | 10,89 m | 4,4 m | 3,8 m | 2,6 x 7,3 m | 5,04 m/s | 45 / 65 / 35 | 12/s |
+| 5 | 30 | 13,06 m | 4,8 m | 4,2 m | 2,9 x 8,1 m | 5,52 m/s | 50 / 70 / 40 | 15/s |
+| 6 | 36 | 15,68 m | 5,3 m | 4,6 m | 3,2 x 8,9 m | 6,05 m/s | 55 / 75 / 45 | 18/s |
+
+**Tests** (`test_golem.gd`, 170 Zusicherungen):
+`test_kills_raise_the_health_limit_and_heal_up_to_it` (ersetzt den Test "ohne
+Obergrenze"), Stufengrenzen bis 6, Koerper 1,2^n gegen Reichweite 1,1^n samt einem
+echten Handschlag auf Stufe 2, Dauerheilung endet an der Obergrenze,
+`test_max_level_golem_chases_a_reachable_airship` (laeuft 18 m hin und holt das
+Schiff herunter) und `test_airship_chase_respects_orders_range_and_reachability`
+(Schiff ueber offenem Wasser, ausserhalb des Radius, Befehl von aussen).
+
+**Auffaellig, nicht geaendert:** auf Stufe 6 ist der Koerper 15,7 m hoch, die
+Reichweite aber nur 5,3 m — der Koerper selbst ist dann 6,9 m breit (Trampelradius
+3,4 m). Das Tempo von 6,05 m/s liegt ueber dem jeder Fusseinheit (4 m/s) und dem
+des Luftschiffs (5 m/s).
+
+**Verifikation:** Ladecheck exit 0, Suite **6256 passed, 0 failed**, kein `SCRIPT ERROR`.
+Im laufenden Spiel nicht geprueft.
+
+### Bugfix: der Golem konnte auf ein Luftschiff steigen (2026-11-15, Nutzermeldung)
+
+**Ursache:** `Golem.can_crew_siege()` ist `false`, aber danach fragen nur die
+BODENfahrzeuge (`CrewedVehicle.accepts_crew_unit` gibt die Frage an die Einheit
+weiter). Das Luftschiff ueberschreibt `accepts_crew_unit` und nahm "jeden ausser
+Fahrzeugen" — also auch den Golem. Der Fehler bestand seit es den Golem gibt und
+auf JEDER Stufe; aufgefallen ist er erst bei der 15 m hohen Stufe-6-Figur.
+
+**Behebung:** `Airship.accepts_crew_unit` weist jetzt auch `Golem` ab. Weil
+`Unit.order_crew`, die Mehrfachauswahl (`selection_manager`) und
+`TribeCommands.order_crew` alle ueber diese eine Funktion gehen, ist damit jeder
+Weg zu (eigenes Schiff, leeres feindliches Schiff zum Kapern).
+
+**Test:** `test_golem_never_boards_an_airship` (Stufe 0 und 6, eigenes und leeres
+feindliches Schiff; Gegenprobe: ein Brave darf weiter einsteigen).
+
+**Verifikation:** Ladecheck exit 0, Suite **6265 passed, 0 failed**.
+
+### Lava-Optik und Wasserfall (2026-11-15, Nutzermeldungen)
+
+**1. Gelaende stach durch die Lavadecke (Vulkan).** Ursache: `LavaSurge` baute ein
+polares Ringnetz (20 Sektoren, 0,6-m-Ringe) und tastete die Gelaendehoehe nur an
+seinen eigenen Punkten ab — die Dreiecke schnitten Sehnen durch das gewoelbte
+Gelaende. Der bisherige Ausweg (Anheben um bis zu 0,5 m je nach Gefaelle) reichte
+nie ganz und liess die Decke an Steilstellen schweben. **Behebung:** die Decke
+entsteht auf dem Gitter des Gelaendes selbst: je erreichter Zelle die zwei
+Gelaendedreiecke (gleiche Vertices via `TerrainData.vertex_mesh_xz` und
+`heights[]`, gleiche Diagonale tl-tr-bl / tr-br-bl), um `SURFACE_LIFT` = 8 cm
+angehoben. Sie ist damit die Gelaendeflaeche selbst, nur hoeher. Eine Oberflaeche,
+ein Draw Call; Zellen im Void werden ausgelassen. Der ausgefranste Rand kommt
+nicht mehr aus der Geometrie, sondern aus der Deckung je Vertex
+(`_front_at` interpoliert die Sektorfronten, `EDGE_WIDTH` / `EDGE_REACH`).
+`_sheet_point`, `RING_STEP` und die Gefaelle-Anhebung sind entfallen. `LavaFlow`
+(das schmale Band) behaelt seine Bauweise.
+
+**2. Lava sah fad aus.** Neu `shaders/lava.gdshader` fuer Decke UND Strom
+(`LavaCommon.make_material`, `heat_for`): im Weltraum verankertes Rauschen (das
+Muster wandert beim Neuaufbau nicht mit), traege waelzende Schmelze,
+Krustenplatten die mit dem Erkalten wachsen, gluehende Adern mit leichtem
+Pulsen, heller Saum an der heissen Front, ausgefranster Rand. Prozedural, kein
+Textur-, Bildschirm- oder Tiefenzugriff. Die Altersfarbe bleibt Grundfarbe.
+Der Strom bekommt dafuer mindestens zwei Bahnen (eine voll gedeckte Mittellinie)
+und laeuft an beiden Enden aus.
+
+**3. Wasserfall kaum sichtbar.** Zwei Ursachen: (a) der Shader blendete ueber
+`UV.y` aus, als liefe es 0..1 — es laeuft in Kacheln (0..4,25), der 34-m-Fall war
+also 8 m unter der Kante schon ganz durchsichtig; (b) er war eine BELEUCHTETE
+Flaeche im Void, die nur das Umgebungslicht traf: fast schwarz vor schwarzem
+Himmel. **Behebung:** `height_tiles` an den Shader, `unshaded`, hellere Farben aus
+denselben Meeresfarben, weisse Gischtstreifen in drei Massstaeben, ein mit der
+Tiefe wachsendes Eigenleuchten (`glow` — die gewuenschte "Lichtquelle unten" als
+Farbe statt als echtes Licht: das Projekt hat bewusst keine Punktlichter, und ein
+Licht von unten traefe eine senkrechte Flaeche ohnehin nicht). Dazu ein kurzer
+Bogen an der Kante (`arc_out` 1,4 m im Vertex-Shader, Netz in
+`WATERFALL_ROWS` 9 Reihen) — ein Vorhang genau unter der Kante wird von eben
+dieser Kante verdeckt. Das Netz haengt weiter senkrecht.
+
+**Neues Diagnoseskript** `tests/diag_lava_waterfall_look.gd` (ohne `--headless`):
+Lavadecke ueber einem Kegel mit Graten und Buckeln auf dem echten Gelaendenetz
+(fliessend / erkaltend), Wasserfall der Inselkarte von aussen und aus der
+Spielkamera.
+
+**Tests:** `test_lava_surge_mesh_follows_the_terrain_grid` ersetzt
+`…_is_static_and_seamless`: jeder Lavavertex ist ein Gelaendevertex genau 8 cm
+darueber, kein Dreieck reicht ueber mehr als eine Zelle, Deckung und Hitze stimmen,
+kein seitliches Wandern. Die Wasserfalltests (senkrecht, radial, von der
+Wasserlinie abwaerts) laufen unveraendert durch.
+
+**Erkenntnis:** aus der Spielkamera INNERHALB der Scheibe sieht man vom Fall am
+gegenueberliegenden Rand prinzipbedingt nur die Gischtlinie an der Kante; voll
+sichtbar ist er am kameranahen Rand, wenn man an den Kartenrand faehrt.
+
+**Verifikation:** Ladecheck exit 0, Suite **6270 passed, 0 failed**, kein
+`SCRIPT ERROR`; Standbilder angesehen (kein Durchstechen auf dem Buckelkegel,
+Wasserfall deutlich sichtbar). **Nicht geprueft:** Bewegung, das Bild im echten
+Spiel (Vulkan mit Kraterfuellung, Lavastrom des Erdbebens), Bildrate.
+
+### Golem: Stufe 7, Einebnen, Gebaeudekills, niedrigeres Grundmodell (2026-11-15)
+
+Nutzervorgaben:
+
+1. **Stufe 7** (`GOLEM_MAX_LEVEL` 7): `GOLEM_TOP_LEVEL_KILLS` (50) Kills nach
+   Stufe 6, also 86 (`Golem.kills_for_level`). Koerper x1,5 gegenueber Stufe 6
+   (`GOLEM_TOP_LEVEL_GROWTH`: 4,48-fach, 21,2 m), Reichweite und Wirkflaechen
+   x1,25 (`GOLEM_TOP_LEVEL_REACH_GROWTH`: 2,21-fach), Dauerheilung 21/s, Tempo
+   aus der Groesse (7,4 m/s). **Der Schaden steigt nicht mehr**
+   (`level_damage_bonus` endet bei Stufe 6: +30).
+2. **Endboni bleiben auf Stufe 6:** neu `GOLEM_FINAL_BONUS_LEVEL` (6) — daran
+   haengen "keine Lebenszeitbegrenzung", Luftschlag und Verfolgung, nicht mehr
+   an der Maximalstufe.
+3. **Lebensobergrenze flat 1000** (`GOLEM_MAX_HP_CAP`): +5 je Kill, aber nie
+   ueber 1000 (nach 40 Kills erreicht); auf Stufe 7 wird sie in jedem Fall auf
+   1000 gesetzt. So gelesen, damit die Grenze beim Aufstieg auf 7 nicht FAELLT
+   (86 Kills x 5 waeren sonst 1230).
+4. **Einebnen** (`_tick_flatten`, statisch `Golem.flatten_plan`): alle
+   `GOLEM_FLATTEN_INTERVAL` (0,6 s) — und nur, wenn kein eigener Morph mehr
+   laeuft und unter dem Koerper mehr als 0,25 m Hoehenunterschied liegen — sinkt
+   jeder Gelaendepunkt im Koerperradius auf den TIEFSTEN dort. Ringsum wird das
+   Gelaende auf eine Boeschung von hoechstens 1 m je Meter zurueckgeschnitten
+   (`GOLEM_FLATTEN_SLOPE`). **Diese Boeschung ist eine eigene Festlegung:** mit
+   harter Kante wie beim Zauber "Ebene" graebt er sich bergauf in eine Schlucht
+   mit unbegehbaren Waenden (Grenze 1,5 m/m) und kommt selbst nicht mehr heraus.
+   Umgesetzt als gewoehnlicher `TerrainMorph` (0,5 s) — damit gelten alle
+   Gelaenderegeln. Dafuer bekommt der Golem beim Beschwoeren den Zauberkontext
+   (`Golem.terrain_ctx`, gesetzt in `GolemSpell.execute`).
+5. **Gebaeudekills zaehlen** (`_strike_building`): bringt ein Angriff des Golems
+   ein Gebaeude zu Fall, ist das EIN Kill (Lebenszeit, Leben, Stufe).
+6. **Grundmodell 10 % niedriger, gleich breit:** neu `GOLEM_BUILD_HEIGHT` 5,25
+   (Statur: Breite/Tiefe) neben `GOLEM_HEIGHT` 4,725 (echte Hoehe);
+   `MODEL_SCALE` / `MODEL_SCALE_Y` skalieren den Modellknoten ungleich. Die
+   Stauchung sitzt ueber dem Skelett, ist also in jeder Pose eine reine
+   senkrechte Skalierung. Der Schrittweg des Geh-Clips ist waagerecht und bleibt.
+
+| Stufe | Kills | Hoehe | Reichweite | Kreis | Schneise | Tempo | Schaden Hand/Tritt/Trampeln | Heilung |
+|---|---|---|---|---|---|---|---|---|
+| 0 | 0 | 4,73 m | 3,0 m | 2,6 m | 1,8 x 5,0 m | 3,50 m/s | 25 / 45 / – | – |
+| 6 | 36 | 14,11 m | 5,3 m | 4,6 m | 3,2 x 8,9 m | 6,05 m/s | 55 / 75 / 45 | 18/s |
+| 7 | 86 | 21,16 m | 6,6 m | 5,8 m | 4,0 x 11,1 m | 7,41 m/s | 55 / 75 / 45 | 21/s |
+
+**Tests** (`test_golem.gd`, 204 Zusicherungen): Stufengrenzen bis 7, Werte der
+Stufe 7, Obergrenze 1000, Gebaeudekill, `flatten_plan` (nur senken, Platte auf
+dem Tiefsten, Boeschung hoechstens 1 m/m, ebener Boden bleibt), Einebnen im
+Spiel nur auf Stufe 7, Statur/Hoehe des Modells. Die Tests der Endboni fragen
+jetzt `GOLEM_FINAL_BONUS_LEVEL`.
+
+**Offen / nicht geprueft:** das Einebnen im laufenden Spiel (Wasser: er senkt
+auch unter die Wasserlinie ab, wenn die tiefste Stelle unter ihm nass ist; eigene
+Gebaeude in seiner Naehe; Kosten des Gelaendeneuaufbaus alle 0,6 s beim Laufen
+durch huegeliges Land) und ob ein 21 m hoher, 7,4 m/s schneller Gigant spielbar
+bleibt.
+
+**Verifikation (Golem Stufe 7):** Ladecheck exit 0, Suite **6293 passed, 0 failed**, kein `SCRIPT ERROR`.
+
+### Schamanin: erste echte Spritesheets, gerendert aus einem 3D-Modell (2026-11-15)
+
+**Anlass (Nutzer):** die Einheiten sind Platzhalter-Sprites; koennen 3D-Modelle
+animiert und aus den passenden Winkeln zu Sprites gerendert werden? Prototyp: die
+Schamanin ist das Maedchen mit den Jeansschuhen aus `D:gamegymnastikschuh`,
+die HAARE tragen die Stammesfarbe.
+
+**Weg (wiederverwendbar fuer weitere Einheiten):**
+1. `D:gamegymnastikschuhigur_export.mjs` + `einheit_bewegung.mjs`: VRM ->
+   schlanke GLB mit eingebackenen Clips (`out/einheiten/schamanin.glb`) und eine
+   Beschreibung der Sheets (`schamanin_sprites.json`).
+2. `tests/tool_render_unit_sprites.gd` (OHNE `--headless`): laedt die GLB zur
+   Laufzeit (kein Import ins Projekt), rendert je Animation und Frame aus acht
+   Richtungen mit durchsichtigem Hintergrund, schreibt Farb-Sheet, Masken-Sheet
+   und `manifest.json` nach `assets/units/<einheit>/`. Optionen `elevation=`,
+   `px_per_m=`, `margin=`, `outline=`, `preview=`; meldet angeschnittene Zellen.
+3. `--headless --import`.
+
+**Geliefert:** 15 Sheets, 40 Frames, 64 x 96 (Hard Cap), je mit Maske — `stand`,
+`idle` 4, `walk` 6, `cast` 4, `punch` 4, `kick`/`shove`/`attack`/`sit`/`jump` je 2,
+`roll` 4, `drown` 3, `airborne` 2, `dead_back`/`dead_front` je 1. Es fehlen
+`carry`/`carry_walk` (Platzhalter). 30 PNG zusammen 804 KB.
+
+**Einstellungen und warum:** Kamera 22 Grad ueber der Waagerechten, 54 px/m.
+Hoeher rutscht ein zur Kamera vorgesetzter Fuss unter den Standpunkt und aus der
+Zelle; groesser beruehren erhobene Arme den Zellrand. Stammesfarbe: das Spiel
+rechnet Farbe x mix(1, Stammesfarbe, Maske) — die Haare werden deshalb hellgrau
+gerendert, die Maske ist nur dort weiss.
+
+**Bildspeicher (nachgemessen):** Atlas des Spiels jetzt 4096 x 2592 px, 1712
+Frames, 40,5 MB Farbe + 10,1 MB Maske. Die Atlaszelle richtet sich nach dem
+groessten Frame ALLER Einheiten — mit der ersten 64x96-Einheit belegen auch die
+Platzhalter der anderen Zellen dieser Groesse. Unkritisch.
+
+**Schwaechen:** in der Standard-Zoomstufe ist die Figur etwa 18 px hoch, schmal
+und faellt weniger auf als die voll eingefaerbten Klotz-Platzhalter; die
+Stammesfarbe steckt dort in wenigen Haarpixeln. Flache Darstellung (keine
+Schattierung, 1 px Kontur). Haare und Rock haengen starr. In den Schlagposen
+weicht die Figur 7-11 cm zurueck, damit Arm/Bein in die Zelle passt. Nicht
+geprueft: Bewegung im Spiel, das Portrait in der Seitenleiste, die Wasserkante
+bei `drown`. **Lizenz des Avatars wie beim Golem ungeklaert** (personalNonProfit,
+Namensnennung) — vor dem Einchecken von `assets/units/shaman/` klaeren.
+
+**Suite-Referenz:** mit den Sheets 2 Zusicherungen weniger als ohne
+(`test_combat.gd` hat zwei, die nur ohne geliefertes Schamanin-Bildmaterial
+laufen: 488 statt 490).
+
+### Wasserziele, Golem-Feinschliff, Portrait, Laufbild der Schamanin (2026-11-15)
+
+**1. Bug: Zielpunkte auf dem Wasser.** `TribeCommands.order_move` verteilte die
+Formationsplaetze um den Klickpunkt, ohne das Gelaende zu fragen — am Ufer lagen
+Plaetze im Meer, und ein Klick mitten aufs Wasser schickte die Truppe trotzdem
+los. Jetzt: `is_water` / `land_point` / `_land_slot` (siehe CLAUDE.md §4).
+`order_move` gibt die Zahl der losgeschickten Einheiten zurueck (vorher void);
+die UI spielt bei 0 den Abgelehnt-Ton. Flieger sind ausgenommen. Die 1,5 m
+Ufertoleranz ist eine eigene Festlegung (ein Klick knapp neben den Strand soll
+nicht ins Leere gehen). Tests in `test_unit_control.gd`
+(`test_move_order_onto_open_water_is_refused`,
+`test_move_order_at_the_shore_keeps_every_target_on_land`).
+
+**2. Golem.** Einebnen allmaehlich: `GOLEM_FLATTEN_RATE` 0,25 m/s,
+`flatten_plan` bekommt `max_drop` je Schritt. Marsch ohne Angriffsbefehl:
+`_maybe_retaliate` kehrt auf einem passiven MOVE sofort zurueck.
+
+**3. Portrait.** Es spielte fuer die stehende Schamanin die Idle-Animation in
+Dauerschleife, die Welt zeigt aber die Ruhepose und laesst Idle nur alle paar
+Sekunden einmal laufen. `_sync_portrait_rest` (jeden Frame) uebernimmt Frame und
+Pose aus `UnitRenderer.idle_frame` mit den Werten der Einheit. Nicht per Test
+abgedeckt (UI), nur Ladecheck.
+
+**4. Schamanin: Rennen statt Gehen.** `walk.png` zeigt jetzt den Laufzyklus aus
+`gang.js` (`rennstelle`, 0,6 s, 6 Bilder, 10 fps); `einheit_bewegung.mjs` und
+das Sheet neu erzeugt.
+
+**Verifikation:** Ladecheck exit 0, Suite **6308 passed, 0 failed**, kein
+`SCRIPT ERROR`; Kontaktbild des neuen Lauf-Sheets angesehen. Im laufenden Spiel
+nicht geprueft.
+
+### Golem: lokales Einebnen, Wachstum bis 100 m; Startmission mit vier roten Huetten (2026-11-15)
+
+**1. Bug: der Gigant schnitt seinen ganzen Weg auf Uferniveau herunter.** Das
+Niveau war "die tiefste Stelle unter ihm" — und dazu zaehlte der Boden, den er
+gerade selbst abgesenkt hatte. Beim Laufen wanderte diese Mulde mit, bergauf
+entstand ein Graben auf dem tiefsten je beruehrten Niveau. **Behebung:**
+`Golem._flatten_natural` merkt sich je Gelaendepunkt die Hoehe VOR seinem
+ersten Eingriff; `flatten_plan(..., natural)` nimmt als Niveau das tiefste
+NATUERLICHE Gelaende unter dem Koerper. Punkte, die schon tiefer liegen, bleiben
+(nie anheben). Das Gedaechtnis wird ab 6000 Eintraegen auf die Umgebung gestutzt.
+Bleibt: weil sich die Standflaechen beim Laufen ueberlappen, kann der Boden bis
+auf das natuerliche Niveau drei Koerperradien hinter ihm sinken — im Laufen
+wegen der Rate von 0,25 m/s aber nur wenige Dezimeter.
+
+**2. Wachstum nach Stufe 7** (`GOLEM_GROWTH_*`, `GOLEM_MAX_HEIGHT`): alle 15
+Kills ein Schritt (`growth_steps_for_kills`), Koerper x1,03, Wirkflaechen und
+Trampelradius x1,0075 (`growth_area_factor`), Tempo x1,0025 (eigene Festlegung
+fuer "nur geringfuegig"); Heilung, Schaden, Lebensobergrenze unveraendert. Die
+Koerpergroesse wird bei 100 m gekappt, nach 53 Schritten ist Schluss
+(`max_growth_steps`). Der Trampelradius haengt ab Stufe 7 nicht mehr an der
+Koerpergroesse, sondern am Flaechenwachstum.
+
+**3. Startmission:** Rot hat vier Huetten statt einer (`_setup_chamber_red`,
+Nutzerwunsch); headless nachgezaehlt (Blau 1, Rot 4).
+
+**Tests:** `test_giant_levels_to_the_local_ground_and_does_not_drag_the_low_level_along`,
+`test_giant_keeps_growing_beyond_level_seven_up_to_a_hundred_metres`;
+`test_golem.gd` 225 Zusicherungen.
+
+**Verifikation:** Ladecheck exit 0, Suite **6324 passed, 0 failed**, kein
+`SCRIPT ERROR`. Im laufenden Spiel nicht geprueft.
+
+### Startmission: rote Huetten bemannt; Golem-Koerperbox auf 75 % (2026-11-15)
+
+- **Startmission:** `Main._fill_huts(red)` setzt in jede rote Huette so viele
+  Braves, wie ihre Besatzung fasst (2 je Huette der Stufe 0) — headless
+  nachgezaehlt: vier rote Huetten, je 2 von 2.
+- **Golem:** `GOLEM_BODY_HALF_WIDTH` 1,15 -> 0,8625, `GOLEM_BODY_HALF_DEPTH`
+  0,9 -> 0,675 (die Einheitenbox war zu gross, Nutzer). Daran haengen Auswahl
+  (Ring 2,7), Schatten, `GOLEM_SEPARATION` (1,5 -> 1,125) und — mit der Stufe
+  skaliert — Trampelradius und Einebnungsflaeche: auf Stufe 7 jetzt 3,9 m statt
+  5,2 m Radius, am Wachstumsende 5,7 m.
+
+**Verifikation:** Ladecheck exit 0, Suite **6328 passed, 0 failed**, kein `SCRIPT ERROR`. Im laufenden Spiel nicht geprueft.
+
+### Golem: Koerperbox -10 %, Einebnen langsamer und nie unter die Wasserlinie (2026-11-15)
+
+- **Koerperbox** noch einmal 10 % kleiner: `GOLEM_BODY_HALF_WIDTH` 0,77625,
+  `GOLEM_BODY_HALF_DEPTH` 0,6075 (1,55 x 1,22 m), Auswahlring 2,43,
+  `GOLEM_SEPARATION` 1,0. Trampel- und Einebnungsradius auf Stufe 7 damit 3,5 m.
+- **Einebnen langsamer:** `GOLEM_FLATTEN_RATE` 0,25 -> 0,1 m/s.
+- **Wasserlinie** (`GOLEM_FLATTEN_ABOVE_WATER` 0,15, `flatten_plan(...,
+  floor_height)`): kein Punkt sinkt unter `SEA_LEVEL` + 0,15 m — das Niveau wird
+  dort gedeckelt —, und Gelaende, das schon darunter liegt (Meeresboden), wird
+  uebersprungen. Angehoben hat der Effekt nie; mit dem Deckel waere es ohne
+  dieses Ueberspringen aber moeglich geworden.
+
+**Tests:** Wasserlinie in `test_flatten_plan_levels_to_the_lowest_ground_with_a_walkable_bank`
+(nichts unter dem Deckel, Meeresboden unberuehrt); `test_golem.gd` 231 Zusicherungen.
+
+**Verifikation:** Ladecheck exit 0, Suite **6330 passed, 0 failed**, kein `SCRIPT ERROR`. Im
+laufenden Spiel nicht geprueft.
+
+### Golem: Tritt nach hinten, Trampeln nach Groesse, Gigant laeuft gerade; Endbildschirm wartet (2026-11-15)
+
+- **Tritt:** Schneise vorn 15 % kuerzer (`GOLEM_KICK_LENGTH` 5,0 -> 4,25 m),
+  dafuer `GOLEM_KICK_BACK_SHARE` (70 %) davon auch nach HINTEN (das Ausholen):
+  1,8 x 7,2 m. Wer hinten getroffen wird, fliegt nach hinten weg.
+- **Trampelschaden** aus der Groesse: Koerperhoehe in m / 5, gerundet, min. 1
+  (`GOLEM_TRAMPLE_HEIGHT_PER_DAMAGE`; `GOLEM_TRAMPLE_DAMAGE` entfaellt, kein
+  Stufenbonus mehr). Stufe 1: 1, Stufe 7: 4, 100 m: 20.
+- **Gebaeude trampeln ab Stufe 7:** je feindlichem Gebaeude unter dem Koerper eine
+  Zerstoerungsstufe alle 2 s (`GOLEM_TRAMPLE_BUILDING_INTERVAL`), nur im Laufen.
+  Auslegung von "1 Schadenstick alle 2 Sek": eine Stufe wie beim Tornado.
+- **Angriffsanimationen:** liefen bisher auf jeder Groesse gleich schnell. Jetzt
+  `attack_speed()` = 1/Wurzel(Groesse), nach unten begrenzt auf Cliplaenge /
+  Abklingzeit — der Clip fuellt hoechstens die 1,8 s, kein Idle dazwischen. Die
+  Ausholzeit (`current_windup`) waechst mit; der Angriffstakt bleibt.
+- **Gerade Wege ab Stufe 7** (`walks_straight`, `giant_line_clear`,
+  `_straighten`, Overrides von `_start_path_to` / `_plan_path_to` /
+  `_apply_worker_path` / `_step_toward`): freie Luftlinie = ein Wegstueck ohne
+  Wegsuche; sonst A* und danach begradigen. Hindernis sind nur Meer, Kartenrand
+  und Klippen ueber 20 % der Koerperhoehe je Meter (`GOLEM_GIANT_STEP_SHARE`).
+  Baeume standen dem Golem schon vorher nicht im Weg (sie sind im NavGrid keine
+  Hindernisse).
+- **Besatzungsfeld:** ein ausgewaehlter Golem zeigt Stufe, Kills bis zur
+  naechsten, Groesse, Leben, Lebenszeit (`Golem.status_text`,
+  `Sidebar._selected_crew_target` / `_crew_view`).
+- **Bug "Rot besiegt, Kreis und Bauruine stehen noch":** die Simulation ist in
+  Ordnung (`Tribe.eliminate` reisst Kreis und Baustelle ab, Tests). Gefundene
+  Ursache: `EndScreen.show_result` pausierte im selben Tick — die Wracks
+  begannen zu versinken und froren aufrecht ein. Der Endbildschirm kommt jetzt
+  `RESULT_DELAY` (2,5 s Spielzeit) nach der Entscheidung. **Nicht bestaetigt**,
+  dass es beim Nutzer dieser Fall war (setzt voraus, dass Rot der letzte Gegner
+  war); bei mehreren Gegnern waere die Ursache eine andere und noch offen.
+
+**Tests:** `test_golem.gd` 273 Zusicherungen (neu u. a.
+`test_kick_hits_a_lane_ahead_and_behind_and_throws_everyone`,
+`test_attack_animations_slow_down_with_size_but_fit_the_cooldown`,
+`test_giant_tramples_buildings_one_stage_every_two_seconds`,
+`test_giant_walks_straight_through_buildings`,
+`test_giant_line_stops_only_at_the_sea_and_big_cliffs`,
+`test_giant_detour_around_water_is_pulled_straight`,
+`test_status_text_reports_level_size_health_and_lifetime`);
+`test_shaman_respawn.gd`: `test_site_sinks_although_a_building_site_is_left`,
+`test_elimination_razes_the_circle_and_a_bare_building_site`;
+`test_ui_logic.gd`: `test_end_screen_waits_for_the_wrecks_to_sink`.
+
+**Verifikation:** Ladecheck exit 0, Suite **6386 passed, 0 failed**, kein `SCRIPT ERROR`.
+Im laufenden Spiel nicht geprueft.

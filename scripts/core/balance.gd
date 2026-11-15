@@ -52,51 +52,201 @@ const WARRIOR_SHOVE_CHANCE: float = 0.0
 const WARRIOR_KICK_CHANCE: float = 0.35
 
 # --- Golem (beschworene Einheit, Zauber 13, 2026-09-06) ---
-## Steinkonstrukt: 3 m tief x 4 m breit x 4 m hoch, eigenes 3D-Modell, lebt
-## GOLEM_LIFETIME Sekunden (+GOLEM_LIFE_PER_KILL je Kill) und zerfaellt dann.
-## 400 -> 800 nach dem ersten Spieltest ("viel zu schwach", 2026-09-06).
+## Beschworene Riesin, seit 2026-11-15 eine schlanke Figur statt eines 4 x 3 m
+## breiten Klotzes: so hoch wie der Wachturm, 2,3 m breit x 1,8 m tief, eigenes
+## 3D-Modell, lebt GOLEM_LIFETIME Sekunden (+GOLEM_LIFE_PER_KILL je Kill) und
+## zerfaellt dann. 400 -> 800 nach dem ersten Spieltest ("viel zu schwach").
 const GOLEM_HP: int = 800
+## Statur der Figur: Breite und Tiefe wie bei einer 5,25 m hohen Figur (die
+## Zinnen des Wachturms: Schaft 4,2 + Plattform + Zinnen, Nutzervorgabe
+## 2026-11-15), die HOEHE aber 10 % weniger — sie wirkte zu schlank
+## (Nutzervorgabe, selber Tag). Das Modell ist auf 4 m gebaut; das Spiel skaliert
+## Breite/Tiefe mit GOLEM_BUILD_HEIGHT und die Hoehe mit GOLEM_HEIGHT.
+const GOLEM_BUILD_HEIGHT: float = 5.25
+const GOLEM_HEIGHT: float = 4.725
 const GOLEM_SPEED: float = 3.5
-## Nahkampf-Reichweite (Abstand zum Ziel, ab dem geschlagen wird — gross, damit
-## der Riese nicht an seinem Opfer klebt).
+## Nahkampf-Reichweite (Abstand zum Ziel, ab dem angegriffen wird — gross, damit
+## die Riesin nicht an ihrem Opfer klebt). Beide Angriffe reichen weiter.
 const GOLEM_REACH: float = 3.0
-## Wirkfeld des Schlags: die GESAMTE Hitbox des Golems (GOLEM_BODY_* Halbmasse:
-## 4 m breit, 3 m tief) PLUS ein Feld GOLEM_FIELD_WIDTH x GOLEM_FIELD_LENGTH
-## direkt vor der Hitbox. Alles flach in XZ im Blickrahmen.
-const GOLEM_BODY_HALF_WIDTH: float = 2.0
-const GOLEM_BODY_HALF_DEPTH: float = 1.5
-## Das Feld vor der Hitbox: 2x3 -> 3x3 m (Nutzervorgabe 2026-09-09). Es ist
-## damit quadratisch und genau so breit wie tief; die Hitbox selbst (4 m) bleibt
-## breiter.
-const GOLEM_FIELD_WIDTH: float = 3.0
-const GOLEM_FIELD_LENGTH: float = 3.0
-## 20 -> 25 und 2,0 -> 1,8 s (Nutzervorgabe 2026-09-09): zusammen 10 -> 13,9
-## Schaden je Sekunde und Ziel, also +39 %.
-const GOLEM_DAMAGE: int = 25
+## Koerperbox (Halbmasse im Blickrahmen): 1,55 m breit, 1,22 m tief — erst 75 %,
+## dann noch einmal 90 % der frueheren 2,3 x 1,8 m (Nutzer 2026-11-15; die Figur
+## selbst misst stehend 2,0 x 1,0 m). Sie bestimmt Auswahl, Schatten und Abstand
+## UND, mit der Stufe skaliert, den Trampelradius und die Flaeche, die der Gigant
+## einebnet. Die Wirkflaechen der Angriffe stehen unten.
+const GOLEM_BODY_HALF_WIDTH: float = 0.77625
+const GOLEM_BODY_HALF_DEPTH: float = 0.6075
+## ZWEI ANGRIFFE (Nutzervorgabe 2026-11-15), beide im Takt GOLEM_STRIKE_COOLDOWN:
+##
+## HANDSCHLAG (slam): sie bueckt sich und schlaegt beide Haende auf den Boden —
+## Flaechenschaden RUNDHERUM. Kreis mit GOLEM_SLAM_RADIUS um den Punkt
+## GOLEM_SLAM_FORWARD vor ihr (dort treffen die Haende auf: im Clip 0,95 m bei
+## 4 m Modellhoehe, also 1,25 m bei 5,25 m). 2,6 m Radius sind 21 m2, genau die
+## Flaeche des alten Schlags (Hitbox 4x3 + Feld 3x3).
+const GOLEM_SLAM_RADIUS: float = 2.6
+const GOLEM_SLAM_FORWARD: float = 1.2
+const GOLEM_SLAM_DAMAGE: int = 25
+## Sekunden vom Ansetzen bis zum Aufschlag (so lang ist das Buecken in der
+## Animation `slam`).
+const GOLEM_SLAM_WINDUP: float = 0.8
+## TRITT (kick): ein Fussballtritt nach vorn — Schaden in einer SCHNEISE:
+## GOLEM_KICK_WIDTH breit, von der Riesin GOLEM_KICK_LENGTH nach vorn (9 m2,
+## weniger als die Haelfte des Handschlags). Dafuer mehr Schaden und VIEL
+## Rueckstoss: JEDER Ueberlebende fliegt in Trittrichtung davon.
+## 2026-11-15 (Nutzer): die Schneise reicht auch nach HINTEN — das Bein holt aus.
+## Vorn 15 % kuerzer (5,0 -> 4,25 m), dafuer GOLEM_KICK_BACK_SHARE (70 %) der
+## vorderen Laenge auch hinter ihr: 1,8 x 7,2 m = 13 m2. Wer hinten getroffen
+## wird, fliegt nach hinten weg.
+const GOLEM_KICK_WIDTH: float = 1.8
+const GOLEM_KICK_LENGTH: float = 4.25
+const GOLEM_KICK_BACK_SHARE: float = 0.7
+const GOLEM_KICK_DAMAGE: int = 45
+const GOLEM_KICK_WINDUP: float = 0.5
+## Wurf des Tritts (waagerecht / senkrecht, m/s): dreimal so weit wie der Wurf
+## des Handschlags (GOLEM_LIFT_PUSH).
+const GOLEM_KICK_PUSH: float = 9.0
+const GOLEM_KICK_UP: float = 5.5
+## Angriffswahl: stehen mindestens so viele Feinde in der Flaeche des
+## Handschlags, schlaegt sie; sonst tritt sie (Einzelziele, Gebaeude).
+const GOLEM_SLAM_MIN_TARGETS: int = 3
+## 2,0 -> 1,8 s (Nutzervorgabe 2026-09-09). Gilt fuer beide Angriffe.
 const GOLEM_STRIKE_COOLDOWN: float = 1.8
-## Je Opfer, das den Schlag ueberlebt: 30 % Hochwirbeln, 30 % Ins-Rollen — beides
-## VOM Golem weg (25/25 -> 30/30 nach dem ersten Spieltest). Der Rest wird nur
-## getroffen.
+## HANDSCHLAG, je Opfer, das ihn ueberlebt: 30 % Hochwirbeln, 30 % Ins-Rollen —
+## beides VOM Golem weg (25/25 -> 30/30 nach dem ersten Spieltest). Der Rest wird
+## nur getroffen. (Der Tritt wirft jeden, s. GOLEM_KICK_PUSH.)
 const GOLEM_LIFT_CHANCE: float = 0.3
 const GOLEM_ROLL_CHANCE: float = 0.3
-## Wurfstaerke des Schlags (waagerecht / senkrecht, m/s) — deutlich schwerer als
-## der Feuerkrieger-Uppercut (1,2 / 3,0).
+## Wurfstaerke des Handschlags (waagerecht / senkrecht, m/s) — deutlich schwerer
+## als der Feuerkrieger-Uppercut (1,2 / 3,0).
 const GOLEM_LIFT_PUSH: float = 3.0
 const GOLEM_LIFT_UP: float = 4.5
 const GOLEM_ROLL_DURATION: float = 1.0
 const GOLEM_ROLL_SPEED: float = 4.0
-## Gebaeudestufen je Schlag auf jedes feindliche Gebaeude im Wirkfeld.
+## Gebaeudestufen je Angriff auf jedes feindliche Gebaeude in der Wirkflaeche
+## (Handschlag und Tritt gleich).
 const GOLEM_BUILDING_STAGES: int = 1
 const GOLEM_LIFETIME: float = 180.0
 ## 3 -> 6 s nach dem ersten Spieltest.
 const GOLEM_LIFE_PER_KILL: float = 6.0
-## Je Kill heilt der Golem zusaetzlich (Nutzervorgabe 2026-09-09) — gedeckelt
-## bei GOLEM_HP, geheilt wird also nur echter Schaden.
+## Je Kill heilt der Golem um GOLEM_HP_PER_KILL (Nutzervorgabe 2026-09-09) UND
+## seine Lebensobergrenze steigt um GOLEM_MAX_HP_PER_KILL (2026-11-15) — bis
+## hoechstens GOLEM_MAX_HP_CAP (flat 1000, Nutzervorgabe; nach 40 Kills erreicht,
+## auf Stufe 7 gilt sie in jedem Fall). Die Obergrenze GILT: Kill-Heilung und
+## Dauerheilung enden an ihr — sonst heilte er sich passiv unendlich hoch.
+## Als Kill zaehlt auch ein vom Golem zerstoertes GEBAEUDE.
 const GOLEM_HP_PER_KILL: int = 10
+const GOLEM_MAX_HP_PER_KILL: int = 5
+const GOLEM_MAX_HP_CAP: int = 1000
+## STUFEN (Nutzervorgabe 2026-11-15): der Golem beginnt auf Stufe 0 und steigt
+## alle GOLEM_KILLS_PER_LEVEL Kills eine Stufe auf, bis Stufe
+## GOLEM_FINAL_BONUS_LEVEL (6). Je Stufe:
+##   + GOLEM_LEVEL_LIFETIME Sekunden Lebenszeit (einmalig beim Aufstieg),
+##   + GOLEM_LEVEL_REGEN Leben je Sekunde Dauerheilung (Stufe 1: 3/s, Stufe 6: 18/s)
+##     bis zur Lebensobergrenze,
+##   GOLEM_LEVEL_GROWTH groesser als auf der Stufe davor (aufgezinst: 1,2 hoch
+##     Stufe — Stufe 6 ist das 2,99-Fache, 15,7 m),
+##   GOLEM_LEVEL_REACH_GROWTH mehr Reichweite, Handschlag-Radius und Schneise als
+##     auf der Stufe davor (aufgezinst: 1,1 hoch Stufe — Stufe 6: 1,77-fach).
+##     Bewusst langsamer als die Koerpergroesse (Nutzervorgabe),
+##   + GOLEM_LEVEL_DAMAGE Schaden auf Handschlag, Tritt und Trampeln.
+## Tempo: GOLEM_SPEED * Wurzel(Groessenfaktor) — die Schritte werden laenger, die
+## Schrittfolge etwas ruhiger (Stufe 6: 6,05 m/s).
+## DIE ENDBONI gibt es ab Stufe GOLEM_FINAL_BONUS_LEVEL (6): keine
+## Lebenszeitbegrenzung mehr, und er jagt Luftschiffe (s. GOLEM_SWAT_WINDUP).
+##
+## STUFE 7, der GIGANT (Nutzervorgabe 2026-11-15): GOLEM_TOP_LEVEL_KILLS (50)
+## weitere Kills nach Stufe 6, also 86 insgesamt. Der Koerper waechst noch einmal
+## um GOLEM_TOP_LEVEL_GROWTH (50 %: 4,48-fach, 21,2 m), Reichweite und
+## Wirkflaechen um GOLEM_TOP_LEVEL_REACH_GROWTH (25 %: 2,21-fach), die
+## Dauerheilung wie gehabt um 3/s (21/s), das Tempo folgt der Groesse. Der
+## SCHADEN steigt nicht mehr (bleibt bei +30). Und: wo der Gigant steht, wird der
+## Boden EBEN — auf die tiefste Stelle unter seinem Koerper (s. GOLEM_FLATTEN_*).
+const GOLEM_KILLS_PER_LEVEL: int = 6
+const GOLEM_MAX_LEVEL: int = 7
+const GOLEM_FINAL_BONUS_LEVEL: int = 6
+const GOLEM_TOP_LEVEL_KILLS: int = 50
+const GOLEM_TOP_LEVEL_GROWTH: float = 0.5
+const GOLEM_TOP_LEVEL_REACH_GROWTH: float = 0.25
+## Einebnen unter dem Giganten (Stufe 7): alle GOLEM_FLATTEN_INTERVAL Sekunden
+## wird geprueft; liegt unter seinem Koerper mehr als GOLEM_FLATTEN_MIN_SPREAD
+## Hoehenunterschied, senkt sich alles dort auf die tiefste Stelle. Ringsum
+## bleibt eine BEGEHBARE Boeschung stehen (hoechstens GOLEM_FLATTEN_SLOPE Meter
+## Anstieg je Meter), sonst graebe er sich in eine Grube mit Steilwaenden ein,
+## aus der er selbst nicht mehr herauskaeme. Es wird nur gesenkt, nie gehoben.
+const GOLEM_FLATTEN_INTERVAL: float = 0.6
+const GOLEM_FLATTEN_MIN_SPREAD: float = 0.25
+const GOLEM_FLATTEN_SLOPE: float = 1.0
+const GOLEM_FLATTEN_DURATION: float = 0.5
+## ...und ALLMAEHLICH (Nutzer 2026-11-15: schlagartig war es zu stark): der
+## Boden sinkt hoechstens so viele Meter je Sekunde. Ein 2 m hoher Buckel unter
+## ihm braucht damit 20 s; wer nur durchlaeuft, hinterlaesst kaum eine Spur.
+## 0,25 -> 0,1 m/s (Nutzer, selber Tag: noch langsamer).
+const GOLEM_FLATTEN_RATE: float = 0.1
+## Das Einebnen senkt NIE unter die Wasserlinie: tiefer als so viele Meter ueber
+## TerrainData.SEA_LEVEL geht kein Punkt (Land bleibt Land, niemand ertrinkt
+## durch den Giganten), und Gelaende, das schon darunter liegt (Meeresboden),
+## wird gar nicht angefasst — weder gesenkt noch gehoben.
+const GOLEM_FLATTEN_ABOVE_WATER: float = 0.15
+## WACHSTUM NACH STUFE 7 (Nutzervorgabe 2026-11-15): der Gigant waechst weiter,
+## ohne eine neue Stufe — alle GOLEM_GROWTH_KILLS Kills ein Schritt:
+##   Koerper   x (1 + GOLEM_GROWTH_SIZE)   = 3 % groesser als davor (aufgezinst),
+##   Wirkflaechen (Reichweite, Handschlag, Schneise, Trampelradius)
+##             x (1 + GOLEM_GROWTH_AREA)   = 0,75 %,
+##   Tempo     x (1 + GOLEM_GROWTH_SPEED)  = nur geringfuegig (0,25 %).
+## Dauerheilung, Schaden und Lebensobergrenze steigen NICHT mehr. Schluss ist bei
+## GOLEM_MAX_HEIGHT Metern Koerperhoehe (nach 53 Schritten = 795 Kills ueber
+## Stufe 7); dann wachsen auch Flaechen und Tempo nicht weiter.
+const GOLEM_GROWTH_KILLS: int = 15
+const GOLEM_GROWTH_SIZE: float = 0.03
+const GOLEM_GROWTH_AREA: float = 0.0075
+const GOLEM_GROWTH_SPEED: float = 0.0025
+const GOLEM_MAX_HEIGHT: float = 100.0
+const GOLEM_LEVEL_LIFETIME: float = 20.0
+const GOLEM_LEVEL_REGEN: float = 3.0
+const GOLEM_LEVEL_GROWTH: float = 0.2
+const GOLEM_LEVEL_REACH_GROWTH: float = 0.1
+const GOLEM_LEVEL_DAMAGE: int = 5
+## AB STUFE 1 ignoriert der Golem die Kollision mit Einheiten (er laeuft durch sie
+## hindurch, niemand wird von ihm weggeschoben) und TRAMPELT: jeder Feind unter
+## seinem Koerper nimmt den Trampelschaden (aus der Groesse, s. u.), solange der Golem
+## sich schneller als GOLEM_TRAMPLE_MIN_SPEED bewegt — im Stehen nie. Dasselbe
+## Opfer hoechstens alle GOLEM_TRAMPLE_INTERVAL Sekunden.
+## Trampelschaden seit 2026-11-15 (Nutzer) aus der GROESSE: Koerperhoehe in
+## Metern / GOLEM_TRAMPLE_HEIGHT_PER_DAMAGE, gerundet, mindestens 1 (Stufe 1 mit
+## 5,7 m: 1; Stufe 7 mit 21 m: 4; 100 m: 20). Kein Stufenbonus mehr obendrauf.
+const GOLEM_TRAMPLE_HEIGHT_PER_DAMAGE: float = 5.0
+## Ab der hoechsten Stufe trampelt der Gigant auch GEBAEUDE nieder: jedes
+## feindliche Gebaeude unter seinem Koerper verliert alle
+## GOLEM_TRAMPLE_BUILDING_INTERVAL Sekunden eine Zerstoerungsstufe (wie unter dem
+## Tornado), solange er laeuft.
+const GOLEM_TRAMPLE_BUILDING_INTERVAL: float = 2.0
+## GERADE WEGE ab der hoechsten Stufe (Nutzer 2026-11-15): der Gigant laeuft in
+## geraden Linien — Gebaeude, Baeume und normales Gelaende (auch Haenge, die fuer
+## alle anderen zu steil sind) halten ihn nicht mehr auf, kein Zickzack ums
+## Hindernis. Was bleibt: das Meer, der Kartenrand und GROSSE Klippen — eine Stufe
+## von mehr als GOLEM_GIANT_STEP_SHARE seiner Koerperhoehe auf einem Meter Weg
+## (Stufe 7 mit 21 m: 4,3 m; zum Vergleich: fuer Fusseinheiten ist bei 1,5 m
+## Schluss). Ist die Luftlinie versperrt, wird der normale Weg gesucht und
+## danach begradigt.
+const GOLEM_GIANT_STEP_SHARE: float = 0.2
+const GOLEM_TRAMPLE_INTERVAL: float = 1.0
+const GOLEM_TRAMPLE_MIN_SPEED: float = 0.5
+## AUF DER HOECHSTEN STUFE schlaegt der Golem auch nach LUFTSCHIFFEN (Nutzervorgabe
+## 2026-11-15): steht ein bemanntes feindliches Luftschiff in seiner Reichweite
+## (flach gemessen, dieselbe wie am Boden), holt er mit einem eigenen Schlag nach
+## oben aus (Clip `swat`, Aufschlag nach GOLEM_SWAT_WINDUP). Jeder Treffer ist EIN
+## Huellentreffer wie beim Katapult — AIRSHIP_HULL_HITS (2) zerstoeren das Schiff.
+const GOLEM_SWAT_WINDUP: float = 0.5
+## ...und er VERFOLGT sie: steht er sonst untaetig herum, laeuft er einem bemannten
+## feindlichen Luftschiff im Umkreis GOLEM_AIR_CHASE_RADIUS nach — aber nur, wenn
+## er eine Stelle in Schlagweite des Schiffs zu Fuss erreichen kann (gleiche
+## Insel; ein Schiff ueber offenem Wasser laesst er ziehen).
+const GOLEM_AIR_CHASE_RADIUS: float = 25.0
 ## Stein brennt schlecht: statt 15 Schaden/s nur ein Rinnsal, und keine Panik.
 const GOLEM_BURN_DPS: float = 5.0
-## Abstand, den andere grosse Koerper (Fahrzeuge, Golems) zum Golem halten.
-const GOLEM_SEPARATION: float = 2.0
+## Abstand, den andere grosse Koerper (Fahrzeuge, Golems) zum Golem halten
+## (2,0 -> 1,5 mit dem schlanken Koerper, -> 1,125 mit der kleineren Koerperbox,
+## beides 2026-11-15).
+const GOLEM_SEPARATION: float = 1.0
 
 # --- Feuerkrieger ---
 const FIREWARRIOR_HP: int = 65

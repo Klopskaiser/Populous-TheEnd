@@ -1306,19 +1306,24 @@ func test_lava_flow_turn_rate_is_capped() -> void:
 	_free_world(w)
 
 
-## Regression (user report): the volcano sheet showed terrain through ring-shaped
-## GAPS and its ragged front appeared to rotate. Both came from one animated
-## bulge factor that scaled only the OUTER edge of each band — below 1.0 it tore
-## the band pair apart, and the animation swept the tear around. The mesh must
-## therefore be (a) identical for the same sector radii regardless of _life and
-## (b) seamless: every band's outer radius is the next band's inner radius.
-func test_lava_surge_mesh_is_static_and_seamless() -> void:
+## Regression (user reports): the volcano sheet let the terrain show through —
+## first through ring-shaped GAPS that also appeared to rotate (an animated bulge
+## factor), later simply because a polar ring mesh cuts CHORDS through curved
+## ground. Since 2026-11-15 the sheet is built on the terrain's own grid, so the
+## mesh must be
+##   (a) CONFORMING: every vertex is a terrain vertex lifted by exactly
+##       SURFACE_LIFT, and the triangles are the terrain's own — nothing can poke
+##       through, however bumpy the ground,
+##   (b) STATIC: identical XZ for the same sector radii regardless of _life,
+##   (c) carrying the shader inputs: coverage 1 well inside, 0 beyond the front.
+func test_lava_surge_mesh_follows_the_terrain_grid() -> void:
 	var w: Dictionary = _make_world()
-	# A cone, so the sectors advance and several bands exist.
+	# A cone with ridges and bumps: exactly what a coarse mesh would cut through.
 	for vz in range(54, 75):
 		for vx in range(54, 75):
 			var d: float = Vector2(float(vx) - 64.0, float(vz) - 64.0).length()
-			w.td.set_vertex_height(vx, vz, 11.0 - 0.7 * d)
+			w.td.set_vertex_height(vx, vz, 11.0 - 0.7 * d
+				+ 0.4 * sin(float(vx) * 1.9) * cos(float(vz) * 1.7))
 	var surge: LavaSurge = LavaSurge.new()
 	surge.setup(Vector3(64, w.td.get_height(64.0, 64.0), 64), w.unit_manager,
 		w.td, 7.5)
@@ -1326,35 +1331,62 @@ func test_lava_surge_mesh_is_static_and_seamless() -> void:
 	surge._mesh.mesh = ImmediateMesh.new()
 	for i in range(30):
 		surge.tick(0.1)
+	surge._rebuild_mesh()
 	var mesh: ImmediateMesh = surge._mesh.mesh
-	check(mesh.get_surface_count() >= 2, "the sheet spans several bands")
+	check(mesh.get_surface_count() == 1, "the sheet is one surface (one draw call)")
+	var arrays: Array = mesh.surface_get_arrays(0)
+	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var uvs: PackedVector2Array = arrays[Mesh.ARRAY_TEX_UV]
+	check(verts.size() >= 60 and verts.size() % 3 == 0,
+		"it is made of whole triangles (%d vertices)" % verts.size())
 
-	# (b) Seamless: band k's outer radius == band k+1's inner radius. Each
-	# surface starts with [outer(sector 0), inner(sector 0)].
-	var seam_error: float = 0.0
-	var prev_outer: float = -1.0
-	for surf in range(mesh.get_surface_count()):
-		var verts: PackedVector3Array = mesh.surface_get_arrays(surf)[Mesh.ARRAY_VERTEX]
-		if verts.size() < 2:
+	# (a) Conforming. ONE aggregated assertion each (the vertex count depends on
+	# how far the fronts ran).
+	var off_grid: int = 0
+	var worst_lift: float = 0.0
+	for v in verts:
+		var wx: float = v.x + surge.position.x
+		var wz: float = v.z + surge.position.z
+		if absf(wx - roundf(wx)) > 0.001 or absf(wz - roundf(wz)) > 0.001:
+			off_grid += 1
 			continue
-		var outer: float = Vector2(verts[0].x, verts[0].z).length()
-		var inner: float = Vector2(verts[1].x, verts[1].z).length()
-		if prev_outer >= 0.0:
-			seam_error = maxf(seam_error, absf(inner - prev_outer))
-		prev_outer = outer
-	check(seam_error < 0.001,
-		"no gap between the ring bands (worst seam %.4f m)" % seam_error)
+		var ground: float = w.td.heights[int(roundf(wz)) * w.td.verts + int(roundf(wx))]
+		worst_lift = maxf(worst_lift,
+			absf(v.y + surge.position.y - ground - LavaSurge.SURFACE_LIFT))
+	check(off_grid == 0, "every lava vertex is a terrain grid vertex")
+	check(worst_lift < 0.001,
+		"and sits exactly SURFACE_LIFT above it (worst error %.4f m)" % worst_lift)
+	# The triangles are the terrain's: each one spans a single grid cell.
+	var stray: int = 0
+	for t in range(0, verts.size(), 3):
+		var lo: Vector3 = verts[t].min(verts[t + 1]).min(verts[t + 2])
+		var hi: Vector3 = verts[t].max(verts[t + 1]).max(verts[t + 2])
+		if hi.x - lo.x > 1.001 or hi.z - lo.z > 1.001:
+			stray += 1
+	check(stray == 0, "no triangle reaches across more than one terrain cell")
 
-	# (a) Static: same radii, later _life -> byte-identical vertices.
-	var before: PackedVector3Array = mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
-	var kept: PackedVector3Array = before.duplicate()
+	# (c) Shader inputs: full coverage near the crater, none beyond the fronts.
+	var full_inside: bool = false
+	var bad_cover: int = 0
+	for i in range(verts.size()):
+		var r: float = Vector2(verts[i].x, verts[i].z).length()
+		if r < 2.0 and uvs[i].y > 0.99:
+			full_inside = true
+		if r > surge._front_radius + LavaSurge.EDGE_REACH + 0.001 and uvs[i].y > 0.0:
+			bad_cover += 1
+		if uvs[i].x < 0.0 or uvs[i].x > 1.0:
+			bad_cover += 1
+	check(full_inside, "the body near the crater is fully covered")
+	check(bad_cover == 0, "coverage is zero beyond the front and the heat stays in 0..1")
+
+	# (b) Static: same radii, later _life -> the same vertices in XZ.
+	var kept: PackedVector3Array = verts.duplicate()
 	surge._life += 1.7
 	surge._rebuild_mesh()
 	var after: PackedVector3Array = mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
 	check(after.size() == kept.size(), "same vertex count")
-	# XZ only: the sheet DOES move down at the end of its life (_sink_offset,
-	# 0.675 m at this point) — that is intended. What must not happen is any
-	# horizontal creep, which is what the animated bulge caused.
+	# XZ only: the sheet DOES move down at the end of its life (_sink_offset) —
+	# that is intended. What must not happen is any horizontal creep.
 	var moved: float = 0.0
 	for i in range(mini(after.size(), kept.size())):
 		moved = maxf(moved, Vector2(after[i].x - kept[i].x,

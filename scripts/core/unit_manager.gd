@@ -144,6 +144,11 @@ const FLAG_PREACHER: int = 16
 ## melee scans skip such targets without an is_airborne() object call. The
 ## THROWN half of is_airborne() is read from soa_state instead.
 const FLAG_AIRBORNE: int = 32
+## Walks through other units (the golem from level 1): takes no part in the
+## separation pass at all — it is neither pushed nor does it push anyone.
+const FLAG_NO_COLLISION: int = 64
+## Units the separation pass skips on BOTH sides (as the mover and as a neighbour).
+const SEPARATION_SKIP_FLAGS: int = FLAG_CREW_SEATED | FLAG_NO_COLLISION
 
 var soa_pos: PackedVector3Array = PackedVector3Array()
 var soa_state: PackedInt32Array = PackedInt32Array()
@@ -818,7 +823,7 @@ func _apply_separation(delta: float) -> void:
 		# their slots by _tick_crew; the flat separation would shove them off-slot
 		# and SNAP their Y onto the terrain for a frame (they flicker/vanish on
 		# slopes, user bug). They neither separate nor push others.
-		if fl & FLAG_CREW_SEATED:
+		if fl & SEPARATION_SKIP_FLAGS:
 			continue
 		# Vehicles (siege engines) are push_immune against pedestrians but keep
 		# a big spacing among EACH OTHER (their crews clip otherwise, phase
@@ -850,7 +855,7 @@ func _apply_separation(delta: float) -> void:
 					if stj == st_dead or stj == st_thrown or stj == st_roll:
 						continue
 					var flj: int = sflags[j]
-					if flj & FLAG_CREW_SEATED:
+					if flj & SEPARATION_SKIP_FLAGS:
 						continue
 					if veh_r > 0.0 and (sveh[j] <= 0.0
 							or ((flj ^ fl) & FLAG_FLIES) != 0):

@@ -61,6 +61,11 @@ const BOTTOM_SHADE: float = 0.30
 const WALL_OUT: float = 0.06
 ## The waterfall hangs this far outside the cliff so the two never fight for depth.
 const WATERFALL_OUT: float = 0.05
+## Rows of the curtain, as fractions of its height (0 = lip, 1 = bottom). The mesh
+## hangs straight down; the shader bends the top into a short launch arc
+## (waterfall.gdshader `arc_out`), which needs vertices where the bend is — dense
+## near the lip, sparse below.
+const WATERFALL_ROWS: Array[float] = [0.0, 0.015, 0.035, 0.065, 0.11, 0.18, 0.30, 0.55, 1.0]
 ## A cell counts as submerged (and therefore pours) at or below this. Slightly above
 ## SEA_LEVEL so a cell lapping exactly at the waterline still produces a fall.
 const SUBMERGED_EPS: float = 0.05
@@ -359,18 +364,19 @@ func _build_waterfall(td: TerrainData, sides: Array) -> ArrayMesh:
 		if absf(u1 - u0) > PI * td.rim_radius() / WATERFALL_TILE:
 			u1 = u0 + TerrainData.CELL_SIZE / WATERFALL_TILE   # the wrap-around quad
 		var base: int = verts.size()
-		verts.append(Vector3(pa.x, top_y, pa.z))
-		verts.append(Vector3(pb.x, top_y, pb.z))
-		verts.append(Vector3(pa.x, floor_y, pa.z))
-		verts.append(Vector3(pb.x, floor_y, pb.z))
-		for _k in range(4):
+		for row in range(WATERFALL_ROWS.size()):
+			var f: float = WATERFALL_ROWS[row]
+			var y: float = lerpf(top_y, floor_y, f)
+			verts.append(Vector3(pa.x, y, pa.z))
+			verts.append(Vector3(pb.x, y, pb.z))
 			normals.append(outward)
-		uvs.append(Vector2(u0, 0.0))
-		uvs.append(Vector2(u1, 0.0))
-		uvs.append(Vector2(u0, v_max))
-		uvs.append(Vector2(u1, v_max))
-		indices.append(base); indices.append(base + 1); indices.append(base + 2)
-		indices.append(base + 1); indices.append(base + 3); indices.append(base + 2)
+			normals.append(outward)
+			uvs.append(Vector2(u0, v_max * f))
+			uvs.append(Vector2(u1, v_max * f))
+			if row > 0:
+				var q: int = base + (row - 1) * 2
+				indices.append(q); indices.append(q + 1); indices.append(q + 2)
+				indices.append(q + 1); indices.append(q + 3); indices.append(q + 2)
 	if indices.is_empty():
 		return null
 	var arrays: Array = []
@@ -444,6 +450,8 @@ func _waterfall_material() -> Material:
 		Terrain.COLOR_WATER_HIGHLIGHT.g, Terrain.COLOR_WATER_HIGHLIGHT.b))
 	mat.set_shader_parameter("scroll_speed", Balance.WATERFALL_SCROLL_SPEED)
 	mat.set_shader_parameter("tile", WATERFALL_TILE)
+	# The fall fraction in the shader is UV.y / height_tiles (UV.y runs in tiles).
+	mat.set_shader_parameter("height_tiles", WATERFALL_HEIGHT / WATERFALL_TILE)
 	# Dissolves over most of its length, so it thins out into the void instead of
 	# ending on a hard line well above the cone's tip (user request).
 	mat.set_shader_parameter("fade_fraction", 0.65)

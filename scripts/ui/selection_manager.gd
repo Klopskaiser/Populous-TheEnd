@@ -942,11 +942,12 @@ func _command_move(screen_pos: Vector2, queue_up: bool, aggressive: bool = false
 
 	var target: Vector3 = hit.position
 	if _tribe_commands != null:
-		_tribe_commands.order_move(selected, target, queue_up, aggressive)
-		# Blocked feedback: if the target is unreachable for at least one unit
-		# (own island vs. target island), play the negative cue instead of the
+		var sent: int = _tribe_commands.order_move(selected, target, queue_up, aggressive)
+		# Blocked feedback: nobody could be sent (a click on open water with only
+		# foot units selected), or the target is unreachable for at least one
+		# unit (own island vs. target island) — the negative cue instead of the
 		# normal move-ack.
-		if _tribe_commands.any_unreachable(selected, target):
+		if sent == 0 or _tribe_commands.any_unreachable(selected, target):
 			_play_blocked_sound()
 		else:
 			_play_move_sound()

@@ -146,3 +146,50 @@ func test_fresh_site_does_not_self_destruct_before_units_exist() -> void:
 	w.bm.tick(TICK)
 	check(site.health <= 0, "and it sinks when that follower dies")
 	_free_world(w)
+
+
+## User report 2026-11-15: red had no follower left, but its circle kept standing;
+## a hut had been started as a building site. The circle must sink no matter what
+## else the tribe still owns — an unfinished building, a living shaman, a dead one.
+func test_site_sinks_although_a_building_site_is_left() -> void:
+	for shaman_alive in [true, false]:
+		var w: Dictionary = _make_world()
+		var site: ReincarnationSite = w.bm.place(SITE_SCENE, w.tribe0, Vector2i(30, 30), 0, true)
+		var shaman: Unit = w.unit_manager.spawn_unit(SHAMAN_SCENE, 0, Vector3(40, 0, 40))
+		var builder: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 0, Vector3(46, 0, 46))
+		var hut: Building = w.bm.place(
+			preload("res://scenes/buildings/hut.tscn"), w.tribe0, Vector2i(48, 48), 0, false)
+		check(hut != null and hut.under_construction, "a hut is started as a building site")
+		builder.order_build(hut)
+		for i in range(20):
+			w.bm.tick(TICK)
+			w.unit_manager.tick(TICK)
+			for u in w.unit_manager.units.duplicate():
+				if is_instance_valid(u):
+					u.tick(TICK)
+		check(site.health > 0, "the circle stands while the builder lives")
+		if not shaman_alive:
+			shaman.take_damage(99999)
+		builder.take_damage(99999)
+		for i in range(4):
+			w.bm.tick(TICK)
+		check(site.health <= 0,
+			"last follower gone -> the circle sinks, building site or not (shaman alive: %s)"
+				% shaman_alive)
+		_free_world(w)
+
+
+## Die Simulationsseite desselben Reports: mit der Niederlage reisst
+## Tribe.eliminate ALLES ab — auch den unverwundbaren Kreis und eine Baustelle,
+## in die noch kein Holz geliefert wurde.
+func test_elimination_razes_the_circle_and_a_bare_building_site() -> void:
+	var w: Dictionary = _make_world()
+	var site: ReincarnationSite = w.bm.place(SITE_SCENE, w.tribe0, Vector2i(30, 30), 0, true)
+	var hut: Building = w.bm.place(
+		preload("res://scenes/buildings/hut.tscn"), w.tribe0, Vector2i(48, 48), 0, false)
+	check(hut.under_construction and hut.health >= 1, "a bare building site has at least 1 HP")
+	w.tribe0.eliminate()
+	check(site.health <= 0 and site._destroyed, "the circle is razed with the tribe")
+	check(hut.health <= 0 and hut._destroyed, "and so is the bare building site")
+	check(w.tribe0.buildings.is_empty(), "the tribe owns nothing any more")
+	_free_world(w)

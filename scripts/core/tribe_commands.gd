@@ -151,21 +151,74 @@ func _is_void(point: Vector3) -> bool:
 	return nav_grid != null and nav_grid.terrain != null 		and not nav_grid.terrain.has_ground(point.x, point.z)
 
 
+## A click this close to the shore (metres) still counts as a click ON the shore:
+## the order goes to the nearest land. Further out it is open water.
+const SHORE_SNAP: float = 1.5
+## A formation slot that would lie in the water moves to the nearest land within
+## this distance (metres); beyond that the unit goes to the order's own point.
+const SLOT_SNAP: float = 8.0
+
+
+## True when `point` lies in the water (the sea bed below the waterline). The
+## mouse ray passes the water surface and hits that sea bed, so this is what a
+## click "on the water" looks like.
+func is_water(point: Vector3) -> bool:
+	return nav_grid != null and nav_grid.terrain != null \
+		and nav_grid.terrain.get_height(point.x, point.z) <= TerrainData.SEA_LEVEL
+
+
+## Where a FOOT unit can be ordered when the player points at `point`: the
+## point itself on land; for a click in the water the nearest land within
+## `snap` metres (a click on the shoreline); Vector3.INF for open water — nobody
+## can walk there, so nobody is sent (user report 2026-11-15: target markers
+## showed up on the sea and the troops set off toward it).
+func land_point(point: Vector3, snap: float = SHORE_SNAP) -> Vector3:
+	if nav_grid == null or not is_water(point):
+		return point
+	var cell: Vector2i = nav_grid.nearest_walkable_cell(nav_grid.world_to_cell(point))
+	if cell.x < 0:
+		return Vector3.INF
+	var shore: Vector3 = nav_grid.cell_to_world(cell)
+	if Vector2(shore.x - point.x, shore.z - point.z).length() > snap:
+		return Vector3.INF
+	return shore
+
+
+## A formation slot of a foot unit, kept on land: a slot in the water moves to
+## the nearest land (so a group ordered to the shore lines up ALONG it instead
+## of half of it aiming at the sea); with no land near it falls back to `anchor`.
+func _land_slot(slot: Vector3, anchor: Vector3) -> Vector3:
+	var on_land: Vector3 = land_point(slot, SLOT_SNAP)
+	if on_land == Vector3.INF or not nav_grid.same_island(on_land, anchor):
+		return anchor
+	return on_land
+
+
 ## Move order in packs of GROUP_SIZE: the selection is sorted spatially so
 ## nearby units end up in the same group, group centres get deterministic
 ## formation offsets (rings), members stand tightly around their centre.
 ## `aggressive` = attack-move (combatants engage enemies on the way);
 ## default is the plain (passive) move — also used to flee a fight.
+##
+## WATER: a foot unit is never given a target in the water. A click on open
+## water sends no foot unit at all (flyers still go); a click on or right at the
+## shore sends them to land, and every formation slot that would lie in the
+## water is moved onto the shore. Returns the number of units that got the order
+## (0 = refused, the caller plays the blocked cue).
 func order_move(units: Array[Unit], target: Vector3, queue_up: bool = false,
-		aggressive: bool = false) -> void:
+		aggressive: bool = false) -> int:
 	if _is_void(target):
-		return   # der Void ist kein Ort
+		return 0   # der Void ist kein Ort
+	# The point foot units can be sent to (INF = open water: they stay).
+	var land: Vector3 = land_point(target)
 	var alive: Array[Unit] = []
 	for unit in units:
 		if unit.state != Unit.State.DEAD and _unit_active(unit):
+			if land == Vector3.INF and not unit.flies:
+				continue
 			alive.append(unit)
 	if alive.is_empty():
-		return
+		return 0
 	# Spatial sort: units that stand together march together.
 	alive.sort_custom(func(a: Unit, b: Unit) -> bool:
 		var ka: float = a.position.z * 1000.0 + a.position.x
@@ -179,13 +232,22 @@ func order_move(units: Array[Unit], target: Vector3, queue_up: bool = false,
 		# inside it and make vehicles shove each other around at the goal
 		# (airships: circle; ground vehicles: jostle). Foot units stay tight.
 		var fscale: float = alive[g].formation_scale()
-		var group_target: Vector3 = target \
+		var flying: bool = alive[g].flies
+		var centre: Vector3 = target if flying else land
+		var group_target: Vector3 = centre \
 			+ formation_offset(group_index) * group_scale * fscale
+		if not flying and nav_grid != null:
+			group_target = _land_slot(group_target, land)
 		var batch: Array[Unit] = []
 		for m in range(g, mini(g + GROUP_SIZE, alive.size())):
 			var moff: float = alive[m].formation_scale()
-			alive[m].order_move(group_target + MEMBER_OFFSETS[m - g] * moff,
-				queue_up, aggressive)
+			var slot: Vector3 = group_target + MEMBER_OFFSETS[m - g] * moff
+			if alive[m].flies:
+				slot = target + formation_offset(group_index) * group_scale * fscale \
+					+ MEMBER_OFFSETS[m - g] * moff
+			elif nav_grid != null:
+				slot = _land_slot(slot, land)
+			alive[m].order_move(slot, queue_up, aggressive)
 			batch.append(alive[m])
 		# The formation 6-pack IS the idle group: register it right away so
 		# the walkers already count as members (slots reserved, and the idle
@@ -193,6 +255,7 @@ func order_move(units: Array[Unit], target: Vector3, queue_up: bool = false,
 		# combat — no point registering those.
 		if not aggressive and unit_manager != null:
 			unit_manager.register_move_group(batch, group_target)
+	return alive.size()
 
 
 ## True if AT LEAST ONE of the units cannot reach `target` on foot (different
