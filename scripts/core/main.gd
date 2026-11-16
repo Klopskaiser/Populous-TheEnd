@@ -103,6 +103,14 @@ const STRESS_MATCH_CAST_INTERVAL: float = 5.0
 const STRESS_MATCH_SPELLS: Array[StringName] = [
 	&"tornado", &"earthquake", &"swarm", &"firestorm"]
 
+## Survival ("Überleben", wave logic in SurvivalMode): the player's small base
+## sits on the map centre. Wish cells of its huts relative to the base anchor
+## (the first Balance.SURVIVAL_START_HUTS are used; _find_plot searches rings
+## around each) and of the free braves.
+const SURVIVAL_HUT_OFFSETS: Array[Vector2i] = [
+	Vector2i(-10, -5), Vector2i(7, -9), Vector2i(8, 5), Vector2i(-9, 7)]
+const SURVIVAL_BRAVE_OFFSET: Vector2i = Vector2i(0, 6)
+
 ## Time-lapse steps for manual testing (key F10 cycles through them). The
 ## engine simulates as many physics steps per frame as the CPU allows — at
 ## 100x the game time effectively runs ~10-30x (CPU-capped, display gets
@@ -306,6 +314,10 @@ func _ready() -> void:
 		MatchConfig.Mode.SKIRMISH:
 			camera_anchor = _setup_skirmish(tribes, nav)
 			GameState.start_win_tracking()
+		MatchConfig.Mode.SURVIVAL:
+			# Tracking first: _setup_survival shields the wave tribe from it.
+			GameState.start_win_tracking()
+			camera_anchor = _setup_survival(tribes, nav)
 
 	# Start the camera over the player's base (skirmish) or the island centre.
 	_camera_rig.global_position = nav.cell_to_world(camera_anchor)
@@ -429,6 +441,50 @@ func _tree_too_close(cell: Vector2i) -> bool:
 			if _tree_manager.has_tree_at(cell + Vector2i(dx, dz)):
 				return true
 	return false
+
+
+# --- Survival ("Überleben") ---------------------------------------------------------
+
+## Survival mode on the default island: a small player base on the map centre
+## (reincarnation site + shaman, fully manned huts, free braves, trees in
+## reach) with EVERY spell fully charged — it is a proving ground for spells and
+## the golem; after that the ordinary mana income applies. Tribe 1 gets nothing
+## at all: SurvivalMode spawns its waves at the shore. Returns the base anchor.
+func _setup_survival(tribes: Array[Tribe], nav: NavGrid) -> Vector2i:
+	var anchor: Vector2i = TerrainData.center_cell(nav.terrain)
+	var player: Tribe = tribes[GameState.PLAYER_TRIBE]
+	var site: Building = _place_site_near(player, anchor)
+	_spawn_shaman_near(player, site, anchor, nav)
+	var huts: Array = []
+	for i in range(mini(Balance.SURVIVAL_START_HUTS, SURVIVAL_HUT_OFFSETS.size())):
+		huts.append([HUT_SCENE, anchor + SURVIVAL_HUT_OFFSETS[i]])
+	_place_chamber_buildings(player, huts, nav)
+	_fill_huts(player)
+	_spawn_braves_near(player.id, anchor + SURVIVAL_BRAVE_OFFSET,
+		Balance.SURVIVAL_START_BRAVES, nav)
+	_ensure_trees_near(anchor, nav)
+	for spell in player.spells:
+		spell.charges = spell.max_charges
+
+	var survival: SurvivalMode = SurvivalMode.new()
+	survival.name = "SurvivalMode"
+	add_child(survival)
+	survival.setup(tribes[1], player, _unit_manager, _tribe_commands, nav, anchor,
+		GameState)
+	survival.wave_spawned.connect(func(wave: int, count: int) -> void:
+		print("Überleben: Welle %d/%d — %d Einheiten" % [
+			wave, SurvivalMode.WAVE_COUNT, count]))
+	var hud: SurvivalHud = SurvivalHud.new()
+	hud.name = "SurvivalHud"
+	$UI.add_child(hud)
+	# Below the end screen, which has to cover everything once the match is decided.
+	$UI.move_child(hud, _end_screen.get_index())
+	hud.setup(survival)
+	_end_screen.victory_subtitle = "Du hast alle %d Wellen überstanden." \
+		% SurvivalMode.WAVE_COUNT
+	print("Überleben: %d Spawnpunkte, erste Welle in %.0f s" % [
+		survival.spawn_cells.size(), SurvivalMode.FIRST_WAVE_DELAY])
+	return anchor
 
 
 ## Debug-Testkammer (Startmission, user request): blue base on the WEST side

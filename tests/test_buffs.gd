@@ -155,10 +155,20 @@ func test_fire_resist_caps_the_burn_damage() -> void:
 	_free_world(w)
 
 
+## Since 2026-11-15 a golem burns at the full rate; only the FULL-GROWN one has
+## its own trickle. The buff caps the first and never raises the second.
 func test_fire_resist_never_raises_the_golems_own_trickle() -> void:
 	var w: Dictionary = _make_world()
-	var g: Unit = _spawn(w, GOLEM_SCENE, 0, _cell(w, 20, 20))
+	var g: Golem = _spawn(w, GOLEM_SCENE, 0, _cell(w, 20, 20)) as Golem
+	check_near(g.effective_burn_dps(), 15.0, "a golem burns at the full 15/s")
+	g.set_aura_buffs(Unit.BUFF_FIRE_RESIST)
+	check_near(g.effective_burn_dps(), Balance.BUFF_FIRE_RESIST_DPS_CAP,
+		"fire resistance caps it like for everyone")
+	g.set_aura_buffs(0)
+	while not g.is_full_size():
+		g._credit_kill()
 	var before: float = g.effective_burn_dps()
+	check_near(before, Balance.GOLEM_BURN_DPS, "the full-grown golem has its own trickle")
 	g.set_aura_buffs(Unit.BUFF_FIRE_RESIST)
 	check_near(g.effective_burn_dps(), before,
 		"the cap is a minf: it can only ever lower the rate")

@@ -693,8 +693,10 @@ func _set_selection(units: Array[Unit]) -> void:
 	if _selection_has_audible_unit() and is_inside_tree():
 		var audio: Node = get_node_or_null("/root/AudioManager")
 		if audio != null:
-			# One sound per selection action; the shaman in the group overrides.
-			audio.play_ui(&"select_shaman" if _selection_has_shaman() else &"select_unit")
+			# One sound per selection action; the shaman in the group overrides,
+			# then the golem (its own voice, user request 2026-11-16).
+			audio.play_ui(voice_key("select", _selection_has_shaman(),
+				_selection_has_golem() and audio.has_ui(&"select_golem")))
 
 
 ## Selects an own building (clears any unit/building selection first).
@@ -887,6 +889,7 @@ func _command_move(screen_pos: Vector2, queue_up: bool, aggressive: bool = false
 	if enemy != null and _tribe_commands != null:
 		_tribe_commands.order_attack(selected, enemy)
 		enemy.flash_target_ring()   # red blink marks the attack target
+		_play_golem_attack_sound()
 		return
 	# Enemy AIRSHIP under the cursor: the generic enemy pick skips
 	# non-targetable vehicles, so run a dedicated pass — catapults aim at the
@@ -894,6 +897,7 @@ func _command_move(screen_pos: Vector2, queue_up: bool, aggressive: bool = false
 	var ship: Unit = _enemy_airship_under_cursor(screen_pos, camera)
 	if ship != null and _tribe_commands != null:
 		_tribe_commands.order_attack(selected, ship)
+		_play_golem_attack_sound()
 		# RED target ring, like any other attack target. This used to call
 		# flash_ring(), which is the GOLD crew-order feedback — an attack on an
 		# enemy zeppelin looked exactly like "I am manning a neutral vehicle"
@@ -964,6 +968,38 @@ func _selection_has_shaman() -> bool:
 	return false
 
 
+func _selection_has_golem() -> bool:
+	for unit in selected:
+		if is_instance_valid(unit) and unit is Golem:
+			return true
+	return false
+
+
+## Which UI sound answers a selection or an order: "<action>_shaman" when the
+## shaman is in the group, "<action>_golem" when a golem is (and that sound
+## exists — `golem` is passed in already checked), else "<action>_unit".
+static func voice_key(action: String, shaman: bool, golem: bool) -> StringName:
+	if shaman:
+		return StringName(action + "_shaman")
+	return StringName(action + ("_golem" if golem else "_unit"))
+
+
+## Attack-order acknowledgement of the golem (target chosen: enemy unit, airship
+## or building). Other units have no attack sound; without a golem in the
+## selection, and as long as the file is missing, nothing plays — except that a
+## missing attack_golem falls back on the golem's move sound.
+func _play_golem_attack_sound() -> void:
+	if not is_inside_tree() or not _selection_has_golem():
+		return
+	var audio: Node = get_node_or_null("/root/AudioManager")
+	if audio == null:
+		return
+	if audio.has_ui(&"attack_golem"):
+		audio.play_ui(&"attack_golem")
+	elif audio.has_ui(&"move_golem"):
+		audio.play_ui(&"move_golem")
+
+
 ## Whether anything in the selection can answer the call (user request
 ## 2026-09-07). A NEUTRAL vehicle stays silent: nobody aboard is able to serve
 ## it, it flies the grey flag and takes no orders — a machine, not a voice. One
@@ -985,7 +1021,8 @@ func _play_move_sound() -> void:
 		return
 	var audio: Node = get_node_or_null("/root/AudioManager")
 	if audio != null:
-		audio.play_ui(&"move_shaman" if _selection_has_shaman() else &"move_unit")
+		audio.play_ui(voice_key("move", _selection_has_shaman(),
+			_selection_has_golem() and audio.has_ui(&"move_golem")))
 
 
 ## Negative move-ack: at least one selected unit cannot reach the ordered
@@ -1122,6 +1159,7 @@ func _dispatch_enemy_building(hit: Dictionary) -> bool:
 		return false
 	_tribe_commands.order_attack_building(selected, building)
 	building.flash_ring(Building.ATTACK_FLASH_COLOR)
+	_play_golem_attack_sound()
 	return true
 
 

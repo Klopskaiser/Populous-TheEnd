@@ -77,7 +77,7 @@ func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:
 			# the units standing exactly on the strike point; the tumble comes
 			# for free when they land (_land_from_throw).
 			u.apply_lift(away, PUSH_SPEED, LIFT_SPEED)
-	victim.take_damage(UNIT_DAMAGE, caster)
+	victim.take_damage(victim.lightning_damage(UNIT_DAMAGE), caster)
 	return true
 
 

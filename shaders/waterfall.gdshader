@@ -72,10 +72,12 @@ void fragment() {
 	float wide = noise1(u * 5.0);
 	float mid = noise1(u * 21.0 + 3.7);
 	float fine = noise1(u * 83.0 + 9.1);
+	// UV.y GROWS downward, so a pattern that falls needs `y - t`: with `y + t` the
+	// streaks climbed the curtain (user report 2026-11-15: "laeuft rueckwaerts").
 	float t = TIME * scroll_speed / tile;
-	float v1 = fract(band_uv.y * 0.6 + t * 0.8 + wide * 1.1);
-	float v2 = fract(band_uv.y * 1.7 + t * 1.3 + mid * 1.6);
-	float v3 = fract(band_uv.y * 4.5 + t * 2.1 + fine * 2.2);
+	float v1 = fract(band_uv.y * 0.6 - t * 0.8 + wide * 1.1);
+	float v2 = fract(band_uv.y * 1.7 - t * 1.3 + mid * 1.6);
+	float v3 = fract(band_uv.y * 4.5 - t * 2.1 + fine * 2.2);
 	float streak = 0.50 * (0.5 + 0.5 * sin(v1 * 6.2831853))
 		+ 0.32 * (0.5 + 0.5 * sin(v2 * 6.2831853))
 		+ 0.18 * (0.5 + 0.5 * sin(v3 * 6.2831853));

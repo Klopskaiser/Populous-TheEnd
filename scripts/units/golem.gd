@@ -14,7 +14,7 @@ class_name Golem extends Unit
 ##     (GOLEM_KICK_WIDTH x GOLEM_KICK_LENGTH, weniger als die halbe Flaeche).
 ##     Mehr Schaden (GOLEM_KICK_DAMAGE) und viel Rueckstoss: JEDER Ueberlebende
 ##     fliegt in Trittrichtung davon.
-## Wahl (_choose_attack): stehen mindestens GOLEM_SLAM_MIN_TARGETS Feinde in der
+## Wahl (_choose_attack, seit 2026-11-16 nach erwartetem Schaden je Sekunde; frueher: stehen mindestens 3 Feinde in der
 ## Flaeche des Handschlags, schlaegt sie, sonst tritt sie. Beide Angriffe haben
 ## eine AUSHOLZEIT (GOLEM_*_WINDUP): der Angriff wird angesetzt, der Schaden
 ## faellt erst beim Aufschlag der Animation — in der dann aktuellen Blickrichtung.
@@ -34,8 +34,8 @@ class_name Golem extends Unit
 ## GOLEM_HP_PER_KILL (bis zur Obergrenze); danach zerfaellt er (golem_death) und
 ## versinkt.
 ##
-## STUFEN (Nutzervorgabe 2026-11-15): alle GOLEM_KILLS_PER_LEVEL Kills steigt er
-## eine Stufe auf (0 .. GOLEM_MAX_LEVEL). Je Stufe +20 s Lebenszeit, +3 Leben/s
+## STUFEN (Nutzervorgabe 2026-11-15): nach GOLEM_LEVEL_KILLS Kills steigt er
+## je eine Stufe auf (0 .. GOLEM_MAX_LEVEL). Je Stufe +20 s Lebenszeit, +3 Leben/s
 ## Dauerheilung (bis zur Lebensobergrenze), +5 Schaden und 20 % groesser als davor
 ## (aufgezinst, size_factor()). Reichweite und Wirkflaechen wachsen langsamer —
 ## 10 % je Stufe (reach_factor()) —, das Tempo mit der Wurzel der Groesse. Ab
@@ -46,7 +46,10 @@ class_name Golem extends Unit
 ## Schlag) und laeuft ihnen nach, wenn er sie zu Fuss erreichen kann. Kein Anhaenger: zaehlt nicht als Bevoelkerung
 ## (kein Mana, kein Wohnraum, haelt keinen Stamm am Leben), aber gegen den
 ## Einheiten-Hardcap. Immun gegen Bekehrung, Hypnose, Panik, Wurf und Rollen;
-## brennt nur mit GOLEM_BURN_DPS und ohne Panik. Nimmt sonst normalen Schaden.
+## brennt ohne Panik. KONTER: Feuer macht vollen Schaden, der Blitz doppelten, ein
+## Katapult-Volltreffer mehr, je groesser er ist — nur der ausgewachsene Golem
+## (100 m) ist dagegen gehaertet. Je Schadenstick trifft er hoechstens
+## max_targets() Ziele.
 
 const REACH: float = Balance.GOLEM_REACH
 ## The model (golem.glb and the placeholder alike) is BUILT 4 m tall. The game
@@ -65,6 +68,27 @@ const ATTACK_SLAM: StringName = &"slam"
 const ATTACK_KICK: StringName = &"kick"
 ## The upward strike at an airship (maximum level only).
 const ATTACK_SWAT: StringName = &"swat"
+## Three hand hits on the ground (left, right, left) — the slam's longer variant.
+const ATTACK_DRUM: StringName = &"drum"
+## Extra clips the model may bring for the same attacks: the kick with the other
+## leg, and the level strike at an airship hovering at chest height.
+const CLIP_KICK_LEFT: StringName = &"kick_l"
+const CLIP_SWIPE: StringName = &"swipe"
+const ATTACK_CLIPS: Array[StringName] = [
+	&"slam", &"kick", &"kick_l", &"swat", &"swipe", &"drum", &"slam_low", &"drum_low"]
+## The two stances (see Balance.GOLEM_STANCE_*): standing kicks, swats and walks;
+## crouched slams and drums — faster, but rooted.
+const STANCE_STAND: int = 0
+const STANCE_CROUCH: int = 1
+## Clips of the crouched stance: rest pose, bending down, getting up, and the two
+## ground attacks starting and ending in the crouch.
+const CLIP_CROUCH_IDLE: StringName = &"crouch_idle"
+const CLIP_CROUCH_DOWN: StringName = &"crouch_down"
+const CLIP_CROUCH_UP: StringName = &"crouch_up"
+const CLIP_SLAM_LOW: StringName = &"slam_low"
+const CLIP_DRUM_LOW: StringName = &"drum_low"
+## Length of the stance-switch clips at speed 1 (golem_bewegung.mjs).
+const STANCE_CLIP_LENGTH: float = 0.45
 ## Strike areas in the heading frame (along = forward, side = right), flat in XZ:
 ## slam = circle of SLAM_RADIUS around the point SLAM_FORWARD ahead,
 ## kick = lane -KICK_BACK <= along <= KICK_LENGTH, |side| <= KICK_HALF_WIDTH (the
@@ -76,7 +100,7 @@ const KICK_LENGTH: float = Balance.GOLEM_KICK_LENGTH
 const KICK_BACK: float = Balance.GOLEM_KICK_LENGTH * Balance.GOLEM_KICK_BACK_SHARE
 ## Length of the model's attack clips (seconds, golem_export.mjs) — an attack
 ## animation may be slowed down until it fills the attack cooldown, no further.
-const CLIP_LENGTH: Dictionary = {&"slam": 1.5, &"kick": 1.2, &"swat": 1.2}
+const CLIP_LENGTH: Dictionary = {&"slam": 0.9, &"kick": 1.2, &"swat": 1.2, &"drum": 1.7}   # slam_low / drum_low
 const STRIKE_COOLDOWN: float = Balance.GOLEM_STRIKE_COOLDOWN
 ## A swat still hits an airship that drifted this far beyond reach() during the
 ## wind-up (factor on the reach).
@@ -174,6 +198,20 @@ var _arm: Node3D = null
 var _flag_mesh: MeshInstance3D = null
 var _anim: AnimationPlayer = null
 var _clip: StringName = &""
+## The body's real direction: it follows `facing` at turn_rate() (see
+## _slew_heading). Unset (ZERO) until the first tick — then `facing` counts.
+var _heading: Vector3 = Vector3.ZERO
+## The next kick uses the left leg (alternates with every kick).
+var _kick_left: bool = false
+## Which of the drum's hits lands next (0-based) while a drum is wound up.
+var _pending_hit: int = 0
+## Stance right now (STANCE_STAND / STANCE_CROUCH), the one a running switch
+## leads to, the seconds that switch still takes (0 = none running), and how long
+## she has been in the current stance (starts "long ago": the first switch is free).
+var stance: int = STANCE_STAND
+var _stance_target: int = STANCE_STAND
+var _stance_switch: float = 0.0
+var _stance_age: float = 1000.0
 ## Strike swing progress of the placeholder arms (0 = just begun, 1 = at rest).
 var _arm_anim: float = 1.0
 var _rise: float = 0.0
@@ -201,6 +239,14 @@ func display_name() -> String:
 	return "Golem"
 
 
+## The radius she picks her fights in grows with her body (user report
+## 2026-11-15: the grown golem hardly attacked anything on her own any more —
+## the plain 8 m lay INSIDE her own reach by then). Capped, or the 100-m giant
+## would see the whole map.
+func aggro_radius() -> float:
+	return minf(AGGRO_RADIUS * size_factor(), Balance.GOLEM_AGGRO_MAX)
+
+
 ## The golem's vital numbers for the sidebar panel (shown while it is selected):
 ## level and the kills to the next step, size, health, lifetime.
 func status_text() -> String:
@@ -213,8 +259,9 @@ func status_text() -> String:
 			base + (growth_steps + 1) * Balance.GOLEM_GROWTH_KILLS - kills]
 	var life: String = "unbegrenzt" if level >= Balance.GOLEM_FINAL_BONUS_LEVEL \
 		else "%d s" % int(ceil(maxf(life_left, 0.0)))
-	return "Stufe %d/%d%s\nGröße: %.1f m   Leben: %d/%d\nLebenszeit: %s   Kills: %d" % [
-		level, Balance.GOLEM_MAX_LEVEL, next, height_m(), health, max_health, life, kills]
+	var pose: String = "gebückt" if stance == STANCE_CROUCH else "stehend"
+	return "Stufe %d/%d%s\nGröße: %.1f m   Leben: %d/%d\nLebenszeit: %s   Kills: %d   Haltung: %s" % [
+		level, Balance.GOLEM_MAX_LEVEL, next, height_m(), health, max_health, life, kills, pose]
 
 
 func _is_combatant() -> bool:
@@ -256,8 +303,43 @@ func can_garrison() -> bool:
 	return false
 
 
+## Fire is a counter again (user spec 2026-11-15): the golem burns like every
+## unit (still without panic). Only the full-grown one is fire-resistant.
 func burn_damage_per_second() -> float:
-	return Balance.GOLEM_BURN_DPS
+	return Balance.GOLEM_BURN_DPS if is_full_size() else super.burn_damage_per_second()
+
+
+## Lightning strikes the golem twice as hard — except the full-grown one.
+func lightning_damage(base: int) -> int:
+	return base if is_full_size() else int(round(float(base) * Balance.GOLEM_LIGHTNING_MULT))
+
+
+## A catapult hits his BODY (see SiegeShot._shockwave).
+func body_hit_radius() -> float:
+	return trample_radius()
+
+
+## A catapult's DIRECT hit — the stone lands inside his body circle — hurts more
+## the bigger he is: from the plain shock damage at the starting size linearly up
+## to GOLEM_SIEGE_DAMAGE_MAX just below 100 m. The full-grown golem takes at most
+## GOLEM_SIEGE_DAMAGE_FULL_SIZE. A stone that only grazes him with its shock ring
+## does the plain damage.
+func siege_shock_damage(base: int, dist: float) -> int:
+	if dist > maxf(trample_radius(), 1.0):
+		return base
+	var scaled: int = siege_damage_for_height(base, height_m())
+	return mini(scaled, Balance.GOLEM_SIEGE_DAMAGE_FULL_SIZE) if is_full_size() else scaled
+
+
+static func siege_damage_for_height(base: int, height: float) -> int:
+	var k: float = clampf((height - Balance.GOLEM_HEIGHT)
+		/ (Balance.GOLEM_MAX_HEIGHT - Balance.GOLEM_HEIGHT), 0.0, 1.0)
+	return int(round(lerpf(float(base), float(Balance.GOLEM_SIEGE_DAMAGE_MAX), k)))
+
+
+## True once the body has reached GOLEM_MAX_HEIGHT (no growth step left).
+func is_full_size() -> bool:
+	return level >= Balance.GOLEM_MAX_LEVEL and growth_steps >= max_growth_steps()
 
 
 func burn_fx_scale() -> float:
@@ -296,6 +378,9 @@ func selection_ring_scale() -> float:
 
 func tick(delta: float) -> void:
 	super.tick(delta)
+	if state != State.DEAD:
+		_slew_heading(delta)
+		_tick_stance(delta)
 	_tick_pending_attack(delta)
 	if state != State.DEAD and not doomed and not garrison_housed:
 		_tick_air_strike(delta)
@@ -314,14 +399,32 @@ func tick(delta: float) -> void:
 
 # --- Levels -------------------------------------------------------------------------
 
-## Kills needed for `p_level`: six per level up to the final-bonus level (6 = 36
-## kills), then GOLEM_TOP_LEVEL_KILLS more for the last one (7 = 86 kills).
+## Kills needed for `p_level` in total: the sum of GOLEM_LEVEL_KILLS up to it
+## (5, 11, 18, 25, 33, 42 and 87 for the giant).
 static func kills_for_level(p_level: int) -> int:
-	var regular: int = mini(p_level, Balance.GOLEM_FINAL_BONUS_LEVEL)
-	var kills_needed: int = regular * Balance.GOLEM_KILLS_PER_LEVEL
-	if p_level > Balance.GOLEM_FINAL_BONUS_LEVEL:
-		kills_needed += (p_level - Balance.GOLEM_FINAL_BONUS_LEVEL) * Balance.GOLEM_TOP_LEVEL_KILLS
+	var kills_needed: int = 0
+	for i in range(mini(p_level, Balance.GOLEM_LEVEL_KILLS.size())):
+		kills_needed += Balance.GOLEM_LEVEL_KILLS[i]
 	return kills_needed
+
+
+## Most targets ONE damage tick of the golem strikes (slam, kick; trampling: per
+## second): GOLEM_MAX_TARGETS by level, plus one for every
+## GOLEM_GROWTH_STEPS_PER_TARGET growth steps beyond level 7.
+static func max_targets_for(p_level: int, p_growth_steps: int) -> int:
+	var table: Array[int] = Balance.GOLEM_MAX_TARGETS
+	return table[clampi(p_level, 0, table.size() - 1)] \
+		+ p_growth_steps / Balance.GOLEM_GROWTH_STEPS_PER_TARGET
+
+
+func max_targets() -> int:
+	return max_targets_for(level, growth_steps)
+
+
+## Health ceiling right now: GOLEM_MAX_HP_CAP, plus GOLEM_GROWTH_MAX_HP for every
+## growth step beyond level 7.
+func max_health_cap() -> int:
+	return Balance.GOLEM_MAX_HP_CAP + Balance.GOLEM_GROWTH_MAX_HP * growth_steps
 
 
 ## Level a golem with `p_kills` kills has reached.
@@ -396,13 +499,29 @@ static func reach_factor_for(p_level: int) -> float:
 	return f
 
 
-## Scale of the reach and of both strike areas at the current level.
+## Scale of the SIZE of both strike areas at the current level (the slam's
+## radius, the lane's width) — the slow one, 10 % a level. Where the areas lie and
+## how far she reaches follows limb_factor() since 2026-11-16.
 func reach_factor() -> float:
 	return reach_factor_for(level) * growth_area_factor()
 
 
+## Exponent of the limb factor: chosen so that at GOLEM_MAX_HEIGHT the limbs are
+## GOLEM_LIMB_SHARE_AT_MAX of what a body-proportional growth would give.
+static func limb_exponent() -> float:
+	return 1.0 + log(Balance.GOLEM_LIMB_SHARE_AT_MAX) / log(max_size_factor())
+
+
+## How much longer her arms and legs are than a fresh golem's: the size factor,
+## damped (size ^ 0,83) — level 6: 2,49, level 7: 3,49, 100 m: 12,7. Scales the
+## reach, the length of the kick's lane and how far ahead the hands come down.
+func limb_factor() -> float:
+	return pow(size_factor(), limb_exponent())
+
+
+## The distance at which she strikes — it grows with her limbs.
 func reach() -> float:
-	return REACH * reach_factor()
+	return REACH * limb_factor()
 
 
 ## Flat damage bonus of the current level: GOLEM_LEVEL_DAMAGE per level up to the
@@ -414,7 +533,29 @@ func level_damage_bonus() -> int:
 ## Damage of an attack at the current level.
 func attack_damage(kind: StringName) -> int:
 	var base: int = Balance.GOLEM_KICK_DAMAGE if kind == ATTACK_KICK else Balance.GOLEM_SLAM_DAMAGE
+	if kind == ATTACK_DRUM:
+		# All three hits together: every hit's own damage, plus the flat level
+		# bonus once for the whole attack.
+		return Balance.GOLEM_DRUM_HITS.size() * _drum_own_hit_damage() + level_damage_bonus()
 	return base + level_damage_bonus()
+
+
+## What every single hit of the drum brings by itself: GOLEM_DRUM_HIT_DAMAGE,
+## plus GOLEM_DRUM_LEVEL_DAMAGE_PER_HIT for every level (up to the final-bonus
+## level, like the flat bonus).
+func _drum_own_hit_damage() -> int:
+	return Balance.GOLEM_DRUM_HIT_DAMAGE + Balance.GOLEM_DRUM_LEVEL_DAMAGE_PER_HIT \
+		* mini(level, Balance.GOLEM_FINAL_BONUS_LEVEL)
+
+
+## Damage of ONE of the drum's hits: its own damage (14, +1 per level) plus its
+## share of the flat level bonus (+5 per level for the whole attack, split over
+## the hits; the last one takes the remainder).
+func drum_hit_damage(hit: int) -> int:
+	var hits: int = Balance.GOLEM_DRUM_HITS.size()
+	var shared: int = level_damage_bonus()
+	var each: int = shared / hits
+	return _drum_own_hit_damage() + (shared - each * (hits - 1) if hit >= hits - 1 else each)
 
 
 ## Trample damage comes from the SIZE (user spec 2026-11-15): body height in
@@ -428,10 +569,209 @@ func height_m() -> float:
 	return Balance.GOLEM_HEIGHT * size_factor()
 
 
-## Radius around the golem's centre it tramples in: its body, grown with the
-## level — and beyond level 7 only with the slow area growth, not with the body.
+## Radius around the golem's centre it tramples in: its body. It grows WITH the
+## body, also beyond level 7 (user spec 2026-11-15 — until then it only took the
+## slow area growth there and the 100-m giant trampled a 5-m circle).
 func trample_radius() -> float:
-	return BODY_HALF_WIDTH * size_factor_for(level) * growth_area_factor()
+	return BODY_HALF_WIDTH * size_factor()
+
+
+## 0 at the starting size, 1 at GOLEM_MAX_HEIGHT — linear in the body height.
+## Drives everything that changes "slowly with the size": the attack cooldown,
+## the turn rate, the catapult's bonus damage.
+func growth_t() -> float:
+	return clampf((height_m() - Balance.GOLEM_HEIGHT)
+		/ (Balance.GOLEM_MAX_HEIGHT - Balance.GOLEM_HEIGHT), 0.0, 1.0)
+
+
+## The stance an attack needs: the ground attacks are struck crouched,
+## everything else standing.
+static func stance_for(kind: StringName) -> int:
+	return STANCE_CROUCH if kind == ATTACK_SLAM or kind == ATTACK_DRUM else STANCE_STAND
+
+
+## Seconds a stance switch takes at the current size.
+func stance_switch_time() -> float:
+	return minf(Balance.GOLEM_STANCE_SWITCH_TIME * sqrt(size_factor()),
+		Balance.GOLEM_STANCE_SWITCH_MAX)
+
+
+func is_switching_stance() -> bool:
+	return _stance_switch > 0.0
+
+
+## May she change the stance of her own accord again? (Not right after the last
+## change — she would rock up and down.)
+func stance_settled() -> bool:
+	return _stance_age >= Balance.GOLEM_STANCE_MIN_TIME
+
+
+## Starts bending down / getting up. Returns false when nothing was started.
+func _begin_stance(target: int) -> bool:
+	if is_switching_stance() or stance == target:
+		return false
+	_stance_target = target
+	_stance_switch = stance_switch_time()
+	var clip: StringName = CLIP_CROUCH_DOWN if target == STANCE_CROUCH else CLIP_CROUCH_UP
+	_play_clip(clip, STANCE_CLIP_LENGTH / _stance_switch, true)
+	return true
+
+
+## Runs a stance switch to its end, and gets her up on her own when the crouch
+## no longer serves: she has to walk (at once), or she has nothing to strike any
+## more (once the stance has settled).
+func _tick_stance(delta: float) -> void:
+	_stance_age += delta
+	if is_switching_stance():
+		_stance_switch -= delta
+		if _stance_switch <= 0.0:
+			_stance_switch = 0.0
+			stance = _stance_target
+			_stance_age = 0.0
+		return
+	if stance != STANCE_CROUCH or _pending_attack != &"":
+		return
+	if state == State.ATTACK and _in_melee:
+		return   # striking from here: the attack choice decides (see _attack_or_switch)
+	if state == State.IDLE and not stance_settled():
+		return   # nothing to do, but she only just bent down
+	_begin_stance(STANCE_STAND)
+
+
+## The attack is due: strike — or change the stance first when the best attack
+## needs the other one. `building` = the assault target, if any.
+func _attack_or_switch(building = null) -> void:
+	var ship: Airship = _airship_in_reach()
+	if ship != null:
+		# An airship overhead goes before the crowd at her feet — standing.
+		if stance == STANCE_STAND:
+			_swat(ship)
+			return
+		if stance_settled():
+			_begin_stance(STANCE_STAND)
+			return
+	var kind: StringName = _choose_attack()
+	if stance_for(kind) != stance:
+		# Not right after the last change (she would rock up and down) — unless
+		# she cannot strike anything at all from the stance she is in.
+		var stay: StringName = _attack_in_stance()
+		if (stance_settled() or attack_worth(stay) <= 0.0) \
+				and _begin_stance(stance_for(kind)):
+			return
+		kind = stay   # too early to change again: make do
+	_wind_up(kind, building)
+
+
+## The best attack she can strike WITHOUT changing the stance.
+func _attack_in_stance() -> StringName:
+	if stance != STANCE_CROUCH:
+		return ATTACK_KICK
+	return ATTACK_DRUM if attack_value(ATTACK_DRUM) > attack_value(ATTACK_SLAM) else ATTACK_SLAM
+
+
+## What the attack `kind` would be worth if it landed right now: for every unit
+## it would strike (same area, same target cap as the real landing) the damage it
+## really takes — never more than the unit has left —, plus
+## GOLEM_STRUCTURE_VALUE for every building or vehicle.
+func attack_worth(kind: StringName) -> float:
+	var struck: Dictionary = _struck_targets(kind)
+	var damage: float = float(attack_damage(kind))
+	var worth: float = 0.0
+	for u in struck.units:
+		worth += minf(damage, float(u.health))
+	return worth + Balance.GOLEM_STRUCTURE_VALUE \
+		* float((struck.vehicles as Array).size() + (struck.buildings as Array).size())
+
+
+## The seconds the attack `kind` costs from the current stance: its cooldown,
+## plus a share of the stance switch when it needs the other stance (the switch
+## pays off over several attacks — GOLEM_STANCE_PLAN_ATTACKS).
+func attack_time(kind: StringName) -> float:
+	var t: float = cooldown_for(kind)
+	if stance_for(kind) != stance:
+		t += stance_switch_time() / float(Balance.GOLEM_STANCE_PLAN_ATTACKS)
+	return t
+
+
+## Expected damage per second of the attack `kind` right now (see attack_worth).
+func attack_value(kind: StringName) -> float:
+	return attack_worth(kind) / attack_time(kind)
+
+
+## Seconds between two attacks at the current size (1,8 s .. 4 s at 100 m).
+func strike_cooldown() -> float:
+	return lerpf(STRIKE_COOLDOWN, Balance.GOLEM_STRIKE_COOLDOWN_MAX, growth_t())
+
+
+## The cooldown the attack `kind` leaves behind: the drum takes longer.
+## The slam is struck crouched and comes back faster; the drum takes the plain rhythm.
+func cooldown_for(kind: StringName) -> float:
+	if kind == ATTACK_DRUM:
+		return strike_cooldown()   # three hits: the plain attack rhythm (1,8 s at the start)
+	if kind == ATTACK_SLAM:
+		return strike_cooldown() * Balance.GOLEM_SLAM_COOLDOWN / Balance.GOLEM_STRIKE_COOLDOWN
+	return strike_cooldown()
+
+
+## How fast the body turns (rad/s): GOLEM_TURN_RATE at the starting size, down to
+## GOLEM_TURN_RATE_FULL_SHARE of the fire ram's rate at 100 m.
+func turn_rate() -> float:
+	return lerpf(Balance.GOLEM_TURN_RATE,
+		Balance.FIRERAM_TURN_RATE * Balance.GOLEM_TURN_RATE_FULL_SHARE, growth_t())
+
+
+## The direction the body really points (flat): `_heading` once it has been
+## slewed, `facing` before the first tick.
+func heading() -> Vector3:
+	var h: Vector3 = _heading if _heading != Vector3.ZERO else facing
+	h.y = 0.0
+	return h.normalized() if h.length_squared() > 0.000001 else Vector3(0, 0, 1)
+
+
+## Turns the body at once into the facing (tests, summoning).
+func snap_heading() -> void:
+	_heading = Vector3.ZERO
+
+
+## Rotates the body toward `facing` at turn_rate() — the fire ram's slew.
+func _slew_heading(delta: float) -> void:
+	var want_dir: Vector3 = Vector3(facing.x, 0.0, facing.z)
+	if want_dir.length_squared() < 0.000001:
+		return
+	want_dir = want_dir.normalized()
+	if _heading == Vector3.ZERO:
+		_heading = want_dir
+		return
+	var cur: float = atan2(_heading.x, _heading.z)
+	var diff: float = wrapf(atan2(want_dir.x, want_dir.z) - cur, -PI, PI)
+	var step: float = turn_rate() * delta
+	if absf(diff) <= step:
+		_heading = want_dir
+	else:
+		var a: float = cur + signf(diff) * step
+		_heading = Vector3(sin(a), 0.0, cos(a))
+
+
+## Has the body turned to within GOLEM_ATTACK_ALIGN_DEG of the facing? Attacks
+## only begin then.
+func is_turned_to_facing() -> bool:
+	var want_dir: Vector3 = Vector3(facing.x, 0.0, facing.z)
+	if want_dir.length_squared() < 0.000001:
+		return true
+	return heading().dot(want_dir.normalized()) >= cos(deg_to_rad(Balance.GOLEM_ATTACK_ALIGN_DEG))
+
+
+## While the body is still turning toward where it wants to go it walks slower
+## (it does not glide sideways): full speed when aligned, down to
+## GOLEM_TURN_MIN_SPEED_SHARE when it would have to walk backward.
+func _slope_speed(slope: float) -> float:
+	if stance != STANCE_STAND or is_switching_stance():
+		return 0.0   # crouched, bending down or getting up: rooted
+	var want_dir: Vector3 = Vector3(facing.x, 0.0, facing.z)
+	var share: float = 1.0
+	if want_dir.length_squared() > 0.000001:
+		share = maxf(Balance.GOLEM_TURN_MIN_SPEED_SHARE, heading().dot(want_dir.normalized()))
+	return super._slope_speed(slope) * share
 
 
 ## Ground speed right now: the level's speed, plus the slight gain per growth step.
@@ -450,14 +790,19 @@ func ignores_unit_collision() -> bool:
 func _credit_kill() -> void:
 	kills += 1
 	life_left += Balance.GOLEM_LIFE_PER_KILL
-	max_health = mini(max_health + Balance.GOLEM_MAX_HP_PER_KILL, Balance.GOLEM_MAX_HP_CAP)
-	health = mini(health + Balance.GOLEM_HP_PER_KILL, max_health)
 	while level < level_for_kills(kills):
 		_level_up()
 	var steps: int = growth_steps_for_kills(kills)
 	if steps != growth_steps:
 		growth_steps = steps
 		_apply_speed()
+	# The ceiling: +5 per kill up to 1000; the giant has the full 1000 at once,
+	# and every growth step beyond level 7 lifts it by GOLEM_GROWTH_MAX_HP.
+	if level >= Balance.GOLEM_MAX_LEVEL:
+		max_health = max_health_cap()
+	else:
+		max_health = mini(max_health + Balance.GOLEM_MAX_HP_PER_KILL, max_health_cap())
+	health = mini(health + Balance.GOLEM_HP_PER_KILL, max_health)
 
 
 func _level_up() -> void:
@@ -631,8 +976,21 @@ func _tick_trample(delta: float) -> void:
 	var walked: float = Vector2(position.x - _tick_pos.x, position.z - _tick_pos.z).length()
 	if walked / delta < Balance.GOLEM_TRAMPLE_MIN_SPEED:
 		return
+	# Target cap (max_targets): at most that many things are under his feet "at
+	# once" — everything trampled stays in _trampled for its interval (units 1 s,
+	# vehicles and buildings 2 s), and while that list is full nothing new is
+	# trampled. Units first (nearest first), then vehicles, then buildings.
+	var room: int = max_targets() - _trampled.size()
+	if room <= 0:
+		return
 	var damage: int = trample_damage()
-	for u in path_service.get_units_in_radius(position, trample_radius()):
+	var radius: float = trample_radius()
+	var under: Array[Unit] = path_service.get_units_in_radius(position, radius)
+	under.sort_custom(func(a: Unit, b: Unit) -> bool:
+		return _flat_dist(a.position, position) < _flat_dist(b.position, position))
+	for u in under:
+		if room <= 0:
+			return
 		if u == self or u.state == State.DEAD or u.tribe_id == tribe_id:
 			continue
 		if not u.is_targetable() or u.is_airborne() or u is CrewedVehicle:
@@ -641,17 +999,35 @@ func _tick_trample(delta: float) -> void:
 		if _trampled.has(id):
 			continue
 		_trampled[id] = Balance.GOLEM_TRAMPLE_INTERVAL
+		room -= 1
 		_no_combat_timer = 0.0
 		u.take_damage(damage, self)
 		if not is_instance_valid(u) or u.state == State.DEAD or u.doomed:
 			_credit_kill()
-	# The giant (maximum level) walks buildings down as well: one destruction
-	# stage every GOLEM_TRAMPLE_BUILDING_INTERVAL for each enemy building under him.
-	if level < Balance.GOLEM_MAX_LEVEL or building_manager == null:
+	if level < Balance.GOLEM_MAX_LEVEL:
+		return
+	# The giant (maximum level) also walks over vehicles that do not fly his
+	# flag: one crush hit per vehicle every GOLEM_TRAMPLE_BUILDING_INTERVAL.
+	for u in under:
+		if room <= 0:
+			return
+		if u == self or not crushes_vehicle(u):
+			continue
+		var vid: int = u.get_instance_id()
+		if _trampled.has(vid):
+			continue
+		_trampled[vid] = Balance.GOLEM_TRAMPLE_BUILDING_INTERVAL
+		room -= 1
+		_no_combat_timer = 0.0
+		_crush_vehicle(u)
+	# ... and walks buildings down as well: one destruction stage every
+	# GOLEM_TRAMPLE_BUILDING_INTERVAL for each enemy building under him.
+	if building_manager == null:
 		return
 	var here: Vector2 = Vector2(position.x, position.z)
-	var radius: float = trample_radius()
 	for b in building_manager.buildings.duplicate():
+		if room <= 0:
+			return
 		if not is_instance_valid(b) or b.health <= 0 or b.tribe_id == tribe_id \
 				or not b.is_attackable():
 			continue
@@ -661,6 +1037,7 @@ func _tick_trample(delta: float) -> void:
 		if _trampled.has(bid):
 			continue
 		_trampled[bid] = Balance.GOLEM_TRAMPLE_BUILDING_INTERVAL
+		room -= 1
 		_no_combat_timer = 0.0
 		_strike_building(b)
 
@@ -706,7 +1083,7 @@ func _begin_attack(enemy: Unit) -> void:
 ## While an attack is wound up she stands and finishes it: no retargeting, no
 ## chasing in mid-swing.
 func _tick_attack(delta: float) -> void:
-	if _pending_attack != &"":
+	if _pending_attack != &"" or is_switching_stance():
 		_attack_cooldown -= delta
 		return
 	if not _unit_target_attackable(attack_target) or attack_target.tribe_id == tribe_id:
@@ -738,12 +1115,9 @@ func _tick_attack(delta: float) -> void:
 	_face_point(target.position)
 	_attack_cooldown -= delta
 	if _attack_cooldown <= 0.0:
-		_attack_cooldown = STRIKE_COOLDOWN
-		var ship: Airship = _airship_in_reach()
-		if ship != null:
-			_swat(ship)   # an airship overhead goes before the crowd at her feet
-		else:
-			_wind_up(_choose_attack())
+		if not is_turned_to_facing():
+			return   # still turning toward it (see turn_rate)
+		_attack_or_switch()
 
 
 ## Nearest living, standing enemy within reach() that the golem can strike (no
@@ -771,7 +1145,7 @@ func _nearest_enemy_in_reach() -> Unit:
 ## building is guaranteed its stage per attack even when the area geometry
 ## misses it (e.g. an odd footprint corner) — see _land_attack.
 func _bombard_building(building, delta: float) -> void:
-	if _pending_attack != &"":
+	if _pending_attack != &"" or is_switching_stance():
 		_attack_cooldown -= delta
 		return
 	var center: Vector3 = building.center_world()
@@ -788,47 +1162,55 @@ func _bombard_building(building, delta: float) -> void:
 	_face_point(center)
 	_attack_cooldown -= delta
 	if _attack_cooldown <= 0.0:
-		_attack_cooldown = STRIKE_COOLDOWN
-		_wind_up(_choose_attack(), building)
+		if not is_turned_to_facing():
+			return   # still turning toward it (see turn_rate)
+		_attack_or_switch(building)
 
 
 ## True when the point at (along, side) in the heading frame lies inside the
 ## slam: the circle around the spot where the hands come down. `scale` = the
-## golem's reach_factor() (1 = level 0).
-static func in_slam_area(along: float, side: float, scale: float = 1.0) -> bool:
-	var a: float = along - SLAM_FORWARD * scale
+## golem's reach_factor() (1 = level 0) and sizes the circle; `limb` = her
+## limb_factor() and says how far ahead the hands land (omitted: like `scale`).
+static func in_slam_area(along: float, side: float, scale: float = 1.0,
+		limb: float = -1.0) -> bool:
+	var a: float = along - SLAM_FORWARD * (limb if limb > 0.0 else scale)
 	var r: float = SLAM_RADIUS * scale
 	return a * a + side * side <= r * r
 
 
 ## True when the point lies in the kick's lane: straight ahead of the golem and,
 ## for the backswing, a shorter stretch behind her.
-static func in_kick_lane(along: float, side: float, scale: float = 1.0) -> bool:
-	return along >= -KICK_BACK * scale and along <= KICK_LENGTH * scale \
+## `scale` sizes the lane's width, `limb` its length (omitted: like `scale`).
+static func in_kick_lane(along: float, side: float, scale: float = 1.0,
+		limb: float = -1.0) -> bool:
+	var long: float = limb if limb > 0.0 else scale
+	return along >= -KICK_BACK * long and along <= KICK_LENGTH * long \
 		and absf(side) <= KICK_HALF_WIDTH * scale
 
 
 static func in_attack_area(kind: StringName, along: float, side: float,
-		scale: float = 1.0) -> bool:
+		scale: float = 1.0, limb: float = -1.0) -> bool:
 	if kind == ATTACK_KICK:
-		return in_kick_lane(along, side, scale)
-	return in_slam_area(along, side, scale)
+		return in_kick_lane(along, side, scale, limb)
+	return in_slam_area(along, side, scale, limb)
 
 
 static func attack_windup(kind: StringName) -> float:
 	if kind == ATTACK_SWAT:
 		return Balance.GOLEM_SWAT_WINDUP
+	if kind == ATTACK_DRUM:
+		return Balance.GOLEM_DRUM_HITS[0]
 	return Balance.GOLEM_KICK_WINDUP if kind == ATTACK_KICK else Balance.GOLEM_SLAM_WINDUP
 
 
 ## Playback speed of an attack animation: a bigger body swings slower (with the
 ## root of its size, like the stride) — but never so slow that the animation
-## would outlast the attack cooldown. At that limit one attack flows straight
-## into the next; she no longer stands idle in between (user spec 2026-11-15).
-## The attack RATE is untouched (GOLEM_STRIKE_COOLDOWN), only the wind-up grows.
+## would outlast the attack's cooldown. At that limit one attack flows straight
+## into the next; she no longer stands idle in between. The cooldown itself grows
+## with the size (strike_cooldown), so the animations of a giant stretch further.
 func attack_speed(kind: StringName) -> float:
-	var slowest: float = float(CLIP_LENGTH.get(kind, STRIKE_COOLDOWN)) / STRIKE_COOLDOWN
-	return clampf(1.0 / sqrt(size_factor()), slowest, 1.0)
+	var slowest: float = float(CLIP_LENGTH.get(kind, STRIKE_COOLDOWN)) / cooldown_for(kind)
+	return clampf(1.0 / sqrt(size_factor()), minf(slowest, 1.0), 1.0)
 
 
 ## Seconds from the start of an attack to its impact at the current size.
@@ -1094,8 +1476,7 @@ func order_attack_building(building) -> void:
 ## Winds up the upward strike at `ship`.
 func _swat(ship: Airship) -> void:
 	_face_point(ship.position)
-	_wind_up(ATTACK_SWAT)
-	_pending_airship = ship
+	_wind_up(ATTACK_SWAT, null, ship)
 
 
 ## Swats at an airship in reach while NOT in the melee loop (idle, walking,
@@ -1105,6 +1486,8 @@ func _tick_air_strike(delta: float) -> void:
 	_air_cooldown = maxf(_air_cooldown - delta, 0.0)
 	if _air_cooldown > 0.0 or _pending_attack != &"" or not can_strike_air():
 		return
+	if stance != STANCE_STAND or is_switching_stance():
+		return   # the strike at an airship is a standing one
 	if state == State.ATTACK and _in_melee:
 		return
 	var ship: Airship = _airship_in_reach()
@@ -1114,8 +1497,7 @@ func _tick_air_strike(delta: float) -> void:
 
 ## Heading frame of the golem: [forward, right], flat in XZ.
 func _heading_frame() -> Array[Vector3]:
-	var forward: Vector3 = Vector3(facing.x, 0.0, facing.z)
-	forward = forward.normalized() if forward.length_squared() > 0.000001 else Vector3(0, 0, 1)
+	var forward: Vector3 = heading()   # where the body really points
 	return [forward, Vector3(-forward.z, 0.0, forward.x)]
 
 
@@ -1128,48 +1510,215 @@ func _victims(kind: StringName) -> Array[Unit]:
 	var frame: Array[Vector3] = _heading_frame()
 	var forward: Vector3 = frame[0]
 	var right: Vector3 = frame[1]
-	var size: float = reach_factor()
-	# Broad phase: a circle around the middle of the area.
-	var centre: Vector3 = position + forward * (SLAM_FORWARD * size)
-	var broad: float = SLAM_RADIUS * size + 0.5
-	if kind == ATTACK_KICK:
-		centre = position + forward * ((KICK_LENGTH - KICK_BACK) * size * 0.5)
-		broad = Vector2((KICK_LENGTH + KICK_BACK) * 0.5, KICK_HALF_WIDTH).length() * size + 0.5
-	for u in path_service.get_units_in_radius(centre, broad):
+	for u in path_service.get_units_in_radius(position, _hit_zone_reach(kind)):
 		if u == self or u.state == State.DEAD or u.tribe_id == tribe_id:
 			continue
 		if not u.is_targetable() or u.is_airborne() or u is CrewedVehicle:
 			continue   # protected reserves, flyers, and devices (no HP) are out
-		var rel: Vector3 = u.position - position
-		var along: float = rel.x * forward.x + rel.z * forward.z
-		var side: float = rel.x * right.x + rel.z * right.z
-		if in_attack_area(kind, along, side, size):
+		if _in_hit_zone(kind, u.position, forward, right):
 			out.append(u)
 	return out
 
 
+## Radius around the golem that contains the whole hit zone of `kind` (broad phase).
+func _hit_zone_reach(kind: StringName) -> float:
+	var size: float = reach_factor()
+	if kind == ATTACK_KICK:
+		var ext: Vector2 = _kick_extent()
+		return Vector2(maxf(ext.x, ext.y), KICK_HALF_WIDTH * size).length() + 0.5
+	return maxf(SLAM_FORWARD * limb_factor() + SLAM_RADIUS * size, trample_radius()) + 0.5
+
+
+## How far the kick's lane reaches ahead (x) and behind her (y): its own length,
+## but never shorter than her body — the lane always runs through the whole body
+## circle. (Only matters late in the growth beyond level 7, when the body
+## outgrows the slowly growing lane.)
+func _kick_extent() -> Vector2:
+	var long: float = limb_factor()   # the leg's length, not the lane's width
+	var body: float = trample_radius()
+	return Vector2(maxf(KICK_LENGTH * long, body), maxf(KICK_BACK * long, body))
+
+
+## Is this point struck by the attack `kind`? (User spec 2026-11-15.)
+##  * KICK: the lane, nothing else — it runs through her body circle, but it is
+##    NOT widened to the body there.
+##  * SLAM: the circle around the hands — plus the FRONT half of her own body
+##    circle (toward the attack). Behind her, at her heels, only what the circle
+##    of the hands reaches by itself is hit.
+func _in_hit_zone(kind: StringName, point: Vector3, forward: Vector3, right: Vector3) -> bool:
+	var rel: Vector3 = point - position
+	var along: float = rel.x * forward.x + rel.z * forward.z
+	var side: float = rel.x * right.x + rel.z * right.z
+	if kind == ATTACK_KICK:
+		var ext: Vector2 = _kick_extent()
+		return along >= -ext.y and along <= ext.x \
+			and absf(side) <= KICK_HALF_WIDTH * reach_factor()
+	if in_slam_area(along, side, reach_factor(), limb_factor()):
+		return true
+	return along >= 0.0 and rel.x * rel.x + rel.z * rel.z <= trample_radius() * trample_radius()
+
+
+## What ONE landing of the attack `kind` strikes, after the target cap
+## (max_targets): {"units", "vehicles", "buildings"}. Units go before vehicles
+## and buildings, within each the nearest to the blow first. The target she is
+## attacking — unit or building — is always struck and counts toward the cap.
+func _struck_targets(kind: StringName) -> Dictionary:
+	var room: int = max_targets()
+	var origin: Vector3 = position
+	if kind != ATTACK_KICK:
+		origin += _heading_frame()[0] * (SLAM_FORWARD * limb_factor())
+	var units: Array[Unit] = _victims(kind)
+	units.sort_custom(func(a: Unit, b: Unit) -> bool:
+		return _flat_dist(a.position, origin) < _flat_dist(b.position, origin))
+	if state == State.ATTACK and _target_valid(attack_target) and units.has(attack_target):
+		units.erase(attack_target)
+		units.push_front(attack_target)
+	var buildings: Array = _buildings_in_area(kind)
+	var prime_building = null
+	if _building_target_valid() and buildings.has(attack_building):
+		prime_building = attack_building
+		buildings.erase(prime_building)
+		room -= 1
+	if units.size() > room:
+		units.resize(maxi(room, 0))
+	room -= units.size()
+	var vehicles: Array = _vehicles_in_area(kind)
+	if vehicles.size() > room:
+		vehicles.resize(maxi(room, 0))
+	room -= vehicles.size()
+	if buildings.size() > room:
+		buildings.resize(maxi(room, 0))
+	if prime_building != null:
+		buildings.push_front(prime_building)
+	return {"units": units, "vehicles": vehicles, "buildings": buildings}
+
+
+## Enemy buildings the attack `kind` would strike right now.
+func _buildings_in_area(kind: StringName) -> Array:
+	var out: Array = []
+	if building_manager == null:
+		return out
+	var forward: Vector3 = _heading_frame()[0]
+	for b in building_manager.buildings:
+		if not is_instance_valid(b) or b.health <= 0:
+			continue
+		if b.tribe_id == tribe_id or not b.is_attackable():
+			continue
+		if _building_in_area(b, kind, forward):
+			out.append(b)
+	return out
+
+
+## Whether the giant's blows and feet wreck this vehicle (maximum level only):
+## every GROUND vehicle that does not fly his own tribe's flag — manned or
+## abandoned. Vehicles under his own flag are always spared, also while their
+## crew fights on foot beside them or before a crew has arrived (ownership
+## follows the crew, so an abandoned ENEMY vehicle keeps the enemy flag).
+## Airships fly above feet and ground blows; the swat is theirs.
+func crushes_vehicle(v) -> bool:
+	if level < Balance.GOLEM_MAX_LEVEL or not (v is CrewedVehicle) or v is Airship:
+		return false
+	if not is_instance_valid(v) or v.state == State.DEAD:
+		return false
+	return v.tribe_id != tribe_id
+
+
+## Ground vehicles the attack `kind` would wreck right now (see crushes_vehicle).
+func _vehicles_in_area(kind: StringName) -> Array:
+	var out: Array = []
+	if level < Balance.GOLEM_MAX_LEVEL or path_service == null:
+		return out
+	var frame: Array[Vector3] = _heading_frame()
+	for u in path_service.get_units_in_radius(position, _hit_zone_reach(kind)):
+		if u != self and crushes_vehicle(u) and _in_hit_zone(kind, u.position, frame[0], frame[1]):
+			out.append(u)
+	return out
+
+
+## One blow or one step on a vehicle: its own damage steps apply (catapult gone
+## at once, fire ram three lives). A wrecked vehicle counts as ONE kill.
+func _crush_vehicle(v) -> void:
+	(v as CrewedVehicle).take_crush_hit(position)
+	if not is_instance_valid(v) or v.state == State.DEAD:
+		_credit_kill()
+
+
 ## Slam when a crowd stands around her, kick otherwise (single targets and
 ## buildings): the kick hurts more but only clears a lane.
+##
+## Everything the slam would strike counts — units, enemy BUILDINGS and (for the
+## giant) vehicles: three huts around her are a crowd too (user report
+## 2026-11-15: she only ever kicked buildings, one at a time).
+##
+## Since 2026-11-16 by DAMAGE (user spec): the attack with the highest expected
+## damage per second wins (attack_value) — what it would strike right now, without
+## overkill, over the time it costs including a share of a stance switch. A tie
+## goes to the attack of the current stance, otherwise to the kick; with nothing
+## to strike at all she kicks.
 func _choose_attack() -> StringName:
-	if _victims(ATTACK_SLAM).size() >= Balance.GOLEM_SLAM_MIN_TARGETS:
-		return ATTACK_SLAM
-	return ATTACK_KICK
+	var order: Array[StringName] = [ATTACK_KICK, ATTACK_SLAM, ATTACK_DRUM]
+	if stance == STANCE_CROUCH:
+		order = [ATTACK_SLAM, ATTACK_DRUM, ATTACK_KICK]
+	var best: StringName = ATTACK_KICK
+	var best_value: float = 0.0
+	for kind in order:
+		var value: float = attack_value(kind)
+		if value > best_value + 0.0001:
+			best = kind
+			best_value = value
+	return best
+
+
+## The clip an attack plays. The kick alternates its leg; the strike at an
+## airship follows the ship's height against her body (see GOLEM_AIR_*_SHARE).
+## A model without the extra clips falls back on the plain one.
+func _clip_for(kind: StringName, ship: Airship = null) -> StringName:
+	var clip: StringName = kind
+	if kind == ATTACK_SLAM:
+		clip = CLIP_SLAM_LOW
+	elif kind == ATTACK_DRUM:
+		clip = CLIP_DRUM_LOW
+	elif kind == ATTACK_KICK:
+		clip = _next_kick_clip()
+	elif kind == ATTACK_SWAT and ship != null and is_instance_valid(ship):
+		var share: float = (ship.position.y - position.y) / maxf(height_m(), 0.01)
+		if share < Balance.GOLEM_AIR_LOW_SHARE:
+			clip = _next_kick_clip()
+		elif share < Balance.GOLEM_AIR_HIGH_SHARE:
+			clip = CLIP_SWIPE
+	if _anim != null and not _anim.has_animation(clip):
+		return kind
+	return clip
+
+
+func _next_kick_clip() -> StringName:
+	_kick_left = not _kick_left
+	return ATTACK_KICK if _kick_left else CLIP_KICK_LEFT
 
 
 ## Begins an attack: the animation starts now, the damage lands after the
 ## wind-up (_tick_pending_attack). `building` = the assault target, if any.
-func _wind_up(kind: StringName, building = null) -> void:
+func _wind_up(kind: StringName, building = null, ship: Airship = null) -> void:
+	# Called directly (tests, the swat) the stance simply follows the attack.
+	if not is_switching_stance() and stance != stance_for(kind):
+		stance = stance_for(kind)
+		_stance_age = 0.0
 	_pending_attack = kind
 	_pending_time = current_windup(kind)
+	_pending_hit = 0
 	_pending_building = building
-	_pending_airship = null
-	_air_cooldown = STRIKE_COOLDOWN
+	_pending_airship = ship
+	# One shared cadence: whatever she strikes with, the next attack — on the
+	# ground or at an airship — waits for this attack's cooldown.
+	_attack_cooldown = cooldown_for(kind)
+	_air_cooldown = cooldown_for(kind)
 	attack_anim = kind
 	anim_base_name = attack_anim
 	anim_start_ms = Time.get_ticks_msec()
 	_arm_anim = 0.0
 	_no_combat_timer = 0.0
-	_play_clip(kind, attack_speed(kind), true)
+	var clip: StringName = _clip_for(kind, ship)
+	_play_clip(clip, attack_speed(kind), true)
 
 
 func _tick_pending_attack(delta: float) -> void:
@@ -1186,13 +1735,20 @@ func _tick_pending_attack(delta: float) -> void:
 	var kind: StringName = _pending_attack
 	var building = _pending_building
 	var ship: Airship = _pending_airship
+	# The drum lands three times; she stays wound up until the last hit.
+	if kind == ATTACK_DRUM and _pending_hit < Balance.GOLEM_DRUM_HITS.size() - 1:
+		_land_attack(kind, _pending_hit)
+		_pending_time += (Balance.GOLEM_DRUM_HITS[_pending_hit + 1]
+			- Balance.GOLEM_DRUM_HITS[_pending_hit]) / attack_speed(kind)
+		_pending_hit += 1
+		return
 	_pending_attack = &""
 	_pending_building = null
 	_pending_airship = null
 	if kind == ATTACK_SWAT:
 		_land_swat(ship)
 		return
-	var struck: Dictionary = _land_attack(kind)
+	var struck: Dictionary = _land_attack(kind, _pending_hit)
 	if building != null and is_instance_valid(building) and building.health > 0 \
 			and not struck.has(building) and state == State.ATTACK \
 			and attack_building == building:
@@ -1210,9 +1766,32 @@ func _land_swat(ship: Airship) -> bool:
 		return false
 	if _flat_dist(position, ship.position) > reach() * SWAT_SLACK:
 		return false
-	_play_sfx(&"golem_strike", 200)
+	_play_strike_sfx(ATTACK_SWAT)
 	ship.register_hull_hit(position)
 	return true
+
+
+## Sound of an attack landing: every attack has its own key (golem_kick,
+## golem_slam, golem_drum — once per hit —, golem_swat). As long as its file is
+## missing the common golem_strike plays instead.
+const STRIKE_SFX: Dictionary = {
+	&"kick": &"golem_kick", &"slam": &"golem_slam", &"drum": &"golem_drum", &"swat": &"golem_swat"}
+
+static func strike_sfx_key(kind: StringName) -> StringName:
+	return STRIKE_SFX.get(kind, &"golem_strike")
+
+
+func _play_strike_sfx(kind: StringName) -> void:
+	if not _audio_checked:
+		_audio_checked = true
+		if is_inside_tree():
+			_audio_node = get_node_or_null("/root/AudioManager")
+	if _audio_node == null:
+		return
+	var key: StringName = strike_sfx_key(kind)
+	if not _audio_node.has_sfx(key):
+		key = &"golem_strike"
+	_audio_node.play_sfx(key, position, 200)
 
 
 ## The hand slam landing (see class doc). Returns the buildings it hit (keys).
@@ -1230,16 +1809,23 @@ func _kick() -> Dictionary:
 ## kick), every enemy building in the area loses a stage. Kills extend the
 ## lifetime AND heal the golem. Returns the buildings it hit (keys) so the
 ## building assault can top up its target.
-func _land_attack(kind: StringName) -> Dictionary:
+##
+## The DRUM lands three times (`hit` 0..2): each hit deals its share of the
+## damage to the units in the slam's area; only the LAST one throws them and
+## strikes vehicles and buildings.
+func _land_attack(kind: StringName, hit: int = 0) -> Dictionary:
 	_no_combat_timer = 0.0
-	_play_sfx(&"golem_strike", 200)
+	_play_strike_sfx(kind)
 	var frame: Array[Vector3] = _heading_frame()
 	var forward: Vector3 = frame[0]
 	var kick: bool = kind == ATTACK_KICK
-	var damage: int = attack_damage(kind)
-	# The victims are collected first: a kill can raise the level, and the area
-	# of THIS attack must not grow while it lands.
-	for u in _victims(kind):
+	var drum: bool = kind == ATTACK_DRUM
+	var last_hit: bool = not drum or hit >= Balance.GOLEM_DRUM_HITS.size() - 1
+	var damage: int = drum_hit_damage(hit) if drum else attack_damage(kind)
+	# Everything struck is collected first: a kill can raise the level, and the
+	# area and the target cap of THIS attack must not grow while it lands.
+	var struck: Dictionary = _struck_targets(kind)
+	for u in struck.units:
 		u.take_damage(damage, self)
 		if not is_instance_valid(u) or u.state == State.DEAD or u.doomed:
 			_credit_kill()
@@ -1252,6 +1838,8 @@ func _land_attack(kind: StringName) -> Dictionary:
 			u.apply_lift(forward if ahead else -forward,
 				Balance.GOLEM_KICK_PUSH, Balance.GOLEM_KICK_UP)
 			continue
+		if not last_hit:
+			continue   # the drum's first two hits only hurt
 		var away: Vector3 = Vector3(u.position.x - position.x, 0.0,
 			u.position.z - position.z)
 		match Fireball.impact_outcome(randf(), Balance.GOLEM_LIFT_CHANCE,
@@ -1263,18 +1851,17 @@ func _land_attack(kind: StringName) -> Dictionary:
 					away = forward
 				u.start_roll(away.normalized(), Balance.GOLEM_ROLL_DURATION,
 					Balance.GOLEM_ROLL_SPEED)
+	if not last_hit:
+		return {}
+	# The giant's blows wreck vehicles too.
+	for v in struck.vehicles:
+		_crush_vehicle(v)
 	var struck_buildings: Dictionary = {}
-	if building_manager != null:
-		# duplicate() because a stage can level a construction site and mutate
-		# the list.
-		for b in building_manager.buildings.duplicate():
-			if not is_instance_valid(b) or b.health <= 0:
-				continue
-			if b.tribe_id == tribe_id or not b.is_attackable():
-				continue
-			if _building_in_area(b, kind, forward):
-				struck_buildings[b] = true
-				_strike_building(b)
+	for b in struck.buildings:
+		if not is_instance_valid(b) or b.health <= 0:
+			continue
+		struck_buildings[b] = true
+		_strike_building(b)
 	return struck_buildings
 
 
@@ -1292,10 +1879,16 @@ func _strike_building(b) -> void:
 func _building_in_area(b, kind: StringName, forward: Vector3) -> bool:
 	var size: float = reach_factor()
 	if kind != ATTACK_KICK:
-		var hit: Vector3 = position + forward * (SLAM_FORWARD * size)
-		return b.footprint_distance_to(Vector2(hit.x, hit.z)) <= SLAM_RADIUS * size
-	var along: float = -KICK_BACK * size + 0.5
-	while along < KICK_LENGTH * size:
+		var hit: Vector3 = position + forward * (SLAM_FORWARD * limb_factor())
+		if b.footprint_distance_to(Vector2(hit.x, hit.z)) <= SLAM_RADIUS * size:
+			return true
+		# The front half of her own body circle belongs to the slam (see _in_hit_zone).
+		var c: Vector3 = b.center_world()
+		return (c.x - position.x) * forward.x + (c.z - position.z) * forward.z >= 0.0 \
+			and b.footprint_distance_to(Vector2(position.x, position.z)) <= trample_radius()
+	var ext: Vector2 = _kick_extent()
+	var along: float = -ext.y + 0.5
+	while along < ext.x:
 		var sample: Vector3 = position + forward * along
 		if b.footprint_distance_to(Vector2(sample.x, sample.z)) <= KICK_HALF_WIDTH * size:
 			return true
@@ -1358,7 +1951,7 @@ func _create_model() -> void:
 func _prepare_clips() -> void:
 	if _anim == null:
 		return
-	for clip in [CLIP_IDLE, CLIP_WALK]:
+	for clip in [CLIP_IDLE, CLIP_WALK, CLIP_CROUCH_IDLE]:
 		if _anim.has_animation(clip):
 			_anim.get_animation(clip).loop_mode = Animation.LOOP_LINEAR
 	_play_clip(CLIP_IDLE)
@@ -1436,8 +2029,8 @@ func _tick_visual(delta: float) -> void:
 		if _dead_time >= SINK_DELAY or _clip != CLIP_DEATH:
 			position.y -= SINK_SPEED * delta
 		return
-	if facing.length_squared() > 0.000001:
-		rotation.y = atan2(facing.x, facing.z)
+	var body_dir: Vector3 = heading()
+	rotation.y = atan2(body_dir.x, body_dir.z)
 	# A level-up lets the figure grow over about a second.
 	if _model != null and not is_equal_approx(_shown_size, size_factor()):
 		_shown_size = move_toward(_shown_size, size_factor(), delta * GROW_SPEED)
@@ -1452,10 +2045,11 @@ func _tick_visual(delta: float) -> void:
 	_last_pos = position
 	if _anim != null:
 		# An attack clip plays out; afterwards walk or idle by the real speed.
-		var attacking: bool = (_clip == ATTACK_SLAM or _clip == ATTACK_KICK
-			or _clip == ATTACK_SWAT) and _anim.is_playing()
-		if not attacking:
-			if ground_speed > WALK_THRESHOLD:
+		var attacking: bool = ATTACK_CLIPS.has(_clip) and _anim.is_playing()
+		if not attacking and not is_switching_stance():
+			if stance == STANCE_CROUCH:
+				_play_clip(CLIP_CROUCH_IDLE)
+			elif ground_speed > WALK_THRESHOLD:
 				# A bigger body covers more ground per stride.
 				_play_clip(CLIP_WALK, ground_speed / (WALK_CLIP_SPEED * _shown_size))
 			else:

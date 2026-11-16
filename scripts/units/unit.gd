@@ -2391,12 +2391,30 @@ func is_burning() -> bool:
 
 
 ## Damage per second while alight: the whole BURN_TOTAL_DAMAGE spread over
-## BURN_DURATION (15/s — lethal to a brave). The golem overrides it with a
-## trickle (stone does not burn well, 2026-09-06). The fire-resist buff caps it
+## BURN_DURATION (15/s — lethal to a brave). The FULL-GROWN golem overrides it
+## with a trickle (2026-11-15; before that every golem did). The fire-resist buff caps it
 ## at the same trickle, but from OUTSIDE (effective_burn_dps) — a cap inside
 ## this virtual would be lost to every subclass that overrides it.
 func burn_damage_per_second() -> float:
 	return float(BURN_TOTAL_DAMAGE) / BURN_DURATION
+
+
+## Damage a catapult stone's shock does to THIS unit when the impact lies
+## `dist` metres (flat) from it. The golem overrides it: a direct hit hurts him
+## more the bigger he is.
+func siege_shock_damage(base: int, _dist: float) -> int:
+	return base
+
+
+## How far this unit's body reaches around its position for area hits that test
+## a body rather than a point (catapult impact). 0 for man-sized units.
+func body_hit_radius() -> float:
+	return 0.0
+
+
+## Damage a lightning bolt does to this unit (the golem takes double).
+func lightning_damage(base: int) -> int:
+	return base
 
 
 ## Size multiplier for the shared StatusFxRenderer flame (vehicles override).

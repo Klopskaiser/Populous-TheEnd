@@ -234,6 +234,14 @@ func take_damage(_amount: int, _attacker = null) -> void:
 	pass
 
 
+## A giant's blow or foot (the golem from its highest level on): sheer force, so
+## the vehicle's own damage steps apply. The plain vehicle (catapult) has none —
+## it bursts apart at once, the crew is released alive. The fire ram and the
+## airship override this with their lives.
+func take_crush_hit(_source_pos: Vector3 = Vector3.ZERO) -> void:
+	_destroy_vehicle(true)
+
+
 ## Too heavy for tornado throws, fireball knockback and rolls.
 func throw_airborne(_velocity: Vector3, _fall_damage: int = 0,
 		_force: bool = false) -> void:

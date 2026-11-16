@@ -44,6 +44,10 @@ var match_over: bool = false
 var _win_tracking: bool = false
 var _defeated: Dictionary[int, bool] = {}
 var _defeat_timer: float = 0.0
+## Tribes the defeat check leaves alone (survival mode: the wave tribe owns no
+## unit between two waves and must not drop out — and end the match — for it).
+## Empty in every other mode, so skirmish and the start mission are untouched.
+var _defeat_exempt: Dictionary[int, bool] = {}
 
 
 func _ready() -> void:
@@ -86,6 +90,23 @@ func stop_win_tracking() -> void:
 	_win_tracking = false
 	match_over = false
 	_defeated.clear()
+	_defeat_exempt.clear()
+
+
+## Shields a tribe from the defeat check (or lifts the shield again). A shielded
+## tribe is never eliminated and counts as a survivor, however few units it has.
+## Used by SurvivalMode for the wave tribe: shielded while waves are still to
+## come, released with the last wave — from then on the ordinary rule ("no
+## living unit left") decides the match. Cleared by stop_win_tracking()/reset().
+func set_defeat_exempt(tribe_id: int, exempt: bool) -> void:
+	if exempt:
+		_defeat_exempt[tribe_id] = true
+	else:
+		_defeat_exempt.erase(tribe_id)
+
+
+func is_defeat_exempt(tribe_id: int) -> bool:
+	return _defeat_exempt.has(tribe_id)
 
 
 ## Checks every tribe once and fires tribe_defeated/match_ended. Public so
@@ -94,7 +115,7 @@ func check_defeats() -> void:
 	if not _win_tracking or match_over:
 		return
 	for tribe in tribes:
-		if _defeated.get(tribe.id, false):
+		if _defeated.get(tribe.id, false) or _defeat_exempt.has(tribe.id):
 			continue
 		if is_tribe_defeated(tribe):
 			_defeated[tribe.id] = true
@@ -154,3 +175,4 @@ func reset() -> void:
 	match_over = false
 	_win_tracking = false
 	_defeated.clear()
+	_defeat_exempt.clear()

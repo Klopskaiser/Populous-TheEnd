@@ -528,6 +528,10 @@ func crew_aura_for(_member) -> Vector2i:
 
 ## One hull hit (fireball-spell bolt or catapult air-intercept). The first
 ## hit sets the hull visibly on fire; HULL_HITS explode the ship.
+func take_crush_hit(source_pos: Vector3 = Vector3.ZERO) -> void:
+	register_hull_hit(source_pos)
+
+
 func register_hull_hit(_source_pos: Vector3 = Vector3.ZERO) -> void:
 	if state == State.DEAD:
 		return

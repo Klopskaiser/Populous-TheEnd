@@ -85,9 +85,51 @@ const GOLEM_BODY_HALF_DEPTH: float = 0.6075
 const GOLEM_SLAM_RADIUS: float = 2.6
 const GOLEM_SLAM_FORWARD: float = 1.2
 const GOLEM_SLAM_DAMAGE: int = 25
-## Sekunden vom Ansetzen bis zum Aufschlag (so lang ist das Buecken in der
-## Animation `slam`).
-const GOLEM_SLAM_WINDUP: float = 0.8
+## Sekunden vom Ansetzen bis zum Aufschlag — aus der GEBUECKTEN Haltung (Clip
+## `slam_low`). Bis 2026-11-16 waren es 0,8 s: das Buecken steckte im Angriff.
+## Jetzt ist das Buecken der Haltungswechsel (GOLEM_STANCE_SWITCH_TIME 0,45 s),
+## aus dem Stand dauert der erste Handschlag also weiter 0,8 s.
+const GOLEM_SLAM_WINDUP: float = 0.35
+## HALTUNG (Nutzervorgabe 2026-11-15, gebaut 2026-11-16): der Golem steht ODER
+## ist gebueckt.
+##   STEHEND  — Tritt, Luftschlag, Laufen.
+##   GEBUECKT — Handschlag und Trommeln; die kommen von dort schneller (kuerzere
+##              Ausholzeit; der Handschlag kommt alle GOLEM_SLAM_COOLDOWN wieder,
+##              das Trommeln im normalen Takt), aber er kann so weder laufen
+##              noch treten.
+## Der Wechsel dauert GOLEM_STANCE_SWITCH_TIME Sekunden mal Wurzel(Groesse),
+## hoechstens GOLEM_STANCE_SWITCH_MAX — in der Zeit greift er nicht an und laeuft
+## nicht. Er wechselt von selbst, nach dem ERWARTETEN SCHADEN (s.
+## GOLEM_STRUCTURE_VALUE): er nimmt den Angriff mit dem meisten Schaden je
+## Sekunde, und braucht der die andere Haltung, wechselt er. Ausserdem steht er
+## auf, wenn ein Luftschiff in Schlagweite kommt oder er laufen muss.
+## Freiwillige Wechsel fruehestens GOLEM_STANCE_MIN_TIME Sekunden nach dem
+## letzten (sonst pendelte er); wer laufen MUSS, steht sofort auf.
+const GOLEM_STANCE_SWITCH_TIME: float = 0.45
+const GOLEM_STANCE_SWITCH_MAX: float = 2.0
+const GOLEM_STANCE_MIN_TIME: float = 3.0
+## ANGRIFFSWAHL NACH SCHADEN (Nutzer 2026-11-16, ersetzt die festen Zielzahlen
+## 3 / 5 / 2): fuer Tritt, Handschlag und Trommeln wird gerechnet, was der Angriff
+## JETZT treffen wuerde (dieselbe Flaeche, dieselbe Zielobergrenze wie beim
+## Aufschlag) —
+##   Wert = Summe ueber die getroffenen Einheiten von min(Schaden, deren Leben)
+##          + GOLEM_STRUCTURE_VALUE je getroffenem Gebaeude/Fahrzeug
+##   Zeit = Abklingzeit des Angriffs
+##          + Haltungswechsel / GOLEM_STANCE_PLAN_ATTACKS, wenn er dafuer die
+##            Haltung wechseln muesste (der Wechsel lohnt sich ueber mehrere
+##            Angriffe, deshalb nur anteilig)
+## und der Angriff mit dem hoechsten Wert / Zeit gewinnt. Gleichstand: der Angriff
+## der aktuellen Haltung, sonst der Tritt. "min(Schaden, Leben)" heisst: gegen
+## fast tote Ziele zaehlt kein Ueberschaden — dort gewinnt der schnelle
+## Handschlag, gegen gesunde das staerkere Trommeln.
+## Ein Gebaeude oder Fahrzeug nimmt je Angriff eine Stufe, egal von welchem; es
+## zaehlt deshalb fuer alle gleich viel (etwa ein Einheitentreffer).
+const GOLEM_STRUCTURE_VALUE: float = 30.0
+const GOLEM_STANCE_PLAN_ATTACKS: int = 3
+## Abklingzeit des Handschlags bei Startgroesse (1,35 -> 1,25 s, Nutzer
+## 2026-11-16). Sie waechst mit der Groesse im selben Verhaeltnis wie der normale
+## Takt (GOLEM_STRIKE_COOLDOWN 1,8 s -> 4 s bei 100 m, der Handschlag also 2,78 s).
+const GOLEM_SLAM_COOLDOWN: float = 1.25
 ## TRITT (kick): ein Fussballtritt nach vorn — Schaden in einer SCHNEISE:
 ## GOLEM_KICK_WIDTH breit, von der Riesin GOLEM_KICK_LENGTH nach vorn (9 m2,
 ## weniger als die Haelfte des Handschlags). Dafuer mehr Schaden und VIEL
@@ -105,9 +147,6 @@ const GOLEM_KICK_WINDUP: float = 0.5
 ## des Handschlags (GOLEM_LIFT_PUSH).
 const GOLEM_KICK_PUSH: float = 9.0
 const GOLEM_KICK_UP: float = 5.5
-## Angriffswahl: stehen mindestens so viele Feinde in der Flaeche des
-## Handschlags, schlaegt sie; sonst tritt sie (Einzelziele, Gebaeude).
-const GOLEM_SLAM_MIN_TARGETS: int = 3
 ## 2,0 -> 1,8 s (Nutzervorgabe 2026-09-09). Gilt fuer beide Angriffe.
 const GOLEM_STRIKE_COOLDOWN: float = 1.8
 ## HANDSCHLAG, je Opfer, das ihn ueberlebt: 30 % Hochwirbeln, 30 % Ins-Rollen —
@@ -130,14 +169,16 @@ const GOLEM_LIFE_PER_KILL: float = 6.0
 ## Je Kill heilt der Golem um GOLEM_HP_PER_KILL (Nutzervorgabe 2026-09-09) UND
 ## seine Lebensobergrenze steigt um GOLEM_MAX_HP_PER_KILL (2026-11-15) — bis
 ## hoechstens GOLEM_MAX_HP_CAP (flat 1000, Nutzervorgabe; nach 40 Kills erreicht,
-## auf Stufe 7 gilt sie in jedem Fall). Die Obergrenze GILT: Kill-Heilung und
+## auf Stufe 7 gilt sie in jedem Fall). Nach Stufe 7 hebt jeder WACHSTUMSSCHRITT
+## sie um GOLEM_GROWTH_MAX_HP (2026-11-15: am 100-m-Ende 1265). Die Obergrenze GILT: Kill-Heilung und
 ## Dauerheilung enden an ihr — sonst heilte er sich passiv unendlich hoch.
 ## Als Kill zaehlt auch ein vom Golem zerstoertes GEBAEUDE.
 const GOLEM_HP_PER_KILL: int = 10
 const GOLEM_MAX_HP_PER_KILL: int = 5
 const GOLEM_MAX_HP_CAP: int = 1000
+const GOLEM_GROWTH_MAX_HP: int = 5
 ## STUFEN (Nutzervorgabe 2026-11-15): der Golem beginnt auf Stufe 0 und steigt
-## alle GOLEM_KILLS_PER_LEVEL Kills eine Stufe auf, bis Stufe
+## nach GOLEM_LEVEL_KILLS Kills je Stufe auf (s. dort), bis Stufe
 ## GOLEM_FINAL_BONUS_LEVEL (6). Je Stufe:
 ##   + GOLEM_LEVEL_LIFETIME Sekunden Lebenszeit (einmalig beim Aufstieg),
 ##   + GOLEM_LEVEL_REGEN Leben je Sekunde Dauerheilung (Stufe 1: 3/s, Stufe 6: 18/s)
@@ -153,17 +194,31 @@ const GOLEM_MAX_HP_CAP: int = 1000
 ## DIE ENDBONI gibt es ab Stufe GOLEM_FINAL_BONUS_LEVEL (6): keine
 ## Lebenszeitbegrenzung mehr, und er jagt Luftschiffe (s. GOLEM_SWAT_WINDUP).
 ##
-## STUFE 7, der GIGANT (Nutzervorgabe 2026-11-15): GOLEM_TOP_LEVEL_KILLS (50)
-## weitere Kills nach Stufe 6, also 86 insgesamt. Der Koerper waechst noch einmal
+## STUFE 7, der GIGANT (Nutzervorgabe 2026-11-15): 45 weitere Kills nach
+## Stufe 6, also 87 insgesamt. Der Koerper waechst noch einmal
 ## um GOLEM_TOP_LEVEL_GROWTH (50 %: 4,48-fach, 21,2 m), Reichweite und
 ## Wirkflaechen um GOLEM_TOP_LEVEL_REACH_GROWTH (25 %: 2,21-fach), die
 ## Dauerheilung wie gehabt um 3/s (21/s), das Tempo folgt der Groesse. Der
 ## SCHADEN steigt nicht mehr (bleibt bei +30). Und: wo der Gigant steht, wird der
 ## Boden EBEN — auf die tiefste Stelle unter seinem Koerper (s. GOLEM_FLATTEN_*).
-const GOLEM_KILLS_PER_LEVEL: int = 6
+## Kills, die jede Stufe ZUSAETZLICH zur vorigen braucht (Index 0 = Stufe 1).
+## Nutzervorgabe 2026-11-15 (vorher 6 je Stufe und 50 fuer Stufe 7): 5, 6, 7, -, 8,
+## 9, 45. Fuer Stufe 4 war kein Wert genannt — angenommen ist 7 (wie Stufe 3).
+## Aufsummiert: Stufe 1 nach 5, 2 nach 11, 3 nach 18, 4 nach 25, 5 nach 33,
+## 6 nach 42, 7 nach 87 Kills.
+const GOLEM_LEVEL_KILLS: Array[int] = [5, 6, 7, 7, 8, 9, 45]
+## ZIELOBERGRENZE (Nutzervorgabe 2026-11-15): gegen dichte Nahkampfhaufen
+## eskalierte der Flaechenschaden. Jeder Schadenstick des Golems — Handschlag,
+## Tritt, und beim Trampeln je Sekunde — trifft hoechstens so viele Ziele
+## (Index = Stufe; fuer Stufe 6 war kein Wert genannt, angenommen 8 wie davor
+## und danach). Nach Stufe 7 kommt alle GOLEM_GROWTH_STEPS_PER_TARGET
+## Wachstumsschritte eines dazu (100 m: 25). Einheiten gehen vor Fahrzeugen und
+## Gebaeuden, die naechsten zuerst; das Ziel, das er gerade angreift, wird immer
+## getroffen und zaehlt mit.
+const GOLEM_MAX_TARGETS: Array[int] = [5, 6, 6, 6, 7, 8, 8, 8]
+const GOLEM_GROWTH_STEPS_PER_TARGET: int = 3
 const GOLEM_MAX_LEVEL: int = 7
 const GOLEM_FINAL_BONUS_LEVEL: int = 6
-const GOLEM_TOP_LEVEL_KILLS: int = 50
 const GOLEM_TOP_LEVEL_GROWTH: float = 0.5
 const GOLEM_TOP_LEVEL_REACH_GROWTH: float = 0.25
 ## Einebnen unter dem Giganten (Stufe 7): alle GOLEM_FLATTEN_INTERVAL Sekunden
@@ -228,6 +283,74 @@ const GOLEM_TRAMPLE_BUILDING_INTERVAL: float = 2.0
 ## Schluss). Ist die Luftlinie versperrt, wird der normale Weg gesucht und
 ## danach begradigt.
 const GOLEM_GIANT_STEP_SHARE: float = 0.2
+## REICHWEITE WAECHST MIT DEM KOERPER (Nutzer 2026-11-16): Arme und Beine werden
+## mit dem Koerper laenger — bis dahin wuchs die Reichweite nur 10 % je Stufe
+## (wie die Wirkflaechen) und der grosse Golem musste fast auf sein Ziel treten.
+## Jetzt waechst alles, was an der GLIEDERLAENGE haengt, mit dem "Gliederfaktor"
+## = Groessenfaktor hoch e, wobei e so gewaehlt ist, dass bei 100 m genau
+## GOLEM_LIMB_SHARE_AT_MAX (60 %) des rein koerperproportionalen Werts
+## herauskommt (e = 0,833; sanfter als 1:1, Nutzervorgabe):
+##   Reichweite (Stufe 6: 7,5 m, Stufe 7: 10,5 m, 100 m: 38 m),
+##   Laenge der Tritt-Schneise nach vorn und hinten,
+##   Abstand des Handschlag-Aufschlagpunkts vom Koerper.
+## Die GROESSE der Flaechen (Radius des Handschlags, Breite der Schneise) bleibt
+## beim langsamen Wachstum von 10 % je Stufe (GOLEM_LEVEL_REACH_GROWTH).
+const GOLEM_LIMB_SHARE_AT_MAX: float = 0.6
+## ANGRIFFSTAKT NACH GROESSE (Nutzer 2026-11-15, ersetzt "der Takt bleibt 1,8 s"):
+## die Abklingzeit waechst langsam mit dem Koerper — linear in der Koerperhoehe
+## von GOLEM_STRIKE_COOLDOWN (1,8 s, Startgroesse) bis GOLEM_STRIKE_COOLDOWN_MAX
+## bei 100 m (Stufe 7 mit 21 m: 2,18 s). Die Angriffsanimationen werden
+## entsprechend langsamer und fuellen die Abklingzeit weiter aus.
+const GOLEM_STRIKE_COOLDOWN_MAX: float = 4.0
+## DREHRATE (Nutzer 2026-11-15): der Golem dreht sich nicht mehr augenblicklich.
+## Sein Koerper folgt der Blickrichtung mit GOLEM_TURN_RATE (rad/s) bei
+## Startgroesse, linear in der Koerperhoehe fallend bis GOLEM_TURN_RATE_FULL_SHARE
+## der Feuerrammen-Drehrate bei 100 m (0,7 x 2,0 = 1,4 rad/s: eine halbe Drehung
+## in 2,2 s). Angegriffen wird erst, wenn er bis auf GOLEM_ATTACK_ALIGN_DEG auf
+## das Ziel gedreht ist; solange er sich dreht, laeuft er langsamer (mindestens
+## GOLEM_TURN_MIN_SPEED_SHARE seines Tempos), damit er nicht seitwaerts gleitet.
+const GOLEM_TURN_RATE: float = 8.0
+const GOLEM_TURN_RATE_FULL_SHARE: float = 0.7
+const GOLEM_ATTACK_ALIGN_DEG: float = 25.0
+const GOLEM_TURN_MIN_SPEED_SHARE: float = 0.2
+## TROMMELN (Nutzer 2026-11-15): eine Variante des Handschlags — drei Schlaege
+## auf den Boden, linke Hand, rechte Hand, linke Hand (Clip "drum_low", Aufschlaege
+## GOLEM_DRUM_HITS Sekunden nach Beginn; aus dem Stand kommt das Buecken davor).
+## Flaeche wie der Handschlag. Werte seit 2026-11-16 (Nutzer; vorher 40 Schaden
+## gesamt, 1,4-fache Abklingzeit des Handschlags):
+##   JEDER Schlag macht GOLEM_DRUM_HIT_DAMAGE (14, zusammen 42);
+##   je Stufe bekommt jeder Schlag GOLEM_DRUM_LEVEL_DAMAGE_PER_HIT (+1) dazu,
+##   ZUSAETZLICH zum normalen Stufenbonus (GOLEM_LEVEL_DAMAGE, +5 fuer den ganzen
+##   Angriff, auf die drei Schlaege verteilt) — also +8 je Stufe insgesamt
+##   (Stufe 6: 3 x 30 = 90);
+##   die Abklingzeit ist der normale Angriffstakt (1,8 s bei Startgroesse), nicht
+##   der verkuerzte der gebueckten Haltung.
+## Gewaehlt wird es, wenn es mehr Schaden je Sekunde bringt als Handschlag und
+## Tritt (s. GOLEM_STRUCTURE_VALUE). Hochwirbeln/Rollen, Gebaeudestufe und
+## Fahrzeugtreffer gibt es nur beim LETZTEN der drei Schlaege.
+const GOLEM_DRUM_HIT_DAMAGE: int = 14
+const GOLEM_DRUM_LEVEL_DAMAGE_PER_HIT: int = 1
+const GOLEM_DRUM_HITS: Array[float] = [0.35, 0.8, 1.25]   # aus der gebueckten Haltung (Clip drum_low)
+## LUFTSCHLAG NACH HOEHE (Nutzer 2026-11-15): Luftschiffe fliegen auf 10 m, schon
+## der Stufe-6-Golem ist 14 m gross — ein Schlag nach OBEN passt dann nicht mehr.
+## Die Animation richtet sich nach der Hoehe des Schiffs ueber seinen Fuessen,
+## gemessen an seiner Koerperhoehe: darueber als GOLEM_AIR_HIGH_SHARE der Schlag
+## nach oben ("swat"), darunter als GOLEM_AIR_LOW_SHARE ein Tritt, dazwischen ein
+## waagerechter Schwinger ("swipe"). Wirkung und Reichweite sind dieselben.
+const GOLEM_AIR_HIGH_SHARE: float = 0.8
+const GOLEM_AIR_LOW_SHARE: float = 0.4
+## AGGRO (Nutzer 2026-11-15: "am Ende greift der kaum noch was von sich aus an"):
+## der Radius, in dem er von sich aus angreift, waechst mit dem KOERPER —
+## MELEE_AGGRO_RADIUS (8 m) x Groessenfaktor, also immer rund 1,7 Koerperhoehen
+## (Stufe 6: 23,9 m, Stufe 7: 35,8 m). Gedeckelt bei GOLEM_AGGRO_MAX, sonst
+## reichte der Radius des 100-m-Giganten (169 m) ueber die ganze Karte.
+const GOLEM_AGGRO_MAX: float = 60.0
+## FAHRZEUGE ab der hoechsten Stufe (Nutzer 2026-11-15): Tritt, Handschlag und
+## Trampeln treffen auch Bodenfahrzeuge, die nicht unter der eigenen Flagge
+## stehen (feindliche, bemannt oder verlassen). Es gelten die Schadensstufen
+## des Fahrzeugs (CrewedVehicle.take_crush_hit): Katapult sofort zerstoert,
+## Feuerramme verliert eines ihrer 3 Leben. Getrampelt wird je Fahrzeug
+## hoechstens alle GOLEM_TRAMPLE_BUILDING_INTERVAL (2 s), wie bei Gebaeuden.
 const GOLEM_TRAMPLE_INTERVAL: float = 1.0
 const GOLEM_TRAMPLE_MIN_SPEED: float = 0.5
 ## AUF DER HOECHSTEN STUFE schlaegt der Golem auch nach LUFTSCHIFFEN (Nutzervorgabe
@@ -241,8 +364,20 @@ const GOLEM_SWAT_WINDUP: float = 0.5
 ## er eine Stelle in Schlagweite des Schiffs zu Fuss erreichen kann (gleiche
 ## Insel; ein Schiff ueber offenem Wasser laesst er ziehen).
 const GOLEM_AIR_CHASE_RADIUS: float = 25.0
-## Stein brennt schlecht: statt 15 Schaden/s nur ein Rinnsal, und keine Panik.
+## KONTER gegen den Golem (Nutzervorgabe 2026-11-15):
+##  * FEUER macht wieder vollen Schaden (15/s wie bei jeder Einheit) — weiterhin
+##    ohne Panik. Das Rinnsal GOLEM_BURN_DPS gilt nur noch fuer den
+##    AUSGEWACHSENEN Golem (100 m): der ist feuerresistent.
+##  * BLITZ macht GOLEM_LIGHTNING_MULT-fachen Schaden (480 statt 240) — beim
+##    ausgewachsenen nur den normalen.
+##  * KATAPULT: ein Volltreffer (Einschlag im Koerperkreis) macht umso mehr
+##    Schaden, je groesser der Golem ist: vom normalen Schockschaden (15) bei
+##    Startgroesse linear bis GOLEM_SIEGE_DAMAGE_MAX kurz vor 100 m. Der
+##    ausgewachsene nimmt hoechstens GOLEM_SIEGE_DAMAGE_FULL_SIZE.
 const GOLEM_BURN_DPS: float = 5.0
+const GOLEM_LIGHTNING_MULT: float = 2.0
+const GOLEM_SIEGE_DAMAGE_MAX: int = 80
+const GOLEM_SIEGE_DAMAGE_FULL_SIZE: int = 40
 ## Abstand, den andere grosse Koerper (Fahrzeuge, Golems) zum Golem halten
 ## (2,0 -> 1,5 mit dem schlanken Koerper, -> 1,125 mit der kleineren Koerperbox,
 ## beides 2026-11-15).
@@ -1458,3 +1593,55 @@ const TRAINING_HALL_FOOTPRINT: Vector2i = Vector2i(4, 4)
 const TRAINING_HALL_WOOD_COST: int = 10
 const TRAINING_HALL_HP: int = 450
 const TRAINING_HALL_TRAINING_TIME: float = 10.0
+
+# =============================================================================
+# ÜBERLEBEN (Spielmodus: 20 Wellen gegen eine kleine Basis, SurvivalMode)
+# =============================================================================
+# Testgelaende fuer Zauber und Golem: der Wellenstamm hat weder Gebaeude noch
+# Schamanin noch KI. Alle Wellenwerte sind GANZZAHLIG gerechnet (Prozente statt
+# Kommazahlen), damit Groesse und Mischung exakt aus der Wellennummer folgen.
+
+## Anzahl der Wellen; danach gewinnt, wer den letzten Wellengegner toetet.
+const SURVIVAL_WAVE_COUNT: int = 20
+## Vorbereitungszeit bis zur ersten Welle.
+const SURVIVAL_FIRST_WAVE_DELAY: float = 30.0
+## Pause zwischen zwei Wellen, gemessen ab dem ERSCHEINEN der vorigen — nicht ab
+## ihrem Tod. Das ergibt den steten Strom: wer langsam aufraeumt, hat zwei
+## Wellen gleichzeitig am Hals.
+const SURVIVAL_WAVE_INTERVAL: float = 45.0
+## Wellengroesse: BASE + GROWTH * k + (GROWTH_SQ_PERCENT * k * k) / 100 mit
+## k = Welle - 1. Ergibt 8 (Welle 1), 37 (Welle 10), 96 (Welle 20); alle 20
+## Wellen zusammen 877 Einheiten — unter TRIBE_MAX_UNITS, der Hardcap kann eine
+## Welle also selbst dann nicht kuerzen, wenn der Spieler keinen Gegner toetet.
+const SURVIVAL_WAVE_BASE_SIZE: int = 8
+const SURVIVAL_WAVE_GROWTH: int = 2
+const SURVIVAL_WAVE_GROWTH_SQ_PERCENT: int = 14
+## Mischung je Welle (abgerundet), der Rest sind Krieger: Krieger stellen die
+## Mehrheit, Prediger bleiben wenige (Welle 1 hat noch keinen).
+const SURVIVAL_FIREWARRIOR_PERCENT: int = 30
+const SURVIVAL_PREACHER_PERCENT: int = 10
+## Moegliche Spawnpunkte, gleichmaessig als Himmelsrichtungen um die Basis
+## verteilt, jeweils am aeussersten begehbaren Punkt (Ufer bzw. Scheibenrand).
+const SURVIVAL_SPAWN_POINTS: int = 8
+## Aus so vielen Richtungen kommt eine Welle gleichzeitig: frueh aus zwei
+## (gegenueber), ab SURVIVAL_LATE_FRONT_WAVE aus drei.
+const SURVIVAL_FRONTS_EARLY: int = 2
+const SURVIVAL_FRONTS_LATE: int = 3
+const SURVIVAL_LATE_FRONT_WAVE: int = 8
+## Um so viele Spawnpunkte dreht jede Welle weiter. Teilerfremd zu
+## SURVIVAL_SPAWN_POINTS, damit nacheinander alle Richtungen drankommen.
+const SURVIVAL_FRONT_ROTATION: int = 3
+## Der Spawnpunkt liegt so viele Zellen innerhalb des aeussersten begehbaren
+## Punkts (Platz fuer die Gruppe), aber nie naeher als MIN_DISTANCE an der Basis.
+const SURVIVAL_SPAWN_INSET: int = 4
+const SURVIVAL_SPAWN_MIN_DISTANCE: int = 30
+## So oft bekommen untaetig herumstehende Wellengegner ein neues Angriffsziel
+## (naechste Spielereinheit, sonst naechstes angreifbares Spielergebaeude).
+const SURVIVAL_REGROUP_INTERVAL: float = 6.0
+## Startbasis des Spielers: voll bemannte Huetten und freie Braves.
+const SURVIVAL_START_HUTS: int = 3
+const SURVIVAL_START_BRAVES: int = 12
+## Zaubertestgelaende: mit JEDER neuen Welle sind alle Zauber des Spielers wieder
+## voll geladen. Das normale Einkommen der kleinen Basis (~2 Mana/s) braechte
+## sonst nach den Startladungen kaum einen Zauber nach (ein Golem kostet 900).
+const SURVIVAL_REFILL_SPELLS_EACH_WAVE: bool = true

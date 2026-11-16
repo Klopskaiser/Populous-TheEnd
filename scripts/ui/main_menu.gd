@@ -73,6 +73,11 @@ func _ready() -> void:
 	if args.has("stresstest"):
 		_launch.call_deferred(MatchConfig.stress_test())
 		return
+	# `godot ... -- survival` starts the survival mode directly (same match as
+	# the menu button "Überleben").
+	if args.has("survival"):
+		_launch.call_deferred(MatchConfig.survival())
+		return
 	var map_arg: String = MapGenerator.DEFAULT_MAP
 	for arg in args:
 		if arg.begins_with("map="):
@@ -135,6 +140,7 @@ func _build_root_page() -> Control:
 	_add_button(vb, "Neues Skirmish", func() -> void: _show_page(1))
 	_add_button(vb, "Startmission", _start_mission)
 	_add_button(vb, "Debugschlacht", _start_debug_battle)
+	_add_button(vb, "Überleben", _start_survival)
 	_add_button(vb, "Stresstest", _start_stress_test)
 	_add_button(vb, "Optionen", func() -> void: _show_page(2))
 	_add_button(vb, "Beenden", func() -> void: get_tree().quit())
@@ -369,6 +375,10 @@ func _start_debug_battle() -> void:
 
 func _start_stress_test() -> void:
 	_launch(MatchConfig.stress_test())
+
+
+func _start_survival() -> void:
+	_launch(MatchConfig.survival())
 
 
 func _launch(config: MatchConfig) -> void:

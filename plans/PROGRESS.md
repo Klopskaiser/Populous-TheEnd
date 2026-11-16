@@ -11885,3 +11885,239 @@ laufenden Spiel nicht geprueft.
 
 **Verifikation:** Ladecheck exit 0, Suite **6386 passed, 0 failed**, kein `SCRIPT ERROR`.
 Im laufenden Spiel nicht geprueft.
+
+### Wasserfall-Richtung, Golem: Aggro, Gebaeude-Handschlag, Koerperkreis, Fahrzeuge, Idle 1 (2026-11-15)
+
+- **Wasserfall lief rueckwaerts:** `waterfall.gdshader` scrollte mit `UV.y + t`,
+  UV.y waechst aber nach unten — die Streifen kletterten. Jetzt `UV.y - t`.
+  Der Fehler stammt aus dem Shader-Umbau vom selben Tag.
+- **Aggro:** `Golem.aggro_radius()` = 8 m x Groessenfaktor, Deckel
+  `GOLEM_AGGRO_MAX` 60 m (Stufe 7: 35,8 m). Die festen 8 m lagen beim grossen
+  Golem innerhalb der eigenen Reichweite.
+- **Handschlag bei Gebaeuden:** `_choose_attack` zaehlt Feinde, feindliche
+  Gebaeude (`_buildings_in_area`) und fuer den Giganten Fahrzeuge zusammen.
+- **Koerperkreis in der Trefferzone:** `_in_hit_zone` = Wirkflaeche ODER Kreis
+  mit dem Trampelradius; auch in `_building_in_area`. Nachgerechnet fuer Stufe
+  0-7 und das 100-m-Ende (Test): ohne die Regel blieben am Rand des Koerpers
+  Luecken (Schneise seitlich ab Stufe 2, Handschlag hinten ab Stufe 4).
+- **Fahrzeuge ab Stufe 7:** `CrewedVehicle.take_crush_hit` (Katapult: sofort
+  `_destroy_vehicle(true)`; `FireRam`: ein Leben ueber `_apply_fire_hit`;
+  `Airship`: Huellentreffer). Der Golem ruft es fuer fremde Bodenfahrzeuge in
+  der Trefferzone (`_vehicles_in_area`) und unter den Fuessen (alle 2 s).
+  Auslegung "nicht eigen kontrolliert" = nicht unter eigener Flagge; eigene
+  Fahrzeuge bleiben immer verschont, auch unbemannte.
+- **Idle:** `golem_bewegung.mjs` `idle1Pose` — Idle 1 der Figur aus `gang.js`,
+  Abschnitt ab 15 s, 20,5 s lang, letzte 3 s in den Anfang geblendet. GLB neu
+  exportiert (1,16 MB), `golem_pruefen.mjs` 0 Fehler. Die alte 5-s-Pose bleibt
+  Ausgangspose der Angriffsclips.
+- **Neu:** `tests/diag_golem_values.gd` druckt die Werte je Stufe aus dem Code.
+
+**Tests:** `test_golem.gd` 304 Zusicherungen (neu:
+`test_aggro_radius_grows_with_the_body_up_to_a_cap`,
+`test_slam_is_chosen_when_three_buildings_stand_in_its_area`,
+`test_body_circle_always_belongs_to_the_hit_zone`,
+`test_giant_wrecks_foreign_vehicles_by_their_own_damage_steps`).
+
+**Verifikation:** Ladecheck exit 0, Suite **6417 passed, 0 failed**, kein `SCRIPT ERROR`.
+Wasserfall und Idle im laufenden Spiel nicht geprueft (Idle: Standbilder aus
+`diag_golem_model.gd`).
+
+### Golem: Stufen-Kills, Koerperradius, Trefferzonen, Zielobergrenze, Konter (2026-11-15)
+
+- **Stufen:** `Balance.GOLEM_LEVEL_KILLS` = 5, 6, 7, 7, 8, 9, 45 (aufsummiert 5,
+  11, 18, 25, 33, 42, 87) ersetzt `GOLEM_KILLS_PER_LEVEL` / `GOLEM_TOP_LEVEL_KILLS`.
+  Fuer Stufe 4 nannte der Nutzer keinen Wert — angenommen 7.
+- **Lebensobergrenze** nach Stufe 7: +5 je Wachstumsschritt
+  (`GOLEM_GROWTH_MAX_HP`, `max_health_cap()`; am Ende 1265).
+- **Koerperradius** (`trample_radius`) = Koerperbox x Groesse, jetzt auch nach
+  Stufe 7 (am Ende 16,4 m statt 5,2 m). Trampeln und Einebnen folgen.
+- **Trefferzonen** (`_in_hit_zone`): Handschlag = Kreis der Haende + VORDERER
+  Halbkreis des Koerpers (an den Fersen nur, was der Kreis erreicht); Tritt = nur
+  die Schneise, die aber nie kuerzer ist als der Koerper (`_kick_extent`). Die
+  Regel "Koerperkreis immer in der Trefferzone" vom selben Tag ist damit ersetzt.
+- **Zielobergrenze** (`GOLEM_MAX_TARGETS` 5/6/6/6/7/8/8/8, +1 je 3
+  Wachstumsschritte; fuer Stufe 6 kein Wert genannt, angenommen 8):
+  `_struck_targets` kappt je Aufschlag (Einheiten vor Fahrzeugen vor Gebaeuden,
+  naechste zuerst, Angriffsziel immer); beim Trampeln zaehlt die Liste
+  `_trampled` als Belegung, also hoechstens so viele je Sekunde.
+- **Konter:** Brand voll (15/s, keine Panik), Blitz doppelt
+  (`Unit.lightning_damage`), Katapult-Volltreffer nach Groesse
+  (`Unit.siege_shock_damage` / `body_hit_radius`; `SiegeShot._shockwave` prueft
+  jetzt den Koerper statt des Mittelpunkts): 15 bis 80, Stufe 7: 26. Der
+  ausgewachsene Golem (`is_full_size`): Brand 5/s, Blitz einfach, Katapult max. 40.
+- **Offen:** Luftschlag-Animation passt ab Stufe 6 nicht zur Flughoehe der
+  Luftschiffe (10 m) — Vorschlag an den Nutzer, nicht umgesetzt.
+
+**Tests:** `test_golem.gd` 338 Zusicherungen (neu u. a.
+`test_hit_zones_slam_front_half_of_the_body_kick_lane_only`,
+`test_target_cap_limits_every_damage_tick`,
+`test_fire_burns_at_full_rate_without_panic_until_full_size`,
+`test_lightning_strikes_the_golem_twice_as_hard`,
+`test_catapult_hits_hurt_more_the_bigger_the_golem_is`); `test_buffs.gd` angepasst.
+
+**Verifikation:** Ladecheck exit 0, Suite **6454 passed, 0 failed**, kein `SCRIPT ERROR`.
+Im laufenden Spiel nicht geprueft.
+
+### Golem: Takt und Drehrate nach Groesse, Trommeln, neue Clips (2026-11-15)
+
+- **Angriffstakt:** `strike_cooldown()` linear in der Koerperhoehe von 1,8 s bis
+  `GOLEM_STRIKE_COOLDOWN_MAX` (4 s bei 100 m; Stufe 7: 2,18 s). `_wind_up` setzt
+  die Abklingzeit des Angriffs (`cooldown_for`), die Animationen strecken sich mit.
+- **Drehrate:** `_heading` folgt `facing` mit `turn_rate()` (8 rad/s bis 70 % der
+  Feuerrammen-Drehrate bei 100 m). Angriffe landen in `heading()`, beginnen erst
+  bei `is_turned_to_facing()` (25 Grad); beim Drehen laeuft er langsamer
+  (`_slope_speed`, mindestens 20 %).
+- **Trommeln:** `ATTACK_DRUM`, ab `GOLEM_DRUM_MIN_TARGETS` (5) Zielen: drei
+  Aufschlaege (`GOLEM_DRUM_HITS` 0,8/1,25/1,7 s), zusammen 40 Schaden, Wuerfe und
+  Gebaeudestufe nur beim letzten, Abklingzeit x 1,4. Die Wahlregel (ab 5 Zielen)
+  ist eine Festlegung von mir.
+- **Clips:** `kick_l` (Tritt wechselt das Bein), `swipe` und die Wahl nach
+  Schiffshoehe (`_clip_for`, `GOLEM_AIR_HIGH_SHARE` 0,8 / `GOLEM_AIR_LOW_SHARE`
+  0,4), `drum`. Gebaut in `D:\game\gymnastikschuh\golem_bewegung.mjs`
+  (`spiegelPose`, `kickLPose`, `swipePose`, `drumPose`), GLB 1,22 MB,
+  `golem_pruefen.mjs` 0 Fehler. Die drei Trommelzeiten stehen nur im Spielcode
+  und in `CLIPS`, nicht in der GLB.
+- **Offen:** Einschaetzung zur "Haltung" (stehend/gebueckt) an den Nutzer gegeben,
+  nicht umgesetzt.
+
+### Spielmodus "Ueberleben" (2026-11-15)
+
+- **Gebaut:** `scripts/core/survival_mode.gd` (`SurvivalMode`: Wellentabelle als
+  reine statische Funktionen `wave_size`/`wave_composition`/`wave_front_count`/
+  `wave_spawn_slots`/`find_spawn_cells`, Laufzeit `setup`/`tick`/
+  `time_to_next_wave`/`enemies_alive`, Signal `wave_spawned`),
+  `scripts/ui/survival_hud.gd` (`SurvivalHud`), `MatchConfig.Mode.SURVIVAL` +
+  `MatchConfig.survival()`, `Main._setup_survival()`, Menueeintrag "Ueberleben" +
+  Direktstart `-- survival`, `EndScreen.victory_subtitle`, Balance-Block
+  `SURVIVAL_*` am Dateiende.
+- **GameState:** `set_defeat_exempt()`/`is_defeat_exempt()` — ein geschuetzter
+  Stamm wird von `check_defeats` nicht eliminiert und zaehlt als Ueberlebender;
+  der Modus schuetzt den Wellenstamm bis zum Erscheinen der letzten Welle.
+- **Zauber:** alle voll zum Start und mit jeder Welle wieder
+  (`SURVIVAL_REFILL_SPELLS_EACH_WAVE`) — das Einkommen der kleinen Basis
+  (~2-3 Mana/s) reicht fuer ein Zaubertestgelaende nicht.
+- **Erkenntnisse:** (1) `set_anchors_preset()` INNERHALB des Baums schreibt die
+  Offsets um — ein in `_ready` zentriertes Panel hing halb aus dem Bild; Offsets
+  danach ausdruecklich setzen. (2) Autoloads sind auch unter `-s` vorhanden,
+  sobald ein Frame gelaufen ist. (3) Wellen brauchen einen Nachzuegler-Befehl,
+  sonst steht ein Rest untaetig an der leeren Basis und das Match endet nie.
+- **Offen:** kein Durchlauf bis Welle 20 im echten Spiel (Sieg nur per Test);
+  Performance und Balance der spaeten Wellen ungetestet; "3 ObjectDB instances
+  leaked at exit" nach entschiedenem Match im Headless-Lauf, Ursache ungeklaert.
+
+**Tests:** `test_golem.gd` 376 Zusicherungen, `test_survival.gd` 446.
+
+**Verifikation:** Ladecheck exit 0, Suite **6938 passed, 0 failed**, kein `SCRIPT ERROR`.
+Echter Start des Modus (Fenster, 60 s) ohne Skriptfehler, Welle 1 nach 30 s
+(Standbild). Golem-Aenderungen im laufenden Spiel nicht geprueft.
+
+### Golem: Haltung stehend / gebueckt (2026-11-16)
+
+- **Regel:** `Golem.stance` (STANCE_STAND / STANCE_CROUCH). Handschlag und
+  Trommeln nur gebueckt (`stance_for`), Tritt, Luftschlag und Laufen nur stehend.
+  Gebueckt: Ausholzeit 0,35 s (`GOLEM_SLAM_WINDUP`, vorher 0,8 s inkl. Buecken),
+  Trommelschlaege 0,35/0,8/1,25 s, Abklingzeit x 0,75
+  (`GOLEM_CROUCH_COOLDOWN_FACTOR`). Der Wechsel dauert
+  `stance_switch_time()` = 0,45 s x Wurzel(Groesse), max. 2 s.
+- **Automatik:** `_attack_or_switch` (ersetzt den direkten `_wind_up`-Aufruf im
+  Angriffstakt): bester Angriff per `_choose_attack` (gebueckt reichen 2 Ziele
+  fuer den Handschlag, stehend braucht es 3), passt die Haltung nicht, wird erst
+  gewechselt — aber freiwillig fruehestens `GOLEM_STANCE_MIN_TIME` (3 s) nach dem
+  letzten Wechsel, sonst `_attack_in_stance`. `_tick_stance` laesst ihn sofort
+  aufstehen, wenn er laufen muss, und nach 3 s Leerlauf. Gebueckt und im Wechsel
+  ist `_slope_speed` 0.
+- **Clips** (gymnastikschuh, `hockPose` = gemeinsame gebueckte Ruhepose):
+  `crouch_down`, `crouch_up` (je 0,45 s), `crouch_idle` (3 s, Schleife),
+  `slam_low` (0,9 s), `drum_low` (1,7 s). GLB 1,31 MB, 14 Clips,
+  `golem_pruefen.mjs` 0 Fehler. Die alten `slam`/`drum` bleiben als Rueckfall
+  im Modell, werden aber nicht mehr gespielt.
+- **Werte von mir gesetzt** (Nutzer wollte "keine massive Logik"): 0,45 s Wechsel,
+  3 s Mindestzeit, 2 Ziele zum Bleiben, 75 % Abklingzeit.
+
+**Tests:** `test_golem.gd` 402 Zusicherungen (neu: `test_stance_*`, vier Tests).
+
+**Verifikation:** Ladecheck exit 0, Suite **6964 passed, 0 failed**, kein `SCRIPT ERROR`;
+echter Start des Ueberlebensmodus (40 s) ohne Skriptfehler. Die Haltung selbst
+ist im laufenden Spiel nicht angesehen (Animationen nur als Standbilder).
+
+### Golem: Angriffswahl nach Schaden (2026-11-16)
+
+- **Regel:** `_choose_attack` nimmt den Angriff mit dem hoechsten
+  `attack_value` = `attack_worth` / `attack_time`: Wert = Summe min(Schaden,
+  Leben) der Einheiten, die er jetzt treffen wuerde (`_struck_targets`, also mit
+  Zielobergrenze), + `GOLEM_STRUCTURE_VALUE` (30) je Gebaeude/Fahrzeug; Zeit =
+  Abklingzeit + Haltungswechsel / `GOLEM_STANCE_PLAN_ATTACKS` (3), wenn er
+  wechseln muesste. Die festen Zielzahlen (`GOLEM_SLAM_MIN_TARGETS`,
+  `GOLEM_DRUM_MIN_TARGETS`, `GOLEM_CROUCH_STAY_TARGETS`) sind entfallen.
+- **Durchgerechnet (je gesundem Ziel, Schaden/s; Tritt stehend, Boden gebueckt):**
+  Stufe 0: 25,0 / 18,5 / 21,2 (Tritt / Handschlag / Trommeln); Stufe 2: 29,7 /
+  25,2 / 25,7; Stufe 3: 31,9 / 28,4 / 27,9; Stufe 6: 37,1 / 36,3 / 33,0.
+  Trommeln ist nur bis Stufe 2 besser als der Handschlag (ab 35 / 42 / 49
+  Restleben des Ziels), ab Stufe 3 nie — der flache Stufenbonus hilft dem kurzen
+  Angriff mehr. Dem Nutzer als offene Balancefrage gemeldet.
+- **Folge fuer Gebaeude:** ein einzelnes Gebaeude wird jetzt gebueckt geschlagen
+  (eine Stufe je 1,35 s statt je 1,8 s; vier Stufen in 5,9 s statt 7,2 s).
+
+**Tests:** `test_golem.gd` 419 Zusicherungen
+(`test_attack_choice_follows_the_expected_damage_per_second` neu, Wahl- und
+Haltungstests angepasst).
+
+**Verifikation:** Ladecheck exit 0, Suite **6981 passed, 0 failed**, kein `SCRIPT ERROR`.
+Im laufenden Spiel nicht geprueft.
+
+### Golem: Trommel-Werte neu (2026-11-16)
+
+- **Nutzerwerte:** jeder Schlag 14 (`GOLEM_DRUM_HIT_DAMAGE`, zusammen 42 statt
+  40), je Stufe +1 je Schlag (`GOLEM_DRUM_LEVEL_DAMAGE_PER_HIT`) zusaetzlich zum
+  flachen +5 fuer den ganzen Angriff (= +8 je Stufe; Stufe 6: 3 x 30 = 90),
+  Abklingzeit = normaler Angriffstakt (`cooldown_for(ATTACK_DRUM)` =
+  `strike_cooldown()`, 1,8 s bei Startgroesse). `GOLEM_DRUM_DAMAGE` und
+  `GOLEM_DRUM_COOLDOWN_FACTOR` sind entfallen.
+- **Durchgerechnet (Schaden/s je gesundem Ziel; Tritt / Handschlag / Trommeln):**
+  Stufe 0: 25,0 / 18,5 / 23,3 — Stufe 1: 27,5 / 22,0 / 27,5 — Stufe 2: 29,7 /
+  25,2 / 31,4 — Stufe 6: 37,1 / 36,3 / 44,6 — Stufe 7: 34,4 / 33,6 / 41,3.
+  Trommeln ist damit ab Stufe 2 auch je Einzelziel staerker als der Tritt und
+  macht ab Stufe 2 mehr Gesamtschaden als er (58 gegen 55; Stufe 6: 90 gegen 75)
+  — dem Nutzer gemeldet (seine fruehere Vorgabe war "etwas weniger als Tritt").
+- **Dazu:** `_attack_or_switch` — die 3-s-Mindestzeit haelt sie nicht mehr in
+  einer Haltung fest, aus der sie gar nichts treffen kann.
+
+**Tests:** `test_golem.gd` 423 Zusicherungen.
+
+**Verifikation:** Ladecheck exit 0, Suite **6985 passed, 0 failed**, kein `SCRIPT ERROR`.
+Im laufenden Spiel nicht geprueft.
+
+### Golem: Handschlag-Abklingzeit 1,25 s (2026-11-16)
+
+- `GOLEM_SLAM_COOLDOWN` 1,25 s (Nutzer; vorher 75 % des Takts = 1,35 s) ersetzt
+  `GOLEM_CROUCH_COOLDOWN_FACTOR`; waechst mit der Groesse im Verhaeltnis des
+  normalen Takts (100 m: 2,78 s). Handschlag je gesundem Ziel damit 20,0
+  Schaden/s auf Stufe 0 (Tritt 25,0, Trommeln 23,3), 39,2 auf Stufe 6.
+- `tests/diag_golem_values.gd` gibt jetzt auch die Flaechen von Handschlag und
+  Tritt aus.
+
+**Verifikation:** Ladecheck exit 0, Suite **6986 passed, 0 failed**, kein `SCRIPT ERROR`.
+Im laufenden Spiel nicht geprueft.
+
+### Golem: Reichweite waechst mit den Gliedern; eigene Sounds (2026-11-16)
+
+- **Reichweite:** `limb_factor()` = Groessenfaktor hoch `limb_exponent()` (0,833 —
+  so gewaehlt, dass bei 100 m `GOLEM_LIMB_SHARE_AT_MAX` = 60 % des
+  koerperproportionalen Werts herauskommen; Nutzer: "etwas sanfter"). Daran
+  haengen `reach()` (Stufe 6: 7,5 m, Stufe 7: 10,5 m, 100 m: 38,1 m; vorher 5,3 /
+  6,6 / 9,9), die Laenge der Tritt-Schneise (`_kick_extent`) und der Abstand des
+  Handschlag-Aufschlagpunkts. `reach_factor()` skaliert nur noch die GROESSE
+  der Flaechen (Radius, Breite). Die statischen Praedikate `in_slam_area` /
+  `in_kick_lane` / `in_attack_area` haben dafuer einen zweiten Faktor `limb`.
+- **Sounds:** je Angriff ein eigener Aufschlag (`golem_kick`, `golem_slam`,
+  `golem_drum`, `golem_swat`; Rueckfall `golem_strike`), UI-Stimme des Golems
+  (`select_golem`, `move_golem`, `attack_golem`; `SelectionManager.voice_key`,
+  `AudioManager.has_ui`). Es gibt im Projekt KEINE Sounddateien — die Schluessel
+  sind angelegt und dokumentiert (`assets/README.md`), zu hoeren ist erst etwas,
+  wenn Dateien dazukommen.
+
+**Tests:** `test_golem.gd` 445 Zusicherungen (`test_reach_grows_with_the_limbs`,
+`test_golem_has_its_own_sound_keys`).
+
+**Verifikation:** Ladecheck exit 0, Suite **7007 passed, 0 failed**, kein `SCRIPT ERROR`.
+Im laufenden Spiel nicht geprueft.

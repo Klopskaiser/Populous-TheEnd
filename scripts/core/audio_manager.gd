@@ -171,6 +171,12 @@ func has_sfx(name: StringName) -> bool:
 	return not _streams_for("audio/sfx/%s" % name).is_empty()
 
 
+## The same for UI sounds (assets/audio/ui/<name>) — lets a caller fall back on
+## the general sound while a special one has no file yet.
+func has_ui(name: StringName) -> bool:
+	return not _streams_for("audio/ui/%s" % name).is_empty()
+
+
 ## All streams for a sound name: the base file (<rel>.ogg/.wav) plus every
 ## numbered variant (<rel>_0.., gap-free). Cached — assets are session-static.
 func _streams_for(rel: String) -> Array:

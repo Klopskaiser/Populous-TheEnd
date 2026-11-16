@@ -12,6 +12,10 @@ const MAIN_MENU_SCENE_PATH: String = "res://scenes/ui/main_menu.tscn"
 ## site still stood). The game runs on for this long, then the overlay pauses it.
 const RESULT_DELAY: float = Building.SINK_DURATION + 0.5
 
+## Line under "Sieg!". A mode with its own victory condition (survival) sets
+## its own text before the match is decided.
+var victory_subtitle: String = "Alle Feinde sind vernichtet."
+
 ## A decided match waiting for its overlay (see RESULT_DELAY).
 var _result_pending: bool = false
 var _pending_winner: int = -1
@@ -96,7 +100,7 @@ func present_result(winner_id: int) -> void:
 	_title.text = "Sieg!" if won else "Niederlage"
 	_title.add_theme_color_override("font_color",
 		UiTheme.GOLD_BRIGHT if won else Color(0.85, 0.25, 0.2))
-	_subtitle.text = "Alle Feinde sind vernichtet." if won \
+	_subtitle.text = victory_subtitle if won \
 		else "Dein Stamm wurde ausgelöscht."
 	visible = true
 	get_tree().paused = true

@@ -205,11 +205,18 @@ func _spawn_lava(wreck_buildings: bool) -> void:
 ## tactical); enemies are knocked over with a slope-dependent roll chance.
 ## The air intercept passes the hull position and a widened radius.
 func _shockwave(center: Vector3, radius: float) -> void:
-	for u in unit_manager.get_units_in_radius(center, radius):
+	# A giant golem is hit by his BODY, not by his centre point: the query is
+	# widened by the largest body there can be and every unit is then tested
+	# against its own body radius (0 for everyone else).
+	var widest: float = Balance.GOLEM_BODY_HALF_WIDTH * Golem.max_size_factor()
+	for u in unit_manager.get_units_in_radius(center, radius + widest):
 		if u.state == Unit.State.DEAD or u == shooter:
 			continue
+		var dist: float = Vector2(u.position.x - center.x, u.position.z - center.z).length()
+		if dist > radius + u.body_hit_radius():
+			continue
 		var attacker = shooter if (shooter != null and is_instance_valid(shooter)) else null
-		u.take_damage(SHOCK_DAMAGE, attacker)
+		u.take_damage(u.siege_shock_damage(SHOCK_DAMAGE, dist), attacker)
 		if u.state == Unit.State.DEAD:
 			continue
 		if u.tribe_id == tribe_id:

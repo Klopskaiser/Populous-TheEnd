@@ -243,6 +243,12 @@ func ignite(_source_pos: Vector3, source = null) -> void:
 	_apply_fire_hit(source)
 
 
+## A giant's blow costs the ram ONE of its lives, like a fire hit (the lives are
+## the ram's damage model — it has no other): three blows wreck it.
+func take_crush_hit(_source_pos: Vector3 = Vector3.ZERO) -> void:
+	_apply_fire_hit(null)
+
+
 ## Adds at most one fire hit PER SOURCE PER ATTACK. The attack key is stable
 ## within one attack but differs between attacks (an enemy ram's key changes per
 ## burst; a lava puddle / bolt keeps its instance id), so sustained contact from
