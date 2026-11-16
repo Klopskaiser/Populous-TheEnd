@@ -12502,3 +12502,10 @@ Tests angepasst (`test_every_attack_has_its_share_of_the_target_count`,
 Nutzervorgabe: `DEMON_GOLEM_GROWTH_KILLS` 5 -> 4. Stufe 1-10 je 4 Kills, 11-20 je 5, ...
 141-148 je 18 (der Anstieg alle 10 Stufen bleibt). Bis 100 m 824 statt 922 Kills, bis
 150 m 1614 statt 1762. `test_demon_golem.gd` angepasst.
+
+### Daemonengolem: 500 LP zum Start, Kill heilt 10 + 15 (2026-11-16)
+
+Nutzervorgabe: `DEMON_GOLEM_HP` 400 -> 500 (die Lebensobergrenze liegt damit auf jeder
+Groesse 100 hoeher: 100 m 990, 149 m 1235), `DEMON_GOLEM_KILL_HEAL_OVER_TIME` 10 -> 15
+(je Kill 10 sofort und 15 ueber 5 s, also 3 LP/s je Stapel). `test_demon_golem.gd`
+angepasst.

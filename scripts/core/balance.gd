@@ -559,7 +559,7 @@ const GOLEM_SEPARATION: float = 1.0
 ##    beanstandet): Tempo mindestens DEMON_GOLEM_MIN_SPEED (die Formel gaebe bei 2 m
 ##    2,3 m/s — langsamer als jeder Brave), Aggro mindestens MELEE_AGGRO_RADIUS.
 ## Die Werte aller Groessen druckt tests/diag_demon_golem_values.gd.
-const DEMON_GOLEM_HP: int = 400
+const DEMON_GOLEM_HP: int = 500   # 400 -> 500 (Nutzervorgabe 2026-11-16)
 const DEMON_GOLEM_START_HEIGHT: float = 2.0
 const DEMON_GOLEM_GROWTH_HEIGHT: float = 1.0
 const DEMON_GOLEM_MAX_HEIGHT: float = 150.0
@@ -579,7 +579,7 @@ const DEMON_GOLEM_GROWTH_DRUM_DAMAGE: float = 1.0
 const DEMON_GOLEM_TARGETS: int = 3
 const DEMON_GOLEM_GROWTH_TARGETS: int = 1
 const DEMON_GOLEM_KILL_HEAL: int = 10
-const DEMON_GOLEM_KILL_HEAL_OVER_TIME: int = 10
+const DEMON_GOLEM_KILL_HEAL_OVER_TIME: int = 15   # 10 -> 15 (Nutzervorgabe 2026-11-16)
 const DEMON_GOLEM_KILL_HEAL_DURATION: float = 5.0
 const DEMON_GOLEM_ATTACK_SPEEDUP: float = 0.15
 const DEMON_GOLEM_AIR_HEIGHT: float = 20.0

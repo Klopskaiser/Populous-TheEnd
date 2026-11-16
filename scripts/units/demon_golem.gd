@@ -18,7 +18,7 @@ class_name DemonGolem extends Golem
 ##  * alle Angriffe 15 % schneller als beim Golem gleicher Groesse.
 ##  * ab 20 m Luftschiffe, ab 30 m das Riesenpaket (is_giant) samt Trampeln und
 ##    Kollision. Nie gehaertet (is_full_size ist immer falsch).
-##  * Kill: 10 Leben sofort und 10 ueber 5 s, stapelbar.
+##  * Kill: 10 Leben sofort und 15 ueber 5 s, stapelbar.
 ##  * Unterhalt: 5 Mana je Sekunde, solange er lebt (_pay_upkeep).
 ##
 ## unit_kind() bleibt "golem": er zaehlt in der Seitenleiste bei den Golems und

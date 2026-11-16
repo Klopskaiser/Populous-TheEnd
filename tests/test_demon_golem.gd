@@ -2,12 +2,12 @@ extends TestBase
 
 ## Zauber 14 "Dämonengolem beschwören" (Nutzervorgabe 2026-11-16): der zweite
 ## Golem. Diese Datei nagelt die Vorgabe fest (Werte in Balance.DEMON_GOLEM_*):
-## 2 m gross und 400 LP beim Erscheinen, keine Stufen, keine Lebenszeit; je
+## 2 m gross und 500 LP beim Erscheinen, keine Stufen, keine Lebenszeit; je
 ## Wachstumsstufe +1 m, +5 LP, +0,15 LP/s, +1 Ziel und Schaden (Handschlag +0,75,
 ## Tritt +0,8, Trommeln +1) auf den halben Startschaden des Golems; die Stufe kostet
 ## 4 Kills und alle 10 Stufen einen mehr; bei 150 m zerfaellt er. Alle Angriffe
 ## 15 % schneller als beim Golem gleicher Groesse. Ab 20 m Luftschiffe, ab 30 m das
-## Riesenpaket. Nie gehaertet. Kill: 10 LP sofort und 10 ueber 5 s, stapelbar.
+## Riesenpaket. Nie gehaertet. Kill: 10 LP sofort und 15 ueber 5 s, stapelbar.
 ## Der Zauber steht nur im Satz des menschlichen Spielers.
 
 const GameStateScript: GDScript = preload("res://scripts/core/game_state.gd")
@@ -98,7 +98,7 @@ func test_spell_is_the_players_alone_and_costs_what_the_golem_costs() -> void:
 		check(found is Golem and found.unit_kind() == &"golem", "he IS a golem (rules, sidebar row)")
 		check(found.display_name() == "Dämonengolem", "with his own name")
 		check(found.terrain_ctx == w.ctx, "and got the spell context (levelling the ground later)")
-		check(found.health == 400 and found.max_health == 400, "400 LP")
+		check(found.health == 500 and found.max_health == 500, "500 LP")
 		check_near(found.height_m(), 2.0, "2 m tall")
 	_free_world(w)
 
@@ -139,12 +139,12 @@ func test_every_step_adds_one_metre_five_health_and_fifteen_hundredths_regen() -
 	d._credit_kill()
 	check(d.growth_steps == 1, "the fourth kill is a growth step")
 	check_near(d.height_m(), 3.0, "exactly one metre taller (no percentage)")
-	check(d.max_health == 405, "+5 health limit")
+	check(d.max_health == 505, "+5 health limit")
 	check_near(d.regen_per_second(), 0.15, "+0,15 health per second")
 	check(d.level == 0, "and still no level")
 	check(d.is_stretching() or d._stretch_queued, "he stretches when he grows")
 	_grow_to(d, 25.0)
-	check(d.growth_steps == 23 and d.max_health == 400 + 5 * 23, "25 m: step 23, 515 LP")
+	check(d.growth_steps == 23 and d.max_health == 500 + 5 * 23, "25 m: step 23, 615 LP")
 	check_near(d.regen_per_second(), 3.45, "3,45 health per second")
 	check(d.kills == DemonGolem.kills_for_steps(23), "after exactly the kills the table gives (139)")
 	_free_world(w)
@@ -224,22 +224,22 @@ func test_targets_start_at_three_and_one_more_every_step() -> void:
 
 ## (Die Heilung wird hier direkt getickt: im ganzen Tick liefe nach 8 s ohne Kampf
 ## auch die normale Erholung jeder Einheit mit.)
-func test_a_kill_heals_ten_at_once_and_ten_over_five_seconds_stacking() -> void:
+func test_a_kill_heals_ten_at_once_and_fifteen_over_five_seconds_stacking() -> void:
 	var w: Dictionary = _make_world()
 	var d: DemonGolem = _demon(w, 0, Vector3(50, 5, 50))
 	d.health = 100
 	d._credit_kill()
 	check(d.health == 110, "ten at once")
-	check(d.max_health == 400, "a kill alone does not raise the limit")
+	check(d.max_health == 500, "a kill alone does not raise the limit")
 	for i in range(25):
 		d._tick_kill_heal(TICK)
-	check(d.health >= 114 and d.health <= 116, "about five more after 2,5 s (got %d)" % d.health)
+	check(d.health >= 116 and d.health <= 118, "about 7,5 more after 2,5 s (got %d)" % d.health)
 	for i in range(30):
 		d._tick_kill_heal(TICK)
-	check(d.health == 120, "ten over the five seconds, then it ends (got %d)" % d.health)
+	check(d.health == 125, "fifteen over the five seconds, then it ends (got %d)" % d.health)
 	for i in range(30):
 		d._tick_kill_heal(TICK)
-	check(d.health == 120, "nothing more afterwards")
+	check(d.health == 125, "nothing more afterwards")
 	# Two kills right after one another: both run side by side.
 	d.health = 100
 	d._credit_kill()
@@ -247,10 +247,10 @@ func test_a_kill_heals_ten_at_once_and_ten_over_five_seconds_stacking() -> void:
 	check(d.health == 120, "twice ten at once")
 	for i in range(10):
 		d._tick_kill_heal(TICK)
-	check(d.health >= 123 and d.health <= 125, "two shares in the first second: about 4 (got %d)" % d.health)
+	check(d.health >= 125 and d.health <= 127, "two shares in the first second: about 6 (got %d)" % d.health)
 	for i in range(50):
 		d._tick_kill_heal(TICK)
-	check(d.health == 140, "and twenty over the five seconds (got %d)" % d.health)
+	check(d.health == 150, "and thirty over the five seconds (got %d)" % d.health)
 	# The limit holds.
 	d.health = d.max_health - 3
 	d._credit_kill()
