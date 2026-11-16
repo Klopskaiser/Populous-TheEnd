@@ -79,8 +79,9 @@ const GOLEM_BODY_HALF_DEPTH: float = 0.6075
 ##
 ## HANDSCHLAG (slam): sie bueckt sich und schlaegt beide Haende auf den Boden —
 ## Flaechenschaden RUNDHERUM. Kreis mit GOLEM_SLAM_RADIUS um den Punkt
-## GOLEM_SLAM_FORWARD vor ihr (dort treffen die Haende auf: im Clip 0,95 m bei
-## 4 m Modellhoehe, also 1,25 m bei 5,25 m). 2,6 m Radius sind 21 m2, genau die
+## GOLEM_SLAM_FORWARD vor ihr (dort treffen die Haende auf: seit 2026-11-16
+## liegen beide Hand-Schuhe dicht nebeneinander auf diesem Punkt, im Clip 0,91 m
+## bei 4 m Modellhoehe, also 1,2 m bei 5,25 m). 2,6 m Radius sind 21 m2, genau die
 ## Flaeche des alten Schlags (Hitbox 4x3 + Feld 3x3).
 const GOLEM_SLAM_RADIUS: float = 2.6
 const GOLEM_SLAM_FORWARD: float = 1.2
@@ -117,7 +118,9 @@ const GOLEM_STANCE_MIN_TIME: float = 3.0
 ## sich dabei auf) und darf sofort weiter angreifen — auch sich sofort wieder
 ## buecken. Eine laufende Angriffsanimation wird vorher zu Ende gespielt, und
 ## solange das Strecken aussteht, beginnt er keinen neuen Angriff.
-const GOLEM_GROW_TIME: float = 0.5
+## Seit 2026-11-16 (Nutzer) eine ganze Sekunde statt einer halben; der Clip ist
+## ebenso lang (Golem.GROW_CLIP_LENGTH).
+const GOLEM_GROW_TIME: float = 1.0
 ## ANGRIFFSWAHL NACH SCHADEN (Nutzer 2026-11-16, ersetzt die festen Zielzahlen
 ## 3 / 5 / 2): fuer Tritt, Handschlag und Trommeln wird gerechnet, was der Angriff
 ## JETZT treffen wuerde (dieselbe Flaeche, dieselbe Zielobergrenze wie beim
@@ -134,6 +137,19 @@ const GOLEM_GROW_TIME: float = 0.5
 ## Handschlag, gegen gesunde das staerkere Trommeln.
 ## Ein Gebaeude oder Fahrzeug nimmt je Angriff eine Stufe, egal von welchem; es
 ## zaehlt deshalb fuer alle gleich viel (etwa ein Einheitentreffer).
+##
+## PLAENE (2026-11-16, mit dem Sprung): dieselbe Rechnung, als Plan gelesen —
+## "Einleitung + GOLEM_STANCE_PLAN_ATTACKS Angriffe", gewertet nach Schaden je
+## Sekunde ueber den ganzen Plan:
+##   ohne Einleitung:   der Angriff der aktuellen Haltung (Wert / Abklingzeit)
+##   Haltungswechsel:   kostet die Wechselzeit und bringt nichts; danach die
+##                      Angriffe der anderen Haltung (das ist die Formel oben)
+##   SPRUNG (stehend):  kostet seine Abklingzeit und bringt seinen eigenen
+##                      Schaden; danach ist sie gebueckt und schlaegt Handschlag
+##                      oder Trommeln — oder sie richtet sich auf (Abklingzeit
+##                      bzw. Clip + Wechselzeit, je nachdem was laenger ist) und
+##                      tritt weiter.
+## Der Sprung wird nur erwogen, wenn er selbst etwas trifft (Golem.stomp_plan_value).
 const GOLEM_STRUCTURE_VALUE: float = 30.0
 const GOLEM_STANCE_PLAN_ATTACKS: int = 3
 ## Abklingzeit des Handschlags bei Startgroesse (1,35 -> 1,25 s, Nutzer
@@ -229,10 +245,17 @@ const GOLEM_LEVEL_KILLS: Array[int] = [5, 6, 7, 7, 8, 9, 45]
 ## Gebaeuden, die naechsten zuerst; das Ziel, das er gerade angreift, wird immer
 ## getroffen und zaehlt mit.
 const GOLEM_MAX_TARGETS: Array[int] = [5, 6, 6, 6, 7, 8, 8, 8]
-## Der TRITT trifft so viele Ziele WENIGER als die gebueckten Angriffe (Nutzer
-## 2026-11-16): Stufe 0 also 4 statt 5. Handschlag, Trommeln und Trampeln behalten
-## die volle Zahl.
-const GOLEM_KICK_TARGETS_LESS: int = 1
+## ZIELZAHL JE ANGRIFF (Nutzer 2026-11-16, ersetzt GOLEM_KICK_TARGETS_LESS "der
+## Tritt trifft eines weniger"): GOLEM_MAX_TARGETS ist die GRUNDZAHL. Jeder
+## Angriff trifft einen Anteil davon (Prozent, ABGERUNDET, mindestens 1):
+##   Handschlag und Trampeln  100 %   (Stufe 0-7: 5 / 6 / 6 / 6 / 7 / 8 / 8 / 8)
+##   Tritt                     60 %   (40 % weniger:  3 / 3 / 3 / 3 / 4 / 4 / 4 / 4)
+##   Trommeln                 125 %   (je Schlag:     6 / 7 / 7 / 7 / 8 / 10 / 10 / 10)
+##   Sprung                   150 %   (               7 / 9 / 9 / 9 / 10 / 12 / 12 / 12)
+## Golem.max_targets_of(). Bei 100 m (Grundzahl 25): 15 / 31 / 37.
+const GOLEM_TARGET_PERCENT_KICK: int = 60
+const GOLEM_TARGET_PERCENT_DRUM: int = 125
+const GOLEM_TARGET_PERCENT_STOMP: int = 150
 const GOLEM_GROWTH_STEPS_PER_TARGET: int = 3
 const GOLEM_MAX_LEVEL: int = 7
 const GOLEM_FINAL_BONUS_LEVEL: int = 6
@@ -289,8 +312,11 @@ const GOLEM_TRAMPLE_HEIGHT_PER_DAMAGE: float = 5.0
 ## Ab der hoechsten Stufe trampelt der Gigant auch GEBAEUDE nieder: jedes
 ## feindliche Gebaeude unter seinem Koerper verliert alle
 ## GOLEM_TRAMPLE_BUILDING_INTERVAL Sekunden eine Zerstoerungsstufe (wie unter dem
-## Tornado), solange er laeuft.
-const GOLEM_TRAMPLE_BUILDING_INTERVAL: float = 2.0
+## Tornado), solange er laeuft. Seit 2026-11-16 (Nutzer: der Gebaeudeschaden beim
+## Trampeln war zu hoch) alle 4 statt alle 2 Sekunden — die halbe Schadensrate.
+## Fahrzeuge behalten ihre 2 s (GOLEM_TRAMPLE_VEHICLE_INTERVAL).
+const GOLEM_TRAMPLE_BUILDING_INTERVAL: float = 4.0
+const GOLEM_TRAMPLE_VEHICLE_INTERVAL: float = 2.0
 ## GERADE WEGE ab der hoechsten Stufe (Nutzer 2026-11-15): der Gigant laeuft in
 ## geraden Linien — Gebaeude, Baeume und normales Gelaende (auch Haenge, die fuer
 ## alle anderen zu steil sind) halten ihn nicht mehr auf, kein Zickzack ums
@@ -340,12 +366,13 @@ const GOLEM_STRIKE_COOLDOWN_MAX: float = 4.0
 ## DREHRATE (Nutzer 2026-11-15): der Golem dreht sich nicht mehr augenblicklich.
 ## Sein Koerper folgt der Blickrichtung mit GOLEM_TURN_RATE (rad/s) bei
 ## Startgroesse, linear in der Koerperhoehe fallend bis GOLEM_TURN_RATE_FULL_SHARE
-## der Feuerrammen-Drehrate bei 100 m (0,7 x 2,0 = 1,4 rad/s: eine halbe Drehung
-## in 2,2 s). Angegriffen wird erst, wenn er bis auf GOLEM_ATTACK_ALIGN_DEG auf
+## der Feuerrammen-Drehrate bei 100 m. Seit 2026-11-16 (Nutzer) dauert die Drehung
+## dort 10 % laenger: 0,7 / 1,1 = 63,6 % (1,27 rad/s: eine halbe Drehung in 2,5 s
+## statt 2,2 s); dazwischen faellt die Rate weiter linear. Angegriffen wird erst, wenn er bis auf GOLEM_ATTACK_ALIGN_DEG auf
 ## das Ziel gedreht ist; solange er sich dreht, laeuft er langsamer (mindestens
 ## GOLEM_TURN_MIN_SPEED_SHARE seines Tempos), damit er nicht seitwaerts gleitet.
 const GOLEM_TURN_RATE: float = 8.0
-const GOLEM_TURN_RATE_FULL_SHARE: float = 0.7
+const GOLEM_TURN_RATE_FULL_SHARE: float = 0.7 / 1.1
 const GOLEM_ATTACK_ALIGN_DEG: float = 25.0
 const GOLEM_TURN_MIN_SPEED_SHARE: float = 0.2
 ## TROMMELN (Nutzer 2026-11-15): eine Variante des Handschlags — drei Schlaege
@@ -366,6 +393,33 @@ const GOLEM_TURN_MIN_SPEED_SHARE: float = 0.2
 const GOLEM_DRUM_HIT_DAMAGE: int = 14
 const GOLEM_DRUM_LEVEL_DAMAGE_PER_HIT: int = 1
 const GOLEM_DRUM_HITS: Array[float] = [0.35, 0.8, 1.25]   # aus der gebueckten Haltung (Clip drum_low)
+## SPRUNG (stomp, Nutzer 2026-11-16): sie springt auf der Stelle und landet auf
+## beiden Fuessen — Schaden RUNDHERUM UM SIE SELBST. Nur aus dem Stand.
+##   Flaeche:  Kreis um ihre Mitte, der Trampelradius (Koerper) mal
+##             GOLEM_STOMP_RADIUS_FACTOR (zwei Drittel groesser: Stufe 0 1,29 m,
+##             Stufe 6 3,87 m, Stufe 7 5,80 m)
+##   Schaden:  GOLEM_STOMP_TRAMPLE_MULT mal der Trampelschaden (aus der Groesse,
+##             kein Stufenbonus: Stufe 0-2 2, Stufe 3-5 4, Stufe 6 6, Stufe 7 8,
+##             100 m 40) — bei der LANDUNG, GOLEM_STOMP_WINDUP nach dem Ansetzen
+##   Ziele:    die Haelfte mehr als die Grundzahl (GOLEM_TARGET_PERCENT_STOMP)
+##   Gebaeude: jedes in der Flaeche verliert GOLEM_STOMP_BUILDING_STAGES Stufen
+##             (wie bei den anderen Angriffen; 0 = der Sprung laesst Gebaeude
+##             stehen), der Gigant trifft auch Fahrzeuge. Niemand wird geworfen.
+## NACH DER LANDUNG IST SIE GEBUECKT (der Clip "stomp" endet in der gebueckten
+## Ruhe). Das Abfangen gehoert zum Angriff, der Schaden ist da schon gefallen.
+## Danach bleibt sie unten, wenn sie von dort weiterschlagen will — oder sie
+## richtet sich sofort wieder auf; das kostet die normale Zeit eines
+## Haltungswechsels (Clip "crouch_up") und gehoert ebenfalls noch zum Angriff
+## (die Mindestzeit der Haltung gilt dafuer nicht).
+## Abklingzeit GOLEM_STOMP_COOLDOWN bei Startgroesse: genau die Laenge des Clips —
+## wer unten bleibt, schlaegt gleich nach dem Abfangen weiter. Sie waechst mit der
+## Groesse wie der normale Takt.
+const GOLEM_STOMP_RADIUS_FACTOR: float = 5.0 / 3.0
+const GOLEM_STOMP_TRAMPLE_MULT: int = 2
+## (2026-11-16, Nutzer: 0,2 s schneller — vorher Landung 0,8 s, Abklingzeit 1,2 s.)
+const GOLEM_STOMP_WINDUP: float = 0.6
+const GOLEM_STOMP_COOLDOWN: float = 1.0
+const GOLEM_STOMP_BUILDING_STAGES: int = 1
 ## LUFTSCHLAG NACH HOEHE (Nutzer 2026-11-15): Luftschiffe fliegen auf 10 m, schon
 ## der Stufe-6-Golem ist 14 m gross — ein Schlag nach OBEN passt dann nicht mehr.
 ## Die Animation richtet sich nach der Hoehe des Schiffs ueber seinen Fuessen,
@@ -385,7 +439,8 @@ const GOLEM_AGGRO_MAX: float = 60.0
 ## stehen (feindliche, bemannt oder verlassen). Es gelten die Schadensstufen
 ## des Fahrzeugs (CrewedVehicle.take_crush_hit): Katapult sofort zerstoert,
 ## Feuerramme verliert eines ihrer 3 Leben. Getrampelt wird je Fahrzeug
-## hoechstens alle GOLEM_TRAMPLE_BUILDING_INTERVAL (2 s), wie bei Gebaeuden.
+## hoechstens alle GOLEM_TRAMPLE_VEHICLE_INTERVAL (2 s; Gebaeude seit 2026-11-16
+## nur noch alle 4 s).
 const GOLEM_TRAMPLE_INTERVAL: float = 1.0
 const GOLEM_TRAMPLE_MIN_SPEED: float = 0.5
 ## AUF DER HOECHSTEN STUFE schlaegt der Golem auch nach LUFTSCHIFFEN (Nutzervorgabe

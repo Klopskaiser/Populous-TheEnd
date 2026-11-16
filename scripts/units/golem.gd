@@ -14,6 +14,11 @@ class_name Golem extends Unit
 ##     (GOLEM_KICK_WIDTH x GOLEM_KICK_LENGTH, weniger als die halbe Flaeche).
 ##     Mehr Schaden (GOLEM_KICK_DAMAGE) und viel Rueckstoss: JEDER Ueberlebende
 ##     fliegt in Trittrichtung davon.
+##   SPRUNG (stomp, 2026-11-16) — sie springt auf der Stelle und landet auf beiden
+##     Fuessen: Schaden rundherum um sie selbst (Trampelradius mal 5/3, doppelter
+##     Trampelschaden, die Haelfte mehr Ziele). Nur aus dem Stand; nach der
+##     Landung ist sie GEBUECKT und bleibt es oder richtet sich sofort wieder auf
+##     (s. Balance.GOLEM_STOMP_*, _tick_stance).
 ## Wahl (_choose_attack, seit 2026-11-16 nach erwartetem Schaden je Sekunde; frueher: stehen mindestens 3 Feinde in der
 ## Flaeche des Handschlags, schlaegt sie, sonst tritt sie. Beide Angriffe haben
 ## eine AUSHOLZEIT (GOLEM_*_WINDUP): der Angriff wird angesetzt, der Schaden
@@ -70,12 +75,15 @@ const ATTACK_KICK: StringName = &"kick"
 const ATTACK_SWAT: StringName = &"swat"
 ## Three hand hits on the ground (left, right, left) — the slam's longer variant.
 const ATTACK_DRUM: StringName = &"drum"
+## The jump on the spot (2026-11-16): she lands on both feet and the damage falls
+## all around her. Struck only from standing — and it leaves her CROUCHED.
+const ATTACK_STOMP: StringName = &"stomp"
 ## Extra clips the model may bring for the same attacks: the kick with the other
 ## leg, and the level strike at an airship hovering at chest height.
 const CLIP_KICK_LEFT: StringName = &"kick_l"
 const CLIP_SWIPE: StringName = &"swipe"
 const ATTACK_CLIPS: Array[StringName] = [
-	&"slam", &"kick", &"kick_l", &"swat", &"swipe", &"drum", &"slam_low", &"drum_low"]
+	&"slam", &"kick", &"kick_l", &"swat", &"swipe", &"drum", &"slam_low", &"drum_low", &"stomp"]
 ## The two stances (see Balance.GOLEM_STANCE_*): standing kicks, swats and walks;
 ## crouched slams and drums — faster, but rooted.
 const STANCE_STAND: int = 0
@@ -91,7 +99,7 @@ const CLIP_DRUM_LOW: StringName = &"drum_low"
 const STANCE_CLIP_LENGTH: float = 0.45
 ## The stretch she does when she grows: clip name and its length at speed 1.
 const CLIP_GROW: StringName = &"grow"
-const GROW_CLIP_LENGTH: float = 0.5
+const GROW_CLIP_LENGTH: float = 1.0
 ## Strike areas in the heading frame (along = forward, side = right), flat in XZ:
 ## slam = circle of SLAM_RADIUS around the point SLAM_FORWARD ahead,
 ## kick = lane -KICK_BACK <= along <= KICK_LENGTH, |side| <= KICK_HALF_WIDTH (the
@@ -103,7 +111,7 @@ const KICK_LENGTH: float = Balance.GOLEM_KICK_LENGTH
 const KICK_BACK: float = Balance.GOLEM_KICK_LENGTH * Balance.GOLEM_KICK_BACK_SHARE
 ## Length of the model's attack clips (seconds, golem_export.mjs) — an attack
 ## animation may be slowed down until it fills the attack cooldown, no further.
-const CLIP_LENGTH: Dictionary = {&"slam": 0.9, &"kick": 1.2, &"swat": 1.2, &"drum": 1.7}   # slam_low / drum_low
+const CLIP_LENGTH: Dictionary = {&"slam": 0.9, &"kick": 1.2, &"swat": 1.2, &"drum": 1.7, &"stomp": 1.0}   # slam_low / drum_low
 const STRIKE_COOLDOWN: float = Balance.GOLEM_STRIKE_COOLDOWN
 ## A swat still hits an airship that drifted this far beyond reach() during the
 ## wind-up (factor on the reach).
@@ -215,6 +223,12 @@ var stance: int = STANCE_STAND
 var _stance_target: int = STANCE_STAND
 var _stance_switch: float = 0.0
 var _stance_age: float = 1000.0
+## The stomp has landed and its clip is still settling into the crouch: once it
+## has played out she decides whether to stay down or get up again (_tick_stance).
+var _stomp_landed: bool = false
+## Off = she never jumps of her own accord (the tests of the plain stance change
+## switch the stomp off; `_wind_up(ATTACK_STOMP)` still works).
+var stomp_enabled: bool = true
 ## She has grown and still owes the stretch (it starts once the running attack
 ## animation is through), the seconds a running stretch still takes, and the
 ## seconds the current attack clip still plays.
@@ -432,12 +446,23 @@ func max_targets() -> int:
 	return max_targets_for(level, growth_steps)
 
 
-## The cap for ONE landing of the attack `kind`: the kick strikes
-## GOLEM_KICK_TARGETS_LESS fewer than the ground attacks (at least one).
-func max_targets_of(kind: StringName) -> int:
+## Share of the base target count (max_targets) the attack `kind` strikes, in
+## per cent: slam (and trampling) the base, kick 40 % fewer, drum a quarter more,
+## stomp half again as many (user spec 2026-11-16).
+static func target_percent(kind: StringName) -> int:
 	if kind == ATTACK_KICK:
-		return maxi(max_targets() - Balance.GOLEM_KICK_TARGETS_LESS, 1)
-	return max_targets()
+		return Balance.GOLEM_TARGET_PERCENT_KICK
+	if kind == ATTACK_DRUM:
+		return Balance.GOLEM_TARGET_PERCENT_DRUM
+	if kind == ATTACK_STOMP:
+		return Balance.GOLEM_TARGET_PERCENT_STOMP
+	return 100
+
+
+## The cap for ONE landing of the attack `kind`: its share of the base count,
+## rounded DOWN, at least one.
+func max_targets_of(kind: StringName) -> int:
+	return maxi(max_targets() * target_percent(kind) / 100, 1)
 
 
 ## Permanent healing per second right now: GOLEM_LEVEL_REGEN per level, and
@@ -586,6 +611,9 @@ func attack_damage(kind: StringName) -> int:
 		# All three hits together: every hit's own damage, plus the flat level
 		# bonus once for the whole attack.
 		return Balance.GOLEM_DRUM_HITS.size() * _drum_own_hit_damage() + level_damage_bonus()
+	if kind == ATTACK_STOMP:
+		# From the size, like the trampling it doubles — no level bonus on top.
+		return Balance.GOLEM_STOMP_TRAMPLE_MULT * trample_damage()
 	return base + level_damage_bonus()
 
 
@@ -625,6 +653,11 @@ func trample_radius() -> float:
 	return BODY_HALF_WIDTH * size_factor()
 
 
+## Radius of the stomp around her own centre: the body circle and two thirds more.
+func stomp_radius() -> float:
+	return trample_radius() * Balance.GOLEM_STOMP_RADIUS_FACTOR
+
+
 ## 0 at the starting size, 1 at GOLEM_MAX_HEIGHT — linear in the body height.
 ## Drives everything that changes "slowly with the size": the attack cooldown,
 ## the turn rate, the catapult's bonus damage.
@@ -659,6 +692,7 @@ func _tick_stretch(delta: float) -> void:
 		return
 	_stretch_queued = false
 	_stretch_time = Balance.GOLEM_GROW_TIME
+	_stomp_landed = false   # the stretch gets her up by itself
 	stance = STANCE_STAND
 	_stance_target = STANCE_STAND
 	_play_sfx(&"golem_grow")
@@ -710,6 +744,17 @@ func _tick_stance(delta: float) -> void:
 			stance = _stance_target
 			_stance_age = 0.0
 		return
+	if _stomp_landed:
+		# The stomp left her crouched (_land_attack). While its clip still settles
+		# she stays put. Then she stays down if she means to strike on from there —
+		# or gets up again at once: that getting-up still belongs to the attack and
+		# does not wait for the stance's minimum time.
+		if _attack_anim_left > 0.0 or _pending_attack != &"":
+			return
+		_stomp_landed = false
+		if not _stays_down_after_stomp():
+			_begin_stance(STANCE_STAND)
+		return
 	if stance != STANCE_CROUCH or _pending_attack != &"":
 		return
 	if state == State.ATTACK and _in_melee:
@@ -717,6 +762,16 @@ func _tick_stance(delta: float) -> void:
 	if state == State.IDLE and not stance_settled():
 		return   # nothing to do, but she only just bent down
 	_begin_stance(STANCE_STAND)
+
+
+## After a stomp: does she stay crouched? Only while she stands in the fight and
+## her best attack from down there is a ground attack (the plain choice, seen
+## from the crouch). With nothing to strike, a march ahead or an owed stretch she
+## gets up.
+func _stays_down_after_stomp() -> bool:
+	if _stretch_queued or not (state == State.ATTACK and _in_melee):
+		return false
+	return stance_for(_choose_attack()) == STANCE_CROUCH
 
 
 ## The attack is due: strike — or change the stance first when the best attack
@@ -777,8 +832,44 @@ func attack_time(kind: StringName) -> float:
 
 
 ## Expected damage per second of the attack `kind` right now (see attack_worth).
+## Read as a PLAN this is "a lead-in plus GOLEM_STANCE_PLAN_ATTACKS attacks":
+## without a lead-in the attack's worth over its cooldown, with a stance switch
+## the switch's time spread over those attacks (attack_time). The stomp is a
+## lead-in of its own kind — see stomp_plan_value.
 func attack_value(kind: StringName) -> float:
+	if kind == ATTACK_STOMP:
+		return stomp_plan_value()
 	return attack_worth(kind) / attack_time(kind)
+
+
+## Seconds the clip of the attack `kind` plays at the current size.
+func attack_duration(kind: StringName) -> float:
+	return float(CLIP_LENGTH.get(kind, 0.0)) / (attack_speed(kind) * clip_rate(kind))
+
+
+## The stomp as a plan (damage per second over the whole plan): it costs its
+## cooldown, brings its own damage and leaves her crouched — so the ground
+## attacks follow without a stance switch. Or she gets up again afterwards (the
+## cooldown, or the clip plus the switch if that takes longer) and goes on
+## kicking. The better continuation counts. A stomp that would strike nothing is
+## worth nothing: she never jumps just to get down.
+func stomp_plan_value() -> float:
+	var lead: float = attack_worth(ATTACK_STOMP)
+	if lead <= 0.0:
+		return 0.0
+	var n: float = float(Balance.GOLEM_STANCE_PLAN_ATTACKS)
+	var cooldown: float = cooldown_for(ATTACK_STOMP)
+	var best: float = 0.0
+	for kind in [ATTACK_SLAM, ATTACK_DRUM]:
+		best = maxf(best, (lead + n * attack_worth(kind)) / (cooldown + n * cooldown_for(kind)))
+	var up: float = maxf(cooldown, attack_duration(ATTACK_STOMP) + stance_switch_time())
+	return maxf(best, (lead + n * attack_worth(ATTACK_KICK)) / (up + n * cooldown_for(ATTACK_KICK)))
+
+
+## May she jump right now? Only standing, and not right after a stance change
+## (the stomp ends crouched: she would rock up and down).
+func can_stomp() -> bool:
+	return stomp_enabled and stance == STANCE_STAND and not is_switching_stance() and stance_settled()
 
 
 ## Seconds between two attacks at the current size (1,8 s .. 4 s at 100 m).
@@ -793,6 +884,9 @@ func cooldown_for(kind: StringName) -> float:
 		return strike_cooldown()   # three hits: the plain attack rhythm (1,8 s at the start)
 	if kind == ATTACK_SLAM:
 		return strike_cooldown() * Balance.GOLEM_SLAM_COOLDOWN / Balance.GOLEM_STRIKE_COOLDOWN
+	if kind == ATTACK_STOMP:
+		# As long as its clip: whoever stays down strikes on right after settling.
+		return strike_cooldown() * Balance.GOLEM_STOMP_COOLDOWN / Balance.GOLEM_STRIKE_COOLDOWN
 	return strike_cooldown()
 
 
@@ -1063,7 +1157,7 @@ func _tick_trample(delta: float) -> void:
 		return
 	# Target cap (max_targets): at most that many things are under his feet "at
 	# once" — everything trampled stays in _trampled for its interval (units 1 s,
-	# vehicles and buildings 2 s), and while that list is full nothing new is
+	# vehicles 2 s, buildings 4 s), and while that list is full nothing new is
 	# trampled. Units first (nearest first), then vehicles, then buildings.
 	var room: int = max_targets() - _trampled.size()
 	if room <= 0:
@@ -1092,7 +1186,7 @@ func _tick_trample(delta: float) -> void:
 	if level < Balance.GOLEM_MAX_LEVEL:
 		return
 	# The giant (maximum level) also walks over vehicles that do not fly his
-	# flag: one crush hit per vehicle every GOLEM_TRAMPLE_BUILDING_INTERVAL.
+	# flag: one crush hit per vehicle every GOLEM_TRAMPLE_VEHICLE_INTERVAL.
 	for u in under:
 		if room <= 0:
 			return
@@ -1101,7 +1195,7 @@ func _tick_trample(delta: float) -> void:
 		var vid: int = u.get_instance_id()
 		if _trampled.has(vid):
 			continue
-		_trampled[vid] = Balance.GOLEM_TRAMPLE_BUILDING_INTERVAL
+		_trampled[vid] = Balance.GOLEM_TRAMPLE_VEHICLE_INTERVAL
 		room -= 1
 		_no_combat_timer = 0.0
 		_crush_vehicle(u)
@@ -1337,6 +1431,8 @@ static func attack_windup(kind: StringName) -> float:
 		return Balance.GOLEM_SWAT_WINDUP
 	if kind == ATTACK_DRUM:
 		return Balance.GOLEM_DRUM_HITS[0]
+	if kind == ATTACK_STOMP:
+		return Balance.GOLEM_STOMP_WINDUP   # the landing
 	return Balance.GOLEM_KICK_WINDUP if kind == ATTACK_KICK else Balance.GOLEM_SLAM_WINDUP
 
 
@@ -1676,6 +1772,8 @@ func _hit_zone_reach(kind: StringName) -> float:
 	if kind == ATTACK_KICK:
 		var ext: Vector2 = _kick_extent()
 		return Vector2(maxf(ext.x, ext.y), KICK_HALF_WIDTH * size).length() + 0.5
+	if kind == ATTACK_STOMP:
+		return stomp_radius() + 0.5
 	return maxf(SLAM_FORWARD * limb_factor() + slam_radius(), trample_radius()) + 0.5
 
 
@@ -1695,8 +1793,11 @@ func _kick_extent() -> Vector2:
 ##  * SLAM: the circle around the hands — plus the FRONT half of her own body
 ##    circle (toward the attack). Behind her, at her heels, only what the circle
 ##    of the hands reaches by itself is hit.
+##  * STOMP: the circle around her own centre (stomp_radius), all around.
 func _in_hit_zone(kind: StringName, point: Vector3, forward: Vector3, right: Vector3) -> bool:
 	var rel: Vector3 = point - position
+	if kind == ATTACK_STOMP:
+		return rel.x * rel.x + rel.z * rel.z <= stomp_radius() * stomp_radius()
 	var along: float = rel.x * forward.x + rel.z * forward.z
 	var side: float = rel.x * right.x + rel.z * right.z
 	if kind == ATTACK_KICK:
@@ -1715,7 +1816,7 @@ func _in_hit_zone(kind: StringName, point: Vector3, forward: Vector3, right: Vec
 func _struck_targets(kind: StringName) -> Dictionary:
 	var room: int = max_targets_of(kind)
 	var origin: Vector3 = position
-	if kind != ATTACK_KICK:
+	if kind != ATTACK_KICK and kind != ATTACK_STOMP:
 		origin += _heading_frame()[0] * (SLAM_FORWARD * limb_factor())
 	var units: Array[Unit] = _victims(kind)
 	units.sort_custom(func(a: Unit, b: Unit) -> bool:
@@ -1805,10 +1906,20 @@ func _crush_vehicle(v) -> void:
 ## overkill, over the time it costs including a share of a stance switch. A tie
 ## goes to the attack of the current stance, otherwise to the kick; with nothing
 ## to strike at all she kicks.
+##
+## With the stomp (2026-11-16) the same comparison reads as PLANS — a lead-in
+## plus GOLEM_STANCE_PLAN_ATTACKS attacks, valued by damage per second over the
+## whole plan (attack_value): no lead-in (the attack of the stance she is in), a
+## stance switch (costs time, brings nothing), or — standing only — the stomp
+## (costs its cooldown, brings its own damage, and ends crouched). The returned
+## kind is what she does FIRST; the stomp comes last in the order, so a tie goes
+## to the plain attacks.
 func _choose_attack() -> StringName:
 	var order: Array[StringName] = [ATTACK_KICK, ATTACK_SLAM, ATTACK_DRUM]
 	if stance == STANCE_CROUCH:
 		order = [ATTACK_SLAM, ATTACK_DRUM, ATTACK_KICK]
+	elif can_stomp():
+		order.append(ATTACK_STOMP)
 	var best: StringName = ATTACK_KICK
 	var best_value: float = 0.0
 	for kind in order:
@@ -1903,8 +2014,8 @@ func _tick_pending_attack(delta: float) -> void:
 	var struck: Dictionary = _land_attack(kind, _pending_hit)
 	if building != null and is_instance_valid(building) and building.health > 0 \
 			and not struck.has(building) and state == State.ATTACK \
-			and attack_building == building:
-		_strike_building(building)
+			and attack_building == building and kind != ATTACK_STOMP:
+		_strike_building(building)   # (the stomp only strikes what stands around her)
 
 
 ## The swat LANDS: one hull hit on the airship it was aimed at — like a catapult
@@ -1927,7 +2038,8 @@ func _land_swat(ship: Airship) -> bool:
 ## golem_slam, golem_drum — once per hit —, golem_swat). As long as its file is
 ## missing the common golem_strike plays instead.
 const STRIKE_SFX: Dictionary = {
-	&"kick": &"golem_kick", &"slam": &"golem_slam", &"drum": &"golem_drum", &"swat": &"golem_swat"}
+	&"kick": &"golem_kick", &"slam": &"golem_slam", &"drum": &"golem_drum", &"swat": &"golem_swat",
+	&"stomp": &"golem_stomp"}
 
 static func strike_sfx_key(kind: StringName) -> StringName:
 	return STRIKE_SFX.get(kind, &"golem_strike")
@@ -1965,6 +2077,9 @@ func _kick() -> Dictionary:
 ## The DRUM lands three times (`hit` 0..2): each hit deals its share of the
 ## damage to the units in the slam's area; only the LAST one throws them and
 ## strikes vehicles and buildings.
+##
+## The STOMP lands around her own centre, throws nobody — and leaves her
+## crouched (_tick_stance decides what follows once its clip has settled).
 func _land_attack(kind: StringName, hit: int = 0) -> Dictionary:
 	_no_combat_timer = 0.0
 	_play_strike_sfx(kind)
@@ -1972,6 +2087,12 @@ func _land_attack(kind: StringName, hit: int = 0) -> Dictionary:
 	var forward: Vector3 = frame[0]
 	var kick: bool = kind == ATTACK_KICK
 	var drum: bool = kind == ATTACK_DRUM
+	var stomp: bool = kind == ATTACK_STOMP
+	if stomp:
+		stance = STANCE_CROUCH
+		_stance_target = STANCE_CROUCH
+		_stance_age = 0.0
+		_stomp_landed = true
 	var last_hit: bool = not drum or hit >= Balance.GOLEM_DRUM_HITS.size() - 1
 	var damage: int = drum_hit_damage(hit) if drum else attack_damage(kind)
 	# Everything struck is collected first: a kill can raise the level, and the
@@ -1990,8 +2111,8 @@ func _land_attack(kind: StringName, hit: int = 0) -> Dictionary:
 			u.apply_lift(forward if ahead else -forward,
 				Balance.GOLEM_KICK_PUSH, Balance.GOLEM_KICK_UP)
 			continue
-		if not last_hit:
-			continue   # the drum's first two hits only hurt
+		if not last_hit or stomp:
+			continue   # the drum's first two hits and the stomp only hurt
 		var away: Vector3 = Vector3(u.position.x - position.x, 0.0,
 			u.position.z - position.z)
 		match Fireball.impact_outcome(randf(), Balance.GOLEM_LIFT_CHANCE,
@@ -2013,14 +2134,14 @@ func _land_attack(kind: StringName, hit: int = 0) -> Dictionary:
 		if not is_instance_valid(b) or b.health <= 0:
 			continue
 		struck_buildings[b] = true
-		_strike_building(b)
+		_strike_building(b, Balance.GOLEM_STOMP_BUILDING_STAGES if stomp else Balance.GOLEM_BUILDING_STAGES)
 	return struck_buildings
 
 
 ## One attack's worth of damage on a building. A building the golem brings down
 ## counts as ONE kill, like a unit (user spec 2026-11-15).
-func _strike_building(b) -> void:
-	b.apply_destruction_stages(Balance.GOLEM_BUILDING_STAGES)
+func _strike_building(b, stages: int = Balance.GOLEM_BUILDING_STAGES) -> void:
+	b.apply_destruction_stages(stages)
 	if not is_instance_valid(b) or b.health <= 0:
 		_credit_kill()
 
@@ -2030,6 +2151,9 @@ func _strike_building(b) -> void:
 ## the lane, each with the lane's half-width (like the fire ram's blast).
 func _building_in_area(b, kind: StringName, forward: Vector3) -> bool:
 	var size: float = reach_factor()
+	if kind == ATTACK_STOMP:
+		return Balance.GOLEM_STOMP_BUILDING_STAGES > 0 \
+			and b.footprint_distance_to(Vector2(position.x, position.z)) <= stomp_radius()
 	if kind != ATTACK_KICK:
 		var hit: Vector3 = position + forward * (SLAM_FORWARD * limb_factor())
 		if b.footprint_distance_to(Vector2(hit.x, hit.z)) <= slam_radius():

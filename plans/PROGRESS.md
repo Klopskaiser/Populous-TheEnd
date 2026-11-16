@@ -12205,3 +12205,62 @@ Im laufenden Spiel nicht geprueft (Clip nur als Standbilder).
 
 **Verifikation:** Ladecheck exit 0, Suite **7059 passed, 0 failed**, kein `SCRIPT ERROR`.
 Im laufenden Spiel nicht geprueft.
+
+### Golem: Haende gezielt, Sprungangriff, Zielzahl je Angriff, Plaene (2026-11-16)
+
+- **Clips (gymnastikschuh):** Handschlag und Trommeln gezielter — beim Handschlag
+  liegen beide Hand-Schuhe dicht nebeneinander auf dem Aufschlagpunkt
+  (`GOLEM_SLAM_FORWARD`), beim Trommeln 0,34 m neben der Mitte (4-m-Massstab),
+  Ellbogen am Boden leicht angewinkelt. Neu `stomp` (1,2 s, Landung 0,8 s, endet
+  in der gebueckten Ruhe); `grow` 1,0 s. GLB 1,34 MB, 16 Clips,
+  `golem_pruefen.mjs` 0 Fehler.
+- **Sprung** (`Golem.ATTACK_STOMP`): nur aus dem Stand; Kreis um sie selbst
+  (`stomp_radius()` = Trampelradius x 5/3), Schaden 2 x `trample_damage()`,
+  Zielzahl 150 % der Grundzahl, eine Gebaeudestufe, kein Wurf. `_land_attack`
+  setzt sie bei der Landung in die Hocke (`_stomp_landed`); `_tick_stance`
+  entscheidet nach dem Clip (`_stays_down_after_stomp`): unten bleiben oder
+  sofort aufrichten (normaler Haltungswechsel, ohne Mindestzeit). Abklingzeit
+  `GOLEM_STOMP_COOLDOWN` 1,2 s = Cliplaenge.
+- **Zielzahl je Angriff:** `Golem.target_percent(kind)`, `max_targets_of` =
+  Grundzahl x Prozent / 100, abgerundet, mindestens 1 (Tritt 60, Trommeln 125,
+  Sprung 150). `GOLEM_KICK_TARGETS_LESS` entfaellt.
+- **Angriffswahl als Plaene:** `attack_value(kind)` bleibt fuer Tritt, Handschlag
+  und Trommeln die alte Formel (als Plan gelesen: Haltungswechsel + 3 Angriffe);
+  `stomp_plan_value()` rechnet "Sprung + 3 Angriffe" (gebueckt weiter oder
+  aufrichten und treten). `_choose_attack` haengt den Sprung im Stand hinten an
+  (`can_stomp()`), Gleichstand geht an die anderen Angriffe.
+- **Weitere Werte:** `GOLEM_GROW_TIME` und `Golem.GROW_CLIP_LENGTH` 1,0 s;
+  `GOLEM_TRAMPLE_BUILDING_INTERVAL` 4 s, neu `GOLEM_TRAMPLE_VEHICLE_INTERVAL` 2 s.
+- **Annahmen (vom Nutzer nicht festgelegt):** Abrunden bei allen Anteilen; der
+  Sprung nimmt Gebaeuden eine Stufe wie die anderen Angriffe; Abklingzeit des
+  Sprungs = Cliplaenge.
+
+**Tests:** `test_golem.gd` 564 Zusicherungen (neu: `test_every_attack_has_its_share_of_the_target_count`,
+`test_stomp_*`, `test_attack_choice_weighs_the_stomp_as_a_plan`,
+`test_trampling_takes_a_building_stage_only_every_four_seconds`). Zwei alte Tests zum
+Haltungswechsel schalten den Sprung ab (`stomp_enabled = false`).
+
+**Verifikation:** Suite **7126 passed, 0 failed**, kein `SCRIPT ERROR`. Clips nur als
+Standbilder angesehen, der Sprungangriff im laufenden Spiel nicht geprueft.
+
+### Golem: Sprung 0,2 s schneller; Drehung geprueft (2026-11-16)
+
+- **Sprung:** Landung 0,6 s statt 0,8 s, Clip und Abklingzeit 1,0 s statt 1,2 s
+  (`GOLEM_STOMP_WINDUP`, `GOLEM_STOMP_COOLDOWN`, `Golem.CLIP_LENGTH`). Im Clip ist der
+  Sprung bis zur Landung dieselbe Bewegung im Zeitraffer (0,8 -> 0,6 s), das Abfangen
+  dauert weiter 0,4 s. `golem_pruefen.mjs` 0 Fehler.
+- **Drehung (Nutzerverdacht "der naechste Gegner wird ohne Drehrate anvisiert"):**
+  gemessen, kein Fehler. Der Koerper dreht sich nie schneller als `turn_rate()`, und
+  kein Angriff wird mehr als 25 Grad neben seinem Ziel angesetzt (14 Krieger rundherum,
+  Stufen 0/3/6, mit und ohne Sprung, je 40 s). Die Drehrate selbst ist aber hoch:
+  8 rad/s bei Startgroesse (halbe Drehung in 0,4 s), auf Stufe 6 noch 7,4 rad/s, weil
+  sie linear bis 100 m faellt. Nicht geaendert — Entscheidung beim Nutzer.
+
+**Verifikation:** `test_golem.gd` 564 passed, 0 failed.
+
+### Golem: Drehung bei 100 m 10 % langsamer (2026-11-16)
+
+- `GOLEM_TURN_RATE_FULL_SHARE` 0,7 -> 0,7 / 1,1: bei 100 m 1,27 rad/s statt 1,4 (halbe
+  Drehung 2,5 s statt 2,2 s); dazwischen weiter linear in der Koerperhoehe ab 8 rad/s.
+
+**Verifikation:** `test_golem.gd` (volle Suite auf Nutzerwunsch nicht gelaufen).
