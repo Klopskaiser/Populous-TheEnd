@@ -609,6 +609,10 @@ func _setup_chamber_red(red: Tribe, center: Vector2i, nav: NavGrid) -> void:
 	var rear: Vector2i = center + Vector2i(30, 0)
 	var red_site: Building = _place_site_near(red, rear + Vector2i(6, 0))
 	_spawn_shaman_near(red, red_site, rear + Vector2i(6, 0), nav)
+	# The same production chain as the player's (user request 2026-11-16: the red
+	# braves stood around in front of their huts): huts -> red fire temple -> the
+	# red shaman's spot.
+	_chain_rally_points(red)
 	var vehicles: Array = [
 		[SIEGE_SCENE, Vector2i(0, -8)], [SIEGE_SCENE, Vector2i(0, -4)],
 		[FIRE_RAM_SCENE, Vector2i(0, 4)], [FIRE_RAM_SCENE, Vector2i(0, 8)],

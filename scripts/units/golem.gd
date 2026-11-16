@@ -16,7 +16,7 @@ class_name Golem extends Unit
 ##     fliegt in Trittrichtung davon.
 ##   SPRUNG (stomp, 2026-11-16) — sie springt auf der Stelle und landet auf beiden
 ##     Fuessen: Schaden rundherum um sie selbst (Trampelradius mal 5/3, doppelter
-##     Trampelschaden, die Haelfte mehr Ziele). Nur aus dem Stand; nach der
+##     Trampelschaden, doppelt so viele Ziele wie das Trampeln). Nur aus dem Stand; nach der
 ##     Landung ist sie GEBUECKT und bleibt es oder richtet sich sofort wieder auf
 ##     (s. Balance.GOLEM_STOMP_*, _tick_stance).
 ## Wahl (_choose_attack, seit 2026-11-16 nach erwartetem Schaden je Sekunde; frueher: stehen mindestens 3 Feinde in der
@@ -200,6 +200,9 @@ var _air_cooldown: float = 0.0
 ## The airship the golem is walking after (maximum level, see _tick_air_chase),
 ## and the seconds until the chase looks again.
 var _chase_ship: Airship = null
+## The building an explicit ORDER sent her against (order_attack_building) — see
+## has_ordered_building().
+var _ordered_building = null
 var _chase_timer: float = 0.0
 ## True only while the chase issues its own move order (see order_move).
 var _own_order: bool = false
@@ -450,7 +453,7 @@ func max_targets() -> int:
 
 ## Share of the base target count (max_targets) the attack `kind` strikes, in
 ## per cent: slam (and trampling) the base, kick 40 % fewer, drum a quarter more,
-## stomp half again as many (user spec 2026-11-16).
+## stomp twice as many — twice the trampling's (user spec 2026-11-16).
 static func target_percent(kind: StringName) -> int:
 	if kind == ATTACK_KICK:
 		return Balance.GOLEM_TARGET_PERCENT_KICK
@@ -1423,6 +1426,9 @@ func _tick_attack(delta: float) -> void:
 		_tick_no_unit_target(delta)
 		return
 	var target: Unit = attack_target
+	if has_ordered_building() and not _near_ordered_building(target):
+		_retarget_or_idle()   # it left the building's surroundings: next one there, or the building
+		return
 	var dist: float = _flat_dist(position, target.position)
 	if dist > reach() or target.is_airborne():
 		# An ORDERED target is kept (user report 2026-11-16: the order was ignored
@@ -1430,6 +1436,8 @@ func _tick_attack(delta: float) -> void:
 		# she walks after it through the crowd. Only a target she picked herself
 		# gives way to whoever stands in reach.
 		var near: Unit = null if _target_ordered else _nearest_enemy_in_reach()
+		if near != null and has_ordered_building() and not _near_ordered_building(near):
+			near = null
 		if near != null and near != target:
 			_begin_attack(near)   # retarget keeps the cooldown (state stays ATTACK)
 			return
@@ -1820,17 +1828,88 @@ func _tick_air_chase(delta: float) -> void:
 func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = false) -> void:
 	if not _own_order:
 		_chase_ship = null
+	_ordered_building = null
 	super.order_move(target, queue_up, aggressive)
 
 
 func order_attack(enemy: Unit) -> void:
 	_chase_ship = null
+	_ordered_building = null
 	super.order_attack(enemy)
 
 
 func order_attack_building(building) -> void:
 	_chase_ship = null
 	super.order_attack_building(building)
+	_ordered_building = attack_building if attack_building == building else null
+
+
+## EXPLICIT BUILDING ORDER (user report 2026-11-16): sent against a building she
+## still went for units that did not stand anywhere near it — the base takes any
+## enemy in the aggro radius (for her up to 60 m). While the ordered building
+## stands she only fights units in reach OF THE BUILDING (footprint distance up to
+## her reach: the ones she strikes from her place there anyway); the others she
+## lets be. A unit that moves out of that range is dropped, and she goes back to
+## the building. A building she picked herself keeps the old rule (units first).
+func has_ordered_building() -> bool:
+	if _ordered_building == null:
+		return false
+	if attack_building != _ordered_building or not _building_target_valid():
+		_ordered_building = null
+		return false
+	return true
+
+
+## Is `u` within her reach of the ordered building's footprint?
+func _near_ordered_building(u: Unit) -> bool:
+	return u != null and is_instance_valid(u) and has_ordered_building() \
+		and _ordered_building.footprint_distance_to(Vector2(u.position.x, u.position.z)) <= reach()
+
+
+## Nearest enemy unit she may fight during the ordered assault (see above), or null.
+func _enemy_near_ordered_building() -> Unit:
+	if path_service == null:
+		return null
+	var b = _ordered_building
+	var centre: Vector3 = b.center_world()
+	var half: float = Vector2(b.footprint.x, b.footprint.y).length() * 0.5 * TerrainData.CELL_SIZE
+	var best: Unit = null
+	var best_d: float = INF
+	for u in path_service.get_units_in_radius(centre, half + reach()):
+		if u == self or u.tribe_id == tribe_id or u.state == State.DEAD or u.state == State.SIT:
+			continue
+		if not u.is_targetable() or u.is_airborne() or u is CrewedVehicle:
+			continue
+		if not _near_ordered_building(u):
+			continue
+		var d: float = _flat_dist(position, u.position)
+		if d < best_d:
+			best_d = d
+			best = u
+	return best
+
+
+## The base's enemy scan (assault fallback, retargeting) — during the ordered
+## assault only units near the building count.
+func _scan_for_enemy(radius: float, max_examined: int = 0) -> Unit:
+	if has_ordered_building():
+		return _enemy_near_ordered_building()
+	return super._scan_for_enemy(radius, max_examined)
+
+
+## Retargeting after a fight: during the ordered assault no "fight on against my
+## own attackers" (they may stand anywhere) — the next unit near the building,
+## else back to the building.
+func _retarget_or_idle() -> void:
+	if not has_ordered_building():
+		super._retarget_or_idle()
+		return
+	_end_attack()
+	var enemy: Unit = _enemy_near_ordered_building()
+	if enemy != null:
+		_begin_attack(enemy)
+		return
+	_set_state(State.ATTACK)
 
 
 ## Winds up the upward strike at `ship`.

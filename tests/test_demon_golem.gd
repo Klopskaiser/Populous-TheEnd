@@ -176,23 +176,23 @@ func test_no_lifetime() -> void:
 func test_damage_starts_at_half_the_golems_and_grows_per_step() -> void:
 	var w: Dictionary = _make_world()
 	var d: DemonGolem = _demon(w, 0, Vector3(50, 5, 50))
-	check_near(d.damage_exact(Golem.ATTACK_SLAM), 12.5, "slam 12,5 (half of 25)")
-	check_near(d.damage_exact(Golem.ATTACK_KICK), 22.5, "kick 22,5 (half of 45)")
-	check_near(d.damage_exact(Golem.ATTACK_DRUM), 21.0, "drum 21 for the three hits (half of 42)")
-	check(d.attack_damage(Golem.ATTACK_SLAM) == 13 and d.attack_damage(Golem.ATTACK_KICK) == 23
-		and d.attack_damage(Golem.ATTACK_DRUM) == 21, "rounded when it lands: 13 / 23 / 21")
+	check_near(d.damage_exact(Golem.ATTACK_SLAM), 15.5, "slam 15,5 (half of 25, +3)")
+	check_near(d.damage_exact(Golem.ATTACK_KICK), 24.5, "kick 24,5 (half of 45, +2)")
+	check_near(d.damage_exact(Golem.ATTACK_DRUM), 24.0, "drum 24 for the three hits (half of 42, +3)")
+	check(d.attack_damage(Golem.ATTACK_SLAM) == 16 and d.attack_damage(Golem.ATTACK_KICK) == 25
+		and d.attack_damage(Golem.ATTACK_DRUM) == 24, "rounded when it lands: 16 / 25 / 24")
 	check(d.level_damage_bonus() == 0, "no level bonus")
 	_grow_to(d, 12.0)   # ten growth steps
-	check_near(d.damage_exact(Golem.ATTACK_SLAM), 12.5 + 0.75 * 10, "slam +0,75 a step")
-	check_near(d.damage_exact(Golem.ATTACK_KICK), 22.5 + 0.8 * 10, "kick +0,8 a step")
-	check_near(d.damage_exact(Golem.ATTACK_DRUM), 21.0 + 1.0 * 10, "drum +1 a step for all three hits")
-	check(d.attack_damage(Golem.ATTACK_SLAM) == 20 and d.attack_damage(Golem.ATTACK_KICK) == 31
-		and d.attack_damage(Golem.ATTACK_DRUM) == 31, "20 / 31 / 31")
+	check_near(d.damage_exact(Golem.ATTACK_SLAM), 15.5 + 0.75 * 10, "slam +0,75 a step")
+	check_near(d.damage_exact(Golem.ATTACK_KICK), 24.5 + 0.8 * 10, "kick +0,8 a step")
+	check_near(d.damage_exact(Golem.ATTACK_DRUM), 24.0 + 1.0 * 10, "drum +1 a step for all three hits")
+	check(d.attack_damage(Golem.ATTACK_SLAM) == 23 and d.attack_damage(Golem.ATTACK_KICK) == 33
+		and d.attack_damage(Golem.ATTACK_DRUM) == 34, "23 / 33 / 34")
 	var sum: int = 0
 	for hit in range(Balance.GOLEM_DRUM_HITS.size()):
 		sum += d.drum_hit_damage(hit)
 	check(sum == d.attack_damage(Golem.ATTACK_DRUM), "the three hits add up to the drum's damage")
-	check(d.drum_hit_damage(0) == 10 and d.drum_hit_damage(2) == 11, "10 / 10 / 11")
+	check(d.drum_hit_damage(0) == 11 and d.drum_hit_damage(2) == 12, "11 / 11 / 12")
 	_free_world(w)
 
 
@@ -211,12 +211,12 @@ func test_targets_start_at_three_and_one_more_every_step() -> void:
 	var d: DemonGolem = _demon(w, 0, Vector3(50, 5, 50))
 	check(d.max_targets() == 3, "three targets at the start")
 	check(d.max_targets_of(Golem.ATTACK_SLAM) == 3 and d.max_targets_of(Golem.ATTACK_KICK) == 1
-		and d.max_targets_of(Golem.ATTACK_DRUM) == 3 and d.max_targets_of(Golem.ATTACK_STOMP) == 4,
-		"shares like the golem's: slam 3, kick 1, drum 3, stomp 4")
+		and d.max_targets_of(Golem.ATTACK_DRUM) == 3 and d.max_targets_of(Golem.ATTACK_STOMP) == 6,
+		"shares like the golem's: slam 3, kick 1, drum 3, stomp 6")
 	_grow_to(d, 25.0)
 	check(d.max_targets() == 26, "25 m (23 steps): 26")
 	check(d.max_targets_of(Golem.ATTACK_KICK) == 15 and d.max_targets_of(Golem.ATTACK_DRUM) == 32
-		and d.max_targets_of(Golem.ATTACK_STOMP) == 39, "kick 15, drum 32, stomp 39")
+		and d.max_targets_of(Golem.ATTACK_STOMP) == 52, "kick 15, drum 32, stomp 52")
 	_free_world(w)
 
 
@@ -425,4 +425,45 @@ func test_status_text_names_him_and_his_growth() -> void:
 	check(text.contains("Dämonengolem") and text.contains("2 m"), "name and size")
 	check(text.contains("noch 5 Kills bis 3 m"), "kills to the next metre")
 	check(not text.contains("Stufe") and not text.contains("Lebenszeit"), "no level, no lifetime")
+	_free_world(w)
+
+
+# --- Unterhalt (Nutzervorgabe 2026-11-16) ---------------------------------------------
+
+## Solange er lebt, kostet er 5 Mana je Sekunde vom laufenden Einkommen — wie die
+## Foersterei, vor dem Aufladen der Zauber; ohne Schuld, die nach seinem Tod weiterliefe.
+func test_he_costs_five_mana_per_second_while_he_lives() -> void:
+	var w: Dictionary = _make_world()
+	for i in range(60):
+		w.um.spawn_unit(BRAVE_SCENE, 0, Vector3(30 + float(i % 10), 5, 30 + float(i / 10)))
+	var income: float = w.t0.mana_rate()
+	check(income > Balance.DEMON_GOLEM_MANA_UPKEEP, "60 braves earn more than 5 mana/s (%.1f)" % income)
+	var d: DemonGolem = _demon(w, 0, Vector3(50, 5, 50))
+	w.t0.tick(0.1)
+	d.tick(0.1)
+	check_near(w.t0.upkeep_rate(), 5.0, "he claims 5 mana per second")
+	check_near(w.t0.charging_income(), income - 5.0, "the spells get 5 less", 0.001)
+	check_near(w.t0.upkeep_debt(), 0.5, "0,5 mana for the 0,1 s")
+	w.t0.tick(0.1)   # pays the 0,5 from this tick's income
+	check_near(w.t0.upkeep_debt(), 0.0, "paid off at once from the income")
+	d.take_damage(100000)
+	w.t0.tick(0.1)
+	d.tick(0.1)
+	check_near(w.t0.upkeep_rate(), 0.0, "dead, he costs nothing")
+	check_near(w.t0.upkeep_debt(), 0.0, "and leaves no debt behind")
+	_free_world(w)
+
+
+func test_a_poor_tribe_pays_what_it_earns_and_no_more() -> void:
+	var w: Dictionary = _make_world()
+	for i in range(10):
+		w.um.spawn_unit(BRAVE_SCENE, 0, Vector3(30 + float(i), 5, 30))
+	var income: float = w.t0.mana_rate()
+	check(income < Balance.DEMON_GOLEM_MANA_UPKEEP, "10 braves earn less than 5 mana/s (%.2f)" % income)
+	var d: DemonGolem = _demon(w, 0, Vector3(50, 5, 50))
+	w.t0.tick(0.1)
+	d.tick(0.1)
+	check_near(w.t0.upkeep_rate(), income, "he takes the whole income", 0.0001)
+	check_near(w.t0.charging_income(), 0.0, "nothing is left for the spells")
+	check_near(w.t0.upkeep_debt(), income * 0.1, "and books only what was earned", 0.0001)
 	_free_world(w)

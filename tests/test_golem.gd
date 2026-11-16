@@ -2487,14 +2487,15 @@ func test_growing_golem_stretches_for_a_second() -> void:
 # --- Sprung (stomp), Zielzahl je Angriff, Trampeln auf Gebaeude (2026-11-16) -----------------
 
 ## Zielzahl je Angriff: GOLEM_MAX_TARGETS ist die Grundzahl; der Tritt trifft 40 %
-## weniger, das Trommeln ein Viertel mehr, der Sprung die Haelfte mehr —
+## weniger, das Trommeln ein Viertel mehr, der Sprung doppelt so viele (wie das
+## Trampeln: Nutzer 2026-11-16, vorher die Haelfte mehr) —
 ## abgerundet. Handschlag und Trampeln halten sich an die Grundzahl.
 func test_every_attack_has_its_share_of_the_target_count() -> void:
 	var w: Dictionary = _make_world()
 	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
 	check(Balance.GOLEM_TARGET_PERCENT_KICK == 60 and Balance.GOLEM_TARGET_PERCENT_DRUM == 125
-		and Balance.GOLEM_TARGET_PERCENT_STOMP == 150, "kick 60 %, drum 125 %, stomp 150 % of the base count")
-	var want: Dictionary = {0: [5, 3, 6, 7], 1: [6, 3, 7, 9], 4: [7, 4, 8, 10], 7: [8, 4, 10, 12]}
+		and Balance.GOLEM_TARGET_PERCENT_STOMP == 200, "kick 60 %, drum 125 %, stomp 200 % of the base count")
+	var want: Dictionary = {0: [5, 3, 6, 10], 1: [6, 3, 7, 12], 4: [7, 4, 8, 14], 7: [8, 4, 10, 16]}
 	for lv in [0, 1, 4, 7]:
 		_level_to(g, lv)
 		var got: Array = [g.max_targets_of(Golem.ATTACK_SLAM), g.max_targets_of(Golem.ATTACK_KICK),
@@ -2503,8 +2504,8 @@ func test_every_attack_has_its_share_of_the_target_count() -> void:
 			"level %d: slam/kick/drum/stomp %s (want %s), trampling the base %d" % [lv, got, want[lv], g.max_targets()])
 	_grow_to_the_end(g)
 	check(g.max_targets() == 25 and g.max_targets_of(Golem.ATTACK_KICK) == 15
-		and g.max_targets_of(Golem.ATTACK_DRUM) == 31 and g.max_targets_of(Golem.ATTACK_STOMP) == 37,
-		"100 m: base 25, kick 15, drum 31, stomp 37")
+		and g.max_targets_of(Golem.ATTACK_DRUM) == 31 and g.max_targets_of(Golem.ATTACK_STOMP) == 50,
+		"100 m: base 25, kick 15, drum 31, stomp 50")
 	_free_world(w)
 
 
@@ -2543,24 +2544,24 @@ func test_stomp_strikes_all_around_her_with_twice_the_trample_damage() -> void:
 	_free_world(w)
 
 
-## Der Sprung trifft die Haelfte mehr Ziele als die Grundzahl (Stufe 0: 7),
+## Der Sprung trifft doppelt so viele Ziele wie die Grundzahl (Stufe 0: 10),
 ## die naechsten zuerst; Gebaeude in seiner Flaeche verlieren eine Stufe.
 func test_stomp_strikes_half_again_as_many_targets_and_buildings() -> void:
 	var w: Dictionary = _make_world()
 	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
 	g.facing = Vector3(0, 0, 1)
 	var ring: Array = []
-	for i in range(9):
-		var a: float = TAU * float(i) / 9.0
+	for i in range(12):
+		var a: float = TAU * float(i) / 12.0
 		ring.append(_foe(w, 50.0 + cos(a) * (0.5 + 0.05 * float(i)), 50.0 + sin(a) * (0.5 + 0.05 * float(i)), 1000))
-	check(g._victims(Golem.ATTACK_STOMP).size() == 9, "nine enemies stand inside the stomp's circle")
+	check(g._victims(Golem.ATTACK_STOMP).size() == 12, "twelve enemies stand inside the stomp's circle")
 	g._land_attack(Golem.ATTACK_STOMP)
 	var hit: int = 0
 	for u in ring:
 		if u.health < 1000:
 			hit += 1
-	check(hit == 7, "the stomp strikes exactly seven of them (struck %d)" % hit)
-	check(ring[7].health == 1000 and ring[8].health == 1000, "the two farthest are spared")
+	check(hit == 10, "the stomp strikes exactly ten of them (struck %d)" % hit)
+	check(ring[10].health == 1000 and ring[11].health == 1000, "the two farthest are spared")
 	var w2: Dictionary = _make_world()
 	var g2: Golem = _golem(w2, 0, Vector3(50, 5, 50))
 	g2.facing = Vector3(0, 0, 1)
@@ -3021,4 +3022,68 @@ func test_she_stays_crouched_when_her_target_dies_and_the_next_stands_close() ->
 	g.tick(TICK)
 	check(g.attack_target == second, "she takes on the next enemy")
 	check(g.stance == Golem.STANCE_CROUCH and not g.is_switching_stance(), "and stays crouched")
+	_free_world(w)
+
+
+# --- Expliziter Gebaeudeangriff (Bugmeldung 2026-11-16) -------------------------------
+
+## Bei einem BEFOHLENEN Gebaeudeangriff griff der Golem Einheiten an, die gar nicht
+## beim Gebaeude standen. Jetzt nur noch Einheiten in seiner Reichweite des Gebaeudes.
+func test_an_ordered_building_assault_only_fights_units_near_the_building() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
+	var hut: Building = w.bm.place(HUT_SCENE, w.t1, Vector2i(48, 55), 0, true)
+	check(hut != null, "an enemy hut stands ahead")
+	var away: Unit = _spawn(w, WARRIOR_SCENE, 1, Vector3(43, 5, 49))    # 7 m aside of her, far from the hut
+	away.max_health = 100000
+	away.health = 100000
+	away.order_move(away.position)
+	w.commands.order_attack_building([g] as Array[Unit], hut)
+	check(g.has_ordered_building(), "ordered onto the hut")
+	check(hut.footprint_distance_to(Vector2(away.position.x, away.position.z)) > g.reach(),
+		"the warrior stands out of her reach of the hut")
+	var ignored: bool = true
+	for i in range(40):
+		_tick_world(w)
+		ignored = ignored and g.attack_target != away
+	check(ignored and g.attack_building == hut, "she leaves the warrior alone and keeps to the hut")
+	check(hut.health < hut.max_health, "and strikes the hut")
+	# A unit right at the hut is fought (her blows land there anyway).
+	var guard: Unit = _spawn(w, WARRIOR_SCENE, 1, hut.center_world() + Vector3(-2.5, 0, 0))
+	guard.max_health = 100000
+	guard.health = 100000
+	guard.order_move(guard.position)
+	check(hut.footprint_distance_to(Vector2(guard.position.x, guard.position.z)) <= g.reach(),
+		"the guard stands in her reach of the hut")
+	var fought: bool = false
+	for i in range(40):
+		_tick_world(w)
+		fought = fought or g.attack_target == guard
+	check(fought, "the guard at the hut is fought")
+	# It runs off: she drops it and goes back to the hut.
+	guard.position = Vector3(30, 5, 50)
+	guard._sync_soa_pos()
+	for i in range(3):
+		_tick_world(w)
+	check(g.attack_target != guard and g.attack_building == hut, "a guard that leaves the hut is let go")
+	_free_world(w)
+
+
+## Ein Gebaeude, das sie sich SELBST ausgesucht hat, weicht wie bisher jedem Feind im
+## Aggro-Radius.
+func test_a_building_she_picked_herself_gives_way_to_units() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
+	var hut: Building = w.bm.place(HUT_SCENE, w.t1, Vector2i(48, 55), 0, true)
+	var away: Unit = _spawn(w, WARRIOR_SCENE, 1, Vector3(44, 5, 50))
+	away.max_health = 100000
+	away.health = 100000
+	away.order_move(away.position)
+	g._begin_attack_building(hut)
+	check(not g.has_ordered_building(), "picked by herself, not ordered")
+	var fought: bool = false
+	for i in range(40):
+		_tick_world(w)
+		fought = fought or g.attack_target == away
+	check(fought, "the warrior in her aggro radius comes first")
 	_free_world(w)

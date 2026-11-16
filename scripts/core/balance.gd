@@ -276,11 +276,13 @@ const GOLEM_MAX_TARGETS: Array[int] = [5, 6, 6, 6, 7, 8, 8, 8]
 ##   Handschlag und Trampeln  100 %   (Stufe 0-7: 5 / 6 / 6 / 6 / 7 / 8 / 8 / 8)
 ##   Tritt                     60 %   (40 % weniger:  3 / 3 / 3 / 3 / 4 / 4 / 4 / 4)
 ##   Trommeln                 125 %   (je Schlag:     6 / 7 / 7 / 7 / 8 / 10 / 10 / 10)
-##   Sprung                   150 %   (               7 / 9 / 9 / 9 / 10 / 12 / 12 / 12)
+##   Sprung                   200 %   (              10 / 12 / 12 / 12 / 14 / 16 / 16 / 16;
+##                                     doppelt so viele wie das Trampeln, Nutzer 2026-11-16 —
+##                                     vorher 150 %)
 ## Golem.max_targets_of(). Bei 100 m (Grundzahl 25): 15 / 31 / 37.
 const GOLEM_TARGET_PERCENT_KICK: int = 60
 const GOLEM_TARGET_PERCENT_DRUM: int = 125
-const GOLEM_TARGET_PERCENT_STOMP: int = 150
+const GOLEM_TARGET_PERCENT_STOMP: int = 200
 const GOLEM_GROWTH_STEPS_PER_TARGET: int = 3
 const GOLEM_MAX_LEVEL: int = 7
 const GOLEM_FINAL_BONUS_LEVEL: int = 6
@@ -435,7 +437,8 @@ const GOLEM_DRUM_HITS: Array[float] = [0.35, 0.8, 1.25]   # aus der gebueckten H
 ##   Schaden:  GOLEM_STOMP_TRAMPLE_MULT mal der Trampelschaden (aus der Groesse,
 ##             kein Stufenbonus: Stufe 0-2 2, Stufe 3-5 4, Stufe 6 6, Stufe 7 8,
 ##             100 m 40) — bei der LANDUNG, GOLEM_STOMP_WINDUP nach dem Ansetzen
-##   Ziele:    die Haelfte mehr als die Grundzahl (GOLEM_TARGET_PERCENT_STOMP)
+##   Ziele:    doppelt so viele wie die Grundzahl, also wie das Trampeln
+##             (GOLEM_TARGET_PERCENT_STOMP, 2026-11-16; vorher die Haelfte mehr)
 ##   Gebaeude: jedes in der Flaeche verliert GOLEM_STOMP_BUILDING_STAGES Stufen
 ##             (wie bei den anderen Angriffen; 0 = der Sprung laesst Gebaeude
 ##             stehen), der Gigant trifft auch Fahrzeuge. Niemand wird geworfen.
@@ -531,7 +534,14 @@ const GOLEM_SEPARATION: float = 1.0
 ##    +DEMON_GOLEM_GROWTH_TARGETS Ziele (Grundzahl, Start DEMON_GOLEM_TARGETS; die
 ##    Anteile je Angriff wie beim Golem), und Schaden: Handschlag +0,75, Tritt +0,8,
 ##    Trommeln +1 fuer alle drei Schlaege zusammen. Startschaden: die Haelfte des
-##    Golems (12,5 / 22,5 / 21). Bruchteile zaehlen mit, gerundet wird beim Treffer.
+##    Golems plus DEMON_GOLEM_START_*_BONUS (2026-11-16: Handschlag +3, Tritt +2,
+##    Trommeln +3 fuer alle drei Schlaege) — 15,5 / 24,5 / 24. Bruchteile zaehlen
+##    mit, gerundet wird beim Treffer.
+##  * UNTERHALT (Nutzervorgabe 2026-11-16): solange er lebt, kostet er
+##    DEMON_GOLEM_MANA_UPKEEP (5) Mana je Sekunde — wie die Foersterei ein Anspruch auf
+##    das laufende Einkommen, VOR dem Aufladen der Zauber. Verdient der Stamm weniger,
+##    nimmt er das ganze Einkommen (es gibt keinen Manavorrat und keine Schuld, die
+##    nach seinem Tod weiterliefe).
 ##  * Kill: DEMON_GOLEM_KILL_HEAL sofort und DEMON_GOLEM_KILL_HEAL_OVER_TIME ueber
 ##    DEMON_GOLEM_KILL_HEAL_DURATION Sekunden, stapelbar.
 ##  * ALLE ANGRIFFE 15 % SCHNELLER als beim Golem GLEICHER GROESSE
@@ -558,6 +568,10 @@ const DEMON_GOLEM_GROWTH_KILLS_STEP: int = 10
 const DEMON_GOLEM_GROWTH_MAX_HP: int = 5
 const DEMON_GOLEM_GROWTH_REGEN: float = 0.15
 const DEMON_GOLEM_DAMAGE_SHARE: float = 0.5
+const DEMON_GOLEM_START_SLAM_BONUS: float = 3.0
+const DEMON_GOLEM_START_KICK_BONUS: float = 2.0
+const DEMON_GOLEM_START_DRUM_BONUS: float = 3.0
+const DEMON_GOLEM_MANA_UPKEEP: float = 5.0
 const DEMON_GOLEM_GROWTH_SLAM_DAMAGE: float = 0.75
 const DEMON_GOLEM_GROWTH_KICK_DAMAGE: float = 0.8
 const DEMON_GOLEM_GROWTH_DRUM_DAMAGE: float = 1.0

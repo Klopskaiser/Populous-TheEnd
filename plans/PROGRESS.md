@@ -12454,3 +12454,45 @@ Schamanin. Rot hat keine Sammelpunkte (keine KI, statisches Ziel).
 **Geprueft:** Startmission headless geladen — alle 5 Huetten Stufe 4, 6/6 Besatzung,
 720 LP; die blaue Huette zeigt auf den Feuertempel, dessen Sammelpunkt liegt auf der
 Schamanin. Test `test_hut_upgrades.gd::test_upgrade_instantly_jumps_to_the_palace_like_real_upgrades`.
+
+### Golem: befohlener Gebaeudeangriff; Startmission: rote Kette (2026-11-16)
+
+- **Bugfix Gebaeudebefehl** (Bugmeldung: bei einem expliziten Gebaeudeangriff griff der
+  Golem Einheiten an, die nicht beim Gebaeude standen): der Grundtyp gibt ein Gebaeude
+  fuer jeden Feind im Aggro-Radius auf (beim Golem bis 60 m). Jetzt merkt sich der Golem
+  das BEFOHLENE Gebaeude (`_ordered_building`, `has_ordered_building()`, gesetzt von
+  `order_attack_building`, geloescht von jedem anderen Befehl). Solange es steht, kaempft
+  er nur gegen Einheiten in seiner Reichweite DES GEBAEUDES (Abstand zum Grundriss bis
+  `reach()`): `_scan_for_enemy`, `_retarget_or_idle` und der Zielwechsel in `_tick_attack`
+  sind darauf gefiltert; eine Einheit, die sich vom Gebaeude entfernt, laesst er los und
+  kehrt zum Gebaeude zurueck. Ein selbst gewaehltes Gebaeude weicht wie bisher.
+- **Startmission:** auch Rot bekommt die Sammelpunkt-Kette (Huetten -> roter
+  Feuertempel -> rote Schamanin); vorher blieben die roten Braves vor ihren Huetten
+  stehen. Nachgemessen: Rot bildet aus (52 -> 69 Feuerkrieger), bis der Wohnraum (180)
+  voll ist. **Blau produziert nicht:** 100 freie Braves + Besatzung = 107 Einwohner gegen
+  45 Wohnplaetze der einen Huette — die blaue Kette laeuft erst, wenn Platz frei wird.
+
+**Tests:** `test_golem.gd` 637 bestanden (neu: `test_an_ordered_building_assault_only_fights_units_near_the_building`,
+`test_a_building_she_picked_herself_gives_way_to_units`; Gegenprobe: ohne den Fix fallen 4
+Pruefungen durch).
+
+### Daemonengolem: 5 Mana/s Unterhalt, Startschaden hoeher (2026-11-16)
+
+Nutzervorgabe. `DemonGolem._pay_upkeep`: solange er lebt, `DEMON_GOLEM_MANA_UPKEEP` (5)
+Mana je Sekunde — Muster der Foersterei (`claim_upkeep_rate` + `consume_mana`): ein
+Anspruch auf das laufende Einkommen vor dem Aufladen, hoechstens so viel, wie der Stamm
+verdient, keine Schuld nach seinem Tod (5 Mana/s entsprechen gut 45 Anhaengern). Die
+Manaanzeige zeigt den Abzug ueber `upkeep_rate()`. Startschaden: Handschlag +3, Tritt +2,
+Trommeln +3 fuer alle drei Schlaege (`DEMON_GOLEM_START_*_BONUS`) — 15,5 / 24,5 / 24
+statt 12,5 / 22,5 / 21; der Zuwachs je Stufe bleibt.
+
+**Tests:** `test_demon_golem.gd` 132 bestanden (Schadenswerte angepasst; neu
+`test_he_costs_five_mana_per_second_while_he_lives`, `test_a_poor_tribe_pays_what_it_earns_and_no_more`).
+
+### Golem: Sprung trifft doppelt so viele Ziele wie das Trampeln (2026-11-16)
+
+Nutzervorgabe: `GOLEM_TARGET_PERCENT_STOMP` 150 -> 200 (Golem Stufe 0-7: 10 / 12 / 12 /
+12 / 14 / 16 / 16 / 16, bei 100 m 50; Daemonengolem: 6 beim Erscheinen, +2 je Stufe).
+Tests angepasst (`test_every_attack_has_its_share_of_the_target_count`,
+`test_stomp_strikes_half_again_as_many_targets_and_buildings` — jetzt 12 Feinde im Kreis,
+10 getroffen; `test_targets_start_at_three_and_one_more_every_step`).

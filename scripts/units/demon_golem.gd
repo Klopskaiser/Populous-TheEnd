@@ -19,6 +19,7 @@ class_name DemonGolem extends Golem
 ##  * ab 20 m Luftschiffe, ab 30 m das Riesenpaket (is_giant) samt Trampeln und
 ##    Kollision. Nie gehaertet (is_full_size ist immer falsch).
 ##  * Kill: 10 Leben sofort und 10 ueber 5 s, stapelbar.
+##  * Unterhalt: 5 Mana je Sekunde, solange er lebt (_pay_upkeep).
 ##
 ## unit_kind() bleibt "golem": er zaehlt in der Seitenleiste bei den Golems und
 ## ueberall dort, wo nach der Einheitenart gefragt wird, als Golem.
@@ -142,17 +143,19 @@ func level_damage_bonus() -> int:
 
 
 ## Damage of an attack as it stands in the books — with its fraction: half the
-## golem's starting damage plus the gain of every growth step.
+## golem's starting damage, a start bonus (slam +3, kick +2, drum +3), plus the gain
+## of every growth step.
 func damage_exact(kind: StringName) -> float:
 	var n: float = float(growth_steps)
 	if kind == ATTACK_KICK:
 		return float(Balance.GOLEM_KICK_DAMAGE) * Balance.DEMON_GOLEM_DAMAGE_SHARE \
-			+ Balance.DEMON_GOLEM_GROWTH_KICK_DAMAGE * n
+			+ Balance.DEMON_GOLEM_START_KICK_BONUS + Balance.DEMON_GOLEM_GROWTH_KICK_DAMAGE * n
 	if kind == ATTACK_DRUM:
 		return float(Balance.GOLEM_DRUM_HIT_DAMAGE * Balance.GOLEM_DRUM_HITS.size()) \
-			* Balance.DEMON_GOLEM_DAMAGE_SHARE + Balance.DEMON_GOLEM_GROWTH_DRUM_DAMAGE * n
+			* Balance.DEMON_GOLEM_DAMAGE_SHARE + Balance.DEMON_GOLEM_START_DRUM_BONUS \
+			+ Balance.DEMON_GOLEM_GROWTH_DRUM_DAMAGE * n
 	return float(Balance.GOLEM_SLAM_DAMAGE) * Balance.DEMON_GOLEM_DAMAGE_SHARE \
-		+ Balance.DEMON_GOLEM_GROWTH_SLAM_DAMAGE * n
+		+ Balance.DEMON_GOLEM_START_SLAM_BONUS + Balance.DEMON_GOLEM_GROWTH_SLAM_DAMAGE * n
 
 
 ## Damage of an attack right now: the exact value, rounded when it lands. The
@@ -262,6 +265,18 @@ func tick(delta: float) -> void:
 	super.tick(delta)
 	if state != State.DEAD and not doomed:
 		_tick_kill_heal(delta)
+		_pay_upkeep(delta)
+
+
+## His upkeep (user spec 2026-11-16): DEMON_GOLEM_MANA_UPKEEP mana per second for
+## as long as he lives — the forester's pattern: a claim on the tribe's income,
+## paid before any spell charges. A tribe that earns less gives what it earns; no
+## debt is left that would run on after his death.
+func _pay_upkeep(delta: float) -> void:
+	if tribe == null or delta <= 0.0:
+		return
+	var granted: float = tribe.claim_upkeep_rate(Balance.DEMON_GOLEM_MANA_UPKEEP)
+	tribe.consume_mana(granted * delta)
 
 
 ## The healing over time of the last kills: every kill's share runs for
