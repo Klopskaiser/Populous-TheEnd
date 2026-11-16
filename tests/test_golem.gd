@@ -279,7 +279,11 @@ func test_golem_has_the_build_of_the_watchtower_but_is_a_tenth_shorter() -> void
 		"body box: 75 percent of the old width, then another 10 percent less")
 	check_near(Balance.GOLEM_BODY_HALF_DEPTH, 0.9 * 0.75 * 0.9, "and the same for the depth")
 	check_near(g.trample_radius(), Balance.GOLEM_BODY_HALF_WIDTH, "the trample radius is the body box")
-	check_near(g.flatten_radius(), g.trample_radius(), "and so is the ground he levels")
+	# Since 2026-11-16 he levels only where others can strike him: his target
+	# radius, half the radius of the selection ring (user spec).
+	check_near(g.target_radius(), g.selection_ring_radius() * 0.5,
+		"the target radius is half the selection ring's radius")
+	check_near(g.flatten_radius(), g.target_radius(), "and so is the ground he levels")
 	g.free()
 
 
@@ -3087,3 +3091,149 @@ func test_a_building_she_picked_herself_gives_way_to_units() -> void:
 		fought = fought or g.attack_target == away
 	check(fought, "the warrior in her aggro radius comes first")
 	_free_world(w)
+
+
+# --- Ufer (Bugfix 2026-11-16) ---------------------------------------------------------
+
+## Ufer: Meer ab x = 55 (1,4 m), davor faellt das Land ab. Die Zelle x = 54 ist
+## begehbar (Eckmittel ueber dem Meer), hat aber Punkte auf Wasserhoehe.
+func _shore_world() -> Dictionary:
+	var w: Dictionary = _make_world(5.0)
+	for vz in range(w.td.verts):
+		for vx in range(55, w.td.verts):
+			w.td.set_vertex_height(vx, vz, 1.4)
+		w.td.set_vertex_height(54, vz, 2.8)
+		w.td.set_vertex_height(53, vz, 3.8)
+		w.td.set_vertex_height(52, vz, 4.6)
+	w.nav.update_region(Rect2i(0, 0, w.td.size, w.td.size))
+	return w
+
+
+## Nutzerbericht: Golems laufen ohne Kampf am Wasser entlang und sterben. Ursache:
+## das Einebnen des Riesen senkte das Ufer unter ihm bis unter die Wasserlinie, und
+## die Gelaendepruefung danach ertraenkte ihn. Jetzt bleibt das Ufer stehen.
+func test_a_giant_levelling_along_the_shore_does_not_drown() -> void:
+	var w: Dictionary = _shore_world()
+	check(w.nav.is_cell_walkable(Vector2i(54, 50)), "the shore cell is walkable")
+	var g: Golem = _golem(w, 0, Vector3(54.5, w.td.get_height(54.5, 50.5), 50.5))
+	g.terrain_ctx = w.ctx
+	_level_to(g, 7)
+	g.order_move(Vector3(54.5, 2.1, 80.5), false, false)
+	for i in range(300):
+		_tick_world(w)
+	check(g.state != Unit.State.DEAD, "30 s of levelling and walking along the shore: alive")
+	var shore_kept: bool = true
+	for vz in range(45, 85):
+		shore_kept = shore_kept and absf(w.td.heights[vz * w.td.verts + 54] - 2.8) < 0.001
+	check(shore_kept, "the vertices at the water are not lowered")
+	check(w.td.heights[50 * w.td.verts + 53] < 3.8 - 0.1, "further inland he still levels")
+	_free_world(w)
+
+
+## Nasse Fuesse am Ufer ertraenken einen Golem nicht mehr, wenn nebenan das
+## Gelaende geaendert wird — einen Krieger an derselben Stelle schon (unveraendert).
+## Versinkt das Land unter dem Golem aber wirklich, ertrinkt er weiter.
+func test_a_golem_wading_at_the_shore_survives_terrain_changes_but_not_sunken_land() -> void:
+	var w: Dictionary = _shore_world()
+	var spot: Vector3 = Vector3(54.9, 0.0, 50.5)
+	spot.y = w.td.get_height(spot.x, spot.z)
+	check(spot.y <= TerrainData.SEA_LEVEL + Unit.WATER_EPS, "his feet are at the waterline")
+	var g: Golem = _golem(w, 0, spot)
+	var foe: Unit = _spawn(w, WARRIOR_SCENE, 1, spot + Vector3(0, 0, 3))
+	w.ctx.apply_terrain_change(Rect2i(50, 46, 8, 10))
+	check(g.state != Unit.State.DEAD, "a terrain change nearby: the golem wades on")
+	check(foe.state == Unit.State.DEAD, "a warrior at the waterline still drowns")
+	for vz in range(48, 54):
+		for vx in range(52, 58):
+			w.td.set_vertex_height(vx, vz, TerrainData.SEA_LEVEL - Balance.GOLEM_DROWN_DEPTH - 0.2)
+	w.ctx.apply_terrain_change(Rect2i(52, 48, 6, 6))
+	check(g.state == Unit.State.DEAD, "the land under him sunk deep: he drowns")
+	_free_world(w)
+
+
+## Das Trommeln sind drei Schlaege mit je eigener Zielauswahl: was der erste
+## toetet, ersetzt der naechste durch weitere Einheiten in der Flaeche. Die Wahl
+## rechnete es frueher wie EINEN Schlag mit dem Gesamtschaden auf eine Zielzahl
+## (Bugfix 2026-11-16, Untersuchung "Daemon trommelt nicht mehr").
+func test_the_drum_is_valued_hit_by_hit_against_a_weak_crowd() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
+	g.stance = Golem.STANCE_CROUCH
+	var impact: Vector3 = g.position + g.heading() * (Golem.SLAM_FORWARD * g.limb_factor())
+	for i in range(12):
+		var b: Unit = _spawn(w, BRAVE_SCENE, 1,
+			impact + Vector3(cos(float(i)) * 0.6, 0, sin(float(i)) * 0.6))
+		b.health = 10
+	var cap: int = g.max_targets_of(Golem.ATTACK_DRUM)
+	check(cap == 6, "six targets per drum hit at level 0 (got %d)" % cap)
+	check_near(g.attack_worth(Golem.ATTACK_DRUM), 120.0,
+		"hits one and two take six fresh braves each (12 x 10), the third finds no one", 0.001)
+	check_near(g.attack_worth(Golem.ATTACK_SLAM), 50.0, "the slam: five braves", 0.001)
+	_free_world(w)
+
+
+# --- Zielradius und Zielpunkte (Nutzervorgabe 2026-11-16) -----------------------------
+
+## Zwei Golems mit einem Bewegungsbefehl: ihre Zielpunkte liegen so weit
+## auseinander, dass sich ihre Koerper nicht beruehren (vorher feste Packabstaende
+## von 0,55 m — die Golems liefen sich in den Weg). Gilt auch fuer ungleiche Groessen.
+func test_golems_sent_together_get_goals_clear_of_each_other() -> void:
+	var w: Dictionary = _make_world()
+	var big: Golem = _golem(w, 0, Vector3(30, 5, 30))
+	var small: Golem = _golem(w, 0, Vector3(34, 5, 30))
+	var third: Golem = _golem(w, 0, Vector3(30, 5, 34))
+	var brave: Unit = _spawn(w, BRAVE_SCENE, 0, Vector3(32, 5, 32))
+	_level_to(big, 6)
+	_level_to(third, 3)
+	var sel: Array[Unit] = [big, small, third, brave]
+	var sent: int = w.commands.order_move(sel, Vector3(60, 5, 60))
+	check(sent == 4, "all four get the order (got %d)" % sent)
+	var gs: Array[Golem] = [big, small, third]
+	var apart: bool = true
+	for a in range(gs.size()):
+		for b in range(a + 1, gs.size()):
+			var need: float = (gs[a].trample_radius() + gs[b].trample_radius()) * Balance.GOLEM_BODY_GAP
+			var ga: Vector3 = gs[a].waypoint_queue.back()
+			var gb: Vector3 = gs[b].waypoint_queue.back()
+			if Vector2(ga.x - gb.x, ga.z - gb.z).length() < need:
+				apart = false
+	check(apart, "no two golem goals closer than their two bodies")
+	check(Vector2(big.waypoint_queue.back().x - 60.0, big.waypoint_queue.back().z - 60.0).length() < 0.01,
+		"the biggest takes the clicked point")
+	check(brave.state == Unit.State.MOVE, "the brave marches as before")
+	_free_world(w)
+
+
+## Angreifer schlagen den Golem vom Rand seines Zielradius aus (die Haelfte des
+## Auswahlkreises), statt sich unter ihm zu draengen — im Objektcode wie in der
+## Kampfschleife des UnitManagers. Gewoehnliche Einheiten haben Radius 0.
+func test_attackers_strike_a_golem_from_the_edge_of_his_target_radius() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
+	_level_to(g, 7)
+	var tr: float = g.target_radius()
+	check(tr > 1.5, "the giant is a big target (%.2f m)" % tr)
+	check_near(w.um.soa_reach[g._idx], tr, "the manager keeps the radius in step", 0.0001)
+	var foe: Unit = _spawn(w, WARRIOR_SCENE, 1, Vector3(50 + tr + 1.0, 5, 50))
+	check(foe.target_radius() == 0.0, "an ordinary unit is a point")
+	check_near(foe.reach_dist_to(g), 1.0, "measured to the edge of his circle", 0.001)
+	check(foe.reach_dist_to(g) <= Balance.MELEE_RANGE, "so the warrior is already in melee range")
+	check_near(_flat_len(g.melee_slot_position(0) - g.position), Unit.MELEE_SLOT_RADIUS + tr,
+		"his melee slots lie outside the circle", 0.001)
+	foe.max_health = 100000
+	foe.health = 100000
+	g.max_health = 100000
+	g.health = 100000
+	g.stance = Golem.STANCE_STAND
+	foe.order_attack(g)
+	var start_hp: int = g.health
+	for i in range(60):
+		foe.tick(TICK)   # only the warrior: the golem must not strike back here
+		w.um.tick(TICK)
+	check(g.health < start_hp, "the warrior hits him from out there")
+	check(_flat_len(foe.position - g.position) > tr, "and never steps inside the circle")
+	_free_world(w)
+
+
+func _flat_len(v: Vector3) -> float:
+	return Vector2(v.x, v.z).length()

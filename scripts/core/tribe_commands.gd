@@ -89,7 +89,8 @@ func place_building(tribe: Tribe, building_scene: PackedScene, cell: Vector2i,
 ## perimeter is blocked can never be worked — no wood is booked, no progress is
 ## made, and manual worker assignment fails silently. Deliberately NOT a blanket
 ## minimum spacing for the player (the AI has AI_PLOT_SPACING): that would also
-## forbid all the tight villages that work fine.
+## forbid all the tight villages that work fine. (Superseded 2026-11-16 by the
+## user: every building now keeps Balance.BUILDING_MIN_GAP cells free around it.)
 ##
 ## The DISC RIM (bug report 2026-11-16): every footprint cell AND the ring of
 ## PLACE_RIM_MARGIN cells around it must lie on the disc. Before, only a
@@ -119,12 +120,32 @@ func can_place_at(cell: Vector2i, footprint: Vector2i, orientation: int = 0) -> 
 				return false
 			if terrain.cell_height(c) <= TerrainData.SEA_LEVEL + 0.1:
 				return false
+	if not keeps_building_gap(cell, footprint):
+		return false
 	for vz in range(cell.y, cell.y + footprint.y + 1):
 		for vx in range(cell.x, cell.x + footprint.x + 1):
 			var h: float = terrain.vertex_height(vx, vz)
 			lo = minf(lo, h)
 			hi = maxf(hi, h)
 	return hi - lo <= MAX_LEVEL_DIFF
+
+
+## True when no cell within Balance.BUILDING_MIN_GAP cells around the footprint
+## belongs to another building or construction site (user spec 2026-11-16: at
+## least that much free ground between two buildings).
+func keeps_building_gap(cell: Vector2i, footprint: Vector2i) -> bool:
+	var g: int = Balance.BUILDING_MIN_GAP
+	if g <= 0 or nav_grid == null:
+		return true
+	for z in range(cell.y - g, cell.y + footprint.y + g):
+		for x in range(cell.x - g, cell.x + footprint.x + g):
+			if x >= cell.x and x < cell.x + footprint.x \
+					and z >= cell.y and z < cell.y + footprint.y:
+				continue   # the footprint itself is checked by the caller
+			var c: Vector2i = Vector2i(x, z)
+			if nav_grid.terrain.in_bounds(c) and nav_grid.is_cell_blocked_by_building(c):
+				return false
+	return true
 
 
 ## Cells of ground a plot keeps from the rim: its workers stand around it.
@@ -243,6 +264,24 @@ func order_move(units: Array[Unit], target: Vector3, queue_up: bool = false,
 			alive.append(unit)
 	if alive.is_empty():
 		return 0
+	# Golems get slots of their own, spaced by their real body size (Bugfix
+	# 2026-11-16: the fixed pack offsets put two golems' goals inside each other,
+	# and they ran into each other's way). The rest marches in packs as before.
+	var sent: int = alive.size()
+	var golems: Array[Unit] = []
+	for unit in alive:
+		if unit is Golem:
+			golems.append(unit)
+	if not golems.is_empty():
+		var slots: Array[Vector3] = golem_slots(golems, land)
+		for k in range(golems.size()):
+			var slot: Vector3 = slots[k]
+			if nav_grid != null:
+				slot = _land_slot(slot, land)
+			golems[k].order_move(slot, queue_up, aggressive)
+			alive.erase(golems[k])
+		if alive.is_empty():
+			return sent
 	# Spatial sort: units that stand together march together.
 	alive.sort_custom(func(a: Unit, b: Unit) -> bool:
 		var ka: float = a.position.z * 1000.0 + a.position.x
@@ -279,7 +318,54 @@ func order_move(units: Array[Unit], target: Vector3, queue_up: bool = false,
 		# combat — no point registering those.
 		if not aggressive and unit_manager != null:
 			unit_manager.register_move_group(batch, group_target)
-	return alive.size()
+	return sent
+
+
+## Goal points for golems sent to `centre` together, in the order of `golems`:
+## the biggest takes the centre, every other one the first point on rings around
+## it that keeps clear of all slots so far by the sum of both bodies (their
+## separation distance, trample radius x GOLEM_BODY_GAP) plus GOLEM_SLOT_MARGIN.
+## The rings are spaced by the biggest body, so small golems fill in between.
+static func golem_slots(golems: Array[Unit], centre: Vector3) -> Array[Vector3]:
+	var order: Array[int] = []
+	var biggest: float = 0.0
+	for k in range(golems.size()):
+		order.append(k)
+		biggest = maxf(biggest, (golems[k] as Golem).trample_radius())
+	order.sort_custom(func(a: int, b: int) -> bool:
+		return (golems[a] as Golem).trample_radius() > (golems[b] as Golem).trample_radius())
+	var step: float = maxf(biggest, 0.5)
+	var slots: Array[Vector3] = []
+	slots.resize(golems.size())
+	var placed: Array[Vector3] = []
+	var placed_r: Array[float] = []
+	for k in order:
+		var r: float = (golems[k] as Golem).trample_radius()
+		var slot: Vector3 = Vector3.INF
+		var ring: int = 0
+		while slot == Vector3.INF and ring <= 64:
+			var count: int = 1 if ring == 0 else 6 * ring
+			for j in range(count):
+				var angle: float = TAU * float(j) / float(count)
+				var p: Vector3 = centre + Vector3(cos(angle), 0.0, sin(angle)) \
+					* (step * float(ring))
+				var clear: bool = true
+				for q in range(placed.size()):
+					var need: float = (r + placed_r[q]) * Balance.GOLEM_BODY_GAP \
+						+ Balance.GOLEM_SLOT_MARGIN
+					if Vector2(p.x - placed[q].x, p.z - placed[q].z).length() < need:
+						clear = false
+						break
+				if clear:
+					slot = p
+					break
+			ring += 1
+		if slot == Vector3.INF:
+			slot = centre
+		slots[k] = slot
+		placed.append(slot)
+		placed_r.append(r)
+	return slots
 
 
 ## True if AT LEAST ONE of the units cannot reach `target` on foot (different

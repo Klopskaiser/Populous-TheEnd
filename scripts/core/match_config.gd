@@ -12,6 +12,9 @@ const MAX_AI: int = 3
 var mode: Mode = Mode.SKIRMISH
 ## Number of AI opponents (SKIRMISH only; clamped to MIN_AI..MAX_AI).
 var ai_count: int = 1
+## SURVIVAL only: endless survival — the waves never stop and keep growing
+## (user spec 2026-11-16); the match ends only with the player's defeat.
+var endless: bool = false
 ## Map selection (phase 7i: island / seenland / bergpass / plateau).
 var map_id: String = MapGenerator.DEFAULT_MAP
 
@@ -50,6 +53,14 @@ static func stress_test() -> MatchConfig:
 static func survival() -> MatchConfig:
 	var config: MatchConfig = MatchConfig.new()
 	config.mode = Mode.SURVIVAL
+	return config
+
+
+## Endless survival ("Endlos-Überleben", 2026-11-16): the same base and waves,
+## but past wave SURVIVAL_WAVE_COUNT it goes on, every wave bigger than the last.
+static func survival_endless() -> MatchConfig:
+	var config: MatchConfig = survival()
+	config.endless = true
 	return config
 
 

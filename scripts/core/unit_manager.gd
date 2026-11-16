@@ -212,6 +212,9 @@ var soa_wp: PackedVector3Array = PackedVector3Array()
 var soa_goal: PackedVector3Array = PackedVector3Array()
 ## Walk speed (Unit.speed), captured at register — static per unit kind.
 var soa_speed: PackedFloat32Array = PackedFloat32Array()
+## Target radius (Unit.target_radius): ranges are measured to the edge of this
+## circle. 0 for ordinary units; the golem keeps it in step as he grows.
+var soa_reach: PackedFloat32Array = PackedFloat32Array()
 ## Knockback-density accumulator of HELD units (fireball salvos): captured
 ## from Unit.knockback_accum at hold entry, decayed by the kernel while held,
 ## written back on drop/clear. Without this, every fireball splash locked its
@@ -351,6 +354,7 @@ func _run_combat_kernels(delta: float) -> void:
 	var wait_centre_r2: float = (Unit.MELEE_WAIT_RADIUS * 2.0) \
 		* (Unit.MELEE_WAIT_RADIUS * 2.0)
 	var arrive: float = Unit.ARRIVE_EPS
+	var reach_arr: PackedFloat32Array = soa_reach
 	var kb: PackedFloat32Array = soa_kb
 	var kb_decay: float = Unit.KNOCKBACK_ACCUM_DECAY * delta
 	var obj: Array[Unit] = _obj_tick
@@ -431,12 +435,29 @@ func _run_combat_kernels(delta: float) -> void:
 					dx = pt.x - pi0.x
 					dz = pt.z - pi0.z
 					d2 = dx * dx + dz * dz
+					# A big target (golem) is struck at the edge of its target
+					# radius: every band grows by it (rare — ordinary units are 0).
+					var m_r2: float = melee_r2
+					var f_r2: float = fire_r2
+					var dr_r2: float = direct_r2
+					var wr_r2: float = wait_ring_r2
+					var wc_r2: float = wait_centre_r2
+					var tr: float = reach_arr[t]
+					if tr > 0.0:
+						m_r2 = (Balance.MELEE_RANGE + tr) * (Balance.MELEE_RANGE + tr)
+						f_r2 = (Balance.FIREWARRIOR_FIRE_RANGE + tr) \
+							* (Balance.FIREWARRIOR_FIRE_RANGE + tr)
+						dr_r2 = (Unit.COMBAT_DIRECT_RANGE + tr) * (Unit.COMBAT_DIRECT_RANGE + tr)
+						wr_r2 = (Unit.MELEE_WAIT_RADIUS + tr + 0.6) \
+							* (Unit.MELEE_WAIT_RADIUS + tr + 0.6)
+						wc_r2 = (Unit.MELEE_WAIT_RADIUS * 2.0 + tr) \
+							* (Unit.MELEE_WAIT_RADIUS * 2.0 + tr)
 					match mode:
 						HOLD_MELEE:
-							if d2 > melee_r2:
+							if d2 > m_r2:
 								drop = true
 						HOLD_FIRE:
-							if d2 <= melee_r2 or d2 > fire_r2:
+							if d2 <= m_r2 or d2 > f_r2:
 								drop = true
 						HOLD_WAIT:
 							# Second row: hand fine control back when the waiter
@@ -446,23 +467,23 @@ func _run_combat_kernels(delta: float) -> void:
 							var wc: Vector3 = goal_arr[i]
 							var wcx: float = pi0.x - wc.x
 							var wcz: float = pi0.z - wc.z
-							if wcx * wcx + wcz * wcz > wait_ring_r2:
+							if wcx * wcx + wcz * wcz > wr_r2:
 								drop = true
 							else:
 								var wtx: float = pt.x - wc.x
 								var wtz: float = pt.z - wc.z
-								if wtx * wtx + wtz * wtz > wait_centre_r2:
+								if wtx * wtx + wtz * wtz > wc_r2:
 									drop = true
 						HOLD_CHASE_DIRECT:
 							# Arrived in melee -> strike branch; target fled
 							# past the direct band -> the object plans a path.
-							if d2 <= melee_r2 or d2 > direct_r2:
+							if d2 <= m_r2 or d2 > dr_r2:
 								drop = true
 						HOLD_CHASE:
 							# Close enough for the direct-step pursuit (or the
 							# strike itself) -> object; target drifted from its
 							# plan-time spot -> object re-plans the path.
-							if d2 <= direct_r2:
+							if d2 <= dr_r2:
 								drop = true
 							else:
 								var g: Vector3 = goal_arr[i]
@@ -471,7 +492,7 @@ func _run_combat_kernels(delta: float) -> void:
 								if gx * gx + gz * gz > 1.0:
 									drop = true
 						HOLD_CHASE_FIRE:
-							if d2 <= fire_r2:
+							if d2 <= f_r2:
 								drop = true
 							else:
 								var gf: Vector3 = goal_arr[i]
@@ -1233,6 +1254,7 @@ func register(unit: Unit) -> void:
 	soa_wp.append(Vector3.ZERO)
 	soa_goal.append(Vector3.ZERO)
 	soa_speed.append(unit.speed)
+	soa_reach.append(unit.target_radius())
 	soa_kb.append(0.0)
 	if _slot_gen.size() <= unit._idx:
 		_slot_gen.resize(unit._idx + 1)   # zero-filled; unregister bumps
@@ -1278,6 +1300,7 @@ func unregister(unit: Unit) -> void:
 		soa_wp[index] = soa_wp[last]
 		soa_goal[index] = soa_goal[last]
 		soa_speed[index] = soa_speed[last]
+		soa_reach[index] = soa_reach[last]
 		soa_kb[index] = soa_kb[last]
 		soa_pos.resize(last)
 		soa_state.resize(last)
@@ -1294,6 +1317,7 @@ func unregister(unit: Unit) -> void:
 		soa_wp.resize(last)
 		soa_goal.resize(last)
 		soa_speed.resize(last)
+		soa_reach.resize(last)
 		soa_kb.resize(last)
 		# Both touched slots change occupancy: stored (index, generation)
 		# handles onto the removed unit AND onto the moved unit go stale — the

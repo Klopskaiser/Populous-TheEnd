@@ -14,12 +14,12 @@ class_name DemonGolem extends Golem
 ##    Golem-Formeln fuer Reichweite, Schneise, Tempo, Takt usw. rechnen damit.
 ##    Die Flaechen wachsen wie beim Golem nach Stufe 7.
 ##  * je Wachstumsstufe +5 Lebensobergrenze, +0,15 Leben/s, +1 Ziel und Schaden
-##    (Handschlag +0,75, Tritt +0,8, Trommeln +1) auf den halben Startschaden.
+##    (Handschlag +0,75, Tritt +0,8, Trommeln +1,2) auf den halben Startschaden.
 ##  * alle Angriffe 15 % schneller als beim Golem gleicher Groesse.
 ##  * ab 20 m Luftschiffe, ab 30 m das Riesenpaket (is_giant) samt Trampeln und
 ##    Kollision. Nie gehaertet (is_full_size ist immer falsch).
 ##  * Kill: 10 Leben sofort und 15 ueber 5 s, stapelbar.
-##  * Wachstumsstufe: 20 Leben sofort und 30 ueber 5 s, dazu.
+##  * Wachstumsstufe: 30 Leben sofort und 45 ueber 5 s, dazu.
 ##  * Unterhalt: 5 Mana je Sekunde, solange er lebt (_pay_upkeep).
 ##
 ## unit_kind() bleibt "golem": er zaehlt in der Seitenleiste bei den Golems und

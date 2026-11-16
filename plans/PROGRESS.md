@@ -12517,3 +12517,59 @@ Nutzervorgabe: jede Wachstumsstufe heilt 20 LP sofort und 30 LP ueber 5 s
 Lebensobergrenze und zusaetzlich zur Kill-Heilung (10 + 15). Die Heilung ueber Zeit
 fuehrt jetzt je Eintrag ihre eigene Rate (`_heal_stacks` als Vector2: Restzeit, LP/s;
 `_add_heal_over_time`). Test `test_a_growth_step_heals_twenty_at_once_and_thirty_over_five_seconds`.
+
+### Golem: Tod am Ufer ohne Kampf (Bugfix 2026-11-16)
+
+Nutzerbericht: Golems laufen ohne Kampf am Wasser entlang und sterben. Ursache: eine
+Uferzelle gilt als begehbar, solange das Mittel ihrer Ecken ueber dem Meer liegt -
+Punkte darauf koennen auf Wasserhoehe liegen. Jede Gelaendeaenderung nebenan
+(`SpellContext.check_terrain_integrity`) ertraenkte, wer dort stand; und das Einebnen
+des Riesen ist so eine Aenderung, direkt unter ihm, alle 0,6 s - es senkte dazu das
+Ufer und zog die Wasserlinie unter ihn (nachgestellt: Stufe 7 am Ufer, tot nach 1,1 s).
+Fix: (1) `Golem.flatten_plan` laesst Ecken mit einem Nachbarn auf Wasserhoehe stehen
+(`_next_to_water`), die Uferlinie wandert nicht mehr; (2) die Integritaetspruefung
+fragt `Unit.is_flooded_on(td)` - normale Einheiten wie bisher, der Golem (und der
+Daemon) erst ab `GOLEM_DROWN_DEPTH` 0,8 m unter der Wasserlinie (eine begehbare Zelle
+reicht nie tiefer als 0,75 m; Sink versenkt 3 m und toetet ihn weiter). Tests in
+`test_golem.gd` (`test_a_giant_levelling_along_the_shore_does_not_drown`,
+`test_a_golem_wading_at_the_shore_survives_terrain_changes_but_not_sunken_land`).
+
+### Golem-Paket 2026-11-16: Zielradius, Zielpunkte, Trommeln, Daemon, Endlos-Ueberleben
+
+Nutzervorgaben:
+1. Zielpunkte: mehrere Golems in einem Bewegungsbefehl bekommen eigene Ziele mit dem Abstand
+   ihrer Koerper (`TribeCommands.golem_slots`, `GOLEM_SLOT_MARGIN` 0,5 m) statt der festen
+   Packabstaende (0,55 m), die die Ziele ineinander legten.
+2. Zielradius: Angreifer messen ihre Reichweite zum Rand eines Kreises mit dem halben Radius
+   des Auswahlkreises (`Unit.target_radius`, `reach_dist_to`, `GOLEM_TARGET_RADIUS_SHARE`);
+   Nahkampf, Feuerkrieger, Kampfplaetze, Wartering und die Kampfschleife (`soa_reach`).
+   Nicht angepasst: Feuerramme, Katapult, Wachturm, Luftschiff, Aggro-Suche.
+3. Einebnen nur im Zielradius (`flatten_radius()` = `target_radius()`).
+4. Daemon-Levelheilung 30 sofort + 45 ueber 5 s (vorher 20 / 30).
+5. Daemon-Ladung 600 statt 900 Mana (ein Drittel billiger).
+6. Untersuchung "Daemon trommelt spaeter nie": (a) Werte - der Handschlag waechst +0,75 je
+   Stufe bei 1,44-mal so schnellem Takt (effektiv +1,08), das Trommeln +1; ab ~22 m ist der
+   Handschlag je Einzelziel staerker (100 m: 38,1 gegen 36,1 Schaden/s), nur in Gruppen ueber
+   der Zielzahl gewinnt das Trommeln (125 % Ziele). (b) Bug - die Wahl zaehlte das Trommeln wie
+   EINEN Schlag mit Gesamtschaden; jetzt Schlag fuer Schlag mit neuer Zielauswahl
+   (`_drum_unit_worth`). Zu (a) Nutzerentscheidung: Trommelzuwachs +1 -> +1,2 je Stufe
+   (`DEMON_GOLEM_GROWTH_DRUM_DAMAGE`); damit liegt das Trommeln je Einzelziel auf
+   jeder Groesse vorn (150 m: 46,0 gegen 41,6 Schaden/s).
+7. Endlos-Ueberleben: Hauptmenue "Survivalszenarien" mit "Ueberleben (20 Wellen)" und
+   "Endlos-Ueberleben" (`MatchConfig.survival_endless`, `SurvivalMode.endless`).
+Tests: `test_golem.gd`, `test_demon_golem.gd`, `test_survival.gd`.
+
+### Ritualkammer (experimentell) und Bauabstand (2026-11-16)
+
+Nutzervorgaben:
+- Ritualkammer (`scripts/buildings/ritual_chamber.gd`, `scenes/buildings/ritual_chamber.tscn`):
+  20 Holz, 3x3, Ausbildungsgebaeude ohne Ausgang, 1 s, Mana je Brave wie ein Krieger
+  (1,8). Je zwei Opfer (je Stamm) ein Kill fuer einen zufaelligen eigenen Golem, ohne Golem
+  10 Mana in einen der Golemzauber. Optionsschalter im Hauptmenue
+  (`GameSettings.ritual_chamber_enabled`), Eintrag im Baumenue nur mit Schalter
+  (`Sidebar.default_build_entries(experimental)`), Icon wie der Golemzauber.
+  Annahmen: 450 LP; Opferzaehler je Stamm statt je Kammer; Mana-Kosten "wie die
+  Kriegerproduktion" als gleicher Betrag je Einheit gelesen.
+- Bauabstand `Balance.BUILDING_MIN_GAP` = 1 Zelle um jedes Gebaeude (`keeps_building_gap`).
+  `test_construction_stuck.gd` stellt seine Baustelle am Nachbarn jetzt direkt auf.
+Tests: `tests/test_ritual_chamber.gd`.

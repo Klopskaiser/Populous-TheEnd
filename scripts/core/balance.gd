@@ -308,6 +308,20 @@ const GOLEM_FLATTEN_RATE: float = 0.1
 ## durch den Giganten), und Gelaende, das schon darunter liegt (Meeresboden),
 ## wird gar nicht angefasst — weder gesenkt noch gehoben.
 const GOLEM_FLATTEN_ABOVE_WATER: float = 0.15
+## Ein Golem (auch der Daemon) ertrinkt bei Gelaendeaenderungen erst, wenn der
+## Boden unter ihm so viele Meter unter der Wasserlinie liegt - tiefer, als eine
+## begehbare Uferzelle je reicht (0,75 m). Am Ufer entlangwaten ist damit sicher,
+## Land unter ihm versenken (Sink: 3 m) toetet ihn weiter (Bugfix 2026-11-16).
+const GOLEM_DROWN_DEPTH: float = 0.8
+## Zielradius des Golems (und des Daemons) als Anteil am Radius seines Auswahlkreises
+## (Nutzervorgabe 2026-11-16): Angreifer sind in Reichweite, sobald sie ihre Reichweite
+## vom RAND dieses Kreises entfernt stehen, statt sich unter ihm zu draengen. Der
+## Gigant ebnet den Boden nur noch in diesem Kreis ein.
+const GOLEM_TARGET_RADIUS_SHARE: float = 0.5
+## Mehrere Golems mit einem Bewegungsbefehl bekommen Zielpunkte, die um die Summe
+## ihrer Koerperradien plus diesen Rand (m) auseinanderliegen (Bugfix 2026-11-16:
+## die festen Packabstaende legten die Ziele ineinander).
+const GOLEM_SLOT_MARGIN: float = 0.5
 ## WACHSTUM NACH STUFE 7 (Nutzervorgabe 2026-11-15): der Gigant waechst weiter,
 ## ohne eine neue Stufe — alle GOLEM_GROWTH_KILLS Kills ein Schritt:
 ##   Koerper   x (1 + GOLEM_GROWTH_SIZE)   = 3 % groesser als davor (aufgezinst),
@@ -575,7 +589,10 @@ const DEMON_GOLEM_START_DRUM_BONUS: float = 3.0
 const DEMON_GOLEM_MANA_UPKEEP: float = 5.0
 const DEMON_GOLEM_GROWTH_SLAM_DAMAGE: float = 0.75
 const DEMON_GOLEM_GROWTH_KICK_DAMAGE: float = 0.8
-const DEMON_GOLEM_GROWTH_DRUM_DAMAGE: float = 1.0
+## 1,0 -> 1,2 (Nutzervorgabe 2026-11-16): mit +1 wuchs das Trommeln langsamer als der
+## Handschlag (+0,75 bei 1,44-mal so schnellem Takt = effektiv +1,08) und war ab ~22 m
+## je Einzelziel schwaecher - er trommelte spaeter nie mehr.
+const DEMON_GOLEM_GROWTH_DRUM_DAMAGE: float = 1.2
 const DEMON_GOLEM_TARGETS: int = 3
 const DEMON_GOLEM_GROWTH_TARGETS: int = 1
 const DEMON_GOLEM_KILL_HEAL: int = 10
@@ -585,8 +602,8 @@ const DEMON_GOLEM_KILL_HEAL_DURATION: float = 5.0
 ## DEMON_GOLEM_GROWTH_HEAL_OVER_TIME ueber DEMON_GOLEM_GROWTH_HEAL_DURATION Sekunden
 ## (Nutzervorgabe 2026-11-16), auf die schon angehobene Lebensobergrenze und neben der
 ## Heilung des Kills, der die Stufe gebracht hat.
-const DEMON_GOLEM_GROWTH_HEAL: int = 20
-const DEMON_GOLEM_GROWTH_HEAL_OVER_TIME: int = 30
+const DEMON_GOLEM_GROWTH_HEAL: int = 30   # 20 -> 30 (Nutzervorgabe 2026-11-16)
+const DEMON_GOLEM_GROWTH_HEAL_OVER_TIME: int = 45   # 30 -> 45 (Nutzervorgabe 2026-11-16)
 const DEMON_GOLEM_GROWTH_HEAL_DURATION: float = 5.0
 const DEMON_GOLEM_ATTACK_SPEEDUP: float = 0.15
 const DEMON_GOLEM_AIR_HEIGHT: float = 20.0
@@ -1116,10 +1133,11 @@ const HYPNOSIS_DURATION: float = 30.0
 const SPELL_GOLEM_CHARGE_COST: float = 900.0
 const SPELL_GOLEM_MAX_CHARGES: int = 2
 const SPELL_GOLEM_CAST_RANGE: float = 10.0
-## Zauber 14 "Daemonengolem beschwoeren" (2026-11-16): dieselben Kosten, Ladungen
-## und Reichweite wie der Golem (Nutzervorgabe). Vorerst nur beim menschlichen
-## Spieler in der Leiste (Spell.create_player_set), Taste C.
-const SPELL_DEMON_GOLEM_CHARGE_COST: float = SPELL_GOLEM_CHARGE_COST
+## Zauber 14 "Daemonengolem beschwoeren" (2026-11-16): Ladungen und Reichweite wie
+## der Golem, die Ladung kostet ein Drittel weniger (Nutzervorgabe 2026-11-16:
+## 900 -> 600). Vorerst nur beim menschlichen Spieler in der Leiste
+## (Spell.create_player_set), Taste C.
+const SPELL_DEMON_GOLEM_CHARGE_COST: float = SPELL_GOLEM_CHARGE_COST * 2.0 / 3.0
 const SPELL_DEMON_GOLEM_MAX_CHARGES: int = SPELL_GOLEM_MAX_CHARGES
 const SPELL_DEMON_GOLEM_CAST_RANGE: float = SPELL_GOLEM_CAST_RANGE
 
@@ -1332,6 +1350,11 @@ const AIRSHIP_WHARF_FOOTPRINT: Vector2i = Vector2i(8, 8)
 const WATCHTOWER_FOOTPRINT: Vector2i = Vector2i(2, 2)
 const WOOD_DEPOT_FOOTPRINT: Vector2i = Vector2i(1, 1)
 const REINCARNATION_SITE_FOOTPRINT: Vector2i = Vector2i(3, 3)
+## Freier Rand um jedes Gebaeude (Zellen = Meter, Nutzervorgabe 2026-11-16): ein neuer
+## Bauplatz darf keiner Zelle eines anderen Gebaeudes (auch einer Baustelle) naeher
+## kommen als so viele Zellen - zwischen zwei Gebaeuden bleibt also mindestens
+## dieser Abstand frei. 0 = dicht an dicht wie bisher.
+const BUILDING_MIN_GAP: int = 1
 
 # --- Hütte (Phase 10f: klein und billig, in vier Stufen zum Wohnpalast) ---
 const HUT_WOOD_COST: int = 7               # war 12, dann 8 (10h)
@@ -1800,6 +1823,22 @@ const TECHNICIAN_FIRERAM_FIRERATE_BASE: float = 0.0
 const TECHNICIAN_FIRERATE_PER_EXTRA: float = 0.10
 ## Zeppelin: Huellenreparatur wie die Feuerramme, Sekunden je Trefferpunkt.
 const AIRSHIP_HULL_REGEN_TIME: float = 30.0
+
+# =============================================================================
+# RITUALKAMMER (experimentell, Nutzervorgabe 2026-11-16)
+# =============================================================================
+# Wie ein Ausbildungsgebaeude, aber heraus kommt niemand: der Brave ist weg. Je
+# RITUAL_CHAMBER_BRAVES_PER_REWARD Opfer (je Stamm gezaehlt) bekommt ein zufaelliger
+# eigener Golem einen Kill - ohne lebenden Golem gehen RITUAL_CHAMBER_MANA_REWARD
+# Mana in einen der beiden Golemzauber. Nur mit dem Optionsschalter baubar.
+
+const RITUAL_CHAMBER_FOOTPRINT: Vector2i = Vector2i(3, 3)
+const RITUAL_CHAMBER_WOOD_COST: int = 20
+## Annahme (nicht vorgegeben): so viel Leben wie die Ausbildungshalle.
+const RITUAL_CHAMBER_HP: int = 450
+const RITUAL_CHAMBER_TRAINING_TIME: float = 1.0
+const RITUAL_CHAMBER_BRAVES_PER_REWARD: int = 2
+const RITUAL_CHAMBER_MANA_REWARD: float = 10.0
 
 # =============================================================================
 # AUSBILDUNGSHALLE

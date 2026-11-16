@@ -71,7 +71,7 @@ func _tick_attack(delta: float) -> void:
 	# dominant cost of the pure-firewarrior battle benchmark (~250 ms/tick at
 	# 2x1000); a 0.25-s reaction window matches every other scan.
 	if _due_to_scan(delta) \
-			and _flat_dist(position, attack_target.position) > MELEE_RANGE:
+			and reach_dist_to(attack_target) > MELEE_RANGE:
 		# Self-defence FIRST: an enemy on top of us takes priority (melee
 		# entanglement is acceptable even under an explicit order).
 		var threat: Unit = _melee_threat()
@@ -80,7 +80,7 @@ func _tick_attack(delta: float) -> void:
 		elif not _target_ordered:
 			_retarget_by_reach(attack_target)
 	var target: Unit = attack_target
-	var dist: float = _flat_dist(position, target.position)
+	var dist: float = reach_dist_to(target)
 	if dist <= MELEE_RANGE:
 		# In melee: brawl when a slot is free (self-defence). Only the overflow
 		# "reserve row" (all 3 slots taken) fires instead of standing idle.
@@ -143,7 +143,7 @@ func _retarget_by_reach(current: Unit) -> void:
 		if priest_near != current:
 			_begin_attack(priest_near)
 		return
-	if _flat_dist(position, current.position) <= FIRE_RANGE:
+	if reach_dist_to(current) <= FIRE_RANGE:
 		return   # the current target is shootable — stay on it
 	var near: Unit = super._scan_for_enemy(FIRE_RANGE)
 	if near != null and near != current:

@@ -118,7 +118,12 @@ func _charge_training_mana(delta: float) -> void:
 	# book_upkeep_rate, nicht consume_mana: es bucht dieselbe Schuld UND die Rate,
 	# damit die Manaanzeige den Abzug zeigt (Bugfix — mit consume_mana blieb die
 	# angezeigte Zahl gleich, obwohl die Ausbildung wirklich kostete).
-	tribe.book_upkeep_rate(Balance.TRAINING_MANA_PER_BUILDING, delta)
+	tribe.book_upkeep_rate(training_mana_rate(), delta)
+
+
+## Mana per second while a brave is inside (the ritual chamber charges more).
+func training_mana_rate() -> float:
+	return Balance.TRAINING_MANA_PER_BUILDING
 
 
 ## Drops braves that are gone or no longer heading here.

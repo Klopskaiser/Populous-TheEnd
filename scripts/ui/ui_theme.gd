@@ -163,7 +163,7 @@ static func icon(key: StringName) -> ImageTexture:
 			_draw_sink(img)
 		&"hypnosis":
 			_draw_hypnosis(img)
-		&"golem":
+		&"golem", &"ritual_chamber":
 			_draw_golem(img)
 		&"demon_golem":
 			_draw_demon_golem(img)

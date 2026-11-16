@@ -19,7 +19,10 @@ var _timer: float = 0.0
 # --- Texts (pure) ----------------------------------------------------------------
 
 ## "Welle 3/20" — the wave that appeared last; before the first one "Welle 0/20".
+## `total` <= 0 = endless survival: just "Welle 23".
 static func wave_text(wave: int, total: int) -> String:
+	if total <= 0:
+		return "Welle %d" % maxi(wave, 0)
 	return "Welle %d/%d" % [clampi(wave, 0, total), total]
 
 
@@ -90,6 +93,6 @@ func _process(delta: float) -> void:
 func _refresh() -> void:
 	if _mode == null or _title == null:
 		return
-	_title.text = wave_text(_mode.wave, SurvivalMode.WAVE_COUNT)
+	_title.text = wave_text(_mode.wave, 0 if _mode.endless else SurvivalMode.WAVE_COUNT)
 	_status.text = status_text(_mode.wave, _mode.time_to_next_wave(),
 		_mode.enemies_alive())

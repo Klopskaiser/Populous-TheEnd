@@ -276,8 +276,12 @@ func test_entrance_flatten_cell_is_skipped_inside_a_foreign_footprint() -> void:
 	var first: Hut = w.building_manager.place(
 		HUT_SCENE, w.tribe, Vector2i(60, 64), 0, true) as Hut
 	check(first != null, "the neighbour stands")
-	var site: Hut = w.commands.place_building(w.tribe, HUT_SCENE, Vector2i(60, 60)) as Hut
-	check(site != null, "the site was placeable")
+	# Since 2026-11-16 the player can no longer place a site touching another
+	# building (Balance.BUILDING_MIN_GAP), so the site is set down directly — the
+	# guard still matters wherever buildings are placed without that check
+	# (scenario setups, a gap of 0).
+	var site: Hut = w.building_manager.place(HUT_SCENE, w.tribe, Vector2i(60, 60)) as Hut
+	check(site != null, "the site stands")
 	var entrance: Vector2i = site.entrance_cell()
 	check(w.nav.is_cell_blocked_by_building(entrance),
 		"the neighbour really covers the site's entrance cell")

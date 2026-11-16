@@ -8,6 +8,8 @@ class_name MainMenu extends Control
 const GAME_SCENE_PATH: String = "res://scenes/main.tscn"
 
 var _pages: Array[Control] = []
+## Index of the survival scenario page in _pages.
+const SURVIVAL_PAGE: int = 4
 var _center: CenterContainer = null
 var _ai_count_option: OptionButton = null
 var _map_option: OptionButton = null
@@ -56,6 +58,7 @@ func _ready() -> void:
 	_pages.append(_build_skirmish_page())
 	_pages.append(_build_options_page())
 	_pages.append(_build_controls_page())
+	_pages.append(_build_survival_page())   # index SURVIVAL_PAGE
 	_show_page(0)
 
 	# Headless verification hook: `godot ... -- skirmish=N [map=<id>]` skips the
@@ -77,6 +80,10 @@ func _ready() -> void:
 	# the menu button "Überleben").
 	if args.has("survival"):
 		_launch.call_deferred(MatchConfig.survival())
+		return
+	# `godot ... -- survival_endless` starts the endless survival directly.
+	if args.has("survival_endless"):
+		_launch.call_deferred(MatchConfig.survival_endless())
 		return
 	var map_arg: String = MapGenerator.DEFAULT_MAP
 	for arg in args:
@@ -140,10 +147,28 @@ func _build_root_page() -> Control:
 	_add_button(vb, "Neues Skirmish", func() -> void: _show_page(1))
 	_add_button(vb, "Startmission", _start_mission)
 	_add_button(vb, "Debugschlacht", _start_debug_battle)
-	_add_button(vb, "Überleben", _start_survival)
+	_add_button(vb, "Survivalszenarien", func() -> void: _show_page(SURVIVAL_PAGE))
 	_add_button(vb, "Stresstest", _start_stress_test)
 	_add_button(vb, "Optionen", func() -> void: _show_page(2))
 	_add_button(vb, "Beenden", func() -> void: get_tree().quit())
+	return vb.get_parent() as Control
+
+
+## Survival scenarios (user spec 2026-11-16): the 20-wave survival and the
+## endless one, where the waves never stop and keep growing.
+func _build_survival_page() -> Control:
+	var vb: VBoxContainer = _make_page("Survivalszenarien")
+	_add_button(vb, "Überleben (%d Wellen)" % Balance.SURVIVAL_WAVE_COUNT, _start_survival)
+	_add_button(vb, "Endlos-Überleben", _start_survival_endless)
+	var note: Label = Label.new()
+	note.text = "Endlos: nach Welle %d geht es weiter, jede Welle größer als die " \
+		% Balance.SURVIVAL_WAVE_COUNT + "davor — bis die Basis fällt."
+	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	note.custom_minimum_size = Vector2(300, 0)
+	note.add_theme_color_override("font_color", UiTheme.GOLD)
+	vb.add_child(note)
+	vb.add_child(HSeparator.new())
+	_add_button(vb, "Zurück", func() -> void: _show_page(0))
 	return vb.get_parent() as Control
 
 
@@ -205,6 +230,16 @@ func _build_options_page() -> Control:
 	fps_check.button_pressed = GameSettings.show_fps()
 	fps_check.toggled.connect(GameSettings.set_show_fps)
 	vb.add_child(fps_check)
+
+	# Experimental building (2026-11-16): the ritual chamber in the build menu.
+	var ritual_check: CheckButton = CheckButton.new()
+	ritual_check.text = "Ritualkammer (experimentell)"
+	ritual_check.tooltip_text = "Gebäude, das Braves opfert: je zwei bekommt ein eigener " \
+		+ "Golem einen Kill, ohne Golem gibt es Mana für einen Golemzauber."
+	UiTheme.style_button(ritual_check)
+	ritual_check.button_pressed = GameSettings.ritual_chamber_enabled()
+	ritual_check.toggled.connect(GameSettings.set_ritual_chamber_enabled)
+	vb.add_child(ritual_check)
 
 	# Window resolution (bug backlog #1), persisted via GameSettings.
 	var resolution_label: Label = Label.new()
@@ -379,6 +414,10 @@ func _start_stress_test() -> void:
 
 func _start_survival() -> void:
 	_launch(MatchConfig.survival())
+
+
+func _start_survival_endless() -> void:
+	_launch(MatchConfig.survival_endless())
 
 
 func _launch(config: MatchConfig) -> void:

@@ -74,6 +74,7 @@ const FOLLOWER_ROWS: Array[Dictionary] = [
 const HUT_SCENE: PackedScene = preload("res://scenes/buildings/hut.tscn")
 const WARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/warrior_camp.tscn")
 const TRAINING_HALL_SCENE: PackedScene = preload("res://scenes/buildings/training_hall.tscn")
+const RITUAL_CHAMBER_SCENE: PackedScene = preload("res://scenes/buildings/ritual_chamber.tscn")
 const FIREWARRIOR_CAMP_SCENE: PackedScene = preload("res://scenes/buildings/firewarrior_camp.tscn")
 const TEMPLE_SCENE: PackedScene = preload("res://scenes/buildings/temple.tscn")
 const FORESTER_SCENE: PackedScene = preload("res://scenes/buildings/forester.tscn")
@@ -232,7 +233,20 @@ static func tribe_bar_fractions(populations: Array[int]) -> Array[float]:
 
 ## Registry for the building tab. Disabled entries have no scene (so they yield
 ## no start_placement target); the hut entry references the Hut scene and cost.
-static func default_build_entries() -> Array[Dictionary]:
+## The experimental ritual chamber comes last and only while its option is on
+## (`experimental`: 1 = with it, 0 = without, -1 = as GameSettings says).
+static func default_build_entries(experimental: int = -1) -> Array[Dictionary]:
+	var entries: Array[Dictionary] = _base_build_entries()
+	var with_ritual: bool = GameSettings.ritual_chamber_enabled() if experimental < 0 \
+		else experimental > 0
+	if with_ritual:
+		entries.append({"id": &"ritual_chamber", "name": "Ritualkammer (experimentell)",
+			"scene": RITUAL_CHAMBER_SCENE, "icon": &"ritual_chamber",
+			"wood_cost": RitualChamber.WOOD_COST, "enabled": true})
+	return entries
+
+
+static func _base_build_entries() -> Array[Dictionary]:
 	return [
 		{"id": &"hut", "name": "Hütte", "scene": HUT_SCENE, "icon": &"hut",
 			"wood_cost": Hut.WOOD_COST, "enabled": true, "hotkey": "H"},

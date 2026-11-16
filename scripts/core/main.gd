@@ -471,12 +471,15 @@ func _setup_survival(tribes: Array[Tribe], nav: NavGrid) -> Vector2i:
 
 	var survival: SurvivalMode = SurvivalMode.new()
 	survival.name = "SurvivalMode"
+	var config: MatchConfig = GameState.match_config
+	survival.endless = config != null and config.endless
 	add_child(survival)
 	survival.setup(tribes[1], player, _unit_manager, _tribe_commands, nav, anchor,
 		GameState)
 	survival.wave_spawned.connect(func(wave: int, count: int) -> void:
-		print("Überleben: Welle %d/%d — %d Einheiten" % [
-			wave, SurvivalMode.WAVE_COUNT, count]))
+		print("Überleben: %s — %d Einheiten" % [
+			SurvivalHud.wave_text(wave, 0 if survival.endless else SurvivalMode.WAVE_COUNT),
+			count]))
 	var hud: SurvivalHud = SurvivalHud.new()
 	hud.name = "SurvivalHud"
 	$UI.add_child(hud)

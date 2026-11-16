@@ -80,8 +80,7 @@ func check_terrain_integrity(rect: Rect2i) -> void:
 				int(floor(u.position.z / TerrainData.CELL_SIZE)))
 			if not grown.has_point(cell):
 				continue
-			if terrain_data.get_height(u.position.x, u.position.z) \
-					<= TerrainData.SEA_LEVEL + Unit.WATER_EPS:
+			if u.is_flooded_on(terrain_data):
 				u.drown()
 	# Props go under with everything else: a flooded tree or wood pile must not
 	# be left standing in the sea (phase 10a).

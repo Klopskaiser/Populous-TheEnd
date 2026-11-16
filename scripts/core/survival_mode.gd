@@ -50,6 +50,11 @@ signal wave_spawned(wave: int, count: int)
 
 ## Number of the wave that appeared last (0 = none yet, WAVE_COUNT = all out).
 var wave: int = 0
+## Endless survival (user spec 2026-11-16): the waves never run out — they go on
+## past WAVE_COUNT with the same growing size formula, and the wave tribe stays
+## shielded for good: the match ends only with the player's defeat. Set before
+## setup().
+var endless: bool = false
 ## Cells the waves appear at, one per direction that has walkable ground
 ## (see find_spawn_cells). Index-aligned with wave_spawn_slots().
 var spawn_cells: Array[Vector2i] = []
@@ -185,7 +190,7 @@ func setup(p_wave_tribe: Tribe, p_player_tribe: Tribe, p_unit_manager: UnitManag
 # --- Queries (HUD) -----------------------------------------------------------------
 
 func all_waves_spawned() -> bool:
-	return wave >= WAVE_COUNT
+	return not endless and wave >= WAVE_COUNT
 
 
 ## Seconds until the next wave appears; -1.0 once the last wave is out.

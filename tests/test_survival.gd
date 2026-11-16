@@ -381,3 +381,45 @@ func test_every_wave_refills_the_players_spells() -> void:
 	check(Balance.SURVIVAL_REFILL_SPELLS_EACH_WAVE and full and not player.spells.is_empty(),
 		"a new wave recharges every spell of the player")
 	_free_world(w)
+
+
+# --- Endlos-Ueberleben (Nutzervorgabe 2026-11-16) --------------------------------------
+
+## Endlos: nach Welle 20 geht es weiter, jede Welle groesser als die davor; der
+## Schutz des Wellenstamms faellt nie — leer geraeumt ist kein Sieg.
+func test_endless_survival_goes_on_past_the_last_wave_and_never_ends_in_victory() -> void:
+	var w: Dictionary = _make_world()
+	var mode: SurvivalMode = w.mode
+	mode.endless = true
+	mode.tick(SurvivalMode.FIRST_WAVE_DELAY)
+	for wave in range(1, SurvivalMode.WAVE_COUNT + 6):
+		check(mode.wave == wave, "wave %d is out" % wave)
+		_kill_all(w.waves)
+		w.gs.check_defeats()
+		mode.tick(SurvivalMode.WAVE_INTERVAL)
+	check(mode.wave == SurvivalMode.WAVE_COUNT + 6, "it goes on past wave %d" % SurvivalMode.WAVE_COUNT)
+	check(not mode.all_waves_spawned() and mode.time_to_next_wave() > 0.0,
+		"there is always a next wave")
+	check(w.waves.units.size() == SurvivalMode.wave_size(SurvivalMode.WAVE_COUNT + 6),
+		"wave 26 appears in full")
+	check(w.gs.is_defeat_exempt(WAVES), "the wave tribe stays shielded")
+	_kill_all(w.waves)
+	w.gs.check_defeats()
+	check(not w.gs.match_over and w.winners.is_empty(), "wiped out again: no victory")
+	_free_world(w)
+
+
+func test_endless_waves_keep_growing() -> void:
+	var grows: bool = true
+	for wave in range(2, 61):
+		grows = grows and SurvivalMode.wave_size(wave) > SurvivalMode.wave_size(wave - 1)
+	check(grows, "every wave up to 60 is bigger than the one before")
+	check(SurvivalMode.wave_size(30) > SurvivalMode.wave_size(20), "wave 30 beats wave 20")
+
+
+func test_endless_config_and_hud() -> void:
+	var config: MatchConfig = MatchConfig.survival_endless()
+	check(config.mode == MatchConfig.Mode.SURVIVAL and config.endless, "endless survival")
+	check(not MatchConfig.survival().endless, "the plain survival stays at 20 waves")
+	check(config.tribe_count() == 2, "two tribes as before")
+	check(SurvivalHud.wave_text(23, 0) == "Welle 23", "endless counter has no total")

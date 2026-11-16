@@ -4,7 +4,7 @@ extends TestBase
 ## Golem. Diese Datei nagelt die Vorgabe fest (Werte in Balance.DEMON_GOLEM_*):
 ## 2 m gross und 500 LP beim Erscheinen, keine Stufen, keine Lebenszeit; je
 ## Wachstumsstufe +1 m, +5 LP, +0,15 LP/s, +1 Ziel und Schaden (Handschlag +0,75,
-## Tritt +0,8, Trommeln +1) auf den halben Startschaden des Golems; die Stufe kostet
+## Tritt +0,8, Trommeln +1,2) auf den halben Startschaden des Golems; die Stufe kostet
 ## 4 Kills und alle 10 Stufen einen mehr; bei 150 m zerfaellt er. Alle Angriffe
 ## 15 % schneller als beim Golem gleicher Groesse. Ab 20 m Luftschiffe, ab 30 m das
 ## Riesenpaket. Nie gehaertet. Kill: 10 LP sofort und 15 ueber 5 s, stapelbar.
@@ -81,9 +81,10 @@ func test_spell_is_the_players_alone_and_costs_what_the_golem_costs() -> void:
 	check(spell != null and spell is DemonGolemSpell, "the player's set carries the demon golem")
 	check(w.t1.get_spell(&"demon_golem") == null, "the default set (the AI's) does not")
 	var golem: Spell = w.t0.get_spell(&"golem")
-	check(is_equal_approx(spell.charge_cost, golem.charge_cost)
+	check(is_equal_approx(spell.charge_cost, golem.charge_cost * 2.0 / 3.0)
 		and spell.max_charges == golem.max_charges
-		and is_equal_approx(spell.cast_range, golem.cast_range), "same cost, charges and range as the golem")
+		and is_equal_approx(spell.cast_range, golem.cast_range),
+		"a third cheaper than the golem; same charges and range")
 	check(Spell.create_default_set().size() + 1 == Spell.create_player_set().size(),
 		"the player's set is the default set plus this one spell")
 	spell.charges = 1
@@ -185,14 +186,23 @@ func test_damage_starts_at_half_the_golems_and_grows_per_step() -> void:
 	_grow_to(d, 12.0)   # ten growth steps
 	check_near(d.damage_exact(Golem.ATTACK_SLAM), 15.5 + 0.75 * 10, "slam +0,75 a step")
 	check_near(d.damage_exact(Golem.ATTACK_KICK), 24.5 + 0.8 * 10, "kick +0,8 a step")
-	check_near(d.damage_exact(Golem.ATTACK_DRUM), 24.0 + 1.0 * 10, "drum +1 a step for all three hits")
+	check_near(d.damage_exact(Golem.ATTACK_DRUM), 24.0 + 1.2 * 10, "drum +1,2 a step for all three hits")
 	check(d.attack_damage(Golem.ATTACK_SLAM) == 23 and d.attack_damage(Golem.ATTACK_KICK) == 33
-		and d.attack_damage(Golem.ATTACK_DRUM) == 34, "23 / 33 / 34")
+		and d.attack_damage(Golem.ATTACK_DRUM) == 36, "23 / 33 / 36")
 	var sum: int = 0
 	for hit in range(Balance.GOLEM_DRUM_HITS.size()):
 		sum += d.drum_hit_damage(hit)
 	check(sum == d.attack_damage(Golem.ATTACK_DRUM), "the three hits add up to the drum's damage")
-	check(d.drum_hit_damage(0) == 11 and d.drum_hit_damage(2) == 12, "11 / 11 / 12")
+	check(d.drum_hit_damage(0) == 12 and d.drum_hit_damage(2) == 12, "12 / 12 / 12")
+	# With +1,2 the drum stays the stronger attack on a single healthy target at
+	# every size (user spec 2026-11-16; with +1 the slam overtook it from ~22 m).
+	var drum_ahead: bool = true
+	for steps in range(0, DemonGolem.max_steps()):
+		d.growth_steps = steps
+		var drum: float = d.damage_exact(Golem.ATTACK_DRUM) / d.cooldown_for(Golem.ATTACK_DRUM)
+		var slam: float = d.damage_exact(Golem.ATTACK_SLAM) / d.cooldown_for(Golem.ATTACK_SLAM)
+		drum_ahead = drum_ahead and drum > slam
+	check(drum_ahead, "the drum beats the slam per single target from 2 m to 150 m")
 	_free_world(w)
 
 
@@ -469,9 +479,9 @@ func test_a_poor_tribe_pays_what_it_earns_and_no_more() -> void:
 	_free_world(w)
 
 
-## Beim Aufleveln (Wachstumsstufe) heilt er 20 sofort und 30 ueber 5 s — zusaetzlich
+## Beim Aufleveln (Wachstumsstufe) heilt er 30 sofort und 45 ueber 5 s — zusaetzlich
 ## zur Heilung des Kills, der die Stufe gebracht hat (Nutzervorgabe 2026-11-16).
-func test_a_growth_step_heals_twenty_at_once_and_thirty_over_five_seconds() -> void:
+func test_a_growth_step_heals_thirty_at_once_and_forty_five_over_five_seconds() -> void:
 	var w: Dictionary = _make_world()
 	var d: DemonGolem = _demon(w, 0, Vector3(50, 5, 50))
 	for i in range(DemonGolem.kills_for_step(1) - 1):
@@ -481,14 +491,14 @@ func test_a_growth_step_heals_twenty_at_once_and_thirty_over_five_seconds() -> v
 	d.health = 100
 	d._credit_kill()
 	check(d.growth_steps == 1 and d.max_health == 505, "this kill is a growth step (limit 505)")
-	check(d.health == 130, "20 for the growth and 10 for the kill at once (got %d)" % d.health)
-	check_near(d.pending_kill_heal(), 45.0, "30 + 15 still to come", 0.001)
+	check(d.health == 140, "30 for the growth and 10 for the kill at once (got %d)" % d.health)
+	check_near(d.pending_kill_heal(), 60.0, "45 + 15 still to come", 0.001)
 	for i in range(25):
 		d._tick_kill_heal(TICK)
-	check(d.health >= 151 and d.health <= 153, "half of the 45 after 2,5 s (got %d)" % d.health)
+	check(d.health >= 169 and d.health <= 171, "half of the 60 after 2,5 s (got %d)" % d.health)
 	for i in range(40):
 		d._tick_kill_heal(TICK)
-	check(d.health == 175, "all of it after 5 s: 100 + 30 + 45 (got %d)" % d.health)
+	check(d.health == 200, "all of it after 5 s: 100 + 40 + 60 (got %d)" % d.health)
 	# The limit holds here as well.
 	while d.kills < DemonGolem.kills_for_steps(2) - 1:
 		d._credit_kill()
@@ -499,3 +509,10 @@ func test_a_growth_step_heals_twenty_at_once_and_thirty_over_five_seconds() -> v
 		d._tick_kill_heal(TICK)
 	check(d.health == d.max_health, "not over time either")
 	_free_world(w)
+
+
+## Die Ladung kostet ein Drittel weniger als beim Golem (Nutzervorgabe 2026-11-16).
+func test_the_demon_golem_charge_costs_a_third_less_than_the_golem() -> void:
+	var spell: Spell = DemonGolemSpell.new()
+	check_near(spell.charge_cost, 600.0, "600 instead of 900", 0.001)
+	check(spell.max_charges == Balance.SPELL_GOLEM_MAX_CHARGES, "charges as before")

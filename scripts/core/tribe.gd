@@ -93,6 +93,9 @@ var _upkeep_rate_booked: float = 0.0
 ## stays around so the win evaluation and the statistics remain consistent.
 ## Irreversible.
 var eliminated: bool = false
+## Braves sacrificed in the tribe's ritual chambers (RitualChamber): every
+## RITUAL_CHAMBER_BRAVES_PER_REWARD-th brings a reward.
+var ritual_sacrifices: int = 0
 
 var _events: Node = null
 var _events_resolved: bool = false

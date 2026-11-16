@@ -2244,6 +2244,13 @@ func _is_water_at(x: float, z: float) -> bool:
 		and terrain_data.get_height(x, z) <= TerrainData.SEA_LEVEL + WATER_EPS
 
 
+## Does a terrain change that leaves `td` like this drown the unit where it stands?
+## A plain unit drowns as soon as the ground at its feet is at the waterline;
+## the golem asks for more (Golem.is_flooded_on).
+func is_flooded_on(td: TerrainData) -> bool:
+	return td.get_height(position.x, position.z) <= TerrainData.SEA_LEVEL + WATER_EPS
+
+
 ## Death in water: landing in the sea after a throw, rolling or being shoved
 ## in, or the ground flooding away under the unit (terrain spells, 7c integrity
 ## rules). Sprite units flail at the surface for a moment and then sink below
@@ -3386,7 +3393,7 @@ func _tick_attack(delta: float) -> void:
 				_enter_soa_wait_hold(maxf(_target_search_timer, 0.0), wait_dest,
 					UnitManager.HOLD_WAIT_WALK)
 		return
-	var dist: float = _flat_dist(position, target.position)
+	var dist: float = reach_dist_to(target)
 	if dist > MELEE_RANGE:
 		_in_melee = false
 		var dest: Vector3 = target.position
@@ -4329,10 +4336,24 @@ func active_melee_attacker_count() -> int:
 	return g.attackers.size()
 
 
-## Ring position for slot index around this (target) unit.
+## Ring position for slot index around this (target) unit — outside its target
+## radius (a golem is struck at the edge of it, not at its centre).
 func melee_slot_position(slot: int) -> Vector3:
 	var angle: float = TAU * float(slot) / float(MAX_MELEE_ATTACKERS)
-	return position + Vector3(cos(angle) * MELEE_SLOT_RADIUS, 0.0, sin(angle) * MELEE_SLOT_RADIUS)
+	var r: float = MELEE_SLOT_RADIUS + target_radius()
+	return position + Vector3(cos(angle) * r, 0.0, sin(angle) * r)
+
+
+## Radius of the body others aim at: an attacker is in range once it is within
+## its range of this circle's EDGE (2026-11-16, user spec). 0 = a point (every
+## ordinary unit); the golem is a big object (Golem.target_radius).
+func target_radius() -> float:
+	return 0.0
+
+
+## Flat distance from here to the edge of `u`'s target radius (never negative).
+func reach_dist_to(u: Unit) -> float:
+	return maxf(_flat_dist(position, u.position) - u.target_radius(), 0.0)
 
 
 # --- Combat movement ----------------------------------------------------------
@@ -4398,12 +4419,12 @@ func _wait_near(target: Unit, delta: float,
 		center: Vector3 = Vector3.INF) -> Vector3:
 	if center == Vector3.INF:
 		center = _wait_center(target)
-	if _flat_dist(position, center) <= MELEE_WAIT_RADIUS + 0.6:
+	var ring: float = MELEE_WAIT_RADIUS + target.target_radius()
+	if _flat_dist(position, center) <= ring + 0.6:
 		_face_point(target.position)
 		return Vector3.INF
 	var angle: float = float(get_instance_id() % 628) * 0.01
-	var dest: Vector3 = center + Vector3(
-		cos(angle) * MELEE_WAIT_RADIUS, 0.0, sin(angle) * MELEE_WAIT_RADIUS)
+	var dest: Vector3 = center + Vector3(cos(angle) * ring, 0.0, sin(angle) * ring)
 	_step_toward(dest, delta)
 	_face_point(target.position)
 	return dest
@@ -4414,7 +4435,8 @@ func _wait_near(target: Unit, delta: float,
 func _wait_center(target: Unit) -> Vector3:
 	var g = combat_group
 	if g != null and g.defender == target \
-			and _flat_dist(g.anchor, target.position) <= MELEE_WAIT_RADIUS * 2.0:
+			and _flat_dist(g.anchor, target.position) \
+				<= MELEE_WAIT_RADIUS * 2.0 + target.target_radius():
 		return g.anchor
 	return target.position
 

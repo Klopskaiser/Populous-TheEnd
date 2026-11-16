@@ -164,6 +164,8 @@ var kills: int = 0
 var level: int = 0
 ## The spell context of the summoning (set by GolemSpell): the level-7 giant
 ## needs it to level the ground. Null (tests, odd spawns) = no levelling.
+## Outer radius of the selection ring mesh (SelectionRingRenderer) at scale 1.
+const SELECTION_RING_MESH_RADIUS: float = 0.34
 var terrain_ctx: SpellContext = null
 ## The running ground-levelling morph and the seconds until the next check.
 var _flatten_morph: TerrainMorph = null
@@ -393,6 +395,21 @@ func displace(_dir: Vector3, _dist: float) -> void:
 	pass
 
 
+## Bugfix 2026-11-16: golems walking along the shore died without a fight. A
+## shore cell counts as walkable while the mean of its corners is above the sea,
+## so a point on it can lie at the waterline; any terrain change nearby then
+## drowned whoever stood there - and the giant's own levelling is such a change,
+## at his feet, every few seconds, lowering the shore towards the waterline.
+## So the golem drowns only when the ground under him lies GOLEM_DROWN_DEPTH
+## below the waterline - deeper than any walkable cell can dip (mean of the
+## corners above the sea, at most MAX_SLOPE apart: never below SEA_LEVEL - 0.75).
+## Wading along the shore is safe; sinking the land under him still kills him.
+## (The giant's levelling also leaves the shore alone now: _next_to_water.)
+func is_flooded_on(td: TerrainData) -> bool:
+	return td.get_height(position.x, position.z) \
+		<= TerrainData.SEA_LEVEL - Balance.GOLEM_DROWN_DEPTH
+
+
 ## Whole hull is clickable; the selection ring encloses the body.
 func pick_size_m() -> Vector2:
 	return Vector2(body_half_width() * 2.0, Balance.GOLEM_HEIGHT) * size_factor()
@@ -400,6 +417,19 @@ func pick_size_m() -> Vector2:
 
 func selection_ring_scale() -> float:
 	return 2.43 * size_factor()   # ring radius 0,83 m around the 1,55-m-wide body
+
+
+## Radius of the selection ring (the ring mesh is 0,34 m at scale 1).
+func selection_ring_radius() -> float:
+	return SELECTION_RING_MESH_RADIUS * selection_ring_scale()
+
+
+## Others strike her as a big object (user spec 2026-11-16): they are in range
+## once within their range of a circle half the selection ring's radius
+## (GOLEM_TARGET_RADIUS_SHARE) — they attack from further away instead of
+## crowding right under her. The giant levels the ground only in this circle.
+func target_radius() -> float:
+	return selection_ring_radius() * Balance.GOLEM_TARGET_RADIUS_SHARE
 
 
 # --- Lifetime -----------------------------------------------------------------------
@@ -896,12 +926,43 @@ func _attack_in_stance() -> StringName:
 ## GOLEM_STRUCTURE_VALUE for every building or vehicle.
 func attack_worth(kind: StringName) -> float:
 	var struck: Dictionary = _struck_targets(kind)
-	var damage: float = float(attack_damage(kind))
 	var worth: float = 0.0
-	for u in struck.units:
-		worth += minf(damage, float(u.health))
+	if kind == ATTACK_DRUM:
+		worth = _drum_unit_worth()
+	else:
+		var damage: float = float(attack_damage(kind))
+		for u in struck.units:
+			worth += minf(damage, float(u.health))
 	return worth + Balance.GOLEM_STRUCTURE_VALUE \
 		* float((struck.vehicles as Array).size() + (struck.buildings as Array).size())
+
+
+## The drum's worth on units, hit by hit (Bugfix 2026-11-16): every one of the
+## three hits picks its own targets (its own cap), so whoever the first hits kill
+## is replaced by the next unit in the area. Counting the drum as one blow of its
+## whole damage on one cap of targets undervalued it against crowds of weak units.
+func _drum_unit_worth() -> float:
+	var order: Array[Unit] = _ordered_victims(ATTACK_DRUM)
+	var room: int = max_targets_of(ATTACK_DRUM)
+	if _building_target_valid() and _buildings_in_area(ATTACK_DRUM).has(attack_building):
+		room -= 1
+	var left: Array[float] = []
+	for u in order:
+		left.append(float(u.health))
+	var worth: float = 0.0
+	for hit in range(Balance.GOLEM_DRUM_HITS.size()):
+		var damage: float = float(drum_hit_damage(hit))
+		var struck: int = 0
+		for i in range(left.size()):
+			if struck >= room:
+				break
+			if left[i] <= 0.0:
+				continue
+			var dealt: float = minf(damage, left[i])
+			worth += dealt
+			left[i] -= dealt
+			struck += 1
+	return worth
 
 
 ## The seconds the attack `kind` costs from the current stance: its cooldown,
@@ -1102,11 +1163,14 @@ func _apply_speed() -> void:
 	# — keep its copy in step, even though the golem is not kernel-walked today.
 	if _idx >= 0 and path_service is UnitManager:
 		(path_service as UnitManager).soa_speed[_idx] = speed
+		# The target radius grows with the body (ranges against her).
+		(path_service as UnitManager).soa_reach[_idx] = target_radius()
 
 
-## Radius of the ground the giant levels: his body.
+## Radius of the ground the giant levels: only where others can strike him —
+## his target radius (user spec 2026-11-16; before: his whole body).
 func flatten_radius() -> float:
-	return trample_radius()
+	return target_radius()
 
 
 ## The height map of one levelling step under the golem at `at`: every terrain
@@ -1167,6 +1231,8 @@ static func flatten_plan(td: TerrainData, at: Vector3, radius: float, slope: flo
 			var idx: int = vz * td.verts + vx
 			if td.heights[idx] <= limit + 0.01 or td.heights[idx] <= floor_height:
 				continue   # already at or below the plate / the bank, or sea bed
+			if floor_height > -INF and _next_to_water(td, vx, vz):
+				continue   # the shore itself stays: lowering it moves the sea inland
 			indices.append(idx)
 			targets.append(maxf(limit, td.heights[idx] - max_drop))
 			min_v = Vector2i(mini(min_v.x, vx), mini(min_v.y, vz))
@@ -1179,6 +1245,21 @@ static func flatten_plan(td: TerrainData, at: Vector3, radius: float, slope: flo
 		clampi(max_v.y, 0, td.size - 1))
 	return {"indices": indices, "targets": targets,
 		"rect": Rect2i(cmin, cmax - cmin + Vector2i.ONE)}
+
+
+## Whether a vertex touches the sea (one of its eight neighbours at or below the
+## waterline). Bugfix 2026-11-16: lowering such a vertex pulled the waterline
+## inland - right under the giant who was levelling there, who then drowned.
+static func _next_to_water(td: TerrainData, vx: int, vz: int) -> bool:
+	for dz in range(-1, 2):
+		for dx in range(-1, 2):
+			var nx: int = vx + dx
+			var nz: int = vz + dz
+			if (dx == 0 and dz == 0) or nx < 0 or nz < 0 or nx >= td.verts or nz >= td.verts:
+				continue
+			if td.heights[nz * td.verts + nx] <= TerrainData.SEA_LEVEL + WATER_EPS:
+				return true
+	return false
 
 
 ## Level 7, the giant: the ground he stands on becomes level — it sinks to the
@@ -2008,15 +2089,7 @@ func _in_hit_zone(kind: StringName, point: Vector3, forward: Vector3, right: Vec
 ## attacking — unit or building — is always struck and counts toward the cap.
 func _struck_targets(kind: StringName) -> Dictionary:
 	var room: int = max_targets_of(kind)
-	var origin: Vector3 = position
-	if kind != ATTACK_KICK and kind != ATTACK_STOMP:
-		origin += _heading_frame()[0] * (SLAM_FORWARD * limb_factor())
-	var units: Array[Unit] = _victims(kind)
-	units.sort_custom(func(a: Unit, b: Unit) -> bool:
-		return _flat_dist(a.position, origin) < _flat_dist(b.position, origin))
-	if state == State.ATTACK and _target_valid(attack_target) and units.has(attack_target):
-		units.erase(attack_target)
-		units.push_front(attack_target)
+	var units: Array[Unit] = _ordered_victims(kind)
 	var buildings: Array = _buildings_in_area(kind)
 	var prime_building = null
 	if _building_target_valid() and buildings.has(attack_building):
@@ -2035,6 +2108,21 @@ func _struck_targets(kind: StringName) -> Dictionary:
 	if prime_building != null:
 		buildings.push_front(prime_building)
 	return {"units": units, "vehicles": vehicles, "buildings": buildings}
+
+
+## Every unit in the area of the attack `kind`, in the order the cap picks them:
+## the current target first, then the nearest to the point of impact.
+func _ordered_victims(kind: StringName) -> Array[Unit]:
+	var origin: Vector3 = position
+	if kind != ATTACK_KICK and kind != ATTACK_STOMP:
+		origin += _heading_frame()[0] * (SLAM_FORWARD * limb_factor())
+	var units: Array[Unit] = _victims(kind)
+	units.sort_custom(func(a: Unit, b: Unit) -> bool:
+		return _flat_dist(a.position, origin) < _flat_dist(b.position, origin))
+	if state == State.ATTACK and _target_valid(attack_target) and units.has(attack_target):
+		units.erase(attack_target)
+		units.push_front(attack_target)
+	return units
 
 
 ## Enemy buildings the attack `kind` would strike right now.
