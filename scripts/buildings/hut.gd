@@ -548,6 +548,17 @@ func _finish_upgrade() -> void:
 		tribe.notify_housing_changed()
 
 
+## Jumps straight to `stage` (clamped to HUT_MAX_UPGRADE_STAGE) without the build:
+## stage by stage through _finish_upgrade, so health, wood value, visuals and the
+## tribe's housing come out exactly as after real upgrades. For prepared match
+## setups (the start mission's huts start as palaces, user request 2026-11-16).
+func upgrade_instantly(stage: int) -> void:
+	if upgrading:
+		abandon_upgrade()
+	while upgrade_stage < mini(stage, Balance.HUT_MAX_UPGRADE_STAGE):
+		_finish_upgrade()
+
+
 ## Aborts the running upgrade and drops the delivered wood at the site. The
 ## upgrade stays DUE (timer full), so it retries once the cause is gone.
 func cancel_upgrade(restart_delay: bool = false) -> void:

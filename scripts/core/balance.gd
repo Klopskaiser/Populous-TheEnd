@@ -170,16 +170,41 @@ const GOLEM_KICK_BACK_SHARE: float = 0.7
 const GOLEM_KICK_DAMAGE: int = 45
 const GOLEM_KICK_WINDUP: float = 0.5
 ## Wurf des Tritts (waagerecht / senkrecht, m/s): dreimal so weit wie der Wurf
-## des Handschlags (GOLEM_LIFT_PUSH).
+## des Handschlags (GOLEM_LIFT_PUSH). Wer geworfen wird, entscheidet seit
+## 2026-11-16 die Groesse (GOLEM_KNOCK_*).
 const GOLEM_KICK_PUSH: float = 9.0
 const GOLEM_KICK_UP: float = 5.5
 ## 2,0 -> 1,8 s (Nutzervorgabe 2026-09-09). Gilt fuer beide Angriffe.
 const GOLEM_STRIKE_COOLDOWN: float = 1.8
-## HANDSCHLAG, je Opfer, das ihn ueberlebt: 30 % Hochwirbeln, 30 % Ins-Rollen —
-## beides VOM Golem weg (25/25 -> 30/30 nach dem ersten Spieltest). Der Rest wird
-## nur getroffen. (Der Tritt wirft jeden, s. GOLEM_KICK_PUSH.)
-const GOLEM_LIFT_CHANCE: float = 0.3
-const GOLEM_ROLL_CHANCE: float = 0.3
+## RUECKSTOSS NACH GROESSE (Nutzervorgabe 2026-11-16, ersetzt "Tritt wirft jeden,
+## Handschlag 30 % Hochwirbeln / 30 % Rollen"): ob ein Ueberlebender geworfen oder
+## gerollt wird, haengt an der KOERPERHOEHE. Unter GOLEM_KNOCK_MIN_HEIGHT (8 m) bei
+## allem 0 %. Ab 8 m steigt jede Chance stufenweise — die erste Stufe gilt ab genau
+## 8 m, jede weitere nach ihrer Schrittweite:
+##   Tritt wirft         +10 % je 5 m   (8 m 10 %, 13 m 20 % ... ab 53 m jeden)
+##   Handschlag wirft     +8 % je 10 m  (8 m 8 %, 18 m 16 % ... ab 48 m 40 %, Grenze)
+##   Handschlag rollt     +8 % je 10 m  (ebenso, Grenze 40 %)
+##   Trommeln             wirft nie; rollt +8 % je 10 m, ohne eigene Grenze
+##                        (98 m 80 %, ab 128 m jeden — der Daemonengolem)
+##   Sprung               wirft und rollt nie (wie bisher)
+## Beim Handschlag wird EINMAL gewuerfelt: unter der Wurfchance fliegt das Opfer,
+## darueber bis Wurf + Roll rollt es, sonst nimmt es nur den Schaden. Beim
+## Trommeln gilt das nur fuer den letzten der drei Schlaege (wie bisher). Wie weit
+## geworfen und gerollt wird, bleibt fest (GOLEM_KICK_PUSH/_UP, GOLEM_LIFT_PUSH/_UP,
+## GOLEM_ROLL_DURATION/_SPEED). Golem.knock_chance rechnet die Treppe.
+const GOLEM_KNOCK_MIN_HEIGHT: float = 8.0
+const GOLEM_KICK_THROW_STEP_M: float = 5.0
+const GOLEM_KICK_THROW_PER_STEP: float = 0.10
+const GOLEM_KICK_THROW_MAX: float = 1.0
+const GOLEM_SLAM_LIFT_STEP_M: float = 10.0
+const GOLEM_SLAM_LIFT_PER_STEP: float = 0.08
+const GOLEM_SLAM_LIFT_MAX: float = 0.4
+const GOLEM_SLAM_ROLL_STEP_M: float = 10.0
+const GOLEM_SLAM_ROLL_PER_STEP: float = 0.08
+const GOLEM_SLAM_ROLL_MAX: float = 0.4
+const GOLEM_DRUM_ROLL_STEP_M: float = 10.0
+const GOLEM_DRUM_ROLL_PER_STEP: float = 0.08
+const GOLEM_DRUM_ROLL_MAX: float = 1.0
 ## Wurfstaerke des Handschlags (waagerecht / senkrecht, m/s) — deutlich schwerer
 ## als der Feuerkrieger-Uppercut (1,2 / 3,0).
 const GOLEM_LIFT_PUSH: float = 3.0
@@ -481,6 +506,70 @@ const GOLEM_SIEGE_DAMAGE_FULL_SIZE: int = 40
 ## (2,0 -> 1,5 mit dem schlanken Koerper, -> 1,125 mit der kleineren Koerperbox,
 ## beides 2026-11-15).
 const GOLEM_SEPARATION: float = 1.0
+
+# --- Daemonengolem (beschworene Einheit, Zauber 14, 2026-11-16) ---
+## Ein zweiter Golem (Nutzervorgabe 2026-11-16, scripts/units/demon_golem.gd): die
+## Figur mit den Jeansschuhen, muskuloeser und gedrungen. Er erbt alles vom Golem
+## (Angriffe, Haltung, Zielwahl, Immunitaeten, Konter) und unterscheidet sich so:
+##  * KEINE STUFEN, keine Lebenszeit. Er beginnt DEMON_GOLEM_START_HEIGHT (2 m)
+##    klein und waechst je WACHSTUMSSTUFE um genau DEMON_GOLEM_GROWTH_HEIGHT (1 m,
+##    kein Prozentwert). Bei DEMON_GOLEM_MAX_HEIGHT (150 m, 148 Stufen) zerfaellt er.
+##  * Kills je Wachstumsstufe: DEMON_GOLEM_GROWTH_KILLS (5), und alle
+##    DEMON_GOLEM_GROWTH_KILLS_STEP (10) Stufen einer mehr — Stufe 1-10 je 5,
+##    11-20 je 6, ... 141-148 je 19. Zusammen 1762 Kills bis 150 m.
+##  * GEDRUNGEN: bei gleicher Hoehe DEMON_GOLEM_WIDTH_FACTOR (25 %) breiter und
+##    tiefer als der Golem — Modell und Koerperbox (Trampeln, Sprung, Einebnen).
+##  * Alles, was beim Golem an der GROESSE haengt, nimmt dieselbe Formel mit seiner
+##    Groesse (Hoehe / GOLEM_HEIGHT): Reichweite, Laenge der Tritt-Schneise,
+##    Aufschlagpunkt, Tempo, Takt, Haltungswechsel, Drehrate, Trampel- und
+##    Sprungschaden, Katapult-Volltreffer. Die FLAECHEN (Radius von Handschlag und
+##    Trommeln, Breite der Schneise) wachsen wie beim Golem NACH Stufe 7, und zwar
+##    von Anfang an: je 3 % Koerper 0,75 % (Handschlag 1,4 %); bei 4,7 m sind sie so
+##    gross wie die eines frischen Golems.
+##  * Je Wachstumsstufe: +DEMON_GOLEM_GROWTH_MAX_HP Lebensobergrenze (Start
+##    DEMON_GOLEM_HP), +DEMON_GOLEM_GROWTH_REGEN Leben/s Dauerheilung,
+##    +DEMON_GOLEM_GROWTH_TARGETS Ziele (Grundzahl, Start DEMON_GOLEM_TARGETS; die
+##    Anteile je Angriff wie beim Golem), und Schaden: Handschlag +0,75, Tritt +0,8,
+##    Trommeln +1 fuer alle drei Schlaege zusammen. Startschaden: die Haelfte des
+##    Golems (12,5 / 22,5 / 21). Bruchteile zaehlen mit, gerundet wird beim Treffer.
+##  * Kill: DEMON_GOLEM_KILL_HEAL sofort und DEMON_GOLEM_KILL_HEAL_OVER_TIME ueber
+##    DEMON_GOLEM_KILL_HEAL_DURATION Sekunden, stapelbar.
+##  * ALLE ANGRIFFE 15 % SCHNELLER als beim Golem GLEICHER GROESSE
+##    (DEMON_GOLEM_ATTACK_SPEEDUP): Abklingzeit und Ausholzeit mal 0,85 — bei 100 m
+##    3,4 statt 4 s. Der Takt laeuft ueber 100 m hinaus im selben Anstieg weiter
+##    (150 m: 4,38 s) und unter 4,7 m entsprechend zurueck (2 m: 1,48 s).
+##  * Ab DEMON_GOLEM_AIR_HEIGHT (20 m) schlaegt er nach Luftschiffen; ab
+##    DEMON_GOLEM_GIANT_HEIGHT (30 m) gilt das Riesenpaket des Golems: Boden
+##    einebnen, Kollision mit Einheiten ignorieren und trampeln, gerade Wege,
+##    Gebaeude niedertrampeln, Fahrzeuge treffen.
+##  * Er wird NIE gehaertet (kein "ausgewachsen"): Feuer, doppelter Blitz und der
+##    wachsende Katapultschaden bleiben seine Schwaechen bis zum Ende.
+##  * Untergrenzen, solange er klein ist (Annahme 2026-11-16, vom Nutzer nicht
+##    beanstandet): Tempo mindestens DEMON_GOLEM_MIN_SPEED (die Formel gaebe bei 2 m
+##    2,3 m/s — langsamer als jeder Brave), Aggro mindestens MELEE_AGGRO_RADIUS.
+## Die Werte aller Groessen druckt tests/diag_demon_golem_values.gd.
+const DEMON_GOLEM_HP: int = 400
+const DEMON_GOLEM_START_HEIGHT: float = 2.0
+const DEMON_GOLEM_GROWTH_HEIGHT: float = 1.0
+const DEMON_GOLEM_MAX_HEIGHT: float = 150.0
+const DEMON_GOLEM_WIDTH_FACTOR: float = 1.25
+const DEMON_GOLEM_GROWTH_KILLS: int = 5
+const DEMON_GOLEM_GROWTH_KILLS_STEP: int = 10
+const DEMON_GOLEM_GROWTH_MAX_HP: int = 5
+const DEMON_GOLEM_GROWTH_REGEN: float = 0.15
+const DEMON_GOLEM_DAMAGE_SHARE: float = 0.5
+const DEMON_GOLEM_GROWTH_SLAM_DAMAGE: float = 0.75
+const DEMON_GOLEM_GROWTH_KICK_DAMAGE: float = 0.8
+const DEMON_GOLEM_GROWTH_DRUM_DAMAGE: float = 1.0
+const DEMON_GOLEM_TARGETS: int = 3
+const DEMON_GOLEM_GROWTH_TARGETS: int = 1
+const DEMON_GOLEM_KILL_HEAL: int = 10
+const DEMON_GOLEM_KILL_HEAL_OVER_TIME: int = 10
+const DEMON_GOLEM_KILL_HEAL_DURATION: float = 5.0
+const DEMON_GOLEM_ATTACK_SPEEDUP: float = 0.15
+const DEMON_GOLEM_AIR_HEIGHT: float = 20.0
+const DEMON_GOLEM_GIANT_HEIGHT: float = 30.0
+const DEMON_GOLEM_MIN_SPEED: float = 4.0
 
 # --- Feuerkrieger ---
 const FIREWARRIOR_HP: int = 65
@@ -1005,6 +1094,12 @@ const HYPNOSIS_DURATION: float = 30.0
 const SPELL_GOLEM_CHARGE_COST: float = 900.0
 const SPELL_GOLEM_MAX_CHARGES: int = 2
 const SPELL_GOLEM_CAST_RANGE: float = 10.0
+## Zauber 14 "Daemonengolem beschwoeren" (2026-11-16): dieselben Kosten, Ladungen
+## und Reichweite wie der Golem (Nutzervorgabe). Vorerst nur beim menschlichen
+## Spieler in der Leiste (Spell.create_player_set), Taste C.
+const SPELL_DEMON_GOLEM_CHARGE_COST: float = SPELL_GOLEM_CHARGE_COST
+const SPELL_DEMON_GOLEM_MAX_CHARGES: int = SPELL_GOLEM_MAX_CHARGES
+const SPELL_DEMON_GOLEM_CAST_RANGE: float = SPELL_GOLEM_CAST_RANGE
 
 # =============================================================================
 # ZAUBER — Effektwerte

@@ -20,6 +20,11 @@ extends SceneTree
 ##   ... -- <output dir> kick:0.3,kick:0.4,kick:0.5,kick:0.6
 ## — then only side-view film strips of exactly these poses are written.
 ##
+## Another model (the demon golem) and its build: third argument = the file under
+## assets/models/units/, fourth = how much WIDER than tall the game shows it
+## (golem 1.11, demon golem 1.39 — DemonGolem.model_scale), e.g.
+##   ... -- <output dir> "" golem_demon.glb 1.39
+##
 ## The "Flag" mesh gets a tribe-coloured material like Golem._refresh_flag_color
 ## does, so the stills also show how much tribe colour is visible.
 
@@ -37,6 +42,9 @@ const TRIBE_COLOR: Color = Color(0.85, 0.15, 0.12)
 var _out_dir: String = "user://golem_model"
 ## Optional second argument "clip:time,clip:time,...": see _strip.
 var _strip_spec: String = ""
+## Optional third and fourth argument: the model file and its width factor.
+var _model_path: String = MODEL
+var _wide: float = 1.0
 var _stage: Node3D = null
 var _camera: Camera3D = null
 
@@ -47,6 +55,10 @@ func _initialize() -> void:
 		_out_dir = args[0]
 	if args.size() > 1:
 		_strip_spec = args[1]
+	if args.size() > 2 and args[2] != "":
+		_model_path = args[2] if args[2].begins_with("res://") else "res://assets/models/units/" + args[2]
+	if args.size() > 3 and args[3].is_valid_float():
+		_wide = float(args[3])
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(_out_dir))
 	_build_world()
 	_run()
@@ -76,7 +88,7 @@ func _strip(scene: PackedScene) -> void:
 
 func _run() -> void:
 	await process_frame   # the root is only inside the tree from the first frame on
-	var scene: PackedScene = load(MODEL) as PackedScene
+	var scene: PackedScene = load(_model_path) as PackedScene
 	if scene == null:
 		push_error("golem.glb is not imported — run --headless --import first")
 		quit(1)
@@ -158,6 +170,7 @@ func _place(scene: PackedScene, poses: Array, step: Vector3) -> void:
 	for i in range(poses.size()):
 		var model: Node3D = scene.instantiate() as Node3D
 		model.position = step * float(i)
+		model.scale = Vector3(_wide, 1.0, _wide)
 		_stage.add_child(model)
 		var flag: MeshInstance3D = model.find_child("Flag", true, false) as MeshInstance3D
 		if flag != null:

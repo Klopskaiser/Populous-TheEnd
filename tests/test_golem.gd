@@ -204,6 +204,7 @@ func test_kick_hits_a_lane_ahead_and_behind_and_throws_everyone() -> void:
 	var w: Dictionary = _make_world()
 	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
 	g.facing = Vector3(0, 0, 1)
+	g.knock_height_override = 53.0   # the throw chance by size: 100 % from 53 m (here only the throw is under test)
 	var near: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50.0, 5, 51.0))        # along 1,0
 	var far: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50.0, 5, 54.2))         # along 4,2
 	var edge: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50.8, 5, 53.0))        # side 0,8
@@ -235,7 +236,7 @@ func test_kick_hits_a_lane_ahead_and_behind_and_throws_everyone() -> void:
 	check(out_far.health == 1000, "4,5 m ahead is beyond the lane (4,25 m)")
 	check(out_back.health == 1000, "3,2 m behind is beyond the backswing (2,98 m)")
 	check(friend.health == 1000, "own units in the lane are never hit")
-	check(all_thrown, "EVERY survivor of the kick is thrown (lots of knockback)")
+	check(all_thrown, "at 100 percent EVERY survivor of the kick is thrown (lots of knockback)")
 	check(all_forward, "in front they fly along the kick, not sideways")
 	check(behind.state == Unit.State.THROWN and behind._throw_velocity.z < 0.0,
 		"the one behind her flies off backward")
@@ -389,8 +390,8 @@ func test_golem_turns_on_the_nearest_enemy_in_reach_before_chasing() -> void:
 	for u in [far, near]:
 		u.max_health = 100000
 		u.health = 100000
-	g.order_attack(far)
-	check(g.attack_target == far, "ordered onto the far one")
+	g._begin_attack(far)   # picked by herself (an ORDERED target is kept, see test_an_ordered_target_is_kept_while_others_fight_around_her)
+	check(g.attack_target == far, "locked onto the far one")
 	_tick_world(w)
 	check(g.attack_target == near, "...but turns on the enemy already in reach")
 	# Nobody in reach any more: now it chases.
@@ -399,9 +400,11 @@ func test_golem_turns_on_the_nearest_enemy_in_reach_before_chasing() -> void:
 	for i in range(20):
 		_tick_world(w)
 	check(g.attack_target == far, "with nobody near it goes for the far one")
-	# Measured on the golem, not on the distance: once she is in reach she KICKS
-	# the target, and a kicked survivor flies further off than it stood before.
-	check(g.position.x > 52.0, "and walks after it (x %.1f)" % g.position.x)
+	# Measured on the golem, not on the distance: the warrior runs at her as well.
+	# (Until 2026-11-16 she kicked it away and had to follow it further; a golem
+	# under 8 m throws nobody now.)
+	check(g.position.x > 51.0, "and walks toward it (x %.1f)" % g.position.x)
+	check(far.health < 100000, "and strikes it")
 	_free_world(w)
 
 
@@ -413,6 +416,7 @@ func test_smash_throws_or_rolls_a_quarter_each_away_from_the_golem() -> void:
 	var w: Dictionary = _make_world()
 	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
 	g.facing = Vector3(0, 0, 1)
+	g.knock_height_override = 28.0   # 24 percent whirled up, 24 percent rolled (size rule 2026-11-16)
 	var lifted: int = 0
 	var rolled: int = 0
 	var untouched: int = 0
@@ -436,11 +440,11 @@ func test_smash_throws_or_rolls_a_quarter_each_away_from_the_golem() -> void:
 		v.take_damage(100000)   # clear the field for the next trial
 		w.um.tick(TICK)
 	check(all_away, "every lifted victim flies AWAY from the golem (+Z)")
-	check(lifted > trials * 0.2 and lifted < trials * 0.4,
-		"about 30 percent are whirled up (%d of %d)" % [lifted, trials])
-	check(rolled > trials * 0.2 and rolled < trials * 0.4,
-		"about 30 percent are sent rolling (%d of %d)" % [rolled, trials])
-	check(untouched > trials * 0.25, "the rest just take the hit (%d of %d)" % [untouched, trials])
+	check(lifted > trials * 0.14 and lifted < trials * 0.34,
+		"about 24 percent are whirled up (%d of %d)" % [lifted, trials])
+	check(rolled > trials * 0.14 and rolled < trials * 0.34,
+		"about 24 percent are sent rolling (%d of %d)" % [rolled, trials])
+	check(untouched > trials * 0.40, "the rest just take the hit (%d of %d)" % [untouched, trials])
 	_free_world(w)
 
 
@@ -2799,4 +2803,222 @@ func test_drum_circle_is_ten_percent_larger_than_the_slam() -> void:
 			"level %d: 5 percent beyond the slam's edge the drum still strikes, the slam does not" % lv)
 	_grow_to_the_end(g)
 	check_near(g.ground_radius(Golem.ATTACK_DRUM), 13.2, "100 m: 13,2 m (slam 12 m)", 0.001)
+	_free_world(w)
+
+
+# --- Rueckstoss nach Groesse (Nutzervorgabe 2026-11-16) -----------------------------
+
+## Unter 8 m wirft und rollt nichts; ab 8 m steigt jede Chance stufenweise: Tritt
+## +10 % je 5 m (bis jeden), Handschlag werfen und rollen je +8 % je 10 m (Grenze je
+## 40 %), Trommeln nur rollen, +8 % je 10 m ohne eigene Grenze.
+func test_knockback_chances_climb_with_the_size() -> void:
+	var c: Callable = func(h: float, step: float, per: float, cap: float) -> float:
+		return Golem.knock_chance(h, step, per, cap)
+	var k: Array = [Balance.GOLEM_KICK_THROW_STEP_M, Balance.GOLEM_KICK_THROW_PER_STEP, Balance.GOLEM_KICK_THROW_MAX]
+	var sl: Array = [Balance.GOLEM_SLAM_LIFT_STEP_M, Balance.GOLEM_SLAM_LIFT_PER_STEP, Balance.GOLEM_SLAM_LIFT_MAX]
+	var sr: Array = [Balance.GOLEM_SLAM_ROLL_STEP_M, Balance.GOLEM_SLAM_ROLL_PER_STEP, Balance.GOLEM_SLAM_ROLL_MAX]
+	var dr: Array = [Balance.GOLEM_DRUM_ROLL_STEP_M, Balance.GOLEM_DRUM_ROLL_PER_STEP, Balance.GOLEM_DRUM_ROLL_MAX]
+	for h in [2.0, 4.725, 7.99]:
+		check(c.call(h, k[0], k[1], k[2]) == 0.0 and c.call(h, sl[0], sl[1], sl[2]) == 0.0
+			and c.call(h, sr[0], sr[1], sr[2]) == 0.0 and c.call(h, dr[0], dr[1], dr[2]) == 0.0,
+			"%.2f m: nothing is thrown or rolled" % h)
+	check_near(c.call(8.0, k[0], k[1], k[2]), 0.10, "kick: 8 m 10 %")
+	check_near(c.call(12.9, k[0], k[1], k[2]), 0.10, "kick: 12,9 m still 10 %")
+	check_near(c.call(13.0, k[0], k[1], k[2]), 0.20, "kick: 13 m 20 %")
+	check_near(c.call(48.0, k[0], k[1], k[2]), 0.90, "kick: 48 m 90 %")
+	check_near(c.call(53.0, k[0], k[1], k[2]), 1.0, "kick: from 53 m every survivor")
+	check_near(c.call(100.0, k[0], k[1], k[2]), 1.0, "kick: no more than 100 %")
+	check_near(c.call(8.0, sl[0], sl[1], sl[2]), 0.08, "slam throw: 8 m 8 %")
+	check_near(c.call(18.0, sl[0], sl[1], sl[2]), 0.16, "slam throw: 18 m 16 %")
+	check_near(c.call(48.0, sl[0], sl[1], sl[2]), 0.40, "slam throw: 48 m 40 %")
+	check_near(c.call(100.0, sl[0], sl[1], sl[2]), 0.40, "slam throw: capped at 40 %")
+	check_near(c.call(38.0, sr[0], sr[1], sr[2]), 0.32, "slam roll: 38 m 32 %")
+	check_near(c.call(100.0, sr[0], sr[1], sr[2]), 0.40, "slam roll: capped at 40 %")
+	check_near(c.call(98.0, dr[0], dr[1], dr[2]), 0.80, "drum roll: 98 m 80 %")
+	check_near(c.call(118.0, dr[0], dr[1], dr[2]), 0.96, "drum roll: 118 m 96 % (no cap of its own)")
+	check_near(c.call(128.0, dr[0], dr[1], dr[2]), 1.0, "drum roll: from 128 m every survivor")
+
+
+func test_a_small_golem_throws_and_rolls_nobody() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
+	g.facing = Vector3(0, 0, 1)
+	check(g.height_m() < Balance.GOLEM_KNOCK_MIN_HEIGHT, "a fresh golem is below 8 m")
+	check(g.kick_throw_chance() == 0.0 and g.slam_lift_chance() == 0.0 and g.slam_roll_chance() == 0.0
+		and g.drum_roll_chance() == 0.0, "all its chances are 0")
+	var still: bool = true
+	for i in range(20):
+		var v: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50.0, 5, 51.5))
+		v.max_health = 1000
+		v.health = 1000
+		g._smash()
+		g._kick()
+		g._land_attack(Golem.ATTACK_DRUM, Balance.GOLEM_DRUM_HITS.size() - 1)
+		still = still and v.state != Unit.State.THROWN and v.state != Unit.State.ROLL and v.health < 1000
+		v.take_damage(100000)
+		w.um.tick(TICK)
+	check(still, "slam, kick and drum hurt, but nobody flies or rolls")
+	_free_world(w)
+
+
+func test_the_chances_follow_the_golems_own_height() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
+	_level_to(g, 3)   # 8,2 m
+	check(g.height_m() >= 8.0 and g.height_m() < 13.0, "level 3 is just above 8 m (%.1f m)" % g.height_m())
+	check_near(g.kick_throw_chance(), 0.10, "kick 10 %")
+	check_near(g.slam_lift_chance(), 0.08, "slam throw 8 %")
+	check_near(g.slam_roll_chance(), 0.08, "slam roll 8 %")
+	check_near(g.drum_roll_chance(), 0.08, "drum roll 8 %")
+	_level_to(g, 7)   # 21,2 m
+	check_near(g.kick_throw_chance(), 0.30, "the giant (21 m): kick 30 %")
+	check_near(g.slam_lift_chance(), 0.16, "slam throw 16 %")
+	check_near(g.drum_roll_chance(), 0.16, "drum roll 16 %")
+	_free_world(w)
+
+
+func test_drum_never_throws_and_rolls_by_its_chance() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
+	g.facing = Vector3(0, 0, 1)
+	g.knock_height_override = 128.0   # drum roll 100 %
+	var thrown: bool = false
+	var all_rolled: bool = true
+	for i in range(10):
+		var v: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50.0, 5, 51.5))
+		v.max_health = 1000
+		v.health = 1000
+		g._land_attack(Golem.ATTACK_DRUM, Balance.GOLEM_DRUM_HITS.size() - 1)
+		thrown = thrown or v.state == Unit.State.THROWN
+		all_rolled = all_rolled and v.state == Unit.State.ROLL
+		v.take_damage(100000)
+		w.um.tick(TICK)
+	check(not thrown, "the drum never throws")
+	check(all_rolled, "at 100 percent every survivor of its last hit rolls")
+	_free_world(w)
+
+
+## Bugmeldung 2026-11-16: zum Ziel geschickt, drehte sich der Golem manchmal erst in
+## die falsche Richtung. Der Weg aus der Warteschlange begann mit der Mitte seiner
+## eigenen Zelle — stand er davor, lag sie hinter ihm.
+func test_a_queued_path_does_not_turn_her_the_wrong_way_first() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _golem(w, 0, Vector3(50.5, 5, 50.9))   # in front of the centre of her cell
+	g.facing = Vector3(0, 0, 1)
+	g.snap_heading()
+	g._slew_heading(0.0)
+	var target: Vector3 = Vector3(60, 5, 70)   # ahead and to the left
+	var path: PackedVector3Array = w.nav.find_path(g.position, target)
+	check(w.nav.world_to_cell(path[0]) == w.nav.world_to_cell(g.position),
+		"the raw path starts in her own cell (the case of the report)")
+	var cells: PackedVector2Array = PackedVector2Array()
+	for p in path:
+		var cell: Vector2i = w.nav.world_to_cell(p)
+		cells.append(Vector2(cell.x, cell.y))
+	g._pending_target = target
+	g._path_request_id += 1
+	g._set_state(Unit.State.MOVE)
+	g._apply_worker_path(g._path_request_id, cells)
+	check(w.nav.world_to_cell(g._path[0]) != w.nav.world_to_cell(g.position),
+		"the queued path no longer starts in her own cell")
+	var want: float = atan2(target.x - g.position.x, target.z - g.position.z)
+	var away: float = 0.0
+	var prev: float = absf(wrapf(want - atan2(g.heading().x, g.heading().z), -PI, PI))
+	for i in range(30):
+		g.tick(0.05)
+		var now: float = absf(wrapf(want - atan2(g.heading().x, g.heading().z), -PI, PI))
+		if now > prev + 0.001:
+			away += now - prev
+		prev = now
+	check(away < deg_to_rad(50.0), "she does not swing away from the goal first (%.0f degrees)" % rad_to_deg(away))
+	_free_world(w)
+
+
+# --- Befehle haben Vorrang (Bugmeldung 2026-11-16) ------------------------------------
+
+## Ein Angriffsbefehl auf eine bestimmte Einheit wurde ignoriert, wenn andere um sie
+## herum kaempften: der Golem wechselte jedes Mal auf den Naechsten in Reichweite.
+## Ein Golem wird nicht im Nahkampf gebunden - das befohlene Ziel bleibt.
+func test_an_ordered_target_is_kept_while_others_fight_around_her() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
+	var far: Unit = _spawn(w, WARRIOR_SCENE, 1, Vector3(58, 5, 50))    # 8 m: out of reach
+	var near: Array = []
+	for at in [Vector3(51.5, 5, 50), Vector3(50, 5, 51.8), Vector3(50, 5, 48.2)]:
+		near.append(_spawn(w, WARRIOR_SCENE, 1, at))                     # in reach, fighting her
+	for u in near + [far]:
+		u.max_health = 100000
+		u.health = 100000
+	for u in near:
+		u.order_attack(g)
+	far.order_move(Vector3(58, 5, 50))   # stands still: she has to walk to it
+	w.commands.order_attack([g] as Array[Unit], far)
+	check(g.attack_target == far and g._target_ordered, "ordered onto the far one")
+	var kept: bool = true
+	var start: float = _flat_dist(g.position, far.position)
+	for i in range(30):
+		_tick_world(w)
+		kept = kept and g.attack_target == far
+	check(kept, "she keeps the ordered target the whole time (target now %s)" % [g.attack_target])
+	check(_flat_dist(g.position, far.position) < start - 0.5,
+		"and walks toward it through the crowd (%.1f m left of %.1f)" % [_flat_dist(g.position, far.position), start])
+	_free_world(w)
+
+
+## Bugmeldung 2026-11-16: "bueckt sich, steht wieder auf und tritt". Jeder Zielwechsel
+## setzte den Nahkampf-Merker zurueck, und die Haltung las das als "muss laufen" — hier
+## der Wechsel auf einen Feind in Reichweite, weil das alte Ziel ausser Reichweite stand.
+func test_a_target_switch_in_reach_keeps_her_crouched() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
+	g.stomp_enabled = false
+	var far: Unit = _spawn(w, WARRIOR_SCENE, 1, Vector3(58, 5, 50))    # 8 m: out of reach
+	var near: Unit = _spawn(w, WARRIOR_SCENE, 1, Vector3(51.5, 5, 50))  # 1,5 m: in reach
+	for u in [far, near]:
+		u.max_health = 100000
+		u.health = 100000
+		u.order_move(u.position)
+	g._begin_attack(far)
+	g.facing = Vector3(1, 0, 0)
+	g.snap_heading()
+	g.stance = Golem.STANCE_CROUCH
+	g._stance_target = Golem.STANCE_CROUCH
+	g._stance_age = 0.5   # just bent down: the stance's minimum time is not over
+	g._in_melee = true
+	g.tick(TICK)
+	check(g.attack_target == near, "she switches to the enemy in reach")
+	check(g.stance == Golem.STANCE_CROUCH and not g.is_switching_stance(),
+		"and stays crouched (no getting up for a target right in front of her)")
+	var kinds: Array = []
+	for i in range(40):
+		g.tick(TICK)
+		if g._pending_attack != &"" and not kinds.has(g._pending_attack):
+			kinds.append(g._pending_attack)
+	check(not kinds.has(Golem.ATTACK_KICK) and not kinds.is_empty(),
+		"she strikes from the crouch, no kick (%s)" % [kinds])
+	_free_world(w)
+
+
+## Derselbe Fehler auf dem zweiten Weg: das Ziel stirbt, die Zielwahl nimmt das naechste.
+func test_she_stays_crouched_when_her_target_dies_and_the_next_stands_close() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
+	g.stomp_enabled = false
+	var first: Unit = _spawn(w, WARRIOR_SCENE, 1, Vector3(51.5, 5, 50))
+	var second: Unit = _spawn(w, WARRIOR_SCENE, 1, Vector3(51.2, 5, 51.0))
+	second.max_health = 100000
+	second.health = 100000
+	for u in [first, second]:
+		u.order_move(u.position)
+	g._begin_attack(first)
+	g.facing = Vector3(1, 0, 0)
+	g.snap_heading()
+	g.stance = Golem.STANCE_CROUCH
+	g._stance_target = Golem.STANCE_CROUCH
+	g._stance_age = 0.5
+	g._in_melee = true
+	first.take_damage(100000, g)
+	g.tick(TICK)
+	check(g.attack_target == second, "she takes on the next enemy")
+	check(g.stance == Golem.STANCE_CROUCH and not g.is_switching_stance(), "and stays crouched")
 	_free_world(w)

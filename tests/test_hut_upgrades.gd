@@ -620,3 +620,23 @@ func test_braves_finish_an_upgrade_on_their_own() -> void:
 	check(done, "the ejected crew builds the upgrade to completion by itself")
 	check(not hut.upgrading, "and the upgrade flag is cleared")
 	_free_world(w)
+
+
+## Startmission (Nutzerwunsch 2026-11-16): Huetten beginnen als Wohnpalast. Der
+## Sofortausbau laeuft Stufe fuer Stufe durch den normalen Abschluss — Leben,
+## Holzwert, Wohnraum und Besatzung stimmen wie nach echten Ausbauten.
+func test_upgrade_instantly_jumps_to_the_palace_like_real_upgrades() -> void:
+	var w: Dictionary = _make_world()
+	var hut: Hut = _place_hut(w, Vector2i(60, 60))
+	var wood0: int = hut.wood_cost
+	hut.upgrade_instantly(Balance.HUT_MAX_UPGRADE_STAGE)
+	check(hut.upgrade_stage == Balance.HUT_MAX_UPGRADE_STAGE, "stage 4, the palace")
+	check(hut.capacity() == 45 and hut.crew_capacity() == 6, "45 places, 6 crew")
+	check(hut.max_health == Balance.HUT_HP_PER_STAGE[Balance.HUT_MAX_UPGRADE_STAGE]
+		and hut.health == hut.max_health, "full palace health")
+	check(hut.wood_cost == wood0 + 4 * Balance.HUT_UPGRADE_WOOD_COST,
+		"the upgrade wood counts into its value (demolition, repair)")
+	check(not hut.upgrading and not hut.upgrade_ready(), "nothing left to upgrade")
+	hut.upgrade_instantly(99)
+	check(hut.upgrade_stage == Balance.HUT_MAX_UPGRADE_STAGE, "never beyond the top stage")
+	_free_world(w)

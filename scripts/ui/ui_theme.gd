@@ -165,6 +165,8 @@ static func icon(key: StringName) -> ImageTexture:
 			_draw_hypnosis(img)
 		&"golem":
 			_draw_golem(img)
+		&"demon_golem":
+			_draw_demon_golem(img)
 		&"shaman":
 			_draw_shaman(img)
 		&"pause":
@@ -488,6 +490,25 @@ static func _draw_golem(img: Image) -> void:
 	_rect(img, 18, 9, 4, 10, dark)
 	_rect(img, 6, 18, 5, 5, dark)          # Beine
 	_rect(img, 13, 18, 5, 5, dark)
+
+
+static func _draw_demon_golem(img: Image) -> void:
+	# Der Daemonengolem: dieselbe Figur wie der Golem, gedrungener und dunkelrot,
+	# mit zwei Hoernern — auf einen Blick vom Golem daneben zu unterscheiden.
+	var body: Color = Color(0.62, 0.20, 0.18)
+	var dark: Color = Color(0.38, 0.10, 0.10)
+	_rect(img, 8, 2, 2, 3, I_LIGHT)         # Hoerner
+	_rect(img, 14, 2, 2, 3, I_LIGHT)
+	_rect(img, 9, 4, 6, 5, body)           # Kopf
+	_rect(img, 10, 6, 1, 1, I_GOLD)        # Augen
+	_rect(img, 13, 6, 1, 1, I_GOLD)
+	_rect(img, 3, 9, 18, 3, dark)          # Schultern
+	_rect(img, 5, 12, 14, 7, body)         # Rumpf
+	_rect(img, 10, 13, 4, 4, I_GOLD)       # Brust-Rune
+	_rect(img, 1, 10, 4, 9, dark)          # Arme
+	_rect(img, 19, 10, 4, 9, dark)
+	_rect(img, 5, 19, 6, 4, dark)          # Beine
+	_rect(img, 13, 19, 6, 4, dark)
 
 
 static func _draw_shaman(img: Image) -> void:

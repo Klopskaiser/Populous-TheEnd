@@ -287,6 +287,7 @@ Größenreferenz die Platzhalter:
 | `airship.glb` | Luftschiff (Zeppelin) | Ballon ~6 m lang × 2 m breit, Unterkante ca. 2,5 m über dem Ursprung; Gondel/Deck 1,6 × 3,6 m | `Flag` optional. **Das Deck muss bei y = 0,6 m liegen** (`Airship.DECK_Y`): dort stellt das Spiel die Passagiere hin — zwei Spalten ±0,44 m neben der Mittelachse, drei Ränge im Abstand 0,85 m. Der Rumpf wippt ±0,15 m (Periode ~5 s), die Passagiere schweben mit. Der Ursprung ist der Punkt **unter** dem Schiff am Boden; die Flughöhe setzt das Spiel. |
 
 | `golem.glb` | Golem (Zauber 13) | Modell **4 m hoch gebaut** (`Golem.MODEL_HEIGHT`) — das Spiel skaliert es auf `Balance.GOLEM_HEIGHT` (5,25 m, so hoch wie der Wachturm); schlanke Figur, im Spiel 2,3 m breit × 1,8 m tief, Ursprung an den Füßen mittig; Platzhalter: Beine, Rumpf, Schultern, Kopf, zwei hängende Arme | **`AnimationPlayer`** (optional) mit den Clips `idle` / `walk` / `slam` / `kick` / `swat` / `death` (s. u.). **`Flag`** (`MeshInstance3D`, optional): Teil in Stammesfarbe (leuchtet leicht) — beim Projektmodell die **Krawattenschleife**. **`Arm`** (`Node3D`, optional, nur für Modelle ohne Clips): Schulter-Pivot beider Arme, schwingt beim Angriff um seine X-Achse. |
+| `golem_demon.glb` | Dämonengolem (Zauber 14) | Modell **4 m hoch gebaut** wie `golem.glb`; das Spiel skaliert es auf seine Größe (2 m beim Erscheinen, +1 m je Wachstumsstufe) und zeigt es **25 % breiter und tiefer** als den Golem gleicher Höhe (`DemonGolem.model_scale`). Die Figur mit den Jeansschuhen, muskulöser; fehlt die Datei: derselbe Platzhalter wie beim Golem | Wie `golem.glb`: **`AnimationPlayer`** mit denselben 16 Clipnamen und Zeiten, **`Flag`** (Krawattenschleife). `walk` deckt 2,575 m je Durchlauf (`DemonGolem.WALK_CLIP_STRIDE`). Erzeugt von `D:\game\gymnastikschuh\golem_export.mjs` aus `jeans_variante/out/avatar_1_example_daemon.vrm`. |
 
 Das Katapult ohne `Arm` feuert trotzdem — nur ohne die Schnapp-Animation; der Golem
 ohne Clips und ohne `Arm` greift trotzdem an — nur ohne Bewegung.
@@ -551,6 +552,7 @@ Die dreizehn gültigen IDs (aus `scripts/spells/*.gd`):
 | `spell_voice_supertornado.ogg` | `spell_supertornado.ogg` | Supertornado | wenn der Haupttrichter erscheint |
 | `spell_voice_hypnosis.ogg` | `spell_hypnosis.ogg` | Hypnose | im Moment der Übernahme (nur wenn wirklich jemand übernommen wird) |
 | `spell_voice_golem.ogg` | `spell_golem.ogg` | Golem beschwören | wenn der Golem erscheint (nur bei erfolgreicher Beschwörung) |
+| `spell_voice_demon_golem.ogg` | `spell_demon_golem.ogg` | Dämonengolem beschwören | wenn der Dämonengolem erscheint (nur bei erfolgreicher Beschwörung). Alle übrigen Sounds teilt er mit dem Golem (`golem_*`, `select_golem` …) |
 
 **Zusatzsounds der Zauber** — `audio/sfx/` (Fallback = stumm):
 

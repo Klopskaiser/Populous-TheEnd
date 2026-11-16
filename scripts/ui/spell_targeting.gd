@@ -11,12 +11,12 @@ class_name SpellTargeting extends Control
 const RAY_LENGTH: float = 1000.0
 const TERRAIN_MASK: int = 1   # the indicator snaps to terrain only
 
-## Hotkey order of the spells (input actions cast_spell_1..13: keys 1-9, 0, ß,
-## ´ and X); matches Sidebar.default_spell_entries().
+## Hotkey order of the spells (input actions cast_spell_1..14: keys 1-9, 0, ß,
+## ´, X and C); matches Sidebar.default_spell_entries().
 const HOTKEY_SPELLS: Array[StringName] = [
 	&"fireball", &"lightning", &"swarm", &"landbridge", &"tornado",
 	&"earthquake", &"volcano", &"firestorm", &"flatten", &"sink",
-	&"supertornado", &"hypnosis", &"golem"]
+	&"supertornado", &"hypnosis", &"golem", &"demon_golem"]
 
 ## Damaging spells that may lock onto an enemy DEVICE (catapult, fire ram,
 ## airship) under the cursor: the cast then tracks that unit's live position.

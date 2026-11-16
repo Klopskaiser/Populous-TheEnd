@@ -12303,3 +12303,154 @@ Standbilder angesehen, der Sprungangriff im laufenden Spiel nicht geprueft.
   21 Huetten und alle Gebaeudearten nach 9 min, jede Suche findet einen Platz).
   Tests `test_ai.gd::test_plot_search_gets_past_a_dense_village`,
   `test_plot_sweep_shares_the_cell_budget_between_anchors`.
+
+### Daemonengolem: zweiter Golem als eigener Zauber (2026-11-16)
+
+Nutzervorgabe 2026-11-16. Zauber 14 "Dämonengolem beschwören" (Taste C, Kosten wie der
+Golem), vorerst nur beim menschlichen Spieler.
+
+- **Einheit** `scripts/units/demon_golem.gd` (`class_name DemonGolem extends Golem`),
+  Szene `scenes/units/demon_golem.tscn`. Alle Werte in `Balance.DEMON_GOLEM_*`, dort
+  steht auch die ganze Vorgabe als Kommentar. Kern: keine Stufen, keine Lebenszeit; 2 m
+  und 400 LP beim Erscheinen; je Wachstumsstufe +1 m, +5 LP, +0,15 LP/s, +1 Ziel,
+  Schaden +0,75 / +0,8 / +1 (Handschlag / Tritt / Trommeln gesamt) auf den halben
+  Startschaden; Stufe kostet 5 Kills, alle 10 Stufen einen mehr; bei 150 m zerfaellt er;
+  Angriffe 15 % schneller als beim Golem gleicher Groesse; ab 20 m Luftschiffe, ab 30 m
+  Riesenpaket samt Trampeln und Kollision; nie gehaertet; Kill heilt 10 sofort und 10
+  ueber 5 s (stapelbar).
+- **Golem geoeffnet statt kopiert:** `golem.gd` fragte an neun Stellen `level` direkt.
+  Die sind jetzt Schalter — `tramples()`, `is_giant()`, `has_lifetime()` (neben den
+  schon vorhandenen `ignores_unit_collision()`, `can_strike_air()`, `walks_straight()`,
+  `is_full_size()`) — und die Statur kommt aus `model_file()`, `model_scale()`,
+  `body_half_width()`, `body_half_depth()`, `walk_clip_speed()`, `rise_depth()`. Fuer den
+  Golem aendert sich kein Wert (`test_golem.gd` unveraendert 584 bestanden). Die
+  Dauerheilung haengt jetzt an `regen_per_second() > 0` statt an `level > 0`.
+- **Groesse treibt alles:** `DemonGolem.size_factor()` = Hoehe / `GOLEM_HEIGHT`; damit
+  rechnen die geerbten Formeln (Reichweite, Schneise, Haltungswechsel, Drehrate, Trampeln,
+  Katapult). Ueberschrieben sind nur Tempo (`current_speed`, mit Untergrenze 4 m/s),
+  Flaechen (`reach_factor`, `slam_scale` als Potenzen der Groesse), Takt und
+  Animationstempo (`strike_cooldown` ohne Klemme, `attack_speed`), Aggro (Untergrenze
+  8 m), Schaden, Ziele, Heilung, Lebensobergrenze.
+- **Zauber:** `DemonGolemSpell extends GolemSpell` (`GolemSpell._scene()` neu als
+  Schalter). `Spell.create_player_set()` = Standardsatz + dieser Zauber; `main.gd` gibt
+  ihn nur `GameState.PLAYER_TRIBE`. Die KI behaelt 13 Zauber, ihre Auflade- und
+  Zauberlogik ist unberuehrt. Leiste: 14. Eintrag (`Sidebar.default_spell_entries`),
+  `SpellTargeting.HOTKEY_SPELLS`, Aktion `cast_spell_14` (C) in `project.godot` und
+  `InputSettings.ACTIONS`, Symbol `demon_golem` in `UiTheme`.
+- **Modell:** `assets/models/units/golem_demon.glb` (18.403 Dreiecke, 1,64 MB) aus der
+  Werkstatt `D:\game\gymnastikschuh` (Jeans-Finalform, muskuloeser; dort
+  `LIESMICH_POPULOUS.md`, Abschnitt "Der Dämonengolem"). Das Spiel skaliert es 25 %
+  breiter und tiefer als den Golem gleicher Hoehe.
+- **Katapult:** die Koerperabfrage in `SiegeShot._shockwave` nimmt jetzt den breitesten
+  moeglichen Koerper beider Golems (`DemonGolem.max_body_radius()`, 30,8 m).
+- **Bugfix unterwegs:** `_create_model` setzte den Wurzelmassstab ohne `_shown_size`; der
+  Daemonengolem waere bis zum ersten Wachstum in Golemgroesse erschienen.
+- **Werkzeuge:** `tests/diag_demon_golem_values.gd` (Wertetabelle je Groesse, optional
+  eigene Groessenliste), `tests/diag_golem_model.gd` nimmt als dritte und vierte Angabe
+  eine Modelldatei und einen Breitenfaktor.
+
+**Annahmen (dem Nutzer genannt, nicht beanstandet):** Flaechen bei 4,7 m wie ein
+frischer Golem; Tempo mindestens 4 m/s und Aggro mindestens 8 m, solange er klein ist;
+Trampeln gehoert zum Paket ab 30 m.
+
+**Offen:** nur gemessen und als Standbilder angesehen, nicht gespielt. Keine eigenen
+Sounds. Bei 150 m erreicht die Grundzahl der Ziele 151 — vom Nutzer so gewollt, im Spiel
+noch nicht erprobt. Der Golem und der Daemonengolem teilen die Zeile "Golems" der
+Seitenleiste.
+
+**Tests:** `test_demon_golem.gd` neu (121 bestanden); `test_ui_logic.gd` auf 14
+Leisteneintraege angepasst. Volle Suite: 54 Dateien, 7282 bestanden, 0 fehlgeschlagen.
+
+### Golem: Rueckstoss nach Groesse; Drehung beim Losschicken (2026-11-16)
+
+- **Rueckstoss nach Groesse** (Nutzervorgabe): ob ein Ueberlebender geworfen oder gerollt
+  wird, haengt an der Koerperhoehe (`Golem.knock_chance`, Treppe ab
+  `GOLEM_KNOCK_MIN_HEIGHT` 8 m; Werte `GOLEM_KICK_THROW_*`, `GOLEM_SLAM_LIFT_*`,
+  `GOLEM_SLAM_ROLL_*`, `GOLEM_DRUM_ROLL_*`). Unter 8 m nichts; Tritt +10 % je 5 m bis
+  100 %, Handschlag werfen und rollen je +8 % je 10 m bis 40 %, Trommeln nur rollen,
+  +8 % je 10 m ohne eigene Grenze. `GOLEM_LIFT_CHANCE`/`GOLEM_ROLL_CHANCE` (30/30) sind
+  entfallen; Wurfweiten unveraendert. Bei 0 % und 100 % wird nicht gewuerfelt (der
+  geseedete Zufallsstrom bleibt dort, wie er war). Gilt fuer den Daemonengolem genauso
+  (er erreicht 8 m nach 30 Kills). Tests koennen die Hoehe mit
+  `Golem.knock_height_override` festlegen.
+- **Drehung beim Losschicken** (Bugmeldung): der Weg aus der Warteschlange
+  (`_apply_worker_path`, PathWorker) begann mit der Mitte der eigenen Zelle — der
+  synchrone Planer streicht diesen Punkt (`_trim_own_cell_waypoint`), dieser Weg nicht.
+  Stand der Golem vor der Zellmitte, lag der erste Wegpunkt hinter ihm, und mit seiner
+  langsamen Drehung schwenkte er nachgestellt bis 169 Grad in die falsche Richtung.
+  `Golem._apply_worker_path` streicht den Punkt jetzt auch. **Nicht behoben:** dieselbe
+  Luecke hat `Unit._apply_worker_path` fuer alle Einheiten (dort kaum zu sehen, weil sie
+  sich sofort drehen).
+
+**Tests:** `test_golem.gd` 619 bestanden (neu: `test_knockback_chances_climb_with_the_size`,
+`test_a_small_golem_throws_and_rolls_nobody`, `test_the_chances_follow_the_golems_own_height`,
+`test_drum_never_throws_and_rolls_by_its_chance`,
+`test_a_queued_path_does_not_turn_her_the_wrong_way_first`; Wurf-, Handschlag- und
+Verfolgungstest an die neue Regel angepasst).
+
+### Golem: befohlenes Ziel bleibt; Recherche Kampfverhalten (2026-11-16)
+
+- **Bugfix Angriffsbefehl** (Bugmeldung: ein Angriffsbefehl auf eine bestimmte Einheit
+  wurde ignoriert, wenn andere kaempften): `Golem._tick_attack` wechselte auf den
+  Naechsten in Reichweite, sobald das Ziel ausser Reichweite war — auch bei einem
+  befohlenen Ziel. Jetzt gilt die Zieldisziplin von 2026-09-06 nur fuer selbst gewaehlte
+  Ziele; ein befohlenes (`_target_ordered`, gesetzt von `order_attack`) bleibt, sie
+  laeuft durch die Menge hin. Ein befohlener GEBAEUDEANGRIFF ist unveraendert: er wird
+  weiter fuer jeden Feind im Aggro-Radius aufgegeben (bewusst offen gelassen, siehe unten).
+- **Recherche "bueckt sich, steht wieder auf und tritt"** (`tests/diag_golem_fight.gd`,
+  Golem gegen 8 bzw. 20 Krieger, Stufe 0/3/6/7, je 3 Laeufe): 32 von 36 Aufrichten
+  mitten im Kampf geschahen im Takt eines Zielwechsels — das neue Ziel stand 1 m vor
+  ihr. Ablauf: das Ziel stirbt, die Zielsuche nimmt den Naechsten im Aggro-Radius, der
+  steht ausser Reichweite, `_tick_attack` wechselt auf den Naechsten in Reichweite —
+  ueber `_begin_attack` -> `_end_attack`, das `_in_melee` auf falsch setzt. Im selben
+  Takt sieht `_tick_stance` "gebueckt, im Angriff, nicht im Nahkampf" und richtet sie
+  auf. Danach sperrt die Mindestzeit der Haltung (3 s) das Wiederbuecken, sie tritt.
+  Ab Stufe 7 kommt die Reichweite dazu: 11,2 m Reichweite, aber der Handkreis reicht nur
+  10,2 m vor sie.
+- **Recherche "lief erst in die Dorfmitte und sprang"** (`tests/diag_golem_village.gd`,
+  4 x 4 Huetten, Feuerkrieger und Krieger): nachgestellt mit einem EINFACHEN
+  Bewegungsbefehl in die Dorfmitte — sie laeuft 6 s, wehrt sich unterwegs nicht (so seit
+  2026-11-15 gewollt, `_maybe_retaliate`) und eroeffnet am Ziel mit dem Sprung, weil die
+  Huetten im Sprungkreis je 30 zaehlen. Mit Angriffsbewegung oder im Stand wehrt sie sich
+  nach rund 2 s.
+
+**Tests:** `test_golem.gd` neu `test_an_ordered_target_is_kept_while_others_fight_around_her`
+(Gegenprobe: ohne den Fix faellt er durch); `test_golem_turns_on_the_nearest_enemy_in_reach_before_chasing`
+nimmt jetzt ein selbst gewaehltes Ziel.
+
+### Golem: bleibt gebueckt beim Zielwechsel (2026-11-16)
+
+- **Bugfix "bueckt sich, steht wieder auf und tritt"** (Befund siehe den Eintrag davor):
+  `_tick_stance` fragt jetzt `_target_in_reach()` statt nur `_in_melee` — steht das
+  aktuelle Ziel (Einheit oder Gebaeude) in Reichweite, bleibt sie gebueckt, auch im
+  Takt eines Zielwechsels. Gefunden waren zwei Wege, die den Merker loeschten: der
+  Wechsel auf den Naechsten in Reichweite (`_tick_attack`) und die Zielwahl nach dem Tod
+  des Ziels (`_tick_no_unit_target` -> `_retarget_or_idle`). Dasselbe gilt fuer
+  `_stays_down_after_stomp`.
+- **Gemessen** mit `tests/diag_golem_fight.gd` (Stufe 0/3/6/7, 8 und 20 Krieger, je 3
+  Laeufe): "Tritt kurz nach dem Buecken" von rund 65 auf 8; Aufrichten mitten im Kampf
+  mit dem neuen Ziel in Reichweite von 32 auf 0. Was bleibt: Kampfende, ein Ziel weit
+  ausser Reichweite, und Tritte, die die Angriffswahl selbst fuer besser haelt.
+- **Nutzerentscheid 2026-11-16:** der Golem greift auf einem einfachen Bewegungsbefehl
+  weiterhin nicht von selbst an, und der Sprung zwischen Gebaeuden bleibt, wie er ist.
+- **Offen:** ab Stufe 7 reicht die Reichweite (11,2 m) weiter als der Handkreis (10,2 m vor
+  ihr); Ziele am Rand trifft sie gebueckt nicht.
+
+**Tests:** `test_golem.gd` 627 bestanden (neu: `test_a_target_switch_in_reach_keeps_her_crouched`,
+`test_she_stays_crouched_when_her_target_dies_and_the_next_stands_close`; Gegenprobe: ohne
+den Fix fallen beide durch).
+
+### Startmission: Huetten als Wohnpalast, Sammelpunkt-Kette (2026-11-16)
+
+Nutzerwunsch. In der Startmission (`Main._setup_test_chamber`) beginnen ALLE Huetten
+(blau 1, rot 4) auf der hoechsten Ausbaustufe und voll besetzt (6 je Huette,
+`Main._max_out_huts` + `_fill_huts` — blau war vorher gar nicht besetzt). Neu
+`Hut.upgrade_instantly(stage)`: laeuft Stufe fuer Stufe durch `_finish_upgrade`, Leben,
+Holzwert, Optik und Wohnraum stimmen wie nach echten Ausbauten. Blau bekommt die
+Produktionskette (`Main._chain_rally_points`): Huette -> Sammelpunkt auf dem Feuertempel
+(die Braves gehen dort in die Ausbildung), Feuertempel -> Sammelpunkt am Platz der
+Schamanin. Rot hat keine Sammelpunkte (keine KI, statisches Ziel).
+
+**Geprueft:** Startmission headless geladen — alle 5 Huetten Stufe 4, 6/6 Besatzung,
+720 LP; die blaue Huette zeigt auf den Feuertempel, dessen Sammelpunkt liegt auf der
+Schamanin. Test `test_hut_upgrades.gd::test_upgrade_instantly_jumps_to_the_palace_like_real_upgrades`.

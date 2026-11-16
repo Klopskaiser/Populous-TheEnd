@@ -213,7 +213,10 @@ func _ready() -> void:
 	spell_ctx.wood_pile_manager = _wood_pile_manager
 	_tribe_commands.spell_context = spell_ctx
 	for tribe in tribes:
-		tribe.set_spells(Spell.create_default_set())
+		# The human player also gets the spells that are his alone for now (the
+		# demon golem, 2026-11-16) — the AI keeps the default set.
+		tribe.set_spells(Spell.create_player_set() if tribe.id == GameState.PLAYER_TRIBE
+			else Spell.create_default_set())
 		# Every spell begins with one stored charge — EXCEPT in skirmish, where
 		# both sides start with empty charges and must build mana up first.
 		if config.mode != MatchConfig.Mode.SKIRMISH:
@@ -525,6 +528,38 @@ func _setup_chamber_blue(tribe: Tribe, anchor: Vector2i, nav: NavGrid) -> void:
 		if cell.x >= 0:
 			_unit_manager.spawn_unit(entry[0], tribe.id, nav.cell_to_world(cell))
 	_spawn_braves_near(tribe.id, anchor + Vector2i(0, 2), CHAMBER_BRAVES, nav)
+	# The hut as a full palace, fully manned, and the production chain set up
+	# (user request 2026-11-16): the hut sends its braves into the fire temple, the
+	# fire temple sends its firewarriors to the shaman's spot.
+	_max_out_huts(tribe)
+	_fill_huts(tribe)
+	_chain_rally_points(tribe)
+
+
+## Every hut of `tribe` jumps to the highest upgrade stage (start mission).
+func _max_out_huts(tribe: Tribe) -> void:
+	for b in tribe.buildings:
+		if is_instance_valid(b) and b is Hut:
+			(b as Hut).upgrade_instantly(Balance.HUT_MAX_UPGRADE_STAGE)
+
+
+## Rally chain of the start mission: every hut rallies onto the tribe's fire
+## temple (fresh braves queue up for training there — Building.
+## rally_training_building), and the fire temple rallies onto the spot where the
+## shaman stands. Without a fire temple or a shaman the respective link is left out.
+func _chain_rally_points(tribe: Tribe) -> void:
+	var camp: Building = null
+	for b in tribe.buildings:
+		if is_instance_valid(b) and b is FirewarriorCamp:
+			camp = b
+			break
+	if camp == null:
+		return
+	for b in tribe.buildings:
+		if is_instance_valid(b) and b is Hut:
+			_tribe_commands.set_rally_point(tribe, b, camp.center_world())
+	if tribe.shaman != null and is_instance_valid(tribe.shaman):
+		_tribe_commands.set_rally_point(tribe, camp, tribe.shaman.position)
 
 
 func _setup_chamber_red(red: Tribe, center: Vector2i, nav: NavGrid) -> void:
@@ -545,8 +580,10 @@ func _setup_chamber_red(red: Tribe, center: Vector2i, nav: NavGrid) -> void:
 		[HUT_SCENE, banchor + Vector2i(2, 5)],
 		[HUT_SCENE, banchor + Vector2i(8, 16)],
 	], nav)
-	# ...their huts fully manned, so the red tribe grows from the first second
+	# ...their huts as full palaces (user request 2026-11-16: ALL huts of the start
+	# mission) and fully manned, so the red tribe grows from the first second
 	# (user request 2026-11-15).
+	_max_out_huts(red)
 	_fill_huts(red)
 	# ...three fully manned watchtowers as the front line...
 	var towers: Array = [

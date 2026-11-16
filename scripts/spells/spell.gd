@@ -113,6 +113,16 @@ static func create_default_set() -> Array[Spell]:
 	]
 
 
+## The set of the HUMAN player: the default set plus the spells that are his
+## alone for now. Zauber 14 "Dämonengolem beschwören" (2026-11-16) is still
+## being tried out — the AI does not get it (user spec), so its charging and
+## casting logic stays untouched.
+static func create_player_set() -> Array[Spell]:
+	var set: Array[Spell] = create_default_set()
+	set.append(DemonGolemSpell.new())
+	return set
+
+
 ## Zuendet einen Zaubereffekt VERZOEGERT (Phase 10k-Nachtrag). Die Schamanin ist
 ## nach ihrem 0,5-s-Wind-up wieder frei; die schweren Zauber (Vulkan, Erdbeben,
 ## Supertornado 1,0 s; Feuerregen, Absinken 0,5 s) treten erst danach ein.

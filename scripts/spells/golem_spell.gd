@@ -23,6 +23,11 @@ func _init() -> void:
 	cast_range = Balance.SPELL_GOLEM_CAST_RANGE
 
 
+## The unit this spell summons (DemonGolemSpell brings its own).
+func _scene() -> PackedScene:
+	return GOLEM_SCENE
+
+
 func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:
 	if ctx == null or ctx.unit_manager == null or tribe == null:
 		return false
@@ -33,7 +38,7 @@ func execute(tribe: Tribe, target: Vector3, ctx: SpellContext) -> bool:
 		if cell.x < 0:
 			return false   # nowhere to stand — the charge is kept
 		pos = ctx.nav_grid.cell_to_world(cell)
-	var golem: Unit = ctx.unit_manager.spawn_unit(GOLEM_SCENE, tribe.id, pos)
+	var golem: Unit = ctx.unit_manager.spawn_unit(_scene(), tribe.id, pos)
 	if golem == null:
 		return false   # unit cap reached — the charge is kept
 	if golem is Golem:

@@ -229,6 +229,8 @@ var _stomp_landed: bool = false
 ## Off = she never jumps of her own accord (the tests of the plain stance change
 ## switch the stomp off; `_wind_up(ATTACK_STOMP)` still works).
 var stomp_enabled: bool = true
+## Tests: the body height the knockback chances are read at (-1 = the real one).
+var knock_height_override: float = -1.0
 ## She has grown and still owes the stretch (it starts once the running attack
 ## animation is through), the seconds a running stretch still takes, and the
 ## seconds the current attack clip still plays.
@@ -390,7 +392,7 @@ func displace(_dir: Vector3, _dist: float) -> void:
 
 ## Whole hull is clickable; the selection ring encloses the body.
 func pick_size_m() -> Vector2:
-	return Vector2(BODY_HALF_WIDTH * 2.0, Balance.GOLEM_HEIGHT) * size_factor()
+	return Vector2(body_half_width() * 2.0, Balance.GOLEM_HEIGHT) * size_factor()
 
 
 func selection_ring_scale() -> float:
@@ -414,7 +416,7 @@ func tick(delta: float) -> void:
 		_tick_flatten(delta)
 		_tick_golem_separation(delta)   # after the trampling: being pushed is not walking
 		# From the final-bonus level on the lifetime no longer runs out (user spec).
-		if level < Balance.GOLEM_FINAL_BONUS_LEVEL:
+		if has_lifetime():
 			life_left -= delta
 			if life_left <= 0.0:
 				_crumble()
@@ -672,7 +674,7 @@ func height_m() -> float:
 ## body, also beyond level 7 (user spec 2026-11-15 — until then it only took the
 ## slow area growth there and the 100-m giant trampled a 5-m circle).
 func trample_radius() -> float:
-	return BODY_HALF_WIDTH * size_factor()
+	return body_half_width() * size_factor()
 
 
 ## Radius of the stomp around her own centre: the body circle and two thirds more.
@@ -727,6 +729,45 @@ static func stance_for(kind: StringName) -> int:
 	return STANCE_CROUCH if kind == ATTACK_SLAM or kind == ATTACK_DRUM else STANCE_STAND
 
 
+## KNOCKBACK BY SIZE (user spec 2026-11-16, see GOLEM_KNOCK_* in Balance): below
+## GOLEM_KNOCK_MIN_HEIGHT nothing is thrown or rolled; from there each chance
+## climbs `per_step` every `step_m` metres — the first step counts from exactly
+## that height on — up to `cap`.
+static func knock_chance(height: float, step_m: float, per_step: float, cap: float) -> float:
+	if height < Balance.GOLEM_KNOCK_MIN_HEIGHT - 0.0001:
+		return 0.0
+	var steps: int = int(floor((height - Balance.GOLEM_KNOCK_MIN_HEIGHT) / step_m + 0.0001)) + 1
+	return minf(per_step * float(steps), cap)
+
+
+## Body height the knockback is read at (tests may pin it).
+func knock_height() -> float:
+	return knock_height_override if knock_height_override >= 0.0 else height_m()
+
+
+## Chance that a survivor of the kick is thrown.
+func kick_throw_chance() -> float:
+	return knock_chance(knock_height(), Balance.GOLEM_KICK_THROW_STEP_M,
+		Balance.GOLEM_KICK_THROW_PER_STEP, Balance.GOLEM_KICK_THROW_MAX)
+
+
+## Chances that a survivor of the slam is whirled up / sent rolling.
+func slam_lift_chance() -> float:
+	return knock_chance(knock_height(), Balance.GOLEM_SLAM_LIFT_STEP_M,
+		Balance.GOLEM_SLAM_LIFT_PER_STEP, Balance.GOLEM_SLAM_LIFT_MAX)
+
+
+func slam_roll_chance() -> float:
+	return knock_chance(knock_height(), Balance.GOLEM_SLAM_ROLL_STEP_M,
+		Balance.GOLEM_SLAM_ROLL_PER_STEP, Balance.GOLEM_SLAM_ROLL_MAX)
+
+
+## The drum never throws; its last hit sends survivors rolling with this chance.
+func drum_roll_chance() -> float:
+	return knock_chance(knock_height(), Balance.GOLEM_DRUM_ROLL_STEP_M,
+		Balance.GOLEM_DRUM_ROLL_PER_STEP, Balance.GOLEM_DRUM_ROLL_MAX)
+
+
 ## Seconds a stance switch takes at the current size.
 func stance_switch_time() -> float:
 	return minf(Balance.GOLEM_STANCE_SWITCH_TIME * sqrt(size_factor()),
@@ -779,11 +820,28 @@ func _tick_stance(delta: float) -> void:
 		return
 	if stance != STANCE_CROUCH or _pending_attack != &"":
 		return
-	if state == State.ATTACK and _in_melee:
+	if state == State.ATTACK and (_in_melee or _target_in_reach()):
 		return   # striking from here: the attack choice decides (see _attack_or_switch)
 	if state == State.IDLE and not stance_settled():
 		return   # nothing to do, but she only just bent down
 	_begin_stance(STANCE_STAND)
+
+
+## Is her current target (unit or building) within reach right now? Asked by the
+## stance logic instead of trusting `_in_melee` alone: every target switch
+## (_begin_attack -> _end_attack) clears that flag, and _tick_attack only sets it
+## again in the NEXT tick. In between, _tick_stance took the switch for "she has to
+## walk" and got her up — with a new target right in front of her — and the
+## stance's minimum time then left her nothing but kicks (user report 2026-11-16:
+## "bueckt sich, steht wieder auf und tritt"; 32 of 36 stand-ups mid-fight in
+## tests/diag_golem_fight.gd happened on such a switch).
+func _target_in_reach() -> bool:
+	if _unit_target_attackable(attack_target) and attack_target.tribe_id != tribe_id:
+		return not attack_target.is_airborne() \
+			and _flat_dist(position, attack_target.position) <= reach()
+	if _building_target_valid():
+		return attack_building.footprint_distance_to(Vector2(position.x, position.z)) <= reach() - 0.5
+	return false
 
 
 ## After a stomp: does she stay crouched? Only while she stands in the fight and
@@ -791,7 +849,7 @@ func _tick_stance(delta: float) -> void:
 ## from the crouch). With nothing to strike, a march ahead or an owed stretch she
 ## gets up.
 func _stays_down_after_stomp() -> bool:
-	if _stretch_queued or not (state == State.ATTACK and _in_melee):
+	if _stretch_queued or not (state == State.ATTACK and (_in_melee or _target_in_reach())):
 		return false
 	return stance_for(_choose_attack()) == STANCE_CROUCH
 
@@ -984,6 +1042,26 @@ func ignores_unit_collision() -> bool:
 	return level >= 1
 
 
+## SWITCHES of the level system (2026-11-16). The base golem answers them from
+## its level; the demon golem (DemonGolem) has no levels and answers them from
+## its height. Everything that used to ask `level` directly for one of these
+## asks here.
+## Does she trample what stands under her while she walks? (From level 1.)
+func tramples() -> bool:
+	return level >= 1
+
+
+## The giant's package (level 7): levels the ground, walks straight, tramples
+## buildings and wrecks vehicles.
+func is_giant() -> bool:
+	return level >= Balance.GOLEM_MAX_LEVEL
+
+
+## Does the lifetime still run out? (Until the final-bonus level.)
+func has_lifetime() -> bool:
+	return level < Balance.GOLEM_FINAL_BONUS_LEVEL
+
+
 ## A kill — by an attack or underfoot: buys time, raises the health limit, patches
 ## the construct up (to that limit) and counts toward the next level.
 func _credit_kill() -> void:
@@ -1105,7 +1183,7 @@ static func flatten_plan(td: TerrainData, at: Vector3, radius: float, slope: flo
 ## metres per second. Checked every GOLEM_FLATTEN_INTERVAL, one morph at a time; the usual terrain rules apply (TerrainMorph: buildings on
 ## a new edge burst, the flooded drown, everything rides the moving ground).
 func _tick_flatten(delta: float) -> void:
-	if level < Balance.GOLEM_MAX_LEVEL or terrain_ctx == null or terrain_data == null \
+	if not is_giant() or terrain_ctx == null or terrain_data == null \
 			or path_service == null:
 		return
 	_flatten_timer -= delta
@@ -1152,7 +1230,7 @@ func _prune_flatten_memory() -> void:
 ## level, right through a fight — up to max_health, which only kills raise
 ## (without that limit he would heal himself up endlessly).
 func _tick_level_regen(delta: float) -> void:
-	if level <= 0 or health >= max_health:
+	if regen_per_second() <= 0.0 or health >= max_health:
 		_level_regen_frac = 0.0
 		return
 	_level_regen_frac += regen_per_second() * delta
@@ -1172,7 +1250,7 @@ func _tick_trample(delta: float) -> void:
 			_trampled[id] -= delta
 			if _trampled[id] <= 0.0:
 				_trampled.erase(id)
-	if level <= 0 or path_service == null or _tick_pos == Vector3.INF or delta <= 0.0:
+	if not tramples() or path_service == null or _tick_pos == Vector3.INF or delta <= 0.0:
 		return
 	var walked: float = Vector2(position.x - _tick_pos.x, position.z - _tick_pos.z).length()
 	if walked / delta < Balance.GOLEM_TRAMPLE_MIN_SPEED:
@@ -1205,7 +1283,7 @@ func _tick_trample(delta: float) -> void:
 		u.take_damage(damage, self)
 		if not is_instance_valid(u) or u.state == State.DEAD or u.doomed:
 			_credit_kill()
-	if level < Balance.GOLEM_MAX_LEVEL:
+	if not is_giant():
 		return
 	# The giant (maximum level) also walks over vehicles that do not fly his
 	# flag: one crush hit per vehicle every GOLEM_TRAMPLE_VEHICLE_INTERVAL.
@@ -1332,6 +1410,8 @@ func _begin_attack(enemy: Unit) -> void:
 ## target it just hurled away while other enemies stand within reach — it turns
 ## on the nearest one in reach instead. Only when nobody is in reach does it
 ## chase; a target still in the air is waited for, not followed.
+## That holds for targets she picked HERSELF. An ordered target (order_attack:
+## player, AI) is kept and followed through the crowd (user report 2026-11-16).
 ##
 ## While an attack is wound up she stands and finishes it: no retargeting, no
 ## chasing in mid-swing.
@@ -1345,7 +1425,11 @@ func _tick_attack(delta: float) -> void:
 	var target: Unit = attack_target
 	var dist: float = _flat_dist(position, target.position)
 	if dist > reach() or target.is_airborne():
-		var near: Unit = _nearest_enemy_in_reach()
+		# An ORDERED target is kept (user report 2026-11-16: the order was ignored
+		# while others fought around her — a golem is never tied down in melee):
+		# she walks after it through the crowd. Only a target she picked herself
+		# gives way to whoever stands in reach.
+		var near: Unit = null if _target_ordered else _nearest_enemy_in_reach()
 		if near != null and near != target:
 			_begin_attack(near)   # retarget keeps the cooldown (state stays ATTACK)
 			return
@@ -1495,7 +1579,7 @@ const GIANT_LINE_STEP: float = 0.5
 ## and ordinary terrain no longer stop him (user spec 2026-11-15). Only the sea,
 ## the rim of the world and big cliffs do.
 func walks_straight() -> bool:
-	return level >= Balance.GOLEM_MAX_LEVEL
+	return is_giant()
 
 
 ## The tallest step the giant still takes: metres of height per metre of way.
@@ -1612,8 +1696,16 @@ func _plan_path_to(target: Vector3, allow_partial: bool = false) -> bool:
 	return true
 
 
+## A path from the PathWorker (the game's path queue). It starts with the centre
+## of the cell she stands in — the synchronous planner drops that point
+## (_trim_own_cell_waypoint), this route did not. Standing off-centre, the point
+## lies BEHIND or beside her, and with her slow turn the body first swung up to
+## 170 degrees the wrong way before it turned toward the goal (user report
+## 2026-11-16). Dropped here as well.
 func _apply_worker_path(request_id: int, cells: PackedVector2Array) -> void:
 	super._apply_worker_path(request_id, cells)
+	if _has_path() and _path_index == 0:
+		_path = _trim_own_cell_waypoint(_path)
 	if walks_straight() and _has_path() and _path_index == 0:
 		_path = _straighten(_path)
 
@@ -1889,7 +1981,7 @@ func _buildings_in_area(kind: StringName) -> Array:
 ## follows the crew, so an abandoned ENEMY vehicle keeps the enemy flag).
 ## Airships fly above feet and ground blows; the swat is theirs.
 func crushes_vehicle(v) -> bool:
-	if level < Balance.GOLEM_MAX_LEVEL or not (v is CrewedVehicle) or v is Airship:
+	if not is_giant() or not (v is CrewedVehicle) or v is Airship:
 		return false
 	if not is_instance_valid(v) or v.state == State.DEAD:
 		return false
@@ -1899,7 +1991,7 @@ func crushes_vehicle(v) -> bool:
 ## Ground vehicles the attack `kind` would wreck right now (see crushes_vehicle).
 func _vehicles_in_area(kind: StringName) -> Array:
 	var out: Array = []
-	if level < Balance.GOLEM_MAX_LEVEL or path_service == null:
+	if not is_giant() or path_service == null:
 		return out
 	var frame: Array[Vector3] = _heading_frame()
 	for u in path_service.get_units_in_radius(position, _hit_zone_reach(kind)):
@@ -2126,6 +2218,11 @@ func _land_attack(kind: StringName, hit: int = 0) -> Dictionary:
 			_credit_kill()
 			continue
 		if kick:
+			# Thrown or not: the size decides (kick_throw_chance). No dice at 0 or
+			# 100 percent — the seeded random stream stays as it was there.
+			var throw_chance: float = kick_throw_chance()
+			if throw_chance <= 0.0 or (throw_chance < 1.0 and randf() >= throw_chance):
+				continue
 			# In front she kicks them away forward; whoever the backswing catches
 			# behind her flies off backward.
 			var rel: Vector3 = u.position - position
@@ -2135,10 +2232,16 @@ func _land_attack(kind: StringName, hit: int = 0) -> Dictionary:
 			continue
 		if not last_hit or stomp:
 			continue   # the drum's first two hits and the stomp only hurt
+		# Whirled up, rolled or only hurt: one roll of the dice against the chances of
+		# her size (the drum never throws) — and none at all where both are 0.
+		var lift_chance: float = 0.0 if drum else slam_lift_chance()
+		var roll_chance: float = drum_roll_chance() if drum else slam_roll_chance()
+		if lift_chance + roll_chance <= 0.0:
+			continue
 		var away: Vector3 = Vector3(u.position.x - position.x, 0.0,
 			u.position.z - position.z)
-		match Fireball.impact_outcome(randf(), Balance.GOLEM_LIFT_CHANCE,
-				Balance.GOLEM_ROLL_CHANCE):
+		var dice: float = 0.0 if lift_chance + roll_chance >= 1.0 and lift_chance <= 0.0 else randf()
+		match Fireball.impact_outcome(dice, lift_chance, roll_chance):
 			Fireball.OUTCOME_LIFT:
 				u.apply_lift(away, Balance.GOLEM_LIFT_PUSH, Balance.GOLEM_LIFT_UP)
 			Fireball.OUTCOME_ROLL:
@@ -2201,6 +2304,37 @@ func _ready() -> void:
 	_refresh_flag_color()
 
 
+## BUILD of the figure (2026-11-16): the base golem's is fixed; the demon golem
+## (DemonGolem) brings its own model, is stockier and starts smaller.
+## File of the model under assets/.
+func model_file() -> String:
+	return "models/units/golem.glb"
+
+
+## Scale of the 4-m model at size factor 1.
+func model_scale() -> Vector3:
+	return Vector3(MODEL_SCALE, MODEL_SCALE_Y, MODEL_SCALE)
+
+
+## Half the body box at size factor 1 (selection, shadow, trample radius).
+func body_half_width() -> float:
+	return BODY_HALF_WIDTH
+
+
+func body_half_depth() -> float:
+	return BODY_HALF_DEPTH
+
+
+## Ground covered by one loop of the walk clip at size factor 1 (metres).
+func walk_clip_speed() -> float:
+	return WALK_CLIP_SPEED
+
+
+## How deep under the ground the figure starts when it is summoned.
+func rise_depth() -> float:
+	return RISE_DEPTH
+
+
 ## User-provided model (assets/models/units/golem.glb) when present: built
 ## MODEL_HEIGHT (4 m) tall — scaled here to Balance.GOLEM_HEIGHT —, front +Z,
 ## origin at the feet. Optional parts: an AnimationPlayer with the
@@ -2210,10 +2344,10 @@ func _ready() -> void:
 func _create_model() -> void:
 	var root: Node3D = Node3D.new()
 	root.name = "Model"
-	root.scale = Vector3(MODEL_SCALE, MODEL_SCALE_Y, MODEL_SCALE)
+	root.scale = model_scale() * _shown_size   # (1 for the base golem; the demon golem starts small)
 	add_child(root)
 	_model = root
-	var custom: Node3D = AssetLibrary.instantiate_model("models/units/golem.glb")
+	var custom: Node3D = AssetLibrary.instantiate_model(model_file())
 	if custom != null:
 		root.add_child(custom)
 		_arm = custom.find_child("Arm", true, false) as Node3D
@@ -2290,9 +2424,9 @@ func _finish_model(root: Node3D) -> void:
 	blob.name = "BlobShadow"
 	# Child of the scaled model root, so its size is given in model units.
 	blob.mesh = UnitRenderer.make_blob_mesh(
-		Vector2(BODY_HALF_WIDTH * 2.6, BODY_HALF_DEPTH * 2.8) / MODEL_SCALE)
+		Vector2(body_half_width() * 2.6, body_half_depth() * 2.8) / model_scale().x)
 	blob.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	blob.position.y = 0.04 / MODEL_SCALE
+	blob.position.y = 0.04 / model_scale().x
 	root.add_child(blob)
 
 
@@ -2332,11 +2466,11 @@ func _tick_visual(delta: float) -> void:
 	# A level-up lets the figure grow over about a second.
 	if _model != null and not is_equal_approx(_shown_size, size_factor()):
 		_shown_size = move_toward(_shown_size, size_factor(), delta * GROW_SPEED)
-		_model.scale = Vector3(MODEL_SCALE, MODEL_SCALE_Y, MODEL_SCALE) * _shown_size
+		_model.scale = model_scale() * _shown_size
 	if _rise < 1.0 and _model != null:
 		_rise = minf(_rise + delta / RISE_TIME, 1.0)
 		var left: float = 1.0 - _rise
-		_model.position.y = -RISE_DEPTH * left * left
+		_model.position.y = -rise_depth() * left * left
 	var ground_speed: float = 0.0
 	if _last_pos != Vector3.INF and delta > 0.0:
 		ground_speed = Vector2(position.x - _last_pos.x, position.z - _last_pos.z).length() / delta
@@ -2349,7 +2483,7 @@ func _tick_visual(delta: float) -> void:
 				_play_clip(CLIP_CROUCH_IDLE)
 			elif ground_speed > WALK_THRESHOLD:
 				# A bigger body covers more ground per stride.
-				_play_clip(CLIP_WALK, ground_speed / (WALK_CLIP_SPEED * _shown_size))
+				_play_clip(CLIP_WALK, ground_speed / (walk_clip_speed() * _shown_size))
 			else:
 				_play_clip(CLIP_IDLE)
 	if _arm != null and _arm_anim < 1.0:
