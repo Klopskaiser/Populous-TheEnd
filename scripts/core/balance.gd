@@ -350,6 +350,12 @@ const GOLEM_LIMB_SHARE_AT_MAX: float = 0.6
 ## GOLEM_LIMB_GROWTH_BONUS. Stufe 0 bleibt bei 3,0 m; Stufe 6: 7,9 m, Stufe 7:
 ## 11,2 m, 100 m: 41,6 m (statt 7,5 / 10,5 / 38,1).
 const GOLEM_LIMB_GROWTH_BONUS: float = 1.1
+## LAENGE DER TRITT-SCHNEISE (Nutzer 2026-11-16): sie waechst langsamer als die
+## Glieder — bei 100 m ist sie GOLEM_KICK_LENGTH_SHARE_AT_MAX der Laenge, die der
+## Gliederfaktor allein ergaebe (90 %: 53,0 statt 58,9 m vor, 37,2 statt 41,3 m
+## zurueck). Auf Stufe 0 unveraendert; dazwischen ist der Zuwachs ueber 1 um
+## denselben Anteil gekuerzt (Golem.kick_limb_factor). Die Reichweite bleibt.
+const GOLEM_KICK_LENGTH_SHARE_AT_MAX: float = 0.9
 ## RADIUS VON HANDSCHLAG UND TROMMELN am Wachstumsende (Nutzer 2026-11-16: "kann
 ## auch besser skalieren, am Ende koennen da 12 m sein"). Bis Stufe 7 bleibt es
 ## beim langsamen Flaechenwachstum (Stufe 7: 5,8 m); in den Wachstumsschritten
@@ -390,6 +396,9 @@ const GOLEM_TURN_MIN_SPEED_SHARE: float = 0.2
 ## Gewaehlt wird es, wenn es mehr Schaden je Sekunde bringt als Handschlag und
 ## Tritt (s. GOLEM_STRUCTURE_VALUE). Hochwirbeln/Rollen, Gebaeudestufe und
 ## Fahrzeugtreffer gibt es nur beim LETZTEN der drei Schlaege.
+## RADIUS DES TROMMELNS (Nutzer 2026-11-16): 10 % groesser als der Kreis des
+## Handschlags, auf allen Stufen (Golem.ground_radius) — Mittelpunkt wie dort.
+const GOLEM_DRUM_RADIUS_FACTOR: float = 1.1
 const GOLEM_DRUM_HIT_DAMAGE: int = 14
 const GOLEM_DRUM_LEVEL_DAMAGE_PER_HIT: int = 1
 const GOLEM_DRUM_HITS: Array[float] = [0.35, 0.8, 1.25]   # aus der gebueckten Haltung (Clip drum_low)

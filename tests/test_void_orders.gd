@@ -128,3 +128,25 @@ func test_no_building_can_be_placed_in_the_void() -> void:
 	check(not w.tc.can_place_at(Vector2i(2, 2), Vector2i(2, 2), 0),
 		"and neither is the square's corner")
 	_free_world(w)
+
+
+## Bugmeldung 2026-11-16: ein Bauplatz durfte ueber den runden Rand ragen — die
+## Baustelle hing halb im Leeren, die Bauarbeiter fielen hinunter. Grundriss UND
+## ein Ring von einer Zelle darum muessen auf der Scheibe liegen; nah am Rand
+## bauen bleibt erlaubt.
+func test_no_plot_reaches_over_the_rim() -> void:
+	var w: Dictionary = _make_world()
+	var mid: int = w.td.size / 2
+	var last: int = mid
+	while w.td.in_disc(Vector2i(last + 1, mid)):
+		last += 1
+	check(not w.tc.can_place_at(Vector2i(last - 1, mid), Vector2i(3, 3), 0),
+		"a 3x3 plot with cells beyond the rim is refused")
+	check(not w.tc.can_place_at(Vector2i(last - 2, mid), Vector2i(3, 3), 0),
+		"so is one that ends right on the last cell — its workers would have no ground beside it")
+	check(w.tc.can_place_at(Vector2i(last - 3, mid - 1), Vector2i(3, 3), 0),
+		"one cell further in it fits, right at the rim")
+	check(not TribeCommands.fits_on_disc(w.td, Vector2i(last - 2, mid), Vector2i(3, 3))
+		and TribeCommands.fits_on_disc(w.td, Vector2i(last - 3, mid - 1), Vector2i(3, 3)),
+		"fits_on_disc draws the same line")
+	_free_world(w)

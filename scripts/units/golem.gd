@@ -575,6 +575,16 @@ func slam_radius() -> float:
 	return SLAM_RADIUS * slam_scale()
 
 
+## Radius of the circle around the hands for the ground attack `kind`: the drum's
+## is GOLEM_DRUM_RADIUS_FACTOR larger than the slam's (user spec 2026-11-16).
+func ground_radius(kind: StringName) -> float:
+	return slam_radius() * _ground_factor(kind)
+
+
+static func _ground_factor(kind: StringName) -> float:
+	return Balance.GOLEM_DRUM_RADIUS_FACTOR if kind == ATTACK_DRUM else 1.0
+
+
 ## Exponent of the limb factor: chosen so that at GOLEM_MAX_HEIGHT the limbs are
 ## GOLEM_LIMB_SHARE_AT_MAX of what a body-proportional growth would give.
 static func limb_exponent() -> float:
@@ -591,6 +601,18 @@ func limb_factor() -> float:
 
 static func limb_factor_for(size: float) -> float:
 	return 1.0 + (pow(size, limb_exponent()) - 1.0) * Balance.GOLEM_LIMB_GROWTH_BONUS
+
+
+## How much longer the kick's lane is than a fresh golem's: the limb factor's
+## gain over 1, shortened so that at GOLEM_MAX_HEIGHT the lane is
+## GOLEM_KICK_LENGTH_SHARE_AT_MAX of what the limbs alone would give.
+func kick_limb_factor() -> float:
+	return 1.0 + (limb_factor() - 1.0) * kick_growth_share()
+
+
+static func kick_growth_share() -> float:
+	var top: float = limb_factor_for(max_size_factor())
+	return (Balance.GOLEM_KICK_LENGTH_SHARE_AT_MAX * top - 1.0) / (top - 1.0)
 
 
 ## The distance at which she strikes — it grows with her limbs.
@@ -1774,15 +1796,15 @@ func _hit_zone_reach(kind: StringName) -> float:
 		return Vector2(maxf(ext.x, ext.y), KICK_HALF_WIDTH * size).length() + 0.5
 	if kind == ATTACK_STOMP:
 		return stomp_radius() + 0.5
-	return maxf(SLAM_FORWARD * limb_factor() + slam_radius(), trample_radius()) + 0.5
+	return maxf(SLAM_FORWARD * limb_factor() + ground_radius(kind), trample_radius()) + 0.5
 
 
 ## How far the kick's lane reaches ahead (x) and behind her (y): its own length,
 ## but never shorter than her body — the lane always runs through the whole body
 ## circle. (Only matters late in the growth beyond level 7, when the body
-## outgrows the slowly growing lane.)
+## outgrows the slowly growing lane.) Its length follows kick_limb_factor.
 func _kick_extent() -> Vector2:
-	var long: float = limb_factor()   # the leg's length, not the lane's width
+	var long: float = kick_limb_factor()   # the leg's length, not the lane's width
 	var body: float = trample_radius()
 	return Vector2(maxf(KICK_LENGTH * long, body), maxf(KICK_BACK * long, body))
 
@@ -1804,7 +1826,7 @@ func _in_hit_zone(kind: StringName, point: Vector3, forward: Vector3, right: Vec
 		var ext: Vector2 = _kick_extent()
 		return along >= -ext.y and along <= ext.x \
 			and absf(side) <= KICK_HALF_WIDTH * reach_factor()
-	if in_slam_area(along, side, slam_scale(), limb_factor()):
+	if in_slam_area(along, side, slam_scale() * _ground_factor(kind), limb_factor()):
 		return true
 	return along >= 0.0 and rel.x * rel.x + rel.z * rel.z <= trample_radius() * trample_radius()
 
@@ -2156,7 +2178,7 @@ func _building_in_area(b, kind: StringName, forward: Vector3) -> bool:
 			and b.footprint_distance_to(Vector2(position.x, position.z)) <= stomp_radius()
 	if kind != ATTACK_KICK:
 		var hit: Vector3 = position + forward * (SLAM_FORWARD * limb_factor())
-		if b.footprint_distance_to(Vector2(hit.x, hit.z)) <= slam_radius():
+		if b.footprint_distance_to(Vector2(hit.x, hit.z)) <= ground_radius(kind):
 			return true
 		# The front half of her own body circle belongs to the slam (see _in_hit_zone).
 		var c: Vector3 = b.center_world()

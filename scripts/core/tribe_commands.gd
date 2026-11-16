@@ -90,8 +90,15 @@ func place_building(tribe: Tribe, building_scene: PackedScene, cell: Vector2i,
 ## made, and manual worker assignment fails silently. Deliberately NOT a blanket
 ## minimum spacing for the player (the AI has AI_PLOT_SPACING): that would also
 ## forbid all the tight villages that work fine.
+##
+## The DISC RIM (bug report 2026-11-16): every footprint cell AND the ring of
+## PLACE_RIM_MARGIN cells around it must lie on the disc. Before, only a
+## walkable approach cell was required, so a plot could reach over the rounded
+## rim — the site hung half in the void and its workers walked off the edge.
 func can_place_at(cell: Vector2i, footprint: Vector2i, orientation: int = 0) -> bool:
 	if nav_grid == null:
+		return false
+	if not fits_on_disc(nav_grid.terrain, cell, footprint):
 		return false
 	# Asked BEFORE the plot goes solid, so its own cells are still walkable; the
 	# ring search starts one cell outside the footprint and the entrance cell lies
@@ -118,6 +125,23 @@ func can_place_at(cell: Vector2i, footprint: Vector2i, orientation: int = 0) -> 
 			lo = minf(lo, h)
 			hi = maxf(hi, h)
 	return hi - lo <= MAX_LEVEL_DIFF
+
+
+## Cells of ground a plot keeps from the rim: its workers stand around it.
+const PLACE_RIM_MARGIN: int = 1
+
+## True when the footprint and a ring of PLACE_RIM_MARGIN cells around it lie
+## inside the disc (TerrainData.in_disc) — building near the rim stays allowed,
+## reaching over it does not.
+static func fits_on_disc(terrain: TerrainData, cell: Vector2i, footprint: Vector2i) -> bool:
+	if terrain == null:
+		return false
+	var m: int = PLACE_RIM_MARGIN
+	for z in range(cell.y - m, cell.y + footprint.y + m):
+		for x in range(cell.x - m, cell.x + footprint.x + m):
+			if not terrain.in_disc(Vector2i(x, z)):
+				return false
+	return true
 
 
 ## Scraps one of the tribe's own buildings (key Entf, phase 10d). A site that

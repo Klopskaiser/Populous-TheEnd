@@ -1856,7 +1856,7 @@ func test_hit_zones_slam_front_half_of_the_body_kick_lane_only() -> void:
 		and g._in_hit_zone(Golem.ATTACK_KICK, at.call(-(body - 0.2), 0.0), forward, right),
 		"kick: the lane runs through the whole body circle, ahead and behind")
 	var lane: Vector2 = g._kick_extent()
-	check_near(lane.x, Balance.GOLEM_KICK_LENGTH * g.limb_factor(), "kick: the lane is as long as her leg reaches")
+	check_near(lane.x, Balance.GOLEM_KICK_LENGTH * g.kick_limb_factor(), "kick: the lane is as long as her leg reaches")
 	check(lane.x > body and g._in_hit_zone(Golem.ATTACK_KICK, at.call(lane.x - 0.2, 0.0), forward, right)
 		and not g._in_hit_zone(Golem.ATTACK_KICK, at.call(lane.x + 0.5, 0.0), forward, right),
 		"kick: and ends there (%.1f m ahead)" % lane.x)
@@ -2230,8 +2230,8 @@ func test_reach_grows_with_the_limbs() -> void:
 	check_near(g.limb_factor() - 1.0, (pow(g.size_factor(), Golem.limb_exponent()) - 1.0) * 1.1,
 		"the gain over a fresh golem is 10 percent more than the plain power law gives", 0.0005)
 	check(Balance.GOLEM_LIMB_GROWTH_BONUS == 1.1, "the documented 10 percent")
-	check_near(g._kick_extent().x / g.reach(), Balance.GOLEM_KICK_LENGTH / Balance.GOLEM_REACH,
-		"the kick's lane stays as much longer than the reach as at level 0", 0.001)
+	check_near(g._kick_extent().x, Balance.GOLEM_KICK_LENGTH * g.kick_limb_factor(),
+		"the kick's lane follows its own, slightly slower factor", 0.001)
 	# Whatever stands at the edge of her reach, straight ahead, the kick can strike.
 	var forward: Vector3 = Vector3(0, 0, 1)
 	var right: Vector3 = Vector3(-1, 0, 0)
@@ -2756,4 +2756,47 @@ func test_trampling_takes_a_building_stage_only_every_four_seconds() -> void:
 	if stages_at.size() >= 3:
 		check_near(stages_at[1] - stages_at[0], 4.0, "4 s between the stages (%.1f)" % (stages_at[1] - stages_at[0]), TICK * 1.5)
 		check_near(stages_at[2] - stages_at[1], 4.0, "and again", TICK * 1.5)
+	_free_world(w)
+
+
+## Tritt-Schneise (2026-11-16): bei 100 m 10 % kuerzer als der Gliederfaktor
+## allein ergaebe, auf Stufe 0 unveraendert; vorn wie hinten.
+func test_kick_lane_is_ten_percent_shorter_at_the_top() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
+	check_near(g.kick_limb_factor(), 1.0, "level 0: unchanged")
+	check_near(g._kick_extent().x, Balance.GOLEM_KICK_LENGTH, "4,25 m ahead")
+	_level_to(g, 7)
+	check(g.kick_limb_factor() < g.limb_factor() and g.kick_limb_factor() > 1.0,
+		"level 7: shorter than the limbs alone (%.2f against %.2f)" % [g.kick_limb_factor(), g.limb_factor()])
+	_grow_to_the_end(g)
+	check_near(g.kick_limb_factor(), 0.9 * g.limb_factor(), "100 m: 90 percent of the limb factor", 0.0001)
+	var lane: Vector2 = g._kick_extent()
+	check_near(lane.x, 0.9 * Balance.GOLEM_KICK_LENGTH * g.limb_factor(), "%.1f m ahead" % lane.x, 0.001)
+	check_near(lane.y, 0.9 * Balance.GOLEM_KICK_LENGTH * Balance.GOLEM_KICK_BACK_SHARE * g.limb_factor(),
+		"%.1f m behind" % lane.y, 0.001)
+	check(lane.x > g.reach(), "still longer than her reach (%.1f m)" % g.reach())
+	_free_world(w)
+
+
+## Trommeln (2026-11-16): sein Kreis ist auf allen Stufen 10 % groesser als der
+## des Handschlags, um denselben Mittelpunkt.
+func test_drum_circle_is_ten_percent_larger_than_the_slam() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
+	g.facing = Vector3(0, 0, 1)
+	g.snap_heading()
+	var forward: Vector3 = Vector3(0, 0, 1)
+	var right: Vector3 = Vector3(-1, 0, 0)
+	for lv in [0, 3, 6, 7]:
+		_level_to(g, lv)
+		check_near(g.ground_radius(Golem.ATTACK_DRUM), 1.1 * g.slam_radius(), "level %d: drum %.2f m, slam %.2f m"
+			% [lv, g.ground_radius(Golem.ATTACK_DRUM), g.slam_radius()], 0.0001)
+		check_near(g.ground_radius(Golem.ATTACK_SLAM), g.slam_radius(), "and the slam keeps its own")
+		var tip: float = Balance.GOLEM_SLAM_FORWARD * g.limb_factor() + g.slam_radius() + 0.05 * g.slam_radius()
+		var p: Vector3 = g.position + forward * tip
+		check(g._in_hit_zone(Golem.ATTACK_DRUM, p, forward, right) and not g._in_hit_zone(Golem.ATTACK_SLAM, p, forward, right),
+			"level %d: 5 percent beyond the slam's edge the drum still strikes, the slam does not" % lv)
+	_grow_to_the_end(g)
+	check_near(g.ground_radius(Golem.ATTACK_DRUM), 13.2, "100 m: 13,2 m (slam 12 m)", 0.001)
 	_free_world(w)

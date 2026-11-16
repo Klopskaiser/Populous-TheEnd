@@ -232,6 +232,14 @@ const FORESTER_MIN_TREES: int = 6
 ## Expensive candidates (each costs a _plot_reachable A*) per ANCHOR sweep; the
 ## shared ceiling across the whole search is _plot_candidates_left.
 const MAX_PLOT_CANDIDATES: int = 40
+## Candidates rejected ONLY for the spacing to other buildings say "the village is
+## dense here", not "this anchor is hopeless": they get this many times the
+## per-sweep give-up count of their own (bug 2026-11-16, see _find_supplied_plot).
+const CLEARANCE_REJECT_FACTOR: int = 5
+## Rings already searched in vain are remembered per anchor and skipped next time
+## (_ring_start) — for at most this many AI ticks, and forgotten at once when one of
+## the tribe's own buildings goes down (that frees ground in the inner rings).
+const RING_MEMORY_TICKS: int = 120
 ## Hard cap on ring cells INSPECTED per plot search. Water/blocked cells fail
 ## can_place_at without counting toward MAX_PLOT_CANDIDATES — on lakeside anchors
 ## (Seenland) the ring search would otherwise sweep every cell every tick.
@@ -341,6 +349,7 @@ func _on_building_destroyed(building) -> void:
 	if tribe != null and is_instance_valid(building) \
 			and building.tribe_id == tribe.id:
 		_rebuild_ticks = REBUILD_COOLDOWN_TICKS
+		_ring_start.clear()   # ground in the inner rings may be free again
 
 
 func setup(p_tribe: Tribe, p_commands: TribeCommands, p_unit_manager: UnitManager,
@@ -1694,6 +1703,14 @@ var _settlement_cache: Array[Vector2i] = []
 var _settlement_age: int = 0
 var _base_island_cache: int = -1
 var _base_island_version: int = -1
+## Per anchor and pass: the first ring that still has to be searched — every ring
+## inside it held no plot when it was last swept (see RING_MEMORY_TICKS).
+## Key Vector4i(anchor.x, anchor.y, spacing, require_trees).
+var _ring_start: Dictionary = {}
+var _ring_start_tick: int = 0
+## Cells ONE anchor may scan in the current sweep: the shared budget split evenly
+## over the sweep's anchors, so the first ones cannot starve the rest.
+var _plot_anchor_cells: int = 0
 
 
 ## Plot search with wood supply, sweeping the settlement anchors nearest-first
@@ -1731,6 +1748,14 @@ func _find_plot(footprint: Vector2i, cache: TickCache = null,
 	if expansion.x >= 0 and not (expansion in anchors):
 		anchors.append(expansion)
 	var cell: Vector2i = Vector2i(-1, -1)
+	if _tick_count - _ring_start_tick >= RING_MEMORY_TICKS:
+		_ring_start.clear()
+		_ring_start_tick = _tick_count
+	# Even share of the cell budget per anchor (bug 2026-11-16): the base sweep used
+	# to eat it all, so the cluster and expansion anchors — where the free ground
+	# was — never got a single cell. The relax pass and the tree-less pass below
+	# reuse the anchors and get the same share.
+	_plot_anchor_cells = maxi(1, Balance.AI_MAX_PLOT_SCAN_CELLS / maxi(1, anchors.size()))
 	_plot_sweep = true
 	for anchor in anchors:
 		cell = _find_supplied_plot(anchor, footprint, Balance.AI_PLOT_SPACING)
@@ -1788,11 +1813,30 @@ func _find_supplied_plot(anchor: Vector2i, footprint: Vector2i,
 	# would never get a single candidate.
 	var checked: int = 0
 	var per_sweep: int = maxi(1, MAX_PLOT_CANDIDATES / 2)
+	# Bug 2026-11-16 (Seenland: "wood is hoarded, huts are no longer built"): in a
+	# grown village the inner rings are full of plots that are placeable but too
+	# close to other buildings. Counting those toward `checked` ended every sweep
+	# after 20 of them — measured: the first free plot was the 21st to the 196th
+	# placeable candidate, so EVERY anchor gave up just short of it, the plot search
+	# failed for good and the AI only stockpiled wood. Spacing rejections now have
+	# their own, larger cap, and one anchor no longer eats the whole cell budget.
+	var crowded: int = 0
+	var crowded_cap: int = per_sweep * CLEARANCE_REJECT_FACTOR
+	var cells_left: int = _plot_budget
+	if _plot_sweep:
+		cells_left = _plot_anchor_cells
+	# Rings searched in vain before are skipped: in a grown village the inner rings
+	# are full, and walking through them again every time is what used up the
+	# budget before the search ever reached free ground.
+	var memory_key: Vector4i = Vector4i(anchor.x, anchor.y, spacing, 1 if require_trees else 0)
+	var first_ring: int = maxi(Balance.AI_PLOT_MIN_RADIUS, int(_ring_start.get(memory_key, 0)))
 	# 10g Teil 5: der Suchradius folgt der Arena. 40 Zellen reichen auf einer
 	# 144er-Karte AN DER NACHBARBASIS VORBEI; eine enge Arena haelt die Basis
 	# kompakt — und macht den Sweep billiger.
 	var search_radius: int = AIState.plot_search_radius(_arena_span())
-	for radius in range(Balance.AI_PLOT_MIN_RADIUS, search_radius):
+	for radius in range(first_ring, search_radius):
+		# Every ring this loop gets PAST held no plot: remember that.
+		_ring_start[memory_key] = radius
 		for cell in ring_cells(anchor, radius):
 			# Der Void kostet KEIN Budget (Phase 10j). Anders als Wasser kann er
 			# niemals bebaubar werden — keine Landbruecke reicht hinaus —, ihn zu
@@ -1804,10 +1848,11 @@ func _find_supplied_plot(anchor: Vector2i, footprint: Vector2i,
 			# ring_cells() ungeprueft ausserhalb des Rechtecks liefert.
 			if nav_grid != null and not nav_grid.terrain.in_disc(cell):
 				continue
-			if _plot_budget <= 0:
+			if _plot_budget <= 0 or cells_left <= 0:
 				return Vector2i(-1, -1)
 			dbg_plot_cells += 1
 			_plot_budget -= 1
+			cells_left -= 1
 			# Entrance faces the settlement; a non-square footprint turns with
 			# it, so orientation has to be decided BEFORE the placement checks.
 			var orientation: int = _orientation_toward(cell, footprint, anchor)
@@ -1830,7 +1875,9 @@ func _find_supplied_plot(anchor: Vector2i, footprint: Vector2i,
 				checked += 1
 				continue
 			if spacing > 0 and not _plot_has_clearance(cell, fp, spacing):
-				checked += 1
+				crowded += 1
+				if crowded >= crowded_cap:
+					return Vector2i(-1, -1)
 				continue
 			# Only the A* consumes the SHARED expensive ceiling.
 			if _plot_candidates_left <= 0:

@@ -12264,3 +12264,42 @@ Standbilder angesehen, der Sprungangriff im laufenden Spiel nicht geprueft.
   Drehung 2,5 s statt 2,2 s); dazwischen weiter linear in der Koerperhoehe ab 8 rad/s.
 
 **Verifikation:** `test_golem.gd` (volle Suite auf Nutzerwunsch nicht gelaufen).
+
+### Golem: Tritt-Schneise kuerzer, Trommeln 10 % groesser (2026-11-16)
+
+- **Tritt:** `kick_limb_factor()` = 1 + (Gliederfaktor - 1) x Anteil, Anteil so, dass die
+  Schneise bei 100 m 90 % der bisherigen Laenge hat (`GOLEM_KICK_LENGTH_SHARE_AT_MAX`):
+  53,0 / 37,1 m statt 58,9 / 41,3 m; Stufe 0 unveraendert, Stufe 7 14,6 / 10,2 m. Die
+  Reichweite bleibt am Gliederfaktor.
+- **Trommeln:** `ground_radius(kind)` — Kreis 10 % groesser als beim Handschlag
+  (`GOLEM_DRUM_RADIUS_FACTOR`), gleicher Mittelpunkt; gilt fuer Einheiten, Gebaeude
+  und die Grobauswahl (`_hit_zone_reach`).
+
+**Tests:** `test_golem.gd` 584 passed, 0 failed (neu: `test_kick_lane_is_ten_percent_shorter_at_the_top`,
+`test_drum_circle_is_ten_percent_larger_than_the_slam`). Volle Suite nicht gelaufen.
+
+### Bugfixes: Bauplatz am Kartenrand, KI baut im Endspiel keine Huetten mehr (2026-11-16)
+
+- **Kartenrand:** `can_place_at` verlangte nur eine begehbare Zugangszelle; ein
+  Grundriss durfte ueber den runden Rand ragen (Baustelle halb im Void, Bauarbeiter
+  fielen hinunter). Neu `TribeCommands.fits_on_disc`: Grundriss plus `PLACE_RIM_MARGIN`
+  (1) Zelle ringsum muessen `in_disc` sein. Nah am Rand bauen bleibt erlaubt.
+  Test `test_void_orders.gd::test_no_plot_reaches_over_the_rim`.
+- **KI-Holzbug (Seenland, Endspiel):** headless nachgestellt (eine KI allein,
+  Startplatz 0/1): nach 9-14 min blieb sie bei 8 bzw. 15 Huetten stehen, Bevoelkerung
+  = Wohnraum, `next_building_kind` immer "hut", jede Bauplatzsuche scheiterte, das
+  Holz lag in Stapeln und Regalen. Ursache in `_find_supplied_plot`: in einem dichten
+  Dorf sind die inneren Ringe voller platzierbarer Plaetze, die nur am Abstand zu
+  anderen Gebaeuden scheitern; jeder zaehlte zum Aufgabe-Zaehler (20), der erste
+  freie Platz war aber der 21. bis 196. Kandidat. Ausserdem frass der Basis-Anker das
+  ganze Zellbudget (800), die Anker der Huettengruppen und der Ausbreitung - wo der
+  freie Boden lag - bekamen nichts. Behoben mit
+  * eigener Grenze fuer Abstands-Absagen (`CLEARANCE_REJECT_FACTOR` x 20),
+  * gleichem Zellanteil je Anker einer Suche (`_plot_anchor_cells` = 800 / Anker),
+  * Ringgedaechtnis je Anker und Durchgang (`_ring_start`): leer durchsuchte Ringe
+    werden uebersprungen; vergessen nach `RING_MEMORY_TICKS` (120) oder sobald ein
+    eigenes Gebaeude faellt.
+  Danach baut die KI weiter (Startplatz 0: 24 Huetten nach 18 min statt 8; Startplatz 1:
+  21 Huetten und alle Gebaeudearten nach 9 min, jede Suche findet einen Platz).
+  Tests `test_ai.gd::test_plot_search_gets_past_a_dense_village`,
+  `test_plot_sweep_shares_the_cell_budget_between_anchors`.

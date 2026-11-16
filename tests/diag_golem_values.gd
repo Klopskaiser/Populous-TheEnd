@@ -19,7 +19,7 @@ func _initialize() -> void:
 	print("Stufe | Kills | Groesse m | Koerperradius m | Auswahlkreis m | LP max | Heilung/s | Tempo m/s"
 		+ " | Reichweite m | Aggro m | Ziele Grund/Tritt/Trommeln/Sprung | Takt s Tritt/Handschlag/Trommeln/Sprung | Haltungswechsel s | Drehrate Grad/s"
 		+ " | Handschlag: Schaden, Kreis r, Mitte vor, Flaeche m2 | Tritt: Schaden, breit x vor + zurueck, Flaeche m2"
-		+ " | Trampeln | Sprung: Schaden, Kreis r, Landung nach s | Ausholen Hand/Tritt/Luft s | Lebenszeit | Klippe bis m"
+		+ " | Trommeln: Kreis r | Trampeln | Sprung: Schaden, Kreis r, Landung nach s | Ausholen Hand/Tritt/Luft s | Lebenszeit | Klippe bis m"
 		+ " | erleidet: Brand/s, Blitz, Katapult-Volltreffer")
 	for stage in range(0, Balance.GOLEM_MAX_LEVEL + 1):
 		while g.level < stage:
@@ -41,7 +41,7 @@ func _row(g: Golem, label: String) -> void:
 		else "180 s + 6/Kill + 20/Stufe"
 	var straight: String = "%.1f" % g.giant_step_limit() if g.walks_straight() else "-"
 	var lane: Vector2 = g._kick_extent()
-	print("%s | %d | %.1f | %.2f | %.2f | %d | %d | %.2f | %.1f | %.1f | %d/%d/%d/%d | %.2f/%.2f/%.2f/%.2f | %.2f | %.0f | %d, %.1f, %.1f, %.0f | %d, %.1f x %.1f + %.1f, %.0f | %d (Trommeln %d) | %d, %.2f, %.2f | %.2f/%.2f/%.2f | %s | %s | %d, %d, %d" % [
+	print("%s | %d | %.1f | %.2f | %.2f | %d | %d | %.2f | %.1f | %.1f | %d/%d/%d/%d | %.2f/%.2f/%.2f/%.2f | %.2f | %.0f | %d, %.1f, %.1f, %.0f | %d, %.1f x %.1f + %.1f, %.0f | %.1f | %d (Trommeln %d) | %d, %.2f, %.2f | %.2f/%.2f/%.2f | %s | %s | %d, %d, %d" % [
 		label, g.kills, g.height_m(), g.trample_radius(), 0.34 * g.selection_ring_scale(),
 		g.max_health, int(g.regen_per_second()), g.current_speed(), g.reach(),
 		g.aggro_radius(), g.max_targets(), g.max_targets_of(Golem.ATTACK_KICK), g.max_targets_of(Golem.ATTACK_DRUM),
@@ -51,7 +51,7 @@ func _row(g: Golem, label: String) -> void:
 		g.attack_damage(Golem.ATTACK_SLAM), g.slam_radius(), Balance.GOLEM_SLAM_FORWARD * g.limb_factor(),
 		PI * pow(g.slam_radius(), 2.0),
 		g.attack_damage(Golem.ATTACK_KICK), Balance.GOLEM_KICK_WIDTH * r, lane.x, lane.y,
-		Balance.GOLEM_KICK_WIDTH * r * (lane.x + lane.y),
+		Balance.GOLEM_KICK_WIDTH * r * (lane.x + lane.y), g.ground_radius(Golem.ATTACK_DRUM),
 		g.trample_damage(), g.attack_damage(Golem.ATTACK_DRUM),
 		g.attack_damage(Golem.ATTACK_STOMP), g.stomp_radius(), g.current_windup(Golem.ATTACK_STOMP),
 		g.current_windup(Golem.ATTACK_SLAM), g.current_windup(Golem.ATTACK_KICK),

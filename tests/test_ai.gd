@@ -2671,3 +2671,68 @@ func test_marching_only_skips_casting_preacher() -> void:
 		"the casting preacher is skipped, the marcher gets the refresh")
 	ai.free()
 	_free_world(w)
+
+
+## Bugmeldung 2026-11-16 (Seenland, Endspiel: "Holz wird gebunkert, Huetten werden
+## nicht mehr gebaut"): in einem dichten Dorf sind die inneren Ringe voller Plaetze,
+## die zwar platzierbar sind, aber zu nah an anderen Gebaeuden liegen. Jeder davon
+## zaehlte zum Aufgabe-Zaehler (20), jede Suche endete knapp vor dem freien Boden —
+## fuer immer. Jetzt haben Abstands-Absagen eine eigene, groessere Grenze, und Ringe,
+## die schon leer durchsucht wurden, werden beim naechsten Mal uebersprungen: nach
+## wenigen Suchen erreicht der Basis-Anker den freien Boden.
+func test_plot_search_gets_past_a_dense_village() -> void:
+	var w: Dictionary = _make_world()
+	var anchor: Vector2i = Vector2i(64, 64)
+	# Dichtes Dorf: ein 1x1-Lager alle 4 Zellen bis 10 Zellen um den Anker — jeder
+	# 4x4-Platz darin hat ein Gebaeude innerhalb von 2 Zellen.
+	var placed: int = 0
+	for dz in range(-10, 11, 4):
+		for dx in range(-10, 11, 4):
+			if w.building_manager.place(WOOD_DEPOT_SCENE, w.tribes[1], anchor + Vector2i(dx, dz), 0, true) != null:
+				placed += 1
+	check(placed >= 30, "a dense village of %d racks around the anchor" % placed)
+	# Baeume ringsum ausserhalb des Dorfs (die Suche will Holz in der Naehe).
+	for r in [17, 19]:
+		for cell in AIController.ring_cells(anchor, r):
+			if (cell.x + cell.y) % 2 == 0 and w.nav.is_cell_walkable(cell):
+				w.tree_manager.spawn_tree(cell, TreeResource.MAX_STAGE)
+	var ai: AIController = _make_ai(w, w.tribes[1], anchor)
+	var fp: Vector2i = AIController.BUILD_FOOTPRINTS[&"hut"]
+	var found: Vector2i = Vector2i(-1, -1)
+	var tries: int = 0
+	while found.x < 0 and tries < 6:
+		found = ai._find_supplied_plot(anchor, fp, Balance.AI_PLOT_SPACING)
+		tries += 1
+	check(found.x >= 0, "the base anchor finds a plot beyond the village (after %d searches: %s)" % [tries, str(found)])
+	if found.x >= 0:
+		check(maxi(absi(found.x - anchor.x), absi(found.y - anchor.y)) > 10,
+			"outside the dense rings (%s)" % str(found))
+		check(ai._plot_has_clearance(found, fp, Balance.AI_PLOT_SPACING), "with the full spacing kept")
+	var key: Vector4i = Vector4i(anchor.x, anchor.y, Balance.AI_PLOT_SPACING, 1)
+	check(int(ai._ring_start.get(key, 0)) > Balance.AI_PLOT_MIN_RADIUS,
+		"the rings searched in vain are remembered (from ring %d on)" % int(ai._ring_start.get(key, 0)))
+	ai._on_building_destroyed(w.tribes[1].buildings[0])
+	check(ai._ring_start.is_empty(), "losing an own building forgets them (ground may be free again)")
+	ai.free()
+	_free_world(w)
+
+
+## Ein Anker darf in einer Suche nur seinen Anteil des Zellbudgets verbrauchen: der
+## Basis-Anker frass vorher alles, und die Anker der Huettengruppen, an denen der
+## freie Boden lag, bekamen keine einzige Zelle.
+func test_plot_sweep_shares_the_cell_budget_between_anchors() -> void:
+	var w: Dictionary = _make_world(1.0)   # unter dem Meeresspiegel: nichts platzierbar
+	var ai: AIController = _make_ai(w, w.tribes[1], Vector2i(64, 64))
+	ai._find_plot(AIController.BUILD_FOOTPRINTS[&"hut"], ai.build_tick_cache())
+	check(ai._plot_anchor_cells > 0 and ai._plot_anchor_cells <= Balance.AI_MAX_PLOT_SCAN_CELLS,
+		"each anchor gets a share (%d cells)" % ai._plot_anchor_cells)
+	ai._plot_sweep = true
+	ai._plot_budget = Balance.AI_MAX_PLOT_SCAN_CELLS
+	ai._plot_anchor_cells = 100
+	ai._ring_start.clear()
+	AIController.dbg_plot_cells = 0
+	ai._find_supplied_plot(Vector2i(64, 64), AIController.BUILD_FOOTPRINTS[&"hut"], 0)
+	ai._plot_sweep = false
+	check(AIController.dbg_plot_cells <= 101, "one anchor stops at its share (%d cells)" % AIController.dbg_plot_cells)
+	ai.free()
+	_free_world(w)
