@@ -12121,3 +12121,87 @@ Im laufenden Spiel nicht geprueft.
 
 **Verifikation:** Ladecheck exit 0, Suite **7007 passed, 0 failed**, kein `SCRIPT ERROR`.
 Im laufenden Spiel nicht geprueft.
+
+### Golem: Abstand untereinander, Handschlag 0,3 s, Tritt ein Ziel weniger (2026-11-16)
+
+- **Golems kollidieren miteinander:** `_tick_golem_separation` (ueber
+  `UnitManager.vehicles`): zwei Golems halten (Koerperradius + Koerperradius) x
+  `GOLEM_BODY_GAP` Abstand; bei Ueberlappung schliesst das Paar die Luecke
+  hoechstens im Lauftempo des schnelleren, jeder mit dem Anteil des ANDEREN
+  Radius (der kleinere weicht staerker aus). Nie auf Boden, den er nicht
+  betreten koennte. Die normale Einheitenkollision bleibt ab Stufe 1 aus.
+- **Handschlag-Ausholzeit** `GOLEM_SLAM_WINDUP` 0,35 -> 0,3 s. Der Clip
+  `slam_low` (Aufschlag bei 0,35 s) wird dafuer mit `clip_rate` = 0,35/0,3
+  schneller gespielt. Auslegung: der Nutzer schrieb "das Buecken ... 0,3 statt
+  0,35" — 0,35 war nur die Ausholzeit des Handschlags; der Haltungswechsel
+  (0,45 s) ist unveraendert. Dem Nutzer so gemeldet.
+- **Tritt:** `max_targets_of(ATTACK_KICK)` = Zielobergrenze - 1
+  (`GOLEM_KICK_TARGETS_LESS`).
+
+**Tests:** `test_golem.gd` 463 Zusicherungen
+(`test_golems_do_not_stand_inside_one_another`,
+`test_slam_wind_up_is_three_tenths_of_a_second`,
+`test_kick_strikes_one_target_less`).
+
+**Verifikation:** Ladecheck exit 0, Suite **7025 passed, 0 failed**, kein `SCRIPT ERROR`.
+Im laufenden Spiel nicht geprueft.
+
+### Golem: Handschlag-Radius 12 m, Wachstum +7 LP, 24 LP/s bei 100 m (2026-11-16)
+
+- **Radius von Handschlag und Trommeln:** `slam_scale()` / `slam_radius()` — bis
+  Stufe 7 wie bisher (5,8 m), in den Wachstumsschritten danach gleichmaessig bis
+  `GOLEM_SLAM_RADIUS_AT_MAX` (12 m bei 100 m; 1,4 % je Schritt, vorher mit den
+  uebrigen Flaechen 0,75 % = 8,6 m). Flaeche bei 100 m: 452 m2 statt 230 m2.
+- **Lebensobergrenze:** `GOLEM_GROWTH_MAX_HP` 5 -> 7 (100 m: 1371).
+- **Dauerheilung:** `regen_per_second()`, der ausgewachsene Golem +3
+  (`GOLEM_FULL_SIZE_REGEN`, 24/s).
+
+**Tests:** `test_golem.gd` 477 Zusicherungen
+(`test_slam_radius_reaches_twelve_metres`,
+`test_full_grown_golem_regenerates_three_more_and_has_1371_hp`).
+
+**Verifikation:** Ladecheck exit 0, Suite **7039 passed, 0 failed**, kein `SCRIPT ERROR`.
+Im laufenden Spiel nicht geprueft.
+
+### Golem: Bueckzeit 0,4 s, Ausholzeit wieder 0,35 s (2026-11-16)
+
+- Der Nutzer meinte mit "Buecken 0,3 statt 0,35" den Haltungswechsel, nicht die
+  Ausholzeit. Korrigiert: `GOLEM_SLAM_WINDUP` zurueck auf 0,35 s,
+  `GOLEM_STANCE_SWITCH_TIME` 0,45 -> 0,4 s (waechst weiter mit der Wurzel der
+  Groesse: Stufe 6: 0,69 s, Stufe 7: 0,85 s, 100 m: 1,84 s). Aus dem Stand
+  landet der erste Handschlag damit nach 0,75 s. `Golem.clip_rate` bleibt als
+  Mechanik stehen (fuer den Handschlag jetzt 1,0).
+
+**Verifikation:** Ladecheck exit 0, Suite **7042 passed, 0 failed**, kein `SCRIPT ERROR`.
+Im laufenden Spiel nicht geprueft.
+
+### Golem: Strecken beim Wachsen (2026-11-16)
+
+- **Regel:** `_level_up` und jeder Wachstumsschritt rufen `_queue_stretch`;
+  `_tick_stretch` startet das Strecken, sobald kein Angriff angesetzt ist und
+  die laufende Angriffsanimation durch ist (`_attack_anim_left`, gesetzt in
+  `_wind_up`). Dauer `GOLEM_GROW_TIME` 0,5 s; in der Zeit kein Angriff, kein
+  Laufen, kein Haltungswechsel. Solange das Strecken aussteht, beginnt
+  `_attack_or_switch` keinen neuen Angriff. Danach steht er und darf sofort
+  weitermachen (`_stance_age` gilt als abgelaufen).
+- **Clip** `grow` (0,5 s, Arme seitlich nach oben, Fersen heben sich; gebaut in
+  gymnastikschuh `growPose`), **Sound** `golem_grow`. GLB 1,32 MB, 15 Clips,
+  `golem_pruefen.mjs` 0 Fehler.
+
+**Tests:** `test_golem.gd` 493 Zusicherungen
+(`test_growing_golem_stretches_for_half_a_second`).
+
+**Verifikation:** Ladecheck exit 0, Suite **7055 passed, 0 failed**, kein `SCRIPT ERROR`.
+Im laufenden Spiel nicht geprueft (Clip nur als Standbilder).
+
+### Golem: Reichweitenwachstum +10 % (2026-11-16)
+
+- `GOLEM_LIMB_GROWTH_BONUS` 1,1: `limb_factor_for(size)` = 1 + (size^e - 1) x 1,1.
+  Reichweite Stufe 6: 7,9 m, Stufe 7: 11,2 m, 100 m: 41,6 m (vorher 7,5 / 10,5 /
+  38,1); Stufe 0 unveraendert 3,0 m. Schneisenlaenge und Abstand des
+  Handschlag-Aufschlagpunkts haengen am selben Faktor und wachsen mit.
+- Strecken beim Wachsen: gilt bereits ab dem ersten Aufstieg (Stufe 0 -> 1) —
+  dem Nutzer bestaetigt, kein Code geaendert.
+
+**Verifikation:** Ladecheck exit 0, Suite **7059 passed, 0 failed**, kein `SCRIPT ERROR`.
+Im laufenden Spiel nicht geprueft.

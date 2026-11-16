@@ -291,7 +291,7 @@ Größenreferenz die Platzhalter:
 Das Katapult ohne `Arm` feuert trotzdem — nur ohne die Schnapp-Animation; der Golem
 ohne Clips und ohne `Arm` greift trotzdem an — nur ohne Bewegung.
 
-**Golem-Animationen (optional, `AnimationPlayer` im Modell; `idle` ist seit 2026-11-15 das gekürzte Idle 1 der Figur, 20,5 s):** Seit 2026-11-15 zusätzlich `kick_l` (Tritt mit dem linken Bein, 1,2 s), `swipe` (waagerechter Schwinger gegen Luftschiffe auf Brusthöhe, 1,2 s, Treffer bei 0,5 s) und `drum` (drei Schläge auf den Boden links/rechts/links bei 0,8/1,25/1,7 s, 2,4 s); fehlt einer, spielt das Spiel `kick` bzw. `swat` bzw. keinen Clip. Für die gebückte Haltung (2026-11-16): `crouch_down` und `crouch_up` (je 0,45 s, Stand ↔ gebückte Ruhepose), `crouch_idle` (Schleife, 3 s), `slam_low` (0,9 s, Aufschlag bei 0,35 s) und `drum_low` (1,7 s, Aufschläge bei 0,35/0,8/1,25 s) — alle beginnen bzw. enden in derselben gebückten Pose; fehlen sie, spielt das Spiel `slam`/`drum` bzw. `idle`. `idle` und `walk` (das Spiel
+**Golem-Animationen (optional, `AnimationPlayer` im Modell; `idle` ist seit 2026-11-15 das gekürzte Idle 1 der Figur, 20,5 s):** Seit 2026-11-15 zusätzlich `kick_l` (Tritt mit dem linken Bein, 1,2 s), `swipe` (waagerechter Schwinger gegen Luftschiffe auf Brusthöhe, 1,2 s, Treffer bei 0,5 s) und `drum` (drei Schläge auf den Boden links/rechts/links bei 0,8/1,25/1,7 s, 2,4 s); fehlt einer, spielt das Spiel `kick` bzw. `swat` bzw. keinen Clip. Für die gebückte Haltung (2026-11-16): `crouch_down` und `crouch_up` (je 0,45 s, Stand ↔ gebückte Ruhepose), `crouch_idle` (Schleife, 3 s), `slam_low` (0,9 s, Aufschlag bei 0,35 s) und `drum_low` (1,7 s, Aufschläge bei 0,35/0,8/1,25 s) — alle beginnen bzw. enden in derselben gebückten Pose; fehlen sie, spielt das Spiel `slam`/`drum` bzw. `idle`. Fürs Wachsen: `grow` (0,5 s, Strecken aus dem Stand und zurück; fehlt er, pausiert der Golem die 0,5 s ohne Animation). `idle` und `walk` (das Spiel
 schaltet beide auf Schleife; `walk` auf der Stelle, das Abspieltempo folgt der echten
 Geschwindigkeit über `Golem.WALK_CLIP_SPEED`), `slam` (Handschlag, **Aufschlag bei 0,8 s**),
 `kick` (Tritt, **Aufschlag bei 0,5 s**), `swat` (Schlag nach oben gegen Luftschiffe, **Aufschlag bei 0,5 s**)
@@ -471,6 +471,7 @@ Vorbis).
 | `golem_slam.ogg` | Aufschlag des Handschlags (beide Hände auf den Boden) |
 | `golem_drum.ogg` | EIN Trommelschlag (wird dreimal je Trommeln gespielt, im Abstand von 0,45 s) |
 | `golem_swat.ogg` | Treffer auf ein Luftschiff (Schlag nach oben, Schwinger oder Tritt) |
+| `golem_grow.ogg` | Der Golem wächst und streckt sich (Stufenaufstieg, Wachstumsschritt nach Stufe 7; 0,5 s) |
 | `golem_death.ogg` | Golem zerfällt (Lebenszeit abgelaufen oder erschlagen; Prio 2) |
 
 **Status-Loops** — `audio/sfx/` (laufen in Dauerschleife, **solange der Zustand

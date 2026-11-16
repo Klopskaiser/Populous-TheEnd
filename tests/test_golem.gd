@@ -655,7 +655,7 @@ func test_levels_grow_size_reach_area_damage_and_speed() -> void:
 	check_near(g.pick_size_m().y, Balance.GOLEM_HEIGHT * s6, "and as much taller (15,7 m)")
 	check_near(g.reach_factor(), r6, "the strike areas are 1,1 ^ 6 = 1,77 times the base")
 	check(r6 < s6 * 0.65, "the areas grow clearly slower than the body")
-	check_near(g.reach(), Balance.GOLEM_REACH * pow(s6, Golem.limb_exponent()),
+	check_near(g.reach(), Balance.GOLEM_REACH * Golem.limb_factor_for(s6),
 		"the reach follows the limbs (%.1f m at level 6)" % g.reach())
 	check_near(g.speed, Balance.GOLEM_SPEED * sqrt(s6), "speed at level 6 (%.2f m/s)" % g.speed)
 	var dmg6: int = g.attack_damage(Golem.ATTACK_KICK)
@@ -922,8 +922,10 @@ func test_giant_keeps_growing_beyond_level_seven_up_to_a_hundred_metres() -> voi
 	g._credit_kill()
 	check(g.growth_steps == 1 and g.level == 7, "the 15th kill is one growth step (still level 7)")
 	check_near(g.size_factor(), size7 * 1.03, "the body is 3 percent bigger")
-	check_near(g.reach(), reach7 * pow(1.03, Golem.limb_exponent()),
-		"the reach grows with the limbs (2,5 percent a step)", 0.0005)
+	check_near(g.reach(), Balance.GOLEM_REACH * Golem.limb_factor_for(size7 * 1.03),
+		"the reach grows with the limbs", 0.0005)
+	check(g.reach() > reach7 * 1.02 and g.reach() < reach7 * 1.03,
+		"between 2 and 3 percent a step (%.3f)" % (g.reach() / reach7))
 	check_near(g.reach_factor(), Golem.reach_factor_for(7) * 1.0075, "the strike areas 0,75 percent", 0.0005)
 	check_near(g.trample_radius(), trample7 * 1.03, "the body radius grows with the BODY (3 percent)", 0.0005)
 	check(g.speed > speed7 and g.speed < speed7 * 1.01, "the speed rises only slightly (%.3f)" % g.speed)
@@ -932,8 +934,9 @@ func test_giant_keeps_growing_beyond_level_seven_up_to_a_hundred_metres() -> voi
 	check_near(g.size_factor(), size7 * 1.03 * 1.03, "the growth compounds", 0.0005)
 	check(g.attack_damage(Golem.ATTACK_KICK) == dmg7, "the damage stays where it was")
 	check(g.max_health == Balance.GOLEM_MAX_HP_CAP + 2 * Balance.GOLEM_GROWTH_MAX_HP
-		and Balance.GOLEM_GROWTH_MAX_HP == 5,
-		"every growth step lifts the health limit by 5 (two steps: 1010)")
+		and Balance.GOLEM_GROWTH_MAX_HP == 7,
+		"every growth step lifts the health limit by 7 (two steps: 1014)")
+	check_near(g.regen_per_second(), 21.0, "the regeneration stays at 21 per second while he grows")
 	g.health = 100
 	g._tick_level_regen(1.0)
 	check(g.health == 121, "and the regeneration stays at 21 per second")
@@ -970,7 +973,7 @@ func test_attack_cooldown_and_animations_slow_down_with_the_size() -> void:
 		"level 7 (21 m): the cooldown has grown only a little (%.2f s)" % g.strike_cooldown())
 	var fits: bool = true
 	for kind in [Golem.ATTACK_SLAM, Golem.ATTACK_KICK, Golem.ATTACK_SWAT, Golem.ATTACK_DRUM]:
-		var played: float = float(Golem.CLIP_LENGTH[kind]) / g.attack_speed(kind)
+		var played: float = float(Golem.CLIP_LENGTH[kind]) / (g.attack_speed(kind) * Golem.clip_rate(kind))
 		fits = fits and played <= g.cooldown_for(kind) + 0.0001 \
 			and g.current_windup(kind) < g.cooldown_for(kind)
 	check(fits, "at level 7 every attack animation fits into its cooldown")
@@ -1821,17 +1824,17 @@ func test_hit_zones_slam_front_half_of_the_body_kick_lane_only() -> void:
 	# The hands come down limb_factor() x 1,2 m ahead; the circle around them has
 	# the slowly grown radius. At 100 m it lies wholly in front of her.
 	var hands: float = Balance.GOLEM_SLAM_FORWARD * g.limb_factor()
-	var slam_near: float = hands - Balance.GOLEM_SLAM_RADIUS * r
-	check(body > Balance.GOLEM_SLAM_RADIUS * r, "at 100 m the body is wider than the slam circle")
+	var slam_near: float = hands - g.slam_radius()
+	check(body > g.slam_radius(), "at 100 m the body is wider than the slam circle")
 	check(slam_near > 0.0, "and the circle of the hands lies wholly in front of her (from %.1f m on)" % slam_near)
 	var at: Callable = func(along: float, side: float) -> Vector3:
 		return g.position + forward * along + right * side
 	# SLAM
 	check(g._in_hit_zone(Golem.ATTACK_SLAM, at.call(1.0, body - 0.5), forward, right),
 		"slam: the front half of the body circle is struck, far beside the hands")
-	check(g._in_hit_zone(Golem.ATTACK_SLAM, at.call(hands + Balance.GOLEM_SLAM_RADIUS * r - 0.2, 0.0), forward, right)
-		and not g._in_hit_zone(Golem.ATTACK_SLAM, at.call(hands + Balance.GOLEM_SLAM_RADIUS * r + 0.5, 0.0), forward, right),
-		"slam: ahead as far as the circle of the hands reaches (%.1f m)" % (hands + Balance.GOLEM_SLAM_RADIUS * r))
+	check(g._in_hit_zone(Golem.ATTACK_SLAM, at.call(hands + g.slam_radius() - 0.2, 0.0), forward, right)
+		and not g._in_hit_zone(Golem.ATTACK_SLAM, at.call(hands + g.slam_radius() + 0.5, 0.0), forward, right),
+		"slam: ahead as far as the circle of the hands reaches (%.1f m)" % (hands + g.slam_radius()))
 	check(not g._in_hit_zone(Golem.ATTACK_SLAM, at.call(-0.5, 0.0), forward, right),
 		"slam: at her heels, beyond that circle, nothing is struck although it is under her body")
 	check(not g._in_hit_zone(Golem.ATTACK_SLAM, at.call(-1.0, body - 0.5), forward, right),
@@ -1854,7 +1857,7 @@ func test_hit_zones_slam_front_half_of_the_body_kick_lane_only() -> void:
 	var g2: Golem = _golem(w2, 0, Vector3(50, 5, 50))
 	g2.facing = Vector3(0, 0, 1)
 	_level_to(g2, 7)
-	var back7: float = Balance.GOLEM_SLAM_RADIUS * g2.reach_factor() \
+	var back7: float = g2.slam_radius() \
 		- Balance.GOLEM_SLAM_FORWARD * g2.limb_factor()
 	check(g2.trample_radius() > back7 + 0.2, "level 7: her body reaches further back than the slam circle")
 	var heel: Unit = _spawn(w2, BRAVE_SCENE, 1, Vector3(50, 5, 50.0 - (back7 + 0.2)))
@@ -2037,7 +2040,7 @@ func _three_huts(w: Dictionary) -> Building:
 
 
 ## Der Golem steht oder ist gebueckt. Bodenangriffe schlaegt er gebueckt: aus dem
-## Stand muss er sich erst buecken (0,45 s), danach kommt der Handschlag nach
+## Stand muss er sich erst buecken (0,4 s), danach kommt der Handschlag nach
 ## 0,35 s und alle 1,25 s wieder — statt 0,8 s Ausholen im 1,8-s-Takt.
 func test_stance_crouching_makes_the_ground_attacks_faster() -> void:
 	var w: Dictionary = _make_world()
@@ -2049,7 +2052,8 @@ func test_stance_crouching_makes_the_ground_attacks_faster() -> void:
 		and Golem.stance_for(Golem.ATTACK_KICK) == Golem.STANCE_STAND
 		and Golem.stance_for(Golem.ATTACK_SWAT) == Golem.STANCE_STAND,
 		"she starts standing; slam and drum need the crouch, kick and swat the stand")
-	check_near(g.stance_switch_time(), Balance.GOLEM_STANCE_SWITCH_TIME, "level 0 switches in 0,45 s")
+	check_near(g.stance_switch_time(), Balance.GOLEM_STANCE_SWITCH_TIME, "level 0 switches in 0,4 s")
+	check(Balance.GOLEM_STANCE_SWITCH_TIME == 0.4, "the documented 0,4 s")
 	check_near(g.cooldown_for(Golem.ATTACK_SLAM),
 		Balance.GOLEM_SLAM_COOLDOWN, "the crouched slam comes back after 1,25 s")
 	check(Balance.GOLEM_SLAM_COOLDOWN == 1.25, "the documented 1,25 s")
@@ -2150,7 +2154,7 @@ func test_stance_choice_has_hysteresis_and_a_minimum_time() -> void:
 		"nothing in reach of the ground attacks: she gets up at once, minimum time or not")
 	for i in range(int(g.stance_switch_time() / TICK) + 2):
 		g._tick_stance(TICK)
-	check(g.stance == Golem.STANCE_STAND and not g.is_switching_stance(), "0,45 s later she stands")
+	check(g.stance == Golem.STANCE_STAND and not g.is_switching_stance(), "0,4 s later she stands")
 	# The ordinary case: settled in the crouch, the better attack needs the stand.
 	weak.position = Vector3(51.6, 5, 51.2)
 	weak._sync_soa_pos()
@@ -2192,7 +2196,8 @@ func test_stance_switch_slows_with_size_and_swats_need_the_stand() -> void:
 	g._tick_air_strike(TICK)
 	check(g._pending_attack == Golem.ATTACK_SWAT and is_instance_valid(ship), "standing she does")
 	_grow_to_the_end(g)
-	check_near(g.stance_switch_time(), Balance.GOLEM_STANCE_SWITCH_MAX, "the 100-m giant: capped at 2 s")
+	check(g.stance_switch_time() <= Balance.GOLEM_STANCE_SWITCH_MAX and g.stance_switch_time() > 1.8,
+		"the 100-m giant: %.2f s, never more than the 2-s cap" % g.stance_switch_time())
 	_free_world(w)
 
 
@@ -2210,9 +2215,12 @@ func test_reach_grows_with_the_limbs() -> void:
 	check(Golem.limb_exponent() > 0.82 and Golem.limb_exponent() < 0.85,
 		"the exponent is about 0,83 (%.3f)" % Golem.limb_exponent())
 	_level_to(g, 6)
-	check(g.reach() > 7.3 and g.reach() < 7.6, "level 6: %.1f m (was 5,3)" % g.reach())
+	check(g.reach() > 7.8 and g.reach() < 8.0, "level 6: %.1f m (was 5,3)" % g.reach())
 	_level_to(g, 7)
-	check(g.reach() > 10.3 and g.reach() < 10.6, "level 7: %.1f m (was 6,6)" % g.reach())
+	check(g.reach() > 11.1 and g.reach() < 11.3, "level 7: %.1f m (was 6,6)" % g.reach())
+	check_near(g.limb_factor() - 1.0, (pow(g.size_factor(), Golem.limb_exponent()) - 1.0) * 1.1,
+		"the gain over a fresh golem is 10 percent more than the plain power law gives", 0.0005)
+	check(Balance.GOLEM_LIMB_GROWTH_BONUS == 1.1, "the documented 10 percent")
 	check_near(g._kick_extent().x / g.reach(), Balance.GOLEM_KICK_LENGTH / Balance.GOLEM_REACH,
 		"the kick's lane stays as much longer than the reach as at level 0", 0.001)
 	# Whatever stands at the edge of her reach, straight ahead, the kick can strike.
@@ -2224,10 +2232,10 @@ func test_reach_grows_with_the_limbs() -> void:
 	check_near(Balance.GOLEM_KICK_WIDTH * g.reach_factor(), 1.8 * Golem.reach_factor_for(7),
 		"the lane's WIDTH still follows the slow area growth", 0.001)
 	_grow_to_the_end(g)
-	check_near(g.limb_factor(), Balance.GOLEM_LIMB_SHARE_AT_MAX * g.size_factor(),
-		"at 100 m the limbs are 60 percent of a body-proportional growth", 0.01)
-	check_near(g.reach(), Balance.GOLEM_REACH * 0.6 * g.size_factor(),
-		"so the reach is %.1f m" % g.reach(), 0.05)
+	check_near(g.limb_factor(), Golem.limb_factor_for(g.size_factor()), "at 100 m: limb factor %.1f" % g.limb_factor())
+	check_near(pow(g.size_factor(), Golem.limb_exponent()), Balance.GOLEM_LIMB_SHARE_AT_MAX * g.size_factor(),
+		"the power law alone gives 60 percent of a body-proportional growth there", 0.01)
+	check(g.reach() > 41.4 and g.reach() < 41.8, "with the 10 percent on top the reach is %.1f m" % g.reach())
 	check(g.aggro_radius() > g.reach(), "still inside her aggro radius")
 	_free_world(w)
 
@@ -2248,3 +2256,214 @@ func test_golem_has_its_own_sound_keys() -> void:
 		and Golem.strike_sfx_key(Golem.ATTACK_SWAT) == &"golem_swat",
 		"every attack has its own impact sound")
 	check(Golem.strike_sfx_key(&"something") == &"golem_strike", "anything else keeps the common strike sound")
+
+
+# --- Golems untereinander, Ausholzeit des Handschlags, Tritt-Obergrenze (2026-11-16) -------
+
+## Golems koennen nicht ineinander stehen: zwei halten die Summe ihrer
+## Koerperradien Abstand, der kleinere weicht staerker aus. Mit normalen
+## Einheiten kollidieren sie ab Stufe 1 weiterhin nicht.
+func test_golems_do_not_stand_inside_one_another() -> void:
+	var w: Dictionary = _make_world()
+	var a: Golem = _golem(w, 0, Vector3(50, 5, 50))
+	var b: Golem = _golem(w, 0, Vector3(50.4, 5, 50))
+	_level_to(a, 1)
+	_level_to(b, 1)
+	check(a.ignores_unit_collision() and b.ignores_unit_collision(),
+		"from level 1 on both ignore the ordinary unit collision")
+	var need: float = (a.trample_radius() + b.trample_radius()) * Balance.GOLEM_BODY_GAP
+	check(_flat(a.position, b.position) < need, "they start overlapping (0,4 m apart, %.2f m needed)" % need)
+	for i in range(40):
+		_tick_world(w)
+	check(_flat(a.position, b.position) >= need - 0.02,
+		"after a moment they stand the sum of their body radii apart (%.2f m)" % _flat(a.position, b.position))
+	check(a.position.x < 49.8 and b.position.x > 50.6,
+		"two golems of the same size both give way (%.2f and %.2f)" % [a.position.x, b.position.x])
+	# A giant and a fresh golem, enemy tribes: the small one gives way.
+	var big: Golem = _golem(w, 0, Vector3(20, 5, 20))
+	_level_to(big, 7)
+	var small: Golem = _golem(w, 1, Vector3(21, 5, 20))
+	var big_start: Vector3 = big.position
+	var small_start: Vector3 = small.position
+	var need2: float = big.trample_radius() + small.trample_radius()
+	for i in range(80):
+		big._tick_golem_separation(TICK)
+		small._tick_golem_separation(TICK)
+	check(_flat(big.position, small.position) >= need2 - 0.02,
+		"a giant and a fresh golem of another tribe separate too (%.1f m apart)" % _flat(big.position, small.position))
+	check(_flat(small.position, small_start) > _flat(big.position, big_start) * 3.0,
+		"the smaller body yields far more (%.2f m against %.2f m)"
+			% [_flat(small.position, small_start), _flat(big.position, big_start)])
+	# An ordinary enemy unit inside a level-1 golem is not pushed out, and does not push.
+	var foe: Unit = _foe(w, 80.0, 80.0, 100000)
+	var solo: Golem = _golem(w, 0, Vector3(80.2, 5, 80))
+	_level_to(solo, 1)
+	var solo_start: Vector3 = solo.position
+	solo._tick_golem_separation(TICK)
+	check(_flat(solo.position, solo_start) < 0.001 and is_instance_valid(foe),
+		"ordinary units do not take part in this")
+	_free_world(w)
+
+
+## Buecken und Aufstehen dauern 0,4 s bei Startgroesse und wachsen mit der Wurzel
+## der Groesse; der Handschlag holt aus der gebueckten Haltung 0,35 s aus. Aus dem
+## Stand landet der erste Handschlag also nach 0,75 s.
+func test_bending_takes_four_tenths_and_the_slam_winds_up_035() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
+	check_near(g.stance_switch_time(), 0.4, "level 0: bending down takes 0,4 s")
+	check_near(Balance.GOLEM_SLAM_WINDUP, 0.35, "the slam's wind-up is 0,35 s")
+	check_near(g.current_windup(Golem.ATTACK_SLAM), 0.35, "level 0: the slam lands 0,35 s after its start")
+	check_near(g.stance_switch_time() + g.current_windup(Golem.ATTACK_SLAM), 0.75,
+		"from the stand the first slam lands after 0,75 s")
+	check_near(Golem.clip_rate(Golem.ATTACK_SLAM), 1.0, "the slam's clip plays as it was built")
+	g._wind_up(Golem.ATTACK_SLAM)
+	check_near(g._pending_time, 0.35, "winding up sets the 0,35 s")
+	_level_to(g, 6)
+	check(g.stance_switch_time() > 0.68 and g.stance_switch_time() < 0.70,
+		"level 6: %.2f s (0,4 x root of the size)" % g.stance_switch_time())
+	_level_to(g, 7)
+	check(g.stance_switch_time() > 0.84 and g.stance_switch_time() < 0.86, "level 7: %.2f s" % g.stance_switch_time())
+	_grow_to_the_end(g)
+	check(g.stance_switch_time() > 1.82 and g.stance_switch_time() < 1.86,
+		"100 m: %.2f s (below the 2-s cap)" % g.stance_switch_time())
+	_free_world(w)
+
+
+## Der Tritt trifft ein Ziel weniger als die gebueckten Angriffe.
+func test_kick_strikes_one_target_less() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
+	g.facing = Vector3(0, 0, 1)
+	check(g.max_targets_of(Golem.ATTACK_KICK) == 4 and g.max_targets_of(Golem.ATTACK_SLAM) == 5
+		and g.max_targets_of(Golem.ATTACK_DRUM) == 5 and g.max_targets() == 5,
+		"level 0: the kick strikes 4, slam and drum 5")
+	var lane: Array = []
+	for i in range(6):
+		lane.append(_foe(w, 50.0 + (0.3 if i % 2 == 0 else -0.3), 50.8 + 0.5 * float(i), 100000))
+	check(g._victims(Golem.ATTACK_KICK).size() == 6, "six enemies stand in the kick's lane")
+	g._kick()
+	var hit: int = 0
+	for u in lane:
+		if u.health < 100000:
+			hit += 1
+	check(hit == 4, "the kick strikes exactly four of them (struck %d)" % hit)
+	_level_to(g, 7)
+	check(g.max_targets_of(Golem.ATTACK_KICK) == 7 and g.max_targets_of(Golem.ATTACK_SLAM) == 8,
+		"level 7: 7 against 8")
+	_free_world(w)
+
+
+## Der Radius von Handschlag und Trommeln: bis Stufe 7 das langsame
+## Flaechenwachstum (5,8 m), danach gleichmaessig bis 12 m bei 100 m (vorher 8,6 m).
+func test_slam_radius_reaches_twelve_metres() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
+	check_near(g.slam_radius(), Balance.GOLEM_SLAM_RADIUS, "level 0: 2,6 m")
+	_level_to(g, 6)
+	check_near(g.slam_radius(), Balance.GOLEM_SLAM_RADIUS * Golem.reach_factor_for(6), "level 6: unchanged (4,6 m)")
+	_level_to(g, 7)
+	var r7: float = g.slam_radius()
+	check_near(r7, Balance.GOLEM_SLAM_RADIUS * Golem.reach_factor_for(7), "level 7: unchanged (%.1f m)" % r7)
+	for i in range(Balance.GOLEM_GROWTH_KILLS):
+		g._credit_kill()
+	check(g.growth_steps == 1 and g.slam_radius() > r7 * 1.013 and g.slam_radius() < r7 * 1.015,
+		"one growth step: about 1,4 percent more (%.3f m)" % g.slam_radius())
+	check_near(Balance.GOLEM_KICK_WIDTH * g.reach_factor(), Balance.GOLEM_KICK_WIDTH * Golem.reach_factor_for(7) * 1.0075,
+		"the lane's width keeps its 0,75 percent", 0.0005)
+	_grow_to_the_end(g)
+	check_near(g.slam_radius(), Balance.GOLEM_SLAM_RADIUS_AT_MAX, "at 100 m: 12 m", 0.001)
+	check(Balance.GOLEM_SLAM_RADIUS_AT_MAX == 12.0, "the documented 12 m")
+	# In play: an enemy 11 m from where the hands land is struck, one at 13 m is not.
+	g.facing = Vector3(0, 0, 1)
+	var hands: Vector3 = g.position + Vector3(0, 0, 1) * (Balance.GOLEM_SLAM_FORWARD * g.limb_factor())
+	check(g._in_hit_zone(Golem.ATTACK_SLAM, hands + Vector3(11.0, 0, 5.0).normalized() * 11.0, Vector3(0, 0, 1), Vector3(-1, 0, 0))
+		and not g._in_hit_zone(Golem.ATTACK_SLAM, hands + Vector3(0, 0, 13.0), Vector3(0, 0, 1), Vector3(-1, 0, 0)),
+		"11 m from the hands is inside the circle, 13 m outside")
+	_free_world(w)
+
+
+## Der ausgewachsene Golem (100 m): noch einmal +3 Leben/s Dauerheilung (24), und
+## die Lebensobergrenze ist 1000 + 53 x 7 = 1371.
+func test_full_grown_golem_regenerates_three_more_and_has_1371_hp() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
+	_level_to(g, 7)
+	while g.growth_steps < Golem.max_growth_steps() - 1:
+		g._credit_kill()
+	check_near(g.regen_per_second(), 21.0, "one step before the end: still 21 per second")
+	_grow_to_the_end(g)
+	check(g.is_full_size(), "grown to 100 m")
+	check_near(g.regen_per_second(), 21.0 + Balance.GOLEM_FULL_SIZE_REGEN, "full-grown: 24 per second")
+	check(g.max_health == 1000 + Golem.max_growth_steps() * 7 and g.max_health == 1371,
+		"the health limit is 1371 (%d)" % g.max_health)
+	g.health = 100
+	g._tick_level_regen(1.0)
+	check(g.health == 124, "one second heals 24")
+	_free_world(w)
+
+
+# --- Strecken beim Wachsen (2026-11-16) ----------------------------------------------------
+
+## Waechst der Golem (Stufenaufstieg oder Wachstumsschritt), streckt er sich
+## einmal: 0,5 s, in denen er weder angreift noch laeuft. Die laufende
+## Angriffsanimation wird vorher zu Ende gespielt, er steht danach und darf
+## sofort weitermachen — auch sich sofort wieder buecken.
+func test_growing_golem_stretches_for_half_a_second() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
+	g.facing = Vector3(0, 0, 1)
+	check(not g._stretch_queued and not g.is_stretching(), "a fresh golem owes no stretch")
+	check_near(Balance.GOLEM_GROW_TIME, 0.5, "the stretch takes half a second")
+	# She winds up a kick; the kill that lifts her to level 1 lands with it.
+	g._wind_up(Golem.ATTACK_KICK)
+	var clip_time: float = g._attack_anim_left
+	check_near(clip_time, 1.2, "the kick's animation takes 1,2 s at level 0")
+	_level_to(g, 1)
+	check(g._stretch_queued and g.level == 1, "the level-up owes a stretch")
+	var t: float = 0.0
+	var started_at: float = -1.0
+	var ended_at: float = -1.0
+	var rooted: bool = true
+	var no_new_attack: bool = true
+	for i in range(40):
+		g._tick_pending_attack(TICK)
+		g._tick_stretch(TICK)
+		t += TICK
+		if g.is_stretching() and started_at < 0.0:
+			started_at = t
+		if g.is_stretching():
+			rooted = rooted and is_zero_approx(g._slope_speed(0.0))
+			no_new_attack = no_new_attack and not g._begin_stance(Golem.STANCE_CROUCH)
+		if started_at >= 0.0 and not g.is_stretching() and ended_at < 0.0:
+			ended_at = t
+	check(started_at >= clip_time - 0.001 and started_at <= clip_time + TICK * 1.5,
+		"the stretch waits for the kick's animation to play out (begins at %.1f s)" % started_at)
+	check_near(ended_at - started_at, Balance.GOLEM_GROW_TIME,
+		"and takes 0,5 s (%.2f)" % (ended_at - started_at), TICK * 1.5)
+	check(rooted, "while stretching she does not walk")
+	check(no_new_attack, "nor does she bend down or strike")
+	check(g.stance == Golem.STANCE_STAND and g.stance_settled() and not g._stretch_queued,
+		"afterwards she stands and may go on at once — bending down included")
+	# While the stretch is still owed she begins no new attack.
+	var foe: Unit = _foe(w, 50.0, 51.5, 100000)
+	g._stretch_queued = true
+	g._attack_or_switch()
+	check(g._pending_attack == &"" and is_instance_valid(foe), "an owed stretch goes before the next attack")
+	# From the crouch she straightens up with it.
+	g.stance = Golem.STANCE_CROUCH
+	g._attack_anim_left = 0.0
+	g._tick_stretch(TICK)
+	check(g.is_stretching() and g.stance == Golem.STANCE_STAND, "crouched, she rises into the stretch")
+	for i in range(8):
+		g._tick_stretch(TICK)
+	g._attack_or_switch()
+	check(g._pending_attack == Golem.ATTACK_KICK, "after the stretch the attack follows at once")
+	# The growth steps beyond level 7 stretch too.
+	var giant: Golem = _golem(w, 0, Vector3(20, 5, 20))
+	_level_to(giant, 7)
+	giant._stretch_queued = false
+	for i in range(Balance.GOLEM_GROWTH_KILLS):
+		giant._credit_kill()
+	check(giant.growth_steps == 1 and giant._stretch_queued, "a growth step beyond level 7 owes a stretch as well")
+	_free_world(w)

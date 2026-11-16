@@ -89,6 +89,9 @@ const CLIP_SLAM_LOW: StringName = &"slam_low"
 const CLIP_DRUM_LOW: StringName = &"drum_low"
 ## Length of the stance-switch clips at speed 1 (golem_bewegung.mjs).
 const STANCE_CLIP_LENGTH: float = 0.45
+## The stretch she does when she grows: clip name and its length at speed 1.
+const CLIP_GROW: StringName = &"grow"
+const GROW_CLIP_LENGTH: float = 0.5
 ## Strike areas in the heading frame (along = forward, side = right), flat in XZ:
 ## slam = circle of SLAM_RADIUS around the point SLAM_FORWARD ahead,
 ## kick = lane -KICK_BACK <= along <= KICK_LENGTH, |side| <= KICK_HALF_WIDTH (the
@@ -212,6 +215,12 @@ var stance: int = STANCE_STAND
 var _stance_target: int = STANCE_STAND
 var _stance_switch: float = 0.0
 var _stance_age: float = 1000.0
+## She has grown and still owes the stretch (it starts once the running attack
+## animation is through), the seconds a running stretch still takes, and the
+## seconds the current attack clip still plays.
+var _stretch_queued: bool = false
+var _stretch_time: float = 0.0
+var _attack_anim_left: float = 0.0
 ## Strike swing progress of the placeholder arms (0 = just begun, 1 = at rest).
 var _arm_anim: float = 1.0
 var _rise: float = 0.0
@@ -381,6 +390,7 @@ func tick(delta: float) -> void:
 	if state != State.DEAD:
 		_slew_heading(delta)
 		_tick_stance(delta)
+		_tick_stretch(delta)
 	_tick_pending_attack(delta)
 	if state != State.DEAD and not doomed and not garrison_housed:
 		_tick_air_strike(delta)
@@ -388,6 +398,7 @@ func tick(delta: float) -> void:
 		_tick_level_regen(delta)
 		_tick_trample(delta)
 		_tick_flatten(delta)
+		_tick_golem_separation(delta)   # after the trampling: being pushed is not walking
 		# From the final-bonus level on the lifetime no longer runs out (user spec).
 		if level < Balance.GOLEM_FINAL_BONUS_LEVEL:
 			life_left -= delta
@@ -419,6 +430,21 @@ static func max_targets_for(p_level: int, p_growth_steps: int) -> int:
 
 func max_targets() -> int:
 	return max_targets_for(level, growth_steps)
+
+
+## The cap for ONE landing of the attack `kind`: the kick strikes
+## GOLEM_KICK_TARGETS_LESS fewer than the ground attacks (at least one).
+func max_targets_of(kind: StringName) -> int:
+	if kind == ATTACK_KICK:
+		return maxi(max_targets() - Balance.GOLEM_KICK_TARGETS_LESS, 1)
+	return max_targets()
+
+
+## Permanent healing per second right now: GOLEM_LEVEL_REGEN per level, and
+## GOLEM_FULL_SIZE_REGEN on top for the full-grown golem.
+func regen_per_second() -> float:
+	var regen: float = Balance.GOLEM_LEVEL_REGEN * float(level)
+	return regen + Balance.GOLEM_FULL_SIZE_REGEN if is_full_size() else regen
 
 
 ## Health ceiling right now: GOLEM_MAX_HP_CAP, plus GOLEM_GROWTH_MAX_HP for every
@@ -506,6 +532,24 @@ func reach_factor() -> float:
 	return reach_factor_for(level) * growth_area_factor()
 
 
+## Scale of the slam's (and the drum's) circle: the slow area growth up to level
+## 7, and beyond it an even growth per step up to GOLEM_SLAM_RADIUS_AT_MAX at
+## 100 m — stronger than the 0,75 percent the other areas take there.
+func slam_scale() -> float:
+	var base: float = reach_factor_for(level)
+	var steps: int = max_growth_steps()
+	if growth_steps <= 0 or steps <= 0:
+		return base
+	var at_max: float = Balance.GOLEM_SLAM_RADIUS_AT_MAX / SLAM_RADIUS
+	return base * pow(at_max / reach_factor_for(Balance.GOLEM_MAX_LEVEL),
+		float(growth_steps) / float(steps))
+
+
+## Radius of the slam's circle right now (metres).
+func slam_radius() -> float:
+	return SLAM_RADIUS * slam_scale()
+
+
 ## Exponent of the limb factor: chosen so that at GOLEM_MAX_HEIGHT the limbs are
 ## GOLEM_LIMB_SHARE_AT_MAX of what a body-proportional growth would give.
 static func limb_exponent() -> float:
@@ -513,10 +557,15 @@ static func limb_exponent() -> float:
 
 
 ## How much longer her arms and legs are than a fresh golem's: the size factor,
-## damped (size ^ 0,83) — level 6: 2,49, level 7: 3,49, 100 m: 12,7. Scales the
-## reach, the length of the kick's lane and how far ahead the hands come down.
+## damped (size ^ 0,83), and its GAIN over 1 raised by GOLEM_LIMB_GROWTH_BONUS —
+## level 6: 2,63, level 7: 3,73, 100 m: 13,9. Scales the reach, the length of the
+## kick's lane and how far ahead the hands come down.
 func limb_factor() -> float:
-	return pow(size_factor(), limb_exponent())
+	return limb_factor_for(size_factor())
+
+
+static func limb_factor_for(size: float) -> float:
+	return 1.0 + (pow(size, limb_exponent()) - 1.0) * Balance.GOLEM_LIMB_GROWTH_BONUS
 
 
 ## The distance at which she strikes — it grows with her limbs.
@@ -584,6 +633,38 @@ func growth_t() -> float:
 		/ (Balance.GOLEM_MAX_HEIGHT - Balance.GOLEM_HEIGHT), 0.0, 1.0)
 
 
+func is_stretching() -> bool:
+	return _stretch_time > 0.0
+
+
+## She grows (level-up or growth step): the stretch is owed.
+func _queue_stretch() -> void:
+	_stretch_queued = true
+
+
+## The stretch of a growing golem (user spec 2026-11-16): it starts as soon as no
+## attack is wound up and the last attack's animation has played out, takes
+## GOLEM_GROW_TIME, and leaves her STANDING and free to strike at once (and to
+## bend down again at once — the stance's minimum time does not count here).
+func _tick_stretch(delta: float) -> void:
+	_attack_anim_left = maxf(_attack_anim_left - delta, 0.0)
+	if is_stretching():
+		_stretch_time -= delta
+		if _stretch_time <= 0.0:
+			_stretch_time = 0.0
+			_stance_age = 1000.0
+		return
+	if not _stretch_queued or _pending_attack != &"" or _attack_anim_left > 0.0 \
+			or is_switching_stance():
+		return
+	_stretch_queued = false
+	_stretch_time = Balance.GOLEM_GROW_TIME
+	stance = STANCE_STAND
+	_stance_target = STANCE_STAND
+	_play_sfx(&"golem_grow")
+	_play_clip(CLIP_GROW, GROW_CLIP_LENGTH / Balance.GOLEM_GROW_TIME, true)
+
+
 ## The stance an attack needs: the ground attacks are struck crouched,
 ## everything else standing.
 static func stance_for(kind: StringName) -> int:
@@ -608,7 +689,7 @@ func stance_settled() -> bool:
 
 ## Starts bending down / getting up. Returns false when nothing was started.
 func _begin_stance(target: int) -> bool:
-	if is_switching_stance() or stance == target:
+	if is_switching_stance() or is_stretching() or stance == target:
 		return false
 	_stance_target = target
 	_stance_switch = stance_switch_time()
@@ -641,6 +722,8 @@ func _tick_stance(delta: float) -> void:
 ## The attack is due: strike — or change the stance first when the best attack
 ## needs the other one. `building` = the assault target, if any.
 func _attack_or_switch(building = null) -> void:
+	if _stretch_queued:
+		return   # she has grown: the stretch comes first (see _tick_stretch)
 	var ship: Airship = _airship_in_reach()
 	if ship != null:
 		# An airship overhead goes before the crowd at her feet — standing.
@@ -765,8 +848,8 @@ func is_turned_to_facing() -> bool:
 ## (it does not glide sideways): full speed when aligned, down to
 ## GOLEM_TURN_MIN_SPEED_SHARE when it would have to walk backward.
 func _slope_speed(slope: float) -> float:
-	if stance != STANCE_STAND or is_switching_stance():
-		return 0.0   # crouched, bending down or getting up: rooted
+	if stance != STANCE_STAND or is_switching_stance() or is_stretching():
+		return 0.0   # crouched, bending down, getting up or stretching: rooted
 	var want_dir: Vector3 = Vector3(facing.x, 0.0, facing.z)
 	var share: float = 1.0
 	if want_dir.length_squared() > 0.000001:
@@ -796,6 +879,7 @@ func _credit_kill() -> void:
 	if steps != growth_steps:
 		growth_steps = steps
 		_apply_speed()
+		_queue_stretch()
 	# The ceiling: +5 per kill up to 1000; the giant has the full 1000 at once,
 	# and every growth step beyond level 7 lifts it by GOLEM_GROWTH_MAX_HP.
 	if level >= Balance.GOLEM_MAX_LEVEL:
@@ -807,6 +891,7 @@ func _credit_kill() -> void:
 
 func _level_up() -> void:
 	level += 1
+	_queue_stretch()
 	life_left += Balance.GOLEM_LEVEL_LIFETIME
 	if level >= Balance.GOLEM_MAX_LEVEL:
 		max_health = Balance.GOLEM_MAX_HP_CAP   # the giant: flat 1000 (user spec)
@@ -954,7 +1039,7 @@ func _tick_level_regen(delta: float) -> void:
 	if level <= 0 or health >= max_health:
 		_level_regen_frac = 0.0
 		return
-	_level_regen_frac += Balance.GOLEM_LEVEL_REGEN * float(level) * delta
+	_level_regen_frac += regen_per_second() * delta
 	if _level_regen_frac >= 1.0:
 		var heal: int = int(_level_regen_frac)
 		_level_regen_frac -= float(heal)
@@ -1042,6 +1127,58 @@ func _tick_trample(delta: float) -> void:
 		_strike_building(b)
 
 
+## Golems never stand inside one another (user spec 2026-11-16): whichever
+## level or tribe, two of them keep the sum of their body radii apart. While they
+## overlap each steps away from the other — the smaller body yields more —, the
+## pair at most at walking speed, and never onto ground it could not walk on. (The ordinary
+## unit separation is switched off for golems from level 1 on, so they need their
+## own.)
+func _tick_golem_separation(delta: float) -> void:
+	if not (path_service is UnitManager) or delta <= 0.0:
+		return
+	var mine: float = trample_radius()
+	var push: Vector2 = Vector2.ZERO
+	for u in (path_service as UnitManager).vehicles:
+		if u == self or not is_instance_valid(u) or not (u is Golem) or u.state == State.DEAD:
+			continue
+		var other: Golem = u as Golem
+		var theirs: float = other.trample_radius()
+		var need: float = (mine + theirs) * Balance.GOLEM_BODY_GAP
+		var away: Vector2 = Vector2(position.x - other.position.x, position.z - other.position.z)
+		var dist: float = away.length()
+		if dist >= need:
+			continue
+		if dist < 0.001:
+			# Exactly on top of each other: a fixed direction per pair, no dice.
+			away = Vector2(1.0, 0.0) if get_instance_id() < other.get_instance_id() \
+				else Vector2(-1.0, 0.0)
+			dist = 0.0
+		else:
+			away /= dist
+		# The pair closes its overlap at most at the faster one's walking speed, and
+		# each takes its share of that: the bigger the OTHER body, the more she
+		# yields — so a giant hardly moves for a small golem.
+		var close: float = minf(need - dist, maxf(current_speed(), other.current_speed()) * delta)
+		push += away * close * (theirs / (mine + theirs))
+	if push == Vector2.ZERO:
+		return
+	var next: Vector3 = Vector3(position.x + push.x, position.y, position.z + push.y)
+	if not _can_be_pushed_to(next):
+		return
+	position = next
+	_snap_to_ground()
+	_sync_soa_pos()
+
+
+## May another golem push her onto this spot? Only where she could walk herself.
+func _can_be_pushed_to(next: Vector3) -> bool:
+	if terrain_data == null:
+		return true
+	if walks_straight():
+		return giant_line_clear(terrain_data, position, next, giant_step_limit())
+	return nav_grid == null or nav_grid.is_cell_walkable(nav_grid.world_to_cell(next))
+
+
 ## Time is up: the construct falls apart (a normal death — corpse, sink, removal).
 func _crumble() -> void:
 	if state == State.DEAD:
@@ -1083,7 +1220,7 @@ func _begin_attack(enemy: Unit) -> void:
 ## While an attack is wound up she stands and finishes it: no retargeting, no
 ## chasing in mid-swing.
 func _tick_attack(delta: float) -> void:
-	if _pending_attack != &"" or is_switching_stance():
+	if _pending_attack != &"" or is_switching_stance() or is_stretching():
 		_attack_cooldown -= delta
 		return
 	if not _unit_target_attackable(attack_target) or attack_target.tribe_id == tribe_id:
@@ -1145,7 +1282,7 @@ func _nearest_enemy_in_reach() -> Unit:
 ## building is guaranteed its stage per attack even when the area geometry
 ## misses it (e.g. an odd footprint corner) — see _land_attack.
 func _bombard_building(building, delta: float) -> void:
-	if _pending_attack != &"" or is_switching_stance():
+	if _pending_attack != &"" or is_switching_stance() or is_stretching():
 		_attack_cooldown -= delta
 		return
 	var center: Vector3 = building.center_world()
@@ -1209,8 +1346,21 @@ static func attack_windup(kind: StringName) -> float:
 ## into the next; she no longer stands idle in between. The cooldown itself grows
 ## with the size (strike_cooldown), so the animations of a giant stretch further.
 func attack_speed(kind: StringName) -> float:
-	var slowest: float = float(CLIP_LENGTH.get(kind, STRIKE_COOLDOWN)) / cooldown_for(kind)
+	var slowest: float = float(CLIP_LENGTH.get(kind, STRIKE_COOLDOWN)) / clip_rate(kind) \
+		/ cooldown_for(kind)
 	return clampf(1.0 / sqrt(size_factor()), minf(slowest, 1.0), 1.0)
+
+
+## Where in its clip an attack's impact lies (seconds, golem_bewegung.mjs) — only
+## for attacks whose wind-up was tuned away from the clip afterwards.
+const CLIP_IMPACT: Dictionary = {&"slam": 0.35}
+
+## How much faster than the animation was built an attack's clip has to play so
+## that its impact meets the wind-up (slam: 0,35 s in the clip, 0,3 s wind-up).
+static func clip_rate(kind: StringName) -> float:
+	if not CLIP_IMPACT.has(kind):
+		return 1.0
+	return float(CLIP_IMPACT[kind]) / attack_windup(kind)
 
 
 ## Seconds from the start of an attack to its impact at the current size.
@@ -1486,8 +1636,8 @@ func _tick_air_strike(delta: float) -> void:
 	_air_cooldown = maxf(_air_cooldown - delta, 0.0)
 	if _air_cooldown > 0.0 or _pending_attack != &"" or not can_strike_air():
 		return
-	if stance != STANCE_STAND or is_switching_stance():
-		return   # the strike at an airship is a standing one
+	if stance != STANCE_STAND or is_switching_stance() or is_stretching() or _stretch_queued:
+		return   # the strike at an airship is a standing one; a stretch goes first
 	if state == State.ATTACK and _in_melee:
 		return
 	var ship: Airship = _airship_in_reach()
@@ -1526,7 +1676,7 @@ func _hit_zone_reach(kind: StringName) -> float:
 	if kind == ATTACK_KICK:
 		var ext: Vector2 = _kick_extent()
 		return Vector2(maxf(ext.x, ext.y), KICK_HALF_WIDTH * size).length() + 0.5
-	return maxf(SLAM_FORWARD * limb_factor() + SLAM_RADIUS * size, trample_radius()) + 0.5
+	return maxf(SLAM_FORWARD * limb_factor() + slam_radius(), trample_radius()) + 0.5
 
 
 ## How far the kick's lane reaches ahead (x) and behind her (y): its own length,
@@ -1553,7 +1703,7 @@ func _in_hit_zone(kind: StringName, point: Vector3, forward: Vector3, right: Vec
 		var ext: Vector2 = _kick_extent()
 		return along >= -ext.y and along <= ext.x \
 			and absf(side) <= KICK_HALF_WIDTH * reach_factor()
-	if in_slam_area(along, side, reach_factor(), limb_factor()):
+	if in_slam_area(along, side, slam_scale(), limb_factor()):
 		return true
 	return along >= 0.0 and rel.x * rel.x + rel.z * rel.z <= trample_radius() * trample_radius()
 
@@ -1563,7 +1713,7 @@ func _in_hit_zone(kind: StringName, point: Vector3, forward: Vector3, right: Vec
 ## and buildings, within each the nearest to the blow first. The target she is
 ## attacking — unit or building — is always struck and counts toward the cap.
 func _struck_targets(kind: StringName) -> Dictionary:
-	var room: int = max_targets()
+	var room: int = max_targets_of(kind)
 	var origin: Vector3 = position
 	if kind != ATTACK_KICK:
 		origin += _heading_frame()[0] * (SLAM_FORWARD * limb_factor())
@@ -1718,7 +1868,9 @@ func _wind_up(kind: StringName, building = null, ship: Airship = null) -> void:
 	_arm_anim = 0.0
 	_no_combat_timer = 0.0
 	var clip: StringName = _clip_for(kind, ship)
-	_play_clip(clip, attack_speed(kind), true)
+	var rate: float = attack_speed(kind) * clip_rate(kind)
+	_attack_anim_left = float(CLIP_LENGTH.get(kind, 0.0)) / rate
+	_play_clip(clip, rate, true)
 
 
 func _tick_pending_attack(delta: float) -> void:
@@ -1880,7 +2032,7 @@ func _building_in_area(b, kind: StringName, forward: Vector3) -> bool:
 	var size: float = reach_factor()
 	if kind != ATTACK_KICK:
 		var hit: Vector3 = position + forward * (SLAM_FORWARD * limb_factor())
-		if b.footprint_distance_to(Vector2(hit.x, hit.z)) <= SLAM_RADIUS * size:
+		if b.footprint_distance_to(Vector2(hit.x, hit.z)) <= slam_radius():
 			return true
 		# The front half of her own body circle belongs to the slam (see _in_hit_zone).
 		var c: Vector3 = b.center_world()
@@ -2046,7 +2198,7 @@ func _tick_visual(delta: float) -> void:
 	if _anim != null:
 		# An attack clip plays out; afterwards walk or idle by the real speed.
 		var attacking: bool = ATTACK_CLIPS.has(_clip) and _anim.is_playing()
-		if not attacking and not is_switching_stance():
+		if not attacking and not is_switching_stance() and not is_stretching():
 			if stance == STANCE_CROUCH:
 				_play_clip(CLIP_CROUCH_IDLE)
 			elif ground_speed > WALK_THRESHOLD:

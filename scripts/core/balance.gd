@@ -87,8 +87,8 @@ const GOLEM_SLAM_FORWARD: float = 1.2
 const GOLEM_SLAM_DAMAGE: int = 25
 ## Sekunden vom Ansetzen bis zum Aufschlag — aus der GEBUECKTEN Haltung (Clip
 ## `slam_low`). Bis 2026-11-16 waren es 0,8 s: das Buecken steckte im Angriff.
-## Jetzt ist das Buecken der Haltungswechsel (GOLEM_STANCE_SWITCH_TIME 0,45 s),
-## aus dem Stand dauert der erste Handschlag also weiter 0,8 s.
+## Jetzt ist das Buecken der Haltungswechsel (GOLEM_STANCE_SWITCH_TIME 0,4 s),
+## aus dem Stand dauert der erste Handschlag also 0,75 s.
 const GOLEM_SLAM_WINDUP: float = 0.35
 ## HALTUNG (Nutzervorgabe 2026-11-15, gebaut 2026-11-16): der Golem steht ODER
 ## ist gebueckt.
@@ -105,9 +105,19 @@ const GOLEM_SLAM_WINDUP: float = 0.35
 ## auf, wenn ein Luftschiff in Schlagweite kommt oder er laufen muss.
 ## Freiwillige Wechsel fruehestens GOLEM_STANCE_MIN_TIME Sekunden nach dem
 ## letzten (sonst pendelte er); wer laufen MUSS, steht sofort auf.
-const GOLEM_STANCE_SWITCH_TIME: float = 0.45
+## 0,45 -> 0,4 s bei Startgroesse (Nutzer 2026-11-16); mit der Wurzel der Groesse
+## waechst es wie bisher: Stufe 6: 0,69 s, Stufe 7: 0,85 s, 100 m: 1,84 s.
+const GOLEM_STANCE_SWITCH_TIME: float = 0.4
 const GOLEM_STANCE_SWITCH_MAX: float = 2.0
 const GOLEM_STANCE_MIN_TIME: float = 3.0
+## STRECKEN BEIM WACHSEN (Nutzer 2026-11-16): bei jedem Stufenaufstieg und jedem
+## Wachstumsschritt nach Stufe 7 reckt sich der Golem einmal (Clip "grow", Sound
+## "golem_grow"). Das kostet GOLEM_GROW_TIME Sekunden, in denen er weder
+## angreift noch laeuft; er steht danach (aus der gebueckten Haltung richtet er
+## sich dabei auf) und darf sofort weiter angreifen — auch sich sofort wieder
+## buecken. Eine laufende Angriffsanimation wird vorher zu Ende gespielt, und
+## solange das Strecken aussteht, beginnt er keinen neuen Angriff.
+const GOLEM_GROW_TIME: float = 0.5
 ## ANGRIFFSWAHL NACH SCHADEN (Nutzer 2026-11-16, ersetzt die festen Zielzahlen
 ## 3 / 5 / 2): fuer Tritt, Handschlag und Trommeln wird gerechnet, was der Angriff
 ## JETZT treffen wuerde (dieselbe Flaeche, dieselbe Zielobergrenze wie beim
@@ -170,13 +180,16 @@ const GOLEM_LIFE_PER_KILL: float = 6.0
 ## seine Lebensobergrenze steigt um GOLEM_MAX_HP_PER_KILL (2026-11-15) — bis
 ## hoechstens GOLEM_MAX_HP_CAP (flat 1000, Nutzervorgabe; nach 40 Kills erreicht,
 ## auf Stufe 7 gilt sie in jedem Fall). Nach Stufe 7 hebt jeder WACHSTUMSSCHRITT
-## sie um GOLEM_GROWTH_MAX_HP (2026-11-15: am 100-m-Ende 1265). Die Obergrenze GILT: Kill-Heilung und
+## sie um GOLEM_GROWTH_MAX_HP (2026-11-16: 7 statt 5, am 100-m-Ende 1371). Die Obergrenze GILT: Kill-Heilung und
 ## Dauerheilung enden an ihr — sonst heilte er sich passiv unendlich hoch.
 ## Als Kill zaehlt auch ein vom Golem zerstoertes GEBAEUDE.
 const GOLEM_HP_PER_KILL: int = 10
 const GOLEM_MAX_HP_PER_KILL: int = 5
 const GOLEM_MAX_HP_CAP: int = 1000
-const GOLEM_GROWTH_MAX_HP: int = 5
+const GOLEM_GROWTH_MAX_HP: int = 7
+## Der AUSGEWACHSENE Golem (100 m) heilt noch einmal so viel Leben je Sekunde
+## mehr (Nutzer 2026-11-16: 21 -> 24).
+const GOLEM_FULL_SIZE_REGEN: float = 3.0
 ## STUFEN (Nutzervorgabe 2026-11-15): der Golem beginnt auf Stufe 0 und steigt
 ## nach GOLEM_LEVEL_KILLS Kills je Stufe auf (s. dort), bis Stufe
 ## GOLEM_FINAL_BONUS_LEVEL (6). Je Stufe:
@@ -216,6 +229,10 @@ const GOLEM_LEVEL_KILLS: Array[int] = [5, 6, 7, 7, 8, 9, 45]
 ## Gebaeuden, die naechsten zuerst; das Ziel, das er gerade angreift, wird immer
 ## getroffen und zaehlt mit.
 const GOLEM_MAX_TARGETS: Array[int] = [5, 6, 6, 6, 7, 8, 8, 8]
+## Der TRITT trifft so viele Ziele WENIGER als die gebueckten Angriffe (Nutzer
+## 2026-11-16): Stufe 0 also 4 statt 5. Handschlag, Trommeln und Trampeln behalten
+## die volle Zahl.
+const GOLEM_KICK_TARGETS_LESS: int = 1
 const GOLEM_GROWTH_STEPS_PER_TARGET: int = 3
 const GOLEM_MAX_LEVEL: int = 7
 const GOLEM_FINAL_BONUS_LEVEL: int = 6
@@ -283,6 +300,12 @@ const GOLEM_TRAMPLE_BUILDING_INTERVAL: float = 2.0
 ## Schluss). Ist die Luftlinie versperrt, wird der normale Weg gesucht und
 ## danach begradigt.
 const GOLEM_GIANT_STEP_SHARE: float = 0.2
+## GOLEMS UNTEREINANDER (Nutzer 2026-11-16): sie koennen nicht ineinander stehen.
+## Zwei Golems — egal welcher Stufe und welchen Stamms — halten mindestens die
+## Summe ihrer Koerperradien mal GOLEM_BODY_GAP Abstand; ueberlappen sie, schieben
+## sie sich auseinander (der kleinere weicht staerker aus). Die Kollision mit
+## normalen Einheiten bleibt ab Stufe 1 ausgeschaltet.
+const GOLEM_BODY_GAP: float = 1.0
 ## REICHWEITE WAECHST MIT DEM KOERPER (Nutzer 2026-11-16): Arme und Beine werden
 ## mit dem Koerper laenger — bis dahin wuchs die Reichweite nur 10 % je Stufe
 ## (wie die Wirkflaechen) und der grosse Golem musste fast auf sein Ziel treten.
@@ -296,6 +319,18 @@ const GOLEM_GIANT_STEP_SHARE: float = 0.2
 ## Die GROESSE der Flaechen (Radius des Handschlags, Breite der Schneise) bleibt
 ## beim langsamen Wachstum von 10 % je Stufe (GOLEM_LEVEL_REACH_GROWTH).
 const GOLEM_LIMB_SHARE_AT_MAX: float = 0.6
+## ... und der ZUWACHS daraus faellt ueber alle Stufen noch einmal 10 % staerker
+## aus (Nutzer 2026-11-16): Gliederfaktor = 1 + (Groesse^e - 1) x
+## GOLEM_LIMB_GROWTH_BONUS. Stufe 0 bleibt bei 3,0 m; Stufe 6: 7,9 m, Stufe 7:
+## 11,2 m, 100 m: 41,6 m (statt 7,5 / 10,5 / 38,1).
+const GOLEM_LIMB_GROWTH_BONUS: float = 1.1
+## RADIUS VON HANDSCHLAG UND TROMMELN am Wachstumsende (Nutzer 2026-11-16: "kann
+## auch besser skalieren, am Ende koennen da 12 m sein"). Bis Stufe 7 bleibt es
+## beim langsamen Flaechenwachstum (Stufe 7: 5,8 m); in den Wachstumsschritten
+## danach waechst der Radius gleichmaessig bis auf diesen Wert bei 100 m (1,4 %
+## je Schritt statt 0,75 % — vorher endete er bei 8,6 m). Die Breite der
+## Tritt-Schneise bleibt bei 0,75 % je Schritt.
+const GOLEM_SLAM_RADIUS_AT_MAX: float = 12.0
 ## ANGRIFFSTAKT NACH GROESSE (Nutzer 2026-11-15, ersetzt "der Takt bleibt 1,8 s"):
 ## die Abklingzeit waechst langsam mit dem Koerper — linear in der Koerperhoehe
 ## von GOLEM_STRIKE_COOLDOWN (1,8 s, Startgroesse) bis GOLEM_STRIKE_COOLDOWN_MAX
