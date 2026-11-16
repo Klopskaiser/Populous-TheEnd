@@ -12573,3 +12573,13 @@ Nutzervorgaben:
 - Bauabstand `Balance.BUILDING_MIN_GAP` = 1 Zelle um jedes Gebaeude (`keeps_building_gap`).
   `test_construction_stuck.gd` stellt seine Baustelle am Nachbarn jetzt direkt auf.
 Tests: `tests/test_ritual_chamber.gd`.
+
+### Golem: Sprung ohne Anvisieren (2026-11-16)
+
+Nutzervorgabe: der Sprung trifft rundherum und muss den Gegner nicht erst anvisieren.
+`turn_time_needed()` (Winkel ueber GOLEM_ATTACK_ALIGN_DEG / Drehrate) geht als Einleitung in
+`attack_time` jedes gerichteten Angriffs ein (geteilt durch GOLEM_STANCE_PLAN_ATTACKS), nicht in
+den Sprung; im Sprungplan zaehlt fuer die Folgeangriffe nur die Drehung, die ueber den Sprung
+hinausgeht. Solange sie sich dreht, wertet `_stomp_while_turning` die Wahl so, als sei sie schon
+gedreht (Flaechen vor dem Koerper), mit der echten Drehzeit - gewinnt der Sprung, springt sie
+sofort. Test `test_the_stomp_needs_no_turn`; der alte Drehtest laeuft ohne Sprung.

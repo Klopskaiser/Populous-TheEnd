@@ -217,6 +217,9 @@ var _clip: StringName = &""
 ## The body's real direction: it follows `facing` at turn_rate() (see
 ## _slew_heading). Unset (ZERO) until the first tick — then `facing` counts.
 var _heading: Vector3 = Vector3.ZERO
+## >= 0 while the attack choice is weighed as if already turned: the turn time
+## it would really take (see _stomp_while_turning, turn_time_needed).
+var _assumed_turn_time: float = -1.0
 ## The next kick uses the left leg (alternates with every kick).
 var _kick_left: bool = false
 ## Which of the drum's hits lands next (0-based) while a drum is wound up.
@@ -972,7 +975,49 @@ func attack_time(kind: StringName) -> float:
 	var t: float = cooldown_for(kind)
 	if stance_for(kind) != stance:
 		t += stance_switch_time() / float(Balance.GOLEM_STANCE_PLAN_ATTACKS)
+	# A directed attack waits until the body has turned (2026-11-16): that time
+	# is a lead-in like the stance switch. The stomp needs no aim.
+	if kind != ATTACK_STOMP:
+		t += turn_time_needed() / float(Balance.GOLEM_STANCE_PLAN_ATTACKS)
 	return t
+
+
+## Seconds the body still has to turn before a directed attack may begin: the
+## angle to the facing beyond GOLEM_ATTACK_ALIGN_DEG at turn_rate(). 0 when
+## aligned. While the choice is weighed as if already turned (see
+## _stomp_while_turning) the real value is held in _assumed_turn_time.
+func turn_time_needed() -> float:
+	if _assumed_turn_time >= 0.0:
+		return _assumed_turn_time
+	var want: Vector3 = Vector3(facing.x, 0.0, facing.z)
+	if want.length_squared() < 0.000001:
+		return 0.0
+	var angle: float = acos(clampf(heading().dot(want.normalized()), -1.0, 1.0))
+	var left: float = angle - deg_to_rad(Balance.GOLEM_ATTACK_ALIGN_DEG)
+	return maxf(left, 0.0) / maxf(turn_rate(), 0.001)
+
+
+## The stomp needs no aim (user spec 2026-11-16): while the body is still
+## turning toward its target, she may jump right away — when the stomp is her
+## best plan, with the turn counted against every directed attack. The other
+## attacks are weighed as if she were already turned (their areas lie ahead of
+## the body), only their time carries the turn. Returns true when she jumped.
+func _stomp_while_turning(building = null) -> bool:
+	if _stretch_queued or not can_stomp() or _airship_in_reach() != null:
+		return false
+	var want: Vector3 = Vector3(facing.x, 0.0, facing.z)
+	if want.length_squared() < 0.000001:
+		return false
+	var saved: Vector3 = _heading
+	_assumed_turn_time = turn_time_needed()
+	_heading = want.normalized()
+	var kind: StringName = _choose_attack()
+	_heading = saved
+	_assumed_turn_time = -1.0
+	if kind != ATTACK_STOMP:
+		return false
+	_wind_up(ATTACK_STOMP, building)
+	return true
 
 
 ## Expected damage per second of the attack `kind` right now (see attack_worth).
@@ -1003,11 +1048,16 @@ func stomp_plan_value() -> float:
 		return 0.0
 	var n: float = float(Balance.GOLEM_STANCE_PLAN_ATTACKS)
 	var cooldown: float = cooldown_for(ATTACK_STOMP)
+	# The stomp itself needs no aim; she turns while she jumps, and only what is
+	# left of the turn afterwards delays the directed attacks that follow.
+	var turn: float = turn_time_needed()
 	var best: float = 0.0
 	for kind in [ATTACK_SLAM, ATTACK_DRUM]:
-		best = maxf(best, (lead + n * attack_worth(kind)) / (cooldown + n * cooldown_for(kind)))
+		best = maxf(best, (lead + n * attack_worth(kind))
+			/ (maxf(cooldown, turn) + n * cooldown_for(kind)))
 	var up: float = maxf(cooldown, attack_duration(ATTACK_STOMP) + stance_switch_time())
-	return maxf(best, (lead + n * attack_worth(ATTACK_KICK)) / (up + n * cooldown_for(ATTACK_KICK)))
+	return maxf(best, (lead + n * attack_worth(ATTACK_KICK))
+		/ (maxf(up, turn) + n * cooldown_for(ATTACK_KICK)))
 
 
 ## May she jump right now? Only standing, and not right after a stance change
@@ -1542,7 +1592,10 @@ func _tick_attack(delta: float) -> void:
 	_attack_cooldown -= delta
 	if _attack_cooldown <= 0.0:
 		if not is_turned_to_facing():
-			return   # still turning toward it (see turn_rate)
+			# Still turning toward it (see turn_rate) — only the stomp needs
+			# no aim and may come at once, when it is the best plan.
+			_stomp_while_turning()
+			return
 		_attack_or_switch()
 
 
@@ -1589,7 +1642,8 @@ func _bombard_building(building, delta: float) -> void:
 	_attack_cooldown -= delta
 	if _attack_cooldown <= 0.0:
 		if not is_turned_to_facing():
-			return   # still turning toward it (see turn_rate)
+			_stomp_while_turning(building)   # the stomp needs no aim
+			return
 		_attack_or_switch(building)
 
 

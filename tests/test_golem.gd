@@ -1038,9 +1038,11 @@ func test_body_turns_slower_the_bigger_the_golem_is() -> void:
 	g._heading = Vector3(0, 0, 1)
 	check_near(g._slope_speed(0.0), g.speed, "aligned again he walks at full speed")
 	_free_world(w)
-	# In play: an enemy behind the full-grown giant is not struck before he has turned.
+	# In play: an enemy behind the full-grown giant is not struck before he has turned
+	# — by the DIRECTED attacks; the stomp needs no aim (test_the_stomp_needs_no_turn).
 	var w2: Dictionary = _make_world()
 	var g2: Golem = _golem(w2, 0, Vector3(50, 5, 50))
+	g2.stomp_enabled = false
 	_grow_to_the_end(g2)
 	g2.facing = Vector3(0, 0, 1)
 	g2.tick(TICK)
@@ -1058,6 +1060,41 @@ func test_body_turns_slower_the_bigger_the_golem_is() -> void:
 		"he needs well over a second to turn before he winds up (tick %d)" % wound_up_at)
 	check(g2.is_turned_to_facing(), "and he is turned to the target when he does")
 	_free_world(w2)
+
+
+## Der Sprung braucht kein Anvisieren (Nutzervorgabe 2026-11-16): steht der Feind
+## hinter dem Riesen, springt er sofort, statt sich erst umzudrehen — die Wahl
+## rechnet die Drehzeit jedem gerichteten Angriff an, dem Sprung nicht.
+func test_the_stomp_needs_no_turn() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
+	_grow_to_the_end(g)
+	for i in range(100):   # let the stretch after the growth play out first
+		if not g.is_stretching() and not g._stretch_queued:
+			break
+		g.tick(TICK)
+	g.facing = Vector3(0, 0, 1)
+	g.snap_heading()
+	g.tick(TICK)
+	var foe: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50, 5, 44))
+	foe.max_health = 100000
+	foe.health = 100000
+	g.order_attack(foe)
+	var first: StringName = &""
+	var turned: bool = true
+	var at: int = -1
+	for i in range(200):
+		g.tick(TICK)
+		if g._pending_attack != &"":
+			first = g._pending_attack
+			turned = g.is_turned_to_facing()
+			at = i
+			break
+	check(first == Golem.ATTACK_STOMP, "the first attack is the stomp (got %s)" % first)
+	check(not turned, "struck while still turned away from the target")
+	check(g.turn_time_needed() > 1.0, "a directed attack would have waited over a second")
+	check(at >= 0 and at < int(1.0 / TICK), "so he strikes within the first second (tick %d)" % at)
+	_free_world(w)
 
 
 ## TROMMELN: drei Schlaege auf den Boden (links, rechts, links) statt eines
