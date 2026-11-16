@@ -8,7 +8,7 @@ class_name DemonGolem extends Golem
 ## (DEMON_GOLEM_*, dort auch die ganze Vorgabe) und wird hier ueberschrieben:
 ##
 ##  * keine Stufen (`level` bleibt 0), keine Lebenszeit. Er beginnt 2 m klein und
-##    waechst je WACHSTUMSSTUFE um genau 1 m (`growth_steps`); die Stufe kostet 5
+##    waechst je WACHSTUMSSTUFE um genau 1 m (`growth_steps`); die Stufe kostet 4
 ##    Kills, alle 10 Stufen einen mehr. Bei 150 m zerfaellt er.
 ##  * die Groesse treibt alles: size_factor() = Hoehe / GOLEM_HEIGHT, und die
 ##    Golem-Formeln fuer Reichweite, Schneise, Tempo, Takt usw. rechnen damit.

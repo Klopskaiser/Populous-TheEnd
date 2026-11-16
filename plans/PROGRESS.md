@@ -12496,3 +12496,9 @@ Nutzervorgabe: `GOLEM_TARGET_PERCENT_STOMP` 150 -> 200 (Golem Stufe 0-7: 10 / 12
 Tests angepasst (`test_every_attack_has_its_share_of_the_target_count`,
 `test_stomp_strikes_half_again_as_many_targets_and_buildings` — jetzt 12 Feinde im Kreis,
 10 getroffen; `test_targets_start_at_three_and_one_more_every_step`).
+
+### Daemonengolem: ein Kill weniger je Wachstumsstufe (2026-11-16)
+
+Nutzervorgabe: `DEMON_GOLEM_GROWTH_KILLS` 5 -> 4. Stufe 1-10 je 4 Kills, 11-20 je 5, ...
+141-148 je 18 (der Anstieg alle 10 Stufen bleibt). Bis 100 m 824 statt 922 Kills, bis
+150 m 1614 statt 1762. `test_demon_golem.gd` angepasst.

@@ -518,8 +518,9 @@ const GOLEM_SEPARATION: float = 1.0
 ##    klein und waechst je WACHSTUMSSTUFE um genau DEMON_GOLEM_GROWTH_HEIGHT (1 m,
 ##    kein Prozentwert). Bei DEMON_GOLEM_MAX_HEIGHT (150 m, 148 Stufen) zerfaellt er.
 ##  * Kills je Wachstumsstufe: DEMON_GOLEM_GROWTH_KILLS (5), und alle
-##    DEMON_GOLEM_GROWTH_KILLS_STEP (10) Stufen einer mehr — Stufe 1-10 je 5,
-##    11-20 je 6, ... 141-148 je 19. Zusammen 1762 Kills bis 150 m.
+##    DEMON_GOLEM_GROWTH_KILLS_STEP (10) Stufen einer mehr — Stufe 1-10 je 4,
+##    11-20 je 5, ... 141-148 je 18. Zusammen 1614 Kills bis 150 m (2026-11-16:
+##    um einen Kill je Stufe gesenkt, vorher 5 / 6 / ... / 19, zusammen 1762).
 ##  * GEDRUNGEN: bei gleicher Hoehe DEMON_GOLEM_WIDTH_FACTOR (25 %) breiter und
 ##    tiefer als der Golem — Modell und Koerperbox (Trampeln, Sprung, Einebnen).
 ##  * Alles, was beim Golem an der GROESSE haengt, nimmt dieselbe Formel mit seiner
@@ -563,7 +564,7 @@ const DEMON_GOLEM_START_HEIGHT: float = 2.0
 const DEMON_GOLEM_GROWTH_HEIGHT: float = 1.0
 const DEMON_GOLEM_MAX_HEIGHT: float = 150.0
 const DEMON_GOLEM_WIDTH_FACTOR: float = 1.25
-const DEMON_GOLEM_GROWTH_KILLS: int = 5
+const DEMON_GOLEM_GROWTH_KILLS: int = 4
 const DEMON_GOLEM_GROWTH_KILLS_STEP: int = 10
 const DEMON_GOLEM_GROWTH_MAX_HP: int = 5
 const DEMON_GOLEM_GROWTH_REGEN: float = 0.15

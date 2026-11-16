@@ -5,7 +5,7 @@ extends TestBase
 ## 2 m gross und 400 LP beim Erscheinen, keine Stufen, keine Lebenszeit; je
 ## Wachstumsstufe +1 m, +5 LP, +0,15 LP/s, +1 Ziel und Schaden (Handschlag +0,75,
 ## Tritt +0,8, Trommeln +1) auf den halben Startschaden des Golems; die Stufe kostet
-## 5 Kills und alle 10 Stufen einen mehr; bei 150 m zerfaellt er. Alle Angriffe
+## 4 Kills und alle 10 Stufen einen mehr; bei 150 m zerfaellt er. Alle Angriffe
 ## 15 % schneller als beim Golem gleicher Groesse. Ab 20 m Luftschiffe, ab 30 m das
 ## Riesenpaket. Nie gehaertet. Kill: 10 LP sofort und 10 ueber 5 s, stapelbar.
 ## Der Zauber steht nur im Satz des menschlichen Spielers.
@@ -113,19 +113,19 @@ func test_lone_demon_golem_is_no_follower() -> void:
 # --- Wachstum -------------------------------------------------------------------------
 
 func test_growth_step_costs_five_kills_and_one_more_every_ten_steps() -> void:
-	check(DemonGolem.kills_for_step(1) == 5 and DemonGolem.kills_for_step(10) == 5,
-		"steps 1-10 cost 5 kills each")
-	check(DemonGolem.kills_for_step(11) == 6 and DemonGolem.kills_for_step(20) == 6,
-		"steps 11-20 cost 6")
-	check(DemonGolem.kills_for_step(21) == 7 and DemonGolem.kills_for_step(148) == 19,
-		"21-30 cost 7 ... the last ones 19")
-	check(DemonGolem.kills_for_steps(10) == 50 and DemonGolem.kills_for_steps(11) == 56
-		and DemonGolem.kills_for_steps(20) == 110, "summed: 50 after ten steps, 56, 110 after twenty")
-	check(DemonGolem.steps_for_kills(4) == 0 and DemonGolem.steps_for_kills(5) == 1
-		and DemonGolem.steps_for_kills(55) == 10 and DemonGolem.steps_for_kills(56) == 11,
+	check(DemonGolem.kills_for_step(1) == 4 and DemonGolem.kills_for_step(10) == 4,
+		"steps 1-10 cost 4 kills each")
+	check(DemonGolem.kills_for_step(11) == 5 and DemonGolem.kills_for_step(20) == 5,
+		"steps 11-20 cost 5")
+	check(DemonGolem.kills_for_step(21) == 6 and DemonGolem.kills_for_step(148) == 18,
+		"21-30 cost 6 ... the last ones 18")
+	check(DemonGolem.kills_for_steps(10) == 40 and DemonGolem.kills_for_steps(11) == 45
+		and DemonGolem.kills_for_steps(20) == 90, "summed: 40 after ten steps, 45, 90 after twenty")
+	check(DemonGolem.steps_for_kills(3) == 0 and DemonGolem.steps_for_kills(4) == 1
+		and DemonGolem.steps_for_kills(44) == 10 and DemonGolem.steps_for_kills(45) == 11,
 		"the step count follows the kills")
-	check(DemonGolem.max_steps() == 148 and DemonGolem.kills_for_steps(148) == 1762,
-		"148 steps to 150 m: 1762 kills")
+	check(DemonGolem.max_steps() == 148 and DemonGolem.kills_for_steps(148) == 1614,
+		"148 steps to 150 m: 1614 kills")
 
 
 func test_every_step_adds_one_metre_five_health_and_fifteen_hundredths_regen() -> void:
@@ -133,11 +133,11 @@ func test_every_step_adds_one_metre_five_health_and_fifteen_hundredths_regen() -
 	var d: DemonGolem = _demon(w, 0, Vector3(50, 5, 50))
 	check(d.level == 0 and d.growth_steps == 0, "no levels; no growth step yet")
 	check_near(d.regen_per_second(), 0.0, "no regeneration at the start")
-	for i in range(4):
+	for i in range(3):
 		d._credit_kill()
-	check(d.growth_steps == 0 and is_equal_approx(d.height_m(), 2.0), "four kills: still 2 m")
+	check(d.growth_steps == 0 and is_equal_approx(d.height_m(), 2.0), "three kills: still 2 m")
 	d._credit_kill()
-	check(d.growth_steps == 1, "the fifth kill is a growth step")
+	check(d.growth_steps == 1, "the fourth kill is a growth step")
 	check_near(d.height_m(), 3.0, "exactly one metre taller (no percentage)")
 	check(d.max_health == 405, "+5 health limit")
 	check_near(d.regen_per_second(), 0.15, "+0,15 health per second")
@@ -157,7 +157,7 @@ func test_he_falls_apart_at_one_hundred_and_fifty_metres() -> void:
 	check(d.state != Unit.State.DEAD and is_equal_approx(d.height_m(), 149.0), "149 m: alive")
 	_grow_to(d, 150.0)
 	check(d.state == Unit.State.DEAD, "reaching 150 m he falls apart")
-	check(d.kills == 1762, "after 1762 kills")
+	check(d.kills == 1614, "after 1614 kills")
 	_free_world(w)
 
 
@@ -423,7 +423,7 @@ func test_status_text_names_him_and_his_growth() -> void:
 	var d: DemonGolem = _demon(w, 0, Vector3(50, 5, 50))
 	var text: String = d.status_text()
 	check(text.contains("Dämonengolem") and text.contains("2 m"), "name and size")
-	check(text.contains("noch 5 Kills bis 3 m"), "kills to the next metre")
+	check(text.contains("noch 4 Kills bis 3 m"), "kills to the next metre")
 	check(not text.contains("Stufe") and not text.contains("Lebenszeit"), "no level, no lifetime")
 	_free_world(w)
 
