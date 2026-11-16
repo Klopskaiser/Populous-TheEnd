@@ -12509,3 +12509,11 @@ Nutzervorgabe: `DEMON_GOLEM_HP` 400 -> 500 (die Lebensobergrenze liegt damit auf
 Groesse 100 hoeher: 100 m 990, 149 m 1235), `DEMON_GOLEM_KILL_HEAL_OVER_TIME` 10 -> 15
 (je Kill 10 sofort und 15 ueber 5 s, also 3 LP/s je Stapel). `test_demon_golem.gd`
 angepasst.
+
+### Daemonengolem: Heilung beim Aufleveln (2026-11-16)
+
+Nutzervorgabe: jede Wachstumsstufe heilt 20 LP sofort und 30 LP ueber 5 s
+(`DEMON_GOLEM_GROWTH_HEAL`, `_OVER_TIME`, `_DURATION`) - auf die schon angehobene
+Lebensobergrenze und zusaetzlich zur Kill-Heilung (10 + 15). Die Heilung ueber Zeit
+fuehrt jetzt je Eintrag ihre eigene Rate (`_heal_stacks` als Vector2: Restzeit, LP/s;
+`_add_heal_over_time`). Test `test_a_growth_step_heals_twenty_at_once_and_thirty_over_five_seconds`.

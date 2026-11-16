@@ -581,6 +581,13 @@ const DEMON_GOLEM_GROWTH_TARGETS: int = 1
 const DEMON_GOLEM_KILL_HEAL: int = 10
 const DEMON_GOLEM_KILL_HEAL_OVER_TIME: int = 15   # 10 -> 15 (Nutzervorgabe 2026-11-16)
 const DEMON_GOLEM_KILL_HEAL_DURATION: float = 5.0
+## Je WACHSTUMSSTUFE heilt er zusaetzlich DEMON_GOLEM_GROWTH_HEAL sofort und
+## DEMON_GOLEM_GROWTH_HEAL_OVER_TIME ueber DEMON_GOLEM_GROWTH_HEAL_DURATION Sekunden
+## (Nutzervorgabe 2026-11-16), auf die schon angehobene Lebensobergrenze und neben der
+## Heilung des Kills, der die Stufe gebracht hat.
+const DEMON_GOLEM_GROWTH_HEAL: int = 20
+const DEMON_GOLEM_GROWTH_HEAL_OVER_TIME: int = 30
+const DEMON_GOLEM_GROWTH_HEAL_DURATION: float = 5.0
 const DEMON_GOLEM_ATTACK_SPEEDUP: float = 0.15
 const DEMON_GOLEM_AIR_HEIGHT: float = 20.0
 const DEMON_GOLEM_GIANT_HEIGHT: float = 30.0

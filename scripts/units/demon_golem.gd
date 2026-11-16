@@ -19,6 +19,7 @@ class_name DemonGolem extends Golem
 ##  * ab 20 m Luftschiffe, ab 30 m das Riesenpaket (is_giant) samt Trampeln und
 ##    Kollision. Nie gehaertet (is_full_size ist immer falsch).
 ##  * Kill: 10 Leben sofort und 15 ueber 5 s, stapelbar.
+##  * Wachstumsstufe: 20 Leben sofort und 30 ueber 5 s, dazu.
 ##  * Unterhalt: 5 Mana je Sekunde, solange er lebt (_pay_upkeep).
 ##
 ## unit_kind() bleibt "golem": er zaehlt in der Seitenleiste bei den Golems und
@@ -29,8 +30,9 @@ class_name DemonGolem extends Golem
 ## so the same stride is 2,575 instead of 2,658 m).
 const WALK_CLIP_STRIDE: float = 2.575
 
-## Seconds left of every kill's healing over time (one entry per kill).
-var _heal_stacks: Array[float] = []
+## Running heals over time: one entry per kill or growth step, x = seconds left,
+## y = health per second.
+var _heal_stacks: Array[Vector2] = []
 var _heal_frac: float = 0.0
 
 
@@ -249,14 +251,20 @@ func _credit_kill() -> void:
 	var steps: int = steps_for_kills(kills)
 	if steps != growth_steps:
 		var was_giant: bool = is_giant()
+		var gained: int = steps - growth_steps
 		growth_steps = steps
 		max_health = max_health_cap()
 		_apply_speed()
 		_queue_stretch()
 		if is_giant() != was_giant:
 			_sync_soa_flags()   # from 30 m he walks through units
+		# Growing heals as well (user spec 2026-11-16): at once and over time.
+		for i in range(gained):
+			health = mini(health + Balance.DEMON_GOLEM_GROWTH_HEAL, max_health)
+			_add_heal_over_time(Balance.DEMON_GOLEM_GROWTH_HEAL_OVER_TIME,
+				Balance.DEMON_GOLEM_GROWTH_HEAL_DURATION)
 	health = mini(health + Balance.DEMON_GOLEM_KILL_HEAL, max_health)
-	_heal_stacks.append(Balance.DEMON_GOLEM_KILL_HEAL_DURATION)
+	_add_heal_over_time(Balance.DEMON_GOLEM_KILL_HEAL_OVER_TIME, Balance.DEMON_GOLEM_KILL_HEAL_DURATION)
 	if growth_steps >= max_steps():
 		_crumble()
 
@@ -284,26 +292,32 @@ func _pay_upkeep(delta: float) -> void:
 func _tick_kill_heal(delta: float) -> void:
 	if _heal_stacks.is_empty() or delta <= 0.0:
 		return
-	var rate: float = float(Balance.DEMON_GOLEM_KILL_HEAL_OVER_TIME) \
-		/ Balance.DEMON_GOLEM_KILL_HEAL_DURATION
 	for i in range(_heal_stacks.size() - 1, -1, -1):
-		_heal_frac += rate * minf(delta, _heal_stacks[i])
-		_heal_stacks[i] -= delta
-		if _heal_stacks[i] <= 0.0:
+		var s: Vector2 = _heal_stacks[i]
+		_heal_frac += s.y * minf(delta, s.x)
+		s.x -= delta
+		if s.x <= 0.0:
 			_heal_stacks.remove_at(i)
+		else:
+			_heal_stacks[i] = s
 	if _heal_frac >= 1.0:
 		var heal: int = int(_heal_frac)
 		_heal_frac -= float(heal)
 		health = mini(health + heal, max_health)
 
 
-## Leben, das die Kill-Heilung noch nachliefert (fuer die Anzeige).
+## Starts a heal of `amount` health spread over `duration` seconds; it runs beside
+## all others (stacking).
+func _add_heal_over_time(amount: int, duration: float) -> void:
+	if amount > 0 and duration > 0.0:
+		_heal_stacks.append(Vector2(duration, float(amount) / duration))
+
+
+## Leben, das die Heilung ueber Zeit (Kills, Wachstum) noch nachliefert (fuer die Anzeige).
 func pending_kill_heal() -> float:
-	var rate: float = float(Balance.DEMON_GOLEM_KILL_HEAL_OVER_TIME) \
-		/ Balance.DEMON_GOLEM_KILL_HEAL_DURATION
 	var left: float = _heal_frac
-	for t in _heal_stacks:
-		left += rate * t
+	for s in _heal_stacks:
+		left += s.x * s.y
 	return left
 
 

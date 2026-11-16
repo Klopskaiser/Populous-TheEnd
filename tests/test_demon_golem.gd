@@ -467,3 +467,35 @@ func test_a_poor_tribe_pays_what_it_earns_and_no_more() -> void:
 	check_near(w.t0.charging_income(), 0.0, "nothing is left for the spells")
 	check_near(w.t0.upkeep_debt(), income * 0.1, "and books only what was earned", 0.0001)
 	_free_world(w)
+
+
+## Beim Aufleveln (Wachstumsstufe) heilt er 20 sofort und 30 ueber 5 s — zusaetzlich
+## zur Heilung des Kills, der die Stufe gebracht hat (Nutzervorgabe 2026-11-16).
+func test_a_growth_step_heals_twenty_at_once_and_thirty_over_five_seconds() -> void:
+	var w: Dictionary = _make_world()
+	var d: DemonGolem = _demon(w, 0, Vector3(50, 5, 50))
+	for i in range(DemonGolem.kills_for_step(1) - 1):
+		d._credit_kill()
+	d._heal_stacks.clear()
+	d._heal_frac = 0.0
+	d.health = 100
+	d._credit_kill()
+	check(d.growth_steps == 1 and d.max_health == 505, "this kill is a growth step (limit 505)")
+	check(d.health == 130, "20 for the growth and 10 for the kill at once (got %d)" % d.health)
+	check_near(d.pending_kill_heal(), 45.0, "30 + 15 still to come", 0.001)
+	for i in range(25):
+		d._tick_kill_heal(TICK)
+	check(d.health >= 151 and d.health <= 153, "half of the 45 after 2,5 s (got %d)" % d.health)
+	for i in range(40):
+		d._tick_kill_heal(TICK)
+	check(d.health == 175, "all of it after 5 s: 100 + 30 + 45 (got %d)" % d.health)
+	# The limit holds here as well.
+	while d.kills < DemonGolem.kills_for_steps(2) - 1:
+		d._credit_kill()
+	d.health = d.max_health - 5
+	d._credit_kill()
+	check(d.growth_steps == 2 and d.health == d.max_health, "never past the (raised) limit")
+	for i in range(60):
+		d._tick_kill_heal(TICK)
+	check(d.health == d.max_health, "not over time either")
+	_free_world(w)
