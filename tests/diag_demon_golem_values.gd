@@ -8,15 +8,15 @@ extends SceneTree
 ##   godot --headless -s res://tests/diag_demon_golem_values.gd
 ##   godot --headless -s res://tests/diag_demon_golem_values.gd -- 2,5,10,20,30
 ##
-## Eine Zeile je Groesse (Vorgabe: 2 m, 20 m, alle 25 m, 30 m und 149 m — bei
-## 150 m zerfaellt er). Jede Zeile steht fuer den Moment, in dem er die Groesse
-## ERREICHT.
+## Eine Zeile je Groesse (Vorgabe: 2 m, 20 m, 30 m, 50 m, 80 m, 100 m und 119 m —
+## bei 120 m zerfaellt er; er waechst 3 m je Stufe, eine Zeile steht fuer die erste
+## Stufe, auf der er die Groesse ERREICHT oder ueberschreitet).
 
 const DEMON_SCENE: PackedScene = preload("res://scenes/units/demon_golem.tscn")
 
 
 func _initialize() -> void:
-	var sizes: Array[int] = [2, 20, 25, 30, 50, 75, 100, 125, 149]
+	var sizes: Array[int] = [2, 20, 30, 50, 80, 100, 119]
 	var args: PackedStringArray = OS.get_cmdline_user_args()
 	if not args.is_empty():
 		sizes.clear()

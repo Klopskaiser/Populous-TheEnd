@@ -122,32 +122,32 @@ func test_he_has_his_own_model_in_the_golems_build() -> void:
 # --- Stufen aus Braves ----------------------------------------------------------------
 
 func test_stages_cost_the_listed_braves() -> void:
-	var want: Array[int] = [0, 10, 22, 36, 53, 73, 96, 123, 154, 190]
+	var want: Array[int] = [0, 10, 22, 36, 53, 73, 96, 123, 154]
 	for s in range(want.size()):
 		check(GenesisGolem.braves_for_stage(s) == want[s],
 			"stage %d after %d braves (%d)" % [s, want[s], GenesisGolem.braves_for_stage(s)])
-	check(GenesisGolem.max_stage() == 9, "nine stages")
+	check(GenesisGolem.max_stage() == 8, "eight stages")
 	check(GenesisGolem.stage_for_xp(9.99) == 0 and GenesisGolem.stage_for_xp(10.0) == 1,
 		"the tenth brave brings stage 1")
-	check(GenesisGolem.stage_for_xp(1000.0) == 9, "no stage beyond 9")
+	check(GenesisGolem.stage_for_xp(1000.0) == 8, "no stage beyond 8")
 
 
-func test_every_stage_adds_four_metres_forty_health_two_regen() -> void:
+func test_every_stage_adds_three_and_a_half_metres_forty_health_two_regen() -> void:
 	var w: Dictionary = _make_world()
 	var g: GenesisGolem = _genesis(w, 0, Vector3(50, 5, 50))
 	for i in range(10):
 		g.credit_brave(1.0)
 	check(g.stage == 1, "stage 1 after ten braves")
-	check_near(g.height_m(), 9.0, "9 m")
+	check_near(g.height_m(), 8.5, "8,5 m")
 	check(g.max_health == 1040 and g.health == 1040, "1040 health (%d/%d)" % [g.health, g.max_health])
 	check_near(g.regen_per_second(), 2.0, "2 health per second")
-	_to_stage(g, 9)
-	check(g.stage == 9, "stage 9")
-	check_near(g.height_m(), 41.0, "41 m at the last stage")
-	check(g.max_health == 1360, "1360 health")
-	check_near(g.regen_per_second(), 18.0, "18 health per second")
+	_to_stage(g, 8)
+	check(g.stage == 8, "stage 8")
+	check_near(g.height_m(), 33.0, "33 m at the last stage")
+	check(g.max_health == 1320, "1320 health")
+	check_near(g.regen_per_second(), 16.0, "16 health per second")
 	g.credit_brave(500.0)
-	check_near(g.height_m(), 41.0, "the stages end at 41 m")
+	check_near(g.height_m(), 33.0, "the stages end at 33 m")
 	_free_world(w)
 
 
@@ -201,39 +201,41 @@ func test_start_values_damage_of_the_demon_reach_of_the_golem() -> void:
 	check_near(g.slam_radius(), golem.slam_radius(), "the fresh golem's slam circle")
 	check_near(g.reach_factor(), golem.reach_factor(), "and lane width")
 	check(g.max_targets() == golem.max_targets(), "the fresh golem's targets (%d)" % g.max_targets())
-	check(g.trample_damage() == 1, "trample damage 1")
+	check(g.trample_damage() == 1, "trample damage 1 (4,7 m / 3,2)")
 	_free_world(w)
 
 
 func test_attack_values_grow_two_thirds_as_fast_as_the_demons() -> void:
 	var w: Dictionary = _make_world()
 	var g: GenesisGolem = _genesis(w, 0, Vector3(50, 5, 50))
-	_to_stage(g, 9)   # 36 m grown -> 24 m count for the attack values
-	check_near(g.damage_exact(Golem.ATTACK_SLAM), 15.5 + 0.75 * 24.0, "slam +0,5 a metre")
-	check_near(g.damage_exact(Golem.ATTACK_KICK), 24.5 + 0.8 * 24.0, "kick +0,53 a metre")
-	check_near(g.damage_exact(Golem.ATTACK_DRUM), 24.0 + 1.2 * 24.0, "drum +0,8 a metre")
-	check(g.max_targets() == 5 + 24, "two thirds of a target a metre (%d)" % g.max_targets())
-	var cf: float = 1.0 + 36.0 / Balance.GOLEM_HEIGHT * 2.0 / 3.0
+	_to_stage(g, 8)   # 28 m grown -> 18,67 m count for the attack values
+	# Per metre as before the demon golem took 3 m a step (his gain per step / 3).
+	var m: float = 28.0 * 2.0 / 3.0
+	check_near(g.damage_exact(Golem.ATTACK_SLAM), 15.5 + 0.75 * m, "slam +0,5 a metre")
+	check_near(g.damage_exact(Golem.ATTACK_KICK), 24.5 + 0.8 * m, "kick +0,53 a metre")
+	check_near(g.damage_exact(Golem.ATTACK_DRUM), 24.0 + 1.2 * m, "drum +0,8 a metre")
+	check(g.max_targets() == 5 + 18, "two thirds of a target a metre (%d)" % g.max_targets())
+	var cf: float = 1.0 + 28.0 / Balance.GOLEM_HEIGHT * 2.0 / 3.0
 	check_near(g.combat_factor(), cf, "attack size factor %.2f" % cf)
 	check_near(g.reach(), Balance.GOLEM_REACH * Golem.limb_factor_for(cf), "reach from it")
-	check(g.reach() < Balance.GOLEM_REACH * Golem.limb_factor_for(41.0 / Balance.GOLEM_HEIGHT),
-		"less than a 41-m demon golem's")
-	check(g.trample_damage() == int(round(Balance.GOLEM_HEIGHT * cf / 5.0)),
+	check(g.reach() < Balance.GOLEM_REACH * Golem.limb_factor_for(33.0 / Balance.GOLEM_HEIGHT),
+		"less than a 33-m demon golem's")
+	check(g.trample_damage() == int(round(Balance.GOLEM_HEIGHT * cf / 3.2)) and g.trample_damage() == 7,
 		"trample damage from the attack size (%d)" % g.trample_damage())
-	check_near(g.trample_radius(), Balance.GOLEM_BODY_HALF_WIDTH * 41.0 / Balance.GOLEM_HEIGHT,
-		"the body itself is 41 m")
+	check_near(g.trample_radius(), Balance.GOLEM_BODY_HALF_WIDTH * 33.0 / Balance.GOLEM_HEIGHT,
+		"the body itself is 33 m")
 	_free_world(w)
 
 
-func test_from_stage_five_collision_levelling_and_air_strike() -> void:
+func test_from_stage_four_collision_levelling_and_air_strike() -> void:
 	var w: Dictionary = _make_world()
 	var g: GenesisGolem = _genesis(w, 0, Vector3(50, 5, 50))
-	_to_stage(g, 4)
+	_to_stage(g, 3)
 	check(not g.tramples() and not g.ignores_unit_collision() and not g.flattens()
-		and not g.can_strike_air(), "stage 4: none of it")
-	_to_stage(g, 5)
+		and not g.can_strike_air(), "stage 3: none of it")
+	_to_stage(g, 4)
 	check(g.tramples() and g.ignores_unit_collision() and g.flattens() and g.can_strike_air(),
-		"stage 5: walks through units, tramples, levels the ground, strikes airships")
+		"stage 4: walks through units, tramples, levels the ground, strikes airships")
 	check(not g.is_giant() and not g.walks_straight(), "but not the rest of the giant's package")
 	check(not g.is_full_size(), "never hardened")
 	_free_world(w)
@@ -390,7 +392,7 @@ func test_braves_take_his_wood_like_from_a_pile() -> void:
 func test_unused_wood_is_eaten_after_thirty_seconds_for_growth() -> void:
 	var w: Dictionary = _make_world()
 	var g: GenesisGolem = _genesis(w, 0, Vector3(50, 5, 50))
-	_to_stage(g, 9)
+	_to_stage(g, 8)
 	g.add_wood(150)
 	for i in range(int(29.5 / TICK)):
 		g._tick_wood_growth(TICK)
@@ -398,36 +400,36 @@ func test_unused_wood_is_eaten_after_thirty_seconds_for_growth() -> void:
 	for i in range(int(10.5 / TICK)):
 		g._tick_wood_growth(TICK)
 	check(g.total_wood() == 0, "then 15 a second: all 150 in 10 s (%d left)" % g.total_wood())
-	var want: float = 41.0 * pow(1.02, 10.0)
+	var want: float = 33.0 * pow(1.02, 10.0)
 	check_near(g.height_m(), want, "2 %% a second: %.2f m" % want, 0.05)
 	var grown: float = g.wood_growth_m
-	check(g.max_health == 1360 + int(floor(2.0 * grown)), "+2 health a metre (%d)" % g.max_health)
-	check_near(g.regen_per_second(), 18.0 + 0.15 * grown, "+0,15 regen a metre")
+	check(g.max_health == 1320 + int(floor(3.0 * grown + 0.000001)), "+3 health a metre (%d)" % g.max_health)
+	check_near(g.regen_per_second(), 16.0 + 0.15 * grown, "+0,15 regen a metre")
 	_free_world(w)
 
 
-func test_wood_growth_ends_at_two_hundred_metres() -> void:
+func test_wood_growth_ends_at_one_hundred_metres() -> void:
 	var w: Dictionary = _make_world()
 	var g: GenesisGolem = _genesis(w, 0, Vector3(50, 5, 50))
-	_to_stage(g, 9)
+	_to_stage(g, 8)
 	g.grow_by_wood(100000.0)
-	check_near(g.height_m(), 200.0, "200 m at most")
+	check_near(g.height_m(), 100.0, "100 m at most")
 	g.credit_brave(1.0)
-	check_near(g.height_m(), 200.0, "and stays there")
+	check_near(g.height_m(), 100.0, "and stays there")
 	_free_world(w)
 
 
-func test_from_stage_eight_trampling_fells_trees() -> void:
+func test_from_stage_seven_trampling_fells_trees() -> void:
 	var w: Dictionary = _make_world()
 	var g: GenesisGolem = _genesis(w, 0, Vector3(50.5, 5, 50.5))
-	_to_stage(g, 7)
+	_to_stage(g, 6)
 	var tree: TreeResource = w.tm.spawn_tree(Vector2i(51, 50), TreeResource.MAX_STAGE)
 	g._tick_trample_wood(TICK, g.position - Vector3(0.3, 0, 0))
-	check(is_instance_valid(tree) and not tree.felled_flag, "stage 7: the tree stands")
-	_to_stage(g, 8)
+	check(is_instance_valid(tree) and not tree.felled_flag, "stage 6: the tree stands")
+	_to_stage(g, 7)
 	g._trample_wood_timer = 0.0
 	g._tick_trample_wood(TICK, g.position - Vector3(0.3, 0, 0))
-	check(not is_instance_valid(tree) or tree.felled_flag, "stage 8: trampled down")
+	check(not is_instance_valid(tree) or tree.felled_flag, "stage 7: trampled down")
 	check(g.total_wood() == GenesisGolem.harvest_yield(4), "and its wood is his (%d)" % g.total_wood())
 	_free_world(w)
 
@@ -437,7 +439,7 @@ func test_status_text_names_him_his_stage_and_wood() -> void:
 	var g: GenesisGolem = _genesis(w, 0, Vector3(50, 5, 50))
 	g.add_wood(7)
 	var text: String = g.status_text()
-	check(text.contains("Genesisgolem") and text.contains("Stufe 0/9")
+	check(text.contains("Genesisgolem") and text.contains("Stufe 0/8")
 		and text.contains("noch 10 Braves") and text.contains("Holz: 7"), text)
 	_free_world(w)
 

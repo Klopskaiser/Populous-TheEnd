@@ -12645,6 +12645,29 @@ zuerst am Daemonengolem.
 - Nachtrag: nach der Abnahme am Daemonengolem haben auch `golem.glb` und `golem_genesis.glb` die
   niedliche Fassung von `grow` und `stomp` (dieselben Namen und Zeiten).
 
+### Golems: 80 m, neue Stufen, Dämonen-Kill-Heilung (2026-11-17)
+
+Nutzervorgabe, Werte in `Balance.GOLEM_*`, `DEMON_GOLEM_*`, `GENESIS_GOLEM_*`:
+- Golem: Stufe 1-6 unverändert. Stufe 7 nach 20 statt 45 Kills (62 insgesamt), +20 % Körper,
+  +10 % Flächen, +5 Schaden (`level_damage_bonus` ohne Deckel), Riesenpaket bleibt. Danach alle
+  20 Kills +8 % (statt 15 / 3 %), bis **80 m** (21 Schritte, 482 Kills); je Schritt +1 Ziel und +18
+  LP (Ende 29 Ziele, 1378 LP). Härtung und +3 LP/s bei 80 m.
+- Flächen und Tempo nach Stufe 7 als Potenz des Körperwachstums (`GOLEM_GROWTH_AREA_EXPONENT`,
+  `GOLEM_GROWTH_SPEED_EXPONENT`, gleiche Verhältnisse wie vorher); `Golem.speed_for_size` für alle
+  drei Golems (Genesis = Golem gleicher Größe, Dämon × 1,15, Untergrenze 4 m/s entfallen).
+- Trampelschaden Höhe / 3,2 (25 bei 80 m; erst 40, auf Nutzerwunsch gesenkt). Takt 3 s bei 80 m (statt 4 s bei 100 m). Gliederkurve und
+  Trittschneise am alten 100-m-Anker (`GOLEM_LIMB_ANCHOR_HEIGHT`), damit Stufe 1-6 gleich bleiben;
+  Handschlag 12 m, Katapult-Volltreffer, Drehrate auf 80 m umgeeicht.
+- Dämonengolem: 3 m je Stufe, Tod bei 120 m (540 Kills), Kills je Stufe 4 und alle 2 Stufen +1;
+  alles je Stufe verdreifacht (je Meter gleich). Kill heilt die Lebensobergrenze des Opfers (halb
+  sofort, halb über 5 s; ohne LP die alten 10 + 15) über `_credit_kill(victim_hp)` /
+  `Golem.kill_hp_of`. Haltungswechsel 15 % kürzer. Handschlag-Exponent fest
+  (`DEMON_GOLEM_SLAM_EXPONENT`).
+- Genesisgolem: 8 Stufen zu 3,5 m (33 m, 1320 LP), Riesenpaket ab Stufe 4, Trampel-Holz ab 7,
+  Holzwachstum bis 100 m mit +3 LP je Meter; Kampfwerte je Meter unverändert (`combat_demon_steps`).
+- Tests: `test_golem.gd`, `test_demon_golem.gd` (2 neue zur Kill-Heilung), `test_genesis_golem.gd`
+  angepasst; `diag_demon_golem_values.gd` Größen 2-119 m. Suite 7614 / 0.
+
 ### Golems: Bewegungsfreiheit und Anlauf in Schlagdistanz (2026-11-17)
 
 Nutzervorgabe, alles in `scripts/units/golem.gd` und `Balance.GOLEM_*` (gilt fuer alle drei Golems):

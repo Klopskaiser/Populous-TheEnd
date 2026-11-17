@@ -8,18 +8,20 @@ class_name DemonGolem extends Golem
 ## (DEMON_GOLEM_*, dort auch die ganze Vorgabe) und wird hier ueberschrieben:
 ##
 ##  * keine Stufen (`level` bleibt 0), keine Lebenszeit. Er beginnt 2 m klein und
-##    waechst je WACHSTUMSSTUFE um genau 1 m (`growth_steps`); die Stufe kostet 4
-##    Kills, alle 10 Stufen einen mehr. Bei 150 m zerfaellt er.
+##    waechst je WACHSTUMSSTUFE um genau 3 m (`growth_steps`); die Stufe kostet 4
+##    Kills, alle 2 Stufen einen mehr. Mit 120 m (40. Stufe) zerfaellt er.
 ##  * die Groesse treibt alles: size_factor() = Hoehe / GOLEM_HEIGHT, und die
 ##    Golem-Formeln fuer Reichweite, Schneise, Tempo, Takt usw. rechnen damit.
 ##    Die Flaechen wachsen wie beim Golem nach Stufe 7.
-##  * je Wachstumsstufe +5 Lebensobergrenze, +0,15 Leben/s, +1 Ziel und Schaden
-##    (Handschlag +0,75, Tritt +0,8, Trommeln +1,2) auf den halben Startschaden.
-##  * alle Angriffe 15 % schneller als beim Golem gleicher Groesse.
+##  * je Wachstumsstufe +15 Lebensobergrenze, +0,45 Leben/s, +3 Ziele und Schaden
+##    (Handschlag +2,25, Tritt +2,4, Trommeln +3,6) auf den halben Startschaden.
+##  * alles 15 % schneller als beim Golem gleicher Groesse: Angriffe, Animationen,
+##    Haltungswechsel und Lauftempo.
 ##  * ab 20 m Luftschiffe, ab 30 m das Riesenpaket (is_giant) samt Trampeln und
 ##    Kollision. Nie gehaertet (is_full_size ist immer falsch).
-##  * Kill: 10 Leben sofort und 15 ueber 5 s, stapelbar.
-##  * Wachstumsstufe: 30 Leben sofort und 45 ueber 5 s, dazu.
+##  * Kill: die Lebensobergrenze des Opfers, halb sofort, halb ueber 5 s, stapelbar
+##    (ohne Lebenspunkte: 10 sofort und 15 ueber 5 s).
+##  * Wachstumsstufe: 90 Leben sofort und 135 ueber 5 s, dazu.
 ##  * Unterhalt: 5 Mana je Sekunde, solange er lebt (_pay_upkeep).
 ##
 ## unit_kind() bleibt "golem": er zaehlt in der Seitenleiste bei den Golems und
@@ -65,7 +67,7 @@ static func kills_for_steps(steps: int) -> int:
 	return total
 
 
-## The step at which he is DEMON_GOLEM_MAX_HEIGHT tall (148).
+## The step at which he is DEMON_GOLEM_MAX_HEIGHT tall (40).
 static func max_steps() -> int:
 	return int(ceil((Balance.DEMON_GOLEM_MAX_HEIGHT - Balance.DEMON_GOLEM_START_HEIGHT)
 		/ Balance.DEMON_GOLEM_GROWTH_HEIGHT - 0.000001))
@@ -94,7 +96,7 @@ static func max_body_radius() -> float:
 
 
 ## The golem's formulas all run on the size factor — his is his height measured
-## in fresh golems (2 m: 0,42; 100 m: 21,2; 150 m: 31,7).
+## in fresh golems (2 m: 0,42; 80 m: 16,9; 119 m: 25,2).
 func size_factor() -> float:
 	return height_for_steps(growth_steps) / Balance.GOLEM_HEIGHT
 
@@ -182,21 +184,17 @@ func drum_hit_damage(hit: int) -> int:
 ## How much faster the body grows than the strike areas beyond the golem's level
 ## 7 — as exponents: an area factor is the size factor to this power.
 static func area_exponent() -> float:
-	return log(1.0 + Balance.GOLEM_GROWTH_AREA) / log(1.0 + Balance.GOLEM_GROWTH_SIZE)
+	return Balance.GOLEM_GROWTH_AREA_EXPONENT
 
 
-## The slam's circle grows faster there (to GOLEM_SLAM_RADIUS_AT_MAX at 100 m).
+## The slam's circle grows faster there — with the golem's exponent from before
+## 2026-11-17, kept fixed (DEMON_GOLEM_SLAM_EXPONENT).
 static func slam_exponent() -> float:
-	var steps: int = Golem.max_growth_steps()
-	if steps <= 0:
-		return area_exponent()
-	var at_max: float = Balance.GOLEM_SLAM_RADIUS_AT_MAX / Balance.GOLEM_SLAM_RADIUS
-	return log(at_max / Golem.reach_factor_for(Balance.GOLEM_MAX_LEVEL)) \
-		/ (float(steps) * log(1.0 + Balance.GOLEM_GROWTH_SIZE))
+	return Balance.DEMON_GOLEM_SLAM_EXPONENT
 
 
 static func speed_exponent() -> float:
-	return log(1.0 + Balance.GOLEM_GROWTH_SPEED) / log(1.0 + Balance.GOLEM_GROWTH_SIZE)
+	return Balance.GOLEM_GROWTH_SPEED_EXPONENT
 
 
 ## Scale of the lane's width: like the golem's areas beyond level 7, from the
@@ -209,15 +207,15 @@ func slam_scale() -> float:
 	return pow(size_factor(), slam_exponent())
 
 
-## The golem's speed at this size (root of the size up to the giant's, hardly
-## growing beyond it) — but never slower than DEMON_GOLEM_MIN_SPEED.
+## The golem's speed at this size, DEMON_GOLEM_MOVE_SPEEDUP faster (user spec
+## 2026-11-17; the 4-m/s floor for the small one is gone).
 func current_speed() -> float:
-	var s: float = size_factor()
-	var giant: float = Golem.size_factor_for(Balance.GOLEM_MAX_LEVEL)
-	var v: float = Balance.GOLEM_SPEED * sqrt(minf(s, giant))
-	if s > giant:
-		v *= pow(s / giant, speed_exponent())
-	return maxf(v, Balance.DEMON_GOLEM_MIN_SPEED)
+	return Golem.speed_for_size(size_factor()) * (1.0 + Balance.DEMON_GOLEM_MOVE_SPEEDUP)
+
+
+## The golem's stance switch at this size, 15 % shorter (user spec 2026-11-17).
+func stance_switch_time() -> float:
+	return super.stance_switch_time() * (1.0 - Balance.DEMON_GOLEM_ATTACK_SPEEDUP)
 
 
 func aggro_radius() -> float:
@@ -225,7 +223,7 @@ func aggro_radius() -> float:
 
 
 ## The golem's cooldown at this height, 15 % shorter. Linear in the body height
-## — carried on beyond 100 m and back below the golem's starting size.
+## — carried on beyond 80 m and back below the golem's starting size.
 func strike_cooldown() -> float:
 	var t: float = (height_m() - Balance.GOLEM_HEIGHT) \
 		/ (Balance.GOLEM_MAX_HEIGHT - Balance.GOLEM_HEIGHT)
@@ -244,9 +242,9 @@ func attack_speed(kind: StringName) -> float:
 
 # --- Kills ----------------------------------------------------------------------------
 
-## A kill: heals at once and over time, and counts toward the next metre. At
-## DEMON_GOLEM_MAX_HEIGHT he falls apart.
-func _credit_kill() -> void:
+## A kill: heals at once and over time, and counts toward the next growth step.
+## At DEMON_GOLEM_MAX_HEIGHT he falls apart.
+func _credit_kill(victim_hp: int = -1) -> void:
 	kills += 1
 	var steps: int = steps_for_kills(kills)
 	if steps != growth_steps:
@@ -263,10 +261,22 @@ func _credit_kill() -> void:
 			health = mini(health + Balance.DEMON_GOLEM_GROWTH_HEAL, max_health)
 			_add_heal_over_time(Balance.DEMON_GOLEM_GROWTH_HEAL_OVER_TIME,
 				Balance.DEMON_GOLEM_GROWTH_HEAL_DURATION)
-	health = mini(health + Balance.DEMON_GOLEM_KILL_HEAL, max_health)
-	_add_heal_over_time(Balance.DEMON_GOLEM_KILL_HEAL_OVER_TIME, Balance.DEMON_GOLEM_KILL_HEAL_DURATION)
+	var heal: Vector2i = kill_heal_for(victim_hp)
+	health = mini(health + heal.x, max_health)
+	_add_heal_over_time(heal.y, Balance.DEMON_GOLEM_KILL_HEAL_DURATION)
 	if growth_steps >= max_steps():
 		_crumble()
+
+
+## What a kill heals (user spec 2026-11-17): the victim's health limit, half of it
+## at once (rounded down) and the rest over time. A victim without health
+## (`victim_hp` < 0: building, vehicle, ritual reward) brings the old 10 + 15.
+## x = at once, y = over DEMON_GOLEM_KILL_HEAL_DURATION.
+static func kill_heal_for(victim_hp: int) -> Vector2i:
+	if victim_hp <= 0:
+		return Vector2i(Balance.DEMON_GOLEM_KILL_HEAL, Balance.DEMON_GOLEM_KILL_HEAL_OVER_TIME)
+	var now: int = victim_hp / 2
+	return Vector2i(now, victim_hp - now)
 
 
 func tick(delta: float) -> void:
@@ -325,7 +335,7 @@ func status_text() -> String:
 	var next: String = ""
 	if growth_steps < max_steps():
 		next = "   noch %d Kills bis %d m" % [
-			kills_for_steps(growth_steps + 1) - kills, int(round(height_m())) + 1]
+			kills_for_steps(growth_steps + 1) - kills, int(round(height_for_steps(growth_steps + 1)))]
 	var pose: String = "gebückt" if stance == STANCE_CROUCH else "stehend"
 	return "Dämonengolem   Größe: %d m%s\nLeben: %d/%d   Heilung: %.2f/s\nKills: %d   Ziele: %d   Haltung: %s" % [
 		int(round(height_m())), next, health, max_health, regen_per_second(), kills,

@@ -221,14 +221,14 @@ const GOLEM_LIFE_PER_KILL: float = 6.0
 ## seine Lebensobergrenze steigt um GOLEM_MAX_HP_PER_KILL (2026-11-15) — bis
 ## hoechstens GOLEM_MAX_HP_CAP (flat 1000, Nutzervorgabe; nach 40 Kills erreicht,
 ## auf Stufe 7 gilt sie in jedem Fall). Nach Stufe 7 hebt jeder WACHSTUMSSCHRITT
-## sie um GOLEM_GROWTH_MAX_HP (2026-11-16: 7 statt 5, am 100-m-Ende 1371). Die Obergrenze GILT: Kill-Heilung und
+## sie um GOLEM_GROWTH_MAX_HP (2026-11-17: 18 statt 7, am 80-m-Ende 1378). Die Obergrenze GILT: Kill-Heilung und
 ## Dauerheilung enden an ihr — sonst heilte er sich passiv unendlich hoch.
 ## Als Kill zaehlt auch ein vom Golem zerstoertes GEBAEUDE.
 const GOLEM_HP_PER_KILL: int = 10
 const GOLEM_MAX_HP_PER_KILL: int = 5
 const GOLEM_MAX_HP_CAP: int = 1000
-const GOLEM_GROWTH_MAX_HP: int = 7
-## Der AUSGEWACHSENE Golem (100 m) heilt noch einmal so viel Leben je Sekunde
+const GOLEM_GROWTH_MAX_HP: int = 18
+## Der AUSGEWACHSENE Golem (80 m) heilt noch einmal so viel Leben je Sekunde
 ## mehr (Nutzer 2026-11-16: 21 -> 24).
 const GOLEM_FULL_SIZE_REGEN: float = 3.0
 ## STUFEN (Nutzervorgabe 2026-11-15): der Golem beginnt auf Stufe 0 und steigt
@@ -248,25 +248,27 @@ const GOLEM_FULL_SIZE_REGEN: float = 3.0
 ## DIE ENDBONI gibt es ab Stufe GOLEM_FINAL_BONUS_LEVEL (6): keine
 ## Lebenszeitbegrenzung mehr, und er jagt Luftschiffe (s. GOLEM_SWAT_WINDUP).
 ##
-## STUFE 7, der GIGANT (Nutzervorgabe 2026-11-15): 45 weitere Kills nach
-## Stufe 6, also 87 insgesamt. Der Koerper waechst noch einmal
-## um GOLEM_TOP_LEVEL_GROWTH (50 %: 4,48-fach, 21,2 m), Reichweite und
-## Wirkflaechen um GOLEM_TOP_LEVEL_REACH_GROWTH (25 %: 2,21-fach), die
-## Dauerheilung wie gehabt um 3/s (21/s), das Tempo folgt der Groesse. Der
-## SCHADEN steigt nicht mehr (bleibt bei +30). Und: wo der Gigant steht, wird der
-## Boden EBEN — auf die tiefste Stelle unter seinem Koerper (s. GOLEM_FLATTEN_*).
+## STUFE 7, der GIGANT (Nutzervorgabe 2026-11-15, 2026-11-17 neu): 20 weitere
+## Kills nach Stufe 6, also 62 insgesamt. Der Koerper waechst noch einmal um
+## GOLEM_TOP_LEVEL_GROWTH (20 %: 3,58-fach, 16,9 m), Reichweite und Wirkflaechen
+## um GOLEM_TOP_LEVEL_REACH_GROWTH (10 %: 1,95-fach), die Dauerheilung wie gehabt
+## um 3/s (21/s), der Schaden wie jede Stufe um +5 (+35), das Tempo folgt der
+## Groesse. Und: wo der Gigant steht, wird der Boden EBEN — auf die tiefste Stelle
+## unter seinem Koerper (s. GOLEM_FLATTEN_*). (Bis 2026-11-17: 45 Kills, +50 %
+## Koerper, +25 % Flaechen, kein Schaden.)
 ## Kills, die jede Stufe ZUSAETZLICH zur vorigen braucht (Index 0 = Stufe 1).
 ## Nutzervorgabe 2026-11-15 (vorher 6 je Stufe und 50 fuer Stufe 7): 5, 6, 7, -, 8,
 ## 9, 45. Fuer Stufe 4 war kein Wert genannt — angenommen ist 7 (wie Stufe 3).
+## Stufe 7 seit 2026-11-17 nach 20 statt 45 Kills.
 ## Aufsummiert: Stufe 1 nach 5, 2 nach 11, 3 nach 18, 4 nach 25, 5 nach 33,
-## 6 nach 42, 7 nach 87 Kills.
-const GOLEM_LEVEL_KILLS: Array[int] = [5, 6, 7, 7, 8, 9, 45]
+## 6 nach 42, 7 nach 62 Kills.
+const GOLEM_LEVEL_KILLS: Array[int] = [5, 6, 7, 7, 8, 9, 20]
 ## ZIELOBERGRENZE (Nutzervorgabe 2026-11-15): gegen dichte Nahkampfhaufen
 ## eskalierte der Flaechenschaden. Jeder Schadenstick des Golems — Handschlag,
 ## Tritt, und beim Trampeln je Sekunde — trifft hoechstens so viele Ziele
 ## (Index = Stufe; fuer Stufe 6 war kein Wert genannt, angenommen 8 wie davor
 ## und danach). Nach Stufe 7 kommt alle GOLEM_GROWTH_STEPS_PER_TARGET
-## Wachstumsschritte eines dazu (100 m: 25). Einheiten gehen vor Fahrzeugen und
+## Wachstumsschritte eines dazu (2026-11-17: jeder Schritt eines, 80 m: 29). Einheiten gehen vor Fahrzeugen und
 ## Gebaeuden, die naechsten zuerst; das Ziel, das er gerade angreift, wird immer
 ## getroffen und zaehlt mit.
 const GOLEM_MAX_TARGETS: Array[int] = [5, 6, 6, 6, 7, 8, 8, 8]
@@ -279,15 +281,15 @@ const GOLEM_MAX_TARGETS: Array[int] = [5, 6, 6, 6, 7, 8, 8, 8]
 ##   Sprung                   200 %   (              10 / 12 / 12 / 12 / 14 / 16 / 16 / 16;
 ##                                     doppelt so viele wie das Trampeln, Nutzer 2026-11-16 —
 ##                                     vorher 150 %)
-## Golem.max_targets_of(). Bei 100 m (Grundzahl 25): 15 / 31 / 37.
+## Golem.max_targets_of(). Bei 80 m (Grundzahl 29): 17 / 36 / 58.
 const GOLEM_TARGET_PERCENT_KICK: int = 60
 const GOLEM_TARGET_PERCENT_DRUM: int = 125
 const GOLEM_TARGET_PERCENT_STOMP: int = 200
-const GOLEM_GROWTH_STEPS_PER_TARGET: int = 3
+const GOLEM_GROWTH_STEPS_PER_TARGET: int = 1
 const GOLEM_MAX_LEVEL: int = 7
 const GOLEM_FINAL_BONUS_LEVEL: int = 6
-const GOLEM_TOP_LEVEL_GROWTH: float = 0.5
-const GOLEM_TOP_LEVEL_REACH_GROWTH: float = 0.25
+const GOLEM_TOP_LEVEL_GROWTH: float = 0.2
+const GOLEM_TOP_LEVEL_REACH_GROWTH: float = 0.1
 ## Einebnen unter dem Giganten (Stufe 7): alle GOLEM_FLATTEN_INTERVAL Sekunden
 ## wird geprueft; liegt unter seinem Koerper mehr als GOLEM_FLATTEN_MIN_SPREAD
 ## Hoehenunterschied, senkt sich alles dort auf die tiefste Stelle. Ringsum
@@ -322,20 +324,26 @@ const GOLEM_TARGET_RADIUS_SHARE: float = 0.5
 ## ihrer Koerperradien plus diesen Rand (m) auseinanderliegen (Bugfix 2026-11-16:
 ## die festen Packabstaende legten die Ziele ineinander).
 const GOLEM_SLOT_MARGIN: float = 0.5
-## WACHSTUM NACH STUFE 7 (Nutzervorgabe 2026-11-15): der Gigant waechst weiter,
-## ohne eine neue Stufe — alle GOLEM_GROWTH_KILLS Kills ein Schritt:
-##   Koerper   x (1 + GOLEM_GROWTH_SIZE)   = 3 % groesser als davor (aufgezinst),
-##   Wirkflaechen (Reichweite, Handschlag, Schneise, Trampelradius)
-##             x (1 + GOLEM_GROWTH_AREA)   = 0,75 %,
-##   Tempo     x (1 + GOLEM_GROWTH_SPEED)  = nur geringfuegig (0,25 %).
-## Dauerheilung, Schaden und Lebensobergrenze steigen NICHT mehr. Schluss ist bei
-## GOLEM_MAX_HEIGHT Metern Koerperhoehe (nach 53 Schritten = 795 Kills ueber
-## Stufe 7); dann wachsen auch Flaechen und Tempo nicht weiter.
-const GOLEM_GROWTH_KILLS: int = 15
-const GOLEM_GROWTH_SIZE: float = 0.03
-const GOLEM_GROWTH_AREA: float = 0.0075
-const GOLEM_GROWTH_SPEED: float = 0.0025
-const GOLEM_MAX_HEIGHT: float = 100.0
+## WACHSTUM NACH STUFE 7 (Nutzervorgabe 2026-11-15, 2026-11-17 neu): der Gigant
+## waechst weiter, ohne eine neue Stufe — alle GOLEM_GROWTH_KILLS (20) Kills ein
+## Schritt, der Koerper je Schritt GOLEM_GROWTH_SIZE (8 %) groesser als davor
+## (aufgezinst; bis 2026-11-17 alle 15 Kills 3 %).
+## Flaechen (Handschlag-, Trommel- und Schneisenbreite) und Tempo wachsen viel
+## langsamer als der Koerper, als POTENZ seines Wachstums seit Stufe 7:
+##   Flaechen  x (Groesse / Stufe-7-Groesse) ^ GOLEM_GROWTH_AREA_EXPONENT (je 8 %
+##             Koerper 1,96 %; das Verhaeltnis der frueheren 0,75 % je 3 %),
+##   Tempo     x (Groesse / Stufe-7-Groesse) ^ GOLEM_GROWTH_SPEED_EXPONENT (je
+##             Schritt 0,65 %; frueher 0,25 % je 3 %).
+## Dieselben Potenzen gelten fuer Daemonen- und Genesisgolem ueber die ganze Groesse.
+## Je Schritt +GOLEM_GROWTH_MAX_HP Lebensobergrenze und +1 Ziel; Dauerheilung und
+## Schaden steigen nicht mehr. Schluss ist bei GOLEM_MAX_HEIGHT (80 m, Nutzer
+## 2026-11-17, vorher 100 m) nach 21 Schritten = 420 Kills ueber Stufe 7 (482
+## insgesamt); dort gibt es die Haertung und +3 Leben/s (s. is_full_size).
+const GOLEM_GROWTH_KILLS: int = 20
+const GOLEM_GROWTH_SIZE: float = 0.08
+const GOLEM_GROWTH_AREA_EXPONENT: float = 0.2527848   # = log(1,0075) / log(1,03)
+const GOLEM_GROWTH_SPEED_EXPONENT: float = 0.0844716  # = log(1,0025) / log(1,03)
+const GOLEM_MAX_HEIGHT: float = 80.0
 const GOLEM_LEVEL_LIFETIME: float = 20.0
 const GOLEM_LEVEL_REGEN: float = 3.0
 const GOLEM_LEVEL_GROWTH: float = 0.2
@@ -347,9 +355,10 @@ const GOLEM_LEVEL_DAMAGE: int = 5
 ## sich schneller als GOLEM_TRAMPLE_MIN_SPEED bewegt — im Stehen nie. Dasselbe
 ## Opfer hoechstens alle GOLEM_TRAMPLE_INTERVAL Sekunden.
 ## Trampelschaden seit 2026-11-15 (Nutzer) aus der GROESSE: Koerperhoehe in
-## Metern / GOLEM_TRAMPLE_HEIGHT_PER_DAMAGE, gerundet, mindestens 1 (Stufe 1 mit
-## 5,7 m: 1; Stufe 7 mit 21 m: 4; 100 m: 20). Kein Stufenbonus mehr obendrauf.
-const GOLEM_TRAMPLE_HEIGHT_PER_DAMAGE: float = 5.0
+## Metern / GOLEM_TRAMPLE_HEIGHT_PER_DAMAGE, gerundet, mindestens 1. Seit
+## 2026-11-17 25 bei 80 m (vorher 20 bei 100 m; zwischendurch 40): Stufe 1 mit
+## 5,7 m: 2; Stufe 6 mit 14,1 m: 4; Stufe 7 mit 16,9 m: 5. Kein Stufenbonus obendrauf.
+const GOLEM_TRAMPLE_HEIGHT_PER_DAMAGE: float = 3.2
 ## Ab der hoechsten Stufe trampelt der Gigant auch GEBAEUDE nieder: jedes
 ## feindliche Gebaeude unter seinem Koerper verliert alle
 ## GOLEM_TRAMPLE_BUILDING_INTERVAL Sekunden eine Zerstoerungsstufe (wie unter dem
@@ -412,6 +421,11 @@ const GOLEM_CLOSE_IN_SLAM_SHARE: float = 0.5
 ## Die GROESSE der Flaechen (Radius des Handschlags, Breite der Schneise) bleibt
 ## beim langsamen Wachstum von 10 % je Stufe (GOLEM_LEVEL_REACH_GROWTH).
 const GOLEM_LIMB_SHARE_AT_MAX: float = 0.6
+## Hoehe, an der GOLEM_LIMB_SHARE_AT_MAX und GOLEM_KICK_LENGTH_SHARE_AT_MAX gelten
+## (Nutzer 2026-11-17): die alten 100 m, auch nachdem der Golem bei 80 m aufhoert
+## zu wachsen — so bleiben Reichweite und Schneise der Stufen 1-6 unveraendert
+## (80 m: 34,5 m Reichweite).
+const GOLEM_LIMB_ANCHOR_HEIGHT: float = 100.0
 ## ... und der ZUWACHS daraus faellt ueber alle Stufen noch einmal 10 % staerker
 ## aus (Nutzer 2026-11-16): Gliederfaktor = 1 + (Groesse^e - 1) x
 ## GOLEM_LIMB_GROWTH_BONUS. Stufe 0 bleibt bei 3,0 m; Stufe 6: 7,9 m, Stufe 7:
@@ -435,7 +449,8 @@ const GOLEM_SLAM_RADIUS_AT_MAX: float = 12.0
 ## von GOLEM_STRIKE_COOLDOWN (1,8 s, Startgroesse) bis GOLEM_STRIKE_COOLDOWN_MAX
 ## bei 100 m (Stufe 7 mit 21 m: 2,18 s). Die Angriffsanimationen werden
 ## entsprechend langsamer und fuellen die Abklingzeit weiter aus.
-const GOLEM_STRIKE_COOLDOWN_MAX: float = 4.0
+## Nutzer 2026-11-17: 3 s bei 80 m (vorher 4 s bei 100 m; bei 80 m waren es 3,54 s).
+const GOLEM_STRIKE_COOLDOWN_MAX: float = 3.0
 ## DREHRATE (Nutzer 2026-11-15): der Golem dreht sich nicht mehr augenblicklich.
 ## Sein Koerper folgt der Blickrichtung mit GOLEM_TURN_RATE (rad/s) bei
 ## Startgroesse, linear in der Koerperhoehe fallend bis GOLEM_TURN_RATE_FULL_SHARE
@@ -555,12 +570,17 @@ const GOLEM_SEPARATION: float = 1.0
 ## Figur mit den Jeansschuhen, muskuloeser und gedrungen. Er erbt alles vom Golem
 ## (Angriffe, Haltung, Zielwahl, Immunitaeten, Konter) und unterscheidet sich so:
 ##  * KEINE STUFEN, keine Lebenszeit. Er beginnt DEMON_GOLEM_START_HEIGHT (2 m)
-##    klein und waechst je WACHSTUMSSTUFE um genau DEMON_GOLEM_GROWTH_HEIGHT (1 m,
-##    kein Prozentwert). Bei DEMON_GOLEM_MAX_HEIGHT (150 m, 148 Stufen) zerfaellt er.
-##  * Kills je Wachstumsstufe: DEMON_GOLEM_GROWTH_KILLS (5), und alle
-##    DEMON_GOLEM_GROWTH_KILLS_STEP (10) Stufen einer mehr — Stufe 1-10 je 4,
-##    11-20 je 5, ... 141-148 je 18. Zusammen 1614 Kills bis 150 m (2026-11-16:
-##    um einen Kill je Stufe gesenkt, vorher 5 / 6 / ... / 19, zusammen 1762).
+##    klein und waechst je WACHSTUMSSTUFE um genau DEMON_GOLEM_GROWTH_HEIGHT (3 m,
+##    kein Prozentwert; Nutzer 2026-11-17, vorher 1 m). Mit der 40. Stufe erreicht
+##    er DEMON_GOLEM_MAX_HEIGHT (120 m, vorher 150 m) und zerfaellt; lebend wird
+##    er hoechstens 119 m gross.
+##  * Kills je Wachstumsstufe: DEMON_GOLEM_GROWTH_KILLS (4), und alle
+##    DEMON_GOLEM_GROWTH_KILLS_STEP (2) Stufen einer mehr — Stufe 1-2 je 4, 3-4 je
+##    5, ... 39-40 je 23. 20 m nach 30 Kills, 32 m nach 60, Tod nach 540
+##    (bis 2026-11-17: alle 10 Stufen einer mehr, 1614 Kills bis 150 m).
+##  * Alles je Stufe wurde 2026-11-17 VERDREIFACHT (Leben, Dauerheilung, Schaden,
+##    Ziele, Heilung beim Wachsen) — bei 3 m je Stufe ist der Zuwachs JE METER
+##    derselbe wie vorher.
 ##  * GEDRUNGEN: bei gleicher Hoehe DEMON_GOLEM_WIDTH_FACTOR (25 %) breiter und
 ##    tiefer als der Golem — Modell und Koerperbox (Trampeln, Sprung, Einebnen).
 ##  * Alles, was beim Golem an der GROESSE haengt, nimmt dieselbe Formel mit seiner
@@ -583,44 +603,54 @@ const GOLEM_SEPARATION: float = 1.0
 ##    das laufende Einkommen, VOR dem Aufladen der Zauber. Verdient der Stamm weniger,
 ##    nimmt er das ganze Einkommen (es gibt keinen Manavorrat und keine Schuld, die
 ##    nach seinem Tod weiterliefe).
-##  * Kill: DEMON_GOLEM_KILL_HEAL sofort und DEMON_GOLEM_KILL_HEAL_OVER_TIME ueber
-##    DEMON_GOLEM_KILL_HEAL_DURATION Sekunden, stapelbar.
-##  * ALLE ANGRIFFE 15 % SCHNELLER als beim Golem GLEICHER GROESSE
-##    (DEMON_GOLEM_ATTACK_SPEEDUP): Abklingzeit und Ausholzeit mal 0,85 — bei 100 m
-##    3,4 statt 4 s. Der Takt laeuft ueber 100 m hinaus im selben Anstieg weiter
-##    (150 m: 4,38 s) und unter 4,7 m entsprechend zurueck (2 m: 1,48 s).
+##  * Kill (Nutzer 2026-11-17): er heilt die LEBENSOBERGRENZE des Opfers, die
+##    Haelfte (abgerundet) sofort, den Rest ueber DEMON_GOLEM_KILL_HEAL_DURATION
+##    Sekunden, stapelbar. Hat das Opfer keine Lebenspunkte (Gebaeude, Fahrzeug,
+##    Belohnung der Ritualkammer), gibt es DEMON_GOLEM_KILL_HEAL sofort und
+##    DEMON_GOLEM_KILL_HEAL_OVER_TIME ueber die Zeit (die alten 25).
+##  * ALLES 15 % SCHNELLER als beim Golem GLEICHER GROESSE: Abklingzeit, Ausholzeit,
+##    Animationen und Haltungswechsel mal (1 - DEMON_GOLEM_ATTACK_SPEEDUP), das
+##    Lauftempo mal (1 + DEMON_GOLEM_MOVE_SPEEDUP) (Nutzer 2026-11-17; vorher
+##    liefen Haltungswechsel und Tempo wie beim Golem, mindestens 4 m/s — die
+##    Untergrenze ist entfallen). Bei 80 m 2,55 statt 3 s Takt. Der Takt laeuft
+##    ueber 80 m hinaus im selben Anstieg weiter (119 m: 3,08 s) und unter 4,7 m
+##    entsprechend zurueck.
 ##  * Ab DEMON_GOLEM_AIR_HEIGHT (20 m) schlaegt er nach Luftschiffen; ab
 ##    DEMON_GOLEM_GIANT_HEIGHT (30 m) gilt das Riesenpaket des Golems: Boden
 ##    einebnen, Kollision mit Einheiten ignorieren und trampeln, gerade Wege,
 ##    Gebaeude niedertrampeln, Fahrzeuge treffen.
 ##  * Er wird NIE gehaertet (kein "ausgewachsen"): Feuer, doppelter Blitz und der
 ##    wachsende Katapultschaden bleiben seine Schwaechen bis zum Ende.
-##  * Untergrenzen, solange er klein ist (Annahme 2026-11-16, vom Nutzer nicht
-##    beanstandet): Tempo mindestens DEMON_GOLEM_MIN_SPEED (die Formel gaebe bei 2 m
-##    2,3 m/s — langsamer als jeder Brave), Aggro mindestens MELEE_AGGRO_RADIUS.
+##  * Untergrenze, solange er klein ist (Annahme 2026-11-16): Aggro mindestens
+##    MELEE_AGGRO_RADIUS. (Die Tempo-Untergrenze von 4 m/s ist 2026-11-17 entfallen:
+##    bei 2 m laeuft er 2,6 m/s.)
+##  * Sein Handschlag-Radius waechst als Groesse hoch DEMON_GOLEM_SLAM_EXPONENT —
+##    fest auf dem Wert von vor 2026-11-17, damit die Umstellung des Golems auf
+##    80 m ihn nicht veraendert.
 ## Die Werte aller Groessen druckt tests/diag_demon_golem_values.gd.
 const DEMON_GOLEM_HP: int = 500   # 400 -> 500 (Nutzervorgabe 2026-11-16)
 const DEMON_GOLEM_START_HEIGHT: float = 2.0
-const DEMON_GOLEM_GROWTH_HEIGHT: float = 1.0
-const DEMON_GOLEM_MAX_HEIGHT: float = 150.0
+const DEMON_GOLEM_GROWTH_HEIGHT: float = 3.0
+const DEMON_GOLEM_MAX_HEIGHT: float = 120.0
 const DEMON_GOLEM_WIDTH_FACTOR: float = 1.25
 const DEMON_GOLEM_GROWTH_KILLS: int = 4
-const DEMON_GOLEM_GROWTH_KILLS_STEP: int = 10
-const DEMON_GOLEM_GROWTH_MAX_HP: int = 5
-const DEMON_GOLEM_GROWTH_REGEN: float = 0.15
+const DEMON_GOLEM_GROWTH_KILLS_STEP: int = 2
+const DEMON_GOLEM_GROWTH_MAX_HP: int = 15
+const DEMON_GOLEM_GROWTH_REGEN: float = 0.45
 const DEMON_GOLEM_DAMAGE_SHARE: float = 0.5
 const DEMON_GOLEM_START_SLAM_BONUS: float = 3.0
 const DEMON_GOLEM_START_KICK_BONUS: float = 2.0
 const DEMON_GOLEM_START_DRUM_BONUS: float = 3.0
 const DEMON_GOLEM_MANA_UPKEEP: float = 5.0
-const DEMON_GOLEM_GROWTH_SLAM_DAMAGE: float = 0.75
-const DEMON_GOLEM_GROWTH_KICK_DAMAGE: float = 0.8
+const DEMON_GOLEM_GROWTH_SLAM_DAMAGE: float = 2.25
+const DEMON_GOLEM_GROWTH_KICK_DAMAGE: float = 2.4
 ## 1,0 -> 1,2 (Nutzervorgabe 2026-11-16): mit +1 wuchs das Trommeln langsamer als der
 ## Handschlag (+0,75 bei 1,44-mal so schnellem Takt = effektiv +1,08) und war ab ~22 m
 ## je Einzelziel schwaecher - er trommelte spaeter nie mehr.
-const DEMON_GOLEM_GROWTH_DRUM_DAMAGE: float = 1.2
+## 2026-11-17 alle Zuwaechse je Stufe verdreifacht (1,2 -> 3,6 usw.).
+const DEMON_GOLEM_GROWTH_DRUM_DAMAGE: float = 3.6
 const DEMON_GOLEM_TARGETS: int = 3
-const DEMON_GOLEM_GROWTH_TARGETS: int = 1
+const DEMON_GOLEM_GROWTH_TARGETS: int = 3
 const DEMON_GOLEM_KILL_HEAL: int = 10
 const DEMON_GOLEM_KILL_HEAL_OVER_TIME: int = 15   # 10 -> 15 (Nutzervorgabe 2026-11-16)
 const DEMON_GOLEM_KILL_HEAL_DURATION: float = 5.0
@@ -628,13 +658,16 @@ const DEMON_GOLEM_KILL_HEAL_DURATION: float = 5.0
 ## DEMON_GOLEM_GROWTH_HEAL_OVER_TIME ueber DEMON_GOLEM_GROWTH_HEAL_DURATION Sekunden
 ## (Nutzervorgabe 2026-11-16), auf die schon angehobene Lebensobergrenze und neben der
 ## Heilung des Kills, der die Stufe gebracht hat.
-const DEMON_GOLEM_GROWTH_HEAL: int = 30   # 20 -> 30 (Nutzervorgabe 2026-11-16)
-const DEMON_GOLEM_GROWTH_HEAL_OVER_TIME: int = 45   # 30 -> 45 (Nutzervorgabe 2026-11-16)
+const DEMON_GOLEM_GROWTH_HEAL: int = 90   # 30 -> 90 (Nutzervorgabe 2026-11-17)
+const DEMON_GOLEM_GROWTH_HEAL_OVER_TIME: int = 135   # 45 -> 135 (Nutzervorgabe 2026-11-17)
 const DEMON_GOLEM_GROWTH_HEAL_DURATION: float = 5.0
 const DEMON_GOLEM_ATTACK_SPEEDUP: float = 0.15
+const DEMON_GOLEM_MOVE_SPEEDUP: float = 0.15
+## = log(12 / 2,6 / 2,214) / (53 * log(1,03)): der Exponent, den der Golem bis
+## 2026-11-17 (100 m, 53 Schritte zu 3 %) fuer seinen Handschlag hatte.
+const DEMON_GOLEM_SLAM_EXPONENT: float = 0.4687749
 const DEMON_GOLEM_AIR_HEIGHT: float = 20.0
 const DEMON_GOLEM_GIANT_HEIGHT: float = 30.0
-const DEMON_GOLEM_MIN_SPEED: float = 4.0
 
 # --- Genesisgolem (beschworene Einheit, Zauber 15, Nutzervorgabe 2026-11-17) ---
 ## Der dritte Golem (scripts/units/genesis_golem.gd), vorerst mit dem Modell des
@@ -643,32 +676,34 @@ const DEMON_GOLEM_MIN_SPEED: float = 4.0
 ##    Lebenszeit.
 ##  * STUFEN aus eigenen Braves: jeder Brave, den eine Huette des Stammes erzeugt,
 ##    zaehlt fuer die Genesisgolems des Stammes (bei mehreren geteilt).
-##    GENESIS_GOLEM_STAGE_BRAVES je Stufe (9 Stufen, zusammen 190), jede Stufe
-##    +GENESIS_GOLEM_STAGE_HEIGHT (4 m, Stufe 9 = 41 m; 2026-11-17 von 5 m gesenkt), +GENESIS_GOLEM_STAGE_MAX_HP
+##    GENESIS_GOLEM_STAGE_BRAVES je Stufe (8 Stufen, zusammen 154; 2026-11-17 fiel
+##    die neunte weg), jede Stufe +GENESIS_GOLEM_STAGE_HEIGHT (3,5 m, Stufe 8 =
+##    33 m; 2026-11-17 erst 5 -> 4, dann 3,5 m), +GENESIS_GOLEM_STAGE_MAX_HP
 ##    Leben, +GENESIS_GOLEM_STAGE_REGEN Leben/s.
 ##  * Startwerte: Schaden wie der frisch beschworene Daemonengolem (15,5 / 24,5 / 24),
 ##    Reichweite, Flaechen und Ziele wie der frische Golem. Mit der Groesse steigen
 ##    Schaden, Flaechen, Reichweite, Zielzahl und Trampelschaden wie beim
-##    Daemonengolem, aber nur GENESIS_GOLEM_GROWTH_SHARE (2/3) so stark.
-##  * Ab Stufe GENESIS_GOLEM_GIANT_STAGE (5): Kollision mit Einheiten ignorieren (und
+##    Daemonengolem JE METER (dessen Zuwachs je Stufe / DEMON_GOLEM_GROWTH_HEIGHT),
+##    aber nur GENESIS_GOLEM_GROWTH_SHARE (2/3) so stark.
+##  * Ab Stufe GENESIS_GOLEM_GIANT_STAGE (4, vorher 5): Kollision mit Einheiten ignorieren (und
 ##    trampeln), Boden einebnen, Luftschlag.
 ##  * HOLZ: er faellt Baeume (Rechtsklick, B-Bereich) mit einem Schlag und bekommt
 ##    deren Holz plus GENESIS_GOLEM_HARVEST_BONUS (50 %, abgerundet); ab Stufe
-##    GENESIS_GOLEM_TRAMPLE_WOOD_STAGE (8) auch beim Trampeln. Das Holz traegt er bei
+##    GENESIS_GOLEM_TRAMPLE_WOOD_STAGE (7, vorher 8) auch beim Trampeln. Das Holz traegt er bei
 ##    sich; Braves holen es wie von einem Stapel. Bleibt es GENESIS_GOLEM_WOOD_IDLE_TIME
 ##    (30 s) unberuehrt und kommt keins dazu, verbraucht er GENESIS_GOLEM_WOOD_BURN_RATE
 ##    (15) Holz je Sekunde und waechst dabei um GENESIS_GOLEM_WOOD_GROWTH_RATE (2 %)
-##    je Sekunde, bis GENESIS_GOLEM_MAX_HEIGHT (200 m); je Meter daraus
+##    je Sekunde, bis GENESIS_GOLEM_MAX_HEIGHT (100 m, vorher 200 m); je Meter daraus
 ##    +GENESIS_GOLEM_WOOD_HP_PER_M Leben und +GENESIS_GOLEM_WOOD_REGEN_PER_M Leben/s.
 const GENESIS_GOLEM_HP: int = 1000
 const GENESIS_GOLEM_START_HEIGHT: float = 5.0
-const GENESIS_GOLEM_STAGE_HEIGHT: float = 4.0
-const GENESIS_GOLEM_STAGE_BRAVES: Array[int] = [10, 12, 14, 17, 20, 23, 27, 31, 36]
+const GENESIS_GOLEM_STAGE_HEIGHT: float = 3.5
+const GENESIS_GOLEM_STAGE_BRAVES: Array[int] = [10, 12, 14, 17, 20, 23, 27, 31]
 const GENESIS_GOLEM_STAGE_MAX_HP: int = 40
 const GENESIS_GOLEM_STAGE_REGEN: float = 2.0
 const GENESIS_GOLEM_GROWTH_SHARE: float = 2.0 / 3.0
-const GENESIS_GOLEM_GIANT_STAGE: int = 5
-const GENESIS_GOLEM_TRAMPLE_WOOD_STAGE: int = 8
+const GENESIS_GOLEM_GIANT_STAGE: int = 4
+const GENESIS_GOLEM_TRAMPLE_WOOD_STAGE: int = 7
 const GENESIS_GOLEM_HARVEST_BONUS: float = 0.5
 ## Nutzervorgabe 2026-11-17: seine Aggroreichweite ist die halbe der anderen Golems
 ## (gleicher Groesse), und ein Gebaeude, das er zerstoert, bringt ihm diesen Anteil
@@ -678,8 +713,8 @@ const GENESIS_GOLEM_BUILDING_WOOD_SHARE: float = 0.5
 const GENESIS_GOLEM_WOOD_IDLE_TIME: float = 30.0
 const GENESIS_GOLEM_WOOD_BURN_RATE: float = 15.0
 const GENESIS_GOLEM_WOOD_GROWTH_RATE: float = 0.02
-const GENESIS_GOLEM_MAX_HEIGHT: float = 200.0
-const GENESIS_GOLEM_WOOD_HP_PER_M: float = 2.0
+const GENESIS_GOLEM_MAX_HEIGHT: float = 100.0
+const GENESIS_GOLEM_WOOD_HP_PER_M: float = 3.0   # 2 -> 3 (Nutzervorgabe 2026-11-17)
 const GENESIS_GOLEM_WOOD_REGEN_PER_M: float = 0.15
 ## Abstand des mitgefuehrten Holzstapels vor seinem Koerperrand (Annahme): dort
 ## erreichen ihn die Braves, ohne unter den Koerper zu muessen.

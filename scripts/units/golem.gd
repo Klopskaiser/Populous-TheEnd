@@ -547,7 +547,18 @@ static func size_factor_for(p_level: int) -> float:
 ## Ground speed at `p_level`: the stride grows with the body, the cadence eases
 ## off with it (speed ~ square root of the size) — deliberately modest.
 static func speed_for(p_level: int) -> float:
-	return Balance.GOLEM_SPEED * sqrt(size_factor_for(p_level))
+	return speed_for_size(size_factor_for(p_level))
+
+
+## Ground speed of ANY golem of this size (user spec 2026-11-17: the same size
+## walks equally fast): the root of the size up to the giant's (level 7), beyond
+## it only GOLEM_GROWTH_SPEED_EXPONENT of the growth.
+static func speed_for_size(s: float) -> float:
+	var giant: float = size_factor_for(Balance.GOLEM_MAX_LEVEL)
+	var v: float = Balance.GOLEM_SPEED * sqrt(minf(s, giant))
+	if s > giant:
+		v *= pow(s / giant, Balance.GOLEM_GROWTH_SPEED_EXPONENT)
+	return v
 
 
 ## Growth steps a golem with `p_kills` kills has taken BEYOND level 7: one per
@@ -577,10 +588,13 @@ func size_factor() -> float:
 		* pow(1.0 + Balance.GOLEM_GROWTH_SIZE, float(growth_steps)), max_size_factor())
 
 
-## Factor of the strike areas and the trample radius from the growth steps
-## beyond level 7 (1 below that): they grow far slower than the body.
+## Factor of the strike areas from the growth beyond level 7 (1 below that): the
+## body's growth since then to GOLEM_GROWTH_AREA_EXPONENT — far slower.
 func growth_area_factor() -> float:
-	return pow(1.0 + Balance.GOLEM_GROWTH_AREA, float(growth_steps))
+	if growth_steps <= 0:
+		return 1.0
+	return pow(size_factor() / size_factor_for(Balance.GOLEM_MAX_LEVEL),
+		Balance.GOLEM_GROWTH_AREA_EXPONENT)
 
 
 ## How much further a golem of `p_level` reaches and strikes than a fresh one:
@@ -630,10 +644,17 @@ static func _ground_factor(kind: StringName) -> float:
 	return Balance.GOLEM_DRUM_RADIUS_FACTOR if kind == ATTACK_DRUM else 1.0
 
 
-## Exponent of the limb factor: chosen so that at GOLEM_MAX_HEIGHT the limbs are
-## GOLEM_LIMB_SHARE_AT_MAX of what a body-proportional growth would give.
+## Exponent of the limb factor: chosen so that at GOLEM_LIMB_ANCHOR_HEIGHT (the
+## old 100 m) the limbs are GOLEM_LIMB_SHARE_AT_MAX of what a body-proportional
+## growth would give.
 static func limb_exponent() -> float:
-	return 1.0 + log(Balance.GOLEM_LIMB_SHARE_AT_MAX) / log(max_size_factor())
+	return 1.0 + log(Balance.GOLEM_LIMB_SHARE_AT_MAX) / log(limb_anchor_size())
+
+
+## Size factor at GOLEM_LIMB_ANCHOR_HEIGHT (user spec 2026-11-17: the limbs keep
+## their curve although the golem stops at 80 m — levels 1-6 stay unchanged).
+static func limb_anchor_size() -> float:
+	return Balance.GOLEM_LIMB_ANCHOR_HEIGHT / Balance.GOLEM_HEIGHT
 
 
 ## How much longer her arms and legs are than a fresh golem's: the size factor,
@@ -649,14 +670,14 @@ static func limb_factor_for(size: float) -> float:
 
 
 ## How much longer the kick's lane is than a fresh golem's: the limb factor's
-## gain over 1, shortened so that at GOLEM_MAX_HEIGHT the lane is
+## gain over 1, shortened so that at GOLEM_LIMB_ANCHOR_HEIGHT the lane is
 ## GOLEM_KICK_LENGTH_SHARE_AT_MAX of what the limbs alone would give.
 func kick_limb_factor() -> float:
 	return 1.0 + (limb_factor() - 1.0) * kick_growth_share()
 
 
 static func kick_growth_share() -> float:
-	var top: float = limb_factor_for(max_size_factor())
+	var top: float = limb_factor_for(limb_anchor_size())
 	return (Balance.GOLEM_KICK_LENGTH_SHARE_AT_MAX * top - 1.0) / (top - 1.0)
 
 
@@ -674,10 +695,10 @@ func strike_distance() -> float:
 		+ slam_radius() * Balance.GOLEM_CLOSE_IN_SLAM_SHARE)
 
 
-## Flat damage bonus of the current level: GOLEM_LEVEL_DAMAGE per level up to the
-## final-bonus level — level 7 adds no more damage (user spec).
+## Flat damage bonus of the current level: GOLEM_LEVEL_DAMAGE per level — level 7
+## too since 2026-11-17 (user spec; before it added none).
 func level_damage_bonus() -> int:
-	return Balance.GOLEM_LEVEL_DAMAGE * mini(level, Balance.GOLEM_FINAL_BONUS_LEVEL)
+	return Balance.GOLEM_LEVEL_DAMAGE * level
 
 
 ## Damage of an attack at the current level.
@@ -694,11 +715,9 @@ func attack_damage(kind: StringName) -> int:
 
 
 ## What every single hit of the drum brings by itself: GOLEM_DRUM_HIT_DAMAGE,
-## plus GOLEM_DRUM_LEVEL_DAMAGE_PER_HIT for every level (up to the final-bonus
-## level, like the flat bonus).
+## plus GOLEM_DRUM_LEVEL_DAMAGE_PER_HIT for every level (like the flat bonus).
 func _drum_own_hit_damage() -> int:
-	return Balance.GOLEM_DRUM_HIT_DAMAGE + Balance.GOLEM_DRUM_LEVEL_DAMAGE_PER_HIT \
-		* mini(level, Balance.GOLEM_FINAL_BONUS_LEVEL)
+	return Balance.GOLEM_DRUM_HIT_DAMAGE + Balance.GOLEM_DRUM_LEVEL_DAMAGE_PER_HIT * level
 
 
 ## Damage of ONE of the drum's hits: its own damage (14, +1 per level) plus its
@@ -1082,7 +1101,7 @@ func can_stomp() -> bool:
 	return stomp_enabled and stance == STANCE_STAND and not is_switching_stance() and stance_settled()
 
 
-## Seconds between two attacks at the current size (1,8 s .. 4 s at 100 m).
+## Seconds between two attacks at the current size (1,8 s .. 3 s at 80 m).
 func strike_cooldown() -> float:
 	return lerpf(STRIKE_COOLDOWN, Balance.GOLEM_STRIKE_COOLDOWN_MAX, growth_t())
 
@@ -1161,9 +1180,9 @@ func _slope_speed(slope: float) -> float:
 	return super._slope_speed(slope) * share
 
 
-## Ground speed right now: the level's speed, plus the slight gain per growth step.
+## Ground speed right now: that of her size (speed_for_size).
 func current_speed() -> float:
-	return speed_for(level) * pow(1.0 + Balance.GOLEM_GROWTH_SPEED, float(growth_steps))
+	return speed_for_size(size_factor())
 
 
 ## From level 1 the golem walks straight through other units (and tramples the
@@ -1199,7 +1218,9 @@ func has_lifetime() -> bool:
 
 ## A kill — by an attack or underfoot: buys time, raises the health limit, patches
 ## the construct up (to that limit) and counts toward the next level.
-func _credit_kill() -> void:
+## `_victim_hp`: the victim's health limit (kill_hp_of), -1 for one without health
+## (building, vehicle, the ritual chamber's reward) — only the demon golem uses it.
+func _credit_kill(_victim_hp: int = -1) -> void:
 	kills += 1
 	life_left += Balance.GOLEM_LIFE_PER_KILL
 	while level < level_for_kills(kills):
@@ -1216,6 +1237,14 @@ func _credit_kill() -> void:
 	else:
 		max_health = mini(max_health + Balance.GOLEM_MAX_HP_PER_KILL, max_health_cap())
 	health = mini(health + Balance.GOLEM_HP_PER_KILL, max_health)
+
+
+## Health limit of a victim for the kill reward: a unit's max_health, -1 for a
+## vehicle (it has no health) — read BEFORE the blow, the victim may be gone after.
+static func kill_hp_of(u) -> int:
+	if u is CrewedVehicle or not (u is Unit) or u.max_health <= 1:
+		return -1
+	return u.max_health
 
 
 func _level_up() -> void:
@@ -1435,9 +1464,10 @@ func _tick_trample(delta: float) -> void:
 		_trampled[id] = Balance.GOLEM_TRAMPLE_INTERVAL
 		room -= 1
 		_no_combat_timer = 0.0
+		var hp: int = kill_hp_of(u)
 		u.take_damage(damage, self)
 		if not is_instance_valid(u) or u.state == State.DEAD or u.doomed:
-			_credit_kill()
+			_credit_kill(hp)
 	if not is_giant():
 		return
 	# The giant (maximum level) also walks over vehicles that do not fly his
@@ -2565,9 +2595,10 @@ func _land_attack(kind: StringName, hit: int = 0) -> Dictionary:
 	# area and the target cap of THIS attack must not grow while it lands.
 	var struck: Dictionary = _struck_targets(kind)
 	for u in struck.units:
+		var hp: int = kill_hp_of(u)
 		u.take_damage(damage, self)
 		if not is_instance_valid(u) or u.state == State.DEAD or u.doomed:
-			_credit_kill()
+			_credit_kill(hp)
 			continue
 		if kick:
 			# Thrown or not: the size decides (kick_throw_chance). No dice at 0 or

@@ -11,20 +11,20 @@ class_name GenesisGolem extends Golem
 ##  * Er waechst NICHT durch Kills (sie werden nur gezaehlt), sondern durch die
 ##    BRAVES seines Stammes: jeder Brave, den eine Huette erzeugt, ist ein Punkt
 ##    Erfahrung, geteilt durch die Zahl der lebenden Genesisgolems des Stammes
-##    (credit_brave_to_tribe). 9 Stufen (GENESIS_GOLEM_STAGE_BRAVES), jede +4 m
-##    (2026-11-17, vorher 5), +40 Leben, +2 Leben/s. Start 5 m und 1000 Leben,
+##    (credit_brave_to_tribe). 8 Stufen (GENESIS_GOLEM_STAGE_BRAVES), jede +3,5 m
+##    (2026-11-17, vorher 9 Stufen zu 5, dann 4 m), +40 Leben, +2 Leben/s. Start 5 m und 1000 Leben,
 ##    keine Lebenszeit. Aggroreichweite: die halbe der anderen Golems.
 ##  * Startwerte: Schaden des frisch beschworenen Daemonengolems, Reichweite,
 ##    Flaechen und Ziele des frischen Golems. Mit der Groesse steigen Schaden,
-##    Flaechen, Reichweite, Zielzahl und Trampelschaden wie beim Daemonengolem,
-##    aber nur 2/3 so stark (combat_factor()). Was am KOERPER haengt — Modell,
+##    Flaechen, Reichweite, Zielzahl und Trampelschaden wie beim Daemonengolem je
+##    Meter, aber nur 2/3 so stark (combat_factor()). Was am KOERPER haengt — Modell,
 ##    Koerperkreis (Trampeln, Sprung), Tempo, Takt, Drehrate, Haltungswechsel —
 ##    folgt der echten Groesse wie bei den anderen Golems.
-##  * Ab Stufe 5: Kollision mit Einheiten ignorieren und trampeln, Boden einebnen,
+##  * Ab Stufe 4: Kollision mit Einheiten ignorieren und trampeln, Boden einebnen,
 ##    Luftschlag. Das uebrige Riesenpaket (gerade Wege, Gebaeude niedertrampeln,
 ##    Fahrzeuge) bekommt er nicht.
 ##  * HOLZ: Baeume faellt er mit EINEM Schlag (Rechtsklick auf einen Baum, B-Bereich)
-##    und bekommt ihr Holz plus 50 % (abgerundet); ab Stufe 8 auch alles, was er
+##    und bekommt ihr Holz plus 50 % (abgerundet); ab Stufe 7 auch alles, was er
 ##    zertrampelt. Beim Bereichsbefehl nimmt er den Schlag, der die meisten Baeume
 ##    auf einmal faellt (Tritt, Handschlag oder Trommeln, _harvest_attack). Ein
 ##    Gebaeude, das er zerstoert, bringt ihm die halben Baukosten als Holz. Das Holz
@@ -108,7 +108,7 @@ static func stage_for_xp(xp: float) -> int:
 	return s
 
 
-## Body height of the stage alone (5 m, +4 m per stage: 41 m at stage 9).
+## Body height of the stage alone (5 m, +3,5 m per stage: 33 m at stage 8).
 static func stage_height(p_stage: int) -> float:
 	return Balance.GENESIS_GOLEM_START_HEIGHT + Balance.GENESIS_GOLEM_STAGE_HEIGHT * float(p_stage)
 
@@ -154,7 +154,7 @@ func _stage_up() -> void:
 
 
 ## Kills only count — he does not grow, heal or live longer by them.
-func _credit_kill() -> void:
+func _credit_kill(_victim_hp: int = -1) -> void:
 	kills += 1
 
 
@@ -180,6 +180,12 @@ func combat_metres() -> float:
 	return (height_m() - Balance.GENESIS_GOLEM_START_HEIGHT) * Balance.GENESIS_GOLEM_GROWTH_SHARE
 
 
+## The demon golem's growth steps those metres are worth: his gains per step are
+## per DEMON_GOLEM_GROWTH_HEIGHT metres (3 m since 2026-11-17).
+func combat_demon_steps() -> float:
+	return combat_metres() / Balance.DEMON_GOLEM_GROWTH_HEIGHT
+
+
 func reach_factor() -> float:
 	return pow(combat_factor(), DemonGolem.area_exponent())
 
@@ -198,14 +204,10 @@ func trample_damage() -> int:
 		/ Balance.GOLEM_TRAMPLE_HEIGHT_PER_DAMAGE)))
 
 
-## The demon golem's walking speed at this height, never below the fresh golem's.
+## The golem's walking speed at this height (user spec 2026-11-17: the same size
+## walks equally fast).
 func current_speed() -> float:
-	var s: float = size_factor()
-	var giant: float = Golem.size_factor_for(Balance.GOLEM_MAX_LEVEL)
-	var v: float = Balance.GOLEM_SPEED * sqrt(minf(s, giant))
-	if s > giant:
-		v *= pow(s / giant, DemonGolem.speed_exponent())
-	return maxf(v, Balance.GOLEM_SPEED)
+	return Golem.speed_for_size(size_factor())
 
 
 ## Half the other golems' aggro radius at his size (user spec 2026-11-17).
@@ -244,7 +246,7 @@ func can_strike_air() -> bool:
 # --- Values ---------------------------------------------------------------------------
 
 func max_targets() -> int:
-	return Balance.GOLEM_MAX_TARGETS[0] + int(floor(combat_metres()
+	return Balance.GOLEM_MAX_TARGETS[0] + int(floor(combat_demon_steps()
 		* float(Balance.DEMON_GOLEM_GROWTH_TARGETS) + 0.000001))
 
 
@@ -265,7 +267,7 @@ func level_damage_bonus() -> int:
 ## Damage with its fraction: the freshly summoned demon golem's, plus two thirds of
 ## the demon golem's gain for every metre he has grown.
 func damage_exact(kind: StringName) -> float:
-	var n: float = combat_metres()
+	var n: float = combat_demon_steps()
 	if kind == ATTACK_KICK:
 		return float(Balance.GOLEM_KICK_DAMAGE) * Balance.DEMON_GOLEM_DAMAGE_SHARE \
 			+ Balance.DEMON_GOLEM_START_KICK_BONUS + Balance.DEMON_GOLEM_GROWTH_KICK_DAMAGE * n
