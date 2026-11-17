@@ -1,6 +1,13 @@
 # 10l – Golem: Haltung „Sitzen“ (Plan, 2026-11-17)
 
-Status: **Erste Stufe umgesetzt (2026-11-17)** — Sitzen mit Taste `V` und Knopf, Sperren,
+Status: **Clips der Sitzangriffe geliefert (2026-11-17, abends)** — alle zwölf (`sit_stomp_l/r`, `sit_kick_l/r`,
+`sit_wipe_l/r`, `sit_hop`, `sit_clap`, `sit_double_stomp`, `sit_turn_l/r`, `sit_grow`) sind in den drei GLB; die
+Aufschlagzeiten aus `GolemSitAnim.SIT_CLIP_IMPACT` sind eingehalten (0,35 s: der Schuh liegt im Bild bei 0,333 s auf).
+Noch nicht im laufenden Spiel angesehen. Was weiter unten zu fehlenden Clips steht, ist der Stand von davor.
+**Arm-Ebene mit Nacken und Kopf** (Nutzerwunsch 2026-11-17: beim Wischer wendet sie den Kopf zur Seite des Arms):
+`GolemSitAnim.head_paths` stehen mit im Filter der Arm-Ebene; `sit_wipe_l/_r` tragen die Kopfdrehung.
+
+Status davor: **Erste Stufe umgesetzt (2026-11-17)** — Sitzen mit Taste `V` und Knopf, Sperren,
 Sitzplatz, Sitzschaden, Zielradius, Wachsen im Sitzen, für alle drei Golems. **Noch offen:**
 Sitzangriffe (Schritt 9), Drehen im Sitzen (Schritt 6) und der Clip `sit_grow` — dafür
 fehlen die Clips `sit_stomp_l/r`, `sit_wipe_l/r`, `sit_turn_l/r`, `sit_grow`. Die Clips
@@ -33,15 +40,49 @@ Umgesetzt in `scripts/units/golem_sit_combat.gd` (Logik) und `scripts/units/gole
 (Animationsebenen); die **Clips fehlen noch** — bis dahin wirken die Angriffe ohne Bild und der
 Animationsbaum bleibt aus.
 
-- **Fuß-Stampfer** (Beine): zielt wie der Luftschlag — Aufschlag am Ziel, Kreis des Handschlags
-  darum. Reichweite `reach()` von der Ruhelage der Füße, **nur nach vorn im Halbkreis**. Linker Fuß
-  für Ziele links, rechter rechts.
-- **Arm-Wischer** (Arme): ebenso gezielt, Kreis des Handschlags. **Immer nur ein Arm**: links für
-  Ziele links, rechts für rechts. Erreichbar: ein **Kegel seitlich und leicht hinter dem Körper** von
-  der Ruhelage der Hand, Reichweite `reach()` (Achse 30° nach hinten, ±60°: Vorschlag).
-- **Bein strecken** (Beine): lange Schneise geradeaus von den Füßen, 2 × `reach()` (Vorschlag), so
-  breit wie die Tritt-Schneise; **die Arme dürfen gleichzeitig angreifen**.
-- **Po-Hüpfer**: Fläche = doppelte Sitzfläche (Vorschlag); **sperrt Arme und Beine**.
+- **Zonen und Werte (Nutzervorgaben 2026-11-17, ersetzt die Vorschläge unten):** Maße des 4-m-Modells in
+  `Balance.GOLEM_SIT_*`, an den Clips gemessen gegen die Mitte zwischen den ruhenden Schuhen, skaliert wie das Modell.
+  Werte bei 31 m in Klammern.
+  1. **Fuß-Stampfer** l/r: Kreis (mittel: 0,75 × Handschlag-Radius, 5,3 m) um die Stelle, an der der Schuh landet
+     (3,3 m vor, 3,7 m neben der Fußmitte), nicht hinter die Ferse des ruhenden Schuhs. Schaden und Ziele wie der
+     Handschlag; schnell wie der gebückte Handschlag (Nutzerentscheidung: der Luftschlag wäre bei 31 m langsamer).
+  2. **Bein strecken** l/r: Schneise vom Hüftgelenk bis zur Spitze des gestreckten Schuhs (11,1 m hinter bis 8,7 m
+     vor den Füßen, 2,6 m breit, 1,6 m neben der Mitte). Werte wie der Tritt. Deckt den Bereich unter den Knien ab.
+  3. **Po-Klatscher** (`sit_hop`): Kreis des Sprungs um die Sitzmitte (8,6 m), Schaden und Ziele wie der Sprung,
+     Abklingzeit 1,1 × die des Sprungs.
+  4. **Doppelstampfer**: Kreis des Trommelns (7,7 m) um die Landestelle beider Schuhe (2,4 m vor den Füßen), reicht
+     ein Stück hinter die Füße. Schaden, Ziele, Abklingzeit wie das Trommeln.
+  5. **Arm-Wischer** l/r: Kegel um die Sitzmitte auf seiner Seite, Reichweite `reach()`, von 30° hinter der
+     Querrichtung nach vorn bis zum Becken (höchstens 0,2 m des 4-m-Modells vor der Sitzmitte, 1,7 m; vorher bis 60°
+     vor quer, er reichte bis zu den Beinen). Schaden und Ziele wie der Luftschlag, schnell wie der gebückte Handschlag.
+  6. **Handstampfer hinten** (`sit_clap`): Kreise des Trommelns um beide Hände, nur hinter der Sitzmitte. Schaden
+     und Ziele wie das Trommeln, Abklingzeit 0,83 × die des Trommelns (Nutzerentscheidung).
+  Die großen (3, 4, 6) brauchen und sperren weiter beide Kanäle und mindestens 3 Ziele — **außer kein Einzelangriff
+  erreicht etwas: dann reicht ein Ziel** (sonst blieb ein einzelner Feind unter oder hinter ihr unbehelligt).
+  Gleichstand zweier Angriffe: der, dessen Aufschlag näher an den Getroffenen liegt (vorher wurde `sit_kick_r` nie
+  gewählt). Die Bein-Schneisen reichen innen bis zur Körpermitte (die Knie berühren sich; Nutzermeldung: ein Feind
+  zwischen den Schuhen wurde nie getroffen).
+  - **Gebäude:** feindliche Gebäude in der Zone verlieren je Treffer eine Zerstörungsstufe (wie im Stand); sie zählen
+    in der Wahl mit `GOLEM_STRUCTURE_VALUE` und füllen die Plätze der Zielzahl, die die Einheiten frei lassen.
+  - **Im Sitzen greift es sich leichter an** (Nutzervorgabe 2026-11-17): alle Sitzangriffe außer dem Handstampfer
+    hinten mit 0,9 × Abklingzeit (`GOLEM_SIT_COOLDOWN_FACTOR`) und 0,9 × Zielbereich (`GOLEM_SIT_AREA_FACTOR`: Radien,
+    Kegel-Reichweite, Breite der Bein-Schneisen; die Zielzahl bleibt). Die Zahlen bei 31 m oben sind die von davor.
+  - **Nachjustiert (Nutzervorgabe 2026-11-17):** Doppelstampfer weiter hinten (Kreismitte 0,9 m hinter statt 2,6 m
+    vor den Füßen) und noch einmal 10 % kleiner (6,3 m); Bein-Schneisen länger, bis 13,9 m vor den Füßen (vorher
+    bis zur gestreckten Schuhspitze, 9,0 m). Maße bei 31 m.
+  - **Spieltest 2026-11-17:** Turm- und Deckschützen messen zum Rand ihres Zielkreises (`UnitManager.rim_dist`) —
+    vorher schossen sie nicht auf sie, wenn ihre Sitzmitte (11 m hinter den Füßen) außer Reichweite lag; das
+    Luftschiff fliegt entsprechend heran. Erreicht nichts ihre Glieder und steht kein Feind im Aggro-Radius, dreht
+    sie sich zum nächsten feindlichen Gebäude darin.
+  - **Drehen:** Drehrate im Sitzen halbiert (12,5 % der Drehrate im Stand). Der Drehclip ist jetzt sichtbar: der
+    Grundclip ist eine Überblendung (0,3 s) zwischen `sit_idle`, `sit_turn_l`, `sit_turn_r`, die jeden Clip von vorn
+    startet, und die Drehclips laufen in Schleife — vorher wurde nur der Clip im Knoten getauscht (er lief auf der
+    Uhr von `sit_idle` weiter) und blieb nach einem Durchlauf stehen.
+  - **Handstampfer hinten:** Kreise 15 % kleiner als die des Trommelns (`GOLEM_SIT_CLAP_AREA_FACTOR`, bei 31 m 6,6 m).
+  - **Wachsen im Sitzen:** die gestreckten Beine treffen in beiden Bein-Schneisen zugleich (Zielzahl 2 × Tritt),
+    0,43 s nach Beginn des Streckens (`GolemSitCombat.GROW`, `grow_strike`), mit dem Schaden eines Trampelticks
+    (Nutzervorgabe 2026-11-17; zuerst der des Tritts).
+- *Stand davor (Vorschläge):*
 - **Doppelklatscher**: beide Hände schlagen neben ihr auf (Kreis um jede Hand); **sperrt die Füße**.
 - **Doppelstampfer**: beide Füße (Kreis um die Füße, 1,5 × Handschlag-Radius: Vorschlag); **sperrt
   die Arme**.
@@ -50,7 +91,7 @@ Animationsbaum bleibt aus.
   großen Angriffe belegen beide. Wahl nach Schaden je Sekunde (ein großer Angriff gegen die besten
   Einzelangriffe beider Kanäle zusammen).
 - **Drehen im Sitzen**: erreicht kein Glied einen Feind, dreht sie sich zum nächsten im Aggro-Radius
-  (ab 20° Abweichung), mit 25 % ihrer Drehrate im Stand, um den Po (ihr Standpunkt bleibt). **Während
+  (ab 20° Abweichung), mit 12,5 % ihrer Drehrate im Stand (2026-11-17 halbiert, vorher 25 %), um den Po (ihr Standpunkt bleibt). **Während
   des Drehens keine Angriffe.** Die Sitzfläche dreht mit; der Sitzschaden trifft weiter nur, wer beim
   Aufsetzen darunter stand.
 - **Werte vorerst geborgt** (Vorschlag, Nutzer legt fest): Stampfer und Wischer wie der Handschlag,

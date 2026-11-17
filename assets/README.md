@@ -300,7 +300,9 @@ Geschwindigkeit über `Golem.WALK_CLIP_SPEED`), `slam` (Handschlag, **Aufschlag 
 und `death` (einmalig; danach versinkt die Figur).
 
 **Sitzen (2026-11-17):** alle drei Golem-Modelle bringen dazu `sit_down` (1,5 s, gebückte Ruhe → Sitz), `sit_up` (1,5 s, zurück) und
-`sit_idle` (18 s, Schleife: umschauen, mit den Schuhspitzen wippen, die Hände umsetzen) – zusammen **19 Clips** je Modell. Die Clips
+`sit_idle` (18 s, Schleife: umschauen, mit den Schuhspitzen wippen, die Hände umsetzen) – zusammen 19 Clips, dazu seit dem Abend des 2026-11-17 die zwölf Clips der Sitzangriffe (`sit_stomp_l/_r`, `sit_kick_l/_r`,
+`sit_wipe_l/_r`, `sit_hop`, `sit_clap`, `sit_double_stomp`, `sit_turn_l/_r`, `sit_grow`; Ebenen und Aufschlagzeiten in
+`scripts/units/golem_sit_anim.gd`): **31 Clips** je Modell. Die Clips
 schließen zahlengleich an die gebückte Pose an; fehlen sie, wechselt das Spiel die Haltung ohne Bewegung. **Im Spiel gibt es dafür
 die Haltung `Golem.STANCE_SIT`, aber noch keinen Auslöser** (`Golem.sit_down()` ruft bisher niemand). Mit denselben Dateien kam die
 **gebückte Haltung ohne Clipping**: in `crouch_*`, `slam_low`, `drum_low` und `stomp` stehen die Knie außen neben dem

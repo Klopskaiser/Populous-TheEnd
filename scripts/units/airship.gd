@@ -632,7 +632,7 @@ func _tick_auto_engage(delta: float) -> void:
 		# follow it once it leaves the firing envelope (throttled by this scan).
 		if state == State.IDLE and is_instance_valid(_ordered_unit) \
 				and _ordered_unit.state != State.DEAD \
-				and _flat_dist(position, _ordered_unit.position) > _best_reach():
+				and UnitManager.rim_dist(position, _ordered_unit) > _best_reach():
 			_fly_into_reach(_ordered_unit.position)
 		return
 	if attack_building != null or route_end_action.is_valid():
@@ -668,7 +668,7 @@ func _tick_auto_engage(delta: float) -> void:
 	if target != null:
 		_auto_building = null
 		stop_at = target.position
-		dist = _flat_dist(position, target.position)
+		dist = UnitManager.rim_dist(position, target)
 	else:
 		# A deck preacher mid-conversion drops its target out of _best_enemy (it
 		# now SITs), so hold position until the channel finishes — otherwise the
@@ -841,7 +841,7 @@ func _tick_deck_firewarrior(fw, delta: float) -> void:
 	var reach: float = Firewarrior.FIRE_RANGE + RANGE_BONUS
 	# Ordered unit first, then the ordered building, then free fire at will.
 	var target: Unit = null
-	if _ordered_unit != null and _flat_dist(position, _ordered_unit.position) <= reach \
+	if _ordered_unit != null and UnitManager.rim_dist(position, _ordered_unit) <= reach \
 			and _ordered_unit.is_targetable():
 		target = _ordered_unit
 	if target == null and attack_building != null \
@@ -973,11 +973,13 @@ func _best_enemy(radius: float) -> Unit:
 	# get_units_in_radius it never spends its candidate budget on friendly units
 	# or corpses, so a zeppelin over its OWN army stops going blind (same defect
 	# as the catapult/ram scans, user report 2026-09-08).
+	# Distances run to the RIM of a big body's target circle (a golem; user report
+	# 2026-11-17: the ship never attacked a seated golem whose middle lay out of reach).
 	for u in path_service.get_enemy_candidates(
-			position, radius, tribe_id, SCAN_MAX_CANDIDATES):
+			position, radius + path_service.max_target_radius(), tribe_id, SCAN_MAX_CANDIDATES):
 		if u.state == State.SIT:
 			continue   # sitting converts keep sitting (a preacher aboard works)
-		var d: float = _flat_dist(position, u.position)
+		var d: float = UnitManager.rim_dist(position, u)
 		if d > radius:
 			continue
 		var pri: int = _enemy_priority(u)

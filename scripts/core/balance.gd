@@ -171,21 +171,61 @@ const GOLEM_SIT_LEVEL_FRONT: float = 0.35
 const GOLEM_SIT_LEVEL_BACK: float = 2.35
 const GOLEM_SIT_LEVEL_HALF_WIDTH: float = 0.8
 ## SITZANGRIFFE (Nutzervorgabe 2026-11-17, scripts/units/golem_sit_combat.gd): Beine und
-## Arme greifen unabhaengig an. Fuss-Stampfer und Arm-Wischer zielen wie der Luftschlag
-## (Aufschlag am Ziel, Kreis des Handschlags darum), Reichweite reach() — der Fuss von der
-## Ruhelage der Fuesse aus nur nach vorn im Halbkreis, der Arm von der Ruhelage der Hand
-## aus in einem Kegel seitlich und leicht hinter dem Koerper: Achse um
-## GOLEM_SIT_ARM_CONE_BACK_DEG nach hinten gedreht, halber Oeffnungswinkel
-## GOLEM_SIT_ARM_CONE_HALF_DEG (Vorschlag).
-const GOLEM_SIT_ARM_CONE_BACK_DEG: float = 30.0
-const GOLEM_SIT_ARM_CONE_HALF_DEG: float = 60.0
-## Bein strecken: Schneise geradeaus von den Fuessen, so lang wie dieser Anteil der
-## Reichweite, so breit wie die Tritt-Schneise (Vorschlag).
-const GOLEM_SIT_KICK_REACH_SHARE: float = 2.0
-## Doppelstampfer: Kreis um die Fuesse, dieser Anteil des Handschlag-Radius (Vorschlag).
-const GOLEM_SIT_DOUBLE_STOMP_RADIUS_SHARE: float = 1.5
-## Po-Huepfer: die Sitzflaeche, so viel mal groesser (Vorschlag).
-const GOLEM_SIT_HOP_AREA_FACTOR: float = 2.0
+## Arme greifen unabhaengig an. ZONEN UND WERTE DER SITZANGRIFFE (Nutzervorgaben
+## 2026-11-17). Masse in Metern des 4-m-Modells, gemessen an den Clips
+## (gymnastikschuh, golem_bewegung_niedlich_sitzen.mjs) gegen feet_point (den Ursprung des
+## Modells; die Mitte der ruhenden Schuhe liegt 0,03 davor); das Spiel skaliert sie wie das Modell
+## (model_scale() x size_factor()). Wer einen Clip aendert, misst sie nach.
+## Ruhender Schuh: seine Mitte so weit neben feet_point, seine Ferse so weit dahinter.
+const GOLEM_SIT_FOOT_SIDE: float = 0.245
+const GOLEM_SIT_HEEL_BACK: float = 0.16
+## 1. Fuss-Stampfer (links/rechts): Aufschlag, wo der Schuh im Clip landet (seine Mitte
+## so weit aussen / vorn gegen die Ruhelage); Kreis mit diesem Anteil des Handschlag-
+## Radius ("Bereich mittel", Vorschlag), der nicht hinter die Ferse des ruhenden Schuhs
+## reicht. Schnell wie der gebueckte Handschlag (Ausholen, Abklingzeit), Schaden und
+## Zielzahl wie der Handschlag.
+const GOLEM_SIT_STOMP_LAND: Vector2 = Vector2(0.18, 0.41)
+const GOLEM_SIT_STOMP_RADIUS_SHARE: float = 0.75
+## 2. Bein strecken (links/rechts): eine Schneise vom Koerper (Hueftgelenk, so weit hinter
+## feet_point) nach vorn bis GOLEM_SIT_KICK_TO (die gestreckte Schuhspitze liegt bei 1,03;
+## Nutzervorgabe 2026-11-17: "muss laenger sein, aber nicht uebertreiben" — gut halb so
+## weit noch einmal darueber hinaus), so breit wie das Bein, so weit neben der Mitte.
+## Schaden, Zielzahl, Takt wie der Tritt.
+const GOLEM_SIT_KICK_SIDE: float = 0.18
+const GOLEM_SIT_KICK_FROM: float = 1.25
+const GOLEM_SIT_KICK_TO: float = 1.6
+const GOLEM_SIT_KICK_WIDTH: float = 0.3
+## 3. Po-Klatscher (Po-Huepfer): Flaeche, Schaden und Zielzahl wie der Sprung, um die
+## Mitte der Sitzflaeche; Abklingzeit die des Sprungs mal diesem Faktor (minimal langsamer
+## als der Sprung, schneller als der Luftschlag).
+const GOLEM_SIT_HOP_COOLDOWN_FACTOR: float = 1.1
+## 4. Doppelstampfer: Kreis des Trommelns um eine Stelle so weit vor feet_point (negativ:
+## dahinter; Nutzervorgabe 2026-11-17: "geht zu weit nach vorn, weiter nach hinten" —
+## vorher 0,30 vor, an der Landestelle der Schuhe), mit diesem Anteil des Radius;
+## Zielzahl, Takt und Schaden wie das Trommeln.
+const GOLEM_SIT_DOUBLE_STOMP_LAND: float = -0.10
+const GOLEM_SIT_DOUBLE_STOMP_AREA_FACTOR: float = 0.9
+## 5. Arm-Wischer (links/rechts): ein Kegel neben ihr auf seiner Seite, von der Mitte der
+## Sitzflaeche aus, Reichweite reach(), von so viel Grad hinter der Querrichtung (etwas
+## hinter den Ruecken) nach vorn bis zum Becken: hoechstens GOLEM_SIT_WIPE_FRONT (Meter
+## des 4-m-Modells) vor der Sitzmitte (Nutzerhinweis 2026-11-17: vorher reichte er bis zu
+## den Beinen). Schaden und Zielzahl wie der Luftschlag, schnell wie der gebueckte Handschlag.
+const GOLEM_SIT_WIPE_FRONT: float = 0.2
+const GOLEM_SIT_WIPE_BACK_DEG: float = 30.0
+## 6. Handstampfer hinten (Doppelklatscher): Kreis des Trommelns um jede Hand, aber nur
+## hinter der Mitte der Sitzflaeche (Rueckenbereich); Schaden und Zielzahl wie das
+## Trommeln, Abklingzeit die des Trommelns mal diesem Anteil (zwischen den schnellen
+## Einzelangriffen und dem Trommeln; Nutzerentscheidung).
+const GOLEM_SIT_CLAP_COOLDOWN_SHARE: float = 0.83
+## Radius seiner Kreise: dieser Anteil des Trommel-Radius (Nutzervorgabe 2026-11-17: um 15 %
+## kleiner).
+const GOLEM_SIT_CLAP_AREA_FACTOR: float = 0.85
+## Im Sitzen greift es sich leichter an (Nutzervorgabe 2026-11-17): alle Sitzangriffe ausser
+## dem Handstampfer hinten kommen um diesen Faktor schneller wieder (Abklingzeit x 0,9) und
+## haben dafuer um diesen Faktor kleinere Zielbereiche (Radien, Kegel-Reichweite, Breite der
+## Bein-Schneisen; deren Laenge haengt an Huefte und Schuhspitze). Die Zielzahl bleibt.
+const GOLEM_SIT_COOLDOWN_FACTOR: float = 0.9
+const GOLEM_SIT_AREA_FACTOR: float = 0.9
 ## Die grossen Sitzangriffe (Po-Huepfer, Doppelklatscher, Doppelstampfer) sind
 ## Flaechenangriffe: sie kommen erst in Frage, wenn sie mindestens so viele Feinde
 ## treffen (Vorschlag).
@@ -194,8 +234,8 @@ const GOLEM_SIT_BIG_MIN_TARGETS: int = 3
 ## naechsten in ihrem Aggro-Radius, wenn er mehr als GOLEM_SIT_TURN_MIN_DEG neben ihrer
 ## Blickrichtung liegt — mit GOLEM_SIT_TURN_SHARE ihrer Drehrate im Stand, um den Po;
 ## fertig bis auf GOLEM_SIT_TURN_DONE_DEG. Waehrend sie sich dreht, greift sie nicht an
-## (Vorschlaege).
-const GOLEM_SIT_TURN_SHARE: float = 0.25
+## (Vorschlaege; die Drehrate hat der Nutzer am 2026-11-17 halbiert, vorher 0,25).
+const GOLEM_SIT_TURN_SHARE: float = 0.125
 const GOLEM_SIT_TURN_MIN_DEG: float = 20.0
 const GOLEM_SIT_TURN_DONE_DEG: float = 3.0
 ## STRECKEN BEIM WACHSEN (Nutzer 2026-11-16): bei jedem Stufenaufstieg und jedem

@@ -12763,3 +12763,47 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
 - **Kein Ausloeser:** nichts im Spiel ruft `sit_down()`. Wann sie sich setzt, ist offen.
 - Tests: `test_golem.gd` 704 (4 neu: ueber die gebueckte Haltung und zurueck, Bewegungsbefehl holt sie hoch,
   kein Schlag aus dem Sitz, nur ein untaetiger Golem setzt sich). Nicht im laufenden Spiel angesehen.
+
+### Golems: Clips der Sitzangriffe (2026-11-17, abends)
+
+- Modelle: `golem.glb`, `golem_genesis.glb`, `golem_demon.glb` neu aus der Werkstatt (`D:\game\gymnastikschuh`), je **31 Clips**:
+  die 19 bisherigen zahlengleich, dazu `sit_stomp_l/_r`, `sit_kick_l/_r`, `sit_wipe_l/_r`, `sit_hop`, `sit_clap`,
+  `sit_double_stomp`, `sit_turn_l/_r`, `sit_grow` (Auftrag `gymnastikschuh/AUFTRAG_SITZANGRIFFE.md`). Jeder beginnt und endet
+  zahlengleich in der Ruhe im Sitz; Bein- und Arm-Clips lassen alle anderen Knochen in Ruhe; Aufschlagzeiten wie in
+  `GolemSitAnim.SIT_CLIP_IMPACT`.
+- Nutzervorgaben dazu: Fussstampfer mit der ganzen Sohle, ein Stueck weiter vorn im Zielkegel, danach ueber den Boden zurueck;
+  `sit_grow` mit nach vorn ausgestreckten Beinen und gestreckten Fussspitzen.
+- Genesisgolem ausserdem: Texturnaht am rosa Schaft erhalten (kein weisser Strich mehr auf dem Lederbesatz der Spitze),
+  Gummibaender am Fuss unvereinfacht (keine dunklen Zacken mehr).
+- Test: `test_sit_animation_layers_filter_legs_and_arms` nahm an, dass die Clips fehlen; er prueft jetzt mit den gelieferten
+  Clips (Ersatzclip nur noch, wenn ein Modell sie nicht hat). Nicht im laufenden Spiel angesehen.
+- Zweite Runde nach Rueckmeldung des Nutzers: Einzelstampfer heben nur den Unterschenkel und zielen kurz, Wischer reichen weiter
+  zu den Beinen, Po-Huepfer hoeher (Fuesse rutschen vor), Kopf bei `sit_grow` weiter nach oben und beim Drehen leicht in
+  Drehrichtung. **Arm-Ebene mit Nacken und Kopf** (`GolemSitAnim.head_paths`, `is_head`): beim Wischer wendet sie den Kopf zur
+  Seite des Arms; Test dazu in `test_sit_animation_layers_filter_legs_and_arms`.
+- **Zonen und Werte der Sitzangriffe nach Nutzervorgabe** (ersetzt die Vorschlaege): Fuss-Stampfer um die
+  Landestelle des Schuhs (Kreis 0,75 x Handschlag, nicht hinter die Ferse), Bein strecken als Schneise Huefte bis
+  Schuhspitze je Bein, Po-Klatscher wie der Sprung um die Sitzmitte (Abklingzeit x 1,1), Doppelstampfer wie das
+  Trommeln um die Landestelle der Fuesse, Arm-Wischer als Kegel neben ihr (60 Grad vor bis 30 Grad hinter quer,
+  Werte des Luftschlags), Handstampfer hinten wie das Trommeln nur hinter der Sitzmitte (Abklingzeit x 0,83).
+  Stampfer und Wischer im Tempo des gebueckten Handschlags. Gleichstand: der naehere Aufschlag (vorher wurde
+  `sit_kick_r` nie gewaehlt). Werte `Balance.GOLEM_SIT_*`; Tests umgestellt.
+- **Nachtrag (Rueckmeldung nach dem ersten Spieltest):** Sitzangriffe nehmen feindlichen Gebaeuden je Treffer
+  eine Zerstoerungsstufe; Bein-Schneisen bis zur Koerpermitte und grosse Angriffe fuer ein Ziel, wenn kein
+  Einzelangriff etwas erreicht (vorher blieb ein Feind zwischen den Schuhen oder hinter ihr unbehelligt);
+  Wischer endet vorn am Becken (`GOLEM_SIT_WIPE_FRONT`); Wachsen im Sitzen trifft wie der Tritt in beiden
+  Bein-Schneisen. Tests dazu in `test_golem.gd`.
+- **Sitzen leichter:** alle Sitzangriffe ausser dem Handstampfer hinten mit 0,9 x Abklingzeit und 0,9 x
+  Zielbereich (`GOLEM_SIT_COOLDOWN_FACTOR`, `GOLEM_SIT_AREA_FACTOR`), Zielzahl unveraendert.
+- **Nachjustiert:** Doppelstampfer weiter hinten und 10 % kleiner, Bein-Schneisen laenger (bis 1,6 statt 1,03 m des
+  4-m-Modells vor den Fuessen); Bezugspunkt der Fussmasse ist der Modellursprung (vorher 0,03 daneben gemessen).
+- **Spieltest:** Wachturm- und Luftschiffschuetzen zielen zum Rand des Zielkreises grosser Koerper
+  (`UnitManager.rim_dist`, `max_target_radius()`; vorher nie auf eine sitzende Golemin mit Mitte ausser Reichweite);
+  die sitzende Golemin dreht sich auch zum naechsten feindlichen Gebaeude im Aggro-Radius.
+- **Drehen im Sitzen:** Drehrate halbiert (`GOLEM_SIT_TURN_SHARE` 0,125); Drehclip sichtbar (Grundclip als
+  `AnimationNodeTransition` mit Neustart, `sit_turn_l/_r` in Schleife — vorher stand er nach einem Durchlauf).
+- **Handstampfer hinten** 15 % kleinere Kreise; **Strecken beim Wachsen im Sitzen** trifft nur noch mit einem
+  Trampeltick (`trample_damage()`).
+- **Startmission:** ein normaler Golem des Spielers mit 31,3 m (erste Groesse ab 30 m, sitzfaehig) suedlich der
+  blauen Basis (`Main._spawn_chamber_golem`, `CHAMBER_GOLEM_HEIGHT`).
+

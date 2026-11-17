@@ -662,7 +662,32 @@ func _run_combat_kernels(delta: float) -> void:
 			hold[i] = cd
 
 
+## Largest target radius of any unit right now (big bodies — golems — have one; see
+## Unit.target_radius): scans that measure to the RIM widen their search by it.
+## Computed once per tick, 0 when there is no big body.
+var _max_target_radius: float = -1.0
+
+
+func max_target_radius() -> float:
+	if _max_target_radius < 0.0:
+		var m: float = 0.0
+		for r in soa_reach:
+			if r > m:
+				m = r
+		_max_target_radius = m
+	return _max_target_radius
+
+
+## Flat distance from `from` to the rim of `u`'s target circle (never negative) —
+## what Unit.reach_dist_to measures, for shooters that are not units themselves
+## (tower and deck crews fire from their platform; user report 2026-11-17: they never
+## shot at a seated golem whose middle lay out of their reach).
+static func rim_dist(from: Vector3, u: Unit) -> float:
+	return maxf(Vector2(from.x - u.position.x, from.z - u.position.z).length() - u.target_radius(), 0.0)
+
+
 func tick(delta: float) -> void:
+	_max_target_radius = -1.0
 	_rebuild_grid()
 	_drain_path_queue()
 	_apply_separation(delta)

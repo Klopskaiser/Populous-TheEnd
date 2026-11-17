@@ -112,6 +112,9 @@ const SIT_CLIP_LENGTH: float = 1.5
 ## The stretch she does when she grows: clip name and its length at speed 1.
 const CLIP_GROW: StringName = &"grow"
 const GROW_CLIP_LENGTH: float = 1.0
+## Growing on the seat: the stretched legs strike this share into the stretch (the clip
+## sit_grow has them stretched out from 0,42 s of its 1,0 s).
+const GROW_STRIKE_SHARE: float = 0.43
 ## Strike areas in the heading frame (along = forward, side = right), flat in XZ:
 ## slam = circle of SLAM_RADIUS around the point SLAM_FORWARD ahead,
 ## kick = lane -KICK_BACK <= along <= KICK_LENGTH, |side| <= KICK_HALF_WIDTH (the
@@ -835,6 +838,11 @@ func _tick_stretch(delta: float) -> void:
 			_play_sfx(&"golem_grow")
 			if _sit_anim != null and _sit_anim.is_active():
 				_sit_anim.fire(GolemSitAnim.LAYER_FULL, GolemSitAnim.CLIP_GROW, Balance.GOLEM_GROW_TIME)
+			# The stretched legs strike like the kick, in both legs' lanes (user spec
+			# 2026-11-17), when they are stretched out in the clip.
+			if sit_combat == null:
+				sit_combat = GolemSitCombat.new(self)
+			sit_combat.grow_strike(Balance.GOLEM_GROW_TIME * GROW_STRIKE_SHARE)
 		return
 	if not _stretch_queued or _pending_attack != &"" or _attack_anim_left > 0.0 \
 			or is_switching_stance():
@@ -3295,7 +3303,7 @@ func _create_model() -> void:
 func _prepare_clips() -> void:
 	if _anim == null:
 		return
-	for clip in [CLIP_IDLE, CLIP_WALK, CLIP_CROUCH_IDLE, CLIP_SIT_IDLE]:
+	for clip in [CLIP_IDLE, CLIP_WALK, CLIP_CROUCH_IDLE, CLIP_SIT_IDLE, GolemSitAnim.CLIP_TURN_L, GolemSitAnim.CLIP_TURN_R]:
 		if _anim.has_animation(clip):
 			_anim.get_animation(clip).loop_mode = Animation.LOOP_LINEAR
 	_play_clip(CLIP_IDLE)

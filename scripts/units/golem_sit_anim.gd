@@ -7,7 +7,9 @@ class_name GolemSitAnim extends RefCounted
 ##
 ##   Grundclip (sit_idle, beim Drehen sit_turn_l / sit_turn_r)
 ##     -> Ebene BEINE  (OneShot, nur die Beinknochen: *UpperLeg, *LowerLeg, *Foot, *Toes)
-##     -> Ebene ARME   (OneShot, nur Schulter, Ober-/Unterarm, Hand und Finger)
+##     -> Ebene ARME   (OneShot, nur Schulter, Ober-/Unterarm, Hand und Finger — und
+##                      seit 2026-11-17 Nacken und Kopf: beim Wischer wendet sie den
+##                      Kopf zur Seite des Arms)
 ##     -> Ebene KOERPER (OneShot ohne Filter: Po-Huepfer, Doppelklatscher, Doppelstampfer)
 ##     -> Ausgabe
 ##
@@ -46,6 +48,9 @@ var _base_clip: StringName = &""
 ## Track paths per layer as read from sit_idle (tests read them).
 var leg_paths: Array[NodePath] = []
 var arm_paths: Array[NodePath] = []
+## Neck and head: they ride on the ARM layer too (user request 2026-11-17: the head
+## turns to the side the arm wipes on — sit_wipe_l/_r carry that turn).
+var head_paths: Array[NodePath] = []
 
 
 func _init(p_player: AnimationPlayer) -> void:
@@ -67,6 +72,12 @@ static func part_of(bone: String) -> int:
 	return 0
 
 
+## Neck or head bone (VRM names "neck", "head")?
+static func is_head(bone: String) -> bool:
+	var b: String = bone.to_lower()
+	return b == "neck" or b == "head"
+
+
 func _read_paths() -> void:
 	var source: StringName = Golem.CLIP_SIT_IDLE if player.has_animation(Golem.CLIP_SIT_IDLE) else &""
 	if source == &"":
@@ -76,6 +87,8 @@ func _read_paths() -> void:
 		var path: NodePath = anim.track_get_path(t)
 		if path.get_subname_count() == 0:
 			continue
+		if is_head(String(path.get_subname(0))) and not head_paths.has(path):
+			head_paths.append(path)
 		match part_of(String(path.get_subname(0))):
 			1:
 				if not leg_paths.has(path):
@@ -85,11 +98,32 @@ func _read_paths() -> void:
 					arm_paths.append(path)
 
 
+## The base clips and their input names in the base transition (BASE_XFADE seconds
+## of crossfade; each starts from its beginning — all three begin in the rest pose).
+const BASE_INPUTS: Dictionary = {&"sit_idle": "idle", &"sit_turn_l": "turn_l", &"sit_turn_r": "turn_r"}
+const BASE_XFADE: float = 0.3
+
+
 func _build() -> void:
 	_blend = AnimationNodeBlendTree.new()
-	var base: AnimationNodeAnimation = AnimationNodeAnimation.new()
-	base.animation = Golem.CLIP_SIT_IDLE
+	# The base: sit_idle, or the turn clip while she turns (user report 2026-11-17: the
+	# turn clip never showed — the base was ONE animation node whose clip was swapped,
+	# so it ran on at sit_idle's clock and, not looping, froze after one pass).
+	var base: AnimationNodeTransition = AnimationNodeTransition.new()
+	base.xfade_time = BASE_XFADE
+	var idx: int = 0
+	for clip in BASE_INPUTS:
+		base.add_input(BASE_INPUTS[clip])
+		base.set_input_reset(idx, true)
+		var a: AnimationNodeAnimation = AnimationNodeAnimation.new()
+		a.animation = clip if player.has_animation(clip) else Golem.CLIP_SIT_IDLE
+		_blend.add_node(StringName("base_" + BASE_INPUTS[clip]), a)
+		idx += 1
 	_blend.add_node(&"base", base)
+	idx = 0
+	for clip in BASE_INPUTS:
+		_blend.connect_node(&"base", idx, StringName("base_" + BASE_INPUTS[clip]))
+		idx += 1
 	var below: StringName = &"base"
 	for layer in [LAYER_LEGS, LAYER_ARMS, LAYER_FULL]:
 		var n: String = LAYER_NAMES[layer]
@@ -104,6 +138,9 @@ func _build() -> void:
 			shot.filter_enabled = true
 			for p in (leg_paths if layer == LAYER_LEGS else arm_paths):
 				shot.set_filter_path(p, true)
+			if layer == LAYER_ARMS:
+				for p in head_paths:
+					shot.set_filter_path(p, true)
 		_blend.add_node(StringName(n), shot)
 		_blend.connect_node(StringName(n + "_speed"), 0, StringName(n + "_clip"))
 		_blend.connect_node(StringName(n), 0, below)
@@ -117,6 +154,7 @@ func _build() -> void:
 	player.get_parent().add_child(tree)
 	tree.anim_player = tree.get_path_to(player)
 	_base_clip = Golem.CLIP_SIT_IDLE
+	tree.set("parameters/base/transition_request", "idle")   # the transition has no state until asked
 
 
 ## Does the model bring any clip the layers are for? Without one the tree stays off.
@@ -140,10 +178,10 @@ func set_active(on: bool) -> void:
 
 ## The clip under the layers: sit_idle, or the turn clip while she turns (if there).
 func set_base(clip: StringName) -> void:
-	if tree == null or clip == _base_clip or not player.has_animation(clip):
+	if tree == null or clip == _base_clip or not player.has_animation(clip) or not BASE_INPUTS.has(clip):
 		return
 	_base_clip = clip
-	(_blend.get_node(&"base") as AnimationNodeAnimation).animation = clip
+	tree.set("parameters/base/transition_request", BASE_INPUTS[clip])
 
 
 func base_clip() -> StringName:

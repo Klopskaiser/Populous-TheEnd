@@ -35,6 +35,11 @@ const TREE_COUNT: int = 60
 ## face the player, everything else sits behind them. No AI: a static range.
 const CHAMBER_BRAVES: int = 100
 const CHAMBER_RED_ARMY: int = 100
+## Start mission: a normal golem of the player, grown to at least this height (m), on
+## the free ground south of the blue base (cells from the blue anchor).
+const GOLEM_SCENE: PackedScene = preload("res://scenes/units/golem.tscn")
+const CHAMBER_GOLEM_HEIGHT: float = 30.0
+const CHAMBER_GOLEM_OFFSET: Vector2i = Vector2i(0, 24)
 
 ## Phase 8.1 (Stufe A): route unit path requests through the off-main-thread
 ## PathWorker. Set to false for an A/B comparison or as an emergency fallback to
@@ -531,12 +536,32 @@ func _setup_chamber_blue(tribe: Tribe, anchor: Vector2i, nav: NavGrid) -> void:
 		if cell.x >= 0:
 			_unit_manager.spawn_unit(entry[0], tribe.id, nav.cell_to_world(cell))
 	_spawn_braves_near(tribe.id, anchor + Vector2i(0, 2), CHAMBER_BRAVES, nav)
+	_spawn_chamber_golem(tribe, anchor + CHAMBER_GOLEM_OFFSET, nav)
 	# The hut as a full palace, fully manned, and the production chain set up
 	# (user request 2026-11-16): the hut sends its braves into the fire temple, the
 	# fire temple sends its firewarriors to the shaman's spot.
 	_max_out_huts(tribe)
 	_fill_huts(tribe)
 	_chain_rally_points(tribe)
+
+
+## Start mission (user request 2026-11-17): a normal golem of the player at about
+## CHAMBER_GOLEM_HEIGHT, big enough to sit down (Golem.can_sit) — to try the sit
+## attacks. Golem sizes come in steps: it is the first one at or above that height
+## (31,3 m). Grown by crediting kills, so level, size and values are those of a real
+## golem with that many kills.
+func _spawn_chamber_golem(tribe: Tribe, at: Vector2i, nav: NavGrid) -> void:
+	var cell: Vector2i = _find_walkable_near(at, nav, 0)
+	if cell.x < 0:
+		return
+	var golem: Golem = _unit_manager.spawn_unit(GOLEM_SCENE, tribe.id, nav.cell_to_world(cell)) as Golem
+	if golem == null:
+		return
+	golem.terrain_ctx = _tribe_commands.spell_context
+	while golem.height_m() < CHAMBER_GOLEM_HEIGHT and golem.growth_steps < Golem.max_growth_steps():
+		golem._credit_kill()
+	golem._stretch_queued = false   # no stretching for the steps it skipped
+	golem.health = golem.max_health
 
 
 ## Every hut of `tribe` jumps to the highest upgrade stage (start mission).
