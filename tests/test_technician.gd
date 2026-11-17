@@ -96,7 +96,8 @@ func test_technician_stats_match_the_brave() -> void:
 	var w: Dictionary = _make_world()
 	var t: Unit = _spawn(w, TECHNICIAN_SCENE, Vector2i(20, 20))
 	check(t.unit_kind() == &"technician", "own unit kind")
-	check(t.max_health == Balance.BRAVE_HP, "same health as a brave")
+	check(t.max_health == 65 and Balance.TECHNICIAN_HP == 65,
+		"65 LP, a little more than a brave (user spec 2026-11-17)")
 	check_near(t.speed, Balance.BRAVE_SPEED, "same speed as a brave")
 	check_near(t.melee_strength(), 1.0, "and the same base damage")
 	check(t is Brave, "he IS a brave for the build/repair machinery")

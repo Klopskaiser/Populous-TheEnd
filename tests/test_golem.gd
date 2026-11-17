@@ -3274,3 +3274,151 @@ func test_attackers_strike_a_golem_from_the_edge_of_his_target_radius() -> void:
 
 func _flat_len(v: Vector3) -> float:
 	return Vector2(v.x, v.z).length()
+
+
+# --- Bewegungsfreiheit unter Golems, Anlauf in Schlagdistanz (2026-11-17) ---------------
+
+## Laesst Stretch und Haltungswechsel nach einem Stufenaufstieg auslaufen.
+func _settle(w: Dictionary, ticks: int = 25) -> void:
+	for i in range(ticks):
+		_tick_world(w)
+
+
+## Ist der Zielort von Golems belegt, gilt der Marsch nah davor als angekommen —
+## die drei Golems dort werden nicht weggeschoben (Nutzervorgabe 2026-11-17).
+func test_a_march_onto_golems_ends_close_to_them() -> void:
+	var w: Dictionary = _make_world()
+	var goal: Vector3 = Vector3(70, 5, 64)
+	var blockers: Array[Golem] = []
+	var probe: Golem = _golem(w, 0, Vector3(20, 5, 20))
+	_level_to(probe, 3)
+	var r: float = probe.trample_radius()
+	for k in range(3):
+		var ang: float = TAU * float(k) / 3.0
+		var at: Vector3 = goal + Vector3(cos(ang), 0.0, sin(ang)) * (2.0 * r / sqrt(3.0) + 0.05)
+		var b: Golem = _golem(w, 0, at)
+		_level_to(b, 3)
+		blockers.append(b)
+	var mover: Golem = probe
+	mover.position = Vector3(40, 5, 64)
+	mover.snap_heading()
+	_settle(w)
+	var starts: Array[Vector3] = []
+	for b in blockers:
+		starts.append(b.position)
+	mover.order_move(goal)
+	var ticks: int = 0
+	while mover.state == Unit.State.MOVE and ticks < 300:
+		_tick_world(w)
+		ticks += 1
+	check(mover.state == Unit.State.IDLE, "the march ends although the goal is taken (%d ticks)" % ticks)
+	var need: float = 2.0 * r * Balance.GOLEM_BODY_GAP
+	check(_flat(mover.position, goal) <= need + r * Balance.GOLEM_BLOCKED_ARRIVE_BODIES + 0.1,
+		"she stops close to it (%.2f m from the goal)" % _flat(mover.position, goal))
+	var pushed: float = 0.0
+	for k in range(3):
+		pushed = maxf(pushed, _flat(blockers[k].position, starts[k]))
+	for i in range(20):
+		_tick_world(w)
+	check(pushed < 0.3, "the golems on the spot are not shoved away (at most %.2f m)" % pushed)
+	check(mover.blocked_goal_reached(goal) and not mover.blocked_goal_reached(Vector3(20, 5, 100)),
+		"blocked_goal_reached: only a goal other golems stand on counts")
+	_free_world(w)
+
+
+## Ein untaetiger Golem, der einem laufenden im Weg steht, tritt zur Seite —
+## quer zu dessen Laufrichtung — statt vor ihm hergeschoben zu werden.
+func test_an_idle_golem_steps_aside_for_a_walking_one() -> void:
+	var w: Dictionary = _make_world()
+	var walker: Golem = _golem(w, 0, Vector3(40, 5, 64))
+	var idle: Golem = _golem(w, 0, Vector3(52, 5, 64))
+	_level_to(walker, 2)
+	_level_to(idle, 2)
+	_settle(w)
+	var start: Vector3 = idle.position
+	var goal: Vector3 = Vector3(66, 5, 64)
+	walker.order_move(goal)
+	var ticks: int = 0
+	while walker.state == Unit.State.MOVE and ticks < 200:
+		_tick_world(w)
+		ticks += 1
+	check(_flat(walker.position, goal) < 0.5, "the walker gets to its goal (%.2f m off, %d ticks)"
+		% [_flat(walker.position, goal), ticks])
+	var side: float = absf(idle.position.z - start.z)
+	var along: float = absf(idle.position.x - start.x)
+	check(side > 1.0 and side > along * 2.0,
+		"the idle golem stepped aside (%.2f m across, %.2f m along the course)" % [side, along])
+	var need: float = walker.trample_radius() + idle.trample_radius()
+	check(side <= need + 0.5, "no farther than needed (%.2f m, %.2f m clear)" % [side, need])
+	_free_world(w)
+
+
+## Muss sie zum Ziel hinlaufen, laeuft sie bis in Schlagdistanz heran (das Ziel
+## liegt dann im Kreis des Handschlags), nicht nur bis an den Rand ihrer
+## Reichweite.
+func test_walking_up_she_closes_in_to_strike_distance() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _golem(w, 0, Vector3(30, 5, 64))
+	_level_to(g, 6)
+	_settle(w)
+	var foe: Unit = _foe(w, 60.0, 64.0, 100000)
+	check(g.strike_distance() < g.reach() - 1.5,
+		"level 6: strike distance %.1f m, reach %.1f m" % [g.strike_distance(), g.reach()])
+	g.order_attack(foe)
+	var ticks: int = 0
+	while g._pending_attack == &"" and ticks < 200:
+		_tick_world(w)
+		ticks += 1
+	var d: float = _flat(g.position, foe.position)
+	check(g._pending_attack != &"", "she strikes (%d ticks)" % ticks)
+	check(d <= g.strike_distance() + 0.3, "having walked in to %.2f m (strike distance %.2f m)"
+		% [d, g.strike_distance()])
+	_free_world(w)
+
+
+## Aus dem Stand greift sie weiter auf volle Reichweite an — sie laeuft nicht hin.
+func test_standing_she_still_strikes_at_full_reach() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _golem(w, 0, Vector3(50, 5, 64))
+	_level_to(g, 6)
+	_settle(w)
+	var foe: Unit = _foe(w, 50.0 + g.reach() - 0.5, 64.0, 100000)
+	var at: Vector3 = g.position
+	g.order_attack(foe)
+	var ticks: int = 0
+	while g._pending_attack == &"" and ticks < 60:
+		_tick_world(w)
+		ticks += 1
+	check(g._pending_attack != &"", "she strikes (%d ticks)" % ticks)
+	check(_flat(g.position, at) < 0.05, "without taking a step (%.2f m)" % _flat(g.position, at))
+	_free_world(w)
+
+
+## Steht beim Heranlaufen ein anderer Golem im Weg, reicht die volle Reichweite:
+## sie schiebt ihn nicht weg, um naeher heranzukommen.
+func test_a_golem_in_the_way_leaves_her_the_full_reach() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _golem(w, 0, Vector3(30, 5, 64))
+	var other: Golem = _golem(w, 0, Vector3(20, 5, 100))
+	_level_to(g, 6)
+	_level_to(other, 6)
+	_settle(w)
+	var need: float = g.trample_radius() + other.trample_radius()
+	var foe_x: float = 60.0
+	# Where she first has the foe in reach, the other golem is already touching her.
+	other.position = Vector3(foe_x - g.reach() + need + 0.3, 5, 64)
+	var other_start: Vector3 = other.position
+	var foe: Unit = _foe(w, foe_x, 64.0, 100000)
+	g.order_attack(foe)
+	var ticks: int = 0
+	while g._pending_attack == &"" and ticks < 200:
+		_tick_world(w)
+		ticks += 1
+	var d: float = _flat(g.position, foe.position)
+	check(g._pending_attack != &"", "she strikes (%d ticks)" % ticks)
+	check(d > g.strike_distance() + 1.0 and d <= g.reach() + 0.05,
+		"from the edge of her reach (%.2f m; reach %.2f, strike distance %.2f)"
+			% [d, g.reach(), g.strike_distance()])
+	check(_flat(other.position, other_start) < 0.3,
+		"the golem in the way was not shoved (%.2f m)" % _flat(other.position, other_start))
+	_free_world(w)

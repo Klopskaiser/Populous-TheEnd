@@ -373,6 +373,32 @@ const GOLEM_GIANT_STEP_SHARE: float = 0.2
 ## sie sich auseinander (der kleinere weicht staerker aus). Die Kollision mit
 ## normalen Einheiten bleibt ab Stufe 1 ausgeschaltet.
 const GOLEM_BODY_GAP: float = 1.0
+## BEWEGUNGSFREIHEIT (Nutzer 2026-11-17): ist der Zielort eines Bewegungsbefehls von
+## anderen Golems belegt (ihr Koerper passte dort nicht hin), gilt sie als
+## angekommen, sobald sie bis auf GOLEM_BLOCKED_ARRIVE_BODIES eigene Koerperradien an
+## die Stelle heran ist, an der sie den Blockierer beruehrt — statt ihn wegzuschieben.
+const GOLEM_BLOCKED_ARRIVE_BODIES: float = 2.0
+## Beruehrung zweier Golems: Abstand hoechstens Summe der Koerperradien plus dieser
+## Anteil des eigenen Radius (mindestens GOLEM_CONTACT_MIN Meter).
+const GOLEM_CONTACT_SHARE: float = 0.25
+const GOLEM_CONTACT_MIN: float = 0.3
+## AUSWEICHEN (Nutzer 2026-11-17): ein untaetiger grosser Koerper (Golem, Katapult,
+## Feuerramme, Luftschiff — Luftschiffe nur unter sich), der einem laufenden im Weg
+## steht, tritt zur Seite (quer zu dessen Laufrichtung), sobald der bis auf
+## BODY_YIELD_LOOKAHEAD seiner eigenen Koerperradien heran ist — mit
+## BODY_YIELD_SPEED_SHARE seines Tempos. Nicht, wenn der Laufende genau dorthin
+## will, wo er steht. Ein Fahrzeug braucht dafuer Fahrbesatzung.
+const BODY_YIELD_LOOKAHEAD: float = 3.0
+const BODY_YIELD_SPEED_SHARE: float = 0.6
+## Wie GOLEM_BLOCKED_ARRIVE_BODIES fuer Fahrzeuge: angekommen, sobald es bis auf
+## diesen Anteil seines eigenen Abstandsradius an die Beruehrungsstelle heran ist.
+const VEHICLE_BLOCKED_ARRIVE_SHARE: float = 1.0
+## ANLAUF IN SCHLAGDISTANZ (Nutzer 2026-11-17): muss sie zum Ziel hinlaufen (oder
+## kommt sie aus der Bewegung), laeuft sie naeher heran als ihre Reichweite: bis das
+## Ziel im Kreis des Handschlags liegt — Aufschlagpunkt der Haende plus dieser Anteil
+## des Handschlag-Radius. Aus dem Stand greift sie weiter auf volle Reichweite an;
+## steht ein anderer Golem im Weg, reicht ebenfalls die volle Reichweite.
+const GOLEM_CLOSE_IN_SLAM_SHARE: float = 0.5
 ## REICHWEITE WAECHST MIT DEM KOERPER (Nutzer 2026-11-16): Arme und Beine werden
 ## mit dem Koerper laenger — bis dahin wuchs die Reichweite nur 10 % je Stufe
 ## (wie die Wirkflaechen) und der grosse Golem musste fast auf sein Ziel treten.
@@ -660,7 +686,7 @@ const GENESIS_GOLEM_WOOD_REGEN_PER_M: float = 0.15
 const GENESIS_GOLEM_PILE_GAP: float = 0.8
 
 # --- Feuerkrieger ---
-const FIREWARRIOR_HP: int = 65
+const FIREWARRIOR_HP: int = 70   # 65 -> 70 (Nutzervorgabe 2026-11-17)
 const FIREWARRIOR_SPEED: float = 4.0
 ## 8 -> 9 m (Nutzerentscheidung 2026-09-06 nach dem 200-gegen-200-Labor).
 const FIREWARRIOR_FIRE_RANGE: float = 9.0
@@ -687,7 +713,7 @@ const FIREWARRIOR_KICK_CHANCE: float = 0.6
 
 # --- Prediger ---
 ## 90 -> 85 (Nutzerentscheidung 2026-09-06, Labor-Schritt 3).
-const PREACHER_HP: int = 85
+const PREACHER_HP: int = 90   # 85 -> 90 (Nutzervorgabe 2026-11-17)
 const PREACHER_SPEED: float = 4.0
 const PREACHER_CONVERT_RANGE: float = 5.0
 ## Bekehrdauer: pro Ziel zufällig aus [MIN, MAX] gewürfelt.
@@ -1861,7 +1887,7 @@ const BUFF_AURA_REFRESH: float = 0.5
 # =============================================================================
 
 ## Werte wie ein Brave — eigene Konstanten, damit sie getrennt justierbar sind.
-const TECHNICIAN_HP: int = BRAVE_HP
+const TECHNICIAN_HP: int = 65   # 60 -> 65 (Nutzervorgabe 2026-11-17; vorher = BRAVE_HP)
 const TECHNICIAN_SPEED: float = BRAVE_SPEED
 ## Nahkampf: halb Tritt, halb Faustschlag, kein Schubser.
 const TECHNICIAN_SHOVE_CHANCE: float = 0.0

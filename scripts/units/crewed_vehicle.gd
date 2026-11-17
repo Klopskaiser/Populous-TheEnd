@@ -774,6 +774,128 @@ func _resummon_crew() -> void:
 			m._set_state(State.CREW)
 
 
+# --- Room among big bodies (user spec 2026-11-17) ------------------------------------
+
+## Every other living big body that shares this unit's layer: golems and ground
+## vehicles on the ground, airships among themselves (the same pairs the
+## separation pass keeps apart).
+static func big_bodies_near(me: Unit) -> Array[Unit]:
+	var out: Array[Unit] = []
+	if not (me.path_service is UnitManager):
+		return out
+	for u in (me.path_service as UnitManager).vehicles:
+		if u == me or not is_instance_valid(u) or u.state == Unit.State.DEAD:
+			continue
+		if u.vehicle_separation <= 0.0 or u.flies != me.flies:
+			continue
+		out.append(u)
+	return out
+
+
+## Centre distance at which two big bodies touch: golems keep the sum of their
+## body radii (Golem._golem_need), every other pair the separation pass's resting
+## distance — the larger of both separation radii.
+static func clearance(a: Unit, b: Unit) -> float:
+	if a is Golem and b is Golem:
+		return (a as Golem)._golem_need(b as Golem)
+	return maxf(a.vehicle_separation, b.vehicle_separation)
+
+
+## Body radius a walker looks ahead with (see yield_offset): a golem's body circle,
+## a vehicle's half separation radius.
+static func body_radius(u: Unit) -> float:
+	if u is Golem:
+		return (u as Golem).trample_radius()
+	return u.vehicle_separation * 0.5
+
+
+## The sideways step `me` (standing idle) takes out of `mover`'s way this tick, at
+## most `step_max` long — ZERO when it is not in the way: the mover is not
+## marching, `me` is behind it, still farther ahead than its look-ahead, beside its
+## course already, standing on its goal (the mover stops short there, see
+## blocked_goal_reached) or beyond the point where it stops. The step goes across
+## the course, to the side `me` already leans to (user spec 2026-11-17).
+static func yield_offset(me: Unit, mover: Unit, need: float, step_max: float) -> Vector2:
+	if mover.state != Unit.State.MOVE or not mover._has_path():
+		return Vector2.ZERO
+	var wp: Vector3 = mover._path[mover._path_index]
+	var dir: Vector2 = Vector2(wp.x - mover.position.x, wp.z - mover.position.z)
+	if dir.length_squared() < 0.000001:
+		return Vector2.ZERO
+	dir = dir.normalized()
+	var rel: Vector2 = Vector2(me.position.x - mover.position.x, me.position.z - mover.position.z)
+	var along: float = rel.dot(dir)
+	if along <= 0.0 or along > need + body_radius(mover) * Balance.BODY_YIELD_LOOKAHEAD:
+		return Vector2.ZERO
+	var left: Vector2 = Vector2(-dir.y, dir.x)
+	var lateral: float = rel.dot(left)
+	if absf(lateral) >= need:
+		return Vector2.ZERO
+	var goal: Vector3 = mover._path[mover._path.size() - 1]
+	if Vector2(goal.x - me.position.x, goal.z - me.position.z).length() < need:
+		return Vector2.ZERO
+	if Vector2(goal.x - mover.position.x, goal.z - mover.position.z).dot(dir) < along - need:
+		return Vector2.ZERO
+	var side: float = 1.0 if lateral > 0.0 \
+		or (lateral == 0.0 and me.get_instance_id() < mover.get_instance_id()) else -1.0
+	return left * side * minf(need - absf(lateral), step_max)
+
+
+## The goal of this vehicle's march is taken by other big bodies and it is already
+## close — closer than the blocker's touching distance plus
+## VEHICLE_BLOCKED_ARRIVE_SHARE of its own separation radius: it counts as arrived
+## instead of shoving them off the spot (user spec 2026-11-17).
+func blocked_goal_reached(goal: Vector3) -> bool:
+	var to_goal: float = _flat_dist(position, goal)
+	var slack: float = vehicle_separation * Balance.VEHICLE_BLOCKED_ARRIVE_SHARE
+	for other in big_bodies_near(self):
+		var need: float = clearance(self, other)
+		if _flat_dist(goal, other.position) < need and to_goal <= need + slack:
+			return true
+	return false
+
+
+func _tick_move(delta: float) -> void:
+	if _pending_target == Vector3.INF and _has_path() \
+			and blocked_goal_reached(_path[_path.size() - 1]):
+		_clear_path()
+		_on_path_finished()
+		return
+	super._tick_move(delta)
+
+
+## Out of the way (user spec 2026-11-17): an idle vehicle that can drive (enough
+## active crew) steps across the course of a marching big body it stands in the
+## way of — at BODY_YIELD_SPEED_SHARE of its speed, only onto ground it could drive
+## on (airships: anywhere on the disc).
+func _tick_yield(delta: float) -> void:
+	if state != State.IDLE or _sinking or is_neutral() \
+			or active_crew_count() < min_move_crew:
+		return
+	var step_max: float = speed * Balance.BODY_YIELD_SPEED_SHARE * delta
+	for other in big_bodies_near(self):
+		var off: Vector2 = yield_offset(self, other, clearance(self, other), step_max)
+		if off == Vector2.ZERO:
+			continue
+		for s in [1.0, -1.0]:
+			var next: Vector3 = Vector3(position.x + off.x * s, position.y, position.z + off.y * s)
+			if _can_drive_onto(next):
+				position = next
+				if not flies:
+					_snap_to_ground()
+				_sync_soa_pos()
+				return
+		return
+
+
+## May this vehicle be moved onto `p` by itself? Ground vehicles need a vehicle
+## cell (wide enough, not a parked hulk), airships ground beneath them on the disc.
+func _can_drive_onto(p: Vector3) -> bool:
+	if flies:
+		return terrain_data == null or terrain_data.has_ground(p.x, p.z)
+	return nav_grid == null or nav_grid.is_cell_vehicle_walkable(nav_grid.world_to_cell(p))
+
+
 # --- Orders & ticking ---------------------------------------------------------------
 
 ## Moving needs at least min_move_crew ACTIVE crew members (pacified or
@@ -953,6 +1075,8 @@ func tick(delta: float) -> void:
 	_refresh_crew_auras()
 	_tick_auto_recrew(delta)
 	super.tick(delta)
+	if state != State.DEAD:
+		_tick_yield(delta)
 	_tick_visual(delta)
 
 

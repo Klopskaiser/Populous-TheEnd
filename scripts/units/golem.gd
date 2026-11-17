@@ -188,6 +188,11 @@ var _trampled: Dictionary = {}
 ## Size the model is drawn at right now; eases toward size_factor() on a level-up.
 var _shown_size: float = 1.0
 
+## She had to walk to her target (or came at it out of a march): she closes in to
+## strike_distance() instead of stopping at the edge of her reach (user spec
+## 2026-11-17). False while she fights from where she stands.
+var _closing_in: bool = false
+
 ## The attack that is wound up right now (&"" = none) and the seconds until it
 ## lands. `_pending_building` is the assault target that is guaranteed its stage.
 var _pending_attack: StringName = &""
@@ -456,6 +461,8 @@ func tick(delta: float) -> void:
 			life_left -= delta
 			if life_left <= 0.0:
 				_crumble()
+	if state == State.IDLE:
+		_closing_in = false
 	_tick_pos = position
 	_tick_visual(delta)
 
@@ -656,6 +663,15 @@ static func kick_growth_share() -> float:
 ## The distance at which she strikes — it grows with her limbs.
 func reach() -> float:
 	return REACH * limb_factor()
+
+
+## How close she walks up when she has to walk to her target anyway (user spec
+## 2026-11-17): until it lies well inside the slam's circle — the spot where the
+## hands come down plus GOLEM_CLOSE_IN_SLAM_SHARE of the circle's radius —, never
+## farther out than her reach. From a standstill she keeps striking at reach().
+func strike_distance() -> float:
+	return minf(reach(), SLAM_FORWARD * limb_factor()
+		+ slam_radius() * Balance.GOLEM_CLOSE_IN_SLAM_SHARE)
 
 
 ## Flat damage bonus of the current level: GOLEM_LEVEL_DAMAGE per level up to the
@@ -1494,6 +1510,7 @@ func _tick_golem_separation(delta: float) -> void:
 		var close: float = minf(need - dist, maxf(current_speed(), other.current_speed()) * delta)
 		push += away * close * (theirs / (mine + theirs))
 	if push == Vector2.ZERO:
+		_tick_golem_yield(delta)
 		return
 	var next: Vector3 = Vector3(position.x + push.x, position.y, position.z + push.y)
 	if not _can_be_pushed_to(next):
@@ -1501,6 +1518,82 @@ func _tick_golem_separation(delta: float) -> void:
 	position = next
 	_snap_to_ground()
 	_sync_soa_pos()
+
+
+## Distance at which this golem and `other` touch (centre to centre).
+func _golem_need(other: Golem) -> float:
+	return (trample_radius() + other.trample_radius()) * Balance.GOLEM_BODY_GAP
+
+
+## Is another golem (or a ground vehicle) standing right in her way toward `point`
+## — touching her and ahead of her (within 60 degrees of the direction)? Then she
+## does not shove it (user spec 2026-11-17): the attack is struck from the full
+## reach.
+func _golem_in_the_way(point: Vector3) -> bool:
+	var dir: Vector2 = Vector2(point.x - position.x, point.z - position.z)
+	if dir.length_squared() < 0.000001:
+		return false
+	dir = dir.normalized()
+	var contact: float = maxf(Balance.GOLEM_CONTACT_MIN,
+		trample_radius() * Balance.GOLEM_CONTACT_SHARE)
+	for other in CrewedVehicle.big_bodies_near(self):
+		var rel: Vector2 = Vector2(other.position.x - position.x, other.position.z - position.z)
+		var d: float = rel.length()
+		if d > CrewedVehicle.clearance(self, other) + contact or d < 0.001:
+			continue
+		if rel.dot(dir) / d >= 0.5:
+			return true
+	return false
+
+
+## The goal of her march is taken by other golems or ground vehicles (her body
+## would not fit there)
+## and she is already close to it — closer than the blocker's touching distance
+## plus GOLEM_BLOCKED_ARRIVE_BODIES of her own body radii (user spec 2026-11-17:
+## near enough counts as arrived; she does not try to push them off the spot).
+func blocked_goal_reached(goal: Vector3) -> bool:
+	var to_goal: float = _flat_dist(position, goal)
+	var slack: float = trample_radius() * Balance.GOLEM_BLOCKED_ARRIVE_BODIES
+	for other in CrewedVehicle.big_bodies_near(self):
+		var need: float = CrewedVehicle.clearance(self, other)
+		if _flat_dist(goal, other.position) < need and to_goal <= need + slack:
+			return true
+	return false
+
+
+## A march whose goal other golems occupy ends close to it (blocked_goal_reached).
+func _tick_move(delta: float) -> void:
+	if _pending_target == Vector3.INF and _has_path() \
+			and blocked_goal_reached(_path[_path.size() - 1]):
+		_clear_path()
+		_on_path_finished()
+		return
+	super._tick_move(delta)
+
+
+## Out of the way (user spec 2026-11-17): an idle, standing golem that another golem
+## or a ground vehicle is marching into steps aside — across its course, toward the
+## side she already leans to — instead of being shoved along in front of it
+## (CrewedVehicle.yield_offset). Not when the walker wants to get to the very spot
+## she stands on (it stops short, see blocked_goal_reached) or stops before it gets
+## to her.
+func _tick_golem_yield(delta: float) -> void:
+	if state != State.IDLE or stance != STANCE_STAND or is_switching_stance() 			or is_stretching() or _pending_attack != &"":
+		return
+	var step_max: float = current_speed() * Balance.BODY_YIELD_SPEED_SHARE * delta
+	for other in CrewedVehicle.big_bodies_near(self):
+		var off: Vector2 = CrewedVehicle.yield_offset(self, other,
+			CrewedVehicle.clearance(self, other), step_max)
+		if off == Vector2.ZERO:
+			continue
+		for s in [1.0, -1.0]:
+			var next: Vector3 = Vector3(position.x + off.x * s, position.y, position.z + off.y * s)
+			if _can_be_pushed_to(next):
+				position = next
+				_snap_to_ground()
+				_sync_soa_pos()
+				return
+		return
 
 
 ## May another golem push her onto this spot? Only where she could walk herself.
@@ -1538,7 +1631,11 @@ func _maybe_retaliate(attacker) -> void:
 func _begin_attack(enemy: Unit) -> void:
 	if enemy != null and is_instance_valid(enemy) and enemy.is_airborne():
 		return
+	# Out of a march (attack-move) or while already walking up to a target she
+	# closes in; from a standstill she strikes at full reach (user spec 2026-11-17).
+	var walking: bool = state == State.MOVE or (state == State.ATTACK and _closing_in)
 	super._begin_attack(enemy)
+	_closing_in = walking
 
 
 ## Lean attack loop without the group machinery: close to REACH, then attack on
@@ -1584,12 +1681,19 @@ func _tick_attack(delta: float) -> void:
 			_face_point(target.position)   # wait for the body to land
 			return
 		_in_melee = false
+		_closing_in = true   # she has to walk: she will close in to strike distance
 		if not _approach(target.position, delta):
 			_mark_target_unreachable(target)
 			_retarget_or_idle()
 			return
 		_face_point(target.position)
 		return
+	if _keeps_closing_in(dist, target.position) and _approach(target.position, delta):
+		_in_melee = false
+		_attack_cooldown -= delta   # the next blow is ready when she gets there
+		_face_point(target.position)
+		return
+	_closing_in = false
 	if _has_path():
 		_clear_path()
 	_in_melee = true
@@ -1602,6 +1706,15 @@ func _tick_attack(delta: float) -> void:
 			_stomp_while_turning()
 			return
 		_attack_or_switch()
+
+
+## Does she walk on although the target (`dist` away) is already within her reach?
+## Only when she had to walk to it anyway (_closing_in), stands upright, it is
+## still beyond strike_distance() and no other golem stands in her way — then the
+## full reach will do (user spec 2026-11-17).
+func _keeps_closing_in(dist: float, point: Vector3) -> bool:
+	return _closing_in and stance == STANCE_STAND and dist > strike_distance() \
+		and not _golem_in_the_way(point)
 
 
 ## Nearest living, standing enemy within reach() that the golem can strike (no
@@ -1634,12 +1747,23 @@ func _bombard_building(building, delta: float) -> void:
 		return
 	var center: Vector3 = building.center_world()
 	var flat: Vector2 = Vector2(position.x, position.z)
-	if building.footprint_distance_to(flat) > reach() - 0.5:
+	var gap: float = building.footprint_distance_to(flat)
+	if gap > reach() - 0.5:
 		_in_melee = false
+		_closing_in = true   # she has to walk: she will close in to strike distance
 		# Never path onto the footprint itself (unwalkable): stop short of it.
 		_approach(stand_off_point(position, center, reach() * APPROACH_RANGE_FRACTION), delta)
 		_face_point(center)
 		return
+	# Closing in on the building: toward the nearest point of its footprint (the
+	# A* goal snaps off the footprint itself).
+	if _keeps_closing_in(gap + 0.5, center) \
+			and _approach(stand_off_point(position, center, 0.0), delta):
+		_in_melee = false
+		_attack_cooldown -= delta
+		_face_point(center)
+		return
+	_closing_in = false
 	if _has_path():
 		_clear_path()
 	_in_melee = true
@@ -1980,8 +2104,10 @@ func order_attack(enemy: Unit) -> void:
 
 func order_attack_building(building) -> void:
 	_chase_ship = null
+	var walking: bool = state == State.MOVE or (state == State.ATTACK and _closing_in)
 	super.order_attack_building(building)
 	_ordered_building = attack_building if attack_building == building else null
+	_closing_in = walking
 
 
 ## EXPLICIT BUILDING ORDER (user report 2026-11-16): sent against a building she

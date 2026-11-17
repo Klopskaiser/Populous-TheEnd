@@ -12645,6 +12645,32 @@ zuerst am Daemonengolem.
 - Nachtrag: nach der Abnahme am Daemonengolem haben auch `golem.glb` und `golem_genesis.glb` die
   niedliche Fassung von `grow` und `stomp` (dieselben Namen und Zeiten).
 
+### Golems: Bewegungsfreiheit und Anlauf in Schlagdistanz (2026-11-17)
+
+Nutzervorgabe, alles in `scripts/units/golem.gd` und `Balance.GOLEM_*` (gilt fuer alle drei Golems):
+- Blockierter Zielort: `blocked_goal_reached()` / `_tick_move`-Override — ist der Zielpunkt von
+  Golems belegt (eigener Koerper passte nicht hin) und sie ist naeher als Beruehrungsabstand plus
+  2 eigene Koerperradien (`GOLEM_BLOCKED_ARRIVE_BODIES`), endet der Marsch dort.
+- Ausweichen: `_tick_golem_yield` — ein untaetiger, stehender Golem tritt quer zur Laufrichtung
+  eines laufenden Golems zur Seite (`GOLEM_YIELD_LOOKAHEAD` 3 Koerperradien des Laeufers,
+  `GOLEM_YIELD_SPEED_SHARE` 0,6), nicht wenn der Laeufer genau dorthin will oder vorher anhaelt.
+  Laeuft nur, solange die Abstandsregel nichts zu schieben hat.
+- Anlauf: `_closing_in` wird gesetzt, wenn sie zum Ziel laufen muss oder es aus einem Marsch
+  annimmt (`_begin_attack`, `order_attack_building`); dann laeuft sie bis `strike_distance()`
+  (Aufschlagpunkt + halber Handschlag-Radius, hoechstens `reach()`), ausser gebueckt oder ein
+  anderer Golem beruehrt sie in Laufrichtung (`_golem_in_the_way`). Aus dem Stand unveraendert.
+- Tests: `test_golem.gd` (5 neue: Marsch auf belegten Zielort, Ausweichen, Anlauf, Stand,
+  Golem im Weg).
+- Nachtrag (Nutzerwunsch): dieselben Regeln fuer Fahrzeuge, gemeinsame Helfer in
+  `CrewedVehicle` (`big_bodies_near`, `clearance`, `body_radius`, `yield_offset`,
+  `blocked_goal_reached`, `_tick_move`, `_tick_yield`, `_can_drive_onto`); Golems sehen Fahrzeuge
+  und umgekehrt (am Boden), Luftschiffe nur einander. Ausweichen nur mit Fahrbesatzung.
+  Konstanten `BODY_YIELD_LOOKAHEAD` / `BODY_YIELD_SPEED_SHARE` (ersetzen `GOLEM_YIELD_*`),
+  `VEHICLE_BLOCKED_ARRIVE_SHARE`. Tests `test_siege.gd` (4 neu: Katapult vor belegtem Ziel,
+  Katapult weicht aus, unbemannt weicht nicht aus, Luftschiff weicht aus).
+- Lebenspunkte (Nutzervorgabe): Techniker 60 -> 65 (nicht mehr = Brave), Feuerkrieger 65 -> 70,
+  Prediger 85 -> 90.
+
 ### Genesisgolem: Aggro, Stufenhoehe, Holz (2026-11-17)
 
 Nutzervorgabe, alles in `scripts/units/genesis_golem.gd` und `Balance.GENESIS_GOLEM_*`:

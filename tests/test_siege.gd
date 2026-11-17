@@ -2175,3 +2175,115 @@ func test_catapult_still_closes_in_on_a_reachable_building() -> void:
 	check(siege.attack_building == hut, "the order is kept")
 	check(fired, "and the catapult closes in and shoots")
 	_free_world(w)
+
+
+# --- Bewegungsfreiheit grosser Koerper (Nutzervorgabe 2026-11-17) ---------------------
+
+## Ist der Zielort von anderen Fahrzeugen belegt, haelt das Katapult nah davor an,
+## statt sie wegzuschieben.
+func test_a_catapult_stops_short_of_a_goal_other_vehicles_hold() -> void:
+	var w: Dictionary = _make_world()
+	var goal: Vector3 = w.nav.cell_to_world(Vector2i(76, 60))
+	var holders: Array[SiegeEngine] = []
+	for dz in [-1.7, 1.7]:
+		var h: SiegeEngine = w.unit_manager.spawn_unit(
+			SIEGE_SCENE, 0, goal + Vector3(0.0, 0.0, dz)) as SiegeEngine
+		_board_crew(w, h)
+		holders.append(h)
+	var mover: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(56, 60))) as SiegeEngine
+	_board_crew(w, mover)
+	for i in range(10):
+		_tick_world(w)
+	var starts: Array[Vector3] = [holders[0].position, holders[1].position]
+	mover.order_move(goal)
+	var ticks: int = 0
+	while mover.state == Unit.State.MOVE and ticks < 400:
+		_tick_world(w)
+		ticks += 1
+	check(mover.state == Unit.State.IDLE, "the march ends although the goal is taken (%d ticks)" % ticks)
+	var d: float = Vector2(mover.position.x - goal.x, mover.position.z - goal.z).length()
+	var sep: float = mover.vehicle_separation
+	check(d <= sep * (1.0 + Balance.VEHICLE_BLOCKED_ARRIVE_SHARE) + 0.3,
+		"it stops close to the spot (%.2f m)" % d)
+	var pushed: float = 0.0
+	for k in range(2):
+		pushed = maxf(pushed, Vector2(holders[k].position.x - starts[k].x,
+			holders[k].position.z - starts[k].z).length())
+	check(pushed < 0.3, "the vehicles on the spot are not shoved away (%.2f m)" % pushed)
+	_free_world(w)
+
+
+## Ein untaetiges, bemanntes Katapult, das einem fahrenden im Weg steht, faehrt
+## quer zur Seite, statt vor ihm hergeschoben zu werden.
+func test_an_idle_catapult_steps_aside_for_a_driving_one() -> void:
+	var w: Dictionary = _make_world()
+	var idle: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(66, 60))) as SiegeEngine
+	_board_crew(w, idle)
+	var mover: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(54, 60))) as SiegeEngine
+	_board_crew(w, mover)
+	for i in range(10):
+		_tick_world(w)
+	var start: Vector3 = idle.position
+	var goal: Vector3 = w.nav.cell_to_world(Vector2i(78, 60))
+	mover.order_move(goal)
+	var ticks: int = 0
+	while mover.state == Unit.State.MOVE and ticks < 600:
+		_tick_world(w)
+		ticks += 1
+	var off: float = Vector2(mover.position.x - goal.x, mover.position.z - goal.z).length()
+	check(off < 1.0, "the driving catapult gets to its goal (%.2f m off, %d ticks)" % [off, ticks])
+	var side: float = absf(idle.position.z - start.z)
+	var along: float = absf(idle.position.x - start.x)
+	check(side > 1.0 and side > along * 2.0,
+		"the idle one moved aside (%.2f m across, %.2f m along the course)" % [side, along])
+	_free_world(w)
+
+
+## Ein unbemanntes Fahrzeug kann nicht ausweichen (niemand faehrt es) — es bleibt
+## ein Hindernis, um das herum geplant wird.
+func test_an_unmanned_vehicle_does_not_step_aside() -> void:
+	var w: Dictionary = _make_world()
+	var idle: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(66, 60))) as SiegeEngine
+	var mover: SiegeEngine = w.unit_manager.spawn_unit(
+		SIEGE_SCENE, 0, w.nav.cell_to_world(Vector2i(60, 60))) as SiegeEngine
+	_board_crew(w, mover)
+	mover.position = idle.position - Vector3(4.0, 0.0, 0.0)
+	mover._clear_path()
+	mover._path = PackedVector3Array([idle.position + Vector3(10.0, 0.0, 0.0)])
+	mover._path_index = 0
+	mover._set_state(Unit.State.MOVE)
+	var start: Vector3 = idle.position
+	idle._tick_yield(TICK)
+	check(idle.position.is_equal_approx(start), "nobody aboard: it stays where it is")
+	_free_world(w)
+
+
+## Auch Luftschiffe weichen einander aus (nur untereinander — sie fliegen ueber die
+## Bodenfahrzeuge hinweg).
+func test_an_idle_airship_steps_aside_for_a_flying_one() -> void:
+	var w: Dictionary = _make_world()
+	var idle: CrewedVehicle = w.unit_manager.spawn_unit(
+		AIRSHIP_SCENE, 0, w.nav.cell_to_world(Vector2i(66, 60))) as CrewedVehicle
+	_board_crew(w, idle)
+	var mover: CrewedVehicle = w.unit_manager.spawn_unit(
+		AIRSHIP_SCENE, 0, w.nav.cell_to_world(Vector2i(54, 60))) as CrewedVehicle
+	_board_crew(w, mover)
+	for i in range(10):
+		_tick_world(w)
+	check(idle.boarded_count() > 0 and mover.boarded_count() > 0, "both ships are manned")
+	var start: Vector3 = idle.position
+	var goal: Vector3 = w.nav.cell_to_world(Vector2i(78, 60))
+	mover.order_move(goal)
+	var ticks: int = 0
+	while mover.state == Unit.State.MOVE and ticks < 600:
+		_tick_world(w)
+		ticks += 1
+	var side: float = absf(idle.position.z - start.z)
+	var along: float = absf(idle.position.x - start.x)
+	check(side > 0.5 and side > along,
+		"the idle ship moved aside (%.2f m across, %.2f m along the course)" % [side, along])
+	_free_world(w)
