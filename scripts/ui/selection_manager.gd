@@ -262,6 +262,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			queue_redraw()
 	elif event.is_action_pressed("demolish_building"):
 		_demolish_selected_buildings()
+	elif event.is_action_pressed("golem_sit_toggle"):
+		toggle_golem_sit()
 	# Shift+B / B: Godot compares modifiers ONLY with exact_match = true
 	# (InputEventKey::action_match ignores them otherwise), so both branches must
 	# ask exactly — the elif order alone cannot separate B from Shift+B.
@@ -886,6 +888,10 @@ func _command_move(screen_pos: Vector2, queue_up: bool, aggressive: bool = false
 	_prune_selection()
 	if selected.is_empty():
 		return
+	# Only sitting golems selected: they take no orders but "stand up" (key V).
+	if _selection_all_sit_locked():
+		_play_blocked_sound()
+		return
 	var camera: Camera3D = get_viewport().get_camera_3d()
 	if camera == null:
 		return
@@ -976,6 +982,33 @@ func _selection_has_shaman() -> bool:
 		if is_instance_valid(unit) and unit.unit_kind() == &"shaman":
 			return true
 	return false
+
+
+## Every selected unit is a golem that sits (or is sitting down / getting up).
+func _selection_all_sit_locked() -> bool:
+	for unit in selected:
+		if not (is_instance_valid(unit) and unit is Golem and (unit as Golem).is_sit_locked()):
+			return false
+	return not selected.is_empty()
+
+
+## Key V and the sidebar button (user spec 2026-11-17): sits the selected golems
+## down, or calls them up when one of them sits. Nobody answering = blocked cue.
+func toggle_golem_sit() -> void:
+	_prune_selection()
+	var golems: Array[Unit] = []
+	for unit in selected:
+		if is_instance_valid(unit) and unit is Golem and unit.tribe_id == player_tribe_id:
+			golems.append(unit)
+	if golems.is_empty():
+		return
+	var answered: int = 0
+	if _tribe_commands != null:
+		answered = _tribe_commands.toggle_golem_sit(golems)
+	if answered == 0:
+		_play_blocked_sound()
+	else:
+		_play_move_sound()
 
 
 func _selection_has_golem() -> bool:

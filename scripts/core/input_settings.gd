@@ -31,6 +31,7 @@ const ACTIONS: Array[Array] = [
 	[&"attack_move_arm", "Angriffsbewegung", "Befehle"],
 	[&"harvest_area_arm", "Holzfäll-Rechteck", "Befehle"],
 	[&"toggle_patrol", "Patrouille an/aus", "Befehle"],
+	[&"golem_sit_toggle", "Golem hinsetzen/aufstehen", "Befehle"],
 	[&"toggle_ranges", "Reichweiten anzeigen", "Befehle"],
 	[&"build_hut", "Hütte bauen", "Bauen"],
 	[&"rotate_building", "Gebäude drehen", "Bauen"],

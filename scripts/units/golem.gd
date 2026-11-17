@@ -97,11 +97,12 @@ const CLIP_SLAM_LOW: StringName = &"slam_low"
 const CLIP_DRUM_LOW: StringName = &"drum_low"
 ## Length of the stance-switch clips at speed 1 (golem_bewegung.mjs).
 const STANCE_CLIP_LENGTH: float = 0.45
-## The third stance (2026-11-17): SITTING. It is reached only through the crouch
-## (stand -> crouch -> sit, and back the same way), she sits only while she has
-## nothing to do, and anything to do gets her up. NOTHING IN THE GAME MAKES HER
-## SIT YET — sit_down() is the hook for a later trigger. The numbers keep their
-## order: a stance change always goes one step along 0 - 1 - 2 (_begin_stance).
+## The third stance (2026-11-17): SITTING, for every golem from GOLEM_SIT_MIN_HEIGHT.
+## It is reached only through the crouch (stand -> crouch -> sit, and back the same
+## way, ending standing) and ONLY BY HAND (sit_down / stand_up: key V, the sidebar
+## button). From the first step down to the last step up she is sit-locked
+## (is_sit_locked): no orders, no walking, no attacks. The numbers keep their order:
+## a stance change always goes one step along 0 - 1 - 2 (_begin_stance).
 const STANCE_SIT: int = 2
 const CLIP_SIT_IDLE: StringName = &"sit_idle"
 const CLIP_SIT_DOWN: StringName = &"sit_down"
@@ -249,6 +250,30 @@ var _stance_switch: float = 0.0
 var _stance_age: float = 1000.0
 ## She has been asked to sit (sit_down) and nothing has called her up since.
 var _wants_sit: bool = false
+## She has been called up from the sit (stand_up) and is not standing yet.
+var _leaving_sit: bool = false
+## Ground her feet still have to cover toward the free seat (find_seat) while she
+## bends down.
+var _sit_shift: Vector3 = Vector3.ZERO
+## While seated: the middle of the seat (her logic position), its long axis (her
+## heading), its half extents (x = across, y = along) — fixed when she sat down —,
+## the units (and enemy vehicles) under it then, and the time to the next tick.
+var _seat_center: Vector3 = Vector3.INF
+var _seat_fwd: Vector3 = Vector3(0, 0, 1)
+var _seat_half: Vector2 = Vector2.ZERO
+var _sit_victims: Array = []
+var _sit_damage_timer: float = 0.0
+## While seated she never lies lower than this (the ground under feet, seat and
+## hands when she sat down, see _seat_floor_height).
+var _seat_floor_y: float = -INF
+## The levelling under her while she sits down (TerrainMorph), if any.
+var _sit_level_morph = null
+## The attacks of her limbs while she sits (GolemSitCombat) and the animation layers
+## for them (GolemSitAnim; only with a model that has the clips).
+var sit_combat: GolemSitCombat = null
+## Off = no sit attacks (tests of the sit damage switch them off).
+var sit_attacks_enabled: bool = true
+var _sit_anim: GolemSitAnim = null
 ## The stomp has landed and its clip is still settling into the crouch: once it
 ## has played out she decides whether to stay down or get up again (_tick_stance).
 var _stomp_landed: bool = false
@@ -450,7 +475,8 @@ func selection_ring_radius() -> float:
 ## (GOLEM_TARGET_RADIUS_SHARE) — they attack from further away instead of
 ## crowding right under her. The giant levels the ground only in this circle.
 func target_radius() -> float:
-	return selection_ring_radius() * Balance.GOLEM_TARGET_RADIUS_SHARE
+	var r: float = selection_ring_radius() * Balance.GOLEM_TARGET_RADIUS_SHARE
+	return r * Balance.GOLEM_SIT_TARGET_RADIUS_FACTOR if _seat_center != Vector3.INF else r
 
 
 # --- Lifetime -----------------------------------------------------------------------
@@ -463,6 +489,8 @@ func tick(delta: float) -> void:
 		_tick_stretch(delta)
 	_tick_pending_attack(delta)
 	if state != State.DEAD and not doomed and not garrison_housed:
+		_tick_sit_damage(delta)
+		_tick_sit_combat(delta)
 		_tick_air_strike(delta)
 		_tick_air_chase(delta)
 		_tick_level_regen(delta)
@@ -476,6 +504,9 @@ func tick(delta: float) -> void:
 				_crumble()
 	if state == State.IDLE:
 		_closing_in = false
+	if _seat_center != Vector3.INF and position.y < _seat_floor_y:
+		position.y = _seat_floor_y
+		_sync_soa_pos()
 	_tick_pos = position
 	_tick_visual(delta)
 
@@ -795,9 +826,19 @@ func _tick_stretch(delta: float) -> void:
 			_stretch_time = 0.0
 			_stance_age = 1000.0
 		return
+	if is_sit_locked():
+		# Growing while seated (user spec 2026-11-17): she stays seated and does not
+		# stretch (no clip for it yet) — the growth simply shows. On the way down or
+		# up it waits until she sits.
+		if _stretch_queued and stance == STANCE_SIT and not is_switching_stance():
+			_stretch_queued = false
+			_play_sfx(&"golem_grow")
+			if _sit_anim != null and _sit_anim.is_active():
+				_sit_anim.fire(GolemSitAnim.LAYER_FULL, GolemSitAnim.CLIP_GROW, Balance.GOLEM_GROW_TIME)
+		return
 	if not _stretch_queued or _pending_attack != &"" or _attack_anim_left > 0.0 \
-			or is_switching_stance() or stance == STANCE_SIT:
-		return   # (from the sit she gets up into the crouch first, see _tick_stance)
+			or is_switching_stance():
+		return
 	_stretch_queued = false
 	_stretch_time = Balance.GOLEM_GROW_TIME
 	_stomp_landed = false   # the stretch gets her up by itself
@@ -859,33 +900,404 @@ func stance_name() -> String:
 	return "gebückt" if stance == STANCE_CROUCH else "stehend"
 
 
-## Asks her to sit down. Only an idle golem does: she bends down, sits, and stays
-## seated until stand_up() or until she has something to do (an order, a target,
-## an owed stretch). Returns false when she will not. NO TRIGGER CALLS THIS YET.
+## Big enough to sit (GOLEM_SIT_MIN_HEIGHT)?
+func can_sit() -> bool:
+	return height_m() >= Balance.GOLEM_SIT_MIN_HEIGHT - 0.0001
+
+
+## The player asks her to sit (key V, sidebar). Whatever she was doing ends; she
+## bends down — moving onto a free seat nearby on the way, if hers is taken —, sits
+## and stays seated until stand_up(). Returns false when she will not: too small,
+## already sitting / on her way, or no free seat (find_seat).
 func sit_down() -> bool:
-	if state != State.IDLE or doomed or garrison_housed or _sit_must_end():
+	if state == State.DEAD or doomed or garrison_housed or not can_sit() or is_sit_locked():
 		return false
+	var feet: Vector3 = find_seat()
+	if feet == Vector3.INF:
+		return false
+	_on_sit_requested()
+	_end_attack()
+	_clear_building_target()
+	_ordered_building = null
+	_chase_ship = null
+	waypoint_queue.clear()
+	_pending_target = Vector3.INF
+	_clear_path()
+	_closing_in = false
+	if state != State.IDLE:
+		_set_state(State.IDLE)
+	_sit_shift = Vector3(feet.x - position.x, 0.0, feet.z - position.z)
 	_wants_sit = true
 	return true
 
 
-## Calls her up again: sit -> crouch -> stand, without the stance's waiting time.
-func stand_up() -> void:
+## Hook for subclasses: the sit request ends their own business (the Genesis
+## golem's harvest).
+func _on_sit_requested() -> void:
+	pass
+
+
+## The player calls her up: sit -> crouch -> stand, without the stance's waiting
+## time; she stays sit-locked until she stands. Also cancels a sit still on its way
+## down. Returns false when she was not sitting or on her way.
+func stand_up() -> bool:
+	if not _wants_sit:
+		return false
 	_wants_sit = false
+	_sit_shift = Vector3.ZERO
+	_leaving_sit = stance != STANCE_STAND or is_switching_stance()
+	return true
 
 
 func is_sitting() -> bool:
 	return stance == STANCE_SIT
 
 
-## Sitting is for idle times only.
-func _sit_must_end() -> bool:
-	return state != State.IDLE or _stretch_queued or _pending_attack != &""
+## From the request to sit until she stands again: no orders, no walking, no
+## attacks, not pushed by other golems (user spec 2026-11-17).
+func is_sit_locked() -> bool:
+	return _wants_sit or stance == STANCE_SIT or _leaving_sit
 
 
-## Seconds sitting down / getting up from the sit takes at the current size.
+## Seated or on her way: she takes no orders — only stand_up() reaches her.
+func can_take_orders() -> bool:
+	return super.can_take_orders() and not is_sit_locked()
+
+
+## Seconds sitting down / getting up from the sit takes: GOLEM_SIT_TIME at
+## GOLEM_SIT_REF_HEIGHT, with the root of the height, no cap (user spec 2026-11-17).
 func sit_switch_time() -> float:
-	return minf(Balance.GOLEM_SIT_TIME * sqrt(size_factor()), Balance.GOLEM_SIT_TIME_MAX)
+	return Balance.GOLEM_SIT_TIME * sqrt(height_m() / Balance.GOLEM_SIT_REF_HEIGHT)
+
+
+## How far behind her feet the middle of the seat lies at her size (metres).
+func seat_back_m() -> float:
+	return Balance.GOLEM_SIT_SEAT_BACK * model_scale().z * size_factor()
+
+
+## Half extents of the seat at her size: x across, y along her heading.
+func seat_half_extent() -> Vector2:
+	return Vector2(Balance.GOLEM_SIT_SEAT_WIDTH * 0.5 * model_scale().x,
+		Balance.GOLEM_SIT_SEAT_LENGTH * 0.5 * model_scale().z) * size_factor()
+
+
+## Where her FEET have to stand for a free seat: her own spot, else a spot up to
+## GOLEM_SIT_SEARCH_SHARE of her body radius aside (two rings of eight); INF = none.
+func find_seat() -> Vector3:
+	var fwd: Vector3 = heading()
+	var back: float = seat_back_m()
+	var half: Vector2 = seat_half_extent()
+	var search: float = trample_radius() * Balance.GOLEM_SIT_SEARCH_SHARE
+	var offsets: Array[Vector2] = [Vector2.ZERO]
+	for ring in [0.5, 1.0]:
+		for k in range(8):
+			offsets.append(Vector2.from_angle(float(k) * TAU / 8.0) * search * ring)
+	for off in offsets:
+		var feet: Vector3 = Vector3(position.x + off.x, position.y, position.z + off.y)
+		if seat_free(feet - fwd * back, fwd, half):
+			return feet
+	return Vector3.INF
+
+
+## Is the seat (middle, long axis, half extents) free: wholly on land inside the
+## disc, touching no building or construction site of any tribe?
+func seat_free(center: Vector3, fwd: Vector3, half: Vector2) -> bool:
+	var right: Vector3 = Vector3(fwd.z, 0.0, -fwd.x)
+	if terrain_data != null:
+		for i in range(-2, 3):
+			for j in range(-2, 3):
+				var p: Vector3 = center + right * (half.x * float(i) / 2.0) + fwd * (half.y * float(j) / 2.0)
+				if not terrain_data.has_ground(p.x, p.z) \
+						or terrain_data.get_height(p.x, p.z) <= TerrainData.SEA_LEVEL:
+					return false
+	if building_manager != null:
+		var c: Vector2 = Vector2(center.x, center.z)
+		var f: Vector2 = Vector2(fwd.x, fwd.z)
+		for b in building_manager.buildings:
+			if not is_instance_valid(b):
+				continue
+			var box: Rect2 = Rect2(Vector2(b.cell) * TerrainData.CELL_SIZE,
+				Vector2(b.footprint) * TerrainData.CELL_SIZE)
+			if seat_overlaps_box(c, f, half, box):
+				return false
+	return true
+
+
+## Does the seat rectangle (middle c, long axis fwd, half extents half: x
+## across, y along) overlap or touch the axis-aligned box? Separating axes.
+static func seat_overlaps_box(c: Vector2, fwd: Vector2, half: Vector2, box: Rect2) -> bool:
+	var right: Vector2 = Vector2(fwd.y, -fwd.x)
+	var bh: Vector2 = box.size * 0.5
+	var d: Vector2 = box.get_center() - c
+	if absf(d.x) > bh.x + absf(right.x) * half.x + absf(fwd.x) * half.y:
+		return false
+	if absf(d.y) > bh.y + absf(right.y) * half.x + absf(fwd.y) * half.y:
+		return false
+	if absf(d.dot(right)) > half.x + absf(right.x) * bh.x + absf(right.y) * bh.y:
+		return false
+	if absf(d.dot(fwd)) > half.y + absf(fwd.x) * bh.x + absf(fwd.y) * bh.y:
+		return false
+	return true
+
+
+## Is the point p on the seat she sat down on (the rectangle fixed then)?
+func on_seat(p: Vector3) -> bool:
+	if _seat_center == Vector3.INF:
+		return false
+	var d: Vector3 = Vector3(p.x - _seat_center.x, 0.0, p.z - _seat_center.z)
+	var right: Vector3 = Vector3(_seat_fwd.z, 0.0, -_seat_fwd.x)
+	return absf(d.dot(right)) <= _seat_half.x and absf(d.dot(_seat_fwd)) <= _seat_half.y
+
+
+## GOLEM_SIT_SEAT_LEAD before she touches down, her logic position moves from the
+## feet onto the middle of the seat (the model is drawn that far forward again,
+## _tick_visual — the figure does not jump; the selection ring does). The seat is
+## fixed now, and she lies no lower than the ground under feet, seat and hands.
+func _move_onto_seat() -> void:
+	if _seat_center != Vector3.INF:
+		return
+	if _sit_shift != Vector3.ZERO:
+		position += _sit_shift
+		_sit_shift = Vector3.ZERO
+		_snap_to_ground()
+	_seat_fwd = heading()
+	facing = _seat_fwd   # no slewing left over: seated she turns only on purpose
+	_seat_half = seat_half_extent()
+	_seat_floor_y = _seat_floor_height(position, _seat_fwd)
+	position -= _seat_fwd * seat_back_m()
+	_snap_to_ground()
+	position.y = maxf(position.y, _seat_floor_y)
+	_seat_center = position
+	_after_seat_shift()
+
+
+## The highest ground under the seated figure with her feet at `feet`: feet, seat,
+## both hands (user spec 2026-11-17: she may lie higher, never lower).
+func _seat_floor_height(feet: Vector3, fwd: Vector3) -> float:
+	if terrain_data == null:
+		return feet.y
+	var s: float = model_scale().z * size_factor()
+	var right: Vector3 = Vector3(fwd.z, 0.0, -fwd.x)
+	var hand_back: Vector3 = fwd * (-Balance.GOLEM_SIT_HAND_BACK * s)
+	var side: Vector3 = right * (Balance.GOLEM_SIT_HAND_SIDE * model_scale().x * size_factor())
+	var h: float = terrain_data.get_height(feet.x, feet.z)
+	for p in [feet - fwd * seat_back_m(), feet + hand_back + side, feet + hand_back - side]:
+		h = maxf(h, terrain_data.get_height(p.x, p.z))
+	return h
+
+
+## Ground moved under her (TerrainMorph): seated, she never sinks below her seat level.
+func settle_on_ground(h: float) -> void:
+	position.y = maxf(h, _seat_floor_y) if _seat_center != Vector3.INF else h
+
+
+## She sits down (sit_down step begins): the ground under the whole seated figure
+## evens out toward the height of her feet over the time she takes (user spec
+## 2026-11-17, sit_level_plan). Needs the terrain context (the summoning spell's).
+func _start_sit_levelling() -> void:
+	if terrain_ctx == null or terrain_data == null or path_service == null:
+		return
+	var feet: Vector3 = position + _sit_shift
+	var blocked: Array[Rect2i] = []
+	if building_manager != null:
+		for b in building_manager.buildings:
+			if is_instance_valid(b):
+				blocked.append(b.footprint_rect().grow(1))
+	var s: Vector2 = Vector2(model_scale().x, model_scale().z) * size_factor()
+	var plan: Dictionary = sit_level_plan(terrain_data, feet, heading(),
+		Balance.GOLEM_SIT_LEVEL_FRONT * s.y, Balance.GOLEM_SIT_LEVEL_BACK * s.y,
+		Balance.GOLEM_SIT_LEVEL_HALF_WIDTH * s.x,
+		terrain_data.get_height(feet.x, feet.z), Balance.GOLEM_FLATTEN_SLOPE,
+		TerrainData.SEA_LEVEL + Balance.GOLEM_FLATTEN_ABOVE_WATER, blocked)
+	if (plan.indices as PackedInt32Array).is_empty():
+		return
+	var morph: TerrainMorph = TerrainMorph.new()
+	morph.setup(terrain_ctx, plan, maxf(sit_switch_time() - Balance.GOLEM_SIT_SEAT_LEAD, 0.1))
+	path_service.register_projectile(morph)
+	_sit_level_morph = morph
+
+
+## The height map that evens out the ground under a seated figure: every vertex in
+## the rectangle from `front` ahead of `feet` to `back` behind them, `half_w` to each
+## side, goes to `level` (raised or lowered); around it a bank of at most `slope`
+## metres per metre joins the old ground. Untouched: vertices on a `blocked` cell
+## (buildings), the sea bed and the shore; nothing goes below `floor_height`. Plan
+## format as flatten_plan.
+static func sit_level_plan(td: TerrainData, feet: Vector3, fwd: Vector3, front: float,
+		back: float, half_w: float, level: float, slope: float, floor_height: float,
+		blocked: Array[Rect2i] = []) -> Dictionary:
+	var cs: float = TerrainData.CELL_SIZE
+	var empty: Dictionary = {"indices": PackedInt32Array(), "targets": PackedFloat32Array(),
+		"rect": Rect2i()}
+	var right: Vector3 = Vector3(fwd.z, 0.0, -fwd.x)
+	level = maxf(level, floor_height)
+	var corners: Array = []
+	for a in [front, -back]:
+		for b in [half_w, -half_w]:
+			corners.append(feet + fwd * a + right * b)
+	var lo: Vector2 = Vector2(INF, INF)
+	var hi: Vector2 = Vector2(-INF, -INF)
+	for c in corners:
+		lo = Vector2(minf(lo.x, c.x), minf(lo.y, c.z))
+		hi = Vector2(maxf(hi.x, c.x), maxf(hi.y, c.z))
+	# How far the bank reaches: the biggest step inside the rectangle, at the slope.
+	var spread: float = 0.0
+	for vz in range(maxi(int(floor(lo.y / cs)), 0), mini(int(ceil(hi.y / cs)), td.verts - 1) + 1):
+		for vx in range(maxi(int(floor(lo.x / cs)), 0), mini(int(ceil(hi.x / cs)), td.verts - 1) + 1):
+			spread = maxf(spread, absf(td.heights[vz * td.verts + vx] - level))
+	var bank: float = spread / maxf(slope, 0.05) + cs
+	var indices: PackedInt32Array = PackedInt32Array()
+	var targets: PackedFloat32Array = PackedFloat32Array()
+	var min_v: Vector2i = Vector2i(td.verts, td.verts)
+	var max_v: Vector2i = Vector2i(-1, -1)
+	for vz in range(maxi(int(floor((lo.y - bank) / cs)), 0), mini(int(ceil((hi.y + bank) / cs)), td.verts - 1) + 1):
+		for vx in range(maxi(int(floor((lo.x - bank) / cs)), 0), mini(int(ceil((hi.x + bank) / cs)), td.verts - 1) + 1):
+			var idx: int = vz * td.verts + vx
+			var h: float = td.heights[idx]
+			if h <= floor_height or _next_to_water(td, vx, vz):
+				continue   # sea bed and shore stay
+			var on_building: bool = false
+			for r in blocked:
+				if r.has_point(Vector2i(vx, vz)) or r.has_point(Vector2i(vx - 1, vz - 1)):
+					on_building = true
+					break
+			if on_building:
+				continue
+			var d: Vector3 = Vector3(float(vx) * cs - feet.x, 0.0, float(vz) * cs - feet.z)
+			var along: float = d.dot(fwd)
+			var dx: float = maxf(absf(d.dot(right)) - half_w, 0.0)
+			var dz: float = maxf(maxf(along - front, -back - along), 0.0)
+			var dev: float = sqrt(dx * dx + dz * dz) * slope
+			var target: float = clampf(h, level - dev, level + dev)
+			target = maxf(target, minf(h, floor_height + 0.0))
+			if absf(target - h) < 0.01:
+				continue
+			indices.append(idx)
+			targets.append(target)
+			min_v = Vector2i(mini(min_v.x, vx), mini(min_v.y, vz))
+			max_v = Vector2i(maxi(max_v.x, vx), maxi(max_v.y, vz))
+	if indices.is_empty():
+		return empty
+	var cmin: Vector2i = Vector2i(clampi(min_v.x - 1, 0, td.size - 1),
+		clampi(min_v.y - 1, 0, td.size - 1))
+	var cmax: Vector2i = Vector2i(clampi(max_v.x, 0, td.size - 1),
+		clampi(max_v.y, 0, td.size - 1))
+	return {"indices": indices, "targets": targets,
+		"rect": Rect2i(cmin, cmax - cmin + Vector2i.ONE)}
+
+
+## She has touched down: whoever is under the seat now takes the first sit damage
+## (the position moved onto the seat already, _move_onto_seat).
+func _on_seated() -> void:
+	_move_onto_seat()
+	_sit_victims.clear()
+	if path_service != null:
+		var reach_r: float = _seat_half.length()
+		for u in path_service.get_units_in_radius(_seat_center, reach_r):
+			if u == self or u.state == State.DEAD or u.doomed or u is Golem:
+				continue
+			if u is CrewedVehicle:
+				if u is Airship or u.tribe_id == tribe_id:
+					continue
+			elif not u.is_targetable() or u.is_airborne():
+				continue
+			if on_seat(u.position):
+				_sit_victims.append(u)
+	_sit_damage_tick()
+	_sit_damage_timer = Balance.GOLEM_SIT_DAMAGE_INTERVAL
+
+
+## She gets up from the sit: back onto her feet (they lie in front of the seat).
+func _on_rising() -> void:
+	if _seat_center == Vector3.INF:
+		return
+	position += heading() * seat_back_m()
+	_snap_to_ground()
+	_seat_center = Vector3.INF
+	_seat_floor_y = -INF
+	facing = heading()
+	if sit_combat != null:
+		sit_combat.reset()
+	_sit_victims.clear()
+	_after_seat_shift()
+
+
+func _after_seat_shift() -> void:
+	_sync_soa_pos()
+	_tick_pos = position
+	_last_pos = position
+	_apply_speed()   # the manager's copy of the target radius
+
+
+## While she sits (and is not getting up): the attacks of her limbs (GolemSitCombat).
+func _tick_sit_combat(delta: float) -> void:
+	if stance != STANCE_SIT or is_switching_stance() or _seat_center == Vector3.INF 			or not sit_attacks_enabled:
+		return
+	if sit_combat == null:
+		sit_combat = GolemSitCombat.new(self)
+	sit_combat.tick(delta)
+
+
+## One tick of turning on the seat (GolemSitCombat): she turns about her hips —
+## her logic position — and the seat turns with her (the victims stay who they were).
+func sit_turn_tick() -> void:
+	_seat_fwd = heading()
+
+
+## A sit attack has been wound up: play it on its animation layer, if the model can.
+func sit_attack_started(kind: StringName, windup: float) -> void:
+	if _sit_anim != null and _sit_anim.is_active():
+		_sit_anim.fire(GolemSitCombat.layer_of(kind), kind, windup)
+
+
+## Is she turning on the seat right now?
+func is_sit_turning() -> bool:
+	return sit_combat != null and sit_combat.turning
+
+
+## Every GOLEM_SIT_DAMAGE_INTERVAL while she sits: the damage on whoever is still
+## under the seat.
+func _tick_sit_damage(delta: float) -> void:
+	if stance != STANCE_SIT or is_switching_stance() or _seat_center == Vector3.INF:
+		return
+	_sit_damage_timer -= delta
+	if _sit_damage_timer > 0.0:
+		return
+	_sit_damage_timer += Balance.GOLEM_SIT_DAMAGE_INTERVAL
+	_sit_damage_tick()
+
+
+## One tick of the sit damage: GOLEM_SIT_DAMAGE_MULT x the trample damage on every
+## unit she sat down on that is still under the seat — of any tribe; enemy ground
+## vehicles take a crush hit. Who left the seat drops out for good. Only enemy
+## victims count as kills.
+func _sit_damage_tick() -> void:
+	var damage: int = Balance.GOLEM_SIT_DAMAGE_MULT * trample_damage()
+	var kept: Array = []
+	for u in _sit_victims:
+		if not is_instance_valid(u) or u.state == State.DEAD or u.doomed:
+			continue
+		if not on_seat(u.position):
+			continue
+		if u is CrewedVehicle:
+			_crush_vehicle(u)
+			if is_instance_valid(u) and u.state != State.DEAD:
+				kept.append(u)
+			continue
+		var hp: int = kill_hp_of(u)
+		var foe: bool = u.tribe_id != tribe_id
+		u.take_damage(damage, self)
+		if not is_instance_valid(u) or u.state == State.DEAD or u.doomed:
+			if foe:
+				_credit_kill(hp)
+			continue
+		kept.append(u)
+	_sit_victims = kept
+
+
+## The victims she sat down on that are still in the list (tests, panel).
+func sit_victims() -> Array:
+	return _sit_victims
 
 
 ## Seconds a stance switch takes at the current size.
@@ -913,6 +1325,10 @@ func _begin_stance(target: int) -> bool:
 		return false
 	var step: int = stance + (1 if target > stance else -1)
 	_stance_target = step
+	if stance == STANCE_SIT:
+		_on_rising()
+	if step == STANCE_SIT:
+		_start_sit_levelling()
 	if step == STANCE_SIT or stance == STANCE_SIT:
 		_stance_switch = sit_switch_time()
 		_play_clip(CLIP_SIT_DOWN if step == STANCE_SIT else CLIP_SIT_UP,
@@ -930,12 +1346,27 @@ func _begin_stance(target: int) -> bool:
 func _tick_stance(delta: float) -> void:
 	_stance_age += delta
 	if is_switching_stance():
+		if _wants_sit and _stance_target == STANCE_SIT and _seat_center == Vector3.INF \
+				and _stance_switch - delta <= Balance.GOLEM_SIT_SEAT_LEAD:
+			_move_onto_seat()   # the selection ring moves a little ahead of the touch-down
+		if _wants_sit and _sit_shift != Vector3.ZERO and _seat_center == Vector3.INF:
+			# On the way down she moves onto the free seat (find_seat), evenly.
+			var step: Vector3 = _sit_shift * clampf(delta / _stance_switch, 0.0, 1.0)
+			position += step
+			_sit_shift -= step
+			_snap_to_ground()
+			_after_seat_shift()
 		_stance_switch -= delta
 		if _stance_switch <= 0.0:
 			_stance_switch = 0.0
 			# Up from the sit she is only passing through the crouch: no waiting time.
 			_stance_age = 1000.0 if stance == STANCE_SIT else 0.0
 			stance = _stance_target
+			if stance == STANCE_SIT:
+				_sit_shift = Vector3.ZERO
+				_on_seated()
+			elif stance == STANCE_STAND:
+				_leaving_sit = false
 		return
 	if _stomp_landed:
 		# The stomp left her crouched (_land_attack). While its clip still settles
@@ -949,17 +1380,19 @@ func _tick_stance(delta: float) -> void:
 			_begin_stance(STANCE_STAND)
 		return
 	if stance == STANCE_SIT:
-		# Anything to do gets her up — through the crouch, from where the rules
-		# below take over.
-		if not _wants_sit or _sit_must_end():
-			_wants_sit = false
+		# Only stand_up() gets her up (user spec 2026-11-17) — through the crouch.
+		if not _wants_sit:
+			_leaving_sit = true
 			_begin_stance(STANCE_CROUCH)
 		return
 	if _wants_sit:
-		if _sit_must_end():
-			_wants_sit = false
-		elif _begin_stance(STANCE_SIT):
-			return   # bending down first, then sitting down: one step each
+		# A blow already wound up or an attack clip still playing comes first.
+		if _pending_attack == &"" and _attack_anim_left <= 0.0 and not is_stretching():
+			_begin_stance(STANCE_SIT)   # bending down first, then sitting down: one step each
+		return
+	if _leaving_sit:
+		_begin_stance(STANCE_STAND)   # up from the sit: on to standing, no waiting time
+		return
 	if stance != STANCE_CROUCH or _pending_attack != &"":
 		return
 	if state == State.ATTACK and (_in_melee or _target_in_reach()):
@@ -1195,8 +1628,17 @@ func cooldown_for(kind: StringName) -> float:
 ## How fast the body turns (rad/s): GOLEM_TURN_RATE at the starting size, down to
 ## GOLEM_TURN_RATE_FULL_SHARE of the fire ram's rate at 100 m.
 func turn_rate() -> float:
-	return lerpf(Balance.GOLEM_TURN_RATE,
+	var r: float = lerpf(Balance.GOLEM_TURN_RATE,
 		Balance.FIRERAM_TURN_RATE * Balance.GOLEM_TURN_RATE_FULL_SHARE, growth_t())
+	return r * Balance.GOLEM_SIT_TURN_SHARE if stance == STANCE_SIT else r
+
+
+## Has her body turned to within `deg` degrees of the flat direction `dir`?
+func is_turned_to(dir: Vector3, deg: float) -> bool:
+	var d: Vector3 = Vector3(dir.x, 0.0, dir.z)
+	if d.length_squared() < 0.000001:
+		return true
+	return heading().dot(d.normalized()) >= cos(deg_to_rad(deg))
 
 
 ## The direction the body really points (flat): `_heading` once it has been
@@ -1441,7 +1883,7 @@ static func _next_to_water(td: TerrainData, vx: int, vz: int) -> bool:
 ## a new edge burst, the flooded drown, everything rides the moving ground).
 func _tick_flatten(delta: float) -> void:
 	if not flattens() or terrain_ctx == null or terrain_data == null \
-			or path_service == null:
+			or path_service == null or is_sit_locked():
 		return
 	_flatten_timer -= delta
 	if _flatten_timer > 0.0:
@@ -1507,7 +1949,8 @@ func _tick_trample(delta: float) -> void:
 			_trampled[id] -= delta
 			if _trampled[id] <= 0.0:
 				_trampled.erase(id)
-	if not tramples() or path_service == null or _tick_pos == Vector3.INF or delta <= 0.0:
+	if not tramples() or path_service == null or _tick_pos == Vector3.INF or delta <= 0.0 \
+			or is_sit_locked():
 		return
 	var walked: float = Vector2(position.x - _tick_pos.x, position.z - _tick_pos.z).length()
 	if walked / delta < Balance.GOLEM_TRAMPLE_MIN_SPEED:
@@ -1586,8 +2029,8 @@ func _tick_trample(delta: float) -> void:
 ## unit separation is switched off for golems from level 1 on, so they need their
 ## own.)
 func _tick_golem_separation(delta: float) -> void:
-	if not (path_service is UnitManager) or delta <= 0.0:
-		return
+	if not (path_service is UnitManager) or delta <= 0.0 or is_sit_locked():
+		return   # (a sitting golem is not pushed: the other one yields all the way)
 	var mine: float = trample_radius()
 	var push: Vector2 = Vector2.ZERO
 	for u in (path_service as UnitManager).vehicles:
@@ -1611,7 +2054,8 @@ func _tick_golem_separation(delta: float) -> void:
 		# each takes its share of that: the bigger the OTHER body, the more she
 		# yields — so a giant hardly moves for a small golem.
 		var close: float = minf(need - dist, maxf(current_speed(), other.current_speed()) * delta)
-		push += away * close * (theirs / (mine + theirs))
+		var share: float = 1.0 if other.is_sit_locked() else theirs / (mine + theirs)
+		push += away * close * share
 	if push == Vector2.ZERO:
 		_tick_golem_yield(delta)
 		return
@@ -1724,7 +2168,7 @@ func _crumble() -> void:
 ## "a fleeing unit hits back after every third melee hit" would stop him at every
 ## skirmish he passes. Standing still or on an attack-move he fights as usual.
 func _maybe_retaliate(attacker) -> void:
-	if state == State.MOVE and not move_aggressive:
+	if (state == State.MOVE and not move_aggressive) or is_sit_locked():
 		return
 	super._maybe_retaliate(attacker)
 
@@ -1732,6 +2176,8 @@ func _maybe_retaliate(attacker) -> void:
 ## Melee cannot reach flyers — _is_ranged() would otherwise let the base lock
 ## onto airborne targets.
 func _begin_attack(enemy: Unit) -> void:
+	if is_sit_locked():
+		return   # seated (or on the way): no attacks in this first stage
 	if enemy != null and is_instance_valid(enemy) and enemy.is_airborne():
 		return
 	# Out of a march (attack-move) or while already walking up to a target she
@@ -2170,7 +2616,7 @@ func _chase_target() -> Airship:
 ## _tick_air_strike as soon as the ship is in reach. It is an attack-move, so he
 ## still deals with what stands in his way. Any order from outside ends it.
 func _tick_air_chase(delta: float) -> void:
-	if not can_strike_air():
+	if not can_strike_air() or is_sit_locked():
 		return
 	_chase_timer -= delta
 	if _chase_timer > 0.0:
@@ -2193,6 +2639,8 @@ func _tick_air_chase(delta: float) -> void:
 ## An order from outside (player, AI) ends the airship chase; the chase's own
 ## move orders pass through.
 func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = false) -> void:
+	if is_sit_locked():
+		return   # seated: only stand_up() reaches her
 	if not _own_order:
 		_chase_ship = null
 	_ordered_building = null
@@ -2200,12 +2648,16 @@ func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = fals
 
 
 func order_attack(enemy: Unit) -> void:
+	if is_sit_locked():
+		return
 	_chase_ship = null
 	_ordered_building = null
 	super.order_attack(enemy)
 
 
 func order_attack_building(building) -> void:
+	if is_sit_locked():
+		return
 	_chase_ship = null
 	var walking: bool = state == State.MOVE or (state == State.ATTACK and _closing_in)
 	super.order_attack_building(building)
@@ -2261,6 +2713,8 @@ func _enemy_near_ordered_building() -> Unit:
 ## The base's enemy scan (assault fallback, retargeting) — during the ordered
 ## assault only units near the building count.
 func _scan_for_enemy(radius: float, max_examined: int = 0) -> Unit:
+	if is_sit_locked():
+		return null
 	if has_ordered_building():
 		return _enemy_near_ordered_building()
 	return super._scan_for_enemy(radius, max_examined)
@@ -2292,7 +2746,7 @@ func _swat(ship: Airship) -> void:
 ## cooldown. One shared cadence: _wind_up resets _air_cooldown.
 func _tick_air_strike(delta: float) -> void:
 	_air_cooldown = maxf(_air_cooldown - delta, 0.0)
-	if _air_cooldown > 0.0 or _pending_attack != &"" or not can_strike_air():
+	if _air_cooldown > 0.0 or _pending_attack != &"" or not can_strike_air() or is_sit_locked():
 		return
 	if stance != STANCE_STAND or is_switching_stance() or is_stretching() or _stretch_queued:
 		return   # the strike at an airship is a standing one; a stretch goes first
@@ -2810,6 +3264,8 @@ func _create_model() -> void:
 		_flag_mesh = custom.find_child("Flag", true, false) as MeshInstance3D
 		_anim = custom.find_child("AnimationPlayer", true, false) as AnimationPlayer
 		_prepare_clips()
+		if _anim != null:
+			_sit_anim = GolemSitAnim.new(_anim)
 		_finish_model(root)
 		return
 	# Legs.
@@ -2843,6 +3299,15 @@ func _prepare_clips() -> void:
 		if _anim.has_animation(clip):
 			_anim.get_animation(clip).loop_mode = Animation.LOOP_LINEAR
 	_play_clip(CLIP_IDLE)
+
+
+## The clip under the sit layers: sit_idle, while turning sit_turn_l / sit_turn_r.
+func _sit_base_clip() -> StringName:
+	if not is_sit_turning():
+		return CLIP_SIT_IDLE
+	var h: Vector3 = heading()
+	var diff: float = wrapf(atan2(facing.x, facing.z) - atan2(h.x, h.z), -PI, PI)
+	return GolemSitAnim.CLIP_TURN_L if diff > 0.0 else GolemSitAnim.CLIP_TURN_R
 
 
 ## Plays `clip` if the model has it. `restart` re-triggers a clip that is
@@ -2919,6 +3384,11 @@ func _tick_visual(delta: float) -> void:
 		return
 	var body_dir: Vector3 = heading()
 	rotation.y = atan2(body_dir.x, body_dir.z)
+	if _model != null:
+		# Seated, her logic position lies on the seat: the figure (origin at the
+		# feet) is drawn that far forward again (_on_seated).
+		_model.position.z = seat_back_m() * _shown_size / size_factor() \
+			if _seat_center != Vector3.INF else 0.0
 	# A level-up lets the figure grow over about a second.
 	if _model != null and not is_equal_approx(_shown_size, size_factor()):
 		_shown_size = move_toward(_shown_size, size_factor(), delta * GROW_SPEED)
@@ -2934,7 +3404,15 @@ func _tick_visual(delta: float) -> void:
 	if _anim != null:
 		# An attack clip plays out; afterwards walk or idle by the real speed.
 		var attacking: bool = ATTACK_CLIPS.has(_clip) and _anim.is_playing()
-		if not attacking and not is_switching_stance() and not is_stretching():
+		var layered: bool = _sit_anim != null and _sit_anim.usable() \
+			and stance == STANCE_SIT and not is_switching_stance()
+		if _sit_anim != null and _sit_anim.is_active() != layered:
+			_sit_anim.set_active(layered)
+			if not layered:
+				_clip = &""   # the player takes over again: replay its clip
+		if layered:
+			_sit_anim.set_base(_sit_base_clip())
+		elif not attacking and not is_switching_stance() and not is_stretching():
 			if stance == STANCE_SIT:
 				_play_clip(CLIP_SIT_IDLE)
 			elif stance == STANCE_CROUCH:

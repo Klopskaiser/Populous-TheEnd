@@ -1221,6 +1221,12 @@ func _clear_path() -> void:
 	_path_index = 0
 
 
+## Ground moved under the unit (TerrainMorph): it rests on the new height `h`.
+## The sitting golem overrides this (it never sinks below its seat level).
+func settle_on_ground(h: float) -> void:
+	position.y = h
+
+
 func _snap_to_ground() -> void:
 	# One property get + one set (component writes cost a get/set roundtrip
 	# each) — this is the hottest per-mover call.

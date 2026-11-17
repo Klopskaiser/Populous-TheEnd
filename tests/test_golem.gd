@@ -3431,11 +3431,12 @@ func test_a_golem_in_the_way_leaves_her_the_full_reach() -> void:
 	_free_world(w)
 
 
-# --- Sitzen (2026-11-17) -----------------------------------------------------------
-# Dritte Haltung, nur ueber die gebueckte erreichbar. Im Spiel gibt es noch keinen
-# Ausloeser: Golem.sit_down() ruft bisher niemand.
+# --- Sitzen (Nutzervorgabe 2026-11-17, plans/10l_golem_sitting.md, erste Stufe) ------
+# Dritte Haltung fuer alle Golems ab 30 m, nur ueber die gebueckte erreichbar und
+# nur von Hand (Taste V / Seitenleiste). Im Sitzen keine Befehle, keine Bewegung,
+# keine Angriffe; Sitzschaden auf das, was beim Aufsetzen unter dem Po steht.
 
-func _run_stance(w: Dictionary, g: Golem, limit: int = 200) -> int:
+func _run_stance(w: Dictionary, g: Golem, limit: int = 400) -> int:
 	var ticks: int = 0
 	while g.is_switching_stance() and ticks < limit:
 		_tick_world(w)
@@ -3443,117 +3444,566 @@ func _run_stance(w: Dictionary, g: Golem, limit: int = 200) -> int:
 	return ticks
 
 
-## Hinsetzen geht ueber die gebueckte Haltung, Aufstehen denselben Weg zurueck —
-## ohne die Wartezeit der Haltung. Solange sie sitzt oder wechselt, bewegt sie sich nicht.
+## A golem grown to at least 30 m (the first growth step past it: 31,3 m).
+func _sit_golem(w: Dictionary, tribe_id: int, at: Vector3) -> Golem:
+	var g: Golem = _golem(w, tribe_id, at)
+	while not g.can_sit():
+		g._credit_kill()
+	g._stretch_queued = false
+	g.health = g.max_health
+	g.facing = Vector3(0, 0, 1)
+	g.snap_heading()
+	g.tick(TICK)
+	return g
+
+
+## Asks her to sit and runs the world until she sits (or the limit).
+func _sit_until_seated(w: Dictionary, g: Golem, limit: int = 400) -> bool:
+	if not g.sit_down():
+		return false
+	var ticks: int = 0
+	while not (g.is_sitting() and not g.is_switching_stance()) and ticks < limit:
+		_tick_world(w)
+		ticks += 1
+	return g.is_sitting()
+
+
+func test_sitting_needs_thirty_metres_and_works_for_every_golem() -> void:
+	var w: Dictionary = _make_world()
+	var small: Golem = _golem(w, 0, Vector3(30, 5, 30))
+	small.tick(TICK)
+	check(not small.can_sit() and not small.sit_down(), "a fresh golem (4,7 m) cannot sit")
+	_level_to(small, 7)
+	check(not small.can_sit(), "the giant (16,9 m) cannot yet")
+	var g: Golem = _sit_golem(w, 0, Vector3(64, 5, 90))
+	check(g.height_m() >= 30.0 and g.can_sit(), "from 30 m she can (%.1f m)" % g.height_m())
+	var demon: DemonGolem = _spawn(w, load("res://scenes/units/demon_golem.tscn"), 0,
+		Vector3(30, 5, 100)) as DemonGolem
+	while demon.height_m() < 29.0:
+		demon._credit_kill()
+	check(not demon.can_sit(), "the demon golem at 29 m cannot")
+	while demon.height_m() < 30.0:
+		demon._credit_kill()
+	check(demon.can_sit(), "at 32 m he can (%.0f m)" % demon.height_m())
+	check_near(demon.sit_switch_time(), Balance.GOLEM_SIT_TIME * sqrt(demon.height_m() / 30.0) * 0.85,
+		"and sits down 15 % faster than the golem of his size", 0.0001)
+	var genesis: GenesisGolem = _spawn(w, load("res://scenes/units/genesis_golem.tscn"), 0,
+		Vector3(100, 5, 30)) as GenesisGolem
+	genesis.credit_brave(1000.0)
+	check(genesis.height_m() >= 30.0 and genesis.can_sit(), "the Genesis golem on stage 8 (33 m) can too")
+	_free_world(w)
+
+
+## Stehen -> buecken -> sitzen, zurueck denselben Weg und am Ende stehend. Im Sitzen
+## liegt ihr Standpunkt auf der Mitte der Sitzflaeche (hinter den Fuessen); beim
+## Aufstehen kehrt er auf die Fuesse zurueck.
 func test_sitting_goes_through_the_crouch_and_back() -> void:
 	var w: Dictionary = _make_world()
-	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
-	g.tick(TICK)
-	var start: Vector3 = g.position
-	check(g.stance == Golem.STANCE_STAND and not g.is_sitting(), "a fresh golem stands")
-	check(g.sit_down(), "an idle golem takes the request to sit")
+	var g: Golem = _sit_golem(w, 0, Vector3(64, 5, 90))
+	var feet: Vector3 = g.position
+	check(g.sit_down(), "she takes the request to sit")
+	check(g.is_sit_locked() and not g.can_take_orders(), "from now on she is sit-locked")
 	_tick_world(w)
-	check(g.is_switching_stance() and g._stance_target == Golem.STANCE_CROUCH,
-		"first she bends down")
+	check(g.is_switching_stance() and g._stance_target == Golem.STANCE_CROUCH, "first she bends down")
 	_run_stance(w, g)
-	check(g.stance == Golem.STANCE_CROUCH, "she is crouched on the way down")
 	_tick_world(w)
 	check(g.is_switching_stance() and g._stance_target == Golem.STANCE_SIT,
-		"then she sits down at once, without the stance's waiting time")
-	check(is_equal_approx(g._stance_switch, g.sit_switch_time())
-			and g.sit_switch_time() > g.stance_switch_time(),
-		"sitting down takes its own, longer time (%.2f s; bending down %.2f s)"
-			% [g.sit_switch_time(), g.stance_switch_time()])
+		"then she sits down at once")
+	check_near(g._stance_switch, Balance.GOLEM_SIT_TIME * sqrt(g.height_m() / 30.0),
+		"sitting down takes 3 s x root(height / 30 m) (%.2f s)" % g.sit_switch_time(), 0.001)
+	check(_flat(g.position, feet) < 0.01, "on the way down her feet stay where they are")
 	_run_stance(w, g)
 	check(g.is_sitting() and g.stance_name() == "sitzend", "she sits")
-	for i in range(60):
+	var back: float = g.seat_back_m()
+	check(back > 10.0 and back < 11.5, "the seat lies %.1f m behind her feet" % back)
+	check_near(_flat(g.position, feet), back, "her position now is the middle of the seat", 0.01)
+	check(g.position.z < feet.z, "behind her (she faces +z)")
+	for i in range(300):
 		_tick_world(w)
-	check(g.is_sitting() and _flat(g.position, start) < 0.01,
-		"with nothing to do she stays seated, on the spot")
-	g.stand_up()
+	check(g.is_sitting() and _flat(g.position, feet - Vector3(0, 0, back)) < 0.01,
+		"with nothing happening she stays seated, on the spot, for 30 s")
+	check(g.stand_up(), "called up")
 	_tick_world(w)
 	check(g.is_switching_stance() and g._stance_target == Golem.STANCE_CROUCH,
-		"called up, she gets up into the crouch first")
-	_run_stance(w, g)
+		"she gets up into the crouch first")
+	check(_flat(g.position, feet) < 0.01, "back on her feet")
+	var up_ticks: int = _run_stance(w, g)
+	check_near(float(up_ticks + 1) * TICK, g.sit_switch_time(),
+		"getting up takes as long as sitting down", TICK * 1.5)
 	_tick_world(w)
 	check(g.is_switching_stance() and g._stance_target == Golem.STANCE_STAND,
-		"and straight on to standing (no waiting time on the way up)")
+		"and straight on to standing")
+	check(g.is_sit_locked(), "still locked until she stands")
 	_run_stance(w, g)
-	check(g.stance == Golem.STANCE_STAND and _flat(g.position, start) < 0.01,
-		"she stands again where she sat")
+	check(g.stance == Golem.STANCE_STAND and not g.is_sit_locked() and g.can_take_orders(),
+		"she stands and takes orders again")
+	check(_flat(g.position, feet) < 0.01, "where she stood before")
 	_free_world(w)
 
 
-## Ein Bewegungsbefehl holt sie aus dem Sitz: erst aufstehen, dann laufen.
-func test_a_move_order_gets_her_up_from_the_sit() -> void:
+## Im Sitzen ignoriert sie Bewegungs- und Angriffsbefehle und greift von sich aus
+## nichts an; nur "Aufstehen" wirkt. Getroffen bleibt sie sitzen.
+func test_seated_she_takes_no_orders_and_strikes_nothing() -> void:
 	var w: Dictionary = _make_world()
-	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
-	g.facing = Vector3(1, 0, 0)
-	g.tick(TICK)
-	g.sit_down()
-	for i in range(80):
-		_tick_world(w)
-	check(g.is_sitting(), "she sits")
-	var start: Vector3 = g.position
-	g.order_move(Vector3(70, 5, 50))
-	_tick_world(w)
-	check(g.is_switching_stance() and g._stance_target == Golem.STANCE_CROUCH,
-		"a move order gets her up at once")
-	var ticks: int = 0
-	var moved: float = 0.0
-	while g.stance != Golem.STANCE_STAND and ticks < 200:
-		moved = maxf(moved, _flat(g.position, start))
-		_tick_world(w)
-		ticks += 1
-	check(g.stance == Golem.STANCE_STAND, "she gets up all the way (%d ticks)" % ticks)
-	check(moved < 0.01, "while getting up she does not move (%.3f m)" % moved)
-	for i in range(12):
-		_tick_world(w)
-	check(_flat(g.position, start) > 1.0 and not g._wants_sit,
-		"then she walks off and does not sit down again (%.1f m)" % _flat(g.position, start))
-	_free_world(w)
-
-
-## Aus dem Sitz wird nichts geschlagen: kommt ein Feind in Reichweite, steht sie
-## auf (in die gebueckte Haltung) und schlaegt erst dann.
-func test_nothing_is_struck_from_the_sit() -> void:
-	var w: Dictionary = _make_world()
-	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
-	g.facing = Vector3(1, 0, 0)
-	g.stomp_enabled = false
-	g.tick(TICK)
-	g.sit_down()
-	for i in range(80):
-		_tick_world(w)
-	check(g.is_sitting(), "she sits")
-	var foe: Unit = _foe(w, 52.0, 50.0, 100000)
+	var g: Golem = _sit_golem(w, 0, Vector3(64, 5, 90))
+	check(_sit_until_seated(w, g), "she sits")
+	var seat: Vector3 = g.position
+	var foe: Unit = _foe(w, 64.0, 99.0, 100000)
+	var sel: Array[Unit] = [g]
+	check(w.commands.order_move(sel, Vector3(64, 5, 40)) == 0, "a move order reaches nobody")
+	w.commands.order_attack(sel, foe)
+	g.order_move(Vector3(64, 5, 40))
 	g.order_attack(foe)
-	var struck_seated: bool = false
-	var ticks: int = 0
-	while g._pending_attack == &"" and ticks < 300:
+	for i in range(100):
 		_tick_world(w)
-		ticks += 1
-		if g._pending_attack != &"" and (g.is_sitting() or g._stance_target == Golem.STANCE_SIT):
-			struck_seated = true
-	check(g._pending_attack != &"", "she strikes once she is up (%d ticks)" % ticks)
-	check(not struck_seated and not g.is_sitting(), "but never from the sit")
-	check(float(ticks) * TICK >= g.sit_switch_time() - TICK,
-		"getting up from the sit came first (%.1f s; it takes %.2f s)"
-			% [float(ticks) * TICK, g.sit_switch_time()])
+		g.take_damage(1, foe)
+	check(g.is_sitting() and _flat(g.position, seat) < 0.01, "she stays seated on the spot")
+	check(g.attack_target == null and g._pending_attack == &"",
+		"no standing attack, no target from orders (her limbs strike on their own, GolemSitCombat)")
+	check(g.state == Unit.State.IDLE, "she stays idle")
 	_free_world(w)
 
 
-## Wer etwas zu tun hat, setzt sich nicht; und die Zeit waechst mit der Groesse.
-func test_sit_down_needs_an_idle_golem() -> void:
+## Taste V: setzt die gewaehlten Golems hin, sitzt einer, stehen alle auf. Zu kleine
+## Golems antworten nicht.
+func test_key_v_toggles_sitting() -> void:
 	var w: Dictionary = _make_world()
-	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
-	g.tick(TICK)
-	g.order_move(Vector3(70, 5, 50))
-	check(not g.sit_down() and not g._wants_sit, "a marching golem does not take the request")
-	check(is_equal_approx(g.sit_switch_time(), Balance.GOLEM_SIT_TIME),
-		"at start size sitting down takes GOLEM_SIT_TIME (%.2f s)" % g.sit_switch_time())
-	_level_to(g, 6)
-	check(g.sit_switch_time() > Balance.GOLEM_SIT_TIME
-			and g.sit_switch_time() <= Balance.GOLEM_SIT_TIME_MAX,
-		"a bigger golem takes longer, up to the cap (level 6: %.2f s)" % g.sit_switch_time())
+	var g: Golem = _sit_golem(w, 0, Vector3(64, 5, 90))
+	var small: Golem = _golem(w, 0, Vector3(20, 5, 20))
+	small.tick(TICK)
+	var sel: Array[Unit] = [g, small]
+	check(w.commands.toggle_golem_sit(sel) == 1, "V: the big one sits down, the small one cannot")
+	check(g._wants_sit and not small._wants_sit, "only the big one")
+	check(w.commands.order_move(sel, Vector3(20, 5, 60)) == 1, "a move order now reaches only the small one")
+	_tick_world(w)
+	_tick_world(w)
+	check(g.is_switching_stance(), "she is bending down")
+	check(w.commands.toggle_golem_sit(sel) == 1, "V again: she gets up (even on her way down)")
+	check(not g._wants_sit and g.is_sit_locked(), "and stays locked until she stands")
+	_run_stance(w, g)
+	_tick_world(w)
+	_run_stance(w, g)
+	check(g.stance == Golem.STANCE_STAND and not g.is_sit_locked(), "standing, free again")
 	_free_world(w)
+
+
+## Sitzplatz: die Sitzflaeche beruehrt kein Gebaeude; ist ihr Platz belegt, rueckt
+## sie bis zu einem halben Koerperradius aus, sonst setzt sie sich nicht.
+func test_no_seat_on_buildings() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _sit_golem(w, 0, Vector3(64, 5, 90))
+	var seat: Vector3 = g.position - g.heading() * g.seat_back_m()
+	check(g.seat_free(seat, g.heading(), g.seat_half_extent()), "her seat is free on open ground")
+	# A hut whose corner reaches just into the seat: she moves aside.
+	var half: Vector2 = g.seat_half_extent()
+	var hut: Building = w.bm.place(HUT_SCENE, w.t1,
+		Vector2i(int(floor(seat.x + half.x - 0.5)), int(floor(seat.z - 1.0))), 0, true)
+	check(hut != null, "a hut stands at the edge of the seat")
+	check(not g.seat_free(seat, g.heading(), g.seat_half_extent()), "the seat touches it")
+	var feet: Vector3 = g.find_seat()
+	check(feet != Vector3.INF and _flat(feet, g.position) <= g.trample_radius() * 0.5 + 0.01,
+		"a free seat within half her body radius (%.2f m aside)" % (_flat(feet, g.position) if feet != Vector3.INF else -1.0))
+	var start: Vector3 = g.position
+	check(_sit_until_seated(w, g), "she sits down there")
+	check(_flat(g.position + g.heading() * g.seat_back_m(), feet) < 0.05,
+		"her feet moved onto the free spot while she bent down")
+	check(g.seat_free(g.position, g.heading(), g.seat_half_extent()), "the seat touches no building")
+	check(_flat(start, feet) > 0.01, "she did have to move")
+	# A hut right under the middle of the seat: no seat within reach, the order is ignored.
+	var g2: Golem = _sit_golem(w, 0, Vector3(30, 5, 50))
+	var seat2: Vector3 = g2.position - g2.heading() * g2.seat_back_m()
+	w.bm.place(HUT_SCENE, w.t1, Vector2i(int(seat2.x) - 1, int(seat2.z) - 1), 0, true)
+	check(g2.find_seat() == Vector3.INF and not g2.sit_down() and not g2.is_sit_locked(),
+		"a hut under the middle of the seat: she does not sit")
+	_free_world(w)
+
+
+## Sitzschaden: wer beim Aufsetzen unter dem Po steht — gleich welcher Stamm —, nimmt
+## 4 x Trampelschaden, sofort und alle 5 s. Wer herauslaeuft, faellt heraus; wer
+## spaeter kommt, wird nicht getroffen. Eigene Opfer zaehlen nicht als Kill.
+func test_sit_damage_hits_who_was_under_her_when_she_sat_down() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _sit_golem(w, 0, Vector3(64, 5, 90))
+	var seat: Vector3 = g.position - g.heading() * g.seat_back_m()
+	var dmg: int = Balance.GOLEM_SIT_DAMAGE_MULT * g.trample_damage()
+	check(dmg == 4 * g.trample_damage() and dmg >= 36, "4 x the trample damage (%d)" % dmg)
+	var foe: Unit = _foe(w, seat.x + 1.0, seat.z, 1000)
+	var leaver: Unit = _foe(w, seat.x - 1.0, seat.z + 1.0, 1000)
+	var friend: Unit = _spawn(w, BRAVE_SCENE, 0, Vector3(seat.x, 5, seat.z - 1.0))
+	friend.max_health = 1000
+	friend.health = 1000
+	var beside: Unit = _foe(w, seat.x + 6.0, seat.z, 1000)
+	var weak: Unit = _foe(w, seat.x, seat.z + 0.5, dmg)
+	g.sit_attacks_enabled = false   # only the sit damage here
+	var kills: int = g.kills
+	check(g.sit_down(), "she sits down on them")
+	var ticks: int = 0
+	while not (g.is_sitting() and not g.is_switching_stance()) and ticks < 400:
+		g.tick(TICK)
+		ticks += 1
+	check(g.is_sitting(), "she sits")
+	check(foe.health == 1000 - dmg and friend.health == 1000 - dmg and leaver.health == 1000 - dmg,
+		"everyone under the seat takes it at once, her own tribe as well")
+	check(beside.health == 1000, "6 m aside is not under her")
+	check(weak.state == Unit.State.DEAD or weak.doomed, "the weak enemy dies")
+	check(g.kills == kills + 1, "an enemy killed by sitting counts")
+	# The leaver walks out, a newcomer walks in.
+	leaver.position = Vector3(seat.x + 15.0, 5, seat.z)
+	var late: Unit = _foe(w, seat.x - 1.0, seat.z - 1.0, 1000)
+	friend.health = dmg   # the next tick kills the friend
+	for i in range(int(Balance.GOLEM_SIT_DAMAGE_INTERVAL / TICK) + 1):
+		g.tick(TICK)
+	check(foe.health == 1000 - 2 * dmg, "after 5 s the next tick (%d)" % foe.health)
+	check(leaver.health == 1000 - dmg, "who walked out takes nothing more")
+	check(late.health == 1000, "who came later takes nothing")
+	check(friend.state == Unit.State.DEAD or friend.doomed, "the own brave dies too")
+	check(g.kills == kills + 1, "but her own victim counts as no kill")
+	leaver.position = Vector3(seat.x - 1.0, 5, seat.z + 1.0)
+	for i in range(int(Balance.GOLEM_SIT_DAMAGE_INTERVAL / TICK) + 1):
+		g.tick(TICK)
+	check(leaver.health == 1000 - dmg, "and coming back does not bring it back")
+	_free_world(w)
+
+
+## Feindliche Bodenfahrzeuge unter der Sitzflaeche nehmen Schaden (wie unter dem
+## Trampeln), eigene nicht.
+func test_sit_damage_wrecks_enemy_vehicles_under_her() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _sit_golem(w, 0, Vector3(64, 5, 90))
+	var seat: Vector3 = g.position - g.heading() * g.seat_back_m()
+	var catapult: Unit = _spawn(w, CATAPULT_SCENE, 1, Vector3(seat.x + 1.0, 5, seat.z))
+	var own: Unit = _spawn(w, CATAPULT_SCENE, 0, Vector3(seat.x - 1.5, 5, seat.z))
+	check(g.sit_down(), "she sits down")
+	var ticks: int = 0
+	while not (g.is_sitting() and not g.is_switching_stance()) and ticks < 400:
+		g.tick(TICK)
+		ticks += 1
+	check(catapult.state == Unit.State.DEAD, "the enemy catapult under her is wrecked")
+	check(own.state != Unit.State.DEAD, "her own is spared")
+	_free_world(w)
+
+
+## Im Sitzen ist sie das groessere Ziel (Zielradius x 2), auch im UnitManager.
+func test_seated_her_target_radius_doubles() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _sit_golem(w, 0, Vector3(64, 5, 90))
+	var standing: float = g.target_radius()
+	check(_sit_until_seated(w, g), "she sits")
+	check_near(g.target_radius(), standing * 2.0, "twice the target radius")
+	check_near(w.um.soa_reach[g._idx], g.target_radius(), "the manager knows", 0.0001)
+	g.stand_up()
+	_tick_world(w)
+	check_near(g.target_radius(), standing, "back to normal once she is up from the sit")
+	_free_world(w)
+
+
+## Waechst sie im Sitzen, bleibt sie sitzen (kein Strecken); die Sitzflaeche waechst
+## nicht mit.
+func test_growing_while_seated_keeps_her_seated() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _sit_golem(w, 0, Vector3(64, 5, 90))
+	check(_sit_until_seated(w, g), "she sits")
+	var half: Vector2 = g._seat_half
+	var steps: int = g.growth_steps
+	for i in range(Balance.GOLEM_GROWTH_KILLS):
+		g._credit_kill()
+	check(g.growth_steps == steps + 1, "she grows a step")
+	for i in range(30):
+		_tick_world(w)
+	check(g.is_sitting() and not g.is_switching_stance() and not g.is_stretching(),
+		"she stays seated, without stretching")
+	check(not g._stretch_queued, "the stretch is done with")
+	check(g._seat_half == half, "the seat for the sit damage does not grow")
+	_free_world(w)
+
+
+## Ein anderer Golem schiebt die Sitzende nicht; er weicht ganz aus.
+func test_a_sitting_golem_is_not_pushed() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _sit_golem(w, 0, Vector3(64, 5, 100))
+	check(_sit_until_seated(w, g), "she sits")
+	var seat: Vector3 = g.position
+	var other: Golem = _golem(w, 0, seat + Vector3(1.0, 0, 0))
+	other.tick(TICK)
+	for i in range(40):
+		_tick_world(w)
+	check(_flat(g.position, seat) < 0.01, "the sitting golem stays put")
+	check(_flat(other.position, seat) >= g._golem_need(other) - 0.05,
+		"the other one moved out of her body (%.2f m)" % _flat(other.position, seat))
+	_free_world(w)
+
+
+## Lowers (or raises) every terrain vertex in the square of half side `half` around
+## `at` to `h` (test helper for uneven ground under the seat).
+func _set_ground(w: Dictionary, at: Vector3, half: float, h: float) -> void:
+	var td: TerrainData = w.td
+	for vz in range(int(floor(at.z - half)), int(ceil(at.z + half)) + 1):
+		for vx in range(int(floor(at.x - half)), int(ceil(at.x + half)) + 1):
+			td.heights[vz * td.verts + vx] = h
+
+
+## Hoehe im Sitzen (Nutzer 2026-11-17): liegt der Sitz tiefer als die Fuesse, sinkt
+## die Figur nicht ab (Arme und Beine verschwaenden im Boden) — hoeher darf sie liegen.
+func test_seated_she_never_lies_lower_than_the_ground_under_her() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _sit_golem(w, 0, Vector3(64, 5, 90))
+	var seat: Vector3 = g.position - g.heading() * g.seat_back_m()
+	_set_ground(w, seat, 4.0, 3.0)   # a hollow under the seat, 2 m below her feet
+	check(_sit_until_seated(w, g), "she sits (no terrain context: no levelling)")
+	check(g.position.y >= 5.0 - 0.001, "she lies at the height of her feet, not in the hollow (%.2f)" % g.position.y)
+	g.settle_on_ground(2.0)
+	check(g.position.y >= 5.0 - 0.001, "sinking ground does not take her down")
+	g.settle_on_ground(6.0)
+	check_near(g.position.y, 6.0, "rising ground lifts her")
+	g.stand_up()
+	_tick_world(w)
+	check_near(g.position.y, 5.0, "getting up she stands on her feet's ground again", 0.01)
+	_free_world(w)
+
+
+## Einebnen beim Hinsetzen (Nutzer 2026-11-17): der Boden unter der sitzenden Figur
+## gleicht sich an die Hoehe ihrer Fuesse an — Mulden heben sich, Buckel senken sich;
+## Gebaeude bleiben stehen, wie sie stehen.
+func test_sitting_down_evens_out_the_ground_under_her() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _sit_golem(w, 0, Vector3(64, 5, 90))
+	g.terrain_ctx = w.ctx
+	var s: float = g.model_scale().z * g.size_factor()
+	var seat: Vector3 = g.position - g.heading() * g.seat_back_m()
+	var hands: Vector3 = g.position - g.heading() * (Balance.GOLEM_SIT_HAND_BACK * s)
+	_set_ground(w, seat, 2.0, 3.5)    # a hollow under the seat
+	_set_ground(w, hands, 1.5, 6.5)   # a bump under her hands
+	var hut: Building = w.bm.place(HUT_SCENE, w.t1, Vector2i(80, 70), 0, true)
+	var hut_corner: int = 70 * w.td.verts + 80
+	var hut_h: float = w.td.heights[hut_corner]
+	check(_sit_until_seated(w, g), "she sits")
+	for i in range(10):
+		_tick_world(w)
+	check_near(w.td.get_height(seat.x, seat.z), 5.0, "the hollow under the seat came up to her feet' level", 0.05)
+	check_near(w.td.get_height(hands.x, hands.z), 5.0, "the bump under her hands came down", 0.05)
+	check_near(g.position.y, 5.0, "she sits at that level", 0.05)
+	check(hut == null or is_equal_approx(w.td.heights[hut_corner], hut_h), "the ground under a building stays")
+	_free_world(w)
+
+
+## Der Auswahlkreis (ihr Standpunkt) wechselt 0,5 s vor dem Aufsetzen auf die
+## Sitzmitte; der Sitzschaden faellt erst beim Aufsetzen.
+func test_the_ring_moves_onto_the_seat_half_a_second_early() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _sit_golem(w, 0, Vector3(64, 5, 90))
+	var feet: Vector3 = g.position
+	var seat: Vector3 = feet - g.heading() * g.seat_back_m()
+	var foe: Unit = _foe(w, seat.x, seat.z, 1000)
+	check(g.sit_down(), "she sits down")
+	var moved_at: float = -1.0
+	var hit_at: float = -1.0
+	var t: float = 0.0
+	while not g.is_sitting() and t < 10.0:
+		g.tick(TICK)
+		t += TICK
+		if moved_at < 0.0 and _flat(g.position, seat) < 0.01:
+			moved_at = t
+		if hit_at < 0.0 and foe.health < 1000:
+			hit_at = t
+	check(moved_at > 0.0 and hit_at > 0.0, "both happened (%.1f / %.1f s)" % [moved_at, hit_at])
+	check_near(hit_at - moved_at, Balance.GOLEM_SIT_SEAT_LEAD, "the position moved 0,5 s before the touch-down", TICK * 1.5)
+	_free_world(w)
+
+
+# --- Sitzangriffe (Vorarbeit 2026-11-17, GolemSitCombat / GolemSitAnim) ---------------
+# Zwei Kanaele (Beine, Arme), gezielt wie der Luftschlag; grosse Angriffe sperren beide;
+# Drehen im Sitzen ohne Angriffe. Die Clips fehlen noch: die Angriffe wirken ohne Bild.
+
+## A seated golem (facing +z) and her sit combat, the world otherwise frozen.
+func _seated(w: Dictionary) -> Golem:
+	var g: Golem = _sit_golem(w, 0, Vector3(64, 5, 70))
+	_sit_until_seated(w, g)
+	g.sit_combat = GolemSitCombat.new(g)
+	return g
+
+
+## Ticks only the golem until `cond` holds (or the limit).
+func _tick_golem_until(g: Golem, cond: Callable, limit: int = 200) -> int:
+	var n: int = 0
+	while not cond.call() and n < limit:
+		g.tick(TICK)
+		n += 1
+	return n
+
+
+func test_sit_foot_zone_is_the_half_circle_ahead_of_her_feet() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _seated(w)
+	var c: GolemSitCombat = g.sit_combat
+	var f: Vector3 = c.feet_point()
+	var fwd: Vector3 = g.heading()
+	check_near(_flat(f, g.position), g.seat_back_m(), "the feet rest in front of the seat", 0.01)
+	check(c.left().x > 0.9, "facing +z her left is +x (as in the model)")
+	check(c.in_foot_zone(f + fwd * (g.reach() * 0.9)), "ahead within reach: yes")
+	check(c.in_foot_zone(f + c.left() * (g.reach() * 0.9) + fwd * 0.1), "beside the feet, a bit ahead: yes")
+	check(not c.in_foot_zone(f - fwd * 2.0), "behind the feet: no (only the half circle ahead)")
+	check(not c.in_foot_zone(f + fwd * (g.reach() + 0.5)), "beyond reach: no")
+	var foe: Unit = _foe(w, f.x + 3.0, f.z + g.reach() * 0.6, 100000)
+	check(c.side_of(foe.position) > 0.0, "the foe stands on her left")
+	_tick_golem_until(g, func() -> bool: return c.pending[GolemSitCombat.CH_LEGS] != &"")
+	check(c.pending[GolemSitCombat.CH_LEGS] == GolemSitCombat.STOMP_L, "the LEFT foot stomps (%s)" % c.pending[GolemSitCombat.CH_LEGS])
+	check(c.pending[GolemSitCombat.CH_ARMS] == &"", "the arms reach nothing there")
+	_tick_golem_until(g, func() -> bool: return foe.health < 100000)
+	check(foe.health == 100000 - g.attack_damage(Golem.ATTACK_SLAM),
+		"it lands on the foe with the slam's damage (%d)" % (100000 - foe.health))
+	_free_world(w)
+
+
+func test_sit_arms_reach_a_cone_beside_and_behind_her_one_arm_each_side() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _seated(w)
+	var c: GolemSitCombat = g.sit_combat
+	var hl: Vector3 = c.hand_point(1.0)
+	var hr: Vector3 = c.hand_point(-1.0)
+	check(hl.x > g.position.x and hr.x < g.position.x and hl.z < g.position.z,
+		"the hands rest beside and behind her hips")
+	var axis: Vector3 = c.arm_axis(1.0)
+	check(axis.x > 0.5 and axis.z < 0.0, "the left cone points left and a little back")
+	check(c.in_arm_zone(hl + axis * g.reach() * 0.7, 1.0) and not c.in_arm_zone(hl + axis * g.reach() * 0.7, -1.0),
+		"a point out to the left: the left arm, not the right")
+	check(not c.in_arm_zone(hl + g.heading() * g.reach() * 0.8, 1.0), "straight ahead of the hand is outside the cone")
+	var foe: Unit = _foe(w, hr.x - g.reach() * 0.6, hr.z - 1.0, 100000)
+	_tick_golem_until(g, func() -> bool: return c.pending[GolemSitCombat.CH_ARMS] != &"")
+	check(c.pending[GolemSitCombat.CH_ARMS] == GolemSitCombat.WIPE_R, "the RIGHT arm wipes (%s)" % c.pending[GolemSitCombat.CH_ARMS])
+	check(c.pending[GolemSitCombat.CH_LEGS] == &"", "only one arm, the legs stay")
+	_tick_golem_until(g, func() -> bool: return foe.health < 100000)
+	check(foe.health < 100000, "the wipe strikes")
+	_free_world(w)
+
+
+func test_sit_legs_and_arms_strike_at_the_same_time() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _seated(w)
+	var c: GolemSitCombat = g.sit_combat
+	var f: Vector3 = c.feet_point()
+	var hr: Vector3 = c.hand_point(-1.0)
+	_foe(w, f.x - 2.0, f.z + g.reach() * 0.5, 100000)
+	_foe(w, hr.x - g.reach() * 0.6, hr.z - 1.0, 100000)
+	var both: bool = false
+	for i in range(40):
+		g.tick(TICK)
+		if c.pending[GolemSitCombat.CH_LEGS] != &"" and c.pending[GolemSitCombat.CH_ARMS] != &"" \
+				and c.pending[GolemSitCombat.CH_LEGS] != c.pending[GolemSitCombat.CH_ARMS]:
+			both = true
+	check(both, "a foot and an arm wound up at once")
+	_free_world(w)
+
+
+func test_sit_long_leg_lane_reaches_beyond_the_foot() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _seated(w)
+	var c: GolemSitCombat = g.sit_combat
+	var f: Vector3 = c.feet_point()
+	var far: Vector3 = f + g.heading() * (g.reach() * 1.6)
+	check(not c.in_foot_zone(far) and c.in_kick_lane(far), "1,6 x reach straight ahead: only the stretched leg")
+	check(not c.in_kick_lane(f + g.heading() * (g.reach() * 2.1)), "the lane ends at 2 x reach")
+	var foe: Unit = _foe(w, far.x, far.z, 100000)
+	_tick_golem_until(g, func() -> bool: return c.pending[GolemSitCombat.CH_LEGS] != &"")
+	var kind: StringName = c.pending[GolemSitCombat.CH_LEGS]
+	check(kind == GolemSitCombat.KICK_L or kind == GolemSitCombat.KICK_R, "she stretches a leg (%s)" % kind)
+	check(GolemSitCombat.channels_of(kind) == ([GolemSitCombat.CH_LEGS] as Array[int]), "the arms stay free for it")
+	_tick_golem_until(g, func() -> bool: return foe.health < 100000)
+	check(foe.health == 100000 - g.attack_damage(Golem.ATTACK_KICK), "the kick's damage")
+	_free_world(w)
+
+
+func test_sit_big_attacks_take_both_channels() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _seated(w)
+	var c: GolemSitCombat = g.sit_combat
+	for kind in [GolemSitCombat.HOP, GolemSitCombat.CLAP, GolemSitCombat.DOUBLE_STOMP]:
+		check(GolemSitCombat.channels_of(kind).size() == 2, "%s takes (or blocks) both channels" % kind)
+	check(GolemSitCombat.layer_of(GolemSitCombat.HOP) == GolemSitAnim.LAYER_FULL
+		and GolemSitCombat.layer_of(GolemSitCombat.STOMP_L) == GolemSitAnim.LAYER_LEGS
+		and GolemSitCombat.layer_of(GolemSitCombat.WIPE_R) == GolemSitAnim.LAYER_ARMS, "and plays on the body layer")
+	# A crowd around her feet: the double stomp beats a single foot.
+	var f: Vector3 = c.feet_point()
+	var crowd: Array = []
+	for i in range(8):
+		crowd.append(_foe(w, f.x + float(i % 4) - 1.5, f.z + 1.0 + float(i / 4), 100000))
+	_tick_golem_until(g, func() -> bool: return c.is_busy())
+	check(c.pending[GolemSitCombat.CH_LEGS] == GolemSitCombat.DOUBLE_STOMP
+		and c.pending[GolemSitCombat.CH_ARMS] == GolemSitCombat.DOUBLE_STOMP,
+		"a crowd at her feet: the double stomp, arms blocked (%s / %s)" % [c.pending[0], c.pending[1]])
+	check(not c.channel_free(GolemSitCombat.CH_ARMS), "the arms are not free meanwhile")
+	_tick_golem_until(g, func() -> bool: return not c.is_busy())
+	var hit: int = 0
+	for u in crowd:
+		if u.health < 100000:
+			hit += 1
+	check(hit == mini(8, c.max_targets(GolemSitCombat.DOUBLE_STOMP)), "it strikes the crowd (%d)" % hit)
+	# The hop strikes around the seat, the clap beside her hands.
+	var seat_foe: Unit = _foe(w, g.position.x + g.seat_half_extent().x * 1.5, g.position.z, 100000)
+	check(c.in_area(GolemSitCombat.HOP, seat_foe.position, Vector3.INF), "the hop's area is twice the seat")
+	check(c.in_area(GolemSitCombat.CLAP, c.hand_point(1.0) + Vector3(1, 0, 0), Vector3.INF)
+		and not c.in_area(GolemSitCombat.CLAP, c.feet_point(), Vector3.INF), "the clap lands beside her hands")
+	_free_world(w)
+
+
+## Erreicht kein Glied einen Feind, dreht sie sich langsam zu ihm (um den Po) — und
+## greift waehrenddessen nicht an.
+func test_sitting_she_turns_slowly_toward_an_enemy_out_of_reach() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _seated(w)
+	var c: GolemSitCombat = g.sit_combat
+	var seat: Vector3 = g.position
+	var foe: Unit = _foe(w, seat.x + 22.0, seat.z - 6.0, 100000)   # left and a little behind, out of reach
+	check(not c.in_foot_zone(foe.position) and not c.in_arm_zone(foe.position, 1.0)
+		and not c.in_kick_lane(foe.position), "no limb reaches the foe")
+	g.tick(TICK)
+	g.tick(TICK)
+	g.tick(TICK)
+	check(c.turning and g.is_sit_turning(), "she turns toward it")
+	check(g._sit_base_clip() == GolemSitAnim.CLIP_TURN_L, "to the left: sit_turn_l")
+	var standing_rate: float = g.turn_rate() / Balance.GOLEM_SIT_TURN_SHARE
+	check_near(g.turn_rate(), standing_rate * 0.25, "a quarter of her standing turn rate")
+	var struck: bool = false
+	var ticks: int = 0
+	while c.turning and ticks < 400:
+		g.tick(TICK)
+		ticks += 1
+		struck = struck or (c.turning and c.is_busy())
+	check(not c.turning, "she has turned (%.1f s)" % (float(ticks) * TICK))
+	check(not struck, "no attack while turning")
+	check(_flat(g.position, seat) < 0.01, "she turned about her hips, on the spot")
+	check(g._seat_fwd.is_equal_approx(g.heading()), "the seat turned with her")
+	_tick_golem_until(g, func() -> bool: return foe.health < 100000, 100)
+	check(foe.health < 100000, "then a limb reaches it")
+	_free_world(w)
+
+
+## Die Animationsebenen: Beine, Arme und Koerper getrennt; ohne die Clips bleibt der
+## Baum aus. Hier mit einem Ersatzclip (der Tritt als sit_stomp_l).
+func test_sit_animation_layers_filter_legs_and_arms() -> void:
+	var root: Node3D = (load("res://assets/models/units/golem.glb") as PackedScene).instantiate()
+	(Engine.get_main_loop() as SceneTree).root.add_child(root)
+	var player: AnimationPlayer = root.find_children("*", "AnimationPlayer", true, false)[0]
+	var layers: GolemSitAnim = GolemSitAnim.new(player)
+	check(layers.tree != null, "the tree is built")
+	check(not layers.usable(), "without sit attack clips it stays unused")
+	check(layers.leg_paths.size() == 6 and layers.arm_paths.size() == 8,
+		"6 leg and 8 arm tracks (%d / %d)" % [layers.leg_paths.size(), layers.arm_paths.size()])
+	var legs: AnimationNodeOneShot = layers._blend.get_node(&"legs") as AnimationNodeOneShot
+	var arms: AnimationNodeOneShot = layers._blend.get_node(&"arms") as AnimationNodeOneShot
+	var leg_path: NodePath = layers.leg_paths[0]
+	var arm_path: NodePath = layers.arm_paths[0]
+	check(legs.is_path_filtered(leg_path) and not legs.is_path_filtered(arm_path), "the leg layer moves only legs")
+	check(arms.is_path_filtered(arm_path) and not arms.is_path_filtered(leg_path), "the arm layer moves only arms")
+	check(not (layers._blend.get_node(&"full") as AnimationNodeOneShot).filter_enabled, "the body layer moves everything")
+	var lib: AnimationLibrary = player.get_animation_library(&"")
+	lib.add_animation(&"sit_stomp_l", player.get_animation(&"kick").duplicate())
+	check(layers.usable(), "with a sit clip the layers come into use")
+	layers.set_active(true)
+	check(layers.fire(GolemSitAnim.LAYER_LEGS, &"sit_stomp_l", 0.7), "the stomp fires on the leg layer")
+	check(not layers.fire(GolemSitAnim.LAYER_ARMS, &"sit_wipe_l", 0.35), "a missing clip does not")
+	layers.tree.advance(0.05)
+	check(layers.layer_running(GolemSitAnim.LAYER_LEGS) and not layers.layer_running(GolemSitAnim.LAYER_ARMS),
+		"the leg layer runs, the arm layer does not")
+	check_near(float(layers.tree.get("parameters/legs_speed/scale")), 0.35 / 0.7,
+		"played so that the impact meets the wind-up", 0.0001)
+	root.queue_free()

@@ -111,13 +111,93 @@ const GOLEM_SLAM_WINDUP: float = 0.35
 const GOLEM_STANCE_SWITCH_TIME: float = 0.4
 const GOLEM_STANCE_SWITCH_MAX: float = 2.0
 const GOLEM_STANCE_MIN_TIME: float = 3.0
-## SITZEN (2026-11-17): dritte Haltung, nur ueber die gebueckte erreichbar (stehen ->
-## buecken -> sitzen und denselben Weg zurueck). Hinsetzen und Aufstehen dauern je
-## GOLEM_SIT_TIME Sekunden mal Wurzel(Groesse), hoechstens GOLEM_SIT_TIME_MAX (die Clips
-## sit_down / sit_up sind 1,5 s lang). Bisher setzt sie nichts im Spiel hin: es gibt
-## noch keinen Ausloeser (Golem.sit_down()).
-const GOLEM_SIT_TIME: float = 1.5
-const GOLEM_SIT_TIME_MAX: float = 4.0
+## SITZEN (Nutzervorgabe 2026-11-17, plans/10l_golem_sitting.md, erste Stufe): dritte
+## Haltung fuer ALLE Golems ab GOLEM_SIT_MIN_HEIGHT Koerperhoehe, nur ueber die gebueckte
+## erreichbar (stehen -> buecken -> sitzen und denselben Weg zurueck, endet stehend).
+## NUR VON HAND (Taste V, Knopf in der Seitenleiste): nichts setzt sie von selbst hin
+## oder laesst sie aufstehen, die KI nutzt es nicht. Solange sie sich setzt, sitzt oder
+## aufsteht, nimmt sie keine Befehle an, laeuft nicht, greift nicht an (erste Stufe: es
+## gibt noch keine Sitzangriffe), wird von anderen Golems nicht geschoben, trampelt und
+## ebnet nicht ein; waechst sie, streckt sie sich nicht (kein Clip, sie bleibt sitzen).
+## Hinsetzen und Aufstehen dauern je GOLEM_SIT_TIME Sekunden bei GOLEM_SIT_REF_HEIGHT,
+## mal Wurzel(Hoehe / GOLEM_SIT_REF_HEIGHT), OHNE Obergrenze (Nutzer: erst ansehen;
+## 80 m: 4,9 s; der Daemonengolem 15 % schneller). Die Clips sit_down / sit_up sind 1,5 s lang.
+const GOLEM_SIT_MIN_HEIGHT: float = 30.0
+const GOLEM_SIT_TIME: float = 3.0
+const GOLEM_SIT_REF_HEIGHT: float = 30.0
+## SITZFLAECHE: ein Rechteck unter dem Po (Haende und Fuesse zaehlen nicht), in Metern
+## des 4-m-Modells — die Mitte GOLEM_SIT_SEAT_BACK hinter den Fuessen (gemessen am Clip
+## sit_idle: Becken 1,3 m dahinter, Hueftgelenke 0,38 m auseinander), quer
+## GOLEM_SIT_SEAT_WIDTH, laengs GOLEM_SIT_SEAT_LENGTH; skaliert wie das Modell (breit wie
+## Modellbreite x Groesse — beim Daemonengolem also 25 % breiter). Bei 30 m: 5 x 5 m, 10,8 m
+## hinter den Fuessen. Im Sitzen liegt der Standpunkt des Golems (Zielkreis,
+## Auswahlkreis, Abstand der Golems) auf der Mitte dieser Flaeche.
+const GOLEM_SIT_SEAT_BACK: float = 1.3
+const GOLEM_SIT_SEAT_WIDTH: float = 0.6
+const GOLEM_SIT_SEAT_LENGTH: float = 0.6
+## Kein Gebaeude und keine Baustelle (gleich welchen Stamms) darf die Sitzflaeche
+## beruehren, sie liegt ganz an Land. Ist ihr Platz belegt, sucht sie bis
+## GOLEM_SIT_SEARCH_SHARE ihres Koerperradius daneben (und rueckt beim Buecken dorthin),
+## sonst setzt sie sich nicht.
+const GOLEM_SIT_SEARCH_SHARE: float = 0.5
+## SITZSCHADEN: wer beim Aufsetzen unter der Sitzflaeche steht (alle Staemme), nimmt
+## GOLEM_SIT_DAMAGE_MULT x Trampelschaden — sofort und dann alle
+## GOLEM_SIT_DAMAGE_INTERVAL Sekunden, solange er noch darunter steht. Wer herauslaeuft,
+## faellt heraus; wer spaeter darunter kommt, wird nicht getroffen. Die Flaeche waechst
+## nicht mit, wenn sie im Sitzen groesser wird. Feindliche Bodenfahrzeuge darunter
+## nehmen je Tick einen Treffer wie unter dem Trampeln. Eigene Opfer zaehlen nicht als Kill.
+const GOLEM_SIT_DAMAGE_MULT: int = 4
+const GOLEM_SIT_DAMAGE_INTERVAL: float = 5.0
+## Im Sitzen ist sie das groessere Ziel: Zielradius mal diesem Faktor.
+const GOLEM_SIT_TARGET_RADIUS_FACTOR: float = 2.0
+## So viele Sekunden VOR dem Aufsetzen wechselt ihr Standpunkt (und mit ihm der
+## Auswahlkreis) schon auf die Mitte der Sitzflaeche (Nutzer 2026-11-17); der
+## Sitzschaden faellt erst beim Aufsetzen.
+const GOLEM_SIT_SEAT_LEAD: float = 0.5
+## HOEHE IM SITZEN (Nutzer 2026-11-17): die sitzende Figur liegt nie tiefer als der
+## Boden unter Fuessen, Po und Haenden (sonst verschwanden Arme und Beine im Hang);
+## hoeher darf sie liegen. Die Haende liegen GOLEM_SIT_HAND_BACK hinter und
+## GOLEM_SIT_HAND_SIDE neben den Fuessen (Clip sit_idle, Metern des 4-m-Modells).
+const GOLEM_SIT_HAND_BACK: float = 2.1
+const GOLEM_SIT_HAND_SIDE: float = 0.7
+## EINEBNEN BEIM HINSETZEN (Nutzer 2026-11-17): waehrend sie sich setzt, gleicht sich
+## der Boden unter der ganzen sitzenden Figur — von GOLEM_SIT_LEVEL_FRONT vor bis
+## GOLEM_SIT_LEVEL_BACK hinter den Fuessen, GOLEM_SIT_LEVEL_HALF_WIDTH zu jeder Seite
+## (4-m-Modell) — an die Hoehe ihrer Fuesse an, gehoben wie gesenkt; ringsum eine
+## begehbare Boeschung (GOLEM_FLATTEN_SLOPE). Gebaeude (mit einer Zelle Rand), das
+## Ufer und der Meeresboden bleiben, nichts sinkt unter die Wasserlinie (wie beim
+## Einebnen des Giganten). Die Figur ist bei 4 m Bauhoehe 2,6 m lang und 1,5 m breit.
+const GOLEM_SIT_LEVEL_FRONT: float = 0.35
+const GOLEM_SIT_LEVEL_BACK: float = 2.35
+const GOLEM_SIT_LEVEL_HALF_WIDTH: float = 0.8
+## SITZANGRIFFE (Nutzervorgabe 2026-11-17, scripts/units/golem_sit_combat.gd): Beine und
+## Arme greifen unabhaengig an. Fuss-Stampfer und Arm-Wischer zielen wie der Luftschlag
+## (Aufschlag am Ziel, Kreis des Handschlags darum), Reichweite reach() — der Fuss von der
+## Ruhelage der Fuesse aus nur nach vorn im Halbkreis, der Arm von der Ruhelage der Hand
+## aus in einem Kegel seitlich und leicht hinter dem Koerper: Achse um
+## GOLEM_SIT_ARM_CONE_BACK_DEG nach hinten gedreht, halber Oeffnungswinkel
+## GOLEM_SIT_ARM_CONE_HALF_DEG (Vorschlag).
+const GOLEM_SIT_ARM_CONE_BACK_DEG: float = 30.0
+const GOLEM_SIT_ARM_CONE_HALF_DEG: float = 60.0
+## Bein strecken: Schneise geradeaus von den Fuessen, so lang wie dieser Anteil der
+## Reichweite, so breit wie die Tritt-Schneise (Vorschlag).
+const GOLEM_SIT_KICK_REACH_SHARE: float = 2.0
+## Doppelstampfer: Kreis um die Fuesse, dieser Anteil des Handschlag-Radius (Vorschlag).
+const GOLEM_SIT_DOUBLE_STOMP_RADIUS_SHARE: float = 1.5
+## Po-Huepfer: die Sitzflaeche, so viel mal groesser (Vorschlag).
+const GOLEM_SIT_HOP_AREA_FACTOR: float = 2.0
+## Die grossen Sitzangriffe (Po-Huepfer, Doppelklatscher, Doppelstampfer) sind
+## Flaechenangriffe: sie kommen erst in Frage, wenn sie mindestens so viele Feinde
+## treffen (Vorschlag).
+const GOLEM_SIT_BIG_MIN_TARGETS: int = 3
+## DREHEN IM SITZEN: erreicht keines ihrer Glieder einen Feind, dreht sie sich zum
+## naechsten in ihrem Aggro-Radius, wenn er mehr als GOLEM_SIT_TURN_MIN_DEG neben ihrer
+## Blickrichtung liegt — mit GOLEM_SIT_TURN_SHARE ihrer Drehrate im Stand, um den Po;
+## fertig bis auf GOLEM_SIT_TURN_DONE_DEG. Waehrend sie sich dreht, greift sie nicht an
+## (Vorschlaege).
+const GOLEM_SIT_TURN_SHARE: float = 0.25
+const GOLEM_SIT_TURN_MIN_DEG: float = 20.0
+const GOLEM_SIT_TURN_DONE_DEG: float = 3.0
 ## STRECKEN BEIM WACHSEN (Nutzer 2026-11-16): bei jedem Stufenaufstieg und jedem
 ## Wachstumsschritt nach Stufe 7 reckt sich der Golem einmal (Clip "grow", Sound
 ## "golem_grow"). Das kostet GOLEM_GROW_TIME Sekunden, in denen er weder

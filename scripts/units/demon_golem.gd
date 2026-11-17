@@ -218,6 +218,11 @@ func stance_switch_time() -> float:
 	return super.stance_switch_time() * (1.0 - Balance.DEMON_GOLEM_ATTACK_SPEEDUP)
 
 
+## Sitting down and getting up as well.
+func sit_switch_time() -> float:
+	return super.sit_switch_time() * (1.0 - Balance.DEMON_GOLEM_ATTACK_SPEEDUP)
+
+
 func aggro_radius() -> float:
 	return clampf(AGGRO_RADIUS * size_factor(), AGGRO_RADIUS, Balance.GOLEM_AGGRO_MAX)
 

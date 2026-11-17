@@ -1,7 +1,88 @@
 # 10l – Golem: Haltung „Sitzen“ (Plan, 2026-11-17)
 
-Status: **Plan, noch nicht umgesetzt.** Animationen kommen später aus
-`D:\game\gymnastikschuh` (Clipvertrag unten). Offene Punkte am Ende.
+Status: **Erste Stufe umgesetzt (2026-11-17)** — Sitzen mit Taste `V` und Knopf, Sperren,
+Sitzplatz, Sitzschaden, Zielradius, Wachsen im Sitzen, für alle drei Golems. **Noch offen:**
+Sitzangriffe (Schritt 9), Drehen im Sitzen (Schritt 6) und der Clip `sit_grow` — dafür
+fehlen die Clips `sit_stomp_l/r`, `sit_wipe_l/r`, `sit_turn_l/r`, `sit_grow`. Die Clips
+`sit_down`, `sit_idle`, `sit_up` sind da (`D:\game\gymnastikschuh`, Clipvertrag unten).
+
+### Entscheidungen zur ersten Stufe (Nutzer 2026-11-17)
+
+- Im Sitzen erstmal **keine Angriffe**.
+- Sitzfläche: **Rechteck unter dem Po**, Hände und Füße zählen nicht (gemessen am Clip
+  `sit_idle`: Mitte 1,3 m hinter den Füßen im 4-m-Modell, 0,6 × 0,6 m;
+  `GOLEM_SIT_SEAT_*`).
+- Zielkreis, Auswahlkreis und Golem-Abstand im Sitzen auf der **Mitte der Sitzfläche**.
+- Dauer 3 s × Wurzel(Höhe / 30 m), **ohne Obergrenze** (Nutzer will es erst sehen).
+- Zielradius im Sitzen **× 2**.
+- Gilt für **alle Golems** (auch den Genesisgolem).
+- Feindliche Fahrzeuge unter der Sitzfläche nehmen Schaden; Bäume werden ignoriert; kein
+  Einebnen im Sitzen; die Sitzschadenfläche wächst im Sitzen nicht mit.
+- Erster Sitzschaden-Tick sofort beim Aufsetzen.
+- Annahme: der Dämonengolem setzt sich wie bei allen Haltungswechseln 15 % schneller.
+- Nachtrag: sitzend nie tiefer als der Boden unter Füßen, Po und Händen (höher darf sie);
+  beim Hinsetzen ebnet sich der Boden unter der Figur auf Fußhöhe ein; der Auswahlkreis
+  wechselt 0,5 s vor dem Aufsetzen auf die Sitzmitte (beim Aufstehen sofort).
+
+Erreichbar: Golem nach 222 Kills (31,3 m), Dämonengolem mit der 32-m-Stufe (60 Kills),
+Genesisgolem auf Stufe 8 (33 m).
+
+### Sitzangriffe und Drehen — Vorarbeit (Nutzervorgaben 2026-11-17)
+
+Umgesetzt in `scripts/units/golem_sit_combat.gd` (Logik) und `scripts/units/golem_sit_anim.gd`
+(Animationsebenen); die **Clips fehlen noch** — bis dahin wirken die Angriffe ohne Bild und der
+Animationsbaum bleibt aus.
+
+- **Fuß-Stampfer** (Beine): zielt wie der Luftschlag — Aufschlag am Ziel, Kreis des Handschlags
+  darum. Reichweite `reach()` von der Ruhelage der Füße, **nur nach vorn im Halbkreis**. Linker Fuß
+  für Ziele links, rechter rechts.
+- **Arm-Wischer** (Arme): ebenso gezielt, Kreis des Handschlags. **Immer nur ein Arm**: links für
+  Ziele links, rechts für rechts. Erreichbar: ein **Kegel seitlich und leicht hinter dem Körper** von
+  der Ruhelage der Hand, Reichweite `reach()` (Achse 30° nach hinten, ±60°: Vorschlag).
+- **Bein strecken** (Beine): lange Schneise geradeaus von den Füßen, 2 × `reach()` (Vorschlag), so
+  breit wie die Tritt-Schneise; **die Arme dürfen gleichzeitig angreifen**.
+- **Po-Hüpfer**: Fläche = doppelte Sitzfläche (Vorschlag); **sperrt Arme und Beine**.
+- **Doppelklatscher**: beide Hände schlagen neben ihr auf (Kreis um jede Hand); **sperrt die Füße**.
+- **Doppelstampfer**: beide Füße (Kreis um die Füße, 1,5 × Handschlag-Radius: Vorschlag); **sperrt
+  die Arme**.
+- Die großen drei sind Flächenangriffe: erst ab 3 Feinden in der Fläche (Vorschlag).
+- **Zwei Kanäle** (Beine, Arme) mit eigener Ausholzeit und Abklingzeit, gleichzeitig möglich; die
+  großen Angriffe belegen beide. Wahl nach Schaden je Sekunde (ein großer Angriff gegen die besten
+  Einzelangriffe beider Kanäle zusammen).
+- **Drehen im Sitzen**: erreicht kein Glied einen Feind, dreht sie sich zum nächsten im Aggro-Radius
+  (ab 20° Abweichung), mit 25 % ihrer Drehrate im Stand, um den Po (ihr Standpunkt bleibt). **Während
+  des Drehens keine Angriffe.** Die Sitzfläche dreht mit; der Sitzschaden trifft weiter nur, wer beim
+  Aufsetzen darunter stand.
+- **Werte vorerst geborgt** (Vorschlag, Nutzer legt fest): Stampfer und Wischer wie der Handschlag,
+  Bein strecken wie der Tritt, Doppelklatscher und Doppelstampfer wie das Trommeln (alle drei Schläge
+  in einem), Po-Hüpfer doppelter Sprung (= 4 × Trampeln); Takt, Ausholzeit und Zielzahl ebenso.
+- **Noch nicht**: Gebäude und Fahrzeuge als Ziele der Sitzangriffe, Rückstoß, Luftschiffe; ob Füße
+  und Hände beim Drehen über Gebäude oder Wasser wandern dürfen.
+
+**Animationsebenen** (`GolemSitAnim`): ein `AnimationTree` über dem `AnimationPlayer` des Modells —
+Grundclip (`sit_idle`, beim Drehen `sit_turn_l/_r`), darüber je ein OneShot für die **Beine** (Filter
+auf die Beinknochen), die **Arme** (Armknochen) und den **ganzen Körper** (ohne Filter), jeder mit
+eigenem Tempo. Die Spuren werden aus `sit_idle` gelesen. Der Baum wird nur aktiv, solange sie sitzt
+und das Modell wenigstens einen der Clips unten hat.
+
+#### Clipvertrag der Sitzangriffe
+
+| Clip | Ebene (Knochen) | Aufschlag bei Tempo 1 | Was passiert |
+|---|---|---|---|
+| `sit_stomp_l` / `sit_stomp_r` | Beine (nur `*UpperLeg`, `*LowerLeg`, `*Foot`) | 0,35 s | ein Fuß hebt ab und stampft auf (Fuß-Stampfer, links/rechts) |
+| `sit_kick_l` / `sit_kick_r` | Beine | 0,5 s | ein Bein schnellt gestreckt nach vorn (Bein strecken, lange Schneise) |
+| `sit_wipe_l` / `sit_wipe_r` | Arme (nur `*Shoulder`, `*UpperArm`, `*LowerArm`, `*Hand`) | 0,35 s | EIN Arm löst sich aus der Stütze und fegt seitlich/leicht hinter ihr über den Boden |
+| `sit_hop` | ganzer Körper | 0,6 s | Po-Hüpfer: auf die Hände gestützt den Po heben und plumpsen lassen |
+| `sit_clap` | ganzer Körper | 0,35 s | Doppelklatscher: beide Hände heben ab und schlagen neben ihr auf |
+| `sit_double_stomp` | ganzer Körper | 0,35 s | Doppelstampfer: beide Füße kurz heben und aufschlagen |
+| `sit_turn_l` / `sit_turn_r` | Grundclip (alle Knochen), Schleife | – | langsames Drehen im Sitzen um den Po (rutschen/umsetzen) |
+| `sit_grow` | ganzer Körper | – (1,0 s lang) | Strecken beim Wachsen im Sitzen |
+
+Alle beginnen und enden in der Ruhe im Sitz (Pose von `sit_idle` bei 0 s), damit die Ebenen ohne
+Sprung ein- und ausblenden. Ein Clip der Bein- oder Armebene darf andere Knochen enthalten — das
+Spiel filtert sie weg —, sollte sie aber in der Ruhepose lassen. Das Spiel spielt jeden
+Angriffsclip so schnell, dass sein Aufschlag auf die Ausholzeit fällt (`GolemSitAnim.SIT_CLIP_IMPACT`);
+die Aufschlagzeiten oben sind Vorschläge und werden mit den Clips festgelegt.
 
 ## Nutzervorgaben (2026-11-16/17)
 

@@ -300,6 +300,10 @@ func tick(delta: float) -> void:
 	if state == State.DEAD or doomed or garrison_housed:
 		return
 	_harvest_cooldown = maxf(_harvest_cooldown - delta, 0.0)
+	if is_sit_locked():
+		_tick_wood_store()
+		_tick_wood_growth(delta)
+		return   # seated: no felling, no trampling
 	_tick_harvest(delta)
 	_tick_trample_wood(delta, before)
 	_tick_wood_store()
@@ -475,6 +479,11 @@ func order_harvest_area(area: Rect2, poly: PackedVector2Array = PackedVector2Arr
 	harvest_area = area
 	harvest_poly = poly
 	return true
+
+
+## Asked to sit: the harvest ends.
+func _on_sit_requested() -> void:
+	end_harvest()
 
 
 func end_harvest() -> void:

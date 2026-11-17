@@ -128,6 +128,7 @@ var _crew_info: Label = null
 var _crew_slot_buttons: Array[Button] = []
 var _crew_pause_button: Button = null
 var _crew_unload_button: Button = null   # airship "Absetzen an…" (unload arm)
+var _golem_sit_button: Button = null   # golem "Hinsetzen" / "Aufstehen" (key V)
 ## Edge detection for the crew tab's auto-switch: last polled target, the tab
 ## to return to on deselection, and the currently active tab index.
 var _crew_target_obj: Object = null
@@ -1099,8 +1100,20 @@ func _build_crew_tab() -> Control:
 	_crew_unload_button.pressed.connect(_on_crew_unload)
 	vb.add_child(_crew_unload_button)
 
+	# Golem only (user spec 2026-11-17): sit down / get up — the same as key V.
+	_golem_sit_button = Button.new()
+	_golem_sit_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	UiTheme.style_button(_golem_sit_button)
+	_golem_sit_button.pressed.connect(_on_golem_sit)
+	vb.add_child(_golem_sit_button)
+
 	scroll.add_child(vb)
 	return scroll
+
+
+func _on_golem_sit() -> void:
+	if _selection != null:
+		_selection.toggle_golem_sit()
 
 
 func _on_crew_unload() -> void:
@@ -1298,6 +1311,19 @@ func _refresh_crew_tab() -> void:
 	if _crew_unload_button != null:
 		_crew_unload_button.visible = target is Airship \
 			and (target as Airship).boarded_count() > 0
+	if _golem_sit_button != null:
+		_golem_sit_button.visible = target is Golem
+		if target is Golem:
+			var g: Golem = target as Golem
+			if g._wants_sit:
+				_golem_sit_button.text = "Aufstehen (V)"
+				_golem_sit_button.disabled = false
+				_golem_sit_button.tooltip_text = "Sie steht auf: erst in die gebückte Haltung, dann in den Stand"
+			else:
+				_golem_sit_button.text = "Hinsetzen (V)"
+				_golem_sit_button.disabled = not g.can_sit() or g.is_sit_locked()
+				_golem_sit_button.tooltip_text = ("Ab %d m Körperhöhe. Sitzend nimmt sie keine Befehle an;" \
+					+ " wer beim Hinsetzen unter ihr steht, nimmt Schaden") % int(Balance.GOLEM_SIT_MIN_HEIGHT)
 
 
 ## Slot click: eject that occupant. The hut eject is MANUAL (pins the crew

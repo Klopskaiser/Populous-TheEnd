@@ -56,7 +56,41 @@ func _tribe_active(tribe: Tribe) -> bool:
 ## True while this unit may still take orders (its tribe is not out). Units
 ## without a tribe reference (tests) are allowed through.
 func _unit_active(unit: Unit) -> bool:
+	if unit != null and unit is Golem and (unit as Golem).is_sit_locked():
+		return false   # a sitting golem takes no orders, only "stand up" (order_golem_stand)
 	return unit != null and (unit.tribe == null or not unit.tribe.eliminated)
+
+
+# --- Golems: sit (key V / sidebar, user spec 2026-11-17) ---------------------------
+
+## Sits down every golem in `units` that can (big enough, free seat, not already
+## sitting). Returns how many will sit — 0: the order is rejected.
+func order_golem_sit(units: Array[Unit]) -> int:
+	var n: int = 0
+	for u in units:
+		if u is Golem and is_instance_valid(u) and u.state != Unit.State.DEAD \
+				and (u.tribe == null or not u.tribe.eliminated) and (u as Golem).sit_down():
+			n += 1
+	return n
+
+
+## Calls up every sitting (or sitting-down) golem in `units`. Returns how many.
+func order_golem_stand(units: Array[Unit]) -> int:
+	var n: int = 0
+	for u in units:
+		if u is Golem and is_instance_valid(u) and u.state != Unit.State.DEAD \
+				and (u as Golem).stand_up():
+			n += 1
+	return n
+
+
+## Key V: when one of the golems in `units` sits or is sitting down, all of those get
+## up; otherwise every golem that can sits down. Returns how many answered.
+func toggle_golem_sit(units: Array[Unit]) -> int:
+	for u in units:
+		if u is Golem and is_instance_valid(u) and (u as Golem)._wants_sit:
+			return order_golem_stand(units)
+	return order_golem_sit(units)
 
 
 # --- Building placement -----------------------------------------------------------

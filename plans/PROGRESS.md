@@ -12645,6 +12645,36 @@ zuerst am Daemonengolem.
 - Nachtrag: nach der Abnahme am Daemonengolem haben auch `golem.glb` und `golem_genesis.glb` die
   niedliche Fassung von `grow` und `stomp` (dieselben Namen und Zeiten).
 
+### Golems: Sitzen, erste Stufe (2026-11-17)
+
+Nach `plans/10l_golem_sitting.md` und den Nutzerentscheidungen vom 2026-11-17:
+- `golem.gd`: `can_sit` (ab 30 m), `sit_down` / `stand_up` nur von Hand,
+  `is_sit_locked` sperrt Befehle (`can_take_orders`), Bewegung, Angriffe, Zurückschlagen,
+  Luftschiffjagd, Trampeln, Einebnen und das Schieben durch andere Golems. Dauer 3 s ×
+  Wurzel(Höhe / 30 m) ohne Obergrenze (Dämonengolem × 0,85).
+- Sitzfläche (`GOLEM_SIT_SEAT_*`, gemessen am Clip `sit_idle`): Rechteck unter dem Po;
+  `find_seat` / `seat_free` (keine Gebäude/Baustellen, an Land, Ausweichen bis halber
+  Körperradius); im Sitzen liegt der Standpunkt auf ihrer Mitte (Modell nach vorn versetzt),
+  Zielradius × 2.
+- Sitzschaden 4 × Trampelschaden sofort und alle 5 s auf die beim Aufsetzen darunter
+  Stehenden (alle Stämme, feindliche Fahrzeuge Crush-Treffer, eigene Opfer kein Kill).
+- Wachsen im Sitzen ohne Strecken. Genesisgolem: Holzfällen endet beim Hinsetzen.
+- Nachtrag (Nutzer): Höhe im Sitzen nie unter dem Boden unter Füßen/Po/Händen
+  (`_seat_floor_height`, `Unit.settle_on_ground` statt fester Höhe in `TerrainMorph`),
+  Einebnen unter der Figur beim Hinsetzen auf Fußhöhe (`sit_level_plan`), Standpunkt und
+  Auswahlkreis 0,5 s vor dem Aufsetzen auf der Sitzmitte (`GOLEM_SIT_SEAT_LEAD`). 3 Tests mehr.
+- Sitzangriffe, Vorarbeit (Nutzervorgaben): `scripts/units/golem_sit_combat.gd` (Fuß-Stampfer,
+  Bein strecken, Arm-Wischer, Po-Hüpfer, Doppelklatscher, Doppelstampfer; Kanäle Beine/Arme,
+  Sperren, Drehen im Sitzen ohne Angriffe) und `scripts/units/golem_sit_anim.gd` (AnimationTree mit
+  Bein-, Arm- und Körperebene, Filter aus den Spuren von `sit_idle`, nur aktiv mit Clips). Werte
+  geborgt (Vorschläge in `Balance.GOLEM_SIT_*`). Clipvertrag in `plans/10l_golem_sitting.md` und
+  `gymnastikschuh/LIESMICH_POPULOUS.md`. 7 Tests mehr (Suite 7754 / 0).
+- Taste `V` (`golem_sit_toggle`, im Tastenmenü), Knopf in der Seitenleiste,
+  `TribeCommands.order_golem_sit/order_golem_stand/toggle_golem_sit`; sitzende Golems
+  fallen aus allen Befehlen (`_unit_active`), nur sie gewählt: Abgelehnt-Ton.
+- Tests: 9 neue in `test_golem.gd` (ersetzen die vier alten Sitztests);
+  `tests/diag_golem_sit.gd` macht Standbilder. Offen: Sitzangriffe, Drehen, `sit_grow`.
+
 ### Golems: 80 m, neue Stufen, Dämonen-Kill-Heilung (2026-11-17)
 
 Nutzervorgabe, Werte in `Balance.GOLEM_*`, `DEMON_GOLEM_*`, `GENESIS_GOLEM_*`:
