@@ -111,6 +111,13 @@ const GOLEM_SLAM_WINDUP: float = 0.35
 const GOLEM_STANCE_SWITCH_TIME: float = 0.4
 const GOLEM_STANCE_SWITCH_MAX: float = 2.0
 const GOLEM_STANCE_MIN_TIME: float = 3.0
+## SITZEN (2026-11-17): dritte Haltung, nur ueber die gebueckte erreichbar (stehen ->
+## buecken -> sitzen und denselben Weg zurueck). Hinsetzen und Aufstehen dauern je
+## GOLEM_SIT_TIME Sekunden mal Wurzel(Groesse), hoechstens GOLEM_SIT_TIME_MAX (die Clips
+## sit_down / sit_up sind 1,5 s lang). Bisher setzt sie nichts im Spiel hin: es gibt
+## noch keinen Ausloeser (Golem.sit_down()).
+const GOLEM_SIT_TIME: float = 1.5
+const GOLEM_SIT_TIME_MAX: float = 4.0
 ## STRECKEN BEIM WACHSEN (Nutzer 2026-11-16): bei jedem Stufenaufstieg und jedem
 ## Wachstumsschritt nach Stufe 7 reckt sich der Golem einmal (Clip "grow", Sound
 ## "golem_grow"). Das kostet GOLEM_GROW_TIME Sekunden, in denen er weder

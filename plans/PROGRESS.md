@@ -12711,3 +12711,25 @@ Nutzervorgabe, alles in `scripts/units/genesis_golem.gd` und `Balance.GENESIS_GO
   dabei unten. Der Sprung wird dafuer nicht benutzt. Der Einzelbefehl ist unveraendert.
 - Tests: `test_genesis_golem.gd` 115 (neu: Cluster mit einem Bodenschlag, Einzelbaum bleibt beim
   Tritt, Aggro, Gebaeudeholz, unsichtbarer Stapel; angepasst: Hoehen 9 / 41 m).
+
+### Golems: Sitzen (ohne Ausloeser) und gebueckte Haltung ohne Clipping (2026-11-17)
+
+Nutzervorgabe: Hinsetzen und Idle im Sitzen fuer alle drei Golems, das Hinsetzen geht ueber die gebueckte
+Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im Buecken. Eingepflegt, aber
+"sitzen hat noch keinen Ausloeser".
+- Modelle: `golem.glb`, `golem_demon.glb`, `golem_genesis.glb` neu aus der Werkstatt
+  (`--bewegung=./golem_bewegung_niedlich_sitzen.mjs`), je 19 Clips. Neu `sit_down`, `sit_up` (je 1,5 s) und
+  `sit_idle` (18 s, Schleife). In `crouch_*`, `slam_low`, `drum_low`, `stomp` stehen die Knie
+  aussen neben dem Oberkoerper, die Schuhspitzen drehen mit, das Becken ist weniger gekippt (Ruecken runder);
+  Brustkorb, Arme, Zeiten und Aufschlagorte sind unveraendert. Die uebrigen zehn Clips (auch die alten
+  Rueckfall-Clips `slam` und `drum`) sind zahlengleich. Nachtrag am selben Abend: `sit_down` neu gefuehrt -
+  erst aufrichten, Arme ueber den Knien nach aussen, dann nach hinten aufstuetzen (vorher gingen die Arme
+  durch die Knie).
+- `Golem`: dritte Haltung `STANCE_SIT` (2). `_begin_stance` geht einen Schritt entlang Stehen - Buecken -
+  Sitzen; `sit_down()` / `stand_up()` / `is_sitting()`, `sit_switch_time()` (`GOLEM_SIT_TIME` 1,5 s mal Wurzel
+  der Groesse, hoechstens `GOLEM_SIT_TIME_MAX` 4 s), `stance_name()` fuer die Seitenleiste (auch Daemonen- und
+  Genesisgolem). Sitzen nur im Leerlauf: Befehl, Ziel oder faelliges Strecken holen sie hoch (`_sit_must_end`),
+  aus dem Sitz kommt sie ohne die Wartezeit der Haltung zum Stand; aus dem Sitz wird nichts geschlagen.
+- **Kein Ausloeser:** nichts im Spiel ruft `sit_down()`. Wann sie sich setzt, ist offen.
+- Tests: `test_golem.gd` 704 (4 neu: ueber die gebueckte Haltung und zurueck, Bewegungsbefehl holt sie hoch,
+  kein Schlag aus dem Sitz, nur ein untaetiger Golem setzt sich). Nicht im laufenden Spiel angesehen.

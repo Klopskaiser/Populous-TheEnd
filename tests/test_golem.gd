@@ -3429,3 +3429,131 @@ func test_a_golem_in_the_way_leaves_her_the_full_reach() -> void:
 	check(_flat(other.position, other_start) < 0.3,
 		"the golem in the way was not shoved (%.2f m)" % _flat(other.position, other_start))
 	_free_world(w)
+
+
+# --- Sitzen (2026-11-17) -----------------------------------------------------------
+# Dritte Haltung, nur ueber die gebueckte erreichbar. Im Spiel gibt es noch keinen
+# Ausloeser: Golem.sit_down() ruft bisher niemand.
+
+func _run_stance(w: Dictionary, g: Golem, limit: int = 200) -> int:
+	var ticks: int = 0
+	while g.is_switching_stance() and ticks < limit:
+		_tick_world(w)
+		ticks += 1
+	return ticks
+
+
+## Hinsetzen geht ueber die gebueckte Haltung, Aufstehen denselben Weg zurueck —
+## ohne die Wartezeit der Haltung. Solange sie sitzt oder wechselt, bewegt sie sich nicht.
+func test_sitting_goes_through_the_crouch_and_back() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
+	g.tick(TICK)
+	var start: Vector3 = g.position
+	check(g.stance == Golem.STANCE_STAND and not g.is_sitting(), "a fresh golem stands")
+	check(g.sit_down(), "an idle golem takes the request to sit")
+	_tick_world(w)
+	check(g.is_switching_stance() and g._stance_target == Golem.STANCE_CROUCH,
+		"first she bends down")
+	_run_stance(w, g)
+	check(g.stance == Golem.STANCE_CROUCH, "she is crouched on the way down")
+	_tick_world(w)
+	check(g.is_switching_stance() and g._stance_target == Golem.STANCE_SIT,
+		"then she sits down at once, without the stance's waiting time")
+	check(is_equal_approx(g._stance_switch, g.sit_switch_time())
+			and g.sit_switch_time() > g.stance_switch_time(),
+		"sitting down takes its own, longer time (%.2f s; bending down %.2f s)"
+			% [g.sit_switch_time(), g.stance_switch_time()])
+	_run_stance(w, g)
+	check(g.is_sitting() and g.stance_name() == "sitzend", "she sits")
+	for i in range(60):
+		_tick_world(w)
+	check(g.is_sitting() and _flat(g.position, start) < 0.01,
+		"with nothing to do she stays seated, on the spot")
+	g.stand_up()
+	_tick_world(w)
+	check(g.is_switching_stance() and g._stance_target == Golem.STANCE_CROUCH,
+		"called up, she gets up into the crouch first")
+	_run_stance(w, g)
+	_tick_world(w)
+	check(g.is_switching_stance() and g._stance_target == Golem.STANCE_STAND,
+		"and straight on to standing (no waiting time on the way up)")
+	_run_stance(w, g)
+	check(g.stance == Golem.STANCE_STAND and _flat(g.position, start) < 0.01,
+		"she stands again where she sat")
+	_free_world(w)
+
+
+## Ein Bewegungsbefehl holt sie aus dem Sitz: erst aufstehen, dann laufen.
+func test_a_move_order_gets_her_up_from_the_sit() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
+	g.facing = Vector3(1, 0, 0)
+	g.tick(TICK)
+	g.sit_down()
+	for i in range(80):
+		_tick_world(w)
+	check(g.is_sitting(), "she sits")
+	var start: Vector3 = g.position
+	g.order_move(Vector3(70, 5, 50))
+	_tick_world(w)
+	check(g.is_switching_stance() and g._stance_target == Golem.STANCE_CROUCH,
+		"a move order gets her up at once")
+	var ticks: int = 0
+	var moved: float = 0.0
+	while g.stance != Golem.STANCE_STAND and ticks < 200:
+		moved = maxf(moved, _flat(g.position, start))
+		_tick_world(w)
+		ticks += 1
+	check(g.stance == Golem.STANCE_STAND, "she gets up all the way (%d ticks)" % ticks)
+	check(moved < 0.01, "while getting up she does not move (%.3f m)" % moved)
+	for i in range(12):
+		_tick_world(w)
+	check(_flat(g.position, start) > 1.0 and not g._wants_sit,
+		"then she walks off and does not sit down again (%.1f m)" % _flat(g.position, start))
+	_free_world(w)
+
+
+## Aus dem Sitz wird nichts geschlagen: kommt ein Feind in Reichweite, steht sie
+## auf (in die gebueckte Haltung) und schlaegt erst dann.
+func test_nothing_is_struck_from_the_sit() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
+	g.facing = Vector3(1, 0, 0)
+	g.stomp_enabled = false
+	g.tick(TICK)
+	g.sit_down()
+	for i in range(80):
+		_tick_world(w)
+	check(g.is_sitting(), "she sits")
+	var foe: Unit = _foe(w, 52.0, 50.0, 100000)
+	g.order_attack(foe)
+	var struck_seated: bool = false
+	var ticks: int = 0
+	while g._pending_attack == &"" and ticks < 300:
+		_tick_world(w)
+		ticks += 1
+		if g._pending_attack != &"" and (g.is_sitting() or g._stance_target == Golem.STANCE_SIT):
+			struck_seated = true
+	check(g._pending_attack != &"", "she strikes once she is up (%d ticks)" % ticks)
+	check(not struck_seated and not g.is_sitting(), "but never from the sit")
+	check(float(ticks) * TICK >= g.sit_switch_time() - TICK,
+		"getting up from the sit came first (%.1f s; it takes %.2f s)"
+			% [float(ticks) * TICK, g.sit_switch_time()])
+	_free_world(w)
+
+
+## Wer etwas zu tun hat, setzt sich nicht; und die Zeit waechst mit der Groesse.
+func test_sit_down_needs_an_idle_golem() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
+	g.tick(TICK)
+	g.order_move(Vector3(70, 5, 50))
+	check(not g.sit_down() and not g._wants_sit, "a marching golem does not take the request")
+	check(is_equal_approx(g.sit_switch_time(), Balance.GOLEM_SIT_TIME),
+		"at start size sitting down takes GOLEM_SIT_TIME (%.2f s)" % g.sit_switch_time())
+	_level_to(g, 6)
+	check(g.sit_switch_time() > Balance.GOLEM_SIT_TIME
+			and g.sit_switch_time() <= Balance.GOLEM_SIT_TIME_MAX,
+		"a bigger golem takes longer, up to the cap (level 6: %.2f s)" % g.sit_switch_time())
+	_free_world(w)

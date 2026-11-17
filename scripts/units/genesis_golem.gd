@@ -690,7 +690,7 @@ func status_text() -> String:
 	if stage < max_stage():
 		next = "   noch %d Braves bis Stufe %d" % [
 			int(ceil(float(braves_for_stage(stage + 1)) - brave_xp - 0.000001)), stage + 1]
-	var pose: String = "gebückt" if stance == STANCE_CROUCH else "stehend"
+	var pose: String = stance_name()
 	return "Genesisgolem   Stufe %d/%d%s\nGröße: %.1f m   Leben: %d/%d   Heilung: %.2f/s\nHolz: %d   Kills: %d   Haltung: %s" % [
 		stage, max_stage(), next, height_m(), health, max_health, regen_per_second(),
 		total_wood(), kills, pose]

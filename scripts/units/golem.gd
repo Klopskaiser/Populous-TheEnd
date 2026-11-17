@@ -97,6 +97,17 @@ const CLIP_SLAM_LOW: StringName = &"slam_low"
 const CLIP_DRUM_LOW: StringName = &"drum_low"
 ## Length of the stance-switch clips at speed 1 (golem_bewegung.mjs).
 const STANCE_CLIP_LENGTH: float = 0.45
+## The third stance (2026-11-17): SITTING. It is reached only through the crouch
+## (stand -> crouch -> sit, and back the same way), she sits only while she has
+## nothing to do, and anything to do gets her up. NOTHING IN THE GAME MAKES HER
+## SIT YET — sit_down() is the hook for a later trigger. The numbers keep their
+## order: a stance change always goes one step along 0 - 1 - 2 (_begin_stance).
+const STANCE_SIT: int = 2
+const CLIP_SIT_IDLE: StringName = &"sit_idle"
+const CLIP_SIT_DOWN: StringName = &"sit_down"
+const CLIP_SIT_UP: StringName = &"sit_up"
+## Length of the sit-down / sit-up clips at speed 1 (golem_bewegung_niedlich_sitzen.mjs).
+const SIT_CLIP_LENGTH: float = 1.5
 ## The stretch she does when she grows: clip name and its length at speed 1.
 const CLIP_GROW: StringName = &"grow"
 const GROW_CLIP_LENGTH: float = 1.0
@@ -236,6 +247,8 @@ var stance: int = STANCE_STAND
 var _stance_target: int = STANCE_STAND
 var _stance_switch: float = 0.0
 var _stance_age: float = 1000.0
+## She has been asked to sit (sit_down) and nothing has called her up since.
+var _wants_sit: bool = false
 ## The stomp has landed and its clip is still settling into the crouch: once it
 ## has played out she decides whether to stay down or get up again (_tick_stance).
 var _stomp_landed: bool = false
@@ -297,7 +310,7 @@ func status_text() -> String:
 			base + (growth_steps + 1) * Balance.GOLEM_GROWTH_KILLS - kills]
 	var life: String = "unbegrenzt" if level >= Balance.GOLEM_FINAL_BONUS_LEVEL \
 		else "%d s" % int(ceil(maxf(life_left, 0.0)))
-	var pose: String = "gebückt" if stance == STANCE_CROUCH else "stehend"
+	var pose: String = stance_name()
 	return "Stufe %d/%d%s\nGröße: %.1f m   Leben: %d/%d\nLebenszeit: %s   Kills: %d   Haltung: %s" % [
 		level, Balance.GOLEM_MAX_LEVEL, next, height_m(), health, max_health, life, kills, pose]
 
@@ -783,8 +796,8 @@ func _tick_stretch(delta: float) -> void:
 			_stance_age = 1000.0
 		return
 	if not _stretch_queued or _pending_attack != &"" or _attack_anim_left > 0.0 \
-			or is_switching_stance():
-		return
+			or is_switching_stance() or stance == STANCE_SIT:
+		return   # (from the sit she gets up into the crouch first, see _tick_stance)
 	_stretch_queued = false
 	_stretch_time = Balance.GOLEM_GROW_TIME
 	_stomp_landed = false   # the stretch gets her up by itself
@@ -839,6 +852,42 @@ func drum_roll_chance() -> float:
 		Balance.GOLEM_DRUM_ROLL_PER_STEP, Balance.GOLEM_DRUM_ROLL_MAX)
 
 
+## The stance in words, for the sidebar panel.
+func stance_name() -> String:
+	if stance == STANCE_SIT:
+		return "sitzend"
+	return "gebückt" if stance == STANCE_CROUCH else "stehend"
+
+
+## Asks her to sit down. Only an idle golem does: she bends down, sits, and stays
+## seated until stand_up() or until she has something to do (an order, a target,
+## an owed stretch). Returns false when she will not. NO TRIGGER CALLS THIS YET.
+func sit_down() -> bool:
+	if state != State.IDLE or doomed or garrison_housed or _sit_must_end():
+		return false
+	_wants_sit = true
+	return true
+
+
+## Calls her up again: sit -> crouch -> stand, without the stance's waiting time.
+func stand_up() -> void:
+	_wants_sit = false
+
+
+func is_sitting() -> bool:
+	return stance == STANCE_SIT
+
+
+## Sitting is for idle times only.
+func _sit_must_end() -> bool:
+	return state != State.IDLE or _stretch_queued or _pending_attack != &""
+
+
+## Seconds sitting down / getting up from the sit takes at the current size.
+func sit_switch_time() -> float:
+	return minf(Balance.GOLEM_SIT_TIME * sqrt(size_factor()), Balance.GOLEM_SIT_TIME_MAX)
+
+
 ## Seconds a stance switch takes at the current size.
 func stance_switch_time() -> float:
 	return minf(Balance.GOLEM_STANCE_SWITCH_TIME * sqrt(size_factor()),
@@ -855,13 +904,22 @@ func stance_settled() -> bool:
 	return _stance_age >= Balance.GOLEM_STANCE_MIN_TIME
 
 
-## Starts bending down / getting up. Returns false when nothing was started.
+## Starts the next step toward the stance `target`: bending down / getting up,
+## sitting down / getting up from the sit. The stances lie in a row (stand -
+## crouch - sit) and one switch goes ONE step — from standing, sitting down is two
+## switches (see _tick_stance). Returns false when nothing was started.
 func _begin_stance(target: int) -> bool:
 	if is_switching_stance() or is_stretching() or stance == target:
 		return false
-	_stance_target = target
+	var step: int = stance + (1 if target > stance else -1)
+	_stance_target = step
+	if step == STANCE_SIT or stance == STANCE_SIT:
+		_stance_switch = sit_switch_time()
+		_play_clip(CLIP_SIT_DOWN if step == STANCE_SIT else CLIP_SIT_UP,
+			SIT_CLIP_LENGTH / _stance_switch, true)
+		return true
 	_stance_switch = stance_switch_time()
-	var clip: StringName = CLIP_CROUCH_DOWN if target == STANCE_CROUCH else CLIP_CROUCH_UP
+	var clip: StringName = CLIP_CROUCH_DOWN if step == STANCE_CROUCH else CLIP_CROUCH_UP
 	_play_clip(clip, STANCE_CLIP_LENGTH / _stance_switch, true)
 	return true
 
@@ -875,8 +933,9 @@ func _tick_stance(delta: float) -> void:
 		_stance_switch -= delta
 		if _stance_switch <= 0.0:
 			_stance_switch = 0.0
+			# Up from the sit she is only passing through the crouch: no waiting time.
+			_stance_age = 1000.0 if stance == STANCE_SIT else 0.0
 			stance = _stance_target
-			_stance_age = 0.0
 		return
 	if _stomp_landed:
 		# The stomp left her crouched (_land_attack). While its clip still settles
@@ -889,6 +948,18 @@ func _tick_stance(delta: float) -> void:
 		if not _stays_down_after_stomp():
 			_begin_stance(STANCE_STAND)
 		return
+	if stance == STANCE_SIT:
+		# Anything to do gets her up — through the crouch, from where the rules
+		# below take over.
+		if not _wants_sit or _sit_must_end():
+			_wants_sit = false
+			_begin_stance(STANCE_CROUCH)
+		return
+	if _wants_sit:
+		if _sit_must_end():
+			_wants_sit = false
+		elif _begin_stance(STANCE_SIT):
+			return   # bending down first, then sitting down: one step each
 	if stance != STANCE_CROUCH or _pending_attack != &"":
 		return
 	if state == State.ATTACK and (_in_melee or _target_in_reach()):
@@ -930,6 +1001,8 @@ func _stays_down_after_stomp() -> bool:
 func _attack_or_switch(building = null) -> void:
 	if _stretch_queued:
 		return   # she has grown: the stretch comes first (see _tick_stretch)
+	if stance == STANCE_SIT:
+		return   # she gets up first (_tick_stance); nothing is struck from the sit
 	var ship: Airship = _airship_in_reach()
 	if ship != null:
 		# An airship overhead goes before the crowd at her feet — standing.
@@ -2766,7 +2839,7 @@ func _create_model() -> void:
 func _prepare_clips() -> void:
 	if _anim == null:
 		return
-	for clip in [CLIP_IDLE, CLIP_WALK, CLIP_CROUCH_IDLE]:
+	for clip in [CLIP_IDLE, CLIP_WALK, CLIP_CROUCH_IDLE, CLIP_SIT_IDLE]:
 		if _anim.has_animation(clip):
 			_anim.get_animation(clip).loop_mode = Animation.LOOP_LINEAR
 	_play_clip(CLIP_IDLE)
@@ -2862,7 +2935,9 @@ func _tick_visual(delta: float) -> void:
 		# An attack clip plays out; afterwards walk or idle by the real speed.
 		var attacking: bool = ATTACK_CLIPS.has(_clip) and _anim.is_playing()
 		if not attacking and not is_switching_stance() and not is_stretching():
-			if stance == STANCE_CROUCH:
+			if stance == STANCE_SIT:
+				_play_clip(CLIP_SIT_IDLE)
+			elif stance == STANCE_CROUCH:
 				_play_clip(CLIP_CROUCH_IDLE)
 			elif ground_speed > WALK_THRESHOLD:
 				# A bigger body covers more ground per stride.

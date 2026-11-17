@@ -336,7 +336,7 @@ func status_text() -> String:
 	if growth_steps < max_steps():
 		next = "   noch %d Kills bis %d m" % [
 			kills_for_steps(growth_steps + 1) - kills, int(round(height_for_steps(growth_steps + 1)))]
-	var pose: String = "gebückt" if stance == STANCE_CROUCH else "stehend"
+	var pose: String = stance_name()
 	return "Dämonengolem   Größe: %d m%s\nLeben: %d/%d   Heilung: %.2f/s\nKills: %d   Ziele: %d   Haltung: %s" % [
 		int(round(height_m())), next, health, max_health, regen_per_second(), kills,
 		max_targets(), pose]

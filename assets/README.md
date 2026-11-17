@@ -298,6 +298,15 @@ schaltet beide auf Schleife; `walk` auf der Stelle, das Abspieltempo folgt der e
 Geschwindigkeit über `Golem.WALK_CLIP_SPEED`), `slam` (Handschlag, **Aufschlag bei 0,8 s**),
 `kick` (Tritt, **Aufschlag bei 0,5 s**), `swat` (Schlag nach oben gegen Luftschiffe, **Aufschlag bei 0,5 s**)
 und `death` (einmalig; danach versinkt die Figur).
+
+**Sitzen (2026-11-17):** alle drei Golem-Modelle bringen dazu `sit_down` (1,5 s, gebückte Ruhe → Sitz), `sit_up` (1,5 s, zurück) und
+`sit_idle` (18 s, Schleife: umschauen, mit den Schuhspitzen wippen, die Hände umsetzen) – zusammen **19 Clips** je Modell. Die Clips
+schließen zahlengleich an die gebückte Pose an; fehlen sie, wechselt das Spiel die Haltung ohne Bewegung. **Im Spiel gibt es dafür
+die Haltung `Golem.STANCE_SIT`, aber noch keinen Auslöser** (`Golem.sit_down()` ruft bisher niemand). Mit denselben Dateien kam die
+**gebückte Haltung ohne Clipping**: in `crouch_*`, `slam_low`, `drum_low` und `stomp` stehen die Knie außen neben dem
+Oberkörper (vorher steckten die Oberschenkel im Brustkorb), die Schuhspitzen drehen mit, das Becken ist weniger gekippt. Zeiten,
+Aufschlagorte und Arme sind unverändert. Erzeugt mit `--bewegung=./golem_bewegung_niedlich_sitzen.mjs`
+(`D:\game\gymnastikschuh\LIESMICH_POPULOUS.md`, Abschnitt „Sitzen“).
 Die Aufschlagzeiten müssen zu `Balance.GOLEM_SLAM_WINDUP` / `GOLEM_KICK_WINDUP` / `GOLEM_SWAT_WINDUP` passen — dort
 fällt der Schaden. Das Modell des Projekts erzeugt `D:\game\gymnastikschuh\golem_export.mjs`.
 
