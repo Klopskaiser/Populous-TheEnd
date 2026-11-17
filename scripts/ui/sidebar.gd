@@ -306,6 +306,8 @@ static func default_spell_entries() -> Array[Dictionary]:
 			"max_charges": Balance.SPELL_GOLEM_MAX_CHARGES, "hotkey": "X"},
 		{"id": &"demon_golem", "name": "Dämonengolem beschwören", "icon": &"demon_golem",
 			"max_charges": Balance.SPELL_DEMON_GOLEM_MAX_CHARGES, "hotkey": "C"},
+		{"id": &"genesis_golem", "name": "Genesisgolem beschwören", "icon": &"genesis_golem",
+			"max_charges": Balance.SPELL_GENESIS_GOLEM_MAX_CHARGES, "hotkey": "Y"},
 	]
 
 

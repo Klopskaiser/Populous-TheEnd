@@ -31,12 +31,16 @@ class_name AudioSlots
 ## Bildbereich ist bei jedem Zoom klar hoerbar, Weitentferntes bleibt leiser
 ## (Raeumlichkeit erhalten), und die Grenze liegt JENSEITS des maximalen Booms,
 ## damit nichts abgeschnitten wird, was man sieht.
+##
+## 2026-11-16: die Kamera hat eine weitere Zoomstufe bekommen (117 m, das 1,3-Fache
+## der bisherigen 90). Beide Hoergrenzen sind im selben Verhaeltnis mitgewachsen
+## (120 -> 156, 100 -> 130) — bei 117 m Abstand waere die Welt sonst fast stumm.
 const AUDIO_UNIT_SIZE: float = 25.0
-const SFX_MAX_DISTANCE: float = 120.0
+const SFX_MAX_DISTANCE: float = 156.0
 ## Loops etwas kuerzer: sie laufen dauerhaft, und ein Dutzend ferner Braende
 ## wuerde den Klangraum zumatschen (die Zahl gleichzeitiger Emitter deckelt
 ## LOOP_CAP_PER_NAME getrennt).
-const LOOP_MAX_DISTANCE: float = 100.0
+const LOOP_MAX_DISTANCE: float = 130.0
 
 ## Caller passes this to mean "derive the priority from the sound name".
 const PRIO_AUTO: int = 0

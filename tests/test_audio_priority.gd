@@ -270,6 +270,8 @@ func test_audio_distances_cover_the_camera_zoom() -> void:
 	var rig_script: GDScript = load("res://scripts/core/camera_rig.gd")
 	var min_boom: float = float(rig_script.get_property_default_value("min_boom"))
 	var max_boom: float = float(rig_script.get_property_default_value("max_boom"))
+	# Die zusaetzliche Zoomstufe (2026-11-16) zaehlt als weitester Zoom.
+	max_boom *= maxf(1.0, float(rig_script.get_property_default_value("far_boom_factor")))
 	check(max_boom > 0.0, "die Kamera-Defaults sind lesbar (max_boom %.0f)" % max_boom)
 	check(AudioSlots.SFX_MAX_DISTANCE > max_boom,
 		"Welt-Sounds reichen ueber den weitesten Zoom hinaus (%.0f > %.0f)"

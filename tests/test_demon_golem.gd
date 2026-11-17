@@ -85,8 +85,8 @@ func test_spell_is_the_players_alone_and_costs_what_the_golem_costs() -> void:
 		and spell.max_charges == golem.max_charges
 		and is_equal_approx(spell.cast_range, golem.cast_range),
 		"a third cheaper than the golem; same charges and range")
-	check(Spell.create_default_set().size() + 1 == Spell.create_player_set().size(),
-		"the player's set is the default set plus this one spell")
+	check(Spell.create_default_set().size() + 2 == Spell.create_player_set().size(),
+		"the player's set is the default set plus the demon and the Genesis golem")
 	spell.charges = 1
 	check(spell.cast(w.t0, Vector3(50, 5, 50), w.ctx), "the cast succeeds")
 	check(spell.charges == 0, "one charge spent")

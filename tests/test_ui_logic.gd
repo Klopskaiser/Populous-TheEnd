@@ -150,8 +150,8 @@ func test_build_entries_training_buildings_active() -> void:
 
 func test_spell_entries_count() -> void:
 	var entries: Array[Dictionary] = Sidebar.default_spell_entries()
-	check(entries.size() == 14,
-		"fourteen spells registered (phase 6 + 7c + supertornado + hypnosis + golem + demon golem)")
+	check(entries.size() == 15,
+		"fifteen spells registered (phase 6 + 7c + supertornado + hypnosis + three golems)")
 	# Entry order and max_charges must match the tribes' spell set — the UI
 	# builds its pips from these values.
 	var by_id: Dictionary = {}
@@ -651,3 +651,17 @@ func test_end_screen_waits_for_the_wrecks_to_sink() -> void:
 	screen.show_result(1)
 	check(screen._pending_winner == 0, "a second result does not replace the pending one")
 	screen.free()
+
+
+## Nutzerwunsch 2026-11-16: eine weitere Zoomstufe, 30 % weiter draussen. Bis 90 m
+## bleibt es bei den 4-m-Schritten; von dort springt ein Raddreh auf 117 m und der
+## naechste nach innen wieder auf 90.
+func test_camera_has_one_far_zoom_stage() -> void:
+	check_near(CameraRig.next_boom(45.0, 1, 4.0, 8.0, 90.0, 1.3), 49.0, "a normal step out")
+	check_near(CameraRig.next_boom(45.0, -1, 4.0, 8.0, 90.0, 1.3), 41.0, "a normal step in")
+	check_near(CameraRig.next_boom(89.0, 1, 4.0, 8.0, 90.0, 1.3), 90.0, "the last normal step stops at the old limit")
+	check_near(CameraRig.next_boom(90.0, 1, 4.0, 8.0, 90.0, 1.3), 117.0, "one more tick reaches the far stage (30 % more)")
+	check_near(CameraRig.next_boom(117.0, 1, 4.0, 8.0, 90.0, 1.3), 117.0, "and there it ends")
+	check_near(CameraRig.next_boom(117.0, -1, 4.0, 8.0, 90.0, 1.3), 90.0, "one tick in returns to the old limit")
+	check_near(CameraRig.next_boom(9.0, -1, 4.0, 8.0, 90.0, 1.3), 8.0, "the near limit is unchanged")
+	check_near(CameraRig.next_boom(90.0, 1, 4.0, 8.0, 90.0, 1.0), 90.0, "factor 1 switches the stage off")

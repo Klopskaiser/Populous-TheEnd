@@ -610,6 +610,55 @@ const DEMON_GOLEM_AIR_HEIGHT: float = 20.0
 const DEMON_GOLEM_GIANT_HEIGHT: float = 30.0
 const DEMON_GOLEM_MIN_SPEED: float = 4.0
 
+# --- Genesisgolem (beschworene Einheit, Zauber 15, Nutzervorgabe 2026-11-17) ---
+## Der dritte Golem (scripts/units/genesis_golem.gd), vorerst mit dem Modell des
+## Golems. Er waechst NICHT durch Kills:
+##  * Start GENESIS_GOLEM_START_HEIGHT (5 m), GENESIS_GOLEM_HP (1000) Leben, keine
+##    Lebenszeit.
+##  * STUFEN aus eigenen Braves: jeder Brave, den eine Huette des Stammes erzeugt,
+##    zaehlt fuer die Genesisgolems des Stammes (bei mehreren geteilt).
+##    GENESIS_GOLEM_STAGE_BRAVES je Stufe (9 Stufen, zusammen 190), jede Stufe
+##    +GENESIS_GOLEM_STAGE_HEIGHT (4 m, Stufe 9 = 41 m; 2026-11-17 von 5 m gesenkt), +GENESIS_GOLEM_STAGE_MAX_HP
+##    Leben, +GENESIS_GOLEM_STAGE_REGEN Leben/s.
+##  * Startwerte: Schaden wie der frisch beschworene Daemonengolem (15,5 / 24,5 / 24),
+##    Reichweite, Flaechen und Ziele wie der frische Golem. Mit der Groesse steigen
+##    Schaden, Flaechen, Reichweite, Zielzahl und Trampelschaden wie beim
+##    Daemonengolem, aber nur GENESIS_GOLEM_GROWTH_SHARE (2/3) so stark.
+##  * Ab Stufe GENESIS_GOLEM_GIANT_STAGE (5): Kollision mit Einheiten ignorieren (und
+##    trampeln), Boden einebnen, Luftschlag.
+##  * HOLZ: er faellt Baeume (Rechtsklick, B-Bereich) mit einem Schlag und bekommt
+##    deren Holz plus GENESIS_GOLEM_HARVEST_BONUS (50 %, abgerundet); ab Stufe
+##    GENESIS_GOLEM_TRAMPLE_WOOD_STAGE (8) auch beim Trampeln. Das Holz traegt er bei
+##    sich; Braves holen es wie von einem Stapel. Bleibt es GENESIS_GOLEM_WOOD_IDLE_TIME
+##    (30 s) unberuehrt und kommt keins dazu, verbraucht er GENESIS_GOLEM_WOOD_BURN_RATE
+##    (15) Holz je Sekunde und waechst dabei um GENESIS_GOLEM_WOOD_GROWTH_RATE (2 %)
+##    je Sekunde, bis GENESIS_GOLEM_MAX_HEIGHT (200 m); je Meter daraus
+##    +GENESIS_GOLEM_WOOD_HP_PER_M Leben und +GENESIS_GOLEM_WOOD_REGEN_PER_M Leben/s.
+const GENESIS_GOLEM_HP: int = 1000
+const GENESIS_GOLEM_START_HEIGHT: float = 5.0
+const GENESIS_GOLEM_STAGE_HEIGHT: float = 4.0
+const GENESIS_GOLEM_STAGE_BRAVES: Array[int] = [10, 12, 14, 17, 20, 23, 27, 31, 36]
+const GENESIS_GOLEM_STAGE_MAX_HP: int = 40
+const GENESIS_GOLEM_STAGE_REGEN: float = 2.0
+const GENESIS_GOLEM_GROWTH_SHARE: float = 2.0 / 3.0
+const GENESIS_GOLEM_GIANT_STAGE: int = 5
+const GENESIS_GOLEM_TRAMPLE_WOOD_STAGE: int = 8
+const GENESIS_GOLEM_HARVEST_BONUS: float = 0.5
+## Nutzervorgabe 2026-11-17: seine Aggroreichweite ist die halbe der anderen Golems
+## (gleicher Groesse), und ein Gebaeude, das er zerstoert, bringt ihm diesen Anteil
+## seiner Baukosten als Holz (abgerundet).
+const GENESIS_GOLEM_AGGRO_SHARE: float = 0.5
+const GENESIS_GOLEM_BUILDING_WOOD_SHARE: float = 0.5
+const GENESIS_GOLEM_WOOD_IDLE_TIME: float = 30.0
+const GENESIS_GOLEM_WOOD_BURN_RATE: float = 15.0
+const GENESIS_GOLEM_WOOD_GROWTH_RATE: float = 0.02
+const GENESIS_GOLEM_MAX_HEIGHT: float = 200.0
+const GENESIS_GOLEM_WOOD_HP_PER_M: float = 2.0
+const GENESIS_GOLEM_WOOD_REGEN_PER_M: float = 0.15
+## Abstand des mitgefuehrten Holzstapels vor seinem Koerperrand (Annahme): dort
+## erreichen ihn die Braves, ohne unter den Koerper zu muessen.
+const GENESIS_GOLEM_PILE_GAP: float = 0.8
+
 # --- Feuerkrieger ---
 const FIREWARRIOR_HP: int = 65
 const FIREWARRIOR_SPEED: float = 4.0
@@ -1140,6 +1189,11 @@ const SPELL_GOLEM_CAST_RANGE: float = 10.0
 const SPELL_DEMON_GOLEM_CHARGE_COST: float = SPELL_GOLEM_CHARGE_COST * 2.0 / 3.0
 const SPELL_DEMON_GOLEM_MAX_CHARGES: int = SPELL_GOLEM_MAX_CHARGES
 const SPELL_DEMON_GOLEM_CAST_RANGE: float = SPELL_GOLEM_CAST_RANGE
+## Zauber 15 "Genesisgolem beschwoeren" (Nutzervorgabe 2026-11-17): Kosten wie der
+## Daemonengolem. Nur beim menschlichen Spieler (Spell.create_player_set), Taste Y.
+const SPELL_GENESIS_GOLEM_CHARGE_COST: float = SPELL_DEMON_GOLEM_CHARGE_COST
+const SPELL_GENESIS_GOLEM_MAX_CHARGES: int = SPELL_DEMON_GOLEM_MAX_CHARGES
+const SPELL_GENESIS_GOLEM_CAST_RANGE: float = SPELL_DEMON_GOLEM_CAST_RANGE
 
 # =============================================================================
 # ZAUBER — Effektwerte

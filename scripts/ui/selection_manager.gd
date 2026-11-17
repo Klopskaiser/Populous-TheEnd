@@ -270,7 +270,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("harvest_area_arm", false, true):
 		# Key B arms the harvest rectangle; the next left DRAG fires it.
 		_prune_selection()
-		if not selected_wood_workers().is_empty():
+		if not selected_harvesters().is_empty():
 			cancel_armed_modes()   # armed modes are mutually exclusive
 			harvest_arm_active = true
 			queue_redraw()
@@ -344,7 +344,7 @@ func _fire_harvest(screen_rect: Rect2, drag_dist: float) -> void:
 	if drag_dist < DRAG_THRESHOLD_PX or _tribe_commands == null:
 		return
 	_prune_selection()
-	var braves: Array[Unit] = selected_wood_workers()
+	var braves: Array[Unit] = selected_harvesters()
 	if braves.is_empty():
 		return
 	# TL, TR, BR, BL — screen-to-ground is a projective map, so this cyclic order
@@ -823,6 +823,16 @@ func selected_wood_workers() -> Array[Unit]:
 		if u.can_gather_wood():
 			workers.append(u)
 	return workers
+
+
+## Who takes the B-area order: the wood workers, and the Genesis golems, which fell
+## trees to grow (2026-11-17).
+func selected_harvesters() -> Array[Unit]:
+	var out: Array[Unit] = selected_wood_workers()
+	for u in selected:
+		if is_instance_valid(u) and u is GenesisGolem and u.state != Unit.State.DEAD:
+			out.append(u)
+	return out
 
 
 ## Tracks the building under the cursor so it can show its production bar on

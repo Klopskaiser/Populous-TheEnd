@@ -12583,3 +12583,82 @@ den Sprung; im Sprungplan zaehlt fuer die Folgeangriffe nur die Drehung, die ueb
 hinausgeht. Solange sie sich dreht, wertet `_stomp_while_turning` die Wahl so, als sei sie schon
 gedreht (Flaechen vor dem Koerper), mit der echten Drehzeit - gewinnt der Sprung, springt sie
 sofort. Test `test_the_stomp_needs_no_turn`; der alte Drehtest laeuft ohne Sprung.
+
+### Weitere Zoomstufe (2026-11-16)
+
+Nutzerwunsch: weiter herauszoomen, 30 % mehr. `CameraRig.far_boom_factor` (1,3): bis
+`max_boom` (90 m) bleiben die 4-m-Schritte, ein weiterer Raddreh springt auf 117 m, der
+naechste nach innen zurueck auf 90 (`CameraRig.next_boom`, statisch und ohne Node
+testbar). Die Hoergrenzen in `AudioSlots` sind im selben Verhaeltnis mitgewachsen
+(`SFX_MAX_DISTANCE` 120 -> 156, `LOOP_MAX_DISTANCE` 100 -> 130) - der Hoerer ist die
+Kamera, bei 117 m waere die Welt sonst fast stumm; im mittleren Zoom wird sie dadurch
+etwa 1 dB lauter. Tests: `test_ui_logic.gd::test_camera_has_one_far_zoom_stage`,
+`test_audio_priority.gd::test_audio_distances_cover_the_camera_zoom` (rechnet jetzt mit
+der fernen Stufe). Nicht angefasst: die Schattenweite (70 m) - Schatten gab es schon
+bei 90 m Zoom nicht mehr.
+
+### Genesisgolem, Zauber 15 (2026-11-17)
+
+Nutzervorgabe: dritter Golem, waechst durch Braves und Holz statt durch Kills.
+- `scripts/units/genesis_golem.gd` (`GenesisGolem extends Golem`), Szene
+  `scenes/units/genesis_golem.tscn` (Modell des Golems), Zauber
+  `scripts/spells/genesis_golem_spell.gd` (nur `Spell.create_player_set`, Taste Y,
+  `cast_spell_15`, Icon `UITheme._draw_genesis_golem`), Werte `Balance.GENESIS_GOLEM_*`.
+- Stufen aus Braves: `Hut._spawn_brave` -> `GenesisGolem.credit_brave_to_tribe` (geteilt).
+- Angriffswerte ueber `combat_factor()` (2/3 des Daemonengolem-Anstiegs ab den Werten des
+  frischen Golems bzw. Daemonengolems); Koerper ueber die echte Hoehe.
+- Neuer Schalter `Golem.flattens()` (Standard `is_giant()`), damit er ab Stufe 5 einebnen kann,
+  ohne das ganze Riesenpaket zu bekommen.
+- Holz: `TreeManager.fell_tree`, Faellen ueber den normalen Angriff (`_land_attack`),
+  Rechtsklick/B ueber `TribeCommands.order_chop`/`order_chop_area` und
+  `SelectionManager.selected_harvesters`; Vorrat mit mitgefuehrtem Stapel (`_wood_pile`,
+  `pile_spot()`), Holzverzehr-Wachstum (`_tick_wood_growth`, `grow_by_wood`), Trampelholz ab
+  Stufe 8 (`_tick_trample_wood`).
+- Ritualkammer: der Genesisgolem bekommt keinen Kill (bringt ihm nichts); Mana geht weiter nur
+  an Golem und Daemonengolem. Katapult-Abfrage (`SiegeShot._shockwave`) kennt seinen 200-m-Koerper.
+- Tests: `tests/test_genesis_golem.gd` (96), angepasst `test_demon_golem.gd` (Spielersatz +2),
+  `test_ui_logic.gd` (15 Zauber).
+- Annahmen (nicht vorgegeben): Stufe und Holzmeter heben auch das aktuelle Leben um den Zuwachs;
+  Kills heilen nicht; getragenes Holz verfaellt beim Tod; kein Manaunterhalt; Taste Y; der Stapel
+  liegt 0,8 m vor dem Koerperrand; Tempo, Takt und Drehrate nach echter Groesse; Zielzahl waechst
+  mit 2/3 Ziel je Meter.
+
+### Golem-Modelle: Gymnastikanzug, Genesis-Modell, niedliche Clips (2026-11-17)
+
+Nutzervorgabe: der Genesisgolem bekommt das neue Modell (rosa Schuhe, Shorts und Top), 10 %
+gestaucht wie der Golem; der Golem bekommt das neue Gymnastikschuh-Modell (weisser
+Gymnastikanzug); Stammesfarbe bei beiden als Raute auf der Brust; `grow` und `stomp` niedlicher,
+zuerst am Daemonengolem.
+- Modelle aus `D:\game\gymnastikschuh` (dort `LIESMICH_POPULOUS.md`, Abschnitt "Stand 2026-11-17"):
+  `assets/models/units/golem.glb` ersetzt, `golem_genesis.glb` neu, `golem_demon.glb` ersetzt
+  (dieselben 16 Clips, `grow`/`stomp` aus `golem_bewegung_niedlich.mjs`; Namen und Zeiten gleich).
+- `GenesisGolem.model_file()` -> `models/units/golem_genesis.glb`, `WALK_CLIP_STRIDE` 2,614,
+  `walk_clip_speed()`; die Statur (`model_scale`, Koerperbox) bleibt die des Golems.
+- Netz `Flag` ist bei Golem und Genesisgolem die Raute; am Spielcode aendert das nichts.
+- Test: `test_genesis_golem.gd` +1 (`test_he_has_his_own_model_in_the_golems_build`, 99).
+  Gelaufen: `test_golem` 665, `test_demon_golem` 142, `test_genesis_golem` 99, je 0 failed.
+  Die ganze Suite lief dafuer nicht.
+- Uebrig: `golem_rock.png` samt `.import` vom alten Golem wird nicht mehr gebraucht (nicht
+  geloescht). Die neuen Clips sind nur als Standbilder angesehen, nicht im laufenden Spiel.
+- Nachtrag: im ersten `stomp` der niedlichen Fassung steckten die Knie ineinander (Nutzermeldung);
+  behoben in der Werkstatt, `golem_demon.glb` noch einmal ersetzt.
+- Nachtrag: nach der Abnahme am Daemonengolem haben auch `golem.glb` und `golem_genesis.glb` die
+  niedliche Fassung von `grow` und `stomp` (dieselben Namen und Zeiten).
+
+### Genesisgolem: Aggro, Stufenhoehe, Holz (2026-11-17)
+
+Nutzervorgabe, alles in `scripts/units/genesis_golem.gd` und `Balance.GENESIS_GOLEM_*`:
+- Aggroreichweite halb so gross wie bei den anderen Golems (`aggro_radius()`,
+  `GENESIS_GOLEM_AGGRO_SHARE` 0,5).
+- Wachstum je Stufe 4 statt 5 m (`GENESIS_GOLEM_STAGE_HEIGHT`); 9 Stufen bleiben, Stufe 9 = 41 m.
+- Das Holz ist nicht mehr sichtbar: der Stapel vor ihm bleibt als Abholstelle der Braves, wird
+  aber nicht gezeichnet (`_wood_pile.visible = false`); die Zahl steht im Besatzungsfeld.
+  Annahme: die Braves sollen es weiter bei ihm holen koennen.
+- Holz aus zerstoerten Gebaeuden: 50 % der Baukosten, abgerundet (`_strike_building`,
+  `building_wood`, `GENESIS_GOLEM_BUILDING_WOOD_SHARE`).
+- Bereichsabholzen mit Flaechenangriffen: `_harvest_attack` waehlt Tritt, Handschlag oder
+  Trommeln nach gefaellten Baeumen je Sekunde (Haltungswechsel hin und zurueck eingerechnet),
+  `_land_attack` faellt alle Baeume des Auftrags in der Flaeche; `stance_settled()` haelt ihn
+  dabei unten. Der Sprung wird dafuer nicht benutzt. Der Einzelbefehl ist unveraendert.
+- Tests: `test_genesis_golem.gd` 115 (neu: Cluster mit einem Bodenschlag, Einzelbaum bleibt beim
+  Tritt, Aggro, Gebaeudeholz, unsichtbarer Stapel; angepasst: Hoehen 9 / 41 m).

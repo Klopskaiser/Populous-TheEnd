@@ -424,6 +424,10 @@ func order_chop(units: Array[Unit], tree: TreeResource) -> int:
 		if unit is Brave:
 			if (unit as Brave).order_chop(tree):
 				assigned += 1
+		elif unit is GenesisGolem:
+			# The Genesis golem fells it with a blow and keeps the wood (2026-11-17).
+			if (unit as GenesisGolem).order_harvest_tree(tree):
+				assigned += 1
 		else:
 			movers.append(unit)
 	if not movers.is_empty() and is_instance_valid(tree):
@@ -454,6 +458,11 @@ func order_chop_area(units: Array[Unit], area: Rect2,
 	var assigned: int = 0
 	for unit in units:
 		if unit == null or unit.state == Unit.State.DEAD or not _unit_active(unit):
+			continue
+		if unit is GenesisGolem:
+			# ...except the Genesis golem: felling is his way of growing (2026-11-17).
+			if (unit as GenesisGolem).order_harvest_area(job_area, shape[1]):
+				assigned += 1
 			continue
 		if not (unit is Brave):
 			continue

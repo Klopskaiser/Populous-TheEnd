@@ -208,8 +208,8 @@ func _shockwave(center: Vector3, radius: float) -> void:
 	# A giant golem is hit by his BODY, not by his centre point: the query is
 	# widened by the largest body there can be and every unit is then tested
 	# against its own body radius (0 for everyone else).
-	var widest: float = maxf(Balance.GOLEM_BODY_HALF_WIDTH * Golem.max_size_factor(),
-		DemonGolem.max_body_radius())
+	var widest: float = maxf(maxf(Balance.GOLEM_BODY_HALF_WIDTH * Golem.max_size_factor(),
+		DemonGolem.max_body_radius()), GenesisGolem.max_body_radius())
 	for u in unit_manager.get_units_in_radius(center, radius + widest):
 		if u.state == Unit.State.DEAD or u == shooter:
 			continue

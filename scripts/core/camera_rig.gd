@@ -14,6 +14,11 @@ class_name CameraRig extends Node3D
 @export var zoom_step: float = 4.0
 @export var min_boom: float = 8.0
 @export var max_boom: float = 90.0
+## One extra zoom stage beyond max_boom (user request 2026-11-16): at max_boom one
+## more wheel tick jumps out to max_boom * far_boom_factor, one tick back returns to
+## max_boom. 1.0 or less switches the stage off. The audio distances in AudioSlots
+## are calibrated against this farthest boom (test_audio_priority).
+@export var far_boom_factor: float = 1.3
 @export var pitch_degrees: float = -55.0
 @export var height_offset: float = 0.0      # extra Y above terrain
 @export var edge_scroll_enabled: bool = true
@@ -41,11 +46,27 @@ func _process(delta: float) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("camera_zoom_in"):
-		_boom = clampf(_boom - zoom_step, min_boom, max_boom)
+		_boom = next_boom(_boom, -1, zoom_step, min_boom, max_boom, far_boom_factor)
 		_apply_boom()
 	elif event.is_action_pressed("camera_zoom_out"):
-		_boom = clampf(_boom + zoom_step, min_boom, max_boom)
+		_boom = next_boom(_boom, 1, zoom_step, min_boom, max_boom, far_boom_factor)
 		_apply_boom()
+
+
+## Boom after one wheel tick (`dir` +1 = out, -1 = in). Between `lo` and `hi` it
+## moves in `step`s; from `hi` one more tick out reaches the far stage `hi * far`,
+## and one tick in from there goes back to `hi`. Pure, so it is testable without
+## a node.
+static func next_boom(boom: float, dir: int, step: float, lo: float, hi: float,
+		far: float) -> float:
+	var far_boom: float = maxf(hi, hi * far)
+	if dir > 0:
+		if boom >= hi - 0.001:
+			return far_boom
+		return minf(boom + step, hi)
+	if boom > hi + 0.001:
+		return hi
+	return maxf(boom - step, lo)
 
 
 func _apply_boom() -> void:

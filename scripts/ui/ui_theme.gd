@@ -167,6 +167,8 @@ static func icon(key: StringName) -> ImageTexture:
 			_draw_golem(img)
 		&"demon_golem":
 			_draw_demon_golem(img)
+		&"genesis_golem":
+			_draw_genesis_golem(img)
 		&"shaman":
 			_draw_shaman(img)
 		&"pause":
@@ -509,6 +511,25 @@ static func _draw_demon_golem(img: Image) -> void:
 	_rect(img, 19, 10, 4, 9, dark)
 	_rect(img, 5, 19, 6, 4, dark)          # Beine
 	_rect(img, 13, 19, 6, 4, dark)
+
+
+static func _draw_genesis_golem(img: Image) -> void:
+	# Der Genesisgolem: die Figur des Golems in Rindenbraun, mit gruener Krone auf
+	# dem Kopf und einem Blatt als Brust-Rune - er waechst aus Braves und Holz.
+	var bark: Color = Color(0.48, 0.34, 0.20)
+	var dark: Color = Color(0.30, 0.21, 0.12)
+	var leaf: Color = Color(0.30, 0.66, 0.26)
+	_rect(img, 7, 1, 10, 2, leaf)          # Krone
+	_rect(img, 9, 3, 6, 5, bark)           # Kopf
+	_rect(img, 10, 5, 1, 1, I_GOLD)        # Augen
+	_rect(img, 13, 5, 1, 1, I_GOLD)
+	_rect(img, 4, 8, 16, 3, dark)          # Schultern
+	_rect(img, 6, 11, 12, 7, bark)         # Rumpf
+	_rect(img, 10, 12, 4, 4, leaf)         # Blatt-Rune
+	_rect(img, 2, 9, 4, 10, dark)          # Arme
+	_rect(img, 18, 9, 4, 10, dark)
+	_rect(img, 6, 18, 5, 5, dark)          # Beine
+	_rect(img, 13, 18, 5, 5, dark)
 
 
 static func _draw_shaman(img: Image) -> void:

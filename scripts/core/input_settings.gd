@@ -53,6 +53,7 @@ const ACTIONS: Array[Array] = [
 	[&"cast_spell_12", "Zauber ´ (Hypnose)", "Zauber"],
 	[&"cast_spell_13", "Zauber X (Golem beschwören)", "Zauber"],
 	[&"cast_spell_14", "Zauber C (Dämonengolem beschwören)", "Zauber"],
+	[&"cast_spell_15", "Zauber Y (Genesisgolem beschwören)", "Zauber"],
 ]
 
 ## Non-rebindable actions whose keys are still off-limits for rebinding (their

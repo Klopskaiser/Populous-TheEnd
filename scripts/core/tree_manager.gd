@@ -685,6 +685,21 @@ func harvest_tree(tree: TreeResource) -> int:
 	return wood
 
 
+## Fells a tree with one blow (the Genesis golem, 2026-11-17): returns its whole
+## current yield and removes it. 0 for a tree that is already gone.
+func fell_tree(tree: TreeResource) -> int:
+	if tree == null or not is_instance_valid(tree) or tree.felled_flag:
+		return 0
+	var wood: int = tree.wood_yield()
+	if is_inside_tree():
+		var audio: Node = get_node_or_null("/root/AudioManager")
+		if audio != null:
+			audio.play_sfx(&"wood_chop", tree.position, 250)
+	tree.felled_flag = true
+	_remove_tree(tree)
+	return wood
+
+
 ## Deregisters a tree (registry, cell index) and frees the node. Used by
 ## harvesting, burning down and the tornado.
 func _remove_tree(tree: TreeResource) -> void:

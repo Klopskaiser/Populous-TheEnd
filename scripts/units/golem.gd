@@ -1171,6 +1171,11 @@ func is_giant() -> bool:
 	return level >= Balance.GOLEM_MAX_LEVEL
 
 
+## Does he level the ground under him? (The giant does; GenesisGolem earlier.)
+func flattens() -> bool:
+	return is_giant()
+
+
 ## Does the lifetime still run out? (Until the final-bonus level.)
 func has_lifetime() -> bool:
 	return level < Balance.GOLEM_FINAL_BONUS_LEVEL
@@ -1317,7 +1322,7 @@ static func _next_to_water(td: TerrainData, vx: int, vz: int) -> bool:
 ## metres per second. Checked every GOLEM_FLATTEN_INTERVAL, one morph at a time; the usual terrain rules apply (TerrainMorph: buildings on
 ## a new edge burst, the flooded drown, everything rides the moving ground).
 func _tick_flatten(delta: float) -> void:
-	if not is_giant() or terrain_ctx == null or terrain_data == null \
+	if not flattens() or terrain_ctx == null or terrain_data == null \
 			or path_service == null:
 		return
 	_flatten_timer -= delta

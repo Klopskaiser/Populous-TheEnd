@@ -72,7 +72,9 @@ func grant_reward() -> StringName:
 		return &"none"
 	var golems: Array[Golem] = []
 	for u in tribe.units:
-		if is_instance_valid(u) and u is Golem and u.state != Unit.State.DEAD and not u.doomed:
+		# The Genesis golem does not grow by kills: a kill would be lost on him.
+		if is_instance_valid(u) and u is Golem and not (u is GenesisGolem) \
+				and u.state != Unit.State.DEAD and not u.doomed:
 			golems.append(u as Golem)
 	if not golems.is_empty():
 		golems[rng.randi_range(0, golems.size() - 1)]._credit_kill()

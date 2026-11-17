@@ -120,6 +120,7 @@ static func create_default_set() -> Array[Spell]:
 static func create_player_set() -> Array[Spell]:
 	var set: Array[Spell] = create_default_set()
 	set.append(DemonGolemSpell.new())
+	set.append(GenesisGolemSpell.new())   # Zauber 15 (2026-11-17), also the player's alone
 	return set
 
 

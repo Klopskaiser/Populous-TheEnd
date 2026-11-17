@@ -345,6 +345,8 @@ func _spawn_brave() -> void:
 		+ TribeCommands.formation_offset(_spawn_counter % 7) * 0.35
 	var brave: Unit = unit_manager.spawn_unit(BRAVE_SCENE, tribe_id, pos)
 	if brave != null:
+		# Every brave a hut brings forth feeds the tribe's Genesis golems (2026-11-17).
+		GenesisGolem.credit_brave_to_tribe(tribe)
 		var camp: TrainingBuilding = rally_training_building()
 		if camp != null:
 			(brave as Brave).order_train(camp)
