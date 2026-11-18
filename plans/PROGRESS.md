@@ -12885,3 +12885,35 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
   `GOLEM_CRAB_AIR_RADIUS` 1,0 m des Modells, Vorschlag), Huellentreffer wie der Luftschlag, dessen Ausholzeit und Takt.
   Nicht stationaer steht sie fuer ein Luftschiff im Aggro-Radius auf, krabbelt heran und dreht ihm den Ruecken zu.
 - **Tests** `test_golem.gd`: `test_crab_*`, `test_dying_seated_plays_sit_death` (1082 gruen).
+- **Spieltest-Bugfixes (2026-11-18):** Luftschiff erst als Ziel, wenn im Sitzen nichts erreichbar ist
+  (`sit_nothing_in_reach` statt eigener Pruefung im Sitzen); selbst gewaehlter Krebsgang endet, sobald ein Feind in
+  Reichweite eines Sitzangriffs steht (`_foe_in_sit_reach`); Anflug ans Schiff ueber `_crab_ship_goal` (heran bis auf
+  Zonenabstand, dann umdrehen; sehr nah weg), Aufgeben nach 20 s (`CRAB_SHIP_GIVE_UP`, `_crab_ignore`); 4 s still im
+  Krebsstand ohne Feind im Aggro-Radius -> hinsetzen (`GOLEM_CRAB_IDLE_SIT_TIME`). Tests
+  `test_crab_strike_she_gets_an_airship_behind_her_head`, `test_crab_foes_in_reach_go_before_an_airship`,
+  `test_crab_idle_four_seconds_without_foes_she_sits_down`.
+- **Runde 2 (2026-11-18):** Zeppelinzone 2,2 / 0,8 m (vorher 1,6 / 1,0); Rueckwaerts-Krebsgang (`_crab_pick_direction`,
+  `_crab_backward`, `crab_walk` rueckwaerts gespielt); Gebaeude zaehlen in der Angriffswahl halb (`building_value`,
+  `GOLEM_BUILDING_VALUE_SHARE`, auch `GolemSitCombat._value`); Bugfix Dauerdrehung im Sitzen (Gebaeudeangriff der
+  Einheitenlogik ueber `can_take_orders`, jetzt gesperrt + `_begin_attack_building`-Sperre + Drehsicherung
+  `_turn_hangs`); Selbst-Krebsgang auch zu Feindgebaeuden. Tests `test_seated_no_endless_turn_toward_a_building`,
+  `test_seated_a_hanging_turn_is_given_up`, `test_crab_walks_backward_to_save_a_turn`,
+  `test_building_hits_count_half_in_the_attack_choice`.
+- **Runde 3 (2026-11-18, Luftschiff ignoriert):** Vorrang Einheiten in Reichweite > Luftschiff > Gebaeude/Fahrzeuge in
+  Reichweite (`crab_ship_waiting`, `_units_in_reach`); Anflugpunkt rund um das Schiff, wenn der naechste ueber dem Rand
+  liegt (`_crab_ship_goal`, `_crab_spot_on_disc`); Pause nach Aufgeben auch in `_crab_ship_near`; erreichbarer Fokus
+  blockiert nicht. Tests `test_crab_an_airship_goes_before_a_building_in_reach`,
+  `test_crab_airship_approach_avoids_the_rim`.
+- **Bugfix "previously freed" (2026-11-18, Spiel):** Drehziel, Krabbelziel, Fokus und Luftschiff mit angesetztem Schlag
+  konnten freigegeben sein; typisierte Parameter (`_alive_at`, `_crab_target_alive`, `_crab_ignored`) scheiterten schon
+  beim Aufruf, und `!= null` haelt ein freigegebenes Objekt fuer null. Jetzt untypisiert mit `is_instance_valid`,
+  `_crab_prune()` zu Beginn jedes Krebsgang-Ticks, Luftschlag im Stand prueft `_pending_airship`. Test
+  `test_sitting_golem_copes_with_freed_targets`.
+- **Runde 4 (2026-11-18):** Krebsgang-Drehrate = Sitz-Drehrate (`GOLEM_CRAB_TURN_SHARE` entfallen); Abklingzeiten der
+  Sitzangriffe bleiben beim Krabbeln (`GolemSitCombat.leave_seat/cool`); Geduld `GOLEM_CRAB_PATIENCE` und Tiefe
+  `GOLEM_CRAB_REACH_DEPTH` gegen Auf-und-ab. Tests `test_crab_turns_as_slowly_as_seated`,
+  `test_crab_keeps_the_sit_attack_cooldowns`, `test_crab_waits_for_a_foe_nearly_in_reach_and_sits_with_it_well_inside`.
+- **Runde 5 (2026-11-18, Sitzzonen):** Bein-Schneise bis zur Schuhspitze (`GOLEM_SIT_KICK_TO` 1,03), Fuss-Stampfer 0,5 m
+  weiter hinten und 0,3 m kleiner bei 31,3 m (`GOLEM_SIT_STOMP_LAND.y` 0,353, `GOLEM_SIT_STOMP_RADIUS_SHARE` 0,7026).
+  `test_sitting_she_turns_for_a_much_better_attack` prueft jetzt, dass der gewaehlte Plan die Gruppe trifft (nicht mehr
+  eine feste Richtung). `test_perf.gd` (2000 Krieger) schwankt um sein Budget, ohne Bezug zum Golem.

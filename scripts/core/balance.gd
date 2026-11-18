@@ -189,19 +189,23 @@ const GOLEM_SIT_HEEL_BACK: float = 0.16
 ## Radius ("Bereich mittel", Vorschlag), der nicht hinter die Ferse des ruhenden Schuhs
 ## reicht. Schnell wie der gebueckte Handschlag (Ausholen, Abklingzeit), Schaden und
 ## Zielzahl wie der Handschlag.
-const GOLEM_SIT_STOMP_LAND: Vector2 = Vector2(0.18, 0.41)
-const GOLEM_SIT_STOMP_RADIUS_SHARE: float = 0.75
+## Spieltest 2026-11-18 (Nutzer): Kreise 0,5 m weiter hinten und 0,3 m kleiner, gemessen bei 31,3 m — umgerechnet
+## aufs 4-m-Modell (vorher 0,41 vorn und Anteil 0,75; bei 31,3 m jetzt 3,1 m vor den Fuessen, Radius 4,45 m), sie
+## wachsen weiter mit dem Koerper.
+const GOLEM_SIT_STOMP_LAND: Vector2 = Vector2(0.18, 0.353)
+const GOLEM_SIT_STOMP_RADIUS_SHARE: float = 0.7026
 ## Die Sitzzonen wachsen genau mit dem Koerper (Nutzervorgabe 2026-11-18): ihre Kreise und der
 ## Wischer nehmen Handschlag-, Trommel-Radius und Reichweite im Stand, und die wachsen ab
 ## GOLEM_BODY_SCALE_HEIGHT (also immer, wenn sie sitzt) mit dem Koerper — GOLEM_BODY_*.
 ## 2. Bein strecken (links/rechts): eine Schneise vom Koerper (Hueftgelenk, so weit hinter
 ## feet_point) nach vorn bis GOLEM_SIT_KICK_TO (die gestreckte Schuhspitze liegt bei 1,03;
-## Nutzervorgabe 2026-11-17: "muss laenger sein, aber nicht uebertreiben" — gut halb so
-## weit noch einmal darueber hinaus), so breit wie das Bein, so weit neben der Mitte.
+## seit Spieltest 2026-11-18 wieder genau bis dorthin — vorher 1,6, "muss laenger sein, aber nicht
+## uebertreiben", Nutzer 2026-11-17; bei 31,3 m 9,0 statt 13,9 m vor den Fuessen), so breit wie das Bein,
+## so weit neben der Mitte.
 ## Schaden, Zielzahl, Takt wie der Tritt.
 const GOLEM_SIT_KICK_SIDE: float = 0.18
 const GOLEM_SIT_KICK_FROM: float = 1.25
-const GOLEM_SIT_KICK_TO: float = 1.6
+const GOLEM_SIT_KICK_TO: float = 1.03
 const GOLEM_SIT_KICK_WIDTH: float = 0.3
 ## 3. Po-Klatscher (Po-Huepfer): Flaeche, Schaden und Zielzahl wie der Sprung, um die
 ## Mitte der Sitzflaeche; Abklingzeit die des Sprungs mal diesem Faktor (minimal langsamer
@@ -285,11 +289,10 @@ const GOLEM_SIT_TURN_SAMPLE_DEG: float = 10.0
 ## KREBSGANG (Nutzervorgabe 2026-11-18, plans/10l_golem_sitting.md): ist der Schalter "Stationaer" aus,
 ## krabbelt eine sitzende Golemin auf allen vieren (Fuesse voran) — fuer Bewegungs- und Angriffsbefehle
 ## und von selbst zu Feinden im Aggro-Radius, die im Sitzen nichts erreicht. Tempo GOLEM_CRAB_SPEED_SHARE
-## des Laufens (Nutzer: ein Drittel), Drehrate GOLEM_CRAB_TURN_SHARE der Drehrate im Stand (Annahme).
+## des Laufens (Nutzer: ein Drittel), Drehrate wie im Sitzen (Nutzervorgabe 2026-11-18; vorher ein Drittel der Stand-Drehrate).
 ## Aufrichten (crab_up) und Absetzen (crab_down) dauern je GOLEM_CRAB_SWITCH_TIME bei
 ## GOLEM_SIT_REF_HEIGHT, mal Wurzel(Hoehe / GOLEM_SIT_REF_HEIGHT) wie das Hinsetzen (Annahme; Clips 0,6 s).
 const GOLEM_CRAB_SPEED_SHARE: float = 1.0 / 3.0
-const GOLEM_CRAB_TURN_SHARE: float = 1.0 / 3.0
 const GOLEM_CRAB_SWITCH_TIME: float = 1.2
 ## Koerper im Krebsstand (Meter des 4-m-Modells, gemessen von der Sitzmitte): Kollisions- und
 ## Trefferkreis mit GOLEM_CRAB_BODY_RADIUS (deckt Schuhspitzen und Haende ab; Nutzer: groesser als im
@@ -301,14 +304,35 @@ const GOLEM_CRAB_BODY_RADIUS: float = 1.55
 const GOLEM_CRAB_FOOT_FORWARD: float = 0.13
 const GOLEM_CRAB_HAND_BACK: float = 0.21
 const GOLEM_CRAB_LIMB_RADIUS: float = 0.3
+## Steht sie so lange im Krebsstand, ohne zu krabbeln, und ist nichts in ihrer Aggro-Reichweite zum
+## Angreifen (Einheit am Boden oder Luftschiff), setzt sie sich hin (Nutzervorgabe 2026-11-18).
+const GOLEM_CRAB_IDLE_SIT_TIME: float = 4.0
+## Geduld (Spieltest 2026-11-18: sie stand fuer einen Feind knapp ausser Reichweite auf und setzte sich gleich
+## wieder, weil er herankam): fuer eine Einheit, die sie durch Drehen oder ein kurzes Stueck erreichen koennte
+## (innerhalb des Suchradius der Sitzangriffe), steht sie erst auf, wenn sie so lange nichts erreicht hat.
+## Luftschiffe, befohlene Ziele, weiter entfernte Einheiten und Gebaeude: sofort.
+const GOLEM_CRAB_PATIENCE: float = 3.0
+## Krabbelt sie zu einer Einheit, setzt sie sich erst, wenn diese GOLEM_CRAB_REACH_DEPTH der Sitzlaenge
+## (Fuesse bis Sitzmitte) innerhalb einer Zone liegt — nicht schon am Rand (sonst war sie nach einem Schritt oder
+## einem Tritt wieder draussen und sie stand gleich wieder auf; Spieltest 2026-11-18).
+const GOLEM_CRAB_REACH_DEPTH: float = 0.2
+## Im Krebsgang krabbelt sie auch rueckwaerts (Kopf voran, Nutzervorgabe 2026-11-18; beim Laufen nicht), gleich
+## schnell: sie nimmt die Richtung, die weniger Drehung kostet — ausser ihr Ziel verlangt eine bestimmte
+## Blickrichtung (Luftschiff: Ruecken zum Schiff).
+## Sitzend: haengt eine Drehung GOLEM_SIT_TURN_STALL_TIME fest (der Koerper kommt nicht voran) oder dreht sie
+## sich eine volle Runde ohne Angriff, bricht sie ab und dreht GOLEM_SIT_TURN_BLOCK_TIME nicht neu (Bugfix).
+const GOLEM_SIT_TURN_STALL_TIME: float = 2.0
+const GOLEM_SIT_TURN_BLOCK_TIME: float = 3.0
 ## ZEPPELIN-ZERSTOERER (Nutzervorgabe 2026-11-18): der einzige Weg, aus dem Sitzen ein Luftschiff zu
 ## treffen — nur im Krebsstand, Zielbereich hinter dem Kopf: ein Kreis mit GOLEM_CRAB_AIR_RADIUS um den
 ## Punkt GOLEM_CRAB_AIR_BACK hinter der Sitzmitte (Meter des 4-m-Modells, flach gemessen; Vorschlag).
 ## Wirkung wie der Luftschlag im Stand: ein Huellentreffer je Schlag, Ausholzeit und Takt des Luftschlags.
 ## Clip "crab_headbutt" (Kopfstoss nach hinten, 1,0 s), Aufschlag bei GOLEM_CRAB_AIR_IMPACT (Werkstatt: 0,4 s); das
 ## Spiel spielt ihn so schnell, dass der Aufschlag auf die Ausholzeit faellt.
-const GOLEM_CRAB_AIR_BACK: float = 1.6
-const GOLEM_CRAB_AIR_RADIUS: float = 1.0
+## Nutzervorgabe 2026-11-18 (Spieltest): weiter nach hinten, 20 % kleiner — vorher 1,6 / 1,0; die Zone
+## beginnt jetzt an der Spitze des Kopf-Schuhs beim Kopfstoss.
+const GOLEM_CRAB_AIR_BACK: float = 2.2
+const GOLEM_CRAB_AIR_RADIUS: float = 0.8
 const GOLEM_CRAB_AIR_IMPACT: float = 0.4
 ## STRECKEN BEIM WACHSEN (Nutzer 2026-11-16): bei jedem Stufenaufstieg und jedem
 ## Wachstumsschritt nach Stufe 7 reckt sich der Golem einmal (Clip "grow", Sound
@@ -356,6 +380,10 @@ const GOLEM_GROW_TIME_MAX_HEIGHT: float = 120.0
 ##                      tritt weiter.
 ## Der Sprung wird nur erwogen, wenn er selbst etwas trifft (Golem.stomp_plan_value).
 const GOLEM_STRUCTURE_VALUE: float = 30.0
+## In der Angriffswahl (Stand und Sitz) zaehlt ein Gebaeudetreffer GOLEM_BUILDING_VALUE_SHARE dessen, was derselbe
+## Treffer gegen eine Einheit zaehlt (Nutzervorgabe 2026-11-18: halb so viel), hoechstens so viel, wie das Gebaeude
+## noch an Lebenspunkten hat — unabhaengig davon, wie viel Schaden es wirklich nimmt (GOLEM_BUILDING_DAMAGE_SHARE).
+const GOLEM_BUILDING_VALUE_SHARE: float = 0.5
 const GOLEM_STANCE_PLAN_ATTACKS: int = 3
 ## Abklingzeit des Handschlags bei Startgroesse (1,35 -> 1,25 s, Nutzer
 ## 2026-11-16). Sie waechst mit der Groesse im selben Verhaeltnis wie der normale

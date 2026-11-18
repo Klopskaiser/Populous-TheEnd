@@ -19,6 +19,49 @@
   Radius (je 4-m-Modell); Selbst-Krebsgang nur zu Einheiten (nicht zu Gebaeuden) und zu Luftschiffen; findet sie am
   Ziel keinen Sitzplatz, bleibt sie im Krebsstand und versucht es jede Sekunde neu.
 
+- **Spieltest 2026-11-18 (Bugfixes):** ein Luftschiff ist erst Ziel, wenn sie im Sitzen nichts erreicht (vorher stand
+  sie fuer jedes Luftschiff im Aggro-Radius auf, auch mit Feinden in Reichweite und gleich nach einem Angriffsbefehl);
+  krabbelt sie von selbst und kommt ein Feind in Reichweite eines Sitzangriffs, setzt sie sich und kaempft
+  (`_foe_in_sit_reach`; ein befohlenes Ziel bleibt). **Anflug ans Luftschiff** (`_crab_ship_goal`): weit weg krabbelt
+  sie heran, bis es so weit weg ist wie die Zone hinter ihrem Kopf, und dreht ihm dann den Ruecken zu (schneller als
+  unter ihm durch und weiter: bei 31 m rund 11 statt 21 s); auf diesem Abstand dreht sie sich nur; naeher krabbelt sie
+  weg. Ohne Treffer nach 20 s laesst sie ein selbst gewaehltes Schiff 10 s in Ruhe. **4 s still im Krebsstand** und
+  nichts in Aggro-Reichweite zum Angreifen: sie setzt sich (`GOLEM_CRAB_IDLE_SIT_TIME`, Nutzervorgabe).
+
+- **Spieltest 2026-11-18, Runde 2:** Zeppelinzone weiter hinten und 20 % kleiner (`GOLEM_CRAB_AIR_BACK` 2,2,
+  `GOLEM_CRAB_AIR_RADIUS` 0,8 m des 4-m-Modells; bei 31 m 12,2 bis 26,1 m hinter der Mitte). **Rueckwaerts krabbeln**
+  (Kopf voran, gleich schnell, nur im Krebsgang): sie nimmt die Richtung mit weniger Drehung, zum Luftschiff krabbelt sie
+  rueckwaerts heran (Ruecken zum Schiff, `_crab_want_heading`). **Angriffswahl:** ein Gebaeudetreffer zaehlt halb so viel
+  wie derselbe Treffer gegen eine Einheit (`GOLEM_BUILDING_VALUE_SHARE`, Stand und Sitz). **Bugfix Dauerdrehung:** mit
+  "Stationaer aus" durfte die Einheitenlogik im Sitzen einen Gebaeudeangriff starten (Zustand ATTACK), der sie jeden Tick
+  zum Gebaeude ausrichtete — gegen die Sitzdrehung, sie hing fest. Jetzt nimmt die Sitzende keine Einheitenbefehle an
+  (`can_take_orders` wie vorher, Befehle laufen ueber `sit_refuses_orders`), dazu eine Sicherung: haengt eine Drehung 2 s
+  oder geht sie eine Runde ohne Angriff, bricht sie ab und dreht 3 s nicht neu (`GOLEM_SIT_TURN_STALL_TIME`,
+  `_BLOCK_TIME`). Erreicht sie im Sitzen nichts und ist keine Einheit und kein Luftschiff da, krabbelt sie zum naechsten
+  Feindgebaeude im Aggro-Radius.
+
+- **Spieltest 2026-11-18, Runde 3 (Luftschiff ignoriert):** Vorrang jetzt: Einheiten in Reichweite der Sitzangriffe >
+  Luftschiff im Aggro-Radius > Gebaeude und Fahrzeuge in Reichweite > Krebsgang zum naechsten Ziel (`crab_ship_waiting`,
+  `GolemSitCombat._units_in_reach`; vorher zerlegte sie erst eine Huette, waehrend das Schiff sie beschoss). Anflugpunkt:
+  der auf ihrer Seite des Schiffs, liegt ihr Koerper dort ueber dem Rand, der naechste von 16 rund um das Schiff
+  (`_crab_spot_on_disc`). Die 10-s-Pause nach dem Aufgeben gilt auch fuer die Schiffswahl. Ein erreichbares befohlenes
+  Ziel (Fokus) blockiert die Wahl anderer Ziele nicht mehr.
+
+- **Spieltest 2026-11-18, Runde 4:** Drehrate im Krebsgang wie im Sitzen. "Sitzschaden beim Absetzen zu gross": der
+  Sitzschaden trifft nur die Sitzflaeche (gemessen), aber das Aufstehen setzte die Abklingzeiten der Sitzangriffe zurueck,
+  sodass bei jedem Absetzen sofort alle Angriffe kamen — jetzt laufen sie beim Krabbeln weiter (`leave_seat`, `cool`).
+  "Steht auf und setzt sich gleich wieder": sie stand fuer Feinde knapp ausser Reichweite auf und setzte sich, sobald sie
+  am Rand der Zone waren. Jetzt **Geduld** 3 s fuer Einheiten im Suchradius der Sitzangriffe (`GOLEM_CRAB_PATIENCE`,
+  `GolemSitCombat.nothing_for`) und **Tiefe**: hinsetzen erst, wenn das Ziel 20 % der Sitzlaenge in der Zone liegt
+  (`GOLEM_CRAB_REACH_DEPTH`, `_crab_reaches_deep`). In 8 Gefechten: Aufstehen 54 -> 41, Kurz-Krabbeln unter 2 m 14 -> 1.
+
+- **Spieltest 2026-11-18, Runde 5 (Sitzzonen):** Bein-Schneisen wieder genau bis zur gestreckten Schuhspitze im Clip
+  (`GOLEM_SIT_KICK_TO` 1,03 statt 1,6; bei 31,3 m 9,0 statt 13,9 m vor den Fuessen). Fuss-Stampfer-Kreise 0,5 m weiter
+  hinten und 0,3 m kleiner (gemessen bei 31,3 m, aufs 4-m-Modell umgerechnet: `GOLEM_SIT_STOMP_LAND.y` 0,353 statt 0,41,
+  `GOLEM_SIT_STOMP_RADIUS_SHARE` 0,7026 statt 0,75; bei 31,3 m Mitte 3,1 m vor den Fuessen, Radius 4,45 statt 4,75 m;
+  waechst weiter mit dem Koerper). Folge in der Drehwahl: fuer eine Gruppe seitlich hinter ihr dreht sie sich jetzt eher
+  den Ruecken zu (Handstampfer hinten) als eine Vierteldrehung fuer den Fuss-Stampfer.
+
 #### Clipvertrag Krebsgang
 
 | Clip | Laenge bei Tempo 1 | Was passiert |

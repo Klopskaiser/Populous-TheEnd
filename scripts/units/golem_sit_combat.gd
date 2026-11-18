@@ -104,6 +104,15 @@ var _c_clap_r: float
 var _c_dstomp_r: float
 var _c_kick_out: float
 var _think: float = 0.0
+## Guard against a turn that hangs (bugfix 2026-11-18): seconds without progress, angle turned in this
+## turn without an attack, the heading last tick, seconds no new turn may start.
+var _turn_stall: float = 0.0
+var _turn_spun: float = 0.0
+var _turn_last: Vector3 = Vector3.ZERO
+var turn_block: float = 0.0
+## Seconds her choices have found nothing within reach in a row (the crab walk waits a little for foes
+## that are nearly there, Golem.sit_nothing_in_reach).
+var nothing_for: float = 0.0
 ## Last landings (tests, diagnostics): kind -> victims struck, kind -> buildings struck.
 var last_struck: Dictionary = {}
 var last_struck_buildings: Dictionary = {}
@@ -113,6 +122,21 @@ var _grow_left: float = 0.0
 
 func _init(p_golem: Golem) -> void:
 	g = p_golem
+
+
+## She gets up into the crab stand: the turn ends, the cooldowns keep running (cool) — a reset would give
+## her every sit attack fresh at the next touch-down (bug report 2026-11-18: a burst of damage each time she
+## sat down from the crab walk).
+func leave_seat() -> void:
+	_end_turn()
+	_think = 0.0
+	nothing_for = 0.0
+
+
+## While she crawls: the cooldowns run on.
+func cool(delta: float) -> void:
+	for ch in [CH_LEGS, CH_ARMS]:
+		cooldown[ch] = maxf(cooldown[ch] - delta, 0.0)
 
 
 func reset() -> void:
@@ -442,6 +466,7 @@ func channel_free(ch: int) -> bool:
 ## the seat) lands, free channels pick the next attack, or she turns toward an enemy no
 ## limb reaches.
 func tick(delta: float) -> void:
+	turn_block = maxf(turn_block - delta, 0.0)
 	for ch in [CH_LEGS, CH_ARMS]:
 		cooldown[ch] = maxf(cooldown[ch] - delta, 0.0)
 		if pending[ch] == &"":
@@ -462,6 +487,17 @@ func tick(delta: float) -> void:
 		if turning:
 			g.facing = g.heading()
 			g.sit_turn_tick()
+		return
+	if turning and _turn_hangs(delta):
+		# The turn makes no headway, or has gone all the way round without an attack (bug report
+		# 2026-11-18: she turned on the spot for good): stop, no new turn for a while — not
+		# stationary, she crawls to what is left in her aggro radius instead.
+		g.facing = g.heading()
+		g.sit_turn_tick()
+		_end_turn()
+		turn_block = Balance.GOLEM_SIT_TURN_BLOCK_TIME
+		_think = THINK_INTERVAL
+		g.sit_nothing_in_reach(_foes_around())
 		return
 	if turning:
 		var goal: Vector3 = _turn_goal_point()
@@ -507,6 +543,22 @@ func tick(delta: float) -> void:
 	_choose()
 
 
+## Does the running turn hang? No headway for GOLEM_SIT_TURN_STALL_TIME, or a full round without a
+## wound-up attack.
+func _turn_hangs(delta: float) -> bool:
+	var h: Vector3 = g.heading()
+	if _turn_last == Vector3.ZERO:
+		_turn_last = h
+		return false
+	var step: float = acos(clampf(h.dot(_turn_last), -1.0, 1.0))
+	_turn_last = h
+	_turn_spun += step
+	if is_busy():
+		_turn_spun = 0.0
+	_turn_stall = _turn_stall + delta if step < deg_to_rad(0.5) * delta / 0.1 else 0.0
+	return _turn_stall >= Balance.GOLEM_SIT_TURN_STALL_TIME or _turn_spun >= TAU
+
+
 ## She grows on the seat (user spec 2026-11-17): the stretch (clip sit_grow) strikes like
 ## the kick in BOTH legs' lanes, `delay` seconds from now (when the legs are stretched).
 func grow_strike(delay: float) -> void:
@@ -533,8 +585,17 @@ func _choose() -> void:
 		if not is_busy():
 			_maybe_turn(foes)   # maybe a building further off
 			if not turning:
+				nothing_for += THINK_INTERVAL
 				g.sit_nothing_in_reach(foes)   # not stationary: her ordered target, crawling
+			else:
+				nothing_for = 0.0
 		return
+	if not is_busy() and g.crab_ship_waiting() and not _units_in_reach(foes):
+		# An airship in her aggro radius goes before buildings and vehicles in reach — the strike from
+		# the crab stand is the only way to hit it (bug report 2026-11-18). Units in reach go first.
+		g.sit_nothing_in_reach(foes)
+		if g.crab_target() != null:
+			return
 	if _turn_sweep(foes, builds):
 		return
 	var best_legs: Dictionary = _best_of([STOMP_L, STOMP_R, KICK_L, KICK_R], foes, builds) if legs else {}
@@ -556,7 +617,21 @@ func _choose() -> void:
 		# the other cools down with a foe in its area (she turned away from it, 2026-11-18).
 		_maybe_turn(foes)
 		if not turning:
+			nothing_for += THINK_INTERVAL
 			g.sit_nothing_in_reach(foes)   # not stationary: she crawls toward it (user spec 2026-11-18)
+		else:
+			nothing_for = 0.0
+	else:
+		nothing_for = 0.0
+
+
+## Is any of `foes` (enemy units) inside the area of one of her sit attacks as she faces now?
+func _units_in_reach(foes: Array[Unit]) -> bool:
+	var reach_r: float = _scan_radius()
+	for u in foes:
+		if _flat(u.position - g.position).length() <= reach_r and g._crab_reaches(u):
+			return true
+	return false
 
 
 ## Radius around the seat beyond which no sit attack reaches.
@@ -682,10 +757,10 @@ func _spread(kind: StringName, hit: Array[Unit], hit_b: Array = []) -> float:
 func _value(kind: StringName, hit: Array[Unit], hit_b: Array = [], hit_v: Array = []) -> float:
 	var dmg: int = damage(kind)
 	var sum: float = Balance.GOLEM_STRUCTURE_VALUE * float(hit_v.size())
-	var to_building: int = Golem.building_damage_for(dmg)
+	var to_building: float = float(dmg) * Balance.GOLEM_BUILDING_VALUE_SHARE   # half a unit hit (user spec)
 	for b in hit_b:
 		if is_instance_valid(b):
-			sum += float(mini(to_building, b.health))
+			sum += minf(to_building, float(b.health))
 	for u in hit:
 		sum += float(mini(dmg, u.health))
 	return sum / maxf(cooldown_of(kind), 0.05)
@@ -786,7 +861,9 @@ func _turn_goal_point() -> Vector3:
 
 ## Where the enemy unit or building `o` stands — INF when it is dead, gone, no longer an
 ## enemy target or farther than `max_dist` from her.
-func _alive_at(o: Object, max_dist: float) -> Vector3:
+## (Untyped on purpose: the one she turns to may have been freed meanwhile — a typed parameter fails at
+## the call already, bug report 2026-11-18.)
+func _alive_at(o, max_dist: float) -> Vector3:
 	if o == null or not is_instance_valid(o):
 		return Vector3.INF
 	var at: Vector3 = Vector3.INF
@@ -805,6 +882,9 @@ func _alive_at(o: Object, max_dist: float) -> Vector3:
 func _end_turn() -> void:
 	_sweep_i = 0
 	turning = false
+	_turn_stall = 0.0
+	_turn_spun = 0.0
+	_turn_last = Vector3.ZERO
 	_turn_sign = 0.0
 	_turn_want = Vector3.ZERO
 	_turn_escape = false
@@ -845,6 +925,8 @@ func _stretched(best: Dictionary, lead: float) -> float:
 ## best one beating the plan she has here wins and she turns to it (once she is not winding up).
 ## Returns true when she turns.
 func _turn_sweep(foes: Array[Unit], builds: Array) -> bool:
+	if turn_block > 0.0:
+		return false
 	var cur: Vector3 = g.heading()
 	if _sweep_i == 0 or cur.dot(_sweep_from) < 0.9999:
 		_sweep_i = 1
@@ -939,6 +1021,8 @@ func _situation_changed() -> bool:
 ## 2026-11-17: she never turned to an airship wharf beside her) — if it lies more than
 ## GOLEM_SIT_TURN_MIN_DEG off her heading.
 func _maybe_turn(foes: Array[Unit]) -> void:
+	if turn_block > 0.0:
+		return
 	var goal: Vector3 = Vector3.INF
 	var goal_obj: Object = null
 	var best: float = INF
@@ -985,6 +1069,8 @@ func _maybe_turn(foes: Array[Unit]) -> void:
 ## the ground changed (user spec 2026-11-18): she turns to the nearest heading where she can sit
 ## (either way, checked every GOLEM_SIT_TURN_SAMPLE_DEG); is there none, she gets up.
 func _escape_pose() -> void:
+	if turn_block > 0.0:
+		return
 	var cur: Vector3 = g.heading()
 	var a0: float = atan2(cur.x, cur.z)
 	var step: float = deg_to_rad(Balance.GOLEM_SIT_TURN_SAMPLE_DEG)

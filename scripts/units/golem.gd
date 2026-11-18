@@ -134,6 +134,10 @@ const CRAB_THINK: float = 0.25
 const CRAB_REPATH: float = 1.0
 ## Failed paths toward a target before she gives up and sits down.
 const CRAB_MAX_FAILS: int = 3
+## Chasing an airship of her own accord without a strike for this long, she lets it be for
+## CRAB_IGNORE_TIME (no endless crawling after a ship she cannot catch; bug report 2026-11-18).
+const CRAB_SHIP_GIVE_UP: float = 20.0
+const CRAB_IGNORE_TIME: float = 10.0
 ## The stretch she does when she grows: clip name and its length at speed 1.
 const CLIP_GROW: StringName = &"grow"
 const GROW_CLIP_LENGTH: float = 1.0
@@ -332,6 +336,15 @@ var _crab_repath: float = 0.0
 var _crab_aimed: Vector3 = Vector3.INF
 var _crab_fails: int = 0
 var _crab_wait: float = 0.0
+## Seconds she has chased the current airship without a strike, and the targets she lets be for a
+## while (instance id -> seconds left).
+var _crab_chase_time: float = 0.0
+var _crab_idle_time: float = 0.0
+## Crawling backward (head first) right now, and the heading her goal asks for at the end (ZERO = any:
+## she takes the way round that turns her less).
+var _crab_backward: bool = false
+var _crab_want_heading: Vector3 = Vector3.ZERO
+var _crab_ignore: Dictionary = {}
 ## Enemy buildings she sat down on (from the crab walk): they take part of the sit damage.
 var _sit_buildings: Array = []
 ## The airship strike in the crab stand: the ship it is wound up at, seconds to the impact,
@@ -1112,8 +1125,18 @@ func is_sit_locked() -> bool:
 
 ## Seated or on her way: she takes no orders — only stand_up() reaches her. Not stationary and
 ## seated (or in the crab stand) she takes move and attack orders: she crab-walks (user spec 2026-11-18).
+## (Bugfix 2026-11-18: with "stationary" off this used to let the idle scan of Unit start a building
+## assault while she sat — the assault faced her toward the building every tick, the sit turn the other
+## way, and she hung in an endless turn. Orders to a crawling golem go through sit_refuses_orders.)
 func can_take_orders() -> bool:
-	return super.can_take_orders() and not sit_refuses_orders()
+	return super.can_take_orders() and not is_sit_locked()
+
+
+## No building assault of the unit logic while she sits (the sit attacks strike buildings).
+func _begin_attack_building(building) -> void:
+	if is_sit_locked():
+		return
+	super._begin_attack_building(building)
 
 
 ## Sit-locked and no crab walk possible right now: move and attack orders do not reach her
@@ -1711,12 +1734,14 @@ func crab_goal() -> Vector3:
 
 
 func crab_target() -> Object:
-	return _crab_target
+	return _crab_target if is_instance_valid(_crab_target) else null
 
 
 ## Is `o` still worth crawling to? A living, targetable enemy unit; a crewed enemy airship; a
 ## standing, attackable enemy building.
-func _crab_target_alive(o: Object) -> bool:
+## (Untyped on purpose: a target that has been freed in the meantime must reach the validity check —
+## a typed parameter fails at the call already, bug report 2026-11-18.)
+func _crab_target_alive(o) -> bool:
 	if o == null or not is_instance_valid(o):
 		return false
 	if o is Airship:
@@ -1732,16 +1757,17 @@ func _crab_target_point(o: Object) -> Vector3:
 	return (o as Unit).position if o is Unit else o.center_world()
 
 
-## Would she reach `o` from where she is, facing as she does? An airship: within reach of the
-## strike behind her head once she turns her back to it. Anything else: inside the area of one of
-## her single sit attacks (legs or arms) — she sits down there and strikes.
+## Would she reach `o` from where she is, facing as she does? An airship: inside the area behind
+## her head. Anything else: inside the area of one of her single sit attacks (legs or arms) — she
+## sits down there and strikes.
 func _crab_reaches(o: Object) -> bool:
 	if o is Airship:
-		return _flat_dist(position, (o as Airship).position) <= crab_air_reach()
+		return in_crab_air_zone((o as Airship).position)
 	if sit_combat == null:
 		sit_combat = GolemSitCombat.new(self)
 	var kinds: Array[StringName] = [GolemSitCombat.STOMP_L, GolemSitCombat.STOMP_R, GolemSitCombat.KICK_L,
-		GolemSitCombat.KICK_R, GolemSitCombat.WIPE_L, GolemSitCombat.WIPE_R, GolemSitCombat.DOUBLE_STOMP]
+		GolemSitCombat.KICK_R, GolemSitCombat.WIPE_L, GolemSitCombat.WIPE_R, GolemSitCombat.DOUBLE_STOMP,
+		GolemSitCombat.CLAP, GolemSitCombat.HOP]   # (crawling backward she may arrive head first)
 	for k in kinds:
 		if o is Unit:
 			if sit_combat.in_area(k, (o as Unit).position):
@@ -1751,39 +1777,188 @@ func _crab_reaches(o: Object) -> bool:
 	return false
 
 
+## Crawling: is `o` well within reach — not just at the edge? The point GOLEM_CRAB_REACH_DEPTH of her
+## seat length beyond it (away from her middle) must be in reach too. Buildings and airships: as _crab_reaches.
+func _crab_reaches_deep(o) -> bool:
+	if not (o is Unit) or o is Airship:
+		return _crab_reaches(o)
+	if not _crab_reaches(o):
+		return false
+	var p: Vector3 = (o as Unit).position
+	var away: Vector3 = Vector3(p.x - position.x, 0.0, p.z - position.z)
+	if away.length_squared() < 0.0001:
+		return true
+	var deeper: Vector3 = p + away.normalized() * (seat_back_m() * Balance.GOLEM_CRAB_REACH_DEPTH)
+	for k in [GolemSitCombat.STOMP_L, GolemSitCombat.STOMP_R, GolemSitCombat.KICK_L, GolemSitCombat.KICK_R,
+			GolemSitCombat.WIPE_L, GolemSitCombat.WIPE_R, GolemSitCombat.DOUBLE_STOMP, GolemSitCombat.CLAP,
+			GolemSitCombat.HOP]:
+		if sit_combat.in_area(k, deeper):
+			return true
+	return false
+
+
 ## GolemSitCombat found nothing within reach and did not turn: not stationary, she crawls toward
 ## the target the player ordered (her focus), else toward the nearest foe in her aggro radius
 ## (user spec 2026-11-18: "wenn er nichts mehr zum Angreifen hat").
 func sit_nothing_in_reach(foes: Array[Unit]) -> void:
+	_crab_prune()
 	if not crab_ready() or is_crabbing() or _crab_goal != Vector3.INF or _crab_target != null:
 		return
 	if _crab_target_alive(_crab_focus):
-		crab_to(Vector3.INF, _crab_focus)
-		return
-	_crab_focus = null
-	var best: Unit = null
+		if not _crab_reaches(_crab_focus):
+			crab_to(Vector3.INF, _crab_focus)
+			return
+		# (within reach from the seat: no crawl for it — it must not block every other goal)
+	else:
+		_crab_focus = null
+	var best: Object = null
 	var best_d: float = aggro_radius()
+	var waiting: bool = false
 	for u in foes:
-		if not _crab_target_alive(u) or u.is_airborne():
+		if not _crab_target_alive(u) or u.is_airborne() or _crab_ignored(u):
 			continue
 		var d: float = _flat_dist(position, u.position)
 		if d <= best_d:
 			best_d = d
 			best = u
+	if best is Unit and sit_combat != null and best_d <= sit_combat._scan_radius() \
+			and sit_combat.nothing_for < Balance.GOLEM_CRAB_PATIENCE:
+		best = null   # nearly within reach: give it a moment to come (bug report 2026-11-18)
+		waiting = true
+	# An airship only now (bug report 2026-11-18: she got up for one while foes stood in her reach)
+	# — the strike from the crab stand is the only way to hit it from the seat.
+	var ship: Airship = _crab_ship_near(aggro_radius())
+	if ship != null and _flat_dist(position, ship.position) < best_d:
+		best = ship
+	if best == null and not waiting and building_manager != null:
+		# No unit, no airship: the nearest enemy building in her aggro radius (bug report 2026-11-18:
+		# she stayed put with a building left in reach of her aggro).
+		var here: Vector2 = Vector2(position.x, position.z)
+		for b in building_manager.buildings:
+			if not _crab_target_alive(b) or _crab_ignored(b):
+				continue
+			var d: float = b.footprint_distance_to(here)
+			if d <= best_d:
+				best_d = d
+				best = b
 	if best != null:
 		crab_to(Vector3.INF, best)
 
 
+## Anything to strike in her aggro radius: an enemy unit on the ground or a crewed enemy airship?
+func _foe_in_aggro() -> bool:
+	if path_service == null:
+		return false
+	for u in path_service.get_units_in_radius(position, aggro_radius()):
+		if u != self and u.tribe_id != tribe_id and not (u is CrewedVehicle) and _crab_target_alive(u) \
+				and not u.is_airborne():
+			return true
+	return _crab_ship_near(aggro_radius()) != null
+
+
+func _crab_ignored(o) -> bool:
+	return o != null and is_instance_valid(o) and _crab_ignore.has(o.get_instance_id())
+
+
+## Is an enemy unit within reach of one of her sit attacks right now (as she faces)? Then a crawl
+## of her own accord ends: she sits down and fights (bug report 2026-11-18).
+func _foe_in_sit_reach() -> bool:
+	if path_service == null:
+		return false
+	if sit_combat == null:
+		sit_combat = GolemSitCombat.new(self)
+	for u in path_service.get_units_in_radius(position, sit_combat._scan_radius()):
+		if u == self or u.tribe_id == tribe_id or u is CrewedVehicle or not _crab_target_alive(u) \
+				or u.is_airborne():
+			continue
+		if _crab_reaches_deep(u):
+			return true
+	return false
+
+
+## Where her middle has to go so that `ship` comes into the area behind her head: far off, she crawls
+## toward it — backward, head first (user spec 2026-11-18), turning her back to it on the way — until it
+## is as far as the area lies behind her; about that far, she only turns her back to it; nearer, she
+## crawls away from it. Returns [goal (INF = only turn), heading she ends up with (her back to it)].
+func _crab_ship_goal(ship: Airship) -> Array:
+	var back: float = Balance.GOLEM_CRAB_AIR_BACK * model_scale().z * size_factor()
+	var r: float = crab_air_radius()
+	var to: Vector3 = Vector3(ship.position.x - position.x, 0.0, ship.position.z - position.z)
+	var d: float = to.length()
+	var dir: Vector3 = to / d if d > 0.001 else heading()
+	var s: Vector3 = Vector3(ship.position.x, position.y, ship.position.z)
+	if absf(d - back) <= r * 0.5:
+		return [Vector3.INF, -dir]   # as far as the area lies behind her: she only turns her back to it
+	# The spot on her side of the ship first; where that lies off the disc (her body would hang over
+	# the rim — a big golem near the edge, bug report 2026-11-18), the next one round the ship, every
+	# 22,5 degrees either way: she ends up with her back to the ship there.
+	var away: Vector3 = -dir
+	var a0: float = atan2(away.x, away.z)
+	var n: int = 16
+	for i in range(n / 2 + 1):
+		for sgn in ([1.0] if i == 0 or i == n / 2 else [1.0, -1.0]):
+			var a: float = a0 + sgn * TAU * float(i) / float(n)
+			var u: Vector3 = Vector3(sin(a), 0.0, cos(a))
+			var goal: Vector3 = s + u * back
+			if _crab_spot_on_disc(goal):
+				return [goal, u]
+	return [s + away * back, away]   # nowhere fits: the plain spot (the give-up takes over)
+
+
+## Does her body fit on the disc with its middle at `p` (the crab body circle, sampled)?
+func _crab_spot_on_disc(p: Vector3) -> bool:
+	if terrain_data == null:
+		return true
+	var r: float = crab_body_radius()
+	if not terrain_data.has_ground(p.x, p.z):
+		return false
+	for k in range(8):
+		var a: float = TAU * float(k) / 8.0
+		if not terrain_data.has_ground(p.x + sin(a) * r, p.z + cos(a) * r):
+			return false
+	return true
+
+
+## Is an enemy airship in her aggro radius she may go after (not stationary, can strike the air, not one
+## she has let be for now)? It goes before buildings and vehicles in reach of her sit attacks (bug report
+## 2026-11-18: she battered a hut while the airship shot at her) — not before units in reach.
+func crab_ship_waiting() -> bool:
+	if not crab_ready() or is_crabbing() or _crab_goal != Vector3.INF or _crab_target != null:
+		return false
+	var ship: Airship = _crab_ship_near(aggro_radius())
+	return ship != null
+
+
+## Drops crab references whose object has been freed meanwhile (a sunk corpse, a wreck taken away). A
+## freed object compares equal to null but fails `is` and typed calls — check it first (bug report
+## 2026-11-18: SCRIPT ERROR "previously freed").
+func _crab_prune() -> void:
+	if not is_instance_valid(_crab_target):
+		_crab_target = null
+	if not is_instance_valid(_crab_focus):
+		_crab_focus = null
+	if not is_instance_valid(_crab_air_ship):
+		_crab_air_ship = null
+
+
 ## One tick of the crab walk (after the stance logic).
 func _tick_crab(delta: float) -> void:
+	_crab_prune()
 	if stance != STANCE_SIT or is_switching_stance():
 		if _crab != CRAB_NONE:
 			_crab = CRAB_NONE   # (cannot happen: the stance waits for the crab walk)
 		return
+	if not _crab_ignore.is_empty():
+		for id in _crab_ignore.keys():
+			_crab_ignore[id] -= delta
+			if _crab_ignore[id] <= 0.0:
+				_crab_ignore.erase(id)
 	if _crab == CRAB_NONE:
 		_tick_crab_seated(delta)
 		return
 	_tick_crab_air(delta)
+	if sit_combat != null:
+		sit_combat.cool(delta)
 	match _crab:
 		CRAB_UP:
 			_crab_time -= delta
@@ -1811,8 +1986,8 @@ func _tick_crab(delta: float) -> void:
 		_seat_floor_y = _seat_floor_height(position + _seat_fwd * seat_back_m(), _seat_fwd)
 
 
-## Seated and not stationary: every CRAB_THINK she checks whether to get up into the crab stand —
-## for an order, or an airship in her aggro radius (only the crab stand strikes those).
+## Seated and not stationary: every CRAB_THINK she checks whether to get up into the crab stand for
+## a goal (an order, or what GolemSitCombat found out of reach: sit_nothing_in_reach).
 func _tick_crab_seated(delta: float) -> void:
 	_crab_think -= delta
 	if _crab_think > 0.0:
@@ -1822,8 +1997,6 @@ func _tick_crab_seated(delta: float) -> void:
 		return
 	if sit_stretching() or _stretch_queued or _sit_layers_busy():
 		return   # a wound-up attack lands and a stretch runs out first
-	if _crab_goal == Vector3.INF and _crab_target == null and can_strike_air():
-		_crab_target = _crab_ship_near(aggro_radius())
 	if _crab_goal != Vector3.INF:
 		if _flat_dist(position, _crab_goal) <= arrive_eps() + 0.5:
 			_crab_goal = Vector3.INF   # she sits there already
@@ -1843,15 +2016,19 @@ func _tick_crab_seated(delta: float) -> void:
 
 func _begin_crab_up() -> void:
 	_crab = CRAB_UP
+	_crab_backward = false
+	_crab_want_heading = Vector3.ZERO
 	_crab_time = crab_switch_time()
 	if sit_combat != null:
-		sit_combat.reset()   # (a turn on the seat ends)
+		sit_combat.leave_seat()   # (a turn on the seat ends; the cooldowns keep running)
 	facing = heading()
 	_sit_victims.clear()   # no sit damage on the way (user spec 2026-11-18)
 	_sit_buildings.clear()
 	_sit_level_y = INF   # the levelling of the old seat stops
 	_crab_fails = 0
 	_crab_aimed = Vector3.INF
+	_crab_chase_time = 0.0
+	_crab_idle_time = 0.0
 	_after_seat_shift()   # the target radius grows to her whole body
 
 
@@ -1859,14 +2036,25 @@ func _begin_crab_up() -> void:
 func _crab_plan() -> void:
 	move_aggressive = false
 	waypoint_queue.clear()
+	_crab_want_heading = Vector3.ZERO
 	if _crab_goal != Vector3.INF:
 		_crab_aimed = _crab_goal
 		_start_path_to(_crab_goal)
 		return
-	if _crab_target_alive(_crab_target) and not _crab_reaches(_crab_target):
-		_crab_aimed = _crab_target_point(_crab_target)
-		_crab_repath = CRAB_REPATH
-		_start_path_to(_crab_aimed)
+	if not _crab_target_alive(_crab_target) or _crab_reaches(_crab_target):
+		return
+	_crab_repath = CRAB_REPATH
+	_crab_aimed = _crab_target_point(_crab_target)
+	if _crab_target is Airship:
+		var plan: Array = _crab_ship_goal(_crab_target as Airship)
+		_crab_want_heading = plan[1]   # crawling there she already turns her back to it
+		if plan[0] == Vector3.INF:
+			_crab_stop()
+			facing = plan[1]   # she only turns her back to it
+			return
+		_start_path_to(plan[0])
+		return
+	_start_path_to(_crab_aimed)
 
 
 func _crab_stop() -> void:
@@ -1886,33 +2074,49 @@ func _tick_crab_stand(delta: float) -> void:
 		return
 	_crab_repath -= delta
 	_crab_wait -= delta
+	_crab_think -= delta
+	var think: bool = _crab_think <= 0.0
+	if think:
+		_crab_think = CRAB_THINK
 	if _crab_target != null and not _crab_target_alive(_crab_target):
 		if _crab_focus == _crab_target:
 			_crab_focus = null
 		_crab_target = null
 		if _crab_goal == Vector3.INF:
 			_crab_stop()
-	if _crab_goal == Vector3.INF and _crab_target == null and not sit_stationary and can_strike_air():
-		var ship: Airship = _crab_ship_near(aggro_radius())
-		if ship != null:
-			_crab_target = ship
-			_crab_fails = 0
-			_crab_plan()
 	if _crab_goal != Vector3.INF:
 		if state == State.MOVE:
+			_crab_idle_time = 0.0
 			return
 		_crab_goal = Vector3.INF   # arrived (or no way further)
+	# Standing idle in the crab stand GOLEM_CRAB_IDLE_SIT_TIME with nothing to strike in her aggro
+	# radius: she sits down (user spec 2026-11-18).
+	if state == State.MOVE:
+		_crab_idle_time = 0.0
+	else:
+		_crab_idle_time += delta
+		if think and _foe_in_aggro():
+			_crab_idle_time = 0.0
+		if _crab_idle_time >= Balance.GOLEM_CRAB_IDLE_SIT_TIME:
+			_crab_idle_time = 0.0
+			_crab_target = null
+			_crab_focus = null
+			_try_crab_down()
+			return
+	if _crab_target != null and _crab_target != _crab_focus and think:
+		# A crawl of her own accord: a foe within reach of a sit attack goes first — she sits down
+		# and fights (bug report 2026-11-18: she stayed in the crab walk after an airship).
+		if _foe_in_sit_reach():
+			_crab_target = null
+			_try_crab_down()
+			return
+	if _crab_target is Airship:
+		_tick_crab_ship(delta)
+		return
 	if _crab_target != null:
-		if _crab_reaches(_crab_target):
+		if _crab_reaches_deep(_crab_target):
 			_crab_stop()
 			_crab_fails = 0
-			if _crab_target is Airship:
-				# She turns her back to it: the strike lands behind her head.
-				var away: Vector3 = position - (_crab_target as Airship).position
-				away.y = 0.0
-				if away.length_squared() > 0.0001:
-					facing = away.normalized()
-				return
 			_crab_target = null
 			_try_crab_down()
 			return
@@ -1931,6 +2135,33 @@ func _tick_crab_stand(delta: float) -> void:
 				_crab_plan()
 		return
 	_try_crab_down()
+
+
+## After an airship: once it is in the area behind her head she stands (the strike comes from
+## _tick_crab_air); else she re-aims every CRAB_REPATH — the ship drifts. Unordered, she gives up
+## after CRAB_SHIP_GIVE_UP without a strike and lets it be for CRAB_IGNORE_TIME.
+func _tick_crab_ship(delta: float) -> void:
+	var ship: Airship = _crab_target as Airship
+	if in_crab_air_zone(ship.position):
+		_crab_stop()
+		_crab_fails = 0
+		return
+	if ship != _crab_focus:
+		_crab_chase_time += delta
+		if _crab_chase_time >= CRAB_SHIP_GIVE_UP:
+			_crab_ignore[ship.get_instance_id()] = CRAB_IGNORE_TIME
+			_crab_target = null
+			_crab_stop()
+			_try_crab_down()
+			return
+	if state != State.MOVE and _crab_repath > 0.0 and _crab_aimed != Vector3.INF:
+		var plan: Array = _crab_ship_goal(ship)
+		if plan[0] == Vector3.INF:
+			facing = plan[1]   # turning her back to it
+		if _flat_dist(ship.position, _crab_aimed) <= 1.0:
+			return
+	if _crab_repath <= 0.0 or state != State.MOVE:
+		_crab_plan()
 
 
 ## Nowhere to go any more: she sits down — if she can sit here (or nearby); else she stays in the
@@ -2028,7 +2259,7 @@ func _crab_ship_near(radius: float) -> Airship:
 	var best: Airship = null
 	var best_d: float = INF
 	for u in path_service.get_enemy_vehicles_in_radius(position, radius, tribe_id):
-		if not (u is Airship) or not (u as Airship).auto_attackable():
+		if not (u is Airship) or not (u as Airship).auto_attackable() or _crab_ignored(u):
 			continue
 		var d: float = _flat_dist(position, u.position)
 		if d < best_d:
@@ -2056,6 +2287,9 @@ func _crab_ship_in_zone() -> Airship:
 func _tick_crab_air(delta: float) -> void:
 	_crab_air_cooldown = maxf(_crab_air_cooldown - delta, 0.0)
 	if _crab_air_ship != null:
+		if not is_instance_valid(_crab_air_ship):
+			_crab_air_ship = null   # the ship is gone (freed) before the strike landed
+			return
 		_crab_air_time -= delta
 		if _crab_air_time <= 0.0:
 			var ship: Airship = _crab_air_ship
@@ -2089,6 +2323,7 @@ func _land_crab_headbutt(ship: Airship) -> bool:
 		return false
 	_play_strike_sfx(ATTACK_SWAT)
 	ship.register_hull_hit(position)
+	_crab_chase_time = 0.0
 	return true
 
 
@@ -2314,8 +2549,9 @@ func _worth_now(kind: StringName) -> float:
 		var damage: float = float(attack_damage(kind))
 		for u in struck.units:
 			worth += minf(damage, float(u.health))
-	# A building: the hit points it really loses (2026-11-18), a vehicle: GOLEM_STRUCTURE_VALUE.
-	var per_building: float = float(building_damage_total(kind))
+	# A building: GOLEM_BUILDING_VALUE_SHARE of what the same hit is worth against a unit (user spec
+	# 2026-11-18), no more than it has left; a vehicle: GOLEM_STRUCTURE_VALUE.
+	var per_building: float = building_value(kind)
 	for b in struck.buildings:
 		if is_instance_valid(b):
 			worth += minf(per_building, float(b.health))
@@ -2326,6 +2562,18 @@ func _worth_now(kind: StringName) -> float:
 ## GOLEM_BUILDING_DAMAGE_SHARE of it, at least 1.
 static func building_damage_for(amount: int) -> int:
 	return maxi(int(floor(float(amount) * Balance.GOLEM_BUILDING_DAMAGE_SHARE)), 1)
+
+
+## What the attack `kind` is worth in the choice against one (healthy) building: GOLEM_BUILDING_VALUE_SHARE
+## of its damage against a unit (the drum: all three hits).
+func building_value(kind: StringName) -> float:
+	var dmg: float = 0.0
+	if kind == ATTACK_DRUM:
+		for hit in range(Balance.GOLEM_DRUM_HITS.size()):
+			dmg += float(drum_hit_damage(hit))
+	else:
+		dmg = float(attack_damage(kind))
+	return dmg * Balance.GOLEM_BUILDING_VALUE_SHARE
 
 
 ## All the hit points the attack `kind` takes off one building (the drum: its three hits).
@@ -2485,8 +2733,7 @@ func cooldown_for(kind: StringName) -> float:
 ## How fast the body turns (rad/s): GOLEM_TURN_RATE at the starting size, down to
 ## GOLEM_TURN_RATE_FULL_SHARE of the fire ram's rate at 80 m. Seated: sit_turn_rate().
 func turn_rate() -> float:
-	if is_crabbing():
-		return standing_turn_rate(height_m()) * Balance.GOLEM_CRAB_TURN_SHARE
+	# (the crab walk turns as slowly as the sit — user spec 2026-11-18; it stays in STANCE_SIT)
 	return sit_turn_rate() if stance == STANCE_SIT else standing_turn_rate(height_m())
 
 
@@ -2567,6 +2814,8 @@ func _slope_speed(slope: float) -> float:
 	var crab: bool = crab_walking()
 	if not crab and (stance != STANCE_STAND or is_switching_stance() or is_stretching()):
 		return 0.0   # crouched, bending down, getting up or stretching: rooted
+	if crab:
+		_crab_pick_direction()   # (the path step has just pointed `facing` where she goes)
 	var want_dir: Vector3 = Vector3(facing.x, 0.0, facing.z)
 	var share: float = 1.0
 	if want_dir.length_squared() > 0.000001:
@@ -2574,6 +2823,26 @@ func _slope_speed(slope: float) -> float:
 	if crab:
 		share *= Balance.GOLEM_CRAB_SPEED_SHARE   # a third of her walking speed (user spec 2026-11-18)
 	return super._slope_speed(slope) * share
+
+
+## Crab walk (user spec 2026-11-18): she may crawl backward, head first. `facing` points where she
+## goes; she turns it round when going backward — when her goal asks for that heading at the end, or
+## (no such wish) when it saves turning (hysteresis around the cross direction).
+func _crab_pick_direction() -> void:
+	var move: Vector3 = Vector3(facing.x, 0.0, facing.z)
+	if move.length_squared() < 0.000001:
+		return
+	move = move.normalized()
+	if _crab_want_heading != Vector3.ZERO:
+		_crab_backward = _crab_want_heading.dot(move) < 0.0
+	else:
+		var d: float = heading().dot(move)
+		if d < -0.1:
+			_crab_backward = true
+		elif d > 0.1:
+			_crab_backward = false
+	if _crab_backward:
+		facing = -move
 
 
 ## Ground speed right now: that of her size (speed_for_size).
@@ -3985,7 +4254,7 @@ func _tick_pending_attack(delta: float) -> void:
 		return
 	var kind: StringName = _pending_attack
 	var building = _pending_building
-	var ship: Airship = _pending_airship
+	var ship: Airship = _pending_airship if is_instance_valid(_pending_airship) else null
 	# The drum lands three times; she stays wound up until the last hit.
 	if kind == ATTACK_DRUM and _pending_hit < Balance.GOLEM_DRUM_HITS.size() - 1:
 		_land_attack(kind, _pending_hit)
@@ -4304,7 +4573,9 @@ func _crab_visual(ground_speed: float) -> void:
 			if _clip == CLIP_CRAB_HEADBUTT and _anim.is_playing():
 				return
 			if ground_speed > WALK_THRESHOLD:
-				_play_clip(CLIP_CRAB_WALK, ground_speed / (crab_clip_speed() * _shown_size))
+				# Backward the walk clip runs backward (head first, user spec 2026-11-18).
+				var sp: float = ground_speed / (crab_clip_speed() * _shown_size)
+				_play_clip(CLIP_CRAB_WALK, -sp if _crab_backward else sp)
 			else:
 				_play_clip(CLIP_CRAB_IDLE)
 
