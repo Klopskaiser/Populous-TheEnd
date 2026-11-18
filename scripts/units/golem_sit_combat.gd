@@ -1106,6 +1106,14 @@ func _turn_sweep(foes: Array[Unit], builds: Array) -> bool:
 	if _sweep_dir == Vector3.ZERO or _sweep_v <= float(here.value) * Balance.GOLEM_SIT_TURN_PLAN_MARGIN + 0.000001:
 		return false   # not clearly better: no turn for a trifle (bug report 2026-11-18)
 	var best_dir: Vector3 = _sweep_dir
+	# The round's values are up to a second old (and held while she was busy): weigh the chosen heading
+	# afresh — the foes may have moved or died since (user report 2026-11-18: she turned and struck
+	# differently although nothing seemed to change).
+	var fresh: Dictionary = _fresh_turn_plan(best_dir, foes, builds, float(here.value) > 0.0)
+	if fresh.is_empty() or float(fresh.value) <= float(here.value) * Balance.GOLEM_SIT_TURN_PLAN_MARGIN + 0.000001:
+		return false
+	_sweep_parts = fresh.parts
+	_sweep_sign = float(fresh.sign)
 	var targets: Array = []
 	for part in _sweep_parts:
 		if not part.is_empty():
@@ -1123,6 +1131,21 @@ func _turn_sweep(foes: Array[Unit], builds: Array) -> bool:
 		return false
 	g.facing = first
 	return true
+
+
+## The plan facing `dir` as it stands right now, with the turn there as a lead-in: {value, parts, sign}
+## (empty when she cannot turn there).
+func _fresh_turn_plan(dir: Vector3, foes: Array[Unit], builds: Array, strict: bool) -> Dictionary:
+	var way: Dictionary = turn_way(dir, free_arc())
+	if way.sign == 0.0:
+		return {}
+	var lead: float = maxf(float(way.angle) - deg_to_rad(Balance.GOLEM_SIT_TURN_DONE_DEG), 0.0) \
+		/ maxf(g.turn_rate(), 0.001)
+	var saved: Vector3 = g._heading
+	g._heading = dir
+	var p: Dictionary = _plan(foes, builds, lead, strict)
+	g._heading = saved
+	return {"value": float(p.value), "parts": p.parts, "sign": float(way.sign)}
 
 
 ## Turning for a plan: is the rest of the turn still worth more than the plan where she

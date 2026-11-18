@@ -12977,3 +12977,12 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
   (`Golem.crab_order_pending`) setzt `GolemSitCombat._choose` nichts Neues an. Test
   `test_crab_move_order_is_not_lost_in_a_fight_or_while_sitting_down` (Fall 2 headless nicht nachstellbar: ohne Modell
   laufen keine Animationsebenen).
+
+- **Drehung im Sitzen nicht mehr auf veraltete Werte (2026-11-18):** `GolemSitCombat._turn_sweep` rechnet die 16
+  Richtungen ueber rund 1 s verteilt (4 je Ueberlegung) und hielt das Ergebnis, solange sie beschaeftigt war; vor dem
+  Losdrehen wird die gewaehlte Richtung jetzt frisch nachgerechnet (`_fresh_turn_plan`) und muss den Plan „hier“ weiter
+  um 20 % schlagen. Test `test_sitting_she_does_not_turn_on_a_stale_plan` (auf dem alten Code rot).
+
+- **Po-Klatscher wieder schneller (Nutzervorgabe 2026-11-18):** Abklingzeit und Animation je 0,15 s kuerzer beim
+  30-m-Golem (1,41 -> 1,26 s, Clip 1,67 -> 1,52 s; `GOLEM_SIT_HOP_SLOWER_COOLDOWN` 1,041, `_ANIM` 1,034). Bei 31,3 m
+  1,27 s Abklingzeit und 0,77 s Ausholen (vorher 1,43 / 0,84), bei 80 m 1,72 / 1,03 s.

@@ -216,8 +216,10 @@ const GOLEM_SIT_HOP_COOLDOWN_FACTOR: float = 1.1
 ## 1,21 -> 1,41 s, Animation 1,47 -> 1,67 s, also Ausholen 0,73 -> 0,83 s) und gelten fuer
 ## jede Groesse gleich. Der Po-Klatscher braucht kein Anvisieren: er kommt auch, waehrend sie
 ## sich dreht (wie der Sprung im Stand).
-const GOLEM_SIT_HOP_SLOWER_COOLDOWN: float = 1.165
-const GOLEM_SIT_HOP_SLOWER_ANIM: float = 1.136
+## Nutzervorgabe 2026-11-18 (spaeter): wieder 0,15 s schneller, beides beim 30-m-Golem — Abklingzeit
+## 1,41 -> 1,26 s, Animation 1,67 -> 1,52 s (Ausholen 0,83 -> 0,76 s); bei 31,3 m 1,28 s und 0,77 s.
+const GOLEM_SIT_HOP_SLOWER_COOLDOWN: float = (1.21 * 1.165 - 0.15) / 1.21   # 1,041 (vorher 1,165)
+const GOLEM_SIT_HOP_SLOWER_ANIM: float = (1.47 * 1.136 - 0.15) / 1.47       # 1,034 (vorher 1,136)
 const GOLEM_SIT_HOP_AREA_FACTOR: float = 0.9
 ## 4. Doppelstampfer: Kreis des Trommelns um eine Stelle so weit vor feet_point (negativ:
 ## dahinter; Nutzervorgabe 2026-11-17: "geht zu weit nach vorn, weiter nach hinten" —

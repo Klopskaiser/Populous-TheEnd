@@ -4066,7 +4066,10 @@ func test_sit_big_attacks_take_the_users_values() -> void:
 		"po clap: damage and targets of the jump")
 	check_near(c.cooldown_of(hop), g.cooldown_for(Golem.ATTACK_STOMP) * Balance.GOLEM_SIT_HOP_COOLDOWN_FACTOR
 		* Balance.GOLEM_SIT_HOP_SLOWER_COOLDOWN * Balance.GOLEM_SIT_COOLDOWN_FACTOR,
-		"its cooldown: 1,1 x the jump's, about 0,2 s more at 30 m, seated 10 % faster (%.2f s)" % c.cooldown_of(hop))
+		"its cooldown: 1,1 x the jump's, about 0,05 s more at 30 m, seated 10 % faster (%.2f s)" % c.cooldown_of(hop))
+	# (user spec 2026-11-18: first 0,2 s slower at 30 m, then 0,15 s faster again: 1,26 s and a 1,52-s clip)
+	check_near(1.21 * Balance.GOLEM_SIT_HOP_SLOWER_COOLDOWN, 1.26, "30 m: cooldown 1,26 s (was 1,41)", 0.001)
+	check_near(1.47 * Balance.GOLEM_SIT_HOP_SLOWER_ANIM, 1.52, "30 m: clip 1,52 s (was 1,67)", 0.001)
 	check_near(c.windup_of(hop), g.current_windup(Golem.ATTACK_STOMP) * Balance.GOLEM_SIT_HOP_SLOWER_ANIM,
 		"its clip plays longer (wind-up %.2f s)" % c.windup_of(hop))
 	var hop_r: float = g.stomp_radius() * Balance.GOLEM_SIT_AREA_FACTOR * Balance.GOLEM_SIT_HOP_AREA_FACTOR
@@ -5685,4 +5688,39 @@ func test_crab_move_order_is_not_lost_in_a_fight_or_while_sitting_down() -> void
 	check(g._crab != Golem.CRAB_NONE, "once seated she gets up and crawls")
 	_run_until(w, func() -> bool: return not g.is_crabbing(), 3000)
 	check(_flat(g.position, goal) < 1.5, "she arrives (%.2f m off)" % _flat(g.position, goal))
+	_free_world(w)
+
+
+## Nutzermeldung 2026-11-18: sie drehte sich und griff anders an, obwohl sich an den Zielen nichts geaendert
+## hatte. Die Drehrunde rechnet die Richtungen ueber rund eine Sekunde verteilt; vor dem Losdrehen wird die
+## gewaehlte Richtung jetzt frisch nachgerechnet — ist der Grund fuer die Drehung inzwischen weg, dreht sie nicht.
+func test_sitting_she_does_not_turn_on_a_stale_plan() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _seated(w)
+	var c: GolemSitCombat = g.sit_combat
+	var fwd: Vector3 = g.heading()
+	var turned: Vector3 = Vector3(fwd.z, 0.0, -fwd.x)   # a quarter turn to her left
+	var saved: Vector3 = g._heading
+	g._heading = turned
+	var there: Vector3 = c.stomp_point(1.0)
+	g._heading = saved
+	var lone: Unit = _foe(w, g.position.x - c.left().x * g.reach() * 0.6, g.position.z - c.left().z * g.reach() * 0.6, 100000)
+	check(c.in_area(GolemSitCombat.WIPE_R, lone.position), "(one foe in her right wipe)")
+	var group: Array[Unit] = []
+	for i in range(6):
+		var a: float = TAU * float(i) / 6.0
+		group.append(_foe(w, there.x + cos(a) * 1.0, there.z + sin(a) * 1.0, 100000))
+	# The round finds the group somewhere round her...
+	_tick_golem_until(g, func() -> bool: return c._sweep_v > 0.0 and c._sweep_i > 0, 40)
+	check(c._sweep_v > 0.0 and not c.turning, "(the round has found a better heading, not turned yet)")
+	# ...then the group is gone before the round ends.
+	for u in group:
+		u.health = 0
+		u.state = Unit.State.DEAD
+	var turned_once: bool = false
+	for i in range(int(2.0 / TICK)):
+		g.tick(TICK)
+		if c.turning and c._turn_goal == null:
+			turned_once = true
+	check(not turned_once, "the reason is gone: she does not turn on the old values")
 	_free_world(w)
