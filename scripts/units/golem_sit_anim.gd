@@ -39,6 +39,7 @@ const SIT_CLIP_IMPACT: Dictionary = {
 	&"sit_stomp_l": 0.35, &"sit_stomp_r": 0.35, &"sit_kick_l": 0.5, &"sit_kick_r": 0.5,
 	&"sit_wipe_l": 0.35, &"sit_wipe_r": 0.35, &"sit_hop": 0.6, &"sit_clap": 0.35,
 	&"sit_double_stomp": 0.35,
+	&"sit_grow": 1.0,   # its whole clip: fired with the stretch's duration it plays that long
 }
 
 var player: AnimationPlayer = null

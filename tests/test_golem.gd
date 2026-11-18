@@ -1271,14 +1271,15 @@ func test_giant_tramples_buildings_one_stage_every_two_seconds() -> void:
 	check(hut.destruction_stage() == 0, "the giant standing still tramples nothing")
 	g._tick_pos = g.position - step
 	g._tick_trample(TICK)
-	check(hut.destruction_stage() == 1, "walking over it takes one destruction stage off the hut")
+	var td: int = Golem.building_damage_for(g.trample_damage())
+	check(hut.max_health - hut.health == td, "walking over it takes half the trampling damage off the hut (%d)" % td)
 	g._tick_pos = g.position - step
 	g._tick_trample(TICK)
-	check(hut.destruction_stage() == 1, "not again inside the 2-s interval")
+	check(hut.max_health - hut.health == td, "not again inside the interval")
 	for i in range(int(Balance.GOLEM_TRAMPLE_BUILDING_INTERVAL / TICK) + 1):
 		g._tick_pos = g.position - step
 		g._tick_trample(TICK)
-	check(hut.destruction_stage() == 2, "after 2 s the next stage")
+	check(hut.max_health - hut.health == 2 * td, "after the interval the next")
 	g.position = Vector3(50, 5, 58)
 	g._sync_soa_pos()
 	g._tick_pos = g.position - step
@@ -1710,8 +1711,8 @@ func test_giant_walks_straight_through_buildings() -> void:
 	check(worst < 0.05, "he never leaves the beeline (max. %.2f m aside)" % worst)
 	check(Vector2(g.position.x - target.x, g.position.z - target.z).length() < 0.5,
 		"and arrives at the target behind the hut")
-	check(not is_instance_valid(hut) or hut.health <= 0 or hut.destruction_stage() >= 1,
-		"walking through the hut tramples it")
+	check(not is_instance_valid(hut) or hut.health < hut.max_health,
+		"walking through the hut tramples it (hit points since 2026-11-18)")
 	# A target INSIDE a building: he does not stop in there.
 	var own: Building = w.bm.place(HUT_SCENE, w.t0, Vector2i(80, 60), 0, true)
 	var goal: Vector3 = g._giant_goal(Vector3(82, 5, 62))
@@ -2554,8 +2555,8 @@ func test_growing_golem_stretches_for_a_second() -> void:
 			ended_at = t
 	check(started_at >= clip_time - 0.001 and started_at <= clip_time + TICK * 1.5,
 		"the stretch waits for the kick's animation to play out (begins at %.1f s)" % started_at)
-	check_near(ended_at - started_at, Balance.GOLEM_GROW_TIME,
-		"and takes 1,0 s (%.2f)" % (ended_at - started_at), TICK * 1.5)
+	check_near(ended_at - started_at, g.grow_time(),
+		"and takes about 1 s at this size (%.2f)" % (ended_at - started_at), TICK * 1.5)
 	check(rooted, "while stretching she does not walk")
 	check(no_new_attack, "nor does she bend down or strike")
 	check(g.stance == Golem.STANCE_STAND and g.stance_settled() and not g._stretch_queued,
@@ -2848,28 +2849,32 @@ func test_stomp_opens_the_assault_and_the_slams_follow_without_a_switch() -> voi
 	_free_world(w)
 
 
-## Trampeln auf Gebaeude: seit 2026-11-16 nur noch alle 4 s eine Stufe (die halbe
-## Schadensrate); Fahrzeuge behalten ihre 2 s.
-func test_trampling_takes_a_building_stage_only_every_four_seconds() -> void:
-	check_near(Balance.GOLEM_TRAMPLE_BUILDING_INTERVAL, 4.0, "a building stage every 4 s")
+## Trampeln auf Gebaeude (seit 2026-11-18 ueber Lebenspunkte): je Sekunde die Haelfte des Trampelschadens;
+## Fahrzeuge behalten ihre 2 s.
+func test_trampling_takes_hit_points_off_a_building_every_second() -> void:
+	check_near(Balance.GOLEM_TRAMPLE_BUILDING_INTERVAL, 1.0, "buildings every second, like units")
 	check_near(Balance.GOLEM_TRAMPLE_VEHICLE_INTERVAL, 2.0, "vehicles keep their 2 s")
 	var w: Dictionary = _make_world()
 	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
 	_level_to(g, 7)
 	var hut: Building = w.bm.place(HUT_SCENE, w.t1, Vector2i(49, 49), 0, true)
 	var step: Vector3 = Vector3(0.4, 0, 0)
-	var stages_at: Array = []
+	var td: int = Golem.building_damage_for(g.trample_damage())
+	var hits_at: Array = []
+	var last: int = hut.health
 	var t: float = 0.0
 	for i in range(85):
 		g._tick_pos = g.position - step
 		g._tick_trample(TICK)
 		t += TICK
-		if hut.destruction_stage() > stages_at.size():
-			stages_at.append(t)
-	check(stages_at.size() == 3, "8,5 s of walking over it: three stages (%d)" % stages_at.size())
-	if stages_at.size() >= 3:
-		check_near(stages_at[1] - stages_at[0], 4.0, "4 s between the stages (%.1f)" % (stages_at[1] - stages_at[0]), TICK * 1.5)
-		check_near(stages_at[2] - stages_at[1], 4.0, "and again", TICK * 1.5)
+		if hut.health < last:
+			check(last - hut.health == td, "each time half the trampling damage (%d)" % (last - hut.health))
+			last = hut.health
+			hits_at.append(t)
+	check(hits_at.size() >= 8, "8,5 s of walking over it: about once a second (%d)" % hits_at.size())
+	if hits_at.size() >= 3:
+		check_near(hits_at[1] - hits_at[0], 1.0, "one second apart (%.1f)" % (hits_at[1] - hits_at[0]), TICK * 1.5)
+		check_near(hits_at[2] - hits_at[1], 1.0, "and again", TICK * 1.5)
 	_free_world(w)
 
 
@@ -4649,6 +4654,43 @@ func test_seated_she_turns_the_short_way_when_the_target_crosses() -> void:
 			break
 	check(worst < 90.0, "it ran across to -40 degrees: she turns back the short way (never past %.0f degrees)" % worst)
 	check(g.heading().angle_to(at.call(-40.0)) < deg_to_rad(5.0), "and faces it")
+	_free_world(w)
+
+
+## Dauer des Streckens mit der Groesse (Nutzervorgabe 2026-11-18): 1 s bei Startgroesse, leicht exponentiell
+## bis 4 s bei 120 m — am Anfang waechst sie kaum.
+func test_the_stretch_takes_longer_the_bigger_she_is() -> void:
+	check_near(Golem.grow_time_for(Balance.GOLEM_HEIGHT), 1.0, "starting size: 1 s")
+	check_near(Golem.grow_time_for(2.0), 1.0, "smaller (the 2-m demon golem): still 1 s")
+	check_near(Golem.grow_time_for(120.0), 4.0, "120 m: 4 s")
+	var mid: float = Golem.grow_time_for((Balance.GOLEM_HEIGHT + 120.0) * 0.5)
+	check(mid < 2.5 and mid > 1.0, "half way it is still well below the straight line (%.2f s)" % mid)
+	check(Golem.grow_time_for(30.0) < 1.5, "30 m: hardly longer (%.2f s)" % Golem.grow_time_for(30.0))
+
+
+## Im Sitzen reiht sich das Strecken ein (Nutzervorgabe 2026-11-18): erst wenn kein Angriff mehr aussteht;
+## solange es aussteht und laeuft, kommt kein neuer Angriff.
+func test_seated_the_stretch_queues_behind_her_attacks() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _seated(w)
+	var c: GolemSitCombat = g.sit_combat
+	var sl: Vector3 = c.stomp_point(1.0)
+	_foe(w, sl.x, sl.z, 100000)
+	_tick_golem_until(g, func() -> bool: return c.is_busy(), 20)
+	check(c.is_busy(), "(she winds up a stomp)")
+	g._queue_stretch()
+	g.tick(TICK)
+	check(not g.sit_stretching() and g._stretch_queued, "the stretch waits while the attack is wound up")
+	_tick_golem_until(g, func() -> bool: return g.sit_stretching(), 30)
+	check(g.sit_stretching() and not c.is_busy(), "it starts once the attack has landed")
+	var struck: bool = false
+	var ticks: int = 0
+	while g.sit_stretching() and ticks < 100:
+		g.tick(TICK)
+		ticks += 1
+		struck = struck or c.pending[GolemSitCombat.CH_LEGS] != &"" or c.pending[GolemSitCombat.CH_ARMS] != &""
+	check(not struck, "no attack while she stretches")
+	check_near(float(ticks) * TICK, g.grow_time(), "it takes her stretch time (%.1f s)" % (float(ticks) * TICK), TICK * 1.5)
 	_free_world(w)
 
 

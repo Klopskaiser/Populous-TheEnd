@@ -292,6 +292,12 @@ const GOLEM_SIT_TURN_SAMPLE_DEG: float = 10.0
 ## Seit 2026-11-16 (Nutzer) eine ganze Sekunde statt einer halben; der Clip ist
 ## ebenso lang (Golem.GROW_CLIP_LENGTH).
 const GOLEM_GROW_TIME: float = 1.0
+## ... bei Startgroesse (GOLEM_HEIGHT); groesser dauert es laenger, leicht exponentiell bis
+## GOLEM_GROW_TIME_MAX bei GOLEM_GROW_TIME_MAX_HEIGHT (Nutzervorgabe 2026-11-18: am Anfang wenig, 120 m: 4 s):
+## GOLEM_GROW_TIME x (MAX / GROW_TIME) hoch ((Hoehe - GOLEM_HEIGHT) / (MAX_HEIGHT - GOLEM_HEIGHT)). Fuer alle
+## Golems gleich (kein Tempobonus des Daemons), im Stehen und im Sitzen.
+const GOLEM_GROW_TIME_MAX: float = 4.0
+const GOLEM_GROW_TIME_MAX_HEIGHT: float = 120.0
 ## ANGRIFFSWAHL NACH SCHADEN (Nutzer 2026-11-16, ersetzt die festen Zielzahlen
 ## 3 / 5 / 2): fuer Tritt, Handschlag und Trommeln wird gerechnet, was der Angriff
 ## JETZT treffen wuerde (dieselbe Flaeche, dieselbe Zielobergrenze wie beim
@@ -390,7 +396,8 @@ const GOLEM_BUILDING_STAGES: int = 1
 ## Stufe faellt erst, wenn genug Schaden beisammen ist. Ein Treffer nimmt einem Gebaeude so viel, wie er einer
 ## Einheit naehme, mal diesem Anteil (abgerundet, mindestens 1); das Trommeln mit jedem seiner drei Schlaege.
 ## In der Wahl zaehlt ein Gebaeude mit diesem Schaden (hoechstens seinen Restlebenspunkten) statt pauschal
-## GOLEM_STRUCTURE_VALUE. Das Trampeln des Giganten bleibt bei einer Stufe je GOLEM_TRAMPLE_BUILDING_INTERVAL.
+## GOLEM_STRUCTURE_VALUE. Auch das Trampeln: ein Gebaeude unter ihr nimmt je GOLEM_TRAMPLE_BUILDING_INTERVAL die
+## Haelfte des Trampelschadens (Nutzervorgabe 2026-11-18).
 const GOLEM_BUILDING_DAMAGE_SHARE: float = 0.5
 const GOLEM_LIFETIME: float = 180.0
 ## 3 -> 6 s nach dem ersten Spieltest.
@@ -540,13 +547,12 @@ const GOLEM_LEVEL_DAMAGE: int = 5
 ## 2026-11-17 25 bei 80 m (vorher 20 bei 100 m; zwischendurch 40): Stufe 1 mit
 ## 5,7 m: 2; Stufe 6 mit 14,1 m: 4; Stufe 7 mit 16,9 m: 5. Kein Stufenbonus obendrauf.
 const GOLEM_TRAMPLE_HEIGHT_PER_DAMAGE: float = 3.2
-## Ab der hoechsten Stufe trampelt der Gigant auch GEBAEUDE nieder: jedes
-## feindliche Gebaeude unter seinem Koerper verliert alle
-## GOLEM_TRAMPLE_BUILDING_INTERVAL Sekunden eine Zerstoerungsstufe (wie unter dem
-## Tornado), solange er laeuft. Seit 2026-11-16 (Nutzer: der Gebaeudeschaden beim
-## Trampeln war zu hoch) alle 4 statt alle 2 Sekunden — die halbe Schadensrate.
+## Ab der hoechsten Stufe trampelt der Gigant auch GEBAEUDE nieder, solange er laeuft. Seit 2026-11-18
+## (Nutzer) ueber Lebenspunkte wie jeder Golem-Angriff: jedes feindliche Gebaeude unter seinem Koerper nimmt
+## alle GOLEM_TRAMPLE_BUILDING_INTERVAL Sekunden die Haelfte des Trampelschadens (GOLEM_BUILDING_DAMAGE_SHARE;
+## Einheiten nehmen ihn ganz, im selben Takt) — 80 m: 12 LP/s. (Bis 2026-11-18 eine ganze Stufe alle 4 s.)
 ## Fahrzeuge behalten ihre 2 s (GOLEM_TRAMPLE_VEHICLE_INTERVAL).
-const GOLEM_TRAMPLE_BUILDING_INTERVAL: float = 4.0
+const GOLEM_TRAMPLE_BUILDING_INTERVAL: float = 1.0
 const GOLEM_TRAMPLE_VEHICLE_INTERVAL: float = 2.0
 ## GERADE WEGE ab der hoechsten Stufe (Nutzer 2026-11-15): der Gigant laeuft in
 ## geraden Linien — Gebaeude, Baeume und normales Gelaende (auch Haenge, die fuer

@@ -12850,4 +12850,8 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
   (`Golem.building_damage_for`: halber Einheitenschaden, `_strike_building(b, amount)`; Trampeln weiter eine Stufe,
   `_stage_hp`); die Wahl rechnet den echten Gebaeudeschaden. Sitzangriffe treffen feindliche Bodenfahrzeuge
   (`GolemSitCombat._vehicles_around`, `vehicles_struck`). Tests der alten Stufen-Regel umgeschrieben.
+  Auch das Trampeln: Gebaeude nehmen je Sekunde die Haelfte des Trampelschadens (statt einer Stufe alle 4 s).
+- **Strecken beim Wachsen (2026-11-18):** Dauer `Golem.grow_time()` 1 s bei Startgroesse, exponentiell bis 4 s bei 120 m
+  (`GOLEM_GROW_TIME_MAX`); im Sitzen eingereiht hinter laufende Angriffe und Clips (`_sit_layers_busy`), waehrenddessen
+  kein Angriff und keine Drehung (`sit_stretching`); `sit_grow` spielt jetzt in dieser Dauer (vorher immer 1 s).
 

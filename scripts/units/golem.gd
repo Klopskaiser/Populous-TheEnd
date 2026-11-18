@@ -302,6 +302,8 @@ var knock_height_override: float = -1.0
 ## animation is through), the seconds a running stretch still takes, and the
 ## seconds the current attack clip still plays.
 var _stretch_queued: bool = false
+## Seconds the seated stretch (sit_grow) still runs.
+var _sit_stretch_left: float = 0.0
 var _stretch_time: float = 0.0
 var _attack_anim_left: float = 0.0
 ## Strike swing progress of the placeholder arms (0 = just begun, 1 = at rest).
@@ -866,6 +868,22 @@ func is_stretching() -> bool:
 	return _stretch_time > 0.0
 
 
+## How long the stretch takes at her size (user spec 2026-11-18): GOLEM_GROW_TIME at the starting size,
+## slightly exponentially up to GOLEM_GROW_TIME_MAX at GOLEM_GROW_TIME_MAX_HEIGHT.
+func grow_time() -> float:
+	return Golem.grow_time_for(height_m())
+
+
+static func grow_time_for(h: float) -> float:
+	var t: float = clampf((h - Balance.GOLEM_HEIGHT) / (Balance.GOLEM_GROW_TIME_MAX_HEIGHT - Balance.GOLEM_HEIGHT), 0.0, 1.0)
+	return Balance.GOLEM_GROW_TIME * pow(Balance.GOLEM_GROW_TIME_MAX / Balance.GOLEM_GROW_TIME, t)
+
+
+## Seated: is the stretch running (sit_grow)? Then she neither strikes nor turns.
+func sit_stretching() -> bool:
+	return _sit_stretch_left > 0.0
+
+
 ## She grows (level-up or growth step): the stretch is owed.
 func _queue_stretch() -> void:
 	_stretch_queued = true
@@ -884,30 +902,46 @@ func _tick_stretch(delta: float) -> void:
 			_stance_age = 1000.0
 		return
 	if is_sit_locked():
-		# Growing while seated (user spec 2026-11-17): she stays seated and does not
-		# stretch (no clip for it yet) — the growth simply shows. On the way down or
-		# up it waits until she sits.
-		if _stretch_queued and stance == STANCE_SIT and not is_switching_stance():
+		# Growing while seated (user spec 2026-11-17): she stays seated and stretches her legs
+		# (sit_grow). On the way down or up it waits until she sits — and (user spec 2026-11-18)
+		# it queues like the standing one: not before her wound-up attacks have landed and their
+		# clips have played out. The growth itself (size, health) is there at once.
+		_sit_stretch_left = maxf(_sit_stretch_left - delta, 0.0)
+		if _stretch_queued and stance == STANCE_SIT and not is_switching_stance() and _sit_stretch_left <= 0.0 \
+				and not _sit_layers_busy():
 			_stretch_queued = false
+			var t: float = grow_time()
+			_sit_stretch_left = t
 			_play_sfx(&"golem_grow")
 			if _sit_anim != null and _sit_anim.is_active():
-				_sit_anim.fire(GolemSitAnim.LAYER_FULL, GolemSitAnim.CLIP_GROW, Balance.GOLEM_GROW_TIME)
+				_sit_anim.fire(GolemSitAnim.LAYER_FULL, GolemSitAnim.CLIP_GROW, t)
 			# The stretched legs strike like the kick, in both legs' lanes (user spec
 			# 2026-11-17), when they are stretched out in the clip.
 			if sit_combat == null:
 				sit_combat = GolemSitCombat.new(self)
-			sit_combat.grow_strike(Balance.GOLEM_GROW_TIME * GROW_STRIKE_SHARE)
+			sit_combat.grow_strike(t * GROW_STRIKE_SHARE)
 		return
 	if not _stretch_queued or _pending_attack != &"" or _attack_anim_left > 0.0 \
 			or is_switching_stance():
 		return
 	_stretch_queued = false
-	_stretch_time = Balance.GOLEM_GROW_TIME
+	_stretch_time = grow_time()
 	_stomp_landed = false   # the stretch gets her up by itself
 	stance = STANCE_STAND
 	_stance_target = STANCE_STAND
 	_play_sfx(&"golem_grow")
-	_play_clip(CLIP_GROW, GROW_CLIP_LENGTH / Balance.GOLEM_GROW_TIME, true)
+	_play_clip(CLIP_GROW, GROW_CLIP_LENGTH / _stretch_time, true)
+
+
+## Seated: is an attack wound up, or does a clip still play on her leg, arm or body layer?
+func _sit_layers_busy() -> bool:
+	if sit_combat != null and sit_combat.is_busy():
+		return true
+	if _sit_anim != null and _sit_anim.is_active():
+		for layer in [GolemSitAnim.LAYER_LEGS, GolemSitAnim.LAYER_ARMS, GolemSitAnim.LAYER_FULL]:
+			if _sit_anim.layer_running(layer):
+				return true
+	return false
 
 
 ## The stance an attack needs: the ground attacks are struck crouched,
@@ -2240,8 +2274,8 @@ func _tick_trample(delta: float) -> void:
 		room -= 1
 		_no_combat_timer = 0.0
 		_crush_vehicle(u)
-	# ... and walks buildings down as well: one destruction stage every
-	# GOLEM_TRAMPLE_BUILDING_INTERVAL for each enemy building under him.
+	# ... and walks buildings down as well: half the trampling damage in hit points every
+	# GOLEM_TRAMPLE_BUILDING_INTERVAL for each enemy building under him (2026-11-18).
 	if building_manager == null:
 		return
 	var here: Vector2 = Vector2(position.x, position.z)
@@ -2259,7 +2293,7 @@ func _tick_trample(delta: float) -> void:
 		_trampled[bid] = Balance.GOLEM_TRAMPLE_BUILDING_INTERVAL
 		room -= 1
 		_no_combat_timer = 0.0
-		_strike_building(b, _stage_hp(b))   # trampling: still a whole stage
+		_strike_building(b, building_damage_for(damage))
 
 
 ## Golems never stand inside one another (user spec 2026-11-16): whichever

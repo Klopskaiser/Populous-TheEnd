@@ -457,6 +457,12 @@ func tick(delta: float) -> void:
 		if _grow_left <= 0.0:
 			_grow_left = 0.0
 			_land(GROW, Vector3.INF)
+	if g.sit_stretching():
+		# She stretches (growing): no attack, the turn holds (user spec 2026-11-18).
+		if turning:
+			g.facing = g.heading()
+			g.sit_turn_tick()
+		return
 	if turning:
 		var goal: Vector3 = _turn_goal_point()
 		if goal == Vector3.INF:
@@ -515,6 +521,8 @@ func grow_strike(delay: float) -> void:
 ## one target is enough (no blind spot under or behind her). Nothing within reach:
 ## turn toward the nearest enemy unit in aggro range.
 func _choose() -> void:
+	if g._stretch_queued:
+		return   # the stretch is owed: no new attack before it (it queues behind the running ones)
 	var legs: bool = channel_free(CH_LEGS)
 	var arms: bool = channel_free(CH_ARMS)
 	if not legs and not arms:
