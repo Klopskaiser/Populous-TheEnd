@@ -68,6 +68,12 @@ var _turn_goal: Object = null
 ## plan strikes — all of it dead or gone, she stops turning.
 var _turn_dir: Vector3 = Vector3.ZERO
 var _turn_targets: Array = []
+## The way she turns (user spec 2026-11-18: only through headings her limbs can rest in): +1 / -1
+## for the direction of the angle (atan2(x, z)), and the heading she turns to.
+var _turn_sign: float = 0.0
+var _turn_want: Vector3 = Vector3.ZERO
+var _sweep_sign: float = 0.0
+var _arc: Vector2 = Vector2(TAU, TAU)
 ## The round over the other headings (_turn_sweep): next one to weigh (0 = none running), the
 ## heading it is measured from, and the best so far.
 var _sweep_i: int = 0
@@ -241,9 +247,16 @@ func stomp_point(side: float) -> Vector3:
 	return _off(foot_point(side), side, Balance.GOLEM_SIT_STOMP_LAND.x, Balance.GOLEM_SIT_STOMP_LAND.y)
 
 
-## Radius of the foot stomp's circle.
+## Radius of the foot stomp's circle. Like every sit zone it grows exactly with her body (user
+## spec 2026-11-18): the standing slam's radius, which grows with the body from 30 m on.
 func stomp_radius() -> float:
 	return g.slam_radius() * Balance.GOLEM_SIT_STOMP_RADIUS_SHARE * area_scale()
+
+
+## How far the wipe reaches from the middle of the seat (the standing reach at her first
+## seated size, grown with the body).
+func wipe_reach() -> float:
+	return g.reach() * area_scale()
 
 
 ## How far ahead of feet_point p lies (negative: behind).
@@ -267,7 +280,7 @@ func _frame() -> void:
 	_c_hand = [hand_point(1.0), hand_point(-1.0)]
 	_c_dstomp = double_stomp_point()
 	_c_stomp_r = stomp_radius()
-	_c_wipe_r = g.reach() * area_scale()
+	_c_wipe_r = wipe_reach()
 	_c_hop_r = hop_radius()
 	_c_clap_r = clap_radius()
 	_c_dstomp_r = double_stomp_radius()
@@ -448,25 +461,30 @@ func tick(delta: float) -> void:
 			g.sit_turn_tick()
 			_end_turn()
 			_think = 0.0
-		elif g.is_turned_to(g.facing, Balance.GOLEM_SIT_TURN_DONE_DEG):
-			g.sit_turn_tick()
-			_end_turn()
-			_think = 0.0
 		else:
 			var want: Vector3 = _flat(goal - g.position)
 			if want.length_squared() > 0.0001:
-				g.facing = want.normalized()   # follow it while it moves
-			g.sit_turn_tick()
-			_think -= delta
-			if _think <= 0.0:
-				_think = THINK_INTERVAL
-				if _turn_goal == null and not _turn_still_pays():
-					g.facing = g.heading()   # the plan she turned for is no longer worth it
-					g.sit_turn_tick()
-					_end_turn()
-					return
-				_hop_while_turning()
-			return
+				_turn_want = want.normalized()   # follow it while it moves
+			var next: Vector3 = Vector3.ZERO if g.is_turned_to(_turn_want, Balance.GOLEM_SIT_TURN_DONE_DEG) else _turn_step()
+			if next == Vector3.ZERO:
+				# Turned — or the next bit of the way is blocked (her limbs would rest on impossible ground).
+				g.facing = g.heading()
+				g.sit_turn_tick()
+				_end_turn()
+				_think = 0.0
+			else:
+				g.facing = next
+				g.sit_turn_tick()
+				_think -= delta
+				if _think <= 0.0:
+					_think = THINK_INTERVAL
+					if _turn_goal == null and not _turn_still_pays():
+						g.facing = g.heading()   # the plan she turned for is no longer worth it
+						g.sit_turn_tick()
+						_end_turn()
+						return
+					_hop_while_turning()
+				return
 	_think -= delta
 	if _think > 0.0:
 		return
@@ -719,6 +737,8 @@ func _alive_at(o: Object, max_dist: float) -> Vector3:
 func _end_turn() -> void:
 	_sweep_i = 0
 	turning = false
+	_turn_sign = 0.0
+	_turn_want = Vector3.ZERO
 	_turn_goal = null
 	_turn_dir = Vector3.ZERO
 	_turn_targets = []
@@ -763,6 +783,8 @@ func _turn_sweep(foes: Array[Unit], builds: Array) -> bool:
 		_sweep_v = 0.0
 		_sweep_dir = Vector3.ZERO
 		_sweep_parts = []
+		_sweep_sign = 0.0
+		_arc = free_arc()
 	var here: Dictionary = _plan(foes, builds, 0.0)
 	var n: int = Balance.GOLEM_SIT_TURN_PLAN_HEADINGS
 	if _sweep_i < n:
@@ -779,13 +801,17 @@ func _turn_sweep(foes: Array[Unit], builds: Array) -> bool:
 			done += 1
 			var a: float = cur_a + turn
 			var dir: Vector3 = Vector3(sin(a), 0.0, cos(a))
-			var lead: float = maxf(ang - deg_to_rad(Balance.GOLEM_SIT_TURN_DONE_DEG), 0.0) / rate
+			var way: Dictionary = turn_way(dir, _arc)
+			if way.sign == 0.0:
+				continue   # her limbs cannot rest there, or not on the way there
+			var lead: float = maxf(float(way.angle) - deg_to_rad(Balance.GOLEM_SIT_TURN_DONE_DEG), 0.0) / rate
 			g._heading = dir
 			var p: Dictionary = _plan(foes, builds, lead, float(here.value) > 0.0)
 			if float(p.value) > _sweep_v + 0.000001:
 				_sweep_v = float(p.value)
 				_sweep_dir = dir
 				_sweep_parts = p.parts
+				_sweep_sign = float(way.sign)
 		g._heading = saved
 		if _sweep_i < n:
 			return false
@@ -800,11 +826,17 @@ func _turn_sweep(foes: Array[Unit], builds: Array) -> bool:
 		if not part.is_empty():
 			targets.append_array(part.hit)
 			targets.append_array(part.hit_b)
-	g.facing = best_dir
 	turning = true
 	_turn_goal = null
 	_turn_dir = best_dir
 	_turn_targets = targets
+	_turn_sign = _sweep_sign
+	_turn_want = best_dir
+	var first: Vector3 = _turn_step()
+	if first == Vector3.ZERO:
+		_end_turn()
+		return false
+	g.facing = first
 	return true
 
 
@@ -814,7 +846,7 @@ func _turn_still_pays() -> bool:
 	var foes: Array[Unit] = _foes_around()
 	var builds: Array = _buildings_around()
 	var here: Dictionary = _plan(foes, builds, 0.0)
-	var left_rad: float = acos(clampf(g.heading().dot(_turn_dir), -1.0, 1.0))
+	var left_rad: float = _left_on_way(_turn_dir)
 	var lead: float = maxf(left_rad - deg_to_rad(Balance.GOLEM_SIT_TURN_DONE_DEG), 0.0) / maxf(g.turn_rate(), 0.001)
 	var saved: Vector3 = g._heading
 	g._heading = _turn_dir
@@ -861,8 +893,86 @@ func _maybe_turn(foes: Array[Unit]) -> void:
 	var want: Vector3 = _flat(goal - g.position).normalized()
 	if want == Vector3.ZERO or forward().dot(want) >= cos(deg_to_rad(Balance.GOLEM_SIT_TURN_MIN_DEG)):
 		return
-	g.facing = want
+	var way: Dictionary = turn_way(want, free_arc())
+	if way.sign == 0.0:
+		return   # she cannot turn there (user spec 2026-11-18): no turn, no attack that way
 	turning = true
 	_turn_goal = goal_obj
 	_turn_dir = Vector3.ZERO
 	_turn_targets = []
+	_turn_sign = float(way.sign)
+	_turn_want = want
+	var first: Vector3 = _turn_step()
+	if first == Vector3.ZERO:
+		_end_turn()
+		return
+	g.facing = first
+
+
+## How far she can turn on the seat from where she faces now, each way (radians, up to a full
+## turn; x: growing angle atan2(x, z), y: falling): every GOLEM_SIT_TURN_SAMPLE_DEG her limbs must
+## rest on possible ground (Golem.sit_heading_ok, user spec 2026-11-18).
+func free_arc() -> Vector2:
+	var cur: Vector3 = g.heading()
+	var a0: float = atan2(cur.x, cur.z)
+	var step: float = deg_to_rad(Balance.GOLEM_SIT_TURN_SAMPLE_DEG)
+	var n: int = int(ceil(TAU / step))
+	var out: Vector2 = Vector2(TAU, TAU)
+	for i in range(1, n + 1):
+		var a: float = a0 + step * float(i)
+		if not g.sit_heading_ok(Vector3(sin(a), 0.0, cos(a))):
+			out.x = step * float(i - 1)
+			break
+	if out.x >= TAU:
+		return out   # all the way round is free
+	for i in range(1, n + 1):
+		var a: float = a0 - step * float(i)
+		if not g.sit_heading_ok(Vector3(sin(a), 0.0, cos(a))):
+			out.y = step * float(i - 1)
+			break
+	return out
+
+
+## The way to turn to `want` within the free arcs `arc`: {sign, angle} — the shorter way when both
+## are free; sign 0: she cannot get there (or cannot rest there).
+func turn_way(want: Vector3, arc: Vector2) -> Dictionary:
+	var cur: Vector3 = g.heading()
+	var up: float = wrapf(atan2(want.x, want.z) - atan2(cur.x, cur.z), 0.0, TAU)
+	var down: float = TAU - up
+	var done: float = deg_to_rad(Balance.GOLEM_SIT_TURN_DONE_DEG)
+	if minf(up, down) <= done:
+		return {"sign": 1.0 if up <= down else -1.0, "angle": minf(up, down)}
+	if not g.sit_heading_ok(want):
+		return {"sign": 0.0, "angle": INF}
+	var up_ok: bool = up - done <= arc.x
+	var down_ok: bool = down - done <= arc.y
+	if up_ok and (not down_ok or up <= down):
+		return {"sign": 1.0, "angle": up}
+	if down_ok:
+		return {"sign": -1.0, "angle": down}
+	return {"sign": 0.0, "angle": INF}
+
+
+## How much of the turn to `want` is left along the way she turns (radians).
+func _left_on_way(want: Vector3) -> float:
+	var cur: Vector3 = g.heading()
+	var d: float = atan2(want.x, want.z) - atan2(cur.x, cur.z)
+	return wrapf(d * (_turn_sign if _turn_sign != 0.0 else 1.0), 0.0, TAU)
+
+
+## The next heading to aim at while turning: along her way (_turn_sign), at most 60 degrees ahead —
+## ZERO when the next bit of the way would put her limbs on impossible ground.
+func _turn_step() -> Vector3:
+	if _turn_sign == 0.0 or _turn_want == Vector3.ZERO:
+		return Vector3.ZERO
+	var cur: Vector3 = g.heading()
+	var a0: float = atan2(cur.x, cur.z)
+	var left: float = _left_on_way(_turn_want)
+	if left > PI * 1.95:
+		return Vector3.ZERO   # (just past it)
+	var look: float = minf(left, deg_to_rad(Balance.GOLEM_SIT_TURN_SAMPLE_DEG))
+	var a_look: float = a0 + _turn_sign * look
+	if not g.sit_heading_ok(Vector3(sin(a_look), 0.0, cos(a_look))):
+		return Vector3.ZERO
+	var a: float = a0 + _turn_sign * minf(left, deg_to_rad(60.0))
+	return Vector3(sin(a), 0.0, cos(a))

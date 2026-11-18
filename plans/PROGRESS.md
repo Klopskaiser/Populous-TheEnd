@@ -12817,4 +12817,28 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
   der Drehzeit als Vorlauf (wie `Golem.attack_time` im Stand) und dreht sich, wenn ein gedrehter Plan mehr bringt;
   `_turn_still_pays` bricht ab. Bugfix: Ausweichdrehung nur, wenn kein Angriff etwas erreicht. Geometrie-Cache
   (`_frame`) und Kreistest (`bound_of`) machen die Wahl 5- bis 10-mal schneller.
+- **Sitzzonen koerpergebunden (2026-11-18):** alle Sitzzonen wachsen genau mit dem Koerper — gleiche Aufteilung
+  ueber alle Groessen und bei allen drei Golems.
+- **Flaechen im Stand ab 30 m koerpergebunden (2026-11-18):** `Golem.reach_factor/slam_scale/limb_factor/
+  kick_limb_factor` nehmen ab `GOLEM_BODY_SCALE_HEIGHT` die Werte des normalen Golems bei 31,3 m mal Koerperbreite
+  durch dessen Breite (`body_anchor_ratio`, `GOLEM_BODY_*_AT_ANCHOR`); darunter die alten Formeln (`_base_*`,
+  Daemon und Genesis ueberschreiben nur diese). Normaler Golem 80 m: Reichweite 40 statt 34,5 m, Handschlag 18 statt
+  12 m, Schneise 10,5 statt 5,2 m breit. Die Sitzzonen nehmen die Werte wieder direkt aus dem Stand.
+- **Daemonengolem-Wachstum (2026-11-18):** Kills je Stufe +2 alle 2 Stufen bis zur 20. Stufe (62 m, 22 Kills), danach
+  je Stufenpaar 2 weniger (39-40: 2); 480 Kills bis 120 m (vorher 540). Ziele ab Stufe 21 nur noch +1 alle 2 Stufen
+  (`DemonGolem.slow_step`, `DEMON_GOLEM_SLOW_*`): 119 m 72 statt 120.
+- **Handschlag und Tritt (2026-11-18):** der Handschlag trifft nur noch den Kreis um die Haende (ohne vordere
+  Koerperhaelfte); jedes Bein tritt in seine eigene, seitlich versetzte Schneise (`Golem.kick_side`, `kick_leg_offset`,
+  `_pick_kick_leg`; ab 30 m beruehren sich die Schneisen, darunter ueberlappen sie), Wahl nach Treffern; ab 30 m
+  ist die Schneise vorn 5 % kuerzer (`GOLEM_BODY_KICK_FRONT_SHARE`). Genesis waegt beim Faellen beide Beine.
+- **Einebnen (2026-11-18):** im Stand bei allen Golems erst ab 30 m (`flattens()`, `GOLEM_FLATTEN_MIN_HEIGHT`). Im Sitzen:
+  beim Hinsetzen sofort der Auswahlkreis um die Sitzmitte, danach nach und nach das Rechteck der Figur in ihrer
+  aktuellen Blickrichtung (`_tick_sit_levelling`, 0,1 m/s); nur gesenkt, nie gehoben; die Liegehoehe folgt dem
+  sinkenden Boden (`_seat_floor_y` je Schritt neu).
+- **Wasser, Sitzterrain, Abstand (2026-11-18):** ab 30 m ertrinkt kein Golem und laeuft auf geraden Linien durchs Wasser
+  (`crosses_water`, `giant_line_clear(…, allow_water)`, `_straight_ok`, `TribeCommands._wades`); Hinsetzen nur, wo Fuesse
+  und Haende auf erklimmbarem Boden aufsetzen (`sit_contacts`, `sit_pose_ok`), im Sitzen Drehen nur ueber moegliche
+  Richtungen, notfalls den langen Weg (`GolemSitCombat.free_arc/turn_way/_turn_step`); Golem-Abstand 0,9 der Radien.
+- **Kleine an grossen Golems (2026-11-18):** wer hoechstens kniehoch ist (28 %), haelt nur Abstand zum Beinbereich des
+  grossen (60 % seines Radius); je Paar symmetrisch in `Golem.golem_pair_need`, genutzt von Abstand, Zielplaetzen, Ausweichen.
 

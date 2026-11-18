@@ -106,6 +106,22 @@ Animationsbaum bleibt aus.
       sich der Rest der Drehung noch lohnt (`_turn_still_pays`), sonst hört sie auf. Faustregel (Stampfer): bei 31 m
       lohnt eine Vierteldrehung ab etwa dem 1,5-Fachen des jetzigen Werts, eine halbe ab dem 2-Fachen; bei 80 m ab dem
       2,2- bzw. 3,4-Fachen.
+    - **Alle Sitzzonen wachsen genau mit dem Körper** (Nutzervorgabe 2026-11-18): Stampfer-, Handstampfer- und
+      Doppelstampfer-Kreis sowie die Reichweite des Wischers hängen nicht mehr an Handschlag-, Trommel-Radius und
+      Reichweite im Stand (die wachsen langsamer als der Körper), sondern an deren Werten beim normalen Golem in seiner
+      ersten Sitzgröße (31,3 m), skaliert wie das Modell. Seit derselben Runde gilt das schon im Stand: Flächen und
+      Reichweiten wachsen dort ab 30 m mit dem Körper (`GOLEM_BODY_*`, s. `CLAUDE.md`); die Sitzzonen nehmen
+      Handschlag-, Trommel-Radius und Reichweite wieder direkt aus dem Stand. Lage, Bein-Schneisen und Po-Klatscher taten das schon. Damit bleibt die Aufteilung über alle Größen
+      und bei allen drei Golems gleich; bei 31,3 m ändert sich nichts. Der Dämonengolem ist 25 % breiter gebaut, seine
+      Zonen auch. Radien (vorher in Klammern): Golem 80 m Stampfer 12,1 (8,1), Wischer 35,9 (31,0), Handstampfer
+      16,8 (11,2), Doppelstampfer 16,0 (10,7) m; Dämonengolem 119 m Stampfer 22,5 (8,0), Wischer 66,8 (43,3) m;
+      Genesisgolem 100 m Stampfer 15,2 (6,1) m. Test `test_sit_zones_grow_exactly_with_the_body`.
+    - **Einebnen im Sitzen** (2026-11-18): beim Hinsetzen sofort der Auswahlkreis um die Sitzmitte, danach nach und
+      nach (0,1 m/s) das Rechteck der Figur in ihrer aktuellen Blickrichtung; nur gesenkt, Gelände unter Fußhöhe
+      bleibt. Die Liegehöhe folgt dem sinkenden Boden.
+    - **Terrain beim Sitzen und Drehen** (2026-11-18): Füße und Hände müssen auf erklimmbarem Boden aufsetzen
+      (`sit_pose_ok`, Laufregel des Giganten, Wasser zählt nicht); gedreht wird nur über mögliche Richtungen
+      (`free_arc`, `turn_way`), notfalls den langen Weg; unerreichbare Richtung: keine Drehung.
     - **Bugfix:** die Ausweichdrehung zum nächsten Feind („nichts erreichbar“) kam auch, wenn nur der freie Kanal
       nichts erreichte, während der andere mit einem Feind in seiner Zone abklang — sie drehte sich von ihm weg.
       Jetzt nur, wenn kein Angriff etwas erreicht.

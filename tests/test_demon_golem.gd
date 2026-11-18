@@ -113,21 +113,29 @@ func test_lone_demon_golem_is_no_follower() -> void:
 
 # --- Wachstum -------------------------------------------------------------------------
 
-func test_growth_step_costs_four_kills_and_one_more_every_two_steps() -> void:
+## Nutzervorgabe 2026-11-18: alle 2 Stufen 2 Kills mehr bis zur Stufe ueber 60 m (20., 62 m),
+## danach alle 2 Stufen 2 weniger.
+func test_growth_step_costs_four_kills_two_more_every_two_steps_then_fewer_past_sixty_metres() -> void:
+	check(DemonGolem.slow_step() == 20 and is_equal_approx(DemonGolem.height_for_steps(20), 62.0),
+		"the 20th step takes him past 60 m (62 m)")
 	check(DemonGolem.kills_for_step(1) == 4 and DemonGolem.kills_for_step(2) == 4,
 		"steps 1-2 cost 4 kills each")
-	check(DemonGolem.kills_for_step(3) == 5 and DemonGolem.kills_for_step(4) == 5,
-		"steps 3-4 cost 5")
-	check(DemonGolem.kills_for_step(5) == 6 and DemonGolem.kills_for_step(40) == 23,
-		"5-6 cost 6 ... the last ones 23")
-	check(DemonGolem.kills_for_steps(2) == 8 and DemonGolem.kills_for_steps(4) == 18
-		and DemonGolem.kills_for_steps(10) == 60, "summed: 8 after two steps, 18 after four, 60 after ten")
+	check(DemonGolem.kills_for_step(3) == 6 and DemonGolem.kills_for_step(4) == 6,
+		"steps 3-4 cost 6")
+	check(DemonGolem.kills_for_step(5) == 8 and DemonGolem.kills_for_step(19) == 22
+		and DemonGolem.kills_for_step(20) == 22, "5-6 cost 8 ... 19-20 cost 22")
+	check(DemonGolem.kills_for_step(21) == 20 and DemonGolem.kills_for_step(22) == 20
+		and DemonGolem.kills_for_step(23) == 18, "past 60 m: 21-22 cost 20, 23-24 cost 18")
+	check(DemonGolem.kills_for_step(39) == 2 and DemonGolem.kills_for_step(40) == 2, "... 39-40 cost 2")
+	check(DemonGolem.kills_for_steps(2) == 8 and DemonGolem.kills_for_steps(4) == 20
+		and DemonGolem.kills_for_steps(10) == 80 and DemonGolem.kills_for_steps(20) == 260,
+		"summed: 8 after two steps, 20 after four, 80 after ten, 260 to 62 m")
 	check(DemonGolem.steps_for_kills(3) == 0 and DemonGolem.steps_for_kills(4) == 1
 		and DemonGolem.steps_for_kills(7) == 1 and DemonGolem.steps_for_kills(8) == 2
-		and DemonGolem.steps_for_kills(59) == 9 and DemonGolem.steps_for_kills(60) == 10,
+		and DemonGolem.steps_for_kills(79) == 9 and DemonGolem.steps_for_kills(80) == 10,
 		"the step count follows the kills")
-	check(DemonGolem.max_steps() == 40 and DemonGolem.kills_for_steps(40) == 540,
-		"40 steps to 120 m: 540 kills")
+	check(DemonGolem.max_steps() == 40 and DemonGolem.kills_for_steps(39) == 478
+		and DemonGolem.kills_for_steps(40) == 480, "119 m after 478 kills, 120 m after 480")
 
 
 func test_every_step_adds_three_metres_fifteen_health_and_forty_five_hundredths_regen() -> void:
@@ -149,7 +157,7 @@ func test_every_step_adds_three_metres_fifteen_health_and_forty_five_hundredths_
 	check(d.growth_steps == 8 and is_equal_approx(d.height_m(), 26.0) and d.max_health == 500 + 15 * 8,
 		"26 m: step 8, 620 LP")
 	check_near(d.regen_per_second(), 3.6, "3,6 health per second")
-	check(d.kills == DemonGolem.kills_for_steps(8) and d.kills == 44, "after exactly the kills the table gives (44)")
+	check(d.kills == DemonGolem.kills_for_steps(8) and d.kills == 56, "after exactly the kills the table gives (56)")
 	_free_world(w)
 
 
@@ -160,7 +168,7 @@ func test_he_falls_apart_at_one_hundred_and_twenty_metres() -> void:
 	check(d.state != Unit.State.DEAD and is_equal_approx(d.height_m(), 119.0), "119 m (step 39): alive")
 	_grow_to(d, 120.0)
 	check(d.state == Unit.State.DEAD, "reaching 120 m he falls apart")
-	check(d.kills == 540, "after 540 kills")
+	check(d.kills == 480, "after 480 kills (540 before 2026-11-18)")
 	_free_world(w)
 
 
@@ -230,6 +238,15 @@ func test_targets_start_at_three_and_three_more_every_step() -> void:
 	check(d.max_targets() == 27, "26 m (8 steps): 27")
 	check(d.max_targets_of(Golem.ATTACK_KICK) == 16 and d.max_targets_of(Golem.ATTACK_DRUM) == 33
 		and d.max_targets_of(Golem.ATTACK_STOMP) == 54, "kick 16, drum 33, stomp 54")
+	# Past 60 m only one more every two steps (user spec 2026-11-18).
+	_grow_to(d, 62.0)
+	check(d.growth_steps == 20 and d.max_targets() == 63, "62 m (step 20): 63")
+	_grow_to(d, 65.0)
+	check(d.max_targets() == 63, "65 m (step 21): still 63")
+	_grow_to(d, 68.0)
+	check(d.max_targets() == 64, "68 m (step 22): 64")
+	_grow_to(d, 119.0)
+	check(d.max_targets() == 72, "119 m (step 39): 72 (was 120)")
 	_free_world(w)
 
 
@@ -345,17 +362,19 @@ func test_everything_that_hangs_on_the_size_uses_the_golems_formula() -> void:
 	var full: Golem = GOLEM_SCENE.instantiate() as Golem
 	while not full.is_full_size():
 		full._credit_kill()
-	check_near(d.reach(), full.reach(), "80 m: the reach of the 80-m golem", 0.05)
+	# From 30 m on all golems take the same share of their body width (2026-11-18): he is
+	# DEMON_GOLEM_WIDTH_FACTOR wider, so his reach and lane are that much longer.
+	check_near(d.reach(), full.reach() * Balance.DEMON_GOLEM_WIDTH_FACTOR, "80 m: the 80-m golem's reach, 25 % more for his width", 0.05)
 	check_near(d.current_speed(), full.current_speed() * 1.15, "its speed, 15 % faster", 0.05)
-	check_near(d._kick_extent().x, full._kick_extent().x, "the length of the kick's lane", 0.1)
+	check_near(d._kick_extent().x, full._kick_extent().x * Balance.DEMON_GOLEM_WIDTH_FACTOR, "the length of the kick's lane", 0.1)
 	check(d.trample_damage() == full.trample_damage() and d.trample_damage() == 25, "its trample damage (25)")
 	check_near(d.stance_switch_time(), full.stance_switch_time() * 0.85, "its stance switch, 15 % shorter", 0.01)
 	check_near(d.turn_rate(), full.turn_rate() * 1.15, "and its turn rate, 15 % faster (user spec 2026-11-18)", 0.01)
-	# The areas grow as the golem's do beyond level 7 — from the start.
-	check_near(d.reach_factor(), pow(d.size_factor(), DemonGolem.area_exponent()), "area factor = size ^ 0,25")
-	check_near(d.slam_radius(), Balance.GOLEM_SLAM_RADIUS * pow(d.size_factor(), DemonGolem.slam_exponent()),
-		"slam radius = 2,6 m x size ^ 0,47")
-	check(d.slam_radius() > 9.0 and d.slam_radius() < 10.5, "about 9,8 m at 80 m (%.2f)" % d.slam_radius())
+	# Below 30 m his areas grow as the golem's do beyond level 7; from 30 m with the body.
+	check_near(d._base_reach_factor(), pow(d.size_factor(), DemonGolem.area_exponent()), "own area factor = size ^ 0,25")
+	check_near(d._base_slam_scale(), pow(d.size_factor(), DemonGolem.slam_exponent()), "own slam scale = size ^ 0,47")
+	check_near(d.slam_radius(), full.slam_radius() * Balance.DEMON_GOLEM_WIDTH_FACTOR,
+		"80 m: the 80-m golem's slam, 25 % more (%.1f m)" % d.slam_radius(), 0.01)
 	check_near(d.ground_radius(Golem.ATTACK_DRUM), d.slam_radius() * Balance.GOLEM_DRUM_RADIUS_FACTOR,
 		"the drum's circle 10 % larger, as the golem's")
 	full.free()

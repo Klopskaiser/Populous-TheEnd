@@ -217,9 +217,10 @@ func test_attack_values_grow_two_thirds_as_fast_as_the_demons() -> void:
 	check(g.max_targets() == 5 + 18, "two thirds of a target a metre (%d)" % g.max_targets())
 	var cf: float = 1.0 + 28.0 / Balance.GOLEM_HEIGHT * 2.0 / 3.0
 	check_near(g.combat_factor(), cf, "attack size factor %.2f" % cf)
-	check_near(g.reach(), Balance.GOLEM_REACH * Golem.limb_factor_for(cf), "reach from it")
-	check(g.reach() < Balance.GOLEM_REACH * Golem.limb_factor_for(33.0 / Balance.GOLEM_HEIGHT),
-		"less than a 33-m demon golem's")
+	check_near(g._base_limb_factor(), Golem.limb_factor_for(cf), "his own limb factor from it")
+	check(g.body_scaled(), "33 m: from 30 m on the reach grows with the body (2026-11-18)")
+	check_near(g.reach(), Balance.GOLEM_REACH * Balance.GOLEM_BODY_LIMB_FACTOR_AT_ANCHOR * g.body_anchor_ratio(),
+		"the golem's share of the body (%.1f m)" % g.reach())
 	check(g.trample_damage() == int(round(Balance.GOLEM_HEIGHT * cf / 3.2)) and g.trample_damage() == 7,
 		"trample damage from the attack size (%d)" % g.trample_damage())
 	check_near(g.trample_radius(), Balance.GOLEM_BODY_HALF_WIDTH * 33.0 / Balance.GOLEM_HEIGHT,
@@ -234,8 +235,11 @@ func test_from_stage_four_collision_levelling_and_air_strike() -> void:
 	check(not g.tramples() and not g.ignores_unit_collision() and not g.flattens()
 		and not g.can_strike_air(), "stage 3: none of it")
 	_to_stage(g, 4)
-	check(g.tramples() and g.ignores_unit_collision() and g.flattens() and g.can_strike_air(),
-		"stage 4: walks through units, tramples, levels the ground, strikes airships")
+	check(g.tramples() and g.ignores_unit_collision() and g.can_strike_air(),
+		"stage 4: walks through units, tramples, strikes airships")
+	check(not g.flattens(), "but he levels the ground only from 30 m on (2026-11-18)")
+	_to_stage(g, 8)
+	check(g.flattens(), "stage 8, 33 m: he levels")
 	check(not g.is_giant() and not g.walks_straight(), "but not the rest of the giant's package")
 	check(not g.is_full_size(), "never hardened")
 	_free_world(w)
@@ -289,8 +293,10 @@ func test_area_order_fells_every_tree_in_it() -> void:
 func test_area_order_fells_a_cluster_with_one_ground_blow() -> void:
 	var w: Dictionary = _make_world()
 	var g: GenesisGolem = _genesis(w, 0, Vector3(40.5, 5, 46.5))
-	for cell in [Vector2i(46, 46), Vector2i(47, 46), Vector2i(46, 47), Vector2i(47, 47), Vector2i(48, 46)]:
-		w.tm.spawn_tree(cell, TreeResource.MAX_STAGE)
+	# A 3 x 3 block (2026-11-18: with a lane for each leg the kick fells small clusters itself).
+	for x in range(46, 49):
+		for z in range(46, 49):
+			w.tm.spawn_tree(Vector2i(x, z), TreeResource.MAX_STAGE)
 	check(w.commands.order_chop_area([g] as Array[Unit], Rect2(44, 44, 8, 6)) == 1, "the B order is taken")
 	var most_at_once: int = 0
 	var crouched: bool = false
@@ -304,11 +310,11 @@ func test_area_order_fells_a_cluster_with_one_ground_blow() -> void:
 			kinds[g._pending_attack] = true
 		if not g.is_harvesting():
 			break
-	check(g.trees_felled == 5, "all five felled (%d)" % g.trees_felled)
+	check(g.trees_felled == 9, "all nine felled (%d)" % g.trees_felled)
 	check(most_at_once >= 2, "several trees fall with one blow (%d at once)" % most_at_once)
 	check(crouched and (kinds.has(Golem.ATTACK_SLAM) or kinds.has(Golem.ATTACK_DRUM)),
 		"he bends down for a ground blow (%s)" % str(kinds.keys()))
-	check(g.total_wood() == 5 * GenesisGolem.harvest_yield(4), "30 wood")
+	check(g.total_wood() == 9 * GenesisGolem.harvest_yield(4), "54 wood")
 	_free_world(w)
 
 

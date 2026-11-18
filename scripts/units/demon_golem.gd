@@ -9,7 +9,8 @@ class_name DemonGolem extends Golem
 ##
 ##  * keine Stufen (`level` bleibt 0), keine Lebenszeit. Er beginnt 2 m klein und
 ##    waechst je WACHSTUMSSTUFE um genau 3 m (`growth_steps`); die Stufe kostet 4
-##    Kills, alle 2 Stufen einen mehr. Mit 120 m (40. Stufe) zerfaellt er.
+##    Kills, alle 2 Stufen 2 mehr bis 62 m, danach alle 2 Stufen 2 weniger (2026-11-18).
+##    Mit 120 m (40. Stufe) zerfaellt er.
 ##  * die Groesse treibt alles: size_factor() = Hoehe / GOLEM_HEIGHT, und die
 ##    Golem-Formeln fuer Reichweite, Schneise, Tempo, Takt usw. rechnen damit.
 ##    Die Flaechen wachsen wie beim Golem nach Stufe 7.
@@ -52,11 +53,25 @@ func display_name() -> String:
 
 # --- Growth ---------------------------------------------------------------------------
 
-## Kills the growth step `step` (1 = the first) costs by itself: 5, and one more
-## for every 10 steps before it.
+## Kills the growth step `step` (1 = the first) costs by itself (user spec 2026-11-18): 4, and
+## DEMON_GOLEM_GROWTH_KILLS_ADD more every DEMON_GOLEM_GROWTH_KILLS_STEP steps up to the step that
+## takes him past DEMON_GOLEM_SLOW_HEIGHT (slow_step, the 20th: 22 kills); after it, as much
+## less every pair of steps (21-22: 20 ... 39-40: 2), never below 1.
 static func kills_for_step(step: int) -> int:
-	return Balance.DEMON_GOLEM_GROWTH_KILLS \
-		+ maxi(step - 1, 0) / Balance.DEMON_GOLEM_GROWTH_KILLS_STEP
+	var pair: int = Balance.DEMON_GOLEM_GROWTH_KILLS_STEP
+	var add: int = Balance.DEMON_GOLEM_GROWTH_KILLS_ADD
+	var top: int = slow_step()
+	if step <= top:
+		return Balance.DEMON_GOLEM_GROWTH_KILLS + add * (maxi(step - 1, 0) / pair)
+	var peak: int = Balance.DEMON_GOLEM_GROWTH_KILLS + add * ((top - 1) / pair)
+	return maxi(peak - add * ((step - top + pair - 1) / pair), 1)
+
+
+## The first growth step that takes him to DEMON_GOLEM_SLOW_HEIGHT or beyond (20: 62 m). From
+## there the kills per step fall and the targets grow slowly.
+static func slow_step() -> int:
+	return int(ceil((Balance.DEMON_GOLEM_SLOW_HEIGHT - Balance.DEMON_GOLEM_START_HEIGHT)
+		/ Balance.DEMON_GOLEM_GROWTH_HEIGHT - 0.000001))
 
 
 ## Kills needed for `steps` growth steps in total.
@@ -130,8 +145,13 @@ func can_strike_air() -> bool:
 
 # --- Values that follow the growth step ----------------------------------------------
 
+## +DEMON_GOLEM_GROWTH_TARGETS a step up to slow_step(); beyond, one every
+## DEMON_GOLEM_SLOW_TARGETS_STEP steps (user spec 2026-11-18).
 func max_targets() -> int:
-	return Balance.DEMON_GOLEM_TARGETS + Balance.DEMON_GOLEM_GROWTH_TARGETS * growth_steps
+	var top: int = slow_step()
+	var fast: int = mini(growth_steps, top)
+	var slow: int = maxi(growth_steps - top, 0) / Balance.DEMON_GOLEM_SLOW_TARGETS_STEP
+	return Balance.DEMON_GOLEM_TARGETS + Balance.DEMON_GOLEM_GROWTH_TARGETS * fast + slow
 
 
 func regen_per_second() -> float:
@@ -199,11 +219,11 @@ static func speed_exponent() -> float:
 
 ## Scale of the lane's width: like the golem's areas beyond level 7, from the
 ## start — a 4,7-m demon golem has a fresh golem's areas.
-func reach_factor() -> float:
+func _base_reach_factor() -> float:
 	return pow(size_factor(), area_exponent())
 
 
-func slam_scale() -> float:
+func _base_slam_scale() -> float:
 	return pow(size_factor(), slam_exponent())
 
 

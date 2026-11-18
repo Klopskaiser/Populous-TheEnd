@@ -240,8 +240,16 @@ var _heading: Vector3 = Vector3.ZERO
 ## >= 0 while the attack choice is weighed as if already turned: the turn time
 ## it would really take (see _stomp_while_turning, turn_time_needed).
 var _assumed_turn_time: float = -1.0
-## The next kick uses the left leg (alternates with every kick).
+## The next kick uses the left leg (alternates with every kick) — still used for the low
+## strike at an airship.
 var _kick_left: bool = false
+## The leg of the next kick on the ground (user spec 2026-11-18): +1 right (clip kick), -1 left
+## (kick_l). Each leg has its own lane; the choice takes the leg that strikes more
+## (_pick_kick_leg). _last_kick_side: the leg of the last kick (ties alternate).
+## _kick_leg_locked: the next wind-up keeps kick_side as it is (felling trees).
+var kick_side: float = 1.0
+var _last_kick_side: float = -1.0
+var _kick_leg_locked: bool = false
 ## Which of the drum's hits lands next (0-based) while a drum is wound up.
 var _pending_hit: int = 0
 ## Stance right now (STANCE_STAND / STANCE_CROUCH), the one a running switch
@@ -271,6 +279,11 @@ var _sit_damage_timer: float = 0.0
 var _seat_floor_y: float = -INF
 ## The levelling under her while she sits down (TerrainMorph), if any.
 var _sit_level_morph = null
+## While seated (user spec 2026-11-18): the height the ground under her body evens out to (her
+## feet's when she sat down; INF = none), the timer and the running step of that gradual levelling.
+var _sit_level_y: float = INF
+var _sit_level_timer: float = 0.0
+var _sit_level_step = null
 ## The attacks of her limbs while she sits (GolemSitCombat) and the animation layers
 ## for them (GolemSitAnim; only with a model that has the clips).
 var sit_combat: GolemSitCombat = null
@@ -455,8 +468,16 @@ func displace(_dir: Vector3, _dist: float) -> void:
 ## Wading along the shore is safe; sinking the land under him still kills him.
 ## (The giant's levelling also leaves the shore alone now: _next_to_water.)
 func is_flooded_on(td: TerrainData) -> bool:
+	if crosses_water():
+		return false   # from 30 m on she wades through any water (user spec 2026-11-18)
 	return td.get_height(position.x, position.z) \
 		<= TerrainData.SEA_LEVEL - Balance.GOLEM_DROWN_DEPTH
+
+
+## From GOLEM_WATER_WALK_HEIGHT on she does not drown and walks through water (user spec
+## 2026-11-18): on the sea bed, straight lines only (giant_line_clear with water allowed).
+func crosses_water() -> bool:
+	return height_m() >= Balance.GOLEM_WATER_WALK_HEIGHT - 0.0001
 
 
 ## Whole hull is clickable; the selection ring encloses the body.
@@ -499,6 +520,7 @@ func tick(delta: float) -> void:
 		_tick_level_regen(delta)
 		_tick_trample(delta)
 		_tick_flatten(delta)
+		_tick_sit_levelling(delta)
 		_tick_golem_separation(delta)   # after the trampling: being pushed is not walking
 		# From the final-bonus level on the lifetime no longer runs out (user spec).
 		if has_lifetime():
@@ -656,10 +678,28 @@ static func reach_factor_for(p_level: int) -> float:
 	return f
 
 
+## From GOLEM_BODY_SCALE_HEIGHT on, areas and reach grow exactly with the body (user spec
+## 2026-11-18, all three golems): the normal golem's values at its first seated size, times
+## her body width over its width there. Below, each golem's own (slower) growth.
+func body_scaled() -> bool:
+	return height_m() >= Balance.GOLEM_BODY_SCALE_HEIGHT - 0.0001
+
+
+## Her body width (model scale x size) over the normal golem's at its first seated size.
+func body_anchor_ratio() -> float:
+	return model_scale().x * size_factor() / Balance.GOLEM_BODY_ANCHOR_WIDTH
+
+
 ## Scale of the SIZE of both strike areas at the current level (the slam's
 ## radius, the lane's width) — the slow one, 10 % a level. Where the areas lie and
-## how far she reaches follows limb_factor() since 2026-11-16.
+## how far she reaches follows limb_factor() since 2026-11-16. From 30 m: with the body.
 func reach_factor() -> float:
+	if body_scaled():
+		return Balance.GOLEM_BODY_REACH_FACTOR_AT_ANCHOR * body_anchor_ratio()
+	return _base_reach_factor()
+
+
+func _base_reach_factor() -> float:
 	return reach_factor_for(level) * growth_area_factor()
 
 
@@ -667,6 +707,12 @@ func reach_factor() -> float:
 ## 7, and beyond it an even growth per step up to GOLEM_SLAM_RADIUS_AT_MAX at
 ## 100 m — stronger than the 0,75 percent the other areas take there.
 func slam_scale() -> float:
+	if body_scaled():
+		return Balance.GOLEM_BODY_SLAM_SCALE_AT_ANCHOR * body_anchor_ratio()
+	return _base_slam_scale()
+
+
+func _base_slam_scale() -> float:
 	var base: float = reach_factor_for(level)
 	var steps: int = max_growth_steps()
 	if growth_steps <= 0 or steps <= 0:
@@ -709,6 +755,12 @@ static func limb_anchor_size() -> float:
 ## level 6: 2,63, level 7: 3,73, 100 m: 13,9. Scales the reach, the length of the
 ## kick's lane and how far ahead the hands come down.
 func limb_factor() -> float:
+	if body_scaled():
+		return Balance.GOLEM_BODY_LIMB_FACTOR_AT_ANCHOR * body_anchor_ratio()
+	return _base_limb_factor()
+
+
+func _base_limb_factor() -> float:
 	return limb_factor_for(size_factor())
 
 
@@ -720,6 +772,8 @@ static func limb_factor_for(size: float) -> float:
 ## gain over 1, shortened so that at GOLEM_LIMB_ANCHOR_HEIGHT the lane is
 ## GOLEM_KICK_LENGTH_SHARE_AT_MAX of what the limbs alone would give.
 func kick_limb_factor() -> float:
+	if body_scaled():
+		return Balance.GOLEM_BODY_KICK_LIMB_AT_ANCHOR * body_anchor_ratio()
 	return 1.0 + (limb_factor() - 1.0) * kick_growth_share()
 
 
@@ -1002,21 +1056,55 @@ func find_seat() -> Vector3:
 			offsets.append(Vector2.from_angle(float(k) * TAU / 8.0) * search * ring)
 	for off in offsets:
 		var feet: Vector3 = Vector3(position.x + off.x, position.y, position.z + off.y)
-		if seat_free(feet - fwd * back, fwd, half):
+		if seat_free(feet - fwd * back, fwd, half) and sit_pose_ok(feet - fwd * back, fwd):
 			return feet
 	return Vector3.INF
 
 
-## Is the seat (middle, long axis, half extents) free: wholly on land inside the
-## disc, touching no building or construction site of any tribe?
+## Where her feet and hands rest when she sits facing `fwd` with the middle of the seat at
+## `seat` (clip sit_idle): left foot, right foot, left hand, right hand.
+func sit_contacts(seat: Vector3, fwd: Vector3) -> Array[Vector3]:
+	var right: Vector3 = Vector3(fwd.z, 0.0, -fwd.x)
+	var sx: float = model_scale().x * size_factor()
+	var sz: float = model_scale().z * size_factor()
+	var feet: Vector3 = seat + fwd * seat_back_m()
+	var foot: Vector3 = right * (Balance.GOLEM_SIT_FOOT_SIDE * sx)
+	var hands: Vector3 = feet - fwd * (Balance.GOLEM_SIT_HAND_BACK * sz)
+	var hand: Vector3 = right * (Balance.GOLEM_SIT_HAND_SIDE * sx)
+	return [feet + foot, feet - foot, hands + hand, hands - hand]
+
+
+## Can she sit like this (user spec 2026-11-18)? The seat and every foot and hand on ground (not the
+## void), and from the middle of the seat to each of them no cliff she could not walk up
+## (giant_line_clear: GOLEM_GIANT_STEP_SHARE of her height per metre). Water does not count.
+func sit_pose_ok(seat: Vector3, fwd: Vector3) -> bool:
+	if terrain_data == null:
+		return true
+	if not terrain_data.has_ground(seat.x, seat.z):
+		return false
+	var limit: float = giant_step_limit()
+	for p in sit_contacts(seat, fwd):
+		if not terrain_data.has_ground(p.x, p.z) or not giant_line_clear(terrain_data, seat, p, limit, true):
+			return false
+	return true
+
+
+## Seated: may she face `fwd`? Her limbs on possible ground (sit_pose_ok) and the turned seat
+## touching no building.
+func sit_heading_ok(fwd: Vector3) -> bool:
+	return sit_pose_ok(position, fwd) and seat_free(position, fwd, seat_half_extent())
+
+
+## Is the seat (middle, long axis, half extents) free: wholly inside the disc (water is
+## fine since 2026-11-18 — she sits from 30 m on, and from there she wades), touching no
+## building or construction site of any tribe?
 func seat_free(center: Vector3, fwd: Vector3, half: Vector2) -> bool:
 	var right: Vector3 = Vector3(fwd.z, 0.0, -fwd.x)
 	if terrain_data != null:
 		for i in range(-2, 3):
 			for j in range(-2, 3):
 				var p: Vector3 = center + right * (half.x * float(i) / 2.0) + fwd * (half.y * float(j) / 2.0)
-				if not terrain_data.has_ground(p.x, p.z) \
-						or terrain_data.get_height(p.x, p.z) <= TerrainData.SEA_LEVEL:
+				if not terrain_data.has_ground(p.x, p.z):
 					return false
 	if building_manager != null:
 		var c: Vector2 = Vector2(center.x, center.z)
@@ -1099,24 +1187,23 @@ func settle_on_ground(h: float) -> void:
 	position.y = maxf(h, _seat_floor_y) if _seat_center != Vector3.INF else h
 
 
-## She sits down (sit_down step begins): the ground under the whole seated figure
-## evens out toward the height of her feet over the time she takes (user spec
-## 2026-11-17, sit_level_plan). Needs the terrain context (the summoning spell's).
+## She sits down (sit_down step begins): the ground in her selection circle around the
+## middle of the seat comes down to the height of her feet (never raised) over the time she takes
+## (user spec 2026-11-18; until then the whole figure at once). The rest of her body
+## follows while she sits (_tick_sit_levelling). Needs the terrain context.
 func _start_sit_levelling() -> void:
+	_sit_level_y = INF
 	if terrain_ctx == null or terrain_data == null or path_service == null:
 		return
 	var feet: Vector3 = position + _sit_shift
-	var blocked: Array[Rect2i] = []
-	if building_manager != null:
-		for b in building_manager.buildings:
-			if is_instance_valid(b):
-				blocked.append(b.footprint_rect().grow(1))
-	var s: Vector2 = Vector2(model_scale().x, model_scale().z) * size_factor()
-	var plan: Dictionary = sit_level_plan(terrain_data, feet, heading(),
-		Balance.GOLEM_SIT_LEVEL_FRONT * s.y, Balance.GOLEM_SIT_LEVEL_BACK * s.y,
-		Balance.GOLEM_SIT_LEVEL_HALF_WIDTH * s.x,
-		terrain_data.get_height(feet.x, feet.z), Balance.GOLEM_FLATTEN_SLOPE,
-		TerrainData.SEA_LEVEL + Balance.GOLEM_FLATTEN_ABOVE_WATER, blocked)
+	_sit_level_y = maxf(terrain_data.get_height(feet.x, feet.z),
+		TerrainData.SEA_LEVEL + Balance.GOLEM_FLATTEN_ABOVE_WATER)
+	_sit_level_timer = Balance.GOLEM_FLATTEN_INTERVAL
+	var seat: Vector3 = feet - heading() * seat_back_m()
+	var plan: Dictionary = sit_level_plan(terrain_data, seat, heading(), 0.0, 0.0, 0.0,
+		_sit_level_y, Balance.GOLEM_FLATTEN_SLOPE,
+		TerrainData.SEA_LEVEL + Balance.GOLEM_FLATTEN_ABOVE_WATER, _sit_blocked_cells(),
+		INF, selection_ring_radius())
 	if (plan.indices as PackedInt32Array).is_empty():
 		return
 	var morph: TerrainMorph = TerrainMorph.new()
@@ -1127,19 +1214,28 @@ func _start_sit_levelling() -> void:
 
 ## The height map that evens out the ground under a seated figure: every vertex in
 ## the rectangle from `front` ahead of `feet` to `back` behind them, `half_w` to each
+## (since 2026-11-18 only LOWERED: what lies above `level` comes down, nothing is raised)
 ## side, goes to `level` (raised or lowered); around it a bank of at most `slope`
 ## metres per metre joins the old ground. Untouched: vertices on a `blocked` cell
 ## (buildings), the sea bed and the shore; nothing goes below `floor_height`. Plan
 ## format as flatten_plan.
+##
+## `max_step`: no vertex moves further than this (the gradual levelling while she sits).
+## `circle_r` > 0: the region is the circle of that radius around `feet` instead of the
+## rectangle (the selection circle when she sits down).
 static func sit_level_plan(td: TerrainData, feet: Vector3, fwd: Vector3, front: float,
 		back: float, half_w: float, level: float, slope: float, floor_height: float,
-		blocked: Array[Rect2i] = []) -> Dictionary:
+		blocked: Array[Rect2i] = [], max_step: float = INF, circle_r: float = -1.0) -> Dictionary:
 	var cs: float = TerrainData.CELL_SIZE
 	var empty: Dictionary = {"indices": PackedInt32Array(), "targets": PackedFloat32Array(),
 		"rect": Rect2i()}
 	var right: Vector3 = Vector3(fwd.z, 0.0, -fwd.x)
 	level = maxf(level, floor_height)
 	var corners: Array = []
+	if circle_r > 0.0:
+		front = circle_r
+		back = circle_r
+		half_w = circle_r
 	for a in [front, -back]:
 		for b in [half_w, -half_w]:
 			corners.append(feet + fwd * a + right * b)
@@ -1173,11 +1269,18 @@ static func sit_level_plan(td: TerrainData, feet: Vector3, fwd: Vector3, front: 
 				continue
 			var d: Vector3 = Vector3(float(vx) * cs - feet.x, 0.0, float(vz) * cs - feet.z)
 			var along: float = d.dot(fwd)
-			var dx: float = maxf(absf(d.dot(right)) - half_w, 0.0)
-			var dz: float = maxf(maxf(along - front, -back - along), 0.0)
-			var dev: float = sqrt(dx * dx + dz * dz) * slope
-			var target: float = clampf(h, level - dev, level + dev)
+			var outside: float
+			if circle_r > 0.0:
+				outside = maxf(Vector2(d.x, d.z).length() - circle_r, 0.0)
+			else:
+				var dx: float = maxf(absf(d.dot(right)) - half_w, 0.0)
+				var dz: float = maxf(maxf(along - front, -back - along), 0.0)
+				outside = sqrt(dx * dx + dz * dz)
+			var dev: float = outside * slope
+			# Only lowered, never raised (user spec 2026-11-18): ground below her feet stays as it is.
+			var target: float = minf(h, level + dev)
 			target = maxf(target, minf(h, floor_height + 0.0))
+			target = maxf(target, h - max_step)
 			if absf(target - h) < 0.01:
 				continue
 			indices.append(idx)
@@ -1192,6 +1295,52 @@ static func sit_level_plan(td: TerrainData, feet: Vector3, fwd: Vector3, front: 
 		clampi(max_v.y, 0, td.size - 1))
 	return {"indices": indices, "targets": targets,
 		"rect": Rect2i(cmin, cmax - cmin + Vector2i.ONE)}
+
+
+## Building footprints (with a cell of margin) the levelling under her leaves alone.
+func _sit_blocked_cells() -> Array[Rect2i]:
+	var blocked: Array[Rect2i] = []
+	if building_manager != null:
+		for b in building_manager.buildings:
+			if is_instance_valid(b):
+				blocked.append(b.footprint_rect().grow(1))
+	return blocked
+
+
+## While she sits (user spec 2026-11-18): the ground under her whole body — the rectangle of
+## the seated figure as she faces NOW (turning, it turns with her) — evens out toward the height
+## of her feet when she sat down, every GOLEM_FLATTEN_INTERVAL at most GOLEM_FLATTEN_RATE metres
+## a second — only lowered, lower ground stays. One step at a time.
+func _tick_sit_levelling(delta: float) -> void:
+	if stance != STANCE_SIT or is_switching_stance() or _seat_center == Vector3.INF or _sit_level_y == INF:
+		return
+	if terrain_ctx == null or terrain_data == null or path_service == null:
+		return
+	_sit_level_timer -= delta
+	if _sit_level_timer > 0.0:
+		return
+	_sit_level_timer = Balance.GOLEM_FLATTEN_INTERVAL
+	if _sit_level_step != null and is_instance_valid(_sit_level_step) and not _sit_level_step.done:
+		return
+	_sit_level_step = null
+	var fwd: Vector3 = heading()
+	var feet: Vector3 = position + fwd * seat_back_m()   # seated, her position is the middle of the seat
+	# The ground under feet, seat and hands has moved (or she has turned): she lies on what is
+	# there now — never lower than it, but no longer on a bump that has come down.
+	_seat_floor_y = _seat_floor_height(feet, fwd)
+	settle_on_ground(terrain_data.get_height(position.x, position.z))
+	var s: Vector2 = Vector2(model_scale().x, model_scale().z) * size_factor()
+	var plan: Dictionary = sit_level_plan(terrain_data, feet, fwd,
+		Balance.GOLEM_SIT_LEVEL_FRONT * s.y, Balance.GOLEM_SIT_LEVEL_BACK * s.y,
+		Balance.GOLEM_SIT_LEVEL_HALF_WIDTH * s.x, _sit_level_y, Balance.GOLEM_FLATTEN_SLOPE,
+		TerrainData.SEA_LEVEL + Balance.GOLEM_FLATTEN_ABOVE_WATER, _sit_blocked_cells(),
+		Balance.GOLEM_FLATTEN_RATE * Balance.GOLEM_FLATTEN_INTERVAL)
+	if (plan.indices as PackedInt32Array).is_empty():
+		return
+	var morph: TerrainMorph = TerrainMorph.new()
+	morph.setup(terrain_ctx, plan, Balance.GOLEM_FLATTEN_DURATION)
+	path_service.register_projectile(morph)
+	_sit_level_step = morph
 
 
 ## She has touched down: whoever is under the seat now takes the first sit damage
@@ -1477,6 +1626,49 @@ func _attack_in_stance() -> StringName:
 ## really takes — never more than the unit has left —, plus
 ## GOLEM_STRUCTURE_VALUE for every building or vehicle.
 func attack_worth(kind: StringName) -> float:
+	if kind == ATTACK_KICK:
+		return _pick_kick_leg()
+	return _worth_now(kind)
+
+
+## Each leg kicks into its own lane (user spec 2026-11-18): weighs both, keeps the better in
+## kick_side and returns its worth. A tie: the leg on the side of her target, else the other
+## leg than last time.
+func _pick_kick_leg() -> float:
+	kick_side = 1.0
+	var right: float = _worth_now(ATTACK_KICK)
+	kick_side = -1.0
+	var left: float = _worth_now(ATTACK_KICK)
+	if absf(right - left) > 0.0001:
+		kick_side = 1.0 if right > left else -1.0
+	else:
+		kick_side = _kick_side_of_target()
+	return maxf(right, left)
+
+
+## The leg on the side of her target (unit or building); none, or straight ahead: the other
+## leg than last time.
+func _kick_side_of_target() -> float:
+	var at: Vector3 = Vector3.INF
+	if _target_valid(attack_target):
+		at = attack_target.position
+	elif _building_target_valid():
+		at = attack_building.center_world()
+	if at != Vector3.INF:
+		var side: float = (at - position).dot(_heading_frame()[1])
+		if absf(side) > 0.05:
+			return signf(side)
+	return -_last_kick_side
+
+
+## Where the lane of the kicking leg runs: this far to the side of her middle (+ right).
+## Grows with the body; from GOLEM_BODY_SCALE_HEIGHT on it is half the lane's width, so the
+## two lanes just touch in the middle — below, the lane is wider and they overlap.
+func kick_leg_offset() -> float:
+	return KICK_HALF_WIDTH * Balance.GOLEM_BODY_REACH_FACTOR_AT_ANCHOR * body_anchor_ratio()
+
+
+func _worth_now(kind: StringName) -> float:
 	var struck: Dictionary = _struck_targets(kind)
 	var worth: float = 0.0
 	if kind == ATTACK_DRUM:
@@ -1748,9 +1940,10 @@ func is_giant() -> bool:
 	return level >= Balance.GOLEM_MAX_LEVEL
 
 
-## Does he level the ground under him? (The giant does; GenesisGolem earlier.)
+## Does he level the ground under him? Every golem from GOLEM_FLATTEN_MIN_HEIGHT on (user spec
+## 2026-11-18; before: the giant of level 7, the genesis golem from stage 4).
 func flattens() -> bool:
-	return is_giant()
+	return height_m() >= Balance.GOLEM_FLATTEN_MIN_HEIGHT - 0.0001
 
 
 ## Does the lifetime still run out? (Until the final-bonus level.)
@@ -2065,7 +2258,7 @@ func _tick_golem_separation(delta: float) -> void:
 			continue
 		var other: Golem = u as Golem
 		var theirs: float = other.trample_radius()
-		var need: float = (mine + theirs) * Balance.GOLEM_BODY_GAP
+		var need: float = _golem_need(other)
 		var away: Vector2 = Vector2(position.x - other.position.x, position.z - other.position.z)
 		var dist: float = away.length()
 		if dist >= need:
@@ -2096,7 +2289,19 @@ func _tick_golem_separation(delta: float) -> void:
 
 ## Distance at which this golem and `other` touch (centre to centre).
 func _golem_need(other: Golem) -> float:
-	return (trample_radius() + other.trample_radius()) * Balance.GOLEM_BODY_GAP
+	return golem_pair_need(trample_radius(), height_m(), other.trample_radius(), other.height_m())
+
+
+## Touching distance of two golems with body radii `ra`, `rb` and heights `ha`, `hb`: GOLEM_BODY_GAP of
+## the sum of the radii — but a golem that reaches no higher than the other's knees
+## (GOLEM_KNEE_HEIGHT_SHARE) only meets that one's legs: GOLEM_LEG_RADIUS_SHARE of its radius (user spec
+## 2026-11-18). The same number for both of the pair.
+static func golem_pair_need(ra: float, ha: float, rb: float, hb: float) -> float:
+	if ha <= hb * Balance.GOLEM_KNEE_HEIGHT_SHARE:
+		rb *= Balance.GOLEM_LEG_RADIUS_SHARE
+	elif hb <= ha * Balance.GOLEM_KNEE_HEIGHT_SHARE:
+		ra *= Balance.GOLEM_LEG_RADIUS_SHARE
+	return (ra + rb) * Balance.GOLEM_BODY_GAP
 
 
 ## Is another golem (or a ground vehicle) standing right in her way toward `point`
@@ -2175,7 +2380,9 @@ func _can_be_pushed_to(next: Vector3) -> bool:
 	if terrain_data == null:
 		return true
 	if walks_straight():
-		return giant_line_clear(terrain_data, position, next, giant_step_limit())
+		return giant_line_clear(terrain_data, position, next, giant_step_limit(), crosses_water())
+	if crosses_water() and terrain_data.get_height(next.x, next.z) <= TerrainData.SEA_LEVEL + WATER_EPS:
+		return giant_line_clear(terrain_data, position, next, giant_step_limit(), true)
 	return nav_grid == null or nav_grid.is_cell_walkable(nav_grid.world_to_cell(next))
 
 
@@ -2439,8 +2646,9 @@ func giant_step_limit() -> float:
 ## the way (no void), never the sea, and no cliff taller than `max_step` metres
 ## within one metre of way. Buildings and the walkability grid are NOT asked —
 ## that is the point.
+## `allow_water`: the sea does not stop the line (golems from 30 m on, user spec 2026-11-18).
 static func giant_line_clear(td: TerrainData, from: Vector3, to: Vector3,
-		max_step: float) -> bool:
+		max_step: float, allow_water: bool = false) -> bool:
 	var a: Vector2 = Vector2(from.x, from.z)
 	var b: Vector2 = Vector2(to.x, to.z)
 	var dist: float = a.distance_to(b)
@@ -2455,7 +2663,7 @@ static func giant_line_clear(td: TerrainData, from: Vector3, to: Vector3,
 		if not td.has_ground(p.x, p.y):
 			return false
 		var h: float = td.get_height(p.x, p.y)
-		if h <= TerrainData.SEA_LEVEL + WATER_EPS:
+		if h <= TerrainData.SEA_LEVEL + WATER_EPS and not allow_water:
 			return false
 		if absf(h - h_prev2) > max_step:
 			return false
@@ -2469,7 +2677,9 @@ static func giant_line_clear(td: TerrainData, from: Vector3, to: Vector3,
 ## walkable cell (he walks THROUGH buildings, he does not stop inside one).
 func _giant_goal(target: Vector3) -> Vector3:
 	var goal: Vector3 = target
-	if nav_grid != null:
+	var wet: bool = crosses_water() and terrain_data.has_ground(target.x, target.z) \
+		and terrain_data.get_height(target.x, target.z) <= TerrainData.SEA_LEVEL + WATER_EPS
+	if nav_grid != null and not wet:   # (from 30 m a goal in the water stays where it is)
 		var cell: Vector2i = nav_grid.world_to_cell(target)
 		if not nav_grid.is_cell_walkable(cell):
 			var near: Vector2i = nav_grid.nearest_walkable_cell(cell)
@@ -2495,14 +2705,14 @@ func _straighten(path: PackedVector3Array) -> PackedVector3Array:
 	var last: int = path.size() - 1
 	while i <= last:
 		var far: int = i
-		if giant_line_clear(terrain_data, anchor, path[last], limit):
+		if giant_line_clear(terrain_data, anchor, path[last], limit, crosses_water()):
 			far = last
 		else:
 			var lo: int = i
 			var hi: int = last - 1
 			while lo < hi:
 				var mid: int = (lo + hi + 1) / 2
-				if giant_line_clear(terrain_data, anchor, path[mid], limit):
+				if giant_line_clear(terrain_data, anchor, path[mid], limit, crosses_water()):
 					lo = mid
 				else:
 					hi = mid - 1
@@ -2517,9 +2727,9 @@ func _straighten(path: PackedVector3Array) -> PackedVector3Array:
 ## without the path queue. Otherwise the normal search runs (and its result is
 ## straightened, see _plan_path_to / _apply_worker_path).
 func _start_path_to(target: Vector3) -> void:
-	if walks_straight() and terrain_data != null:
+	if (walks_straight() or crosses_water()) and terrain_data != null:
 		var goal: Vector3 = _giant_goal(target)
-		if giant_line_clear(terrain_data, position, goal, giant_step_limit()):
+		if _straight_ok(position, goal):
 			_clear_soa_hold()
 			_pending_target = Vector3.INF   # cancels a queued request, like set_path
 			_path = PackedVector3Array([goal])
@@ -2530,18 +2740,40 @@ func _start_path_to(target: Vector3) -> void:
 
 
 func _plan_path_to(target: Vector3, allow_partial: bool = false) -> bool:
-	if not walks_straight() or terrain_data == null:
+	if not (walks_straight() or crosses_water()) or terrain_data == null:
 		return super._plan_path_to(target, allow_partial)
 	var goal: Vector3 = _giant_goal(target)
-	if giant_line_clear(terrain_data, position, goal, giant_step_limit()):
+	if _straight_ok(position, goal):
 		_path = PackedVector3Array([goal])
 		_path_index = 0
 		return true
 	if not super._plan_path_to(target, allow_partial):
 		return false
+	if not walks_straight():
+		return true
 	_path = _straighten(_path)
 	_path_index = 0
 	return true
+
+
+## May she take the straight line from `a` to `b`? The giant always when it is clear (from 30 m
+## also through water); a golem of 30 m or more that does not walk straight otherwise (the genesis
+## golem) only where the line crosses water — on land she keeps her paths.
+func _straight_ok(a: Vector3, b: Vector3) -> bool:
+	if not giant_line_clear(terrain_data, a, b, giant_step_limit(), crosses_water()):
+		return false
+	return walks_straight() or line_touches_water(terrain_data, a, b)
+
+
+## Does the straight line from `a` to `b` run over water anywhere (sampled every metre)?
+static func line_touches_water(td: TerrainData, a: Vector3, b: Vector3) -> bool:
+	var d: float = Vector2(a.x, a.z).distance_to(Vector2(b.x, b.z))
+	var n: int = maxi(1, int(ceil(d)))
+	for i in range(n + 1):
+		var p: Vector3 = a.lerp(b, float(i) / float(n))
+		if td.get_height(p.x, p.z) <= TerrainData.SEA_LEVEL + WATER_EPS:
+			return true
+	return false
 
 
 ## A path from the PathWorker (the game's path queue). It starts with the centre
@@ -2571,7 +2803,7 @@ func _step_toward(point: Vector3, delta: float) -> void:
 		facing = Vector3(to_target.x, 0.0, to_target.y).normalized()
 	var next: Vector2 = flat.move_toward(flat_target, _slope_speed(_slope_ahead(to_target)) * delta)
 	if not giant_line_clear(terrain_data, position, Vector3(next.x, 0.0, next.y),
-			giant_step_limit()):
+			giant_step_limit(), crosses_water()):
 		return
 	position = Vector3(next.x, position.y, next.y)
 	_snap_to_ground()
@@ -2814,7 +3046,7 @@ func _hit_zone_reach(kind: StringName) -> float:
 	var size: float = reach_factor()
 	if kind == ATTACK_KICK:
 		var ext: Vector2 = _kick_extent()
-		return Vector2(maxf(ext.x, ext.y), KICK_HALF_WIDTH * size).length() + 0.5
+		return Vector2(maxf(ext.x, ext.y), KICK_HALF_WIDTH * size + kick_leg_offset()).length() + 0.5
 	if kind == ATTACK_STOMP:
 		return stomp_radius() + 0.5
 	return maxf(SLAM_FORWARD * limb_factor() + ground_radius(kind), trample_radius()) + 0.5
@@ -2827,15 +3059,15 @@ func _hit_zone_reach(kind: StringName) -> float:
 func _kick_extent() -> Vector2:
 	var long: float = kick_limb_factor()   # the leg's length, not the lane's width
 	var body: float = trample_radius()
-	return Vector2(maxf(KICK_LENGTH * long, body), maxf(KICK_BACK * long, body))
+	var front: float = Balance.GOLEM_BODY_KICK_FRONT_SHARE if body_scaled() else 1.0   # 2026-11-18
+	return Vector2(maxf(KICK_LENGTH * long * front, body), maxf(KICK_BACK * long, body))
 
 
 ## Is this point struck by the attack `kind`? (User spec 2026-11-15.)
-##  * KICK: the lane, nothing else — it runs through her body circle, but it is
-##    NOT widened to the body there.
-##  * SLAM: the circle around the hands — plus the FRONT half of her own body
-##    circle (toward the attack). Behind her, at her heels, only what the circle
-##    of the hands reaches by itself is hit.
+##  * KICK: the lane of the kicking leg (kick_side, offset kick_leg_offset), nothing else —
+##    it runs through her body circle, but it is NOT widened to the body there.
+##  * SLAM: the circle around the hands, nothing else (since 2026-11-18 without the front
+##    half of her body circle — the circle grows with the body from 30 m on).
 ##  * STOMP: the circle around her own centre (stomp_radius), all around.
 func _in_hit_zone(kind: StringName, point: Vector3, forward: Vector3, right: Vector3) -> bool:
 	var rel: Vector3 = point - position
@@ -2846,10 +3078,8 @@ func _in_hit_zone(kind: StringName, point: Vector3, forward: Vector3, right: Vec
 	if kind == ATTACK_KICK:
 		var ext: Vector2 = _kick_extent()
 		return along >= -ext.y and along <= ext.x \
-			and absf(side) <= KICK_HALF_WIDTH * reach_factor()
-	if in_slam_area(along, side, slam_scale() * _ground_factor(kind), limb_factor()):
-		return true
-	return along >= 0.0 and rel.x * rel.x + rel.z * rel.z <= trample_radius() * trample_radius()
+			and absf(side - kick_side * kick_leg_offset()) <= KICK_HALF_WIDTH * reach_factor() + Balance.GOLEM_KICK_LANE_SLACK
+	return in_slam_area(along, side, slam_scale() * _ground_factor(kind), limb_factor())
 
 
 ## What ONE landing of the attack `kind` strikes, after the target cap
@@ -2990,7 +3220,7 @@ func _clip_for(kind: StringName, ship: Airship = null) -> StringName:
 	elif kind == ATTACK_DRUM:
 		clip = CLIP_DRUM_LOW
 	elif kind == ATTACK_KICK:
-		clip = _next_kick_clip()
+		clip = ATTACK_KICK if kick_side > 0.0 else CLIP_KICK_LEFT   # right leg: kick, left: kick_l
 	elif kind == ATTACK_SWAT and ship != null and is_instance_valid(ship):
 		var share: float = (ship.position.y - position.y) / maxf(height_m(), 0.01)
 		if share < Balance.GOLEM_AIR_LOW_SHARE:
@@ -3014,6 +3244,11 @@ func _wind_up(kind: StringName, building = null, ship: Airship = null) -> void:
 	if not is_switching_stance() and stance != stance_for(kind):
 		stance = stance_for(kind)
 		_stance_age = 0.0
+	if kind == ATTACK_KICK:
+		if not _kick_leg_locked:
+			_pick_kick_leg()   # the leg that strikes more (its lane is fixed until it lands)
+		_kick_leg_locked = false
+		_last_kick_side = kick_side
 	_pending_attack = kind
 	_pending_time = current_windup(kind)
 	_pending_hit = 0
@@ -3218,16 +3453,12 @@ func _building_in_area(b, kind: StringName, forward: Vector3) -> bool:
 			and b.footprint_distance_to(Vector2(position.x, position.z)) <= stomp_radius()
 	if kind != ATTACK_KICK:
 		var hit: Vector3 = position + forward * (SLAM_FORWARD * limb_factor())
-		if b.footprint_distance_to(Vector2(hit.x, hit.z)) <= ground_radius(kind):
-			return true
-		# The front half of her own body circle belongs to the slam (see _in_hit_zone).
-		var c: Vector3 = b.center_world()
-		return (c.x - position.x) * forward.x + (c.z - position.z) * forward.z >= 0.0 \
-			and b.footprint_distance_to(Vector2(position.x, position.z)) <= trample_radius()
+		return b.footprint_distance_to(Vector2(hit.x, hit.z)) <= ground_radius(kind)
 	var ext: Vector2 = _kick_extent()
 	var along: float = -ext.y + 0.5
+	var leg: Vector3 = Vector3(-forward.z, 0.0, forward.x) * (kick_side * kick_leg_offset())   # the kicking leg's lane
 	while along < ext.x:
-		var sample: Vector3 = position + forward * along
+		var sample: Vector3 = position + forward * along + leg
 		if b.footprint_distance_to(Vector2(sample.x, sample.z)) <= KICK_HALF_WIDTH * size:
 			return true
 		along += 1.0

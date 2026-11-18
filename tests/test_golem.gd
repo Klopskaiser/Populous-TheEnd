@@ -205,13 +205,17 @@ func test_kick_hits_a_lane_ahead_and_behind_and_throws_everyone() -> void:
 	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
 	g.facing = Vector3(0, 0, 1)
 	g.knock_height_override = 53.0   # the throw chance by size: 100 % from 53 m (here only the throw is under test)
-	var near: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50.0, 5, 51.0))        # along 1,0
-	var far: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50.0, 5, 54.2))         # along 4,2
-	var edge: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50.8, 5, 53.0))        # side 0,8
-	var out_side: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(51.0, 5, 53.0))    # side 1,0 > 0,9
-	var out_far: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50.0, 5, 54.5))     # along 4,5 > 4,25
-	var out_back: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50.0, 5, 46.8))    # along -3,2 < -2,98
-	var friend: Unit = _spawn(w, BRAVE_SCENE, 0, Vector3(50.0, 5, 52.0))
+	# The right leg kicks (2026-11-18: each leg has its own lane, kick_leg_offset beside her
+	# middle — right is -x when she faces +z). Sideways distances count from that lane's middle.
+	g.kick_side = 1.0
+	var lx: float = 50.0 - g.kick_leg_offset()
+	var near: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(lx, 5, 51.0))        # along 1,0
+	var far: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(lx, 5, 54.2))         # along 4,2
+	var edge: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(lx - 0.8, 5, 53.0))  # side 0,8
+	var out_side: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(lx - 1.0, 5, 53.0))   # side 1,0 > 0,9
+	var out_far: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(lx, 5, 54.5))     # along 4,5 > 4,25
+	var out_back: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(lx, 5, 46.8))    # along -3,2 < -2,98
+	var friend: Unit = _spawn(w, BRAVE_SCENE, 0, Vector3(lx, 5, 52.0))
 	for u in [near, far, edge, out_side, out_far, out_back, friend]:
 		u.max_health = 1000
 		u.health = 1000
@@ -221,7 +225,7 @@ func test_kick_hits_a_lane_ahead_and_behind_and_throws_everyone() -> void:
 	check(edge.health == hit, "0,8 m aside is inside the 1,8-m-wide lane")
 	# (The kick strikes three targets at level 0: the one behind her gets a kick of
 	# its own — the three in front are in the air by then.)
-	var behind: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50.0, 5, 47.5))      # along -2,5: the backswing
+	var behind: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(lx, 5, 47.5))      # along -2,5: the backswing
 	behind.max_health = 1000
 	behind.health = 1000
 	var all_thrown: bool = true
@@ -1183,18 +1187,52 @@ func test_drum_lands_three_hits_and_is_chosen_for_big_crowds() -> void:
 	_free_world(w2)
 
 
+## Eigene Schneise je Bein (Nutzervorgabe 2026-11-18): ab 30 m beruehren sich die Schneisen in der
+## Mitte, darunter ueberlappen sie; getreten wird mit dem Bein, das mehr trifft.
+func test_each_leg_kicks_into_its_own_lane() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
+	g.facing = Vector3(0, 0, 1)
+	var half: float = Golem.KICK_HALF_WIDTH * g.reach_factor()
+	check(g.kick_leg_offset() > 0.0 and g.kick_leg_offset() < half, "level 0: the lanes overlap (offset %.2f, half width %.2f)" % [g.kick_leg_offset(), half])
+	# A foe well to her left (+x when she faces +z): the left leg kicks.
+	var left_foe: Unit = _foe(w, 50.0 + g.kick_leg_offset() + half * 0.8, 52.0, 1000)
+	check(g.attack_worth(Golem.ATTACK_KICK) > 0.0 and g.kick_side < 0.0, "a foe on her left: the left leg")
+	left_foe.health = 0
+	left_foe.state = Unit.State.DEAD
+	var a: Unit = _foe(w, 50.0 - g.kick_leg_offset() - half * 0.8, 52.0, 1000)
+	var b: Unit = _foe(w, 50.0 - g.kick_leg_offset() - half * 0.5, 53.0, 1000)
+	g.attack_worth(Golem.ATTACK_KICK)
+	check(g.kick_side > 0.0, "two on her right: the right leg")
+	g._wind_up(Golem.ATTACK_KICK)
+	check(g._clip_for(Golem.ATTACK_KICK) == Golem.ATTACK_KICK, "(and the right leg's clip)")
+	_free_world(w)
+	var big: Golem = GOLEM_SCENE.instantiate() as Golem
+	while not big.can_sit():
+		big._credit_kill()
+	check_near(big.kick_leg_offset(), Golem.KICK_HALF_WIDTH * big.reach_factor(), "31,3 m: the two lanes just touch in the middle")
+	check_near(big._kick_extent().x, 19.2, "31,3 m: 5 % shorter ahead (%.1f m)" % big._kick_extent().x, 0.1)
+	big.free()
+
+
 ## Clipwahl: der Tritt wechselt das Bein; der Schlag nach einem Luftschiff
 ## richtet sich nach dessen Hoehe am Koerper (oben: swat, Brust bis Huefte:
 ## swipe, darunter: Tritt).
 func test_attack_clips_alternate_legs_and_follow_the_airships_height() -> void:
 	var w: Dictionary = _make_world()
 	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
-	var first: StringName = g._clip_for(Golem.ATTACK_KICK)
-	var second: StringName = g._clip_for(Golem.ATTACK_KICK)
-	var third: StringName = g._clip_for(Golem.ATTACK_KICK)
-	check(first != second and first == third
-		and [first, second].has(Golem.ATTACK_KICK) and [first, second].has(Golem.CLIP_KICK_LEFT),
-		"the kick alternates between the right and the left leg")
+	# Each leg has its own lane (2026-11-18): the clip follows the leg; with nothing to choose
+	# between them, the legs take turns.
+	g.kick_side = 1.0
+	check(g._clip_for(Golem.ATTACK_KICK) == Golem.ATTACK_KICK, "right leg: kick")
+	g.kick_side = -1.0
+	check(g._clip_for(Golem.ATTACK_KICK) == Golem.CLIP_KICK_LEFT, "left leg: kick_l")
+	g._wind_up(Golem.ATTACK_KICK)
+	var first: float = g.kick_side
+	g._pending_attack = &""
+	g._wind_up(Golem.ATTACK_KICK)
+	check(g.kick_side != first, "the kick alternates between the right and the left leg")
+	g._pending_attack = &""
 	check(g._clip_for(Golem.ATTACK_SLAM) == Golem.CLIP_SLAM_LOW
 		and g._clip_for(Golem.ATTACK_DRUM) == Golem.CLIP_DRUM_LOW,
 		"slam and drum play their crouched clips")
@@ -1380,7 +1418,7 @@ func test_flatten_plan_levels_to_the_lowest_ground_with_a_walkable_bank() -> voi
 	_free_world(w)
 
 
-## ...und im Spiel: nur der Gigant (Stufe 7) ebnet, Stufe 6 nicht.
+## ...und im Spiel: erst ab 30 m Koerperhoehe (Nutzervorgabe 2026-11-18; vorher ab Stufe 7).
 func test_only_the_level_seven_giant_levels_the_ground() -> void:
 	var w: Dictionary = _make_world(8.0)
 	for vz in range(40, 61):
@@ -1389,12 +1427,16 @@ func test_only_the_level_seven_giant_levels_the_ground() -> void:
 	w.nav.update_region(Rect2i(0, 0, w.td.size, w.td.size))
 	var g: Golem = _golem(w, 0, Vector3(50, w.td.get_height(50.0, 50.0), 50))
 	g.terrain_ctx = w.ctx
-	_level_to(g, 6)
+	_level_to(g, 7)
+	check(not g.flattens(), "(level 7, 16,9 m: below 30 m)")
 	for i in range(30):
 		_tick_world(w)
 	check(not (Golem.flatten_plan(w.td, g.position, g.flatten_radius(), 1.0, 0.25).indices
-		as PackedInt32Array).is_empty(), "a level-6 golem leaves the bumpy ground as it is")
-	_level_to(g, 7)
+		as PackedInt32Array).is_empty(), "a 17-m golem leaves the bumpy ground as it is")
+	while not g.flattens():
+		g._credit_kill()
+	g._stretch_queued = false
+	check(g.height_m() >= 30.0, "from 30 m on she levels (%.1f m)" % g.height_m())
 	var before: float = _spread_under(w, g)
 	for i in range(15):
 		_tick_world(w)
@@ -1875,34 +1917,37 @@ func test_hit_zones_slam_front_half_of_the_body_kick_lane_only() -> void:
 	check_near(body, Balance.GOLEM_BODY_HALF_WIDTH * g.size_factor(),
 		"and it keeps growing with the body beyond level 7 (%.1f m at 100 m)" % body)
 	var r: float = g.reach_factor()
-	# The hands come down limb_factor() x 1,2 m ahead; the circle around them has
-	# the slowly grown radius. At 100 m it lies wholly in front of her.
+	# The hands come down limb_factor() x 1,2 m ahead; since 2026-11-18 the circle around them
+	# grows with the body from 30 m on and reaches a little behind her middle at 80 m.
 	var hands: float = Balance.GOLEM_SLAM_FORWARD * g.limb_factor()
 	var slam_near: float = hands - g.slam_radius()
-	check(body > g.slam_radius(), "at 100 m the body is wider than the slam circle")
-	check(slam_near > 0.0, "and the circle of the hands lies wholly in front of her (from %.1f m on)" % slam_near)
+	var heel_at: float = minf(-0.5, slam_near - 0.5)
+	check(-heel_at < body, "(behind the circle of the hands, still under her body: %.1f m)" % heel_at)
 	var at: Callable = func(along: float, side: float) -> Vector3:
 		return g.position + forward * along + right * side
 	# SLAM
-	check(g._in_hit_zone(Golem.ATTACK_SLAM, at.call(1.0, body - 0.5), forward, right),
-		"slam: the front half of the body circle is struck, far beside the hands")
+	check(not g._in_hit_zone(Golem.ATTACK_SLAM, at.call(1.0, body - 0.5), forward, right),
+		"slam: the front half of her body circle no longer counts (2026-11-18), only the hands' circle")
 	check(g._in_hit_zone(Golem.ATTACK_SLAM, at.call(hands + g.slam_radius() - 0.2, 0.0), forward, right)
 		and not g._in_hit_zone(Golem.ATTACK_SLAM, at.call(hands + g.slam_radius() + 0.5, 0.0), forward, right),
 		"slam: ahead as far as the circle of the hands reaches (%.1f m)" % (hands + g.slam_radius()))
-	check(not g._in_hit_zone(Golem.ATTACK_SLAM, at.call(-0.5, 0.0), forward, right),
+	check(not g._in_hit_zone(Golem.ATTACK_SLAM, at.call(heel_at, 0.0), forward, right),
 		"slam: at her heels, beyond that circle, nothing is struck although it is under her body")
 	check(not g._in_hit_zone(Golem.ATTACK_SLAM, at.call(-1.0, body - 0.5), forward, right),
 		"slam: the BACK half of the body circle is not added")
 	# KICK
 	var half: float = Balance.GOLEM_KICK_WIDTH * 0.5 * r
-	check(g._in_hit_zone(Golem.ATTACK_KICK, at.call(0.0, half - 0.1), forward, right)
-		and not g._in_hit_zone(Golem.ATTACK_KICK, at.call(0.0, half + 0.5), forward, right),
+	g.kick_side = 1.0
+	var mid: float = g.kick_leg_offset()   # the right leg's lane
+	check(g._in_hit_zone(Golem.ATTACK_KICK, at.call(0.0, mid + half - 0.1), forward, right)
+		and not g._in_hit_zone(Golem.ATTACK_KICK, at.call(0.0, mid + half + 0.5), forward, right),
 		"kick: only the lane counts, also at the body — it is not widened to the body circle")
 	check(g._in_hit_zone(Golem.ATTACK_KICK, at.call(body - 0.2, 0.0), forward, right)
 		and g._in_hit_zone(Golem.ATTACK_KICK, at.call(-(body - 0.2), 0.0), forward, right),
 		"kick: the lane runs through the whole body circle, ahead and behind")
 	var lane: Vector2 = g._kick_extent()
-	check_near(lane.x, Balance.GOLEM_KICK_LENGTH * g.kick_limb_factor(), "kick: the lane is as long as her leg reaches")
+	check_near(lane.x, Balance.GOLEM_KICK_LENGTH * g.kick_limb_factor() * Balance.GOLEM_BODY_KICK_FRONT_SHARE,
+		"kick: the lane is as long as her leg reaches, from 30 m 5 % shorter ahead")
 	check(lane.x > body and g._in_hit_zone(Golem.ATTACK_KICK, at.call(lane.x - 0.2, 0.0), forward, right)
 		and not g._in_hit_zone(Golem.ATTACK_KICK, at.call(lane.x + 0.5, 0.0), forward, right),
 		"kick: and ends there (%.1f m ahead)" % lane.x)
@@ -2287,12 +2332,13 @@ func test_reach_grows_with_the_limbs() -> void:
 	check_near(Balance.GOLEM_KICK_WIDTH * g.reach_factor(), 1.8 * Golem.reach_factor_for(7),
 		"the lane's WIDTH still follows the slow area growth", 0.001)
 	_grow_to_the_end(g)
-	check_near(g.limb_factor(), Golem.limb_factor_for(g.size_factor()), "at 80 m: limb factor %.1f" % g.limb_factor())
+	check_near(g.limb_factor(), Balance.GOLEM_BODY_LIMB_FACTOR_AT_ANCHOR * g.body_anchor_ratio(),
+		"at 80 m: limb factor %.1f, grown with the body from 30 m (2026-11-18)" % g.limb_factor())
 	# The curve keeps its anchor at the old 100 m (user spec 2026-11-17): levels 1-6 unchanged.
 	var anchor: float = Golem.limb_anchor_size()
 	check_near(pow(anchor, Golem.limb_exponent()), Balance.GOLEM_LIMB_SHARE_AT_MAX * anchor,
 		"the power law alone gives 60 percent of a body-proportional growth at 100 m", 0.01)
-	check(g.reach() > 34.3 and g.reach() < 34.7, "with the 10 percent on top the reach at 80 m is %.1f m" % g.reach())
+	check(g.reach() > 39.7 and g.reach() < 40.1, "the reach at 80 m is %.1f m (34,5 m before 2026-11-18)" % g.reach())
 	check(g.aggro_radius() > g.reach(), "still inside her aggro radius")
 	_free_world(w)
 
@@ -2342,7 +2388,7 @@ func test_golems_do_not_stand_inside_one_another() -> void:
 	var small: Golem = _golem(w, 1, Vector3(21, 5, 20))
 	var big_start: Vector3 = big.position
 	var small_start: Vector3 = small.position
-	var need2: float = big.trample_radius() + small.trample_radius()
+	var need2: float = big._golem_need(small)   # (knee high: only her legs count, 2026-11-18)
 	for i in range(80):
 		big._tick_golem_separation(TICK)
 		small._tick_golem_separation(TICK)
@@ -2430,14 +2476,15 @@ func test_slam_radius_reaches_twelve_metres() -> void:
 	check_near(Balance.GOLEM_KICK_WIDTH * g.reach_factor(), Balance.GOLEM_KICK_WIDTH * Golem.reach_factor_for(7) * 1.019645,
 		"the lane's width takes its 1,96 percent", 0.0005)
 	_grow_to_the_end(g)
-	check_near(g.slam_radius(), Balance.GOLEM_SLAM_RADIUS_AT_MAX, "at 80 m: 12 m", 0.001)
+	check_near(g.slam_radius(), Balance.GOLEM_SLAM_RADIUS * Balance.GOLEM_BODY_SLAM_SCALE_AT_ANCHOR * g.body_anchor_ratio(),
+		"at 80 m: with the body from 30 m on, about 18 m (%.1f; 12 m before 2026-11-18)" % g.slam_radius(), 0.001)
 	check(Balance.GOLEM_SLAM_RADIUS_AT_MAX == 12.0, "the documented 12 m")
 	# In play: an enemy 11 m from where the hands land is struck, one at 13 m is not.
 	g.facing = Vector3(0, 0, 1)
 	var hands: Vector3 = g.position + Vector3(0, 0, 1) * (Balance.GOLEM_SLAM_FORWARD * g.limb_factor())
-	check(g._in_hit_zone(Golem.ATTACK_SLAM, hands + Vector3(11.0, 0, 5.0).normalized() * 11.0, Vector3(0, 0, 1), Vector3(-1, 0, 0))
-		and not g._in_hit_zone(Golem.ATTACK_SLAM, hands + Vector3(0, 0, 13.0), Vector3(0, 0, 1), Vector3(-1, 0, 0)),
-		"11 m from the hands is inside the circle, 13 m outside")
+	check(g._in_hit_zone(Golem.ATTACK_SLAM, hands + Vector3(11.0, 0, 5.0).normalized() * 17.0, Vector3(0, 0, 1), Vector3(-1, 0, 0))
+		and not g._in_hit_zone(Golem.ATTACK_SLAM, hands + Vector3(0, 0, 19.0), Vector3(0, 0, 1), Vector3(-1, 0, 0)),
+		"17 m from the hands is inside the circle, 19 m outside")
 	_free_world(w)
 
 
@@ -2822,10 +2869,10 @@ func test_kick_lane_is_ten_percent_shorter_at_the_top() -> void:
 	_grow_to_the_end(g)
 	var top: float = Golem.limb_factor_for(Golem.limb_anchor_size())
 	check_near(1.0 + (top - 1.0) * Golem.kick_growth_share(), 0.9 * top, "100 m: 90 percent of the limb factor", 0.0001)
-	check(g.kick_limb_factor() > 0.9 * g.limb_factor() and g.kick_limb_factor() < 0.905 * g.limb_factor(),
-		"80 m: just over 90 percent (%.4f)" % (g.kick_limb_factor() / g.limb_factor()))
+	check_near(g.kick_limb_factor() / g.limb_factor(), Balance.GOLEM_BODY_KICK_LIMB_AT_ANCHOR / Balance.GOLEM_BODY_LIMB_FACTOR_AT_ANCHOR,
+		"80 m: the share it has at 31,3 m, both grow with the body (%.4f)" % (g.kick_limb_factor() / g.limb_factor()), 0.0001)
 	var lane: Vector2 = g._kick_extent()
-	check_near(lane.x, Balance.GOLEM_KICK_LENGTH * g.kick_limb_factor(), "%.1f m ahead" % lane.x, 0.001)
+	check_near(lane.x, Balance.GOLEM_KICK_LENGTH * g.kick_limb_factor() * Balance.GOLEM_BODY_KICK_FRONT_SHARE, "%.1f m ahead" % lane.x, 0.001)
 	check_near(lane.y, Balance.GOLEM_KICK_LENGTH * Balance.GOLEM_KICK_BACK_SHARE * g.kick_limb_factor(),
 		"%.1f m behind" % lane.y, 0.001)
 	check(lane.x > g.reach(), "still longer than her reach (%.1f m)" % g.reach())
@@ -2851,7 +2898,7 @@ func test_drum_circle_is_ten_percent_larger_than_the_slam() -> void:
 		check(g._in_hit_zone(Golem.ATTACK_DRUM, p, forward, right) and not g._in_hit_zone(Golem.ATTACK_SLAM, p, forward, right),
 			"level %d: 5 percent beyond the slam's edge the drum still strikes, the slam does not" % lv)
 	_grow_to_the_end(g)
-	check_near(g.ground_radius(Golem.ATTACK_DRUM), 13.2, "100 m: 13,2 m (slam 12 m)", 0.001)
+	check_near(g.ground_radius(Golem.ATTACK_DRUM), 1.1 * g.slam_radius(), "80 m: the drum still 10 percent larger (%.1f m)" % g.ground_radius(Golem.ATTACK_DRUM), 0.001)
 	_free_world(w)
 
 
@@ -3161,7 +3208,9 @@ func test_a_giant_levelling_along_the_shore_does_not_drown() -> void:
 	check(w.nav.is_cell_walkable(Vector2i(54, 50)), "the shore cell is walkable")
 	var g: Golem = _golem(w, 0, Vector3(54.5, w.td.get_height(54.5, 50.5), 50.5))
 	g.terrain_ctx = w.ctx
-	_level_to(g, 7)
+	while not g.flattens():   # from 30 m on (2026-11-18)
+		g._credit_kill()
+	g._stretch_queued = false
 	g.order_move(Vector3(54.5, 2.1, 80.5), false, false)
 	for i in range(300):
 		_tick_world(w)
@@ -3170,7 +3219,10 @@ func test_a_giant_levelling_along_the_shore_does_not_drown() -> void:
 	for vz in range(45, 85):
 		shore_kept = shore_kept and absf(w.td.heights[vz * w.td.verts + 54] - 2.8) < 0.001
 	check(shore_kept, "the vertices at the water are not lowered")
-	check(w.td.heights[50 * w.td.verts + 53] < 3.8 - 0.1, "further inland he still levels")
+	var lowered: bool = false
+	for vz in range(45, 85):
+		lowered = lowered or w.td.heights[vz * w.td.verts + 53] < 3.8 - 0.05
+	check(lowered, "further inland she still levels along her way")
 	_free_world(w)
 
 
@@ -3761,27 +3813,38 @@ func test_seated_she_never_lies_lower_than_the_ground_under_her() -> void:
 	_free_world(w)
 
 
-## Einebnen beim Hinsetzen (Nutzer 2026-11-17): der Boden unter der sitzenden Figur
-## gleicht sich an die Hoehe ihrer Fuesse an — Mulden heben sich, Buckel senken sich;
+## Einebnen beim Sitzen (Nutzervorgaben 2026-11-18): beim Hinsetzen sofort der Auswahlkreis um
+## die Sitzmitte, danach nach und nach der Rest der Figur — nur abgesenkt, nie angehoben;
 ## Gebaeude bleiben stehen, wie sie stehen.
 func test_sitting_down_evens_out_the_ground_under_her() -> void:
 	var w: Dictionary = _make_world()
 	var g: Golem = _sit_golem(w, 0, Vector3(64, 5, 90))
 	g.terrain_ctx = w.ctx
 	var s: float = g.model_scale().z * g.size_factor()
-	var seat: Vector3 = g.position - g.heading() * g.seat_back_m()
-	var hands: Vector3 = g.position - g.heading() * (Balance.GOLEM_SIT_HAND_BACK * s)
-	_set_ground(w, seat, 2.0, 3.5)    # a hollow under the seat
-	_set_ground(w, hands, 1.5, 6.5)   # a bump under her hands
-	var hut: Building = w.bm.place(HUT_SCENE, w.t1, Vector2i(80, 70), 0, true)
+	var fwd: Vector3 = g.heading()
+	var seat: Vector3 = g.position - fwd * g.seat_back_m()
+	var hands: Vector3 = g.position - fwd * (Balance.GOLEM_SIT_HAND_BACK * s)
+	var ring: float = g.selection_ring_radius()
+	var side: Vector3 = Vector3(fwd.z, 0.0, -fwd.x) * (ring * 0.5)
+	check(seat.distance_to(hands) > ring, "(her hands lie outside the selection circle)")
+	_set_ground(w, seat, 2.0, 3.5)          # a hollow under the seat
+	_set_ground(w, seat + side, 1.0, 6.5)   # a bump in the selection circle
+	_set_ground(w, hands, 1.5, 6.5)         # a bump under her hands
+	var hut: Building = w.bm.place(HUT_SCENE, w.t0, Vector2i(80, 70), 0, true)   # her own: she does not turn to it
 	var hut_corner: int = 70 * w.td.verts + 80
 	var hut_h: float = w.td.heights[hut_corner]
 	check(_sit_until_seated(w, g), "she sits")
 	for i in range(10):
 		_tick_world(w)
-	check_near(w.td.get_height(seat.x, seat.z), 5.0, "the hollow under the seat came up to her feet' level", 0.05)
-	check_near(w.td.get_height(hands.x, hands.z), 5.0, "the bump under her hands came down", 0.05)
-	check_near(g.position.y, 5.0, "she sits at that level", 0.05)
+	var in_ring: Vector3 = seat + side
+	check_near(w.td.get_height(in_ring.x, in_ring.z), 5.0, "the bump in her selection circle came down at once", 0.05)
+	check_near(w.td.get_height(seat.x, seat.z), 3.5, "the hollow under the seat stays (nothing is raised)", 0.01)
+	var early: float = w.td.get_height(hands.x, hands.z)
+	check(early > 5.5, "the bump under her hands only begins to sink (%.2f m)" % early)
+	for i in range(250):
+		_tick_world(w)
+	check_near(w.td.get_height(hands.x, hands.z), 5.0, "after a while it has come down to her feet' level", 0.05)
+	check_near(g.position.y, 5.0, "and she lies on her feet's level, not on the old bump (%.2f)" % g.position.y, 0.05)
 	check(hut == null or is_equal_approx(w.td.heights[hut_corner], hut_h), "the ground under a building stays")
 	_free_world(w)
 
@@ -4230,6 +4293,216 @@ func test_sitting_she_does_not_turn_for_one_more_foe() -> void:
 		turned = turned or c.turning
 		wiped = wiped or c.pending[GolemSitCombat.CH_LEGS] == GolemSitCombat.STOMP_L
 	check(wiped and not turned, "she stomps the one in reach and does not turn for the other")
+	_free_world(w)
+
+
+## Flaechen und Reichweiten im Stand: unter 30 m wie bisher, ab 30 m genau mit dem Koerper
+## (Nutzervorgabe 2026-11-18) — mit den Anteilen des normalen Golems bei 31,3 m, alle drei Golems.
+func test_standing_areas_grow_with_the_body_from_thirty_metres() -> void:
+	var g: Golem = GOLEM_SCENE.instantiate() as Golem
+	check_near(g.reach(), Golem.REACH, "fresh: the reach as before (3 m)")
+	check_near(g.slam_radius(), Golem.SLAM_RADIUS, "and the slam's circle (2,6 m)")
+	while g.level < Balance.GOLEM_MAX_LEVEL:
+		g._credit_kill()
+	check(not g.body_scaled(), "(16,9 m: below 30 m)")
+	check_near(g.reach_factor(), g._base_reach_factor(), "level 7: its own slow growth")
+	check_near(g.limb_factor(), g._base_limb_factor(), "and its own limbs")
+	while not g.can_sit():
+		g._credit_kill()
+	check(g.body_scaled(), "31,3 m: body-scaled")
+	check_near(g.reach_factor(), g._base_reach_factor(), "at 31,3 m no jump: lane width", 0.0001)
+	check_near(g.slam_scale(), g._base_slam_scale(), "slam", 0.0001)
+	check_near(g.limb_factor(), g._base_limb_factor(), "reach", 0.0001)
+	check_near(g.kick_limb_factor(), 1.0 + (g._base_limb_factor() - 1.0) * Golem.kick_growth_share(), "lane length", 0.0001)
+	var w31: float = g.model_scale().x * g.size_factor()
+	var shares: Array[float] = [g.reach() / w31, g.slam_radius() / w31, g._kick_extent().x / w31]
+	while not g.is_full_size():
+		g._credit_kill()
+	var w80: float = g.model_scale().x * g.size_factor()
+	check_near(g.reach() / w80, shares[0], "80 m: the reach keeps its share of the body", 0.0001)
+	check_near(g.slam_radius() / w80, shares[1], "the slam's circle too", 0.0001)
+	check_near(g._kick_extent().x / w80, shares[2], "and the kick's lane", 0.0001)
+	g.free()
+	var s: GenesisGolem = (load("res://scenes/units/genesis_golem.tscn") as PackedScene).instantiate() as GenesisGolem
+	s.wood_growth_m = 100.0
+	var ws: float = s.model_scale().x * s.size_factor()
+	check_near(s.reach() / ws, shares[0], "the genesis golem at 100 m: the same share of his body", 0.0001)
+	check_near(s.slam_radius() / ws, shares[1], "(slam)", 0.0001)
+	s.free()
+
+
+## Alle Sitzzonen wachsen genau mit dem Koerper (Nutzervorgabe 2026-11-18): die Aufteilung bleibt
+## ueber alle Groessen und bei allen drei Golems gleich; in der ersten Sitzgroesse aendert sich nichts.
+func test_sit_zones_grow_exactly_with_the_body() -> void:
+	var g: Golem = GOLEM_SCENE.instantiate() as Golem
+	while not g.can_sit():
+		g._credit_kill()
+	var c: GolemSitCombat = GolemSitCombat.new(g)
+	check_near(c.stomp_radius(), g.slam_radius() * Balance.GOLEM_SIT_STOMP_RADIUS_SHARE * Balance.GOLEM_SIT_AREA_FACTOR,
+		"first seated size: the foot stomp as before (%.2f m)" % c.stomp_radius(), 0.001)
+	check_near(c.wipe_reach(), g.reach() * Balance.GOLEM_SIT_AREA_FACTOR, "the wipe as before", 0.001)
+	check_near(c.clap_radius(), g.ground_radius(Golem.ATTACK_DRUM) * Balance.GOLEM_SIT_CLAP_AREA_FACTOR, "the hand stomp as before", 0.001)
+	var at_first: Array = _sit_zone_shares(g, c)
+	while not g.is_full_size():
+		g._credit_kill()
+	var at_full: Array = _sit_zone_shares(g, c)
+	for i in range(at_first.size()):
+		check_near(at_full[i], at_first[i], "80 m: zone %d keeps its share of the body (%.3f)" % [i, at_full[i]], 0.0005)
+	check_near(g.reach(), 0.499 * 80.0, "standing too: 80 m reach about 40 m (%.1f)" % g.reach(), 0.2)
+	check_near(g.slam_radius(), 0.225 * 80.0, "the slam's circle about 18 m (%.1f)" % g.slam_radius(), 0.2)
+	g.free()
+	var d: DemonGolem = (load("res://scenes/units/demon_golem.tscn") as PackedScene).instantiate() as DemonGolem
+	while not d.can_sit():
+		d.growth_steps += 1
+	var dc: GolemSitCombat = GolemSitCombat.new(d)
+	var d_first: Array = _sit_zone_shares(d, dc)
+	while d.height_m() < 118.0:
+		d.growth_steps += 1
+	var d_top: Array = _sit_zone_shares(d, dc)
+	for i in range(at_first.size()):
+		check_near(d_first[i], at_first[i], "the demon golem: zone %d, same share of his body" % i, 0.0005)
+		check_near(d_top[i], at_first[i], "and at %.0f m" % d.height_m(), 0.0005)
+	d.free()
+	var s: GenesisGolem = (load("res://scenes/units/genesis_golem.tscn") as PackedScene).instantiate() as GenesisGolem
+	s.wood_growth_m = 100.0
+	var sc: GolemSitCombat = GolemSitCombat.new(s)
+	var s_top: Array = _sit_zone_shares(s, sc)
+	for i in range(at_first.size()):
+		check_near(s_top[i], at_first[i], "the genesis golem at 100 m: zone %d, same share" % i, 0.0005)
+	s.free()
+
+
+## Every sit zone measured in the model's width at her size.
+func _sit_zone_shares(g: Golem, c: GolemSitCombat) -> Array:
+	c._ck = [Vector3.INF, Vector3.INF, -1.0]
+	var sx: float = c._sx()
+	var sz: float = c._sz()
+	return [c.stomp_radius() / sx, c.wipe_reach() / sx, c.clap_radius() / sx, c.double_stomp_radius() / sx,
+		c.hop_radius() / sx, g.seat_back_m() / sz, (Balance.GOLEM_SIT_KICK_FROM + Balance.GOLEM_SIT_KICK_TO) * sz / sz]
+
+
+## Ab 30 m ertrinken Golems nicht und laufen durchs Wasser (Nutzervorgabe 2026-11-18); darunter nicht.
+func test_from_thirty_metres_golems_wade_through_water() -> void:
+	var w: Dictionary = _shore_world()
+	var small: Golem = _golem(w, 0, Vector3(45.5, 5, 40.5))
+	_level_to(small, 7)
+	small._stretch_queued = false
+	check(not small.crosses_water(), "(17 m: not yet)")
+	check(w.commands.order_move([small] as Array[Unit], Vector3(75.5, 1.4, 40.5)) == 0,
+		"a 17-m golem is not sent into open water")
+	var big: Golem = _golem(w, 0, Vector3(45.5, 5, 60.5))
+	while not big.crosses_water():
+		big._credit_kill()
+	big._stretch_queued = false
+	check(big.height_m() >= 30.0, "(%.1f m)" % big.height_m())
+	check(Golem.giant_line_clear(w.td, big.position, Vector3(75.5, 1.4, 60.5), big.giant_step_limit(), true)
+		and not Golem.giant_line_clear(w.td, big.position, Vector3(75.5, 1.4, 60.5), big.giant_step_limit()),
+		"the straight line into the sea: clear only with water allowed")
+	check(w.commands.order_move([big] as Array[Unit], Vector3(75.5, 1.4, 60.5)) == 1, "a 31-m golem takes the order")
+	for i in range(200):
+		_tick_world(w)
+		if big.position.x > 74.0:
+			break
+	check(big.position.x > 74.0, "she walks into the sea (x %.1f)" % big.position.x)
+	check(big.state != Unit.State.DEAD and not big.is_flooded_on(w.td), "and does not drown there")
+	_free_world(w)
+
+
+## Terrain beim Hinsetzen (Nutzervorgabe 2026-11-18): Haende und Fuesse muessen auf Boden aufsetzen,
+## den sie erklimmen koennte — an einer Klippe setzt sie sich nicht.
+func test_she_does_not_sit_down_where_a_hand_would_rest_on_a_cliff() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _sit_golem(w, 0, Vector3(64, 5, 90))
+	var fwd: Vector3 = g.heading()
+	var seat: Vector3 = g.position - fwd * g.seat_back_m()
+	check(g.sit_pose_ok(seat, fwd), "flat ground: she could sit")
+	var hand: Vector3 = g.sit_contacts(seat, fwd)[2]
+	_set_ground(w, hand, 6.0, 45.0)   # a 40-m block under her left hand (and the spots around)
+	check(not g.sit_pose_ok(seat, fwd), "a 40-m cliff between seat and hand: no")
+	g.sit_down()
+	for i in range(150):
+		_tick_world(w)
+	check(not g.is_sitting(), "she does not sit down there")
+	_free_world(w)
+
+
+## Drehen im Sitzen nur ueber moegliche Richtungen (Nutzervorgabe 2026-11-18): ist der kurze Weg
+## blockiert, dreht sie sich den langen Weg herum; ist die Zielrichtung selbst unmoeglich, gar nicht.
+func test_seated_she_turns_only_through_possible_headings() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _seated(w)
+	var c: GolemSitCombat = g.sit_combat
+	var at: Callable = func(deg: float) -> Vector3:
+		var a: float = deg_to_rad(deg)
+		return Vector3(sin(a), 0.0, cos(a))
+	check(g.heading().angle_to(at.call(0.0)) < 0.01, "(she faces +z, angle 0)")
+	# A tall pillar where one of her feet would rest at +45 degrees (the other foot meets it a
+	# little further on — both on the short way; a pillar under a hand would block both ways).
+	var pillar: Vector3 = g.sit_contacts(g.position, at.call(45.0))[0]
+	_set_ground(w, pillar, 0.5, 45.0)   # narrow: her hands, closer in, never touch it
+	check(not g.sit_heading_ok(at.call(45.0)), "at +45 degrees her foot would rest on the pillar")
+	check(g.sit_heading_ok(at.call(0.0)) and g.sit_heading_ok(at.call(90.0)), "0 and +90 degrees are fine")
+	var way: Dictionary = c.turn_way(at.call(90.0), c.free_arc())
+	check(way.sign == -1.0 and absf(rad_to_deg(float(way.angle)) - 270.0) < 0.5,
+		"to +90 degrees she turns the long way round (%s)" % str(way))
+	# A foe out at +90 degrees, beyond every zone: she turns toward it — the long way.
+	var foe_at: Vector3 = g.position + at.call(90.0) * 45.0
+	_foe(w, foe_at.x, foe_at.z, 100000)
+	_tick_golem_until(g, func() -> bool: return c.turning, 20)
+	check(c.turning and c._turn_sign == -1.0, "she turns the long way round toward the foe")
+	var crossed: bool = false
+	for i in range(600):
+		g.tick(TICK)
+		var a: float = rad_to_deg(atan2(g.heading().x, g.heading().z))
+		crossed = crossed or (a > 30.0 and a < 60.0)
+		if not c.turning:
+			break
+	check(not crossed, "never through the blocked headings")
+	check(g.heading().angle_to(at.call(90.0)) < deg_to_rad(5.0), "and arrives at +90 degrees")
+	_free_world(w)
+
+
+func test_seated_she_does_not_turn_toward_an_impossible_heading() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _seated(w)
+	var c: GolemSitCombat = g.sit_combat
+	var east: Vector3 = Vector3(1, 0, 0)
+	var pillar: Vector3 = g.sit_contacts(g.position, east)[2]
+	_set_ground(w, pillar, 1.0, 45.0)
+	check(not g.sit_heading_ok(east), "facing +x her hand would rest on the pillar")
+	check(c.turn_way(east, c.free_arc()).sign == 0.0, "so she cannot turn there")
+	var foe_at: Vector3 = g.position + east * 45.0
+	_foe(w, foe_at.x, foe_at.z, 100000)
+	for i in range(20):
+		g.tick(TICK)
+	check(not c.turning, "a foe that way: she does not turn (and cannot strike it)")
+	_free_world(w)
+
+
+## Kleine Golems an grossen (Nutzervorgabe 2026-11-18): wer hoechstens bis zu den Knien des anderen
+## reicht, haelt nur Abstand zu dessen Beinbereich (60 % seines Koerperradius).
+func test_a_knee_high_golem_meets_only_the_big_ones_legs() -> void:
+	var w: Dictionary = _make_world()
+	var big: Golem = _golem(w, 0, Vector3(40, 5, 40))
+	while not big.is_full_size():
+		big._credit_kill()
+	var small: Golem = _golem(w, 1, Vector3(70, 5, 70))
+	_level_to(small, 6)
+	check(small.height_m() <= big.height_m() * Balance.GOLEM_KNEE_HEIGHT_SHARE, "(%.1f m next to %.1f m: knee high)" % [small.height_m(), big.height_m()])
+	var legs: float = (small.trample_radius() + big.trample_radius() * Balance.GOLEM_LEG_RADIUS_SHARE) * Balance.GOLEM_BODY_GAP
+	check_near(small._golem_need(big), legs, "the small one keeps clear of the legs only (%.1f m)" % legs)
+	check_near(big._golem_need(small), legs, "the same distance for both")
+	var mid: Golem = _golem(w, 1, Vector3(90, 5, 40))
+	while mid.height_m() < big.height_m() * 0.5:
+		mid._credit_kill()
+	check_near(mid._golem_need(big), (mid.trample_radius() + big.trample_radius()) * Balance.GOLEM_BODY_GAP,
+		"a golem half as tall keeps the whole body's distance")
+	# In play: closer than the whole body's distance, but clear of the legs — nobody is pushed.
+	small.position = big.position + Vector3(legs + 0.5, 0, 0)
+	var at: Vector3 = small.position
+	for i in range(20):
+		small._tick_golem_separation(TICK)
+	check(small.position.distance_to(at) < 0.01, "standing at her legs, the small one is not pushed away")
 	_free_world(w)
 
 

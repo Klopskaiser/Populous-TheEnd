@@ -241,6 +241,11 @@ const SLOT_SNAP: float = 8.0
 ## True when `point` lies in the water (the sea bed below the waterline). The
 ## mouse ray passes the water surface and hits that sea bed, so this is what a
 ## click "on the water" looks like.
+## Golems from 30 m on walk into the water (user spec 2026-11-18).
+static func _wades(unit: Unit) -> bool:
+	return unit is Golem and (unit as Golem).crosses_water()
+
+
 func is_water(point: Vector3) -> bool:
 	return nav_grid != null and nav_grid.terrain != null \
 		and nav_grid.terrain.get_height(point.x, point.z) <= TerrainData.SEA_LEVEL
@@ -293,8 +298,8 @@ func order_move(units: Array[Unit], target: Vector3, queue_up: bool = false,
 	var alive: Array[Unit] = []
 	for unit in units:
 		if unit.state != Unit.State.DEAD and _unit_active(unit):
-			if land == Vector3.INF and not unit.flies:
-				continue
+			if land == Vector3.INF and not unit.flies and not _wades(unit):
+				continue   # (golems from 30 m on walk into the water, 2026-11-18)
 			alive.append(unit)
 	if alive.is_empty():
 		return 0
@@ -307,10 +312,13 @@ func order_move(units: Array[Unit], target: Vector3, queue_up: bool = false,
 		if unit is Golem:
 			golems.append(unit)
 	if not golems.is_empty():
-		var slots: Array[Vector3] = golem_slots(golems, land)
+		var all_wade: bool = true
+		for gu in golems:
+			all_wade = all_wade and _wades(gu)
+		var slots: Array[Vector3] = golem_slots(golems, target if all_wade or land == Vector3.INF else land)
 		for k in range(golems.size()):
 			var slot: Vector3 = slots[k]
-			if nav_grid != null:
+			if nav_grid != null and not _wades(golems[k]):
 				slot = _land_slot(slot, land)
 			golems[k].order_move(slot, queue_up, aggressive)
 			alive.erase(golems[k])
@@ -358,7 +366,7 @@ func order_move(units: Array[Unit], target: Vector3, queue_up: bool = false,
 ## Goal points for golems sent to `centre` together, in the order of `golems`:
 ## the biggest takes the centre, every other one the first point on rings around
 ## it that keeps clear of all slots so far by the sum of both bodies (their
-## separation distance, trample radius x GOLEM_BODY_GAP) plus GOLEM_SLOT_MARGIN.
+## separation distance, Golem._golem_need — a small one beside a big one's legs) plus GOLEM_SLOT_MARGIN.
 ## The rings are spaced by the biggest body, so small golems fill in between.
 static func golem_slots(golems: Array[Unit], centre: Vector3) -> Array[Vector3]:
 	var order: Array[int] = []
@@ -372,9 +380,9 @@ static func golem_slots(golems: Array[Unit], centre: Vector3) -> Array[Vector3]:
 	var slots: Array[Vector3] = []
 	slots.resize(golems.size())
 	var placed: Array[Vector3] = []
-	var placed_r: Array[float] = []
+	var placed_g: Array[Golem] = []
 	for k in order:
-		var r: float = (golems[k] as Golem).trample_radius()
+		var me: Golem = golems[k] as Golem
 		var slot: Vector3 = Vector3.INF
 		var ring: int = 0
 		while slot == Vector3.INF and ring <= 64:
@@ -385,8 +393,7 @@ static func golem_slots(golems: Array[Unit], centre: Vector3) -> Array[Vector3]:
 					* (step * float(ring))
 				var clear: bool = true
 				for q in range(placed.size()):
-					var need: float = (r + placed_r[q]) * Balance.GOLEM_BODY_GAP \
-						+ Balance.GOLEM_SLOT_MARGIN
+					var need: float = me._golem_need(placed_g[q]) + Balance.GOLEM_SLOT_MARGIN
 					if Vector2(p.x - placed[q].x, p.z - placed[q].z).length() < need:
 						clear = false
 						break
@@ -398,7 +405,7 @@ static func golem_slots(golems: Array[Unit], centre: Vector3) -> Array[Vector3]:
 			slot = centre
 		slots[k] = slot
 		placed.append(slot)
-		placed_r.append(r)
+		placed_g.append(me)
 	return slots
 
 

@@ -167,6 +167,11 @@ const GOLEM_SIT_HAND_SIDE: float = 0.7
 ## begehbare Boeschung (GOLEM_FLATTEN_SLOPE). Gebaeude (mit einer Zelle Rand), das
 ## Ufer und der Meeresboden bleiben, nichts sinkt unter die Wasserlinie (wie beim
 ## Einebnen des Giganten). Die Figur ist bei 4 m Bauhoehe 2,6 m lang und 1,5 m breit.
+## Seit 2026-11-18 (Nutzer) in zwei Teilen: beim Hinsetzen SOFORT der Auswahlkreis um die
+## Sitzmitte (selection_ring_radius), im Sitzen dann NACH UND NACH das Rechteck der Figur in ihrer
+## aktuellen Blickrichtung (dreht sie sich, wandert es mit) — alle GOLEM_FLATTEN_INTERVAL Sekunden
+## hoechstens GOLEM_FLATTEN_RATE Meter je Sekunde auf die Fusshoehe vom Hinsetzen. NUR GESENKT (Nutzer
+## 2026-11-18): liegt Gelaende tiefer als ihre Fuesse, bleibt es so.
 const GOLEM_SIT_LEVEL_FRONT: float = 0.35
 const GOLEM_SIT_LEVEL_BACK: float = 2.35
 const GOLEM_SIT_LEVEL_HALF_WIDTH: float = 0.8
@@ -186,6 +191,9 @@ const GOLEM_SIT_HEEL_BACK: float = 0.16
 ## Zielzahl wie der Handschlag.
 const GOLEM_SIT_STOMP_LAND: Vector2 = Vector2(0.18, 0.41)
 const GOLEM_SIT_STOMP_RADIUS_SHARE: float = 0.75
+## Die Sitzzonen wachsen genau mit dem Koerper (Nutzervorgabe 2026-11-18): ihre Kreise und der
+## Wischer nehmen Handschlag-, Trommel-Radius und Reichweite im Stand, und die wachsen ab
+## GOLEM_BODY_SCALE_HEIGHT (also immer, wenn sie sitzt) mit dem Koerper — GOLEM_BODY_*.
 ## 2. Bein strecken (links/rechts): eine Schneise vom Koerper (Hueftgelenk, so weit hinter
 ## feet_point) nach vorn bis GOLEM_SIT_KICK_TO (die gestreckte Schuhspitze liegt bei 1,03;
 ## Nutzervorgabe 2026-11-17: "muss laenger sein, aber nicht uebertreiben" — gut halb so
@@ -264,6 +272,13 @@ const GOLEM_SIT_TURN_DONE_DEG: float = 3.0
 const GOLEM_SIT_TURN_PLAN_ATTACKS: int = 3
 const GOLEM_SIT_TURN_PLAN_HEADINGS: int = 16
 const GOLEM_SIT_TURN_PLAN_PER_THINK: int = 4
+## TERRAIN BEIM SITZEN UND DREHEN (Nutzervorgabe 2026-11-18): Fuesse und Haende muessen auf Boden aufsetzen
+## (kein Void), und von der Sitzmitte bis zu jedem Aufsetzpunkt darf keine Klippe liegen, die sie beim
+## Laufen nicht nehmen koennte (Golem.giant_line_clear, GOLEM_GIANT_STEP_SHARE); Wasser zaehlt nicht.
+## Sie setzt sich nur so hin; im Sitzen dreht sie sich nur ueber Richtungen, in denen das gilt (geprueft alle
+## GOLEM_SIT_TURN_SAMPLE_DEG Grad) — notfalls den laengeren Weg herum; ist die Richtung gar nicht erreichbar,
+## dreht sie sich nicht dorthin.
+const GOLEM_SIT_TURN_SAMPLE_DEG: float = 10.0
 ## STRECKEN BEIM WACHSEN (Nutzer 2026-11-16): bei jedem Stufenaufstieg und jedem
 ## Wachstumsschritt nach Stufe 7 reckt sich der Golem einmal (Clip "grow", Sound
 ## "golem_grow"). Das kostet GOLEM_GROW_TIME Sekunden, in denen er weder
@@ -449,6 +464,9 @@ const GOLEM_TOP_LEVEL_REACH_GROWTH: float = 0.1
 ## bleibt eine BEGEHBARE Boeschung stehen (hoechstens GOLEM_FLATTEN_SLOPE Meter
 ## Anstieg je Meter), sonst graebe er sich in eine Grube mit Steilwaenden ein,
 ## aus der er selbst nicht mehr herauskaeme. Es wird nur gesenkt, nie gehoben.
+## Seit 2026-11-18 (Nutzer) ebnen ALLE Golems erst ab GOLEM_FLATTEN_MIN_HEIGHT Koerperhoehe ein
+## (Golem ab 31,3 m statt Stufe 7, Daemon ab 32 m, Genesis ab 33 m statt Stufe 4).
+const GOLEM_FLATTEN_MIN_HEIGHT: float = 30.0
 const GOLEM_FLATTEN_INTERVAL: float = 0.6
 const GOLEM_FLATTEN_MIN_SPREAD: float = 0.25
 const GOLEM_FLATTEN_SLOPE: float = 1.0
@@ -534,7 +552,19 @@ const GOLEM_GIANT_STEP_SHARE: float = 0.2
 ## Summe ihrer Koerperradien mal GOLEM_BODY_GAP Abstand; ueberlappen sie, schieben
 ## sie sich auseinander (der kleinere weicht staerker aus). Die Kollision mit
 ## normalen Einheiten bleibt ab Stufe 1 ausgeschaltet.
-const GOLEM_BODY_GAP: float = 1.0
+## 1,0 -> 0,9 (Nutzervorgabe 2026-11-18: der Kollisionsradius der Golems untereinander 10 % kleiner).
+const GOLEM_BODY_GAP: float = 0.9
+## KLEINE GOLEMS AN GROSSEN (Nutzervorgabe 2026-11-18): reicht der kleinere hoechstens bis
+## GOLEM_KNEE_HEIGHT_SHARE der Hoehe des groesseren (bis zu dessen Knien), zaehlt vom grossen nur der
+## Beinbereich: GOLEM_LEG_RADIUS_SHARE seines Koerperradius. Die Regel gilt je Paar (symmetrisch) fuer den
+## Abstand, die Zielplaetze und das Ausweichen. Beide Werte sind Schaetzwerte der Proportionen.
+const GOLEM_KNEE_HEIGHT_SHARE: float = 0.28
+const GOLEM_LEG_RADIUS_SHARE: float = 0.6
+## WASSER AB 30 m (Nutzervorgabe 2026-11-18, alle Golems): ab dieser Koerperhoehe ertrinken sie nicht
+## mehr und laufen ueber Wasser — auf dem Meeresboden (Insel bis 2 m, Seen bis 8 m tief; die Klippenregel
+## des geraden Wegs gilt dort wie an Land). Gerade Linien ueber Wasser nimmt jeder Golem ab dieser Hoehe;
+## die normale Wegsuche kennt weiter nur Land (ein Umweg ueber Wasser wird nicht gesucht).
+const GOLEM_WATER_WALK_HEIGHT: float = 30.0
 ## BEWEGUNGSFREIHEIT (Nutzer 2026-11-17): ist der Zielort eines Bewegungsbefehls von
 ## anderen Golems belegt (ihr Koerper passte dort nicht hin), gilt sie als
 ## angekommen, sobald sie bis auf GOLEM_BLOCKED_ARRIVE_BODIES eigene Koerperradien an
@@ -597,6 +627,32 @@ const GOLEM_KICK_LENGTH_SHARE_AT_MAX: float = 0.9
 ## je Schritt statt 0,75 % — vorher endete er bei 8,6 m). Die Breite der
 ## Tritt-Schneise bleibt bei 0,75 % je Schritt.
 const GOLEM_SLAM_RADIUS_AT_MAX: float = 12.0
+## FLAECHEN UND REICHWEITEN WACHSEN AB 30 m GENAU MIT DEM KOERPER (Nutzervorgabe 2026-11-18,
+## alle drei Golems): ab GOLEM_BODY_SCALE_HEIGHT nehmen reach_factor (Breite der Tritt-Schneise),
+## slam_scale (Handschlag- und Trommel-Radius), limb_factor (Reichweite, Aufschlagpunkt der Haende)
+## und kick_limb_factor (Laenge der Tritt-Schneise) die Werte des normalen Golems in seiner ersten
+## Sitzgroesse (31,3 m, GOLEM_BODY_*_AT_ANCHOR), mal Koerperbreite / GOLEM_BODY_ANCHOR_WIDTH
+## (Breite = Modellmassstab x Groesse). Darunter alles wie bisher. Gleiche Koerperanteile fuer alle
+## drei Golems (Nutzerentscheidung): der Daemonengolem ist 25 % breiter, seine Flaechen also auch;
+## Daemon und Genesis springen an der Schwelle etwas nach oben. Normaler Golem bei 80 m: Reichweite
+## 40 statt 34,5 m, Handschlag-Radius 18 statt 12 m, Schneise 10,5 statt 5,2 m breit.
+const GOLEM_BODY_SCALE_HEIGHT: float = 30.0
+const GOLEM_BODY_ANCHOR_WIDTH: float = 8.704786
+const GOLEM_BODY_REACH_FACTOR_AT_ANCHOR: float = 2.276884
+const GOLEM_BODY_SLAM_SCALE_AT_ANCHOR: float = 2.706449
+const GOLEM_BODY_LIMB_FACTOR_AT_ANCHOR: float = 5.215458
+const GOLEM_BODY_KICK_LIMB_AT_ANCHOR: float = 4.761154
+## Ab GOLEM_BODY_SCALE_HEIGHT ist die Tritt-Schneise VORN um diesen Anteil kuerzer (Nutzervorgabe
+## 2026-11-18: "auf 31,3 m vorne etwas kuerzen, 5 %" — 31,3 m: 19,2 statt 20,2 m; hinten unveraendert).
+const GOLEM_BODY_KICK_FRONT_SHARE: float = 0.95
+## EIGENE SCHNEISE JE BEIN (Nutzervorgabe 2026-11-18, wie im Sitzen): die Schneise des Tritts liegt
+## um den Abstand des Beins zur Seite versetzt — rechtes Bein (Clip kick) rechts, linkes (kick_l) links.
+## Der Abstand waechst mit dem Koerper und ist so gewaehlt, dass die beiden Schneisen sich ab
+## GOLEM_BODY_SCALE_HEIGHT in der Mitte genau beruehren (halbe Schneisenbreite bei 31,3 m); darunter ist
+## die Schneise im Verhaeltnis breiter und sie ueberlappen (gewollt). Getreten wird mit dem Bein, das
+## mehr trifft; bei Gleichstand das auf der Seite des Ziels, sonst abwechselnd. Ein Ziel genau vor ihr
+## liegt in beiden Schneisen (GOLEM_KICK_LANE_SLACK).
+const GOLEM_KICK_LANE_SLACK: float = 0.001
 ## ANGRIFFSTAKT NACH GROESSE (Nutzer 2026-11-15, ersetzt "der Takt bleibt 1,8 s"):
 ## die Abklingzeit waechst langsam mit dem Koerper — linear in der Koerperhoehe
 ## von GOLEM_STRIKE_COOLDOWN (1,8 s, Startgroesse) bis GOLEM_STRIKE_COOLDOWN_MAX
@@ -727,10 +783,14 @@ const GOLEM_SEPARATION: float = 1.0
 ##    kein Prozentwert; Nutzer 2026-11-17, vorher 1 m). Mit der 40. Stufe erreicht
 ##    er DEMON_GOLEM_MAX_HEIGHT (120 m, vorher 150 m) und zerfaellt; lebend wird
 ##    er hoechstens 119 m gross.
-##  * Kills je Wachstumsstufe: DEMON_GOLEM_GROWTH_KILLS (4), und alle
-##    DEMON_GOLEM_GROWTH_KILLS_STEP (2) Stufen einer mehr — Stufe 1-2 je 4, 3-4 je
-##    5, ... 39-40 je 23. 20 m nach 30 Kills, 32 m nach 60, Tod nach 540
-##    (bis 2026-11-17: alle 10 Stufen einer mehr, 1614 Kills bis 150 m).
+##  * Kills je Wachstumsstufe (Nutzervorgabe 2026-11-18): DEMON_GOLEM_GROWTH_KILLS (4), und alle
+##    DEMON_GOLEM_GROWTH_KILLS_STEP (2) Stufen DEMON_GOLEM_GROWTH_KILLS_ADD (2) mehr — bis zur Stufe,
+##    die ueber DEMON_GOLEM_SLOW_HEIGHT (60 m) fuehrt (20. Stufe, 62 m): Stufe 1-2 je 4, 3-4 je 6 ...
+##    19-20 je 22. Danach je Stufenpaar 2 weniger: 21-22 je 20 ... 39-40 je 2 (mindestens 1).
+##    62 m nach 260 Kills, 119 m nach 478, Tod nach 480 (bis 2026-11-18: einer mehr alle 2 Stufen,
+##    540 Kills).
+##  * Ziele: ab DEMON_GOLEM_SLOW_HEIGHT nur noch +1 alle DEMON_GOLEM_SLOW_TARGETS_STEP (2) Stufen
+##    statt +DEMON_GOLEM_GROWTH_TARGETS je Stufe (Nutzervorgabe 2026-11-18): 62 m 63, 119 m 72.
 ##  * Alles je Stufe wurde 2026-11-17 VERDREIFACHT (Leben, Dauerheilung, Schaden,
 ##    Ziele, Heilung beim Wachsen) — bei 3 m je Stufe ist der Zuwachs JE METER
 ##    derselbe wie vorher.
@@ -788,6 +848,9 @@ const DEMON_GOLEM_MAX_HEIGHT: float = 120.0
 const DEMON_GOLEM_WIDTH_FACTOR: float = 1.25
 const DEMON_GOLEM_GROWTH_KILLS: int = 4
 const DEMON_GOLEM_GROWTH_KILLS_STEP: int = 2
+const DEMON_GOLEM_GROWTH_KILLS_ADD: int = 2
+const DEMON_GOLEM_SLOW_HEIGHT: float = 60.0
+const DEMON_GOLEM_SLOW_TARGETS_STEP: int = 2
 const DEMON_GOLEM_GROWTH_MAX_HP: int = 15
 const DEMON_GOLEM_GROWTH_REGEN: float = 0.45
 const DEMON_GOLEM_DAMAGE_SHARE: float = 0.5

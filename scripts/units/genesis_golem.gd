@@ -186,15 +186,15 @@ func combat_demon_steps() -> float:
 	return combat_metres() / Balance.DEMON_GOLEM_GROWTH_HEIGHT
 
 
-func reach_factor() -> float:
+func _base_reach_factor() -> float:
 	return pow(combat_factor(), DemonGolem.area_exponent())
 
 
-func slam_scale() -> float:
+func _base_slam_scale() -> float:
 	return pow(combat_factor(), DemonGolem.slam_exponent())
 
 
-func limb_factor() -> float:
+func _base_limb_factor() -> float:
 	return limb_factor_for(combat_factor())
 
 
@@ -232,10 +232,6 @@ func tramples() -> bool:
 
 
 func ignores_unit_collision() -> bool:
-	return tramples()
-
-
-func flattens() -> bool:
 	return tramples()
 
 
@@ -575,6 +571,7 @@ func _tick_harvest(delta: float) -> void:
 		return
 	_harvest_strike = harvest_tree
 	_harvest_cooldown = cooldown_for(kind)
+	_kick_leg_locked = true   # the leg _harvest_attack chose
 	_wind_up(kind)
 
 
@@ -589,6 +586,7 @@ func _harvest_attack() -> StringName:
 	var plain: StringName = ATTACK_SLAM if stance == STANCE_CROUCH else ATTACK_KICK
 	var tm: TreeManager = _trees()
 	if harvest_area.size.x <= 0.0 or tm == null or not _tree_ok(harvest_tree):
+		kick_side = -_last_kick_side   # one tree, straight ahead: in both lanes — the legs take turns
 		return plain
 	var frame: Array[Vector3] = _heading_frame()
 	var trees: Array[TreeResource] = tm.area_trees(harvest_area, harvest_poly)
@@ -597,16 +595,25 @@ func _harvest_attack() -> StringName:
 		order = [ATTACK_SLAM, ATTACK_DRUM, ATTACK_KICK]
 	var best: StringName = plain
 	var best_value: float = 0.0
+	var best_side: float = -_last_kick_side
 	for kind in order:
-		if not _in_hit_zone(kind, harvest_tree.position, frame[0], frame[1]):
-			continue
-		var time: float = cooldown_for(kind)
-		if stance_for(kind) != stance:
-			time += 2.0 * stance_switch_time()
-		var value: float = float(harvest_trees_in_blow(kind, trees).size()) / time
-		if value > best_value + 0.0001:
-			best = kind
-			best_value = value
+		# The kick: each leg has its own lane (2026-11-18) — weigh both.
+		var sides: Array[float] = [kick_side]
+		if kind == ATTACK_KICK:
+			sides = [-_last_kick_side, _last_kick_side]
+		for s in sides:
+			kick_side = s
+			if not _in_hit_zone(kind, harvest_tree.position, frame[0], frame[1]):
+				continue
+			var time: float = cooldown_for(kind)
+			if stance_for(kind) != stance:
+				time += 2.0 * stance_switch_time()
+			var value: float = float(harvest_trees_in_blow(kind, trees).size()) / time
+			if value > best_value + 0.0001:
+				best = kind
+				best_value = value
+				best_side = s
+	kick_side = best_side
 	return best
 
 
