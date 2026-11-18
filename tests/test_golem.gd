@@ -466,8 +466,8 @@ func test_smash_takes_a_stage_off_enemy_buildings_only() -> void:
 	var before: int = hut.health
 	var struck: Dictionary = g._smash()
 	check(struck.has(hut), "the hut lies in the slam's circle")
-	check(hut.health < before and hut.destruction_stage() == 1,
-		"one strike = one destruction stage")
+	check(hut.health == before - Golem.building_damage_for(g.attack_damage(Golem.ATTACK_SLAM)),
+		"one strike = half the slam's damage in hit points (2026-11-18; %d)" % (before - hut.health))
 	# The owner's own golem never damages the owner's hut.
 	var own: Golem = _golem(w, 1, Vector3(50, 5, 46))
 	own.facing = Vector3(0, 0, 1)
@@ -477,9 +477,9 @@ func test_smash_takes_a_stage_off_enemy_buildings_only() -> void:
 	_free_world(w)
 
 
-## Ein einzelnes Gebaeude nimmt von jedem Angriff genau eine Stufe — also gewinnt
-## nach der Schadenswahl der schnellste: der Handschlag aus der gebueckten Haltung
-## (alle 1,25 s; frueher der Tritt alle 1,8 s).
+## Ein Gebaeude nimmt seit 2026-11-18 Lebenspunkte: die Haelfte dessen, was der Angriff einer Einheit
+## naehme. Gegen ein einzelnes Gebaeude gewinnt damit der Angriff mit den meisten Lebenspunkten je
+## Sekunde — auf Stufe 0 der Tritt (22 alle 1,8 s gegen 12 alle 1,25 s).
 func test_building_assault_from_outside_one_stage_per_attack() -> void:
 	var w: Dictionary = _make_world()
 	var hut: Building = w.bm.place(HUT_SCENE, w.t1, Vector2i(48, 54), 0, true)
@@ -491,18 +491,18 @@ func test_building_assault_from_outside_one_stage_per_attack() -> void:
 	while hut.health == before and ticks < 300:
 		_tick_world(w)
 		ticks += 1
-	check(hut.health < before, "the golem walks up and lands the first stage (%d ticks)" % ticks)
-	check(hut.destruction_stage() == 1, "exactly one stage")
+	var kick: int = Golem.building_damage_for(g.attack_damage(Golem.ATTACK_KICK))
+	check(hut.health == before - kick, "the golem walks up and kicks: half the kick's damage (%d ticks, %d)" % [ticks, before - hut.health])
+	check(hut.destruction_stage() == 0, "no stage yet: that takes 30 percent of its hit points")
 	check(g.state != Unit.State.RAID and g.in_world, "it strikes from OUTSIDE (never a raider)")
-	check(g.stance == Golem.STANCE_CROUCH, "she has bent down for it: the slam is the fastest attack on a building")
+	check(g.stance == Golem.STANCE_STAND, "standing: the kick takes the most hit points a second")
 	var after_first: int = hut.health
 	for i in range(11):   # 1,1 s: still reloading
 		_tick_world(w)
-	check(hut.health == after_first, "no second stage inside the slam's 1,25-s cooldown")
-	for i in range(6):   # past 1,25 s
+	check(hut.health == after_first, "no second blow inside the kick's 1,8-s cooldown")
+	for i in range(9):   # past 1,8 s
 		_tick_world(w)
-	check(hut.health < after_first and hut.destruction_stage() == 2,
-		"the second strike lands after the cooldown")
+	check(hut.health == after_first - kick, "the second blow lands after the cooldown")
 	_free_world(w)
 
 
@@ -1165,7 +1165,7 @@ func test_drum_lands_three_hits_and_is_chosen_for_big_crowds() -> void:
 				for u in crowd:
 					thrown_early = thrown_early or u.state == Unit.State.THROWN \
 						or u.state == Unit.State.ROLL
-				check(hut.destruction_stage() == 0, "hit %d: the building is not struck yet" % hit_times.size())
+				check(hut.max_health - hut.health == 7 * hit_times.size(), "hit %d: the building loses half of it, every hit (%d)" % [hit_times.size(), hut.max_health - hut.health])
 			seen = now
 	check(hit_times.size() == 3, "three hits landed (%d)" % hit_times.size())
 	if hit_times.size() == 3:
@@ -1174,7 +1174,7 @@ func test_drum_lands_three_hits_and_is_chosen_for_big_crowds() -> void:
 			"at 0,35 / 0,8 / 1,25 s (%.2f / %.2f / %.2f)" % [hit_times[0], hit_times[1], hit_times[2]])
 	check(crowd[0].health == 100000 - 42, "each unit took 42 in all")
 	check(not thrown_early, "the first two hits only hurt, nobody is thrown yet")
-	check(hut.destruction_stage() == 1, "the last hit takes the building's stage")
+	check(hut.max_health - hut.health == 21, "the building lost 3 x 7 hit points (2026-11-18)")
 	check(g._pending_attack == &"", "after the third hit the drum is over")
 	_free_world(w)
 	# Weak targets: the quick slam (no overkill counted).
@@ -1862,8 +1862,8 @@ func test_aggro_radius_grows_with_the_body_up_to_a_cap() -> void:
 	_free_world(w)
 
 
-## Handschlag auch gegen Gebaeude: stehen drei feindliche Gebaeude in seiner
-## Flaeche, schlaegt er (alle drei verlieren eine Stufe), statt eines zu treten.
+## Bodenangriff auch gegen Gebaeude: stehen mehrere feindliche Gebaeude in seiner Flaeche, bueckt sie
+## sich (jedes nimmt Lebenspunkte), statt eines zu treten.
 func test_slam_is_chosen_when_three_buildings_stand_in_its_area() -> void:
 	var w: Dictionary = _make_world()
 	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
@@ -1874,15 +1874,16 @@ func test_slam_is_chosen_when_three_buildings_stand_in_its_area() -> void:
 	# This is about slam against kick; with the stomp on offer she would open with
 	# it here (see test_attack_choice_weighs_the_stomp_as_a_plan).
 	g.stomp_enabled = false
-	check(g._choose_attack() == Golem.ATTACK_SLAM,
-		"two buildings beside her, none in the kick's lane: the slam (the drum takes longer for the same stage)")
+	check(Golem.stance_for(g._choose_attack()) == Golem.STANCE_CROUCH,
+		"two buildings beside her, none in the kick's lane: a ground attack (%s)" % g._choose_attack())
 	var c: Building = w.bm.place(HUT_SCENE, w.t1, Vector2i(48, 53), 0, true)
 	check(c != null, "a third hut in front of her")
 	check(g._buildings_in_area(Golem.ATTACK_SLAM).size() == 3, "all three lie in the slam's area")
-	check(g._choose_attack() == Golem.ATTACK_SLAM, "three buildings: she slams — three stages against one for the kick")
+	check(Golem.stance_for(g._choose_attack()) == Golem.STANCE_CROUCH, "three buildings: a ground attack, not the kick (%s)" % g._choose_attack())
+	var bd: int = Golem.building_damage_for(g.attack_damage(Golem.ATTACK_SLAM))
 	g._smash()
-	check(a.destruction_stage() == 1 and b.destruction_stage() == 1 and c.destruction_stage() == 1,
-		"the slam takes one stage off each of the three")
+	check(a.max_health - a.health == bd and b.max_health - b.health == bd and c.max_health - c.health == bd,
+		"the slam takes its hit points off each of the three")
 	# One building in front and two enemies beside her: a ground attack beats the kick.
 	var w2: Dictionary = _make_world()
 	var g2: Golem = _golem(w2, 0, Vector3(50, 5, 50))
@@ -2043,7 +2044,7 @@ func test_target_cap_limits_every_damage_tick() -> void:
 	for b4 in braves4:
 		if b4.health < 100000:
 			hit4 += 1
-	check(hut4.destruction_stage() == 1 and hit4 == 4,
+	check(hut4.health < hut4.max_health and hit4 == 4,
 		"attacking the hut: it is always struck and takes one slot, 4 units fill the rest (struck %d)" % hit4)
 	_free_world(w4)
 	# --- trampling: at most max_targets per second -----------------------------------
@@ -2143,10 +2144,16 @@ func _three_huts(w: Dictionary) -> Building:
 ## 0,35 s und alle 1,25 s wieder — statt 0,8 s Ausholen im 1,8-s-Takt.
 func test_stance_crouching_makes_the_ground_attacks_faster() -> void:
 	var w: Dictionary = _make_world()
-	var front: Building = _three_huts(w)
 	var g: Golem = _golem(w, 0, Vector3(50, 5, 50.8))
 	g.facing = Vector3(0, 0, 1)
 	g.stomp_enabled = false   # the plain stance change is tested here; with the stomp she would jump into the crouch
+	# Foes of 30 HP beside the kick's lanes, in the slam's circle: the quick slam (no overkill) wins —
+	# since 2026-11-18 buildings no longer make the case (they take hit points now).
+	var crowd: Array = []
+	for i in range(5):   # five: the slam's cap (with six the drum's bigger cap would win)
+		var side: float = 1.0 if i % 2 == 0 else -1.0
+		crowd.append(_foe(w, 50.0 + side * (1.6 + 0.3 * float(i / 2)), 52.2 + 0.2 * float(i / 2), 30))
+	var front: Unit = crowd[0]
 	check(g.stance == Golem.STANCE_STAND and Golem.stance_for(Golem.ATTACK_SLAM) == Golem.STANCE_CROUCH
 		and Golem.stance_for(Golem.ATTACK_DRUM) == Golem.STANCE_CROUCH
 		and Golem.stance_for(Golem.ATTACK_KICK) == Golem.STANCE_STAND
@@ -2158,11 +2165,11 @@ func test_stance_crouching_makes_the_ground_attacks_faster() -> void:
 		Balance.GOLEM_SLAM_COOLDOWN, "the crouched slam comes back after 1,25 s")
 	check(Balance.GOLEM_SLAM_COOLDOWN == 1.25, "the documented 1,25 s")
 	check(g.status_text().contains("Haltung: stehend"), "the panel shows the stance")
-	g.order_attack_building(front)
+	g.order_attack(front)
 	var t: float = 0.0
 	var bent_at: float = -1.0
 	var hits: Array = []
-	var stage: int = 0
+	var left: int = 5 * 30
 	var saw_switch_without_attack: bool = false
 	for i in range(60):
 		_tick_world(w)
@@ -2171,19 +2178,21 @@ func test_stance_crouching_makes_the_ground_attacks_faster() -> void:
 			saw_switch_without_attack = true
 		if bent_at < 0.0 and g.stance == Golem.STANCE_CROUCH:
 			bent_at = t
-		if is_instance_valid(front) and front.destruction_stage() > stage:
-			stage = front.destruction_stage()
+		var now: int = 0
+		for u in crowd:
+			now += maxi(u.health, 0) if is_instance_valid(u) else 0
+		if now < left:
+			left = now
 			hits.append(t)
-		if hits.size() >= 3:
+		if hits.size() >= 2:
 			break
-	check(saw_switch_without_attack, "three buildings in the area: she bends down first, without striking yet")
-	check(hits.size() >= 3, "then the slams land (%d)" % hits.size())
-	if hits.size() >= 3:
+	check(saw_switch_without_attack, "foes in the slam's circle only: she bends down first, without striking yet")
+	check(hits.size() >= 2, "then the slams land (%d)" % hits.size())
+	if hits.size() >= 2:
 		check_near(hits[0] - bent_at, Balance.GOLEM_SLAM_WINDUP,
 			"the first slam lands 0,35 s after she is down (%.2f)" % (hits[0] - bent_at), TICK * 1.5)
 		check_near(hits[1] - hits[0], g.cooldown_for(Golem.ATTACK_SLAM),
-			"the next ones follow every 1,25 s — no bending in between (%.2f)" % (hits[1] - hits[0]), TICK * 1.5)
-		check_near(hits[2] - hits[1], g.cooldown_for(Golem.ATTACK_SLAM), "and again", TICK * 1.5)
+			"the next one follows after 1,25 s — no bending in between (%.2f)" % (hits[1] - hits[0]), TICK * 1.5)
 	check(g.stance == Golem.STANCE_CROUCH and g.status_text().contains("Haltung: gebückt"),
 		"she stays crouched between the slams")
 	check_near(g._slope_speed(0.0), 0.0, "crouched she cannot walk")
@@ -2660,10 +2669,10 @@ func test_stomp_strikes_half_again_as_many_targets_and_buildings() -> void:
 	var b_hut: Building = w2.bm.place(HUT_SCENE, w2.t1, Vector2i(45, 48), 0, true)
 	var far_hut: Building = w2.bm.place(HUT_SCENE, w2.t1, Vector2i(48, 56), 0, true)
 	check(g2._buildings_in_area(Golem.ATTACK_STOMP).size() == 2, "two huts stand inside the stomp's circle, the third does not")
-	check(Balance.GOLEM_STOMP_BUILDING_STAGES == 1, "a building loses one stage, as with every attack")
+	var sd: int = Golem.building_damage_for(g2.attack_damage(Golem.ATTACK_STOMP))
 	g2._land_attack(Golem.ATTACK_STOMP)
-	check(a_hut.destruction_stage() == 1 and b_hut.destruction_stage() == 1 and far_hut.destruction_stage() == 0,
-		"both lose a stage, the hut farther away none")
+	check(a_hut.max_health - a_hut.health == sd and b_hut.max_health - b_hut.health == sd and far_hut.health == far_hut.max_health,
+		"both lose half the stomp's damage in hit points (2026-11-18), the hut farther away nothing")
 	_free_world(w2)
 	_free_world(w)
 
@@ -2772,61 +2781,70 @@ func test_attack_choice_weighs_the_stomp_as_a_plan() -> void:
 	check(g._choose_attack() == Golem.ATTACK_KICK, "so she kicks")
 	far.health = 0
 	far.state = Unit.State.DEAD
-	# Two enemy huts beside her, inside the stomp's circle and inside the slam's.
-	w.bm.place(HUT_SCENE, w.t1, Vector2i(51, 48), 0, true)
-	w.bm.place(HUT_SCENE, w.t1, Vector2i(45, 48), 0, true)
+	# Ten weak foes (4 HP) close around her — inside the stomp's circle and the slam's. (Until
+	# 2026-11-18 two huts made the case; buildings take hit points now and the stomp's few points
+	# hardly scratch them.)
+	for i in range(10):
+		var a: float = TAU * float(i) / 10.0
+		_foe(w, 50.0 + cos(a) * 0.9, 50.0 + sin(a) * 0.9, 4)
 	var lead: float = g.attack_worth(Golem.ATTACK_STOMP)
-	var slam: float = g.attack_worth(Golem.ATTACK_SLAM)
-	check_near(lead, 60.0, "two huts in the stomp's circle are worth 2 x 30")
-	check_near(slam, 60.0, "and as much to the slam")
-	var plan: float = (lead + 3.0 * slam) / (1.0 + 3.0 * 1.25)
-	check_near(g.stomp_plan_value(), plan, "stomp, then three slams: %.1f per second" % plan)
-	check_near(g.attack_value(Golem.ATTACK_STOMP), plan, "attack_value reports the plan")
-	check(plan > g.attack_value(Golem.ATTACK_SLAM),
-		"that beats bending down first (%.1f against %.1f)" % [plan, g.attack_value(Golem.ATTACK_SLAM)])
+	check_near(lead, 10.0 * float(g.attack_damage(Golem.ATTACK_STOMP)), "the stomp strikes all ten")
+	var n: float = float(Balance.GOLEM_STANCE_PLAN_ATTACKS)
+	var plan: float = 0.0
+	for kind in [Golem.ATTACK_SLAM, Golem.ATTACK_DRUM]:
+		plan = maxf(plan, (lead + n * g.attack_worth(kind)) / (maxf(g.cooldown_for(Golem.ATTACK_STOMP), g.turn_time_needed()) + n * g.cooldown_for(kind)))
+	check(g.stomp_plan_value() >= plan - 0.0001, "stomp, then three ground attacks: %.1f per second" % plan)
+	check_near(g.attack_value(Golem.ATTACK_STOMP), g.stomp_plan_value(), "attack_value reports the plan")
+	check(g.stomp_plan_value() > g.attack_value(Golem.ATTACK_SLAM) and g.stomp_plan_value() > g.attack_value(Golem.ATTACK_DRUM),
+		"that beats bending down first")
 	check(g._choose_attack() == Golem.ATTACK_STOMP, "she opens with the stomp")
 	g._stance_age = 0.0
-	check(g._choose_attack() == Golem.ATTACK_SLAM, "right after a stance change she does not jump: the slam")
+	check(g._choose_attack() != Golem.ATTACK_STOMP, "right after a stance change she does not jump")
 	g._stance_age = 1000.0
 	g.stomp_enabled = false
-	check(g._choose_attack() == Golem.ATTACK_SLAM, "switched off: the slam")
+	check(g._choose_attack() != Golem.ATTACK_STOMP, "switched off: no stomp")
 	g.stomp_enabled = true
 	g.stance = Golem.STANCE_CROUCH
-	check(g._choose_attack() == Golem.ATTACK_SLAM, "crouched the stomp is not on offer")
+	check(g._choose_attack() != Golem.ATTACK_STOMP, "crouched the stomp is not on offer")
 	_free_world(w)
 
 
-## Im Ablauf: zwischen zwei Huetten oeffnet sie mit dem Sprung (beide verlieren
-## eine Stufe), bleibt unten und schlaegt mit dem Handschlag weiter — ohne einen
-## einzigen Haltungswechsel.
+## Im Ablauf: zwischen schwachen Feinden oeffnet sie mit dem Sprung, bleibt unten und schlaegt mit einem
+## Bodenangriff weiter — ohne einen einzigen Haltungswechsel. (Bis 2026-11-18 mit zwei Huetten.)
 func test_stomp_opens_the_assault_and_the_slams_follow_without_a_switch() -> void:
 	var w: Dictionary = _make_world()
 	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
 	g.facing = Vector3(0, 0, 1)
-	var a_hut: Building = w.bm.place(HUT_SCENE, w.t1, Vector2i(51, 48), 0, true)
-	var b_hut: Building = w.bm.place(HUT_SCENE, w.t1, Vector2i(45, 48), 0, true)
-	g.order_attack_building(a_hut)
+	var ring: Array = []
+	for i in range(10):
+		var a: float = TAU * float(i) / 10.0
+		ring.append(_foe(w, 50.0 + cos(a) * 0.9, 50.0 + sin(a) * 0.9, 4))
+	g.order_attack(ring[0])
 	var saw_stomp: bool = false
-	var saw_slam: bool = false
+	var saw_ground: bool = false
 	var saw_switch: bool = false
-	var both_after_stomp: bool = false
+	var hurt_by_stomp: bool = false
 	for i in range(70):
 		_tick_world(w)
 		if g._pending_attack == Golem.ATTACK_STOMP:
 			saw_stomp = true
-		if g._pending_attack == Golem.ATTACK_SLAM:
-			saw_slam = true
+		if g._pending_attack == Golem.ATTACK_SLAM or g._pending_attack == Golem.ATTACK_DRUM:
+			saw_ground = true
 		if g.is_switching_stance():
 			saw_switch = true
-		if saw_stomp and not saw_slam and g._pending_attack == &"" and not both_after_stomp \
-				and is_instance_valid(a_hut) and is_instance_valid(b_hut):
-			both_after_stomp = a_hut.destruction_stage() == 1 and b_hut.destruction_stage() == 1
-		if not is_instance_valid(a_hut) or a_hut.destruction_stage() >= 3:
+		if saw_stomp and not saw_ground and g._pending_attack == &"" and not hurt_by_stomp:
+			hurt_by_stomp = true
+			for u in ring:
+				hurt_by_stomp = hurt_by_stomp and is_instance_valid(u) and u.health < 4
+		var alive: int = 0
+		for u in ring:
+			if is_instance_valid(u) and u.state != Unit.State.DEAD:
+				alive += 1
+		if alive == 0:
 			break
 	check(saw_stomp, "she opens with the stomp")
-	check(both_after_stomp, "its landing takes a stage off both huts")
-	check(saw_slam and not saw_switch, "then she slams from the crouch — no stance switch at all")
-	check(not is_instance_valid(a_hut) or a_hut.destruction_stage() >= 3, "and the hut goes down stage by stage")
+	check(hurt_by_stomp, "its landing hurts all ten")
+	check(saw_ground and not saw_switch, "then she strikes from the crouch — no stance switch at all")
 	_free_world(w)
 
 
@@ -4082,8 +4100,8 @@ func test_sit_big_attacks_take_both_channels() -> void:
 	_free_world(w)
 
 
-## Sitzangriffe treffen feindliche Gebaeude: ein Treffer = eine Zerstoerungsstufe (wie im
-## Stand, Nutzervorgabe 2026-11-17); eigene nie.
+## Sitzangriffe treffen feindliche Gebaeude: seit 2026-11-18 mit Lebenspunkten, der Haelfte dessen, was der
+## Angriff einer Einheit naehme (wie im Stand); eigene nie.
 func test_sit_attacks_take_a_stage_off_enemy_buildings_only() -> void:
 	var w: Dictionary = _make_world()
 	var g: Golem = _seated(w)
@@ -4096,10 +4114,28 @@ func test_sit_attacks_take_a_stage_off_enemy_buildings_only() -> void:
 	check(c.building_in_area(GolemSitCombat.STOMP_L, hut), "the left foot's circle touches the enemy hut")
 	var own_hp: int = own.health
 	_tick_golem_until(g, func() -> bool: return not c.last_struck_buildings.is_empty())
-	check(hut.destruction_stage() == 1, "one strike = one destruction stage (%d)" % hut.destruction_stage())
+	var kind: StringName = c.last_struck_buildings.keys()[0]
+	check(hut.max_health - hut.health == Golem.building_damage_for(c.damage(kind)),
+		"one strike = half its damage in hit points (%s: %d)" % [kind, hut.max_health - hut.health])
 	for k in c.last_struck_buildings:
 		check(not (c.last_struck_buildings[k] as Array).has(own), "never her own building (%s)" % k)
 	check(own.health == own_hp, "her own hut is untouched")
+	_free_world(w)
+
+
+## Fahrzeuge im Sitzen (Nutzervorgabe 2026-11-18): die Sitzangriffe treffen feindliche Bodenfahrzeuge wie die
+## Schlaege der Riesin im Stand — das Katapult ist sofort hin. (Luftschiffe nie.)
+func test_sit_attacks_wreck_enemy_ground_vehicles() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _seated(w)
+	var c: GolemSitCombat = g.sit_combat
+	var sl: Vector3 = c.stomp_point(1.0)
+	var cat: Unit = _spawn(w, CATAPULT_SCENE, 1, Vector3(sl.x, 5, sl.z))
+	var own: Unit = _spawn(w, CATAPULT_SCENE, 0, Vector3(c.stomp_point(-1.0).x, 5, c.stomp_point(-1.0).z))
+	check(c.in_area(GolemSitCombat.STOMP_L, cat.position), "(an enemy catapult in the left foot's circle)")
+	_tick_golem_until(g, func() -> bool: return not is_instance_valid(cat) or cat.state == Unit.State.DEAD, 60)
+	check(not is_instance_valid(cat) or cat.state == Unit.State.DEAD, "the stomp wrecks it")
+	check(is_instance_valid(own) and own.state != Unit.State.DEAD, "her own catapult is spared")
 	_free_world(w)
 
 
@@ -4199,8 +4235,8 @@ func test_sitting_she_turns_toward_an_enemy_building() -> void:
 	_free_world(w)
 
 
-## Der Po-Klatscher braucht kein Anvisieren (Nutzervorgabe 2026-11-18): waehrend sie sich zu
-## einem fernen Feind dreht, kommt er trotzdem fuer einen Feind unter ihr.
+## Waehrend des Drehens kein Angriff, es sei denn, die Lage aendert sich (Nutzervorgabe 2026-11-18):
+## laeuft ihr ein Feind unter den Po, hoert sie auf zu drehen und greift an.
 func test_sitting_the_po_clap_comes_while_she_turns() -> void:
 	var w: Dictionary = _make_world()
 	var g: Golem = _seated(w)
@@ -4211,8 +4247,10 @@ func test_sitting_the_po_clap_comes_while_she_turns() -> void:
 	var under: Vector3 = g.position + g.heading() * 1.0
 	var near: Unit = _foe(w, under.x, under.z, 100000)
 	check(c.in_area(GolemSitCombat.HOP, near.position), "a foe under her, in the po clap's circle")
-	_tick_golem_until(g, func() -> bool: return c.pending[GolemSitCombat.CH_LEGS] == GolemSitCombat.HOP, 20)
-	check(c.pending[GolemSitCombat.CH_LEGS] == GolemSitCombat.HOP and c.turning, "the po clap comes while she still turns")
+	_tick_golem_until(g, func() -> bool: return not c.turning, 10)
+	check(not c.turning, "the situation changed: she stops turning")
+	_tick_golem_until(g, func() -> bool: return c.is_busy(), 10)
+	check(c.is_busy() and not c.turning, "and strikes the foe under her (%s)" % str(c.pending))
 	check(far.health == 100000, "(the far one untouched)")
 	_free_world(w)
 
@@ -4445,8 +4483,8 @@ func test_seated_she_turns_only_through_possible_headings() -> void:
 	var way: Dictionary = c.turn_way(at.call(90.0), c.free_arc())
 	check(way.sign == -1.0 and absf(rad_to_deg(float(way.angle)) - 270.0) < 0.5,
 		"to +90 degrees she turns the long way round (%s)" % str(way))
-	# A foe out at +90 degrees, beyond every zone: she turns toward it — the long way.
-	var foe_at: Vector3 = g.position + at.call(90.0) * 45.0
+	# A foe out at +90 degrees, beyond every zone but within their scan: she turns toward it — the long way.
+	var foe_at: Vector3 = g.position + at.call(90.0) * 30.0
 	_foe(w, foe_at.x, foe_at.z, 100000)
 	_tick_golem_until(g, func() -> bool: return c.turning, 20)
 	check(c.turning and c._turn_sign == -1.0, "she turns the long way round toward the foe")
@@ -4471,7 +4509,7 @@ func test_seated_she_does_not_turn_toward_an_impossible_heading() -> void:
 	_set_ground(w, pillar, 1.0, 45.0)
 	check(not g.sit_heading_ok(east), "facing +x her hand would rest on the pillar")
 	check(c.turn_way(east, c.free_arc()).sign == 0.0, "so she cannot turn there")
-	var foe_at: Vector3 = g.position + east * 45.0
+	var foe_at: Vector3 = g.position + east * 30.0
 	_foe(w, foe_at.x, foe_at.z, 100000)
 	for i in range(20):
 		g.tick(TICK)
@@ -4503,6 +4541,114 @@ func test_a_knee_high_golem_meets_only_the_big_ones_legs() -> void:
 	for i in range(20):
 		small._tick_golem_separation(TICK)
 	check(small.position.distance_to(at) < 0.01, "standing at her legs, the small one is not pushed away")
+	_free_world(w)
+
+
+## Kein grundloses Drehen (Bugmeldung 2026-11-18): zu einem Feind, den nach dem Drehen keine Zone
+## erreichen koennte, dreht sie sich nicht.
+func test_seated_she_does_not_turn_toward_a_foe_no_zone_could_reach() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _seated(w)
+	var c: GolemSitCombat = g.sit_combat
+	var far: Vector3 = g.position + Vector3(1, 0, 0) * (c._scan_radius() + 8.0)
+	check(_flat(far, g.position) < g.aggro_radius(), "(the foe stands within her aggro radius)")
+	_foe(w, far.x, far.z, 100000)
+	for i in range(30):
+		g.tick(TICK)
+	check(not c.turning and g.heading().angle_to(Vector3(0, 0, 1)) < 0.01, "beyond every zone: she does not turn")
+	_free_world(w)
+
+
+## Wird die Sitzlage unmoeglich (gewachsen, Boden veraendert), dreht sie sich, bis sie wieder sitzen
+## kann — gibt es keine moegliche Richtung, steht sie auf (Nutzervorgabe 2026-11-18).
+func test_seated_she_turns_out_of_an_impossible_pose_or_gets_up() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _seated(w)
+	var c: GolemSitCombat = g.sit_combat
+	var foot: Vector3 = g.sit_contacts(g.position, g.heading())[0]
+	_set_ground(w, foot, 0.5, 45.0)
+	check(not g.sit_heading_ok(g.heading()), "a pillar under her foot: this pose is impossible now")
+	_tick_golem_until(g, func() -> bool: return c.turning, 10)
+	check(c.turning and c._turn_escape, "she turns out of it")
+	_tick_golem_until(g, func() -> bool: return not c.turning, 300)
+	check(g.sit_heading_ok(g.heading()) and g.is_sitting(), "and sits where she can")
+	_free_world(w)
+	# All round impossible: a wall where her feet and hands rest, in every direction.
+	var w2: Dictionary = _make_world()
+	var g2: Golem = _seated(w2)
+	var c2: GolemSitCombat = g2.sit_combat
+	var near_r: float = INF
+	var far_r: float = 0.0
+	for p in g2.sit_contacts(g2.position, g2.heading()):
+		near_r = minf(near_r, _flat(p, g2.position))
+		far_r = maxf(far_r, _flat(p, g2.position))
+	var td: TerrainData = w2.td
+	for vz in range(td.verts):
+		for vx in range(td.verts):
+			var d: float = Vector2(float(vx) - g2.position.x, float(vz) - g2.position.z).length()
+			if d >= near_r - 1.0 and d <= far_r + 1.0:
+				td.heights[vz * td.verts + vx] = 45.0
+	check(not g2.sit_heading_ok(g2.heading()), "(a wall all round)")
+	for i in range(10):
+		g2.tick(TICK)
+	check(not g2._wants_sit, "no heading works: she gets up")
+	_free_world(w2)
+
+
+## Dreht sie sich fuer einen besseren Plan, kommt zwischendurch kein Angriff (Nutzervorgabe 2026-11-18).
+func test_seated_she_does_not_strike_while_she_turns() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _seated(w)
+	var c: GolemSitCombat = g.sit_combat
+	var fwd: Vector3 = g.heading()
+	var turned: Vector3 = Vector3(fwd.z, 0.0, -fwd.x)
+	var saved: Vector3 = g._heading
+	g._heading = turned
+	var there: Vector3 = c.stomp_point(1.0)
+	g._heading = saved
+	for i in range(6):
+		var a: float = TAU * float(i) / 6.0
+		_foe(w, there.x + cos(a), there.z + sin(a), 100000)
+	_tick_golem_until(g, func() -> bool: return c.turning, 40)
+	check(c.turning, "six foes a quarter turn away: she turns")
+	var struck: bool = false
+	var ticks: int = 0
+	while c.turning and ticks < 300:
+		g.tick(TICK)
+		ticks += 1
+		struck = struck or (c.turning and c.is_busy())
+	check(not struck, "no attack on the way")
+	_free_world(w)
+
+
+## Bugmeldung 2026-11-18: sie drehte manchmal genau falsch herum. Laeuft das Ziel, zu dem sie sich
+## dreht, auf die andere Seite ihrer Blickrichtung, dreht sie den kurzen Weg dorthin — nicht weiter
+## die ganze Runde in der ersten Richtung.
+func test_seated_she_turns_the_short_way_when_the_target_crosses() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _seated(w)
+	var c: GolemSitCombat = g.sit_combat
+	var at: Callable = func(deg: float) -> Vector3:
+		var a: float = deg_to_rad(deg)
+		return Vector3(sin(a), 0.0, cos(a))
+	var p: Vector3 = g.position + at.call(60.0) * 30.0
+	var foe: Unit = _foe(w, p.x, p.z, 100000)
+	_tick_golem_until(g, func() -> bool: return c.turning, 20)
+	check(c.turning and c._turn_sign > 0.0, "she turns toward +60 degrees")
+	for i in range(5):
+		g.tick(TICK)
+	var q: Vector3 = g.position + at.call(-40.0) * 30.0
+	foe.position = q
+	foe._sync_soa_pos()
+	var worst: float = 0.0
+	for i in range(300):
+		g.tick(TICK)
+		var a: float = rad_to_deg(atan2(g.heading().x, g.heading().z))
+		worst = maxf(worst, absf(a))
+		if not c.turning:
+			break
+	check(worst < 90.0, "it ran across to -40 degrees: she turns back the short way (never past %.0f degrees)" % worst)
+	check(g.heading().angle_to(at.call(-40.0)) < deg_to_rad(5.0), "and faces it")
 	_free_world(w)
 
 

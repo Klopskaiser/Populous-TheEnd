@@ -351,11 +351,11 @@ func test_a_building_he_brings_down_gives_half_its_cost_in_wood() -> void:
 	var hut: Building = w.bm.place(HUT_SCENE, w.t1, Vector2i(52, 52), 0, true)
 	var cost: int = hut.wood_cost
 	check(GenesisGolem.building_wood(hut) == cost / 2, "half the cost, rounded down (%d of %d)" % [cost / 2, cost])
-	g._strike_building(hut, 1)
+	g._strike_building(hut, Golem._stage_hp(hut))
 	check(g.total_wood() == 0, "a blow that leaves it standing brings nothing")
 	for i in range(6):
 		if is_instance_valid(hut) and hut.health > 0:
-			g._strike_building(hut, 1)
+			g._strike_building(hut, Golem._stage_hp(hut))
 	check(not is_instance_valid(hut) or hut.health <= 0, "the hut is down")
 	check(g.total_wood() == cost / 2, "and half its cost is his (%d)" % g.total_wood())
 	check(g._wood_idle == 0.0, "new wood restarts the idle clock")

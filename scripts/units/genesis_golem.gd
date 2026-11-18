@@ -653,9 +653,9 @@ func _land_attack(kind: StringName, hit: int = 0) -> Dictionary:
 
 ## A building he brings down leaves him wood: half of what it cost to build,
 ## rounded down (user spec 2026-11-17).
-func _strike_building(b, stages: int = Balance.GOLEM_BUILDING_STAGES) -> void:
+func _strike_building(b, amount: int) -> void:
 	var gain: int = building_wood(b)
-	super._strike_building(b, stages)
+	super._strike_building(b, amount)
 	if not is_instance_valid(b) or b.health <= 0:
 		add_wood(gain)
 

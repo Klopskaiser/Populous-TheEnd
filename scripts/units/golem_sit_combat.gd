@@ -72,6 +72,11 @@ var _turn_targets: Array = []
 ## for the direction of the angle (atan2(x, z)), and the heading she turns to.
 var _turn_sign: float = 0.0
 var _turn_want: Vector3 = Vector3.ZERO
+## Whether she turns out of a pose that has become impossible (grown, or the ground changed:
+## _escape_pose).
+var _turn_escape: bool = false
+## Enemy ground vehicles around her, fetched with every search for foes (_foes_around).
+var _vehicles: Array = []
 var _sweep_sign: float = 0.0
 var _arc: Vector2 = Vector2(TAU, TAU)
 ## The round over the other headings (_turn_sweep): next one to weigh (0 = none running), the
@@ -463,7 +468,7 @@ func tick(delta: float) -> void:
 			_think = 0.0
 		else:
 			var want: Vector3 = _flat(goal - g.position)
-			if want.length_squared() > 0.0001:
+			if want.length_squared() > 0.0001 and not _turn_escape:
 				_turn_want = want.normalized()   # follow it while it moves
 			var next: Vector3 = Vector3.ZERO if g.is_turned_to(_turn_want, Balance.GOLEM_SIT_TURN_DONE_DEG) else _turn_step()
 			if next == Vector3.ZERO:
@@ -478,17 +483,21 @@ func tick(delta: float) -> void:
 				_think -= delta
 				if _think <= 0.0:
 					_think = THINK_INTERVAL
-					if _turn_goal == null and not _turn_still_pays():
-						g.facing = g.heading()   # the plan she turned for is no longer worth it
+					# No attack while she turns (user spec 2026-11-18: the turn was chosen by the damage
+					# reckoning) — unless the situation changes: then she stops and chooses anew.
+					if not _turn_escape and _situation_changed():
+						g.facing = g.heading()
 						g.sit_turn_tick()
 						_end_turn()
 						return
-					_hop_while_turning()
 				return
 	_think -= delta
 	if _think > 0.0:
 		return
 	_think = THINK_INTERVAL
+	if not is_busy() and not g.sit_heading_ok(g.heading()):
+		_escape_pose()
+		return
 	_choose()
 
 
@@ -512,7 +521,7 @@ func _choose() -> void:
 		return
 	var foes: Array[Unit] = _foes_around()
 	var builds: Array = _buildings_around()
-	if foes.is_empty() and builds.is_empty():
+	if foes.is_empty() and builds.is_empty() and _vehicles.is_empty():
 		if not is_busy():
 			_maybe_turn(foes)   # maybe a building further off
 		return
@@ -547,6 +556,7 @@ func _scan_radius() -> float:
 ## turn toward (aggro radius around the seat).
 func _foes_around() -> Array[Unit]:
 	var out: Array[Unit] = []
+	_vehicles = _vehicles_around()   # (every choice starts here: the vehicles come fresh with it)
 	if g.path_service == null:
 		return out
 	var radius: float = maxf(g.aggro_radius(), _scan_radius())
@@ -556,6 +566,39 @@ func _foes_around() -> Array[Unit]:
 		if not u.is_targetable() or u.is_airborne() or u is CrewedVehicle:
 			continue
 		out.append(u)
+	return out
+
+
+## Enemy GROUND vehicles near enough for a sit attack (user spec 2026-11-18: seated every golem
+## strikes them, as the giant does standing; airships no). Each strike is a hit with the vehicle's
+## own damage steps (Golem._crush_vehicle).
+func _vehicles_around() -> Array:
+	var out: Array = []
+	if g.path_service == null:
+		return out
+	for u in g.path_service.get_units_in_radius(g.position, _scan_radius()):
+		if not (u is CrewedVehicle) or u is Airship or not is_instance_valid(u) or u.state == Unit.State.DEAD:
+			continue
+		if u.tribe_id != g.tribe_id:
+			out.append(u)
+	return out
+
+
+## The vehicles among `vehicles` the attack `kind` strikes: in its area, the nearest to the impact
+## first, in the places of the target cap the units left free.
+func vehicles_struck(kind: StringName, vehicles: Array, units_hit: int) -> Array:
+	var free: int = max_targets(kind) - units_hit
+	var out: Array = []
+	if free <= 0:
+		return out
+	for v in vehicles:
+		if is_instance_valid(v) and v.state != Unit.State.DEAD and in_area(kind, v.position):
+			out.append(v)
+	var centre: Vector3 = impact_point(kind)
+	out.sort_custom(func(a, b) -> bool:
+		return _flat(a.position - centre).length_squared() < _flat(b.position - centre).length_squared())
+	if out.size() > free:
+		out.resize(free)
 	return out
 
 
@@ -597,16 +640,17 @@ func _best_of(kinds: Array, foes: Array[Unit], builds: Array = [], min_big: int 
 	var best: Dictionary = {}
 	for kind in kinds:
 		var hit: Array[Unit] = victims(kind, Vector3.INF, foes)
-		var hit_b: Array = buildings_struck(kind, builds, hit.size())
-		if hit.is_empty() and hit_b.is_empty():
+		var hit_v: Array = vehicles_struck(kind, _vehicles, hit.size())
+		var hit_b: Array = buildings_struck(kind, builds, hit.size() + hit_v.size())
+		if hit.is_empty() and hit_v.is_empty() and hit_b.is_empty():
 			continue
-		if channels_of(kind).size() == 2 and hit.size() + hit_b.size() < min_big:
+		if channels_of(kind).size() == 2 and hit.size() + hit_v.size() + hit_b.size() < min_big:
 			continue   # the big ones are area attacks
-		var v: float = _value(kind, hit, hit_b)
+		var v: float = _value(kind, hit, hit_b, hit_v)
 		var near: float = _spread(kind, hit, hit_b)
 		var bv: float = float(best.get("value", 0.0))
 		if v > bv + 0.000001 or (absf(v - bv) <= 0.000001 and near < float(best.get("near", INF))):
-			best = {"kind": kind, "at": Vector3.INF, "value": v, "near": near, "hit": hit, "hit_b": hit_b}
+			best = {"kind": kind, "at": Vector3.INF, "value": v, "near": near, "hit": hit, "hit_b": hit_b, "hit_v": hit_v}
 	return best
 
 
@@ -623,9 +667,13 @@ func _spread(kind: StringName, hit: Array[Unit], hit_b: Array = []) -> float:
 
 ## Damage per second the attack would bring: what it strikes (no overkill, target
 ## cap; a building counts GOLEM_STRUCTURE_VALUE) over its cooldown.
-func _value(kind: StringName, hit: Array[Unit], hit_b: Array = []) -> float:
+func _value(kind: StringName, hit: Array[Unit], hit_b: Array = [], hit_v: Array = []) -> float:
 	var dmg: int = damage(kind)
-	var sum: float = Balance.GOLEM_STRUCTURE_VALUE * float(hit_b.size())
+	var sum: float = Balance.GOLEM_STRUCTURE_VALUE * float(hit_v.size())
+	var to_building: int = Golem.building_damage_for(dmg)
+	for b in hit_b:
+		if is_instance_valid(b):
+			sum += float(mini(to_building, b.health))
 	for u in hit:
 		sum += float(mini(dmg, u.health))
 	return sum / maxf(cooldown_of(kind), 0.05)
@@ -686,8 +734,9 @@ func _wind_up(kind: StringName, at: Vector3) -> void:
 	g.sit_attack_started(kind, t)
 
 
-## The landing: every unit struck takes the damage, every building struck loses ONE
-## destruction stage (like the standing attacks; a building brought down is a kill).
+## The landing: every unit struck takes the damage, every ground vehicle struck a hit of its own
+## damage steps, every building struck GOLEM_BUILDING_DAMAGE_SHARE of the damage in hit points
+## (user spec 2026-11-18; a building or vehicle brought down is a kill).
 func _land(kind: StringName, at: Vector3) -> void:
 	var dmg: int = damage(kind)
 	var struck: Array[Unit] = victims(kind, at, _foes_around())
@@ -696,9 +745,14 @@ func _land(kind: StringName, at: Vector3) -> void:
 		u.take_damage(dmg, g)
 		if not is_instance_valid(u) or u.state == Unit.State.DEAD or u.doomed:
 			g._credit_kill(hp)
-	var struck_b: Array = buildings_struck(kind, _buildings_around(), struck.size())
+	var struck_v: Array = vehicles_struck(kind, _vehicles_around(), struck.size())
+	for v in struck_v:
+		if is_instance_valid(v) and v.state != Unit.State.DEAD:
+			g._crush_vehicle(v)
+	var struck_b: Array = buildings_struck(kind, _buildings_around(), struck.size() + struck_v.size())
 	for b in struck_b:
-		g._strike_building(b, Balance.GOLEM_BUILDING_STAGES)
+		if is_instance_valid(b) and b.health > 0:
+			g._strike_building(b, Golem.building_damage_for(dmg))
 	last_struck[kind] = struck
 	last_struck_buildings[kind] = struck_b
 	g._play_strike_sfx(model_of(kind))
@@ -707,6 +761,8 @@ func _land(kind: StringName, at: Vector3) -> void:
 ## Where the one she turns to stands — INF when it is dead, gone, no longer an enemy
 ## target or out of her aggro radius.
 func _turn_goal_point() -> Vector3:
+	if _turn_escape:
+		return g.position + _turn_dir
 	if _turn_goal == null and _turn_dir != Vector3.ZERO:
 		# Turning for a plan: on while anything it strikes is still there.
 		for o in _turn_targets:
@@ -739,6 +795,7 @@ func _end_turn() -> void:
 	turning = false
 	_turn_sign = 0.0
 	_turn_want = Vector3.ZERO
+	_turn_escape = false
 	_turn_goal = null
 	_turn_dir = Vector3.ZERO
 	_turn_targets = []
@@ -818,8 +875,8 @@ func _turn_sweep(foes: Array[Unit], builds: Array) -> bool:
 	if is_busy():
 		return false   # the round is done: hold its result until she is free
 	_sweep_i = 0
-	if _sweep_dir == Vector3.ZERO or _sweep_v <= float(here.value) + 0.000001:
-		return false
+	if _sweep_dir == Vector3.ZERO or _sweep_v <= float(here.value) * Balance.GOLEM_SIT_TURN_PLAN_MARGIN + 0.000001:
+		return false   # not clearly better: no turn for a trifle (bug report 2026-11-18)
 	var best_dir: Vector3 = _sweep_dir
 	var targets: Array = []
 	for part in _sweep_parts:
@@ -855,14 +912,14 @@ func _turn_still_pays() -> bool:
 	return float(there.value) > float(here.value) + 0.000001
 
 
-## The po clap needs no aiming (user spec 2026-11-18, like the jump standing): while she
-## turns, it still comes for whatever is under and around her — one target is enough.
-func _hop_while_turning() -> void:
-	if not channel_free(CH_LEGS) or not channel_free(CH_ARMS) or is_busy():
-		return
-	var hop: Dictionary = _best_of([HOP], _foes_around(), _buildings_around(), 1)
-	if not hop.is_empty():
-		_wind_up(hop.kind, hop.at)
+## While she turns: has the situation changed so that the turn should end? A turn for a plan:
+## when the rest of it no longer pays (_turn_still_pays). A turn because nothing was in reach:
+## as soon as something is (a foe walked under her — the po clap needs no aiming, it counts at
+## every heading).
+func _situation_changed() -> bool:
+	if _turn_goal == null:
+		return not _turn_still_pays()
+	return float(_plan(_foes_around(), _buildings_around(), 0.0).value) > 0.0
 
 
 ## Nothing in reach: she turns (slowly) toward the nearest enemy unit within her aggro
@@ -873,9 +930,12 @@ func _maybe_turn(foes: Array[Unit]) -> void:
 	var goal: Vector3 = Vector3.INF
 	var goal_obj: Object = null
 	var best: float = INF
+	# Only what a zone could reach once she has turned (bug report 2026-11-18: she turned toward
+	# foes and buildings far beyond her limbs and then could not strike them either).
+	var range_m: float = minf(g.aggro_radius(), _scan_radius())
 	for u in foes:
 		var d: float = _flat(u.position - g.position).length()
-		if d <= g.aggro_radius() and d < best:
+		if d <= range_m and d < best:
 			best = d
 			goal = u.position
 			goal_obj = u
@@ -884,7 +944,7 @@ func _maybe_turn(foes: Array[Unit]) -> void:
 			if not is_instance_valid(b) or b.health <= 0 or b.tribe_id == g.tribe_id or not b.is_attackable():
 				continue
 			var d: float = b.footprint_distance_to(Vector2(g.position.x, g.position.z))
-			if d <= g.aggro_radius() and d < best:
+			if d <= range_m and d < best:
 				best = d
 				goal = b.center_world()
 				goal_obj = b
@@ -907,6 +967,31 @@ func _maybe_turn(foes: Array[Unit]) -> void:
 		_end_turn()
 		return
 	g.facing = first
+
+
+## Her pose has become impossible — she has grown and her feet and hands reach further out, or
+## the ground changed (user spec 2026-11-18): she turns to the nearest heading where she can sit
+## (either way, checked every GOLEM_SIT_TURN_SAMPLE_DEG); is there none, she gets up.
+func _escape_pose() -> void:
+	var cur: Vector3 = g.heading()
+	var a0: float = atan2(cur.x, cur.z)
+	var step: float = deg_to_rad(Balance.GOLEM_SIT_TURN_SAMPLE_DEG)
+	for i in range(1, int(ceil(PI / step)) + 1):
+		for sgn in [1.0, -1.0]:
+			var a: float = a0 + sgn * step * float(i)
+			var dir: Vector3 = Vector3(sin(a), 0.0, cos(a))
+			if g.sit_heading_ok(dir):
+				turning = true
+				_turn_escape = true
+				_turn_goal = null
+				_turn_dir = dir
+				_turn_targets = []
+				_turn_sign = sgn
+				_turn_want = dir
+				var b: float = a0 + sgn * minf(step * float(i), deg_to_rad(60.0))
+				g.facing = Vector3(sin(b), 0.0, cos(b))
+				return
+	g.stand_up()   # no heading works: she gets up
 
 
 ## How far she can turn on the seat from where she faces now, each way (radians, up to a full
@@ -962,17 +1047,33 @@ func _left_on_way(want: Vector3) -> float:
 
 ## The next heading to aim at while turning: along her way (_turn_sign), at most 60 degrees ahead —
 ## ZERO when the next bit of the way would put her limbs on impossible ground.
+## Is the way from angle `a0` by `by` radians (signed) free — her limbs on possible ground every
+## GOLEM_SIT_TURN_SAMPLE_DEG and at its end?
+func _way_free(a0: float, by: float) -> bool:
+	var step: float = deg_to_rad(Balance.GOLEM_SIT_TURN_SAMPLE_DEG)
+	var n: int = int(ceil(absf(by) / step))
+	for i in range(1, n + 1):
+		var a: float = a0 + signf(by) * minf(step * float(i), absf(by))
+		if not g.sit_heading_ok(Vector3(sin(a), 0.0, cos(a))):
+			return false
+	return true
+
+
 func _turn_step() -> Vector3:
 	if _turn_sign == 0.0 or _turn_want == Vector3.ZERO:
 		return Vector3.ZERO
 	var cur: Vector3 = g.heading()
 	var a0: float = atan2(cur.x, cur.z)
+	# The short way, whenever it is free (bug report 2026-11-18: following a target that moved across
+	# her heading — or overshooting it a little — she kept her first direction and turned almost all
+	# the way round, the wrong way). The long way only while the short one is blocked.
+	var short: float = wrapf(atan2(_turn_want.x, _turn_want.z) - a0, -PI, PI)
+	if signf(short) != _turn_sign and absf(short) > 0.0001 and (_turn_escape or _way_free(a0, short)):
+		_turn_sign = signf(short)
 	var left: float = _left_on_way(_turn_want)
-	if left > PI * 1.95:
-		return Vector3.ZERO   # (just past it)
 	var look: float = minf(left, deg_to_rad(Balance.GOLEM_SIT_TURN_SAMPLE_DEG))
 	var a_look: float = a0 + _turn_sign * look
-	if not g.sit_heading_ok(Vector3(sin(a_look), 0.0, cos(a_look))):
+	if not _turn_escape and not g.sit_heading_ok(Vector3(sin(a_look), 0.0, cos(a_look))):
 		return Vector3.ZERO
 	var a: float = a0 + _turn_sign * minf(left, deg_to_rad(60.0))
 	return Vector3(sin(a), 0.0, cos(a))

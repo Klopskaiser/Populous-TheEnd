@@ -1089,10 +1089,10 @@ func sit_pose_ok(seat: Vector3, fwd: Vector3) -> bool:
 	return true
 
 
-## Seated: may she face `fwd`? Her limbs on possible ground (sit_pose_ok) and the turned seat
-## touching no building.
+## Seated: may she face `fwd`? Her limbs on possible ground (sit_pose_ok). Buildings do not
+## count here — only when she sits down (seat_free; user spec 2026-11-18).
 func sit_heading_ok(fwd: Vector3) -> bool:
-	return sit_pose_ok(position, fwd) and seat_free(position, fwd, seat_half_extent())
+	return sit_pose_ok(position, fwd)
 
 
 ## Is the seat (middle, long axis, half extents) free: wholly inside the disc (water is
@@ -1677,8 +1677,28 @@ func _worth_now(kind: StringName) -> float:
 		var damage: float = float(attack_damage(kind))
 		for u in struck.units:
 			worth += minf(damage, float(u.health))
-	return worth + Balance.GOLEM_STRUCTURE_VALUE \
-		* float((struck.vehicles as Array).size() + (struck.buildings as Array).size())
+	# A building: the hit points it really loses (2026-11-18), a vehicle: GOLEM_STRUCTURE_VALUE.
+	var per_building: float = float(building_damage_total(kind))
+	for b in struck.buildings:
+		if is_instance_valid(b):
+			worth += minf(per_building, float(b.health))
+	return worth + Balance.GOLEM_STRUCTURE_VALUE * float((struck.vehicles as Array).size())
+
+
+## What one hit worth `amount` against a unit takes off a building (user spec 2026-11-18):
+## GOLEM_BUILDING_DAMAGE_SHARE of it, at least 1.
+static func building_damage_for(amount: int) -> int:
+	return maxi(int(floor(float(amount) * Balance.GOLEM_BUILDING_DAMAGE_SHARE)), 1)
+
+
+## All the hit points the attack `kind` takes off one building (the drum: its three hits).
+func building_damage_total(kind: StringName) -> int:
+	if kind == ATTACK_DRUM:
+		var sum: int = 0
+		for hit in range(Balance.GOLEM_DRUM_HITS.size()):
+			sum += building_damage_for(drum_hit_damage(hit))
+		return sum
+	return building_damage_for(attack_damage(kind))
 
 
 ## The drum's worth on units, hit by hit (Bugfix 2026-11-16): every one of the
@@ -2239,7 +2259,7 @@ func _tick_trample(delta: float) -> void:
 		_trampled[bid] = Balance.GOLEM_TRAMPLE_BUILDING_INTERVAL
 		room -= 1
 		_no_combat_timer = 0.0
-		_strike_building(b)
+		_strike_building(b, _stage_hp(b))   # trampling: still a whole stage
 
 
 ## Golems never stand inside one another (user spec 2026-11-16): whichever
@@ -3300,7 +3320,8 @@ func _tick_pending_attack(delta: float) -> void:
 	if building != null and is_instance_valid(building) and building.health > 0 \
 			and not struck.has(building) and state == State.ATTACK \
 			and attack_building == building and kind != ATTACK_STOMP:
-		_strike_building(building)   # (the stomp only strikes what stands around her)
+		_strike_building(building, building_damage_for(drum_hit_damage(Balance.GOLEM_DRUM_HITS.size() - 1)
+			if kind == ATTACK_DRUM else attack_damage(kind)))   # (the stomp only strikes what stands around her)
 
 
 ## The swat LANDS: one hull hit on the airship it was aimed at — like a catapult
@@ -3421,26 +3442,37 @@ func _land_attack(kind: StringName, hit: int = 0) -> Dictionary:
 					away = forward
 				u.start_roll(away.normalized(), Balance.GOLEM_ROLL_DURATION,
 					Balance.GOLEM_ROLL_SPEED)
-	if not last_hit:
-		return {}
-	# The giant's blows wreck vehicles too.
-	for v in struck.vehicles:
-		_crush_vehicle(v)
+	# Buildings lose hit points with every hit — the drum's three as well (2026-11-18).
 	var struck_buildings: Dictionary = {}
+	var to_building: int = building_damage_for(damage)
 	for b in struck.buildings:
 		if not is_instance_valid(b) or b.health <= 0:
 			continue
 		struck_buildings[b] = true
-		_strike_building(b, Balance.GOLEM_STOMP_BUILDING_STAGES if stomp else Balance.GOLEM_BUILDING_STAGES)
+		_strike_building(b, to_building)
+	if not last_hit:
+		return struck_buildings
+	# The giant's blows wreck vehicles too.
+	for v in struck.vehicles:
+		_crush_vehicle(v)
 	return struck_buildings
 
 
-## One attack's worth of damage on a building. A building the golem brings down
-## counts as ONE kill, like a unit (user spec 2026-11-15).
-func _strike_building(b, stages: int = Balance.GOLEM_BUILDING_STAGES) -> void:
-	b.apply_destruction_stages(stages)
+## `amount` hit points off a building (since 2026-11-18 its stages fall by hit points, as under
+## every other attacker). A building the golem brings down counts as ONE kill, like a unit (user
+## spec 2026-11-15).
+func _strike_building(b, amount: int) -> void:
+	b.take_damage(amount)
 	if not is_instance_valid(b) or b.health <= 0:
 		_credit_kill()
+
+
+## One whole destruction stage of `b` in hit points (a construction site: all it has — sites are
+## fragile, as under the spells).
+static func _stage_hp(b) -> int:
+	if b.under_construction:
+		return maxi(b.health, 1)
+	return int(ceil(Building.STAGE_DAMAGE * float(b.max_health)))
 
 
 ## Does the attack's area touch the building's footprint? Slam: the footprint

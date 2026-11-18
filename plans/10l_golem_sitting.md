@@ -121,7 +121,13 @@ Animationsbaum bleibt aus.
       bleibt. Die Liegehöhe folgt dem sinkenden Boden.
     - **Terrain beim Sitzen und Drehen** (2026-11-18): Füße und Hände müssen auf erklimmbarem Boden aufsetzen
       (`sit_pose_ok`, Laufregel des Giganten, Wasser zählt nicht); gedreht wird nur über mögliche Richtungen
-      (`free_arc`, `turn_way`), notfalls den langen Weg; unerreichbare Richtung: keine Drehung.
+      (`free_arc`, `turn_way`), notfalls den langen Weg; unerreichbare Richtung: keine Drehung. Gebäude zählen nur
+      beim Hinsetzen. Unmögliche Lage (Wachsen, Boden): zur nächsten möglichen Richtung drehen, sonst aufstehen.
+      Plan-Drehung erst ab 20 % mehr Wert; während des Drehens kein Angriff, außer die Lage ändert sich; immer der
+      kurze Weg, sobald er frei ist (Bugfix: falsch herum hinter einem Ziel, das die Seite wechselte).
+    - **Gebäude und Fahrzeuge** (2026-11-18): Gebäude nehmen je Treffer die Hälfte des Schadens in Lebenspunkten
+      (keine ganze Stufe mehr); feindliche Bodenfahrzeuge werden getroffen (Schadensschritt wie im Stand),
+      Luftschiffe nicht.
     - **Bugfix:** die Ausweichdrehung zum nächsten Feind („nichts erreichbar“) kam auch, wenn nur der freie Kanal
       nichts erreichte, während der andere mit einem Feind in seiner Zone abklang — sie drehte sich von ihm weg.
       Jetzt nur, wenn kein Angriff etwas erreicht.

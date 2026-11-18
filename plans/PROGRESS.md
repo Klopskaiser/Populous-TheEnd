@@ -12841,4 +12841,13 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
   Richtungen, notfalls den langen Weg (`GolemSitCombat.free_arc/turn_way/_turn_step`); Golem-Abstand 0,9 der Radien.
 - **Kleine an grossen Golems (2026-11-18):** wer hoechstens kniehoch ist (28 %), haelt nur Abstand zum Beinbereich des
   grossen (60 % seines Radius); je Paar symmetrisch in `Golem.golem_pair_need`, genutzt von Abstand, Zielplaetzen, Ausweichen.
+- **Drehen im Sitzen, Bugfixes (2026-11-18):** Plan-Drehung erst ab 20 % mehr Wert (`GOLEM_SIT_TURN_PLAN_MARGIN`);
+  Ausweichdrehung nur zu Zielen in Reichweite der Zonen (`_scan_radius`); waehrend des Drehens kein Angriff, ausser die
+  Lage aendert sich (`_situation_changed`); immer der kurze Weg, sobald frei (Bugfix: falsch herum hinter einem Ziel,
+  das die Seite wechselte, `_way_free`); Gebaeude zaehlen beim Drehen nicht; unmoegliche Sitzlage: Drehen zur naechsten moeglichen
+  Richtung, sonst Aufstehen (`_escape_pose`).
+- **Gebaeudeschaden und Fahrzeuge (2026-11-18):** alle Golem-Angriffe nehmen Gebaeuden Lebenspunkte statt Stufen
+  (`Golem.building_damage_for`: halber Einheitenschaden, `_strike_building(b, amount)`; Trampeln weiter eine Stufe,
+  `_stage_hp`); die Wahl rechnet den echten Gebaeudeschaden. Sitzangriffe treffen feindliche Bodenfahrzeuge
+  (`GolemSitCombat._vehicles_around`, `vehicles_struck`). Tests der alten Stufen-Regel umgeschrieben.
 

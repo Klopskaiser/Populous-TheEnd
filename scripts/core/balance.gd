@@ -270,6 +270,9 @@ const GOLEM_SIT_TURN_DONE_DEG: float = 3.0
 ## sich. Je Ueberlegung (alle 0,25 s) werden GOLEM_SIT_TURN_PLAN_PER_THINK Richtungen gerechnet, eine
 ## Runde dauert also rund 1 s (Rechenzeit); waehrenddessen greift sie normal an.
 const GOLEM_SIT_TURN_PLAN_ATTACKS: int = 3
+## Gegen grundloses Hin- und Herdrehen (Bugmeldung 2026-11-18): ein gedrehter Plan muss mindestens so viel
+## mehr bringen (mit der Drehzeit schon eingerechnet).
+const GOLEM_SIT_TURN_PLAN_MARGIN: float = 1.2
 const GOLEM_SIT_TURN_PLAN_HEADINGS: int = 16
 const GOLEM_SIT_TURN_PLAN_PER_THINK: int = 4
 ## TERRAIN BEIM SITZEN UND DREHEN (Nutzervorgabe 2026-11-18): Fuesse und Haende muessen auf Boden aufsetzen
@@ -382,6 +385,13 @@ const GOLEM_ROLL_SPEED: float = 4.0
 ## Gebaeudestufen je Angriff auf jedes feindliche Gebaeude in der Wirkflaeche
 ## (Handschlag und Tritt gleich).
 const GOLEM_BUILDING_STAGES: int = 1
+## GEBAEUDESCHADEN DER GOLEMS (Nutzervorgabe 2026-11-18, alle Angriffe aller Golems, im Stand und im Sitzen):
+## nicht mehr eine Zerstoerungsstufe je Treffer, sondern Lebenspunkte wie bei allen anderen Angreifern — die
+## Stufe faellt erst, wenn genug Schaden beisammen ist. Ein Treffer nimmt einem Gebaeude so viel, wie er einer
+## Einheit naehme, mal diesem Anteil (abgerundet, mindestens 1); das Trommeln mit jedem seiner drei Schlaege.
+## In der Wahl zaehlt ein Gebaeude mit diesem Schaden (hoechstens seinen Restlebenspunkten) statt pauschal
+## GOLEM_STRUCTURE_VALUE. Das Trampeln des Giganten bleibt bei einer Stufe je GOLEM_TRAMPLE_BUILDING_INTERVAL.
+const GOLEM_BUILDING_DAMAGE_SHARE: float = 0.5
 const GOLEM_LIFETIME: float = 180.0
 ## 3 -> 6 s nach dem ersten Spieltest.
 const GOLEM_LIFE_PER_KILL: float = 6.0
