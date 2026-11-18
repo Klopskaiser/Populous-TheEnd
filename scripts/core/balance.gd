@@ -305,10 +305,11 @@ const GOLEM_CRAB_LIMB_RADIUS: float = 0.3
 ## treffen — nur im Krebsstand, Zielbereich hinter dem Kopf: ein Kreis mit GOLEM_CRAB_AIR_RADIUS um den
 ## Punkt GOLEM_CRAB_AIR_BACK hinter der Sitzmitte (Meter des 4-m-Modells, flach gemessen; Vorschlag).
 ## Wirkung wie der Luftschlag im Stand: ein Huellentreffer je Schlag, Ausholzeit und Takt des Luftschlags.
-## Clip "crab_swat" (kommt noch; bis dahin ohne Bild), Aufschlag bei GOLEM_CRAB_AIR_IMPACT (Vorschlag).
+## Clip "crab_headbutt" (Kopfstoss nach hinten, 1,0 s), Aufschlag bei GOLEM_CRAB_AIR_IMPACT (Werkstatt: 0,4 s); das
+## Spiel spielt ihn so schnell, dass der Aufschlag auf die Ausholzeit faellt.
 const GOLEM_CRAB_AIR_BACK: float = 1.6
 const GOLEM_CRAB_AIR_RADIUS: float = 1.0
-const GOLEM_CRAB_AIR_IMPACT: float = 0.5
+const GOLEM_CRAB_AIR_IMPACT: float = 0.4
 ## STRECKEN BEIM WACHSEN (Nutzer 2026-11-16): bei jedem Stufenaufstieg und jedem
 ## Wachstumsschritt nach Stufe 7 reckt sich der Golem einmal (Clip "grow", Sound
 ## "golem_grow"). Das kostet GOLEM_GROW_TIME Sekunden, in denen er weder

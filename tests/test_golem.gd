@@ -5000,6 +5000,7 @@ func test_crab_strike_behind_her_head_brings_airships_down() -> void:
 	g.set_sit_stationary(false)
 	_run_until(w, func() -> bool: return g.crab_air_pending(), 200)
 	check(g.crab_air_pending() and g._crab == Golem.CRAB_STAND, "not stationary: up into the crab stand, she winds up")
+	check_near(g._crab_air_time + TICK, g.current_windup(Golem.ATTACK_SWAT), "with the swat's wind-up", TICK + 0.0001)
 	check(g.in_crab_air_zone(ship.position), "the ship is in the area behind her head")
 	_run_until(w, func() -> bool: return ship.state == Unit.State.DEAD, 400)
 	check(ship.state == Unit.State.DEAD, "two strikes bring it down (%d hull hits)" % ship._hull_hits)
@@ -5030,7 +5031,8 @@ func test_dying_seated_plays_sit_death() -> void:
 		if g._model == null:
 			g._create_model()   # (inside the test runner the root is not ready yet: no _ready)
 		check(g._anim != null, "%s: the model has its clips" % f)
-		for clip in [Golem.CLIP_SIT_DEATH, Golem.CLIP_CRAB_UP, Golem.CLIP_CRAB_IDLE, Golem.CLIP_CRAB_WALK, Golem.CLIP_CRAB_DOWN]:
+		for clip in [Golem.CLIP_SIT_DEATH, Golem.CLIP_CRAB_UP, Golem.CLIP_CRAB_IDLE, Golem.CLIP_CRAB_WALK, Golem.CLIP_CRAB_DOWN,
+				Golem.CLIP_CRAB_HEADBUTT]:
 			check(g._anim.has_animation(clip), "%s has %s" % [f.get_file(), clip])
 		check(g._anim.get_animation(Golem.CLIP_CRAB_WALK).loop_mode == Animation.LOOP_LINEAR
 			and g._anim.get_animation(Golem.CLIP_CRAB_IDLE).loop_mode == Animation.LOOP_LINEAR, "crab_idle / crab_walk loop")

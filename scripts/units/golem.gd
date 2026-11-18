@@ -123,8 +123,9 @@ const CLIP_CRAB_UP: StringName = &"crab_up"
 const CLIP_CRAB_IDLE: StringName = &"crab_idle"
 const CLIP_CRAB_WALK: StringName = &"crab_walk"
 const CLIP_CRAB_DOWN: StringName = &"crab_down"
-## The airship strike in the crab stand (clip still to come; without it the strike lands unseen).
-const CLIP_CRAB_SWAT: StringName = &"crab_swat"
+## The airship strike in the crab stand: a headbutt backward with the head-shoe (1,0 s, impact at
+## GOLEM_CRAB_AIR_IMPACT; without the clip the strike lands unseen).
+const CLIP_CRAB_HEADBUTT: StringName = &"crab_headbutt"
 const CRAB_CLIP_LENGTH: float = 0.6
 ## Ground covered by one loop of crab_walk at 4 m (metres of the model, measured on the export).
 const CRAB_CLIP_STRIDE: float = 1.029
@@ -2059,7 +2060,7 @@ func _tick_crab_air(delta: float) -> void:
 		if _crab_air_time <= 0.0:
 			var ship: Airship = _crab_air_ship
 			_crab_air_ship = null
-			_land_crab_swat(ship)
+			_land_crab_headbutt(ship)
 		return
 	if _crab != CRAB_STAND or _crab_air_cooldown > 0.0:
 		return
@@ -2070,7 +2071,7 @@ func _tick_crab_air(delta: float) -> void:
 	_crab_air_time = current_windup(ATTACK_SWAT)
 	_crab_air_cooldown = cooldown_for(ATTACK_SWAT)
 	_no_combat_timer = 0.0
-	_play_clip(CLIP_CRAB_SWAT, Balance.GOLEM_CRAB_AIR_IMPACT / maxf(_crab_air_time, 0.05), true)
+	_play_clip(CLIP_CRAB_HEADBUTT, Balance.GOLEM_CRAB_AIR_IMPACT / maxf(_crab_air_time, 0.05), true)
 
 
 ## Is the strike from the crab stand wound up (tests)?
@@ -2079,7 +2080,7 @@ func crab_air_pending() -> bool:
 
 
 ## The strike lands: a hull hit on the ship, if it is still in the area (a little slack for its drift).
-func _land_crab_swat(ship: Airship) -> bool:
+func _land_crab_headbutt(ship: Airship) -> bool:
 	_no_combat_timer = 0.0
 	if ship == null or not is_instance_valid(ship) or ship.state == State.DEAD \
 			or ship.tribe_id == tribe_id or not ship.auto_attackable():
@@ -4292,7 +4293,7 @@ func death_clip() -> StringName:
 
 ## The crab walk's clips: crab_up / crab_down stretched to their time, in the stand crab_walk by the
 ## real speed (CRAB_CLIP_STRIDE per loop, or the hands and feet slide) or crab_idle; the strike at
-## an airship (crab_swat) plays out first.
+## an airship (crab_headbutt) plays out first.
 func _crab_visual(ground_speed: float) -> void:
 	match _crab:
 		CRAB_UP:
@@ -4300,7 +4301,7 @@ func _crab_visual(ground_speed: float) -> void:
 		CRAB_DOWN:
 			_play_clip(CLIP_CRAB_DOWN, CRAB_CLIP_LENGTH / crab_switch_time())
 		_:
-			if _clip == CLIP_CRAB_SWAT and _anim.is_playing():
+			if _clip == CLIP_CRAB_HEADBUTT and _anim.is_playing():
 				return
 			if ground_speed > WALK_THRESHOLD:
 				_play_clip(CLIP_CRAB_WALK, ground_speed / (crab_clip_speed() * _shown_size))

@@ -12880,7 +12880,7 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
   `collision_radius()` fuer Golem-Abstand, `CrewedVehicle.body_radius`, Katapult `body_hit_radius`, `target_radius`).
   Trampeln nur unter den vier Gliedern (`crab_contacts`, `crab_limb_radius` 0,3 m des Modells, Schaetzwert), eine
   gemeinsame Zielobergrenze (`_trample_circles`, `_trample_gap`). Im Krebsstand schieben andere Golems sie (`is_rooted`).
-- **Zeppelin-Zerstoerer** (Nutzervorgabe 2026-11-18, Clip `crab_swat` kommt noch): einziger Weg, aus dem Sitzen ein
+- **Zeppelin-Zerstoerer** (Nutzervorgabe 2026-11-18, Clip `crab_headbutt` aus der Werkstatt, Aufschlag 0,4 s): einziger Weg, aus dem Sitzen ein
   Luftschiff zu treffen. Nur im Krebsstand, Kreis hinter dem Kopf (`crab_air_center`, `GOLEM_CRAB_AIR_BACK` 1,6 m,
   `GOLEM_CRAB_AIR_RADIUS` 1,0 m des Modells, Vorschlag), Huellentreffer wie der Luftschlag, dessen Ausholzeit und Takt.
   Nicht stationaer steht sie fuer ein Luftschiff im Aggro-Radius auf, krabbelt heran und dreht ihm den Ruecken zu.

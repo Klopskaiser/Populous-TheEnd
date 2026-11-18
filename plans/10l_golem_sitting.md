@@ -28,7 +28,7 @@
 | `crab_walk` | 1,0 s, Schleife | Krebsgang auf der Stelle, Fuesse voran; Weg je Durchlauf bei 4 m: Golem 1,029, Daemon 0,997, Genesis 1,012 m |
 | `crab_down` | 0,6 s (gestreckt) | Krebsstand -> Sitz |
 | `sit_death` | 1,4 s | Sterben im Sitzen, bleibt in der Endpose |
-| `crab_swat` | **kommt noch** (Vorschlag 1,2 s, Aufschlag 0,5 s = `GOLEM_CRAB_AIR_IMPACT`) | Zeppelin-Zerstoerer: Schlag hinter den Kopf, aus dem Krebsstand, endet im Krebsstand |
+| `crab_headbutt` | 1,0 s, Aufschlag 0,4 s (`GOLEM_CRAB_AIR_IMPACT`; gespielt so, dass er auf die Ausholzeit faellt) | Zeppelin-Zerstoerer: Kopfstoss nach hinten aus dem Krebsstand, beginnt und endet in der Ruhe im Krebsstand |
 
 
 Status: **Clips der Sitzangriffe geliefert (2026-11-17, abends)** — alle zwölf (`sit_stomp_l/r`, `sit_kick_l/r`,
