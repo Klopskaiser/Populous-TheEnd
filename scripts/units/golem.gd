@@ -442,6 +442,30 @@ func status_lines(head: String, extra: String) -> String:
 		head, height_m(), health, max_health, regen_per_second(), current_speed(), extra, kills, stance_name()]
 
 
+## Her mana upkeep per second (user spec 2026-11-18, all golems): mana_upkeep_share() of her tribe's gross
+## income (the population's, Tribe.mana_rate — no bonus mana such as the ritual chamber's) plus
+## GOLEM_MANA_UPKEEP_FLAT.
+func mana_upkeep_rate() -> float:
+	var income: float = tribe.mana_rate() if tribe != null else 0.0
+	return mana_upkeep_share() * income + Balance.GOLEM_MANA_UPKEEP_FLAT
+
+
+## Share of the gross income she costs: GOLEM_MANA_UPKEEP_SHARE (golem and demon golem; the genesis golem
+## overrides it).
+func mana_upkeep_share() -> float:
+	return Balance.GOLEM_MANA_UPKEEP_SHARE
+
+
+## Pays her upkeep for `delta` — the forester's pattern: a claim on the tribe's income, paid before any
+## spell charges. A tribe that earns less gives what it earns; no debt is left that would run on after her
+## death.
+func _pay_upkeep(delta: float) -> void:
+	if tribe == null or delta <= 0.0:
+		return
+	var granted: float = tribe.claim_upkeep_rate(mana_upkeep_rate())
+	tribe.consume_mana(granted * delta)
+
+
 ## Golems take no part in the ordinary units' rest healing (REGEN_RATE after REGEN_DELAY out of combat;
 ## user spec 2026-11-18) — their own healing (regen_per_second, from GOLEM_BASE_REGEN on) runs through
 ## every fight instead. The combat-free time still counts.
@@ -603,6 +627,8 @@ func target_radius() -> float:
 
 func tick(delta: float) -> void:
 	super.tick(delta)
+	if state != State.DEAD and not doomed:
+		_pay_upkeep(delta)
 	if state != State.DEAD:
 		_slew_heading(delta)
 		_tick_stance(delta)

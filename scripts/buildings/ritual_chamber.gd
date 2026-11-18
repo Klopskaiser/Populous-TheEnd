@@ -6,7 +6,9 @@ class_name RitualChamber extends TrainingBuilding
 ## braves the tribe sacrifices (counted per tribe, over all its chambers) either
 ## credit ONE kill to a random golem of the tribe (golem or demon golem — with
 ## everything a kill brings: growth, healing, lifetime) or, without a living golem,
-## pay RITUAL_CHAMBER_MANA_REWARD mana into one of the two golem spells.
+## pay RITUAL_CHAMBER_MANA_REWARD mana into one of the three golem spells (golem, demon golem, genesis
+## golem) — one that is switched on (charging) and not full; only when there is none, into any that is
+## not full (user spec 2026-11-18).
 ##
 ## Only buildable while the option "Ritualkammer (experimentell)" is switched on
 ## (GameSettings.ritual_chamber_enabled, main menu options); the AI never builds it.
@@ -65,8 +67,9 @@ func _finish_one() -> void:
 
 
 ## One reward: a kill for a random living golem of the tribe, else mana for one of
-## the golem spells that can still take some. Returns what happened (&"kill",
-## &"mana" or &"none" — both spells full / missing).
+## the golem spells that can still take some — a random one of those switched on (charging), and only
+## when none of them is, a random one of the rest (user spec 2026-11-18). Returns what happened
+## (&"kill", &"mana" or &"none" — both spells full / missing).
 func grant_reward() -> StringName:
 	if tribe == null:
 		return &"none"
@@ -80,12 +83,17 @@ func grant_reward() -> StringName:
 		golems[rng.randi_range(0, golems.size() - 1)]._credit_kill()
 		return &"kill"
 	var spells: Array[Spell] = []
-	for id in [&"golem", &"demon_golem"]:
+	var active: Array[Spell] = []
+	for id in [&"golem", &"demon_golem", &"genesis_golem"]:   # (genesis since 2026-11-18, user spec)
 		var spell: Spell = tribe.get_spell(id)
 		if spell != null and not spell.is_full():
 			spells.append(spell)
+			if spell.active:
+				active.append(spell)
 	if spells.is_empty():
 		return &"none"
+	if not active.is_empty():
+		spells = active
 	spells[rng.randi_range(0, spells.size() - 1)].add_charge_mana(
 		Balance.RITUAL_CHAMBER_MANA_REWARD)
 	tribe._emit_spell_charges()

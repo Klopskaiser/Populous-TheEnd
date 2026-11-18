@@ -97,8 +97,8 @@ func test_summon_spawns_a_golem_and_spends_a_charge() -> void:
 	var w: Dictionary = _make_world()
 	var spell: Spell = w.t0.get_spell(&"golem")
 	check(spell != null and spell is GolemSpell, "the default set carries the golem spell")
-	check(spell.max_charges == 2 and is_equal_approx(spell.charge_cost, 900.0)
-		and is_equal_approx(spell.cast_range, 10.0), "2 Ladungen, 900 Mana, 10 m")
+	check(spell.max_charges == 2 and is_equal_approx(spell.charge_cost, 800.0)
+		and is_equal_approx(spell.cast_range, 10.0), "2 Ladungen, 800 Mana (2026-11-18, vorher 900), 10 m")
 	spell.charges = 2
 	var pop: int = w.t0.population()
 	var rate: float = w.t0.mana_rate()

@@ -82,10 +82,10 @@ func test_spell_is_the_players_alone_and_costs_what_the_golem_costs() -> void:
 	check(spell != null and spell is DemonGolemSpell, "the player's set carries the demon golem")
 	check(w.t1.get_spell(&"demon_golem") == null, "the default set (the AI's) does not")
 	var golem: Spell = w.t0.get_spell(&"golem")
-	check(is_equal_approx(spell.charge_cost, golem.charge_cost * 2.0 / 3.0)
+	check(is_equal_approx(spell.charge_cost, 600.0) and is_equal_approx(golem.charge_cost, 800.0)
 		and spell.max_charges == golem.max_charges
 		and is_equal_approx(spell.cast_range, golem.cast_range),
-		"a third cheaper than the golem; same charges and range")
+		"600 against the golem's 800 (2026-11-18); same charges and range")
 	check(Spell.create_default_set().size() + 2 == Spell.create_player_set().size(),
 		"the player's set is the default set plus the demon and the Genesis golem")
 	spell.charges = 1
@@ -517,18 +517,21 @@ func test_status_text_names_him_and_his_growth() -> void:
 
 ## Solange er lebt, kostet er 5 Mana je Sekunde vom laufenden Einkommen — wie die
 ## Foersterei, vor dem Aufladen der Zauber; ohne Schuld, die nach seinem Tod weiterliefe.
-func test_he_costs_five_mana_per_second_while_he_lives() -> void:
+## Unterhalt aller Golems (Nutzervorgabe 2026-11-18): 8 % des Brutto-Einkommens (Genesis 5 %) + 2 Mana/s.
+func test_every_golem_costs_a_share_of_the_income_plus_two_per_second() -> void:
 	var w: Dictionary = _make_world()
 	for i in range(60):
 		w.um.spawn_unit(BRAVE_SCENE, 0, Vector3(30 + float(i % 10), 5, 30 + float(i / 10)))
 	var income: float = w.t0.mana_rate()
-	check(income > Balance.DEMON_GOLEM_MANA_UPKEEP, "60 braves earn more than 5 mana/s (%.1f)" % income)
+	var want: float = income * 0.08 + 2.0
+	check(income > want, "60 braves earn more than the upkeep (%.1f)" % income)
 	var d: DemonGolem = _demon(w, 0, Vector3(50, 5, 50))
+	check_near(d.mana_upkeep_rate(), want, "8 %% of %.1f + 2 = %.2f mana per second" % [income, want], 0.0001)
 	w.t0.tick(0.1)
 	d.tick(0.1)
-	check_near(w.t0.upkeep_rate(), 5.0, "he claims 5 mana per second")
-	check_near(w.t0.charging_income(), income - 5.0, "the spells get 5 less", 0.001)
-	check_near(w.t0.upkeep_debt(), 0.5, "0,5 mana for the 0,1 s")
+	check_near(w.t0.upkeep_rate(), want, "he claims it")
+	check_near(w.t0.charging_income(), income - want, "the spells get that much less", 0.001)
+	check_near(w.t0.upkeep_debt(), want * 0.1, "for the 0,1 s", 0.0001)
 	w.t0.tick(0.1)   # pays the 0,5 from this tick's income
 	check_near(w.t0.upkeep_debt(), 0.0, "paid off at once from the income")
 	d.take_damage(100000)
@@ -536,6 +539,20 @@ func test_he_costs_five_mana_per_second_while_he_lives() -> void:
 	d.tick(0.1)
 	check_near(w.t0.upkeep_rate(), 0.0, "dead, he costs nothing")
 	check_near(w.t0.upkeep_debt(), 0.0, "and leaves no debt behind")
+	# The golem costs as much; the genesis golem 5 % + 2.
+	var g: Golem = w.um.spawn_unit(GOLEM_SCENE, 0, Vector3(70, 5, 70)) as Golem
+	var gen: Golem = w.um.spawn_unit(load("res://scenes/units/genesis_golem.tscn"), 0, Vector3(90, 5, 90)) as Golem
+	income = w.t0.mana_rate()
+	check_near(g.mana_upkeep_rate(), income * 0.08 + 2.0, "the golem: 8 % + 2", 0.0001)
+	check_near(gen.mana_upkeep_rate(), income * 0.05 + 2.0, "the genesis golem: 5 % + 2", 0.0001)
+	w.t0.tick(0.1)
+	g.tick(0.1)
+	gen.tick(0.1)
+	check_near(w.t0.upkeep_rate(), income * 0.13 + 4.0, "both claim theirs", 0.001)
+	# Bonus mana (the ritual chamber's) is no income: it goes straight into a spell and does not count.
+	var before: float = g.mana_upkeep_rate()
+	w.t0.get_spell(&"golem").add_charge_mana(20.0)
+	check_near(g.mana_upkeep_rate(), before, "bonus mana does not raise the upkeep")
 	_free_world(w)
 
 
@@ -544,7 +561,7 @@ func test_a_poor_tribe_pays_what_it_earns_and_no_more() -> void:
 	for i in range(10):
 		w.um.spawn_unit(BRAVE_SCENE, 0, Vector3(30 + float(i), 5, 30))
 	var income: float = w.t0.mana_rate()
-	check(income < Balance.DEMON_GOLEM_MANA_UPKEEP, "10 braves earn less than 5 mana/s (%.2f)" % income)
+	check(income < income * 0.08 + Balance.GOLEM_MANA_UPKEEP_FLAT, "10 braves earn less than the upkeep (%.2f)" % income)
 	var d: DemonGolem = _demon(w, 0, Vector3(50, 5, 50))
 	w.t0.tick(0.1)
 	d.tick(0.1)
@@ -587,8 +604,10 @@ func test_a_growth_step_heals_ninety_at_once_and_one_hundred_thirty_five_over_fi
 	_free_world(w)
 
 
-## Die Ladung kostet ein Drittel weniger als beim Golem (Nutzervorgabe 2026-11-16).
+## Die Ladung kostet 600 (Nutzervorgabe 2026-11-16: ein Drittel weniger als der damalige Golem mit 900; seit der
+## Golem 800 kostet, 2026-11-18, bleibt sie fest bei 600).
 func test_the_demon_golem_charge_costs_a_third_less_than_the_golem() -> void:
 	var spell: Spell = DemonGolemSpell.new()
-	check_near(spell.charge_cost, 600.0, "600 instead of 900", 0.001)
+	check_near(spell.charge_cost, 600.0, "600 (the golem: 800)", 0.001)
+	check_near(Balance.SPELL_GOLEM_CHARGE_COST, 800.0, "the golem spell costs 800")
 	check(spell.max_charges == Balance.SPELL_GOLEM_MAX_CHARGES, "charges as before")

@@ -248,6 +248,11 @@ func max_targets() -> int:
 		* float(Balance.DEMON_GOLEM_GROWTH_TARGETS) + 0.000001))
 
 
+## His upkeep: GENESIS_GOLEM_MANA_UPKEEP_SHARE of the gross income (+ the flat part, Golem.mana_upkeep_rate).
+func mana_upkeep_share() -> float:
+	return Balance.GENESIS_GOLEM_MANA_UPKEEP_SHARE
+
+
 func regen_per_second() -> float:
 	return Balance.GOLEM_BASE_REGEN + Balance.GENESIS_GOLEM_STAGE_REGEN * float(stage) \
 		+ Balance.GENESIS_GOLEM_WOOD_REGEN_PER_M * wood_growth_m

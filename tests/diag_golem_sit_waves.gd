@@ -23,12 +23,15 @@ extends SceneTree
 ##   Welle 1 je Trupp 25 (Sueden und Norden), jede Welle 1,5-mal so gross wie die davor (gerundet), alle 30 s, bis sie
 ##   faellt (hoechstens X15_WAVES Wellen). Dafuer eine 256er-Karte (gleicher Anmarsch: Front 52 m vor ihr, breitere
 ##   Reihen) und KEIN Einheitenlimit fuer den Angreiferstamm (nur in dieser Diagnose).
+##   ... -- demon_<modus> [seed] (z. B. demon_mobile): dasselbe mit der Daemonengolemin, ab ihrer ersten moeglichen
+##   Sitzgroesse (32 m, durch Kills gewachsen wie im Spiel).
 ## Ohne Argument laufen still, mobile, still_fixed, mobile_fixed.
 ## Fehlersuche: Umgebungsvariable GOLEM_TRACE=<s> druckt ab dieser Zeit jeden Tick ihren Zustand (Leben, Krebsgang,
 ## Drehen, Strecken, ausstehende Angriffe, Abklingzeiten); GOLEM_ZONES=1 dazu je Sitzzone die Feinde darin und die im
 ## 30-m-Umkreis in keiner Zone, GOLEM_ZONES=pos auch deren Lage zu ihr (voraus / seitlich).
 
 const GOLEM_SCENE: PackedScene = preload("res://scenes/units/golem.tscn")
+const DEMON_SCENE: PackedScene = preload("res://scenes/units/demon_golem.tscn")
 const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
 const FIREWARRIOR_SCENE: PackedScene = preload("res://scenes/units/firewarrior.tscn")
 const PREACHER_SCENE: PackedScene = preload("res://scenes/units/preacher.tscn")
@@ -95,7 +98,8 @@ func _tick(w: Dictionary) -> void:
 func _initialize() -> void:
 	var args: PackedStringArray = OS.get_cmdline_user_args()
 	var modes: Array[String] = ["still", "mobile", "still_fixed", "mobile_fixed"]
-	if args.size() > 0 and (args[0].trim_suffix("_fixed") in ["still", "mobile", "stand"] or args[0] == "mobile_x15"):
+	var base_arg: String = args[0].trim_prefix("demon_") if args.size() > 0 else ""
+	if args.size() > 0 and (base_arg.trim_suffix("_fixed") in ["still", "mobile", "stand"] or base_arg == "mobile_x15"):
 		modes = [args[0]]
 	var seed_value: int = int(args[1]) if args.size() > 1 and args[1].is_valid_int() else 4711
 	for m in modes:
@@ -123,11 +127,13 @@ static func group_mix(n: int) -> Array[PackedScene]:
 
 
 func _golem(w: Dictionary, mode: String) -> Golem:
-	var g: Golem = w.um.spawn_unit(GOLEM_SCENE, 0, _centre) as Golem
+	var scene: PackedScene = DEMON_SCENE if mode.begins_with("demon_") else GOLEM_SCENE
+	mode = mode.trim_prefix("demon_")
+	var g: Golem = w.um.spawn_unit(scene, 0, _centre) as Golem
 	g.facing = Vector3(0, 0, 1)
 	g.snap_heading()
 	# As the start mission (Main._spawn_chamber_golem): grown by kills to the first sit size.
-	while g.height_m() < 30.0 and g.growth_steps < Golem.max_growth_steps():
+	while not g.can_sit() and g.kills < 2000:
 		g._credit_kill()
 	g._stretch_queued = false
 	g.health = g.max_health
@@ -180,20 +186,22 @@ func _alive(list: Array) -> int:
 
 func _run(mode: String, seed_value: int = 4711) -> void:
 	seed(seed_value)
-	_x15 = mode == "mobile_x15"
+	var demon: bool = mode.begins_with("demon_")
+	var base_mode: String = mode.trim_prefix("demon_")
+	_x15 = base_mode == "mobile_x15"
 	_centre = Vector3(float(X15_MAP) * 0.5, 5, float(X15_MAP) * 0.5) if _x15 else Vector3(64, 5, 64)
 	var waves: int = X15_WAVES if _x15 else WAVES
 	var w: Dictionary = _world()
 	var g: Golem = _golem(w, mode)
-	var fixed: bool = mode.ends_with("_fixed")
+	var fixed: bool = base_mode.ends_with("_fixed")
 	var label: String = {"still": "sitzend, stationaer an", "mobile": "sitzend, stationaer aus (Krebsgang)",
-		"stand": "stehend (Vergleich)", "mobile_x15": "sitzend, stationaer aus, Wellen x1,5"}[mode.trim_suffix("_fixed")] \
+		"stand": "stehend (Vergleich)", "mobile_x15": "sitzend, stationaer aus, Wellen x1,5"}[base_mode.trim_suffix("_fixed")] \
 		+ (", OHNE Wachsen" if fixed else "")
 	var base_steps: int = g.growth_steps
 	var base_level: int = g.level
 	var base_max: int = g.max_health
 	print("")
-	print("=== Golemin %s: %.1f m, %d/%d LP, %d Kills zu Beginn ===" % [label, g.height_m(), g.health, g.max_health, g.kills])
+	print("=== %s %s: %.1f m, %d/%d LP, %d Kills zu Beginn ===" % ["Daemonengolemin" if demon else "Golemin", label, g.height_m(), g.health, g.max_health, g.kills])
 	var kills0: int = g.kills
 	var enemies: Array = []
 	var spawned: int = 0

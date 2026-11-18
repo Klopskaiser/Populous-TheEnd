@@ -23,7 +23,7 @@ class_name DemonGolem extends Golem
 ##  * Kill: die Lebensobergrenze des Opfers, halb sofort, halb ueber 5 s, stapelbar
 ##    (ohne Lebenspunkte: 10 sofort und 15 ueber 5 s).
 ##  * Wachstumsstufe: 90 Leben sofort und 135 ueber 5 s, dazu.
-##  * Unterhalt: 5 Mana je Sekunde, solange er lebt (_pay_upkeep).
+##  * Unterhalt: wie jeder Golem 8 % des Brutto-Manaeinkommens + 2 Mana/s (Golem._pay_upkeep; bis 2026-11-18 5 Mana/s).
 ##
 ## unit_kind() bleibt "golem": er zaehlt in der Seitenleiste bei den Golems und
 ## ueberall dort, wo nach der Einheitenart gefragt wird, als Golem.
@@ -329,18 +329,6 @@ func tick(delta: float) -> void:
 	super.tick(delta)
 	if state != State.DEAD and not doomed:
 		_tick_kill_heal(delta)
-		_pay_upkeep(delta)
-
-
-## His upkeep (user spec 2026-11-16): DEMON_GOLEM_MANA_UPKEEP mana per second for
-## as long as he lives — the forester's pattern: a claim on the tribe's income,
-## paid before any spell charges. A tribe that earns less gives what it earns; no
-## debt is left that would run on after his death.
-func _pay_upkeep(delta: float) -> void:
-	if tribe == null or delta <= 0.0:
-		return
-	var granted: float = tribe.claim_upkeep_rate(Balance.DEMON_GOLEM_MANA_UPKEEP)
-	tribe.consume_mana(granted * delta)
 
 
 ## The healing over time of the last kills: every kill's share runs for

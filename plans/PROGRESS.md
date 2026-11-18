@@ -12956,3 +12956,16 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
   zaehlt nur die Zeit), dafuer `GOLEM_BASE_REGEN` 6 LP/s von Anfang an, auch im Kampf, bei allen drei Golems (Golem 80 m:
   51 LP/s). Statusanzeige vereinheitlicht (`Golem.status_lines`): Name/Stufe, Groesse/Leben, Heilung/Tempo, dann
   Lebenszeit bzw. Ziele bzw. Holz, Kills, Haltung.
+
+- **Ritualkammer (2026-11-18):** ohne lebenden Golem 20 statt 10 Mana je Belohnung, und zwar in einen aktiven (ladenden),
+  nicht vollen Golemzauber (Golem/Daemonengolem/Genesisgolem); nur wenn keiner aktiv und offen ist, wie vorher in einen zufaelligen
+  nicht vollen (`RitualChamber.grant_reward`). Test `test_ritual_mana_prefers_an_active_golem_spell`.
+- **Wellen-Diagnose:** Modus `demon_<modus>` (Daemonengolemin ab ihrer ersten Sitzgroesse 32 m). Erster Lauf (`demon_mobile`,
+  7 Seeds): fuenfmal Welle 1-4 ganz abgeraeumt und bei 120 m planmaessig zerfallen, zweimal im Kampf gefallen (Welle 2, 5).
+
+- **Ritualkammer fuellt auch den Genesiszauber (2026-11-18)**; Zauber 13 (Golem) kostet 800 statt 900 Mana je Ladung,
+  Daemonen- und Genesisgolem bleiben fest bei 600 (`SPELL_DEMON_GOLEM_CHARGE_COST` haengt nicht mehr am Golem).
+
+- **Mana-Unterhalt aller Golems (2026-11-18):** `Golem._pay_upkeep` / `mana_upkeep_rate` (vorher nur der Daemonengolem mit
+  5 Mana/s): Golem und Daemonengolem 8 %, Genesisgolem 5 % des Brutto-Einkommens (`Tribe.mana_rate`) + 2 Mana/s, als
+  Anspruch wie die Foersterei (`claim_upkeep_rate`). Test `test_every_golem_costs_a_share_of_the_income_plus_two_per_second`.

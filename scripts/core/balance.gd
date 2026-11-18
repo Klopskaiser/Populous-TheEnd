@@ -922,7 +922,7 @@ const GOLEM_SEPARATION: float = 1.0
 ##    Trommeln +3 fuer alle drei Schlaege) — 15,5 / 24,5 / 24. Bruchteile zaehlen
 ##    mit, gerundet wird beim Treffer.
 ##  * UNTERHALT (Nutzervorgabe 2026-11-16): solange er lebt, kostet er
-##    DEMON_GOLEM_MANA_UPKEEP (5) Mana je Sekunde — wie die Foersterei ein Anspruch auf
+##    (bis 2026-11-18) 5 Mana je Sekunde, seitdem der Unterhalt aller Golems (GOLEM_MANA_UPKEEP_*) — wie die Foersterei ein Anspruch auf
 ##    das laufende Einkommen, VOR dem Aufladen der Zauber. Verdient der Stamm weniger,
 ##    nimmt er das ganze Einkommen (es gibt keinen Manavorrat und keine Schuld, die
 ##    nach seinem Tod weiterliefe).
@@ -972,7 +972,13 @@ const DEMON_GOLEM_DAMAGE_SHARE: float = 0.5
 const DEMON_GOLEM_START_SLAM_BONUS: float = 3.0
 const DEMON_GOLEM_START_KICK_BONUS: float = 2.0
 const DEMON_GOLEM_START_DRUM_BONUS: float = 3.0
-const DEMON_GOLEM_MANA_UPKEEP: float = 5.0
+## Unterhalt ALLER Golems (Nutzervorgabe 2026-11-18, ersetzt die 5 Mana/s des Daemonengolems): solange er
+## lebt, ein Anteil des Brutto-Manaeinkommens seines Stammes (Tribe.mana_rate: Bevoelkerung; Boni wie die der
+## Ritualkammer zaehlen nicht) plus GOLEM_MANA_UPKEEP_FLAT je Sekunde — wie die Foersterei ein Anspruch auf das
+## laufende Einkommen, bevor die Zauber laden (Golem._pay_upkeep).
+const GOLEM_MANA_UPKEEP_SHARE: float = 0.08            # Golem und Daemonengolem
+const GENESIS_GOLEM_MANA_UPKEEP_SHARE: float = 0.05
+const GOLEM_MANA_UPKEEP_FLAT: float = 2.0
 const DEMON_GOLEM_GROWTH_SLAM_DAMAGE: float = 2.25
 const DEMON_GOLEM_GROWTH_KICK_DAMAGE: float = 2.4
 ## 1,0 -> 1,2 (Nutzervorgabe 2026-11-16): mit +1 wuchs das Trommeln langsamer als der
@@ -1574,14 +1580,14 @@ const HYPNOSIS_DURATION: float = 30.0
 ## Beschwoert am Zielpunkt einen Golem (Werte GOLEM_* oben). Zwischen Feuerregen
 ## (775) und Supertornado (1200): 400 LP und drei Minuten Lebenszeit sind stark,
 ## aber der Golem ist beschiessbar und zeitlich begrenzt (Nutzerentscheidung).
-const SPELL_GOLEM_CHARGE_COST: float = 900.0
+const SPELL_GOLEM_CHARGE_COST: float = 800.0   # 900 -> 800 (Nutzervorgabe 2026-11-18)
 const SPELL_GOLEM_MAX_CHARGES: int = 2
 const SPELL_GOLEM_CAST_RANGE: float = 10.0
 ## Zauber 14 "Daemonengolem beschwoeren" (2026-11-16): Ladungen und Reichweite wie
 ## der Golem, die Ladung kostet ein Drittel weniger (Nutzervorgabe 2026-11-16:
 ## 900 -> 600). Vorerst nur beim menschlichen Spieler in der Leiste
-## (Spell.create_player_set), Taste C.
-const SPELL_DEMON_GOLEM_CHARGE_COST: float = SPELL_GOLEM_CHARGE_COST * 2.0 / 3.0
+## (Spell.create_player_set), Taste C. Seit der Golem 800 kostet (2026-11-18), bleibt er fest bei 600.
+const SPELL_DEMON_GOLEM_CHARGE_COST: float = 600.0
 const SPELL_DEMON_GOLEM_MAX_CHARGES: int = SPELL_GOLEM_MAX_CHARGES
 const SPELL_DEMON_GOLEM_CAST_RANGE: float = SPELL_GOLEM_CAST_RANGE
 ## Zauber 15 "Genesisgolem beschwoeren" (Nutzervorgabe 2026-11-17): Kosten wie der
@@ -2287,7 +2293,9 @@ const RITUAL_CHAMBER_WOOD_COST: int = 20
 const RITUAL_CHAMBER_HP: int = 450
 const RITUAL_CHAMBER_TRAINING_TIME: float = 1.0
 const RITUAL_CHAMBER_BRAVES_PER_REWARD: int = 2
-const RITUAL_CHAMBER_MANA_REWARD: float = 10.0
+## 10 -> 20 (Nutzervorgabe 2026-11-18); seitdem nur in einen AKTIVEN, nicht vollen Golemzauber (Golem, Daemonen-
+## und Genesisgolem), und nur wenn keiner aktiv und offen ist, wie vorher in einen zufaelligen nicht vollen.
+const RITUAL_CHAMBER_MANA_REWARD: float = 20.0
 
 # =============================================================================
 # AUSBILDUNGSHALLE

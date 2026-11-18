@@ -137,21 +137,72 @@ func test_two_sacrifices_credit_one_kill_to_an_own_golem() -> void:
 	_free_world(w)
 
 
-func test_without_a_golem_ten_mana_go_into_a_golem_spell() -> void:
+func test_without_a_golem_twenty_mana_go_into_a_golem_spell() -> void:
 	var w: Dictionary = _make_world()
 	var chamber: RitualChamber = _chamber(w)
 	var g: Spell = w.tribe.get_spell(&"golem")
 	var d: Spell = w.tribe.get_spell(&"demon_golem")
-	var before: float = g.charge_mana + d.charge_mana
+	var gs: Spell = w.tribe.get_spell(&"genesis_golem")
+	var before: float = g.charge_mana + d.charge_mana + gs.charge_mana
 	_sacrifice(w, chamber, 2)
-	check_near(g.charge_mana + d.charge_mana - before, Balance.RITUAL_CHAMBER_MANA_REWARD,
-		"10 mana into one of the two golem spells", 0.0001)
+	check_near(g.charge_mana + d.charge_mana + gs.charge_mana - before, Balance.RITUAL_CHAMBER_MANA_REWARD,
+		"20 mana into one of the three golem spells", 0.0001)
+	check_near(Balance.RITUAL_CHAMBER_MANA_REWARD, 20.0, "20 (user spec 2026-11-18, before 10)")
 	check(chamber.grant_reward() == &"mana", "the reward is mana")
 	g.charges = g.max_charges
 	g.charge_mana = 0.0
 	d.charges = d.max_charges
 	d.charge_mana = 0.0
-	check(chamber.grant_reward() == &"none", "both spells full: nothing to give")
+	var gen: Spell = w.tribe.get_spell(&"genesis_golem")
+	gen.charges = gen.max_charges
+	gen.charge_mana = 0.0
+	check(chamber.grant_reward() == &"none", "all three spells full: nothing to give")
+	_free_world(w)
+
+
+## Nutzervorgabe 2026-11-18: das Mana geht nur in einen aktiven (ladenden), nicht vollen Golemzauber; ist keiner
+## aktiv und offen, wie vorher in einen zufaelligen nicht vollen.
+func test_ritual_mana_prefers_an_active_golem_spell() -> void:
+	var w: Dictionary = _make_world()
+	var chamber: RitualChamber = _chamber(w)
+	var g: Spell = w.tribe.get_spell(&"golem")
+	var d: Spell = w.tribe.get_spell(&"demon_golem")
+	var gen: Spell = w.tribe.get_spell(&"genesis_golem")
+	check(gen != null, "the player's set has the genesis golem spell")
+	g.active = false
+	d.active = true
+	gen.active = false
+	for i in range(3):   # (20 a time: far from a full 600-mana charge)
+		var gm: float = g.charge_mana
+		var dm: float = d.charge_mana
+		var genm: float = gen.charge_mana
+		check(chamber.grant_reward() == &"mana", "mana")
+		check(is_equal_approx(g.charge_mana, gm) and is_equal_approx(gen.charge_mana, genm) and d.charge_mana > dm,
+			"only the active demon golem spell takes it (reward %d)" % i)
+	# The genesis golem spell takes it as well (user spec 2026-11-18): the only active one.
+	d.active = false
+	gen.active = true
+	var gen_before: float = gen.charge_mana
+	check(chamber.grant_reward() == &"mana" and gen.charge_mana > gen_before,
+		"the genesis golem spell is filled too, when it is the active one")
+	# The active one full, the others switched off: as before, into one that is not full.
+	gen.charges = gen.max_charges
+	gen.charge_mana = 0.0
+	d.charges = d.max_charges
+	d.charge_mana = 0.0
+	var before: float = g.charge_mana
+	check(chamber.grant_reward() == &"mana" and g.charge_mana > before,
+		"the only active spell full: into the switched-off one that is not")
+	# None active: a random one that is not full.
+	d.charges = 0
+	gen.charges = 0
+	g.active = false
+	d.active = false
+	gen.active = false
+	var sum: float = g.charge_mana + d.charge_mana + gen.charge_mana
+	check(chamber.grant_reward() == &"mana", "none active: still mana")
+	check_near(g.charge_mana + d.charge_mana + gen.charge_mana - sum, Balance.RITUAL_CHAMBER_MANA_REWARD,
+		"into one of them", 0.0001)
 	_free_world(w)
 
 
