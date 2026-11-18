@@ -32,6 +32,8 @@ class_name DemonGolem extends Golem
 ## prints it; the figure with the jeans shoes is a little taller than the golem's,
 ## so the same stride is 2,575 instead of 2,658 m).
 const WALK_CLIP_STRIDE: float = 2.575
+## The same for one loop of crab_walk (crab walk, 2026-11-18): 0,997 m.
+const CRAB_CLIP_STRIDE_DEMON: float = 0.997
 
 ## Running heals over time: one entry per kill or growth step, x = seconds left,
 ## y = health per second.
@@ -241,6 +243,15 @@ func stance_switch_time() -> float:
 ## Sitting down and getting up as well.
 func sit_switch_time() -> float:
 	return super.sit_switch_time() * (1.0 - Balance.DEMON_GOLEM_ATTACK_SPEEDUP)
+
+
+## And getting into and out of the crab stand (assumption, like every stance change).
+func crab_switch_time() -> float:
+	return super.crab_switch_time() * (1.0 - Balance.DEMON_GOLEM_ATTACK_SPEEDUP)
+
+
+func crab_stride() -> float:
+	return CRAB_CLIP_STRIDE_DEMON
 
 
 ## He turns 15 % faster than the golem of his size, standing and seated (user spec 2026-11-18).

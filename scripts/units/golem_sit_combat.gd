@@ -532,6 +532,8 @@ func _choose() -> void:
 	if foes.is_empty() and builds.is_empty() and _vehicles.is_empty():
 		if not is_busy():
 			_maybe_turn(foes)   # maybe a building further off
+			if not turning:
+				g.sit_nothing_in_reach(foes)   # not stationary: her ordered target, crawling
 		return
 	if _turn_sweep(foes, builds):
 		return
@@ -553,6 +555,8 @@ func _choose() -> void:
 		# Only when NO attack reaches anything — not when the free channel reaches nothing while
 		# the other cools down with a foe in its area (she turned away from it, 2026-11-18).
 		_maybe_turn(foes)
+		if not turning:
+			g.sit_nothing_in_reach(foes)   # not stationary: she crawls toward it (user spec 2026-11-18)
 
 
 ## Radius around the seat beyond which no sit attack reaches.

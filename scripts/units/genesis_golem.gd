@@ -42,6 +42,8 @@ const TRAMPLE_WOOD_INTERVAL: float = 0.25
 ## prints it; the figure with the pink shoes stands a little taller than the
 ## golem's, so the same stride is 2,614 instead of 2,658 m).
 const WALK_CLIP_STRIDE: float = 2.614
+## The same for one loop of crab_walk (crab walk, 2026-11-18): 1,012 m.
+const CRAB_CLIP_STRIDE_GENESIS: float = 1.012
 
 ## Stage 0..9 and the experience (braves, fractions when shared) behind it.
 var stage: int = 0
@@ -697,6 +699,10 @@ func model_file() -> String:
 
 func walk_clip_speed() -> float:
 	return WALK_CLIP_STRIDE * MODEL_SCALE
+
+
+func crab_stride() -> float:
+	return CRAB_CLIP_STRIDE_GENESIS
 
 
 # --- Display ----------------------------------------------------------------------------

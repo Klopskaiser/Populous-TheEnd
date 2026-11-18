@@ -56,8 +56,8 @@ func _tribe_active(tribe: Tribe) -> bool:
 ## True while this unit may still take orders (its tribe is not out). Units
 ## without a tribe reference (tests) are allowed through.
 func _unit_active(unit: Unit) -> bool:
-	if unit != null and unit is Golem and (unit as Golem).is_sit_locked():
-		return false   # a sitting golem takes no orders, only "stand up" (order_golem_stand)
+	if unit != null and unit is Golem and (unit as Golem).sit_refuses_orders():
+		return false   # a sitting golem takes no orders, only "stand up" — unless she may crab-walk
 	return unit != null and (unit.tribe == null or not unit.tribe.eliminated)
 
 
@@ -80,6 +80,17 @@ func order_golem_stand(units: Array[Unit]) -> int:
 	for u in units:
 		if u is Golem and is_instance_valid(u) and u.state != Unit.State.DEAD \
 				and (u as Golem).stand_up():
+			n += 1
+	return n
+
+
+## Switch "stationary" (sidebar, user spec 2026-11-18): sets it for every golem in `units`.
+## Returns how many golems were set.
+func set_golem_stationary(units: Array[Unit], on: bool) -> int:
+	var n: int = 0
+	for u in units:
+		if u is Golem and is_instance_valid(u) and u.state != Unit.State.DEAD:
+			(u as Golem).set_sit_stationary(on)
 			n += 1
 	return n
 

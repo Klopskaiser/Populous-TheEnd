@@ -805,7 +805,7 @@ static func clearance(a: Unit, b: Unit) -> float:
 ## a vehicle's half separation radius.
 static func body_radius(u: Unit) -> float:
 	if u is Golem:
-		return (u as Golem).trample_radius()
+		return (u as Golem).collision_radius()
 	return u.vehicle_separation * 0.5
 
 

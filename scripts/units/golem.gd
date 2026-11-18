@@ -109,6 +109,30 @@ const CLIP_SIT_DOWN: StringName = &"sit_down"
 const CLIP_SIT_UP: StringName = &"sit_up"
 ## Length of the sit-down / sit-up clips at speed 1 (golem_bewegung_niedlich_sitzen.mjs).
 const SIT_CLIP_LENGTH: float = 1.5
+## Death while seated or in the crab stand (clip sit_death, 1,4 s, keeps its end pose).
+const CLIP_SIT_DEATH: StringName = &"sit_death"
+## CRAB WALK (user spec 2026-11-18): with the switch "stationary" off a seated golem lifts her
+## bottom (crab_up), crawls feet first on all fours (crab_idle / crab_walk, loops, blended like
+## idle / walk) and sits down again (crab_down). She stays in STANCE_SIT the whole time; _crab
+## tells the phase. Clip lengths at speed 1 (golem_bewegung_niedlich_krebs.mjs).
+const CRAB_NONE: int = 0
+const CRAB_UP: int = 1
+const CRAB_STAND: int = 2
+const CRAB_DOWN: int = 3
+const CLIP_CRAB_UP: StringName = &"crab_up"
+const CLIP_CRAB_IDLE: StringName = &"crab_idle"
+const CLIP_CRAB_WALK: StringName = &"crab_walk"
+const CLIP_CRAB_DOWN: StringName = &"crab_down"
+## The airship strike in the crab stand (clip still to come; without it the strike lands unseen).
+const CLIP_CRAB_SWAT: StringName = &"crab_swat"
+const CRAB_CLIP_LENGTH: float = 0.6
+## Ground covered by one loop of crab_walk at 4 m (metres of the model, measured on the export).
+const CRAB_CLIP_STRIDE: float = 1.029
+## How often she looks for a goal while seated (airship, focus) and re-aims a crawl at a moving target.
+const CRAB_THINK: float = 0.25
+const CRAB_REPATH: float = 1.0
+## Failed paths toward a target before she gives up and sits down.
+const CRAB_MAX_FAILS: int = 3
 ## The stretch she does when she grows: clip name and its length at speed 1.
 const CLIP_GROW: StringName = &"grow"
 const GROW_CLIP_LENGTH: float = 1.0
@@ -290,6 +314,30 @@ var sit_combat: GolemSitCombat = null
 ## Off = no sit attacks (tests of the sit damage switch them off).
 var sit_attacks_enabled: bool = true
 var _sit_anim: GolemSitAnim = null
+## Switch "stationary" (user spec 2026-11-18, sidebar): on = seated she never moves (as before);
+## off = she crab-walks for orders and of her own accord. A fresh golem is stationary.
+var sit_stationary: bool = true
+## Crab walk: phase (CRAB_*), seconds left of crab_up / crab_down, the goal of a move order
+## (INF = none), the unit / building / airship she crawls toward, the target the player ordered
+## (it stays her focus after she sat down), the spot correction while she sits down, timers.
+var _crab: int = CRAB_NONE
+var _crab_time: float = 0.0
+var _crab_goal: Vector3 = Vector3.INF
+var _crab_target: Object = null
+var _crab_focus: Object = null
+var _crab_shift: Vector3 = Vector3.ZERO
+var _crab_think: float = 0.0
+var _crab_repath: float = 0.0
+var _crab_aimed: Vector3 = Vector3.INF
+var _crab_fails: int = 0
+var _crab_wait: float = 0.0
+## Enemy buildings she sat down on (from the crab walk): they take part of the sit damage.
+var _sit_buildings: Array = []
+## The airship strike in the crab stand: the ship it is wound up at, seconds to the impact,
+## seconds to the next strike.
+var _crab_air_ship: Airship = null
+var _crab_air_time: float = 0.0
+var _crab_air_cooldown: float = 0.0
 ## The stomp has landed and its clip is still settling into the crouch: once it
 ## has played out she decides whether to stay down or get up again (_tick_stance).
 var _stomp_landed: bool = false
@@ -408,9 +456,9 @@ func lightning_damage(base: int) -> int:
 	return base if is_full_size() else int(round(float(base) * Balance.GOLEM_LIGHTNING_MULT))
 
 
-## A catapult hits his BODY (see SiegeShot._shockwave).
+## A catapult hits his BODY (see SiegeShot._shockwave) — in the crab stand all of it.
 func body_hit_radius() -> float:
-	return trample_radius()
+	return collision_radius()
 
 
 ## A catapult's DIRECT hit — the stone lands inside his body circle — hurts more
@@ -502,6 +550,9 @@ func selection_ring_radius() -> float:
 ## crowding right under her. The giant levels the ground only in this circle.
 func target_radius() -> float:
 	var r: float = selection_ring_radius() * Balance.GOLEM_TARGET_RADIUS_SHARE
+	if is_crabbing():
+		# In the crab stand her whole body is the target (user spec 2026-11-18).
+		return maxf(r * Balance.GOLEM_SIT_TARGET_RADIUS_FACTOR, crab_body_radius())
 	return r * Balance.GOLEM_SIT_TARGET_RADIUS_FACTOR if _seat_center != Vector3.INF else r
 
 
@@ -512,6 +563,7 @@ func tick(delta: float) -> void:
 	if state != State.DEAD:
 		_slew_heading(delta)
 		_tick_stance(delta)
+		_tick_crab(delta)
 		_tick_stretch(delta)
 	_tick_pending_attack(delta)
 	if state != State.DEAD and not doomed and not garrison_housed:
@@ -908,7 +960,7 @@ func _tick_stretch(delta: float) -> void:
 		# clips have played out. The growth itself (size, health) is there at once.
 		_sit_stretch_left = maxf(_sit_stretch_left - delta, 0.0)
 		if _stretch_queued and stance == STANCE_SIT and not is_switching_stance() and _sit_stretch_left <= 0.0 \
-				and not _sit_layers_busy():
+				and not _sit_layers_busy() and not is_crabbing():
 			_stretch_queued = false
 			var t: float = grow_time()
 			_sit_stretch_left = t
@@ -1042,6 +1094,8 @@ func stand_up() -> bool:
 	_wants_sit = false
 	_sit_shift = Vector3.ZERO
 	_leaving_sit = stance != STANCE_STAND or is_switching_stance()
+	_crab_clear_goals()   # in the crab stand she sits down first (crab_down), then gets up
+	_crab_focus = null
 	return true
 
 
@@ -1055,9 +1109,23 @@ func is_sit_locked() -> bool:
 	return _wants_sit or stance == STANCE_SIT or _leaving_sit
 
 
-## Seated or on her way: she takes no orders — only stand_up() reaches her.
+## Seated or on her way: she takes no orders — only stand_up() reaches her. Not stationary and
+## seated (or in the crab stand) she takes move and attack orders: she crab-walks (user spec 2026-11-18).
 func can_take_orders() -> bool:
-	return super.can_take_orders() and not is_sit_locked()
+	return super.can_take_orders() and not sit_refuses_orders()
+
+
+## Sit-locked and no crab walk possible right now: move and attack orders do not reach her
+## (TribeCommands, SelectionManager: rejected cue).
+func sit_refuses_orders() -> bool:
+	return is_sit_locked() and not crab_ready()
+
+
+## May she crab-walk now? Not stationary, seated for good (not on her way down or up) — or
+## already in the crab stand.
+func crab_ready() -> bool:
+	return not sit_stationary and _wants_sit and not _leaving_sit and stance == STANCE_SIT \
+		and not is_switching_stance() and state != State.DEAD and not doomed
 
 
 ## Seconds sitting down / getting up from the sit takes: GOLEM_SIT_TIME at
@@ -1133,13 +1201,8 @@ func sit_heading_ok(fwd: Vector3) -> bool:
 ## fine since 2026-11-18 — she sits from 30 m on, and from there she wades), touching no
 ## building or construction site of any tribe?
 func seat_free(center: Vector3, fwd: Vector3, half: Vector2) -> bool:
-	var right: Vector3 = Vector3(fwd.z, 0.0, -fwd.x)
-	if terrain_data != null:
-		for i in range(-2, 3):
-			for j in range(-2, 3):
-				var p: Vector3 = center + right * (half.x * float(i) / 2.0) + fwd * (half.y * float(j) / 2.0)
-				if not terrain_data.has_ground(p.x, p.z):
-					return false
+	if not seat_on_disc(center, fwd, half):
+		return false
 	if building_manager != null:
 		var c: Vector2 = Vector2(center.x, center.z)
 		var f: Vector2 = Vector2(fwd.x, fwd.z)
@@ -1149,6 +1212,20 @@ func seat_free(center: Vector3, fwd: Vector3, half: Vector2) -> bool:
 			var box: Rect2 = Rect2(Vector2(b.cell) * TerrainData.CELL_SIZE,
 				Vector2(b.footprint) * TerrainData.CELL_SIZE)
 			if seat_overlaps_box(c, f, half, box):
+				return false
+	return true
+
+
+## Does the seat lie wholly on the disc (water is fine)? From the crab walk this is all the seat
+## needs — she may sit down on buildings then (user spec 2026-11-18).
+func seat_on_disc(center: Vector3, fwd: Vector3, half: Vector2) -> bool:
+	if terrain_data == null:
+		return true
+	var right: Vector3 = Vector3(fwd.z, 0.0, -fwd.x)
+	for i in range(-2, 3):
+		for j in range(-2, 3):
+			var p: Vector3 = center + right * (half.x * float(i) / 2.0) + fwd * (half.y * float(j) / 2.0)
+			if not terrain_data.has_ground(p.x, p.z):
 				return false
 	return true
 
@@ -1225,11 +1302,14 @@ func settle_on_ground(h: float) -> void:
 ## middle of the seat comes down to the height of her feet (never raised) over the time she takes
 ## (user spec 2026-11-18; until then the whole figure at once). The rest of her body
 ## follows while she sits (_tick_sit_levelling). Needs the terrain context.
-func _start_sit_levelling() -> void:
+func _start_sit_levelling(feet: Vector3 = Vector3.INF, duration: float = -1.0) -> void:
 	_sit_level_y = INF
 	if terrain_ctx == null or terrain_data == null or path_service == null:
 		return
-	var feet: Vector3 = position + _sit_shift
+	if feet == Vector3.INF:
+		feet = position + _sit_shift
+	if duration < 0.0:
+		duration = sit_switch_time() - Balance.GOLEM_SIT_SEAT_LEAD
 	_sit_level_y = maxf(terrain_data.get_height(feet.x, feet.z),
 		TerrainData.SEA_LEVEL + Balance.GOLEM_FLATTEN_ABOVE_WATER)
 	_sit_level_timer = Balance.GOLEM_FLATTEN_INTERVAL
@@ -1241,7 +1321,7 @@ func _start_sit_levelling() -> void:
 	if (plan.indices as PackedInt32Array).is_empty():
 		return
 	var morph: TerrainMorph = TerrainMorph.new()
-	morph.setup(terrain_ctx, plan, maxf(sit_switch_time() - Balance.GOLEM_SIT_SEAT_LEAD, 0.1))
+	morph.setup(terrain_ctx, plan, maxf(duration, 0.1))
 	path_service.register_projectile(morph)
 	_sit_level_morph = morph
 
@@ -1346,7 +1426,8 @@ func _sit_blocked_cells() -> Array[Rect2i]:
 ## of her feet when she sat down, every GOLEM_FLATTEN_INTERVAL at most GOLEM_FLATTEN_RATE metres
 ## a second — only lowered, lower ground stays. One step at a time.
 func _tick_sit_levelling(delta: float) -> void:
-	if stance != STANCE_SIT or is_switching_stance() or _seat_center == Vector3.INF or _sit_level_y == INF:
+	if stance != STANCE_SIT or is_switching_stance() or _seat_center == Vector3.INF or _sit_level_y == INF \
+			or is_crabbing():
 		return
 	if terrain_ctx == null or terrain_data == null or path_service == null:
 		return
@@ -1394,6 +1475,18 @@ func _on_seated() -> void:
 				continue
 			if on_seat(u.position):
 				_sit_victims.append(u)
+	# Enemy buildings under the seat (she may sit down on them from the crab walk).
+	_sit_buildings.clear()
+	if building_manager != null:
+		var c: Vector2 = Vector2(_seat_center.x, _seat_center.z)
+		var f: Vector2 = Vector2(_seat_fwd.x, _seat_fwd.z)
+		for b in building_manager.buildings:
+			if not is_instance_valid(b) or b.health <= 0 or b.tribe_id == tribe_id or not b.is_attackable():
+				continue
+			var box: Rect2 = Rect2(Vector2(b.cell) * TerrainData.CELL_SIZE,
+				Vector2(b.footprint) * TerrainData.CELL_SIZE)
+			if seat_overlaps_box(c, f, _seat_half, box):
+				_sit_buildings.append(b)
 	_sit_damage_tick()
 	_sit_damage_timer = Balance.GOLEM_SIT_DAMAGE_INTERVAL
 
@@ -1410,6 +1503,7 @@ func _on_rising() -> void:
 	if sit_combat != null:
 		sit_combat.reset()
 	_sit_victims.clear()
+	_sit_buildings.clear()
 	_after_seat_shift()
 
 
@@ -1422,7 +1516,8 @@ func _after_seat_shift() -> void:
 
 ## While she sits (and is not getting up): the attacks of her limbs (GolemSitCombat).
 func _tick_sit_combat(delta: float) -> void:
-	if stance != STANCE_SIT or is_switching_stance() or _seat_center == Vector3.INF 			or not sit_attacks_enabled:
+	if stance != STANCE_SIT or is_switching_stance() or _seat_center == Vector3.INF \
+			or not sit_attacks_enabled or is_crabbing():
 		return
 	if sit_combat == null:
 		sit_combat = GolemSitCombat.new(self)
@@ -1449,7 +1544,7 @@ func is_sit_turning() -> bool:
 ## Every GOLEM_SIT_DAMAGE_INTERVAL while she sits: the damage on whoever is still
 ## under the seat.
 func _tick_sit_damage(delta: float) -> void:
-	if stance != STANCE_SIT or is_switching_stance() or _seat_center == Vector3.INF:
+	if stance != STANCE_SIT or is_switching_stance() or _seat_center == Vector3.INF or is_crabbing():
 		return
 	_sit_damage_timer -= delta
 	if _sit_damage_timer > 0.0:
@@ -1484,11 +1579,516 @@ func _sit_damage_tick() -> void:
 			continue
 		kept.append(u)
 	_sit_victims = kept
+	# Enemy buildings she sat down on (from the crab walk, user spec 2026-11-18): half the sit
+	# damage in hit points, like every golem attack on a building.
+	var standing: Array = []
+	for b in _sit_buildings:
+		if not is_instance_valid(b) or b.health <= 0:
+			continue
+		_strike_building(b, building_damage_for(damage))
+		if is_instance_valid(b) and b.health > 0:
+			standing.append(b)
+	_sit_buildings = standing
 
 
 ## The victims she sat down on that are still in the list (tests, panel).
 func sit_victims() -> Array:
 	return _sit_victims
+
+
+## Enemy buildings she sat down on that still stand (tests).
+func sit_buildings() -> Array:
+	return _sit_buildings
+
+
+# --- Crab walk (user spec 2026-11-18) -------------------------------------------------
+# With the switch "stationary" off a seated golem crawls on all fours, feet first: for a move
+# order, toward an ordered target until a sit attack reaches it, and of her own accord toward a
+# foe in her aggro radius when nothing is within reach from the seat — and toward an airship,
+# which only the strike from the crab stand can hit. At the goal she sits down again (also on
+# buildings; the ground rules of the seat stay, the sit damage strikes anew). Phases: crab_up ->
+# crab stand (crab_idle / crab_walk) -> crab_down. She stays in STANCE_SIT throughout; her logic
+# position stays the middle of her body (as on the seat), the model is drawn forward as there.
+
+func is_crabbing() -> bool:
+	return _crab != CRAB_NONE
+
+
+## In the crab stand and free to walk (not winding up the airship strike).
+func crab_walking() -> bool:
+	return _crab == CRAB_STAND and _crab_air_ship == null
+
+
+## Rooted: seated (or getting into / out of the crab stand) — other golems do not push her.
+func is_rooted() -> bool:
+	return is_sit_locked() and _crab != CRAB_STAND
+
+
+## Her collision circle (other golems, vehicles' clearance) and the catapult's: the body circle —
+## in the crab stand her whole body (user spec 2026-11-18: bigger, and open to attacks).
+func collision_radius() -> float:
+	return crab_body_radius() if is_crabbing() else trample_radius()
+
+
+func crab_body_radius() -> float:
+	return Balance.GOLEM_CRAB_BODY_RADIUS * model_scale().z * size_factor()
+
+
+## Radius of the circle each limb treads in the crab walk.
+func crab_limb_radius() -> float:
+	return Balance.GOLEM_CRAB_LIMB_RADIUS * model_scale().x * size_factor()
+
+
+## Where her feet and hands rest in the crab stand: left foot, right foot, left hand, right hand
+## (the feet a little further ahead, the hands a little further back than on the seat).
+func crab_contacts() -> Array[Vector3]:
+	var fwd: Vector3 = heading()
+	var right: Vector3 = Vector3(fwd.z, 0.0, -fwd.x)
+	var sx: float = model_scale().x * size_factor()
+	var sz: float = model_scale().z * size_factor()
+	var sit_feet: Vector3 = position + fwd * seat_back_m()
+	var feet: Vector3 = sit_feet + fwd * (Balance.GOLEM_CRAB_FOOT_FORWARD * sz)
+	var foot: Vector3 = right * (Balance.GOLEM_SIT_FOOT_SIDE * sx)
+	var hands: Vector3 = sit_feet - fwd * ((Balance.GOLEM_SIT_HAND_BACK + Balance.GOLEM_CRAB_HAND_BACK) * sz)
+	var hand: Vector3 = right * (Balance.GOLEM_SIT_HAND_SIDE * sx)
+	return [feet + foot, feet - foot, hands + hand, hands - hand]
+
+
+## Seconds crab_up / crab_down take: GOLEM_CRAB_SWITCH_TIME at GOLEM_SIT_REF_HEIGHT, with the root of
+## the height like sitting down.
+func crab_switch_time() -> float:
+	return Balance.GOLEM_CRAB_SWITCH_TIME * sqrt(height_m() / Balance.GOLEM_SIT_REF_HEIGHT)
+
+
+## Ground one loop of crab_walk covers at 4 m (each model its own, measured on the export).
+func crab_stride() -> float:
+	return CRAB_CLIP_STRIDE
+
+
+## Ground one loop of crab_walk covers at size factor 1 (world metres).
+func crab_clip_speed() -> float:
+	return crab_stride() * model_scale().z
+
+
+## The switch "stationary" (sidebar). Switched on during a crawl she sits down where she is.
+func set_sit_stationary(on: bool) -> void:
+	sit_stationary = on
+	if on:
+		_crab_clear_goals()
+		_crab_focus = null
+
+
+## Sends her crawling: to `goal` (a move order; INF = none) or toward `target` (unit, building,
+## airship) until she can strike it. False when she may not crab-walk now.
+func crab_to(goal: Vector3, target: Object) -> bool:
+	if not crab_ready():
+		return false
+	_crab_goal = goal
+	_crab_target = target
+	_crab_aimed = Vector3.INF
+	_crab_fails = 0
+	_crab_repath = 0.0
+	_crab_think = 0.0
+	if _crab == CRAB_STAND:
+		_crab_plan()
+	return true
+
+
+func _crab_clear_goals() -> void:
+	_crab_goal = Vector3.INF
+	_crab_target = null
+	_crab_aimed = Vector3.INF
+
+
+## The goal of the current crawl (tests, panel): the move goal, else the target's place, else INF.
+func crab_goal() -> Vector3:
+	if _crab_goal != Vector3.INF:
+		return _crab_goal
+	if _crab_target_alive(_crab_target):
+		return _crab_target_point(_crab_target)
+	return Vector3.INF
+
+
+func crab_target() -> Object:
+	return _crab_target
+
+
+## Is `o` still worth crawling to? A living, targetable enemy unit; a crewed enemy airship; a
+## standing, attackable enemy building.
+func _crab_target_alive(o: Object) -> bool:
+	if o == null or not is_instance_valid(o):
+		return false
+	if o is Airship:
+		return (o as Airship).state != State.DEAD and (o as Airship).tribe_id != tribe_id \
+			and (o as Airship).auto_attackable()
+	if o is Unit:
+		var u: Unit = o as Unit
+		return u.state != State.DEAD and not u.doomed and u.tribe_id != tribe_id and u.is_targetable()
+	return o.health > 0 and o.tribe_id != tribe_id and o.is_attackable()
+
+
+func _crab_target_point(o: Object) -> Vector3:
+	return (o as Unit).position if o is Unit else o.center_world()
+
+
+## Would she reach `o` from where she is, facing as she does? An airship: within reach of the
+## strike behind her head once she turns her back to it. Anything else: inside the area of one of
+## her single sit attacks (legs or arms) — she sits down there and strikes.
+func _crab_reaches(o: Object) -> bool:
+	if o is Airship:
+		return _flat_dist(position, (o as Airship).position) <= crab_air_reach()
+	if sit_combat == null:
+		sit_combat = GolemSitCombat.new(self)
+	var kinds: Array[StringName] = [GolemSitCombat.STOMP_L, GolemSitCombat.STOMP_R, GolemSitCombat.KICK_L,
+		GolemSitCombat.KICK_R, GolemSitCombat.WIPE_L, GolemSitCombat.WIPE_R, GolemSitCombat.DOUBLE_STOMP]
+	for k in kinds:
+		if o is Unit:
+			if sit_combat.in_area(k, (o as Unit).position):
+				return true
+		elif sit_combat.building_in_area(k, o):
+			return true
+	return false
+
+
+## GolemSitCombat found nothing within reach and did not turn: not stationary, she crawls toward
+## the target the player ordered (her focus), else toward the nearest foe in her aggro radius
+## (user spec 2026-11-18: "wenn er nichts mehr zum Angreifen hat").
+func sit_nothing_in_reach(foes: Array[Unit]) -> void:
+	if not crab_ready() or is_crabbing() or _crab_goal != Vector3.INF or _crab_target != null:
+		return
+	if _crab_target_alive(_crab_focus):
+		crab_to(Vector3.INF, _crab_focus)
+		return
+	_crab_focus = null
+	var best: Unit = null
+	var best_d: float = aggro_radius()
+	for u in foes:
+		if not _crab_target_alive(u) or u.is_airborne():
+			continue
+		var d: float = _flat_dist(position, u.position)
+		if d <= best_d:
+			best_d = d
+			best = u
+	if best != null:
+		crab_to(Vector3.INF, best)
+
+
+## One tick of the crab walk (after the stance logic).
+func _tick_crab(delta: float) -> void:
+	if stance != STANCE_SIT or is_switching_stance():
+		if _crab != CRAB_NONE:
+			_crab = CRAB_NONE   # (cannot happen: the stance waits for the crab walk)
+		return
+	if _crab == CRAB_NONE:
+		_tick_crab_seated(delta)
+		return
+	_tick_crab_air(delta)
+	match _crab:
+		CRAB_UP:
+			_crab_time -= delta
+			if _crab_time <= 0.0:
+				_crab_time = 0.0
+				_crab = CRAB_STAND
+				_crab_plan()
+		CRAB_STAND:
+			_tick_crab_stand(delta)
+		CRAB_DOWN:
+			if _crab_shift != Vector3.ZERO:
+				var step: Vector3 = _crab_shift * clampf(delta / maxf(_crab_time, delta), 0.0, 1.0)
+				position += step
+				_crab_shift -= step
+				_snap_to_ground()
+				_sync_soa_pos()
+			_crab_time -= delta
+			if _crab_time <= 0.0:
+				_crab_seated()
+				return
+	if _crab != CRAB_NONE:
+		# Her body moves with her: the seat layout (model offset, floor) follows.
+		_seat_center = position
+		_seat_fwd = heading()
+		_seat_floor_y = _seat_floor_height(position + _seat_fwd * seat_back_m(), _seat_fwd)
+
+
+## Seated and not stationary: every CRAB_THINK she checks whether to get up into the crab stand —
+## for an order, or an airship in her aggro radius (only the crab stand strikes those).
+func _tick_crab_seated(delta: float) -> void:
+	_crab_think -= delta
+	if _crab_think > 0.0:
+		return
+	_crab_think = CRAB_THINK
+	if not crab_ready():
+		return
+	if sit_stretching() or _stretch_queued or _sit_layers_busy():
+		return   # a wound-up attack lands and a stretch runs out first
+	if _crab_goal == Vector3.INF and _crab_target == null and can_strike_air():
+		_crab_target = _crab_ship_near(aggro_radius())
+	if _crab_goal != Vector3.INF:
+		if _flat_dist(position, _crab_goal) <= arrive_eps() + 0.5:
+			_crab_goal = Vector3.INF   # she sits there already
+			return
+		_begin_crab_up()
+		return
+	if _crab_target == null:
+		return
+	if not _crab_target_alive(_crab_target):
+		_crab_target = null
+		return
+	if _crab_target is Airship or not _crab_reaches(_crab_target):
+		_begin_crab_up()
+	else:
+		_crab_target = null   # within reach from the seat: the sit attacks take it
+
+
+func _begin_crab_up() -> void:
+	_crab = CRAB_UP
+	_crab_time = crab_switch_time()
+	if sit_combat != null:
+		sit_combat.reset()   # (a turn on the seat ends)
+	facing = heading()
+	_sit_victims.clear()   # no sit damage on the way (user spec 2026-11-18)
+	_sit_buildings.clear()
+	_sit_level_y = INF   # the levelling of the old seat stops
+	_crab_fails = 0
+	_crab_aimed = Vector3.INF
+	_after_seat_shift()   # the target radius grows to her whole body
+
+
+## In the crab stand: (re)plans the crawl toward the move goal or the target.
+func _crab_plan() -> void:
+	move_aggressive = false
+	waypoint_queue.clear()
+	if _crab_goal != Vector3.INF:
+		_crab_aimed = _crab_goal
+		_start_path_to(_crab_goal)
+		return
+	if _crab_target_alive(_crab_target) and not _crab_reaches(_crab_target):
+		_crab_aimed = _crab_target_point(_crab_target)
+		_crab_repath = CRAB_REPATH
+		_start_path_to(_crab_aimed)
+
+
+func _crab_stop() -> void:
+	if state == State.MOVE:
+		_clear_path()
+		_pending_target = Vector3.INF
+		_set_state(State.IDLE)
+
+
+func _tick_crab_stand(delta: float) -> void:
+	if _crab_air_ship != null:
+		return   # winding up the strike at an airship: she stands
+	if not _wants_sit:
+		_crab_clear_goals()
+		_crab_stop()
+		_begin_crab_down()   # called up: she sits down first, then gets up
+		return
+	_crab_repath -= delta
+	_crab_wait -= delta
+	if _crab_target != null and not _crab_target_alive(_crab_target):
+		if _crab_focus == _crab_target:
+			_crab_focus = null
+		_crab_target = null
+		if _crab_goal == Vector3.INF:
+			_crab_stop()
+	if _crab_goal == Vector3.INF and _crab_target == null and not sit_stationary and can_strike_air():
+		var ship: Airship = _crab_ship_near(aggro_radius())
+		if ship != null:
+			_crab_target = ship
+			_crab_fails = 0
+			_crab_plan()
+	if _crab_goal != Vector3.INF:
+		if state == State.MOVE:
+			return
+		_crab_goal = Vector3.INF   # arrived (or no way further)
+	if _crab_target != null:
+		if _crab_reaches(_crab_target):
+			_crab_stop()
+			_crab_fails = 0
+			if _crab_target is Airship:
+				# She turns her back to it: the strike lands behind her head.
+				var away: Vector3 = position - (_crab_target as Airship).position
+				away.y = 0.0
+				if away.length_squared() > 0.0001:
+					facing = away.normalized()
+				return
+			_crab_target = null
+			_try_crab_down()
+			return
+		if state != State.MOVE:
+			_crab_fails += 1
+			if _crab_fails > CRAB_MAX_FAILS:
+				if _crab_focus == _crab_target:
+					_crab_focus = null
+				_crab_target = null   # no way to it: she sits down where she is
+			else:
+				_crab_plan()
+			return
+		if _crab_repath <= 0.0:
+			_crab_repath = CRAB_REPATH
+			if _flat_dist(_crab_target_point(_crab_target), _crab_aimed) > 1.0:
+				_crab_plan()
+		return
+	_try_crab_down()
+
+
+## Nowhere to go any more: she sits down — if she can sit here (or nearby); else she stays in the
+## crab stand and looks again every CRAB_REPATH.
+func _try_crab_down() -> void:
+	if _crab_wait > 0.0:
+		return
+	if not _begin_crab_down():
+		_crab_wait = CRAB_REPATH
+
+
+## Sits down from the crab stand. Called up (stand_up) anywhere; otherwise only where the seat lies
+## on the disc and her feet and hands rest on possible ground — buildings do not matter here (user
+## spec 2026-11-18), up to half her body radius aside (she shifts there on the way down).
+func _begin_crab_down() -> bool:
+	_crab_stop()
+	facing = heading()
+	var shift: Vector3 = Vector3.ZERO
+	if _wants_sit:
+		var spot: Vector3 = _crab_seat_spot()
+		if spot == Vector3.INF:
+			return false
+		shift = Vector3(spot.x - position.x, 0.0, spot.z - position.z)
+		_start_sit_levelling(spot + heading() * seat_back_m(), crab_switch_time())
+	_crab_shift = shift
+	_crab = CRAB_DOWN
+	_crab_time = crab_switch_time()
+	return true
+
+
+## Where the middle of her seat can go down from the crab stand: here, else up to
+## GOLEM_SIT_SEARCH_SHARE of her body radius aside (as find_seat, but buildings do not count).
+func _crab_seat_spot() -> Vector3:
+	var fwd: Vector3 = heading()
+	var half: Vector2 = seat_half_extent()
+	var search: float = trample_radius() * Balance.GOLEM_SIT_SEARCH_SHARE
+	var offsets: Array[Vector2] = [Vector2.ZERO]
+	for ring in [0.5, 1.0]:
+		for k in range(8):
+			offsets.append(Vector2.from_angle(float(k) * TAU / 8.0) * search * ring)
+	for off in offsets:
+		var c: Vector3 = Vector3(position.x + off.x, position.y, position.z + off.y)
+		if seat_on_disc(c, fwd, half) and sit_pose_ok(c, fwd):
+			return c
+	return Vector3.INF
+
+
+## crab_down has played out: she sits — the seat fixed anew, the sit damage strikes who is under it now.
+func _crab_seated() -> void:
+	_crab = CRAB_NONE
+	_crab_time = 0.0
+	if _crab_shift != Vector3.ZERO:
+		position += _crab_shift
+		_snap_to_ground()
+	_crab_shift = Vector3.ZERO
+	var fwd: Vector3 = heading()
+	facing = fwd
+	_seat_fwd = fwd
+	_seat_half = seat_half_extent()
+	_seat_floor_y = _seat_floor_height(position + fwd * seat_back_m(), fwd)
+	position.y = maxf(position.y, _seat_floor_y)
+	_seat_center = position
+	_after_seat_shift()
+	_crab_think = 0.0
+	if _wants_sit:
+		_on_seated()
+
+
+# --- The airship strike from the crab stand (user spec 2026-11-18) ---------------------------
+# The only way a seated golem hits an airship: in the crab stand, area behind her head. Like the
+# standing swat a hull hit (two bring a ship down), with the swat's wind-up and cooldown.
+
+## Middle of the area behind her head.
+func crab_air_center() -> Vector3:
+	return position - heading() * (Balance.GOLEM_CRAB_AIR_BACK * model_scale().z * size_factor())
+
+
+func crab_air_radius() -> float:
+	return Balance.GOLEM_CRAB_AIR_RADIUS * model_scale().z * size_factor()
+
+
+## How far from her middle an airship may be to come into the area once she turns her back to it.
+func crab_air_reach() -> float:
+	return Balance.GOLEM_CRAB_AIR_BACK * model_scale().z * size_factor() + crab_air_radius()
+
+
+func in_crab_air_zone(p: Vector3, slack: float = 1.0) -> bool:
+	return _flat_dist(p, crab_air_center()) <= crab_air_radius() * slack
+
+
+## Nearest crewed enemy airship within `radius` of her middle.
+func _crab_ship_near(radius: float) -> Airship:
+	if not can_strike_air() or path_service == null:
+		return null
+	var best: Airship = null
+	var best_d: float = INF
+	for u in path_service.get_enemy_vehicles_in_radius(position, radius, tribe_id):
+		if not (u is Airship) or not (u as Airship).auto_attackable():
+			continue
+		var d: float = _flat_dist(position, u.position)
+		if d < best_d:
+			best_d = d
+			best = u as Airship
+	return best
+
+
+## Nearest crewed enemy airship inside the area behind her head.
+func _crab_ship_in_zone() -> Airship:
+	if not can_strike_air() or path_service == null:
+		return null
+	var best: Airship = null
+	var best_d: float = INF
+	for u in path_service.get_enemy_vehicles_in_radius(position, crab_air_reach(), tribe_id):
+		if not (u is Airship) or not (u as Airship).auto_attackable() or not in_crab_air_zone(u.position):
+			continue
+		var d: float = _flat_dist(crab_air_center(), u.position)
+		if d < best_d:
+			best_d = d
+			best = u as Airship
+	return best
+
+
+func _tick_crab_air(delta: float) -> void:
+	_crab_air_cooldown = maxf(_crab_air_cooldown - delta, 0.0)
+	if _crab_air_ship != null:
+		_crab_air_time -= delta
+		if _crab_air_time <= 0.0:
+			var ship: Airship = _crab_air_ship
+			_crab_air_ship = null
+			_land_crab_swat(ship)
+		return
+	if _crab != CRAB_STAND or _crab_air_cooldown > 0.0:
+		return
+	var target: Airship = _crab_ship_in_zone()
+	if target == null:
+		return
+	_crab_air_ship = target
+	_crab_air_time = current_windup(ATTACK_SWAT)
+	_crab_air_cooldown = cooldown_for(ATTACK_SWAT)
+	_no_combat_timer = 0.0
+	_play_clip(CLIP_CRAB_SWAT, Balance.GOLEM_CRAB_AIR_IMPACT / maxf(_crab_air_time, 0.05), true)
+
+
+## Is the strike from the crab stand wound up (tests)?
+func crab_air_pending() -> bool:
+	return _crab_air_ship != null
+
+
+## The strike lands: a hull hit on the ship, if it is still in the area (a little slack for its drift).
+func _land_crab_swat(ship: Airship) -> bool:
+	_no_combat_timer = 0.0
+	if ship == null or not is_instance_valid(ship) or ship.state == State.DEAD \
+			or ship.tribe_id == tribe_id or not ship.auto_attackable():
+		return false
+	if not in_crab_air_zone(ship.position, SWAT_SLACK):
+		return false
+	_play_strike_sfx(ATTACK_SWAT)
+	ship.register_hull_hit(position)
+	return true
 
 
 ## Seconds a stance switch takes at the current size.
@@ -1571,6 +2171,8 @@ func _tick_stance(delta: float) -> void:
 			_begin_stance(STANCE_STAND)
 		return
 	if stance == STANCE_SIT:
+		if is_crabbing():
+			return   # in the crab stand she sits down first (_tick_crab)
 		# Only stand_up() gets her up (user spec 2026-11-17) — through the crouch.
 		if not _wants_sit:
 			_leaving_sit = true
@@ -1882,6 +2484,8 @@ func cooldown_for(kind: StringName) -> float:
 ## How fast the body turns (rad/s): GOLEM_TURN_RATE at the starting size, down to
 ## GOLEM_TURN_RATE_FULL_SHARE of the fire ram's rate at 80 m. Seated: sit_turn_rate().
 func turn_rate() -> float:
+	if is_crabbing():
+		return standing_turn_rate(height_m()) * Balance.GOLEM_CRAB_TURN_SHARE
 	return sit_turn_rate() if stance == STANCE_SIT else standing_turn_rate(height_m())
 
 
@@ -1959,12 +2563,15 @@ func is_turned_to_facing() -> bool:
 ## (it does not glide sideways): full speed when aligned, down to
 ## GOLEM_TURN_MIN_SPEED_SHARE when it would have to walk backward.
 func _slope_speed(slope: float) -> float:
-	if stance != STANCE_STAND or is_switching_stance() or is_stretching():
+	var crab: bool = crab_walking()
+	if not crab and (stance != STANCE_STAND or is_switching_stance() or is_stretching()):
 		return 0.0   # crouched, bending down, getting up or stretching: rooted
 	var want_dir: Vector3 = Vector3(facing.x, 0.0, facing.z)
 	var share: float = 1.0
 	if want_dir.length_squared() > 0.000001:
 		share = maxf(Balance.GOLEM_TURN_MIN_SPEED_SHARE, heading().dot(want_dir.normalized()))
+	if crab:
+		share *= Balance.GOLEM_CRAB_SPEED_SHARE   # a third of her walking speed (user spec 2026-11-18)
 	return super._slope_speed(slope) * share
 
 
@@ -2223,8 +2830,9 @@ func _tick_trample(delta: float) -> void:
 			_trampled[id] -= delta
 			if _trampled[id] <= 0.0:
 				_trampled.erase(id)
+	var crab: bool = crab_walking()
 	if not tramples() or path_service == null or _tick_pos == Vector3.INF or delta <= 0.0 \
-			or is_sit_locked():
+			or (is_sit_locked() and not crab):
 		return
 	var walked: float = Vector2(position.x - _tick_pos.x, position.z - _tick_pos.z).length()
 	if walked / delta < Balance.GOLEM_TRAMPLE_MIN_SPEED:
@@ -2237,10 +2845,16 @@ func _tick_trample(delta: float) -> void:
 	if room <= 0:
 		return
 	var damage: int = trample_damage()
-	var radius: float = trample_radius()
-	var under: Array[Unit] = path_service.get_units_in_radius(position, radius)
+	# Where she treads: her body circle — in the crab walk only her four limbs (user spec
+	# 2026-11-18), one circle each; the target cap counts for all four together.
+	var circles: PackedVector3Array = _trample_circles()
+	var radius: float = collision_radius() if crab else trample_radius()
+	var under: Array[Unit] = []
+	for u in path_service.get_units_in_radius(position, radius):
+		if not crab or _trample_gap(circles, u.position) <= 0.0:
+			under.append(u)
 	under.sort_custom(func(a: Unit, b: Unit) -> bool:
-		return _flat_dist(a.position, position) < _flat_dist(b.position, position))
+		return _trample_gap(circles, a.position) < _trample_gap(circles, b.position))
 	for u in under:
 		if room <= 0:
 			return
@@ -2278,14 +2892,18 @@ func _tick_trample(delta: float) -> void:
 	# GOLEM_TRAMPLE_BUILDING_INTERVAL for each enemy building under him (2026-11-18).
 	if building_manager == null:
 		return
-	var here: Vector2 = Vector2(position.x, position.z)
 	for b in building_manager.buildings.duplicate():
 		if room <= 0:
 			return
 		if not is_instance_valid(b) or b.health <= 0 or b.tribe_id == tribe_id \
 				or not b.is_attackable():
 			continue
-		if b.footprint_distance_to(here) > radius:
+		var touched: bool = false
+		for c in circles:
+			if b.footprint_distance_to(Vector2(c.x, c.z)) <= c.y:
+				touched = true
+				break
+		if not touched:
 			continue
 		var bid: int = b.get_instance_id()
 		if _trampled.has(bid):
@@ -2296,6 +2914,26 @@ func _tick_trample(delta: float) -> void:
 		_strike_building(b, building_damage_for(damage))
 
 
+## Where she treads (x, z = middle, y = radius): her body circle, in the crab walk her four limbs.
+func _trample_circles() -> PackedVector3Array:
+	var out: PackedVector3Array = PackedVector3Array()
+	if crab_walking():
+		var r: float = crab_limb_radius()
+		for p in crab_contacts():
+			out.append(Vector3(p.x, r, p.z))
+	else:
+		out.append(Vector3(position.x, trample_radius(), position.z))
+	return out
+
+
+## How far p lies outside the nearest of the circles (negative: inside).
+static func _trample_gap(circles: PackedVector3Array, p: Vector3) -> float:
+	var best: float = INF
+	for c in circles:
+		best = minf(best, Vector2(p.x - c.x, p.z - c.z).length() - c.y)
+	return best
+
+
 ## Golems never stand inside one another (user spec 2026-11-16): whichever
 ## level or tribe, two of them keep the sum of their body radii apart. While they
 ## overlap each steps away from the other — the smaller body yields more —, the
@@ -2303,15 +2941,15 @@ func _tick_trample(delta: float) -> void:
 ## unit separation is switched off for golems from level 1 on, so they need their
 ## own.)
 func _tick_golem_separation(delta: float) -> void:
-	if not (path_service is UnitManager) or delta <= 0.0 or is_sit_locked():
+	if not (path_service is UnitManager) or delta <= 0.0 or is_rooted():
 		return   # (a sitting golem is not pushed: the other one yields all the way)
-	var mine: float = trample_radius()
+	var mine: float = collision_radius()
 	var push: Vector2 = Vector2.ZERO
 	for u in (path_service as UnitManager).vehicles:
 		if u == self or not is_instance_valid(u) or not (u is Golem) or u.state == State.DEAD:
 			continue
 		var other: Golem = u as Golem
-		var theirs: float = other.trample_radius()
+		var theirs: float = other.collision_radius()
 		var need: float = _golem_need(other)
 		var away: Vector2 = Vector2(position.x - other.position.x, position.z - other.position.z)
 		var dist: float = away.length()
@@ -2328,7 +2966,7 @@ func _tick_golem_separation(delta: float) -> void:
 		# each takes its share of that: the bigger the OTHER body, the more she
 		# yields — so a giant hardly moves for a small golem.
 		var close: float = minf(need - dist, maxf(current_speed(), other.current_speed()) * delta)
-		var share: float = 1.0 if other.is_sit_locked() else theirs / (mine + theirs)
+		var share: float = 1.0 if other.is_rooted() else theirs / (mine + theirs)
 		push += away * close * share
 	if push == Vector2.ZERO:
 		_tick_golem_yield(delta)
@@ -2343,7 +2981,7 @@ func _tick_golem_separation(delta: float) -> void:
 
 ## Distance at which this golem and `other` touch (centre to centre).
 func _golem_need(other: Golem) -> float:
-	return golem_pair_need(trample_radius(), height_m(), other.trample_radius(), other.height_m())
+	return golem_pair_need(collision_radius(), height_m(), other.collision_radius(), other.height_m())
 
 
 ## Touching distance of two golems with body radii `ra`, `rb` and heights `ha`, `hb`: GOLEM_BODY_GAP of
@@ -2953,7 +3591,11 @@ func _tick_air_chase(delta: float) -> void:
 ## move orders pass through.
 func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = false) -> void:
 	if is_sit_locked():
-		return   # seated: only stand_up() reaches her
+		# Seated: only stand_up() reaches her — unless she may crab-walk (user spec 2026-11-18).
+		if crab_ready():
+			_crab_focus = null
+			crab_to(target, null)
+		return
 	if not _own_order:
 		_chase_ship = null
 	_ordered_building = null
@@ -2962,6 +3604,9 @@ func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = fals
 
 func order_attack(enemy: Unit) -> void:
 	if is_sit_locked():
+		if crab_ready() and enemy != null and is_instance_valid(enemy) and enemy.tribe_id != tribe_id:
+			_crab_focus = enemy   # crawl within reach, sit down, strike (user spec 2026-11-18)
+			crab_to(Vector3.INF, enemy)
 		return
 	_chase_ship = null
 	_ordered_building = null
@@ -2970,6 +3615,9 @@ func order_attack(enemy: Unit) -> void:
 
 func order_attack_building(building) -> void:
 	if is_sit_locked():
+		if crab_ready() and building != null and is_instance_valid(building) and building.tribe_id != tribe_id:
+			_crab_focus = building
+			crab_to(Vector3.INF, building)
 		return
 	_chase_ship = null
 	var walking: bool = state == State.MOVE or (state == State.ATTACK and _closing_in)
@@ -3619,7 +4267,8 @@ func _create_model() -> void:
 func _prepare_clips() -> void:
 	if _anim == null:
 		return
-	for clip in [CLIP_IDLE, CLIP_WALK, CLIP_CROUCH_IDLE, CLIP_SIT_IDLE, GolemSitAnim.CLIP_TURN_L, GolemSitAnim.CLIP_TURN_R]:
+	for clip in [CLIP_IDLE, CLIP_WALK, CLIP_CROUCH_IDLE, CLIP_SIT_IDLE, GolemSitAnim.CLIP_TURN_L, GolemSitAnim.CLIP_TURN_R,
+			CLIP_CRAB_IDLE, CLIP_CRAB_WALK]:
 		if _anim.has_animation(clip):
 			_anim.get_animation(clip).loop_mode = Animation.LOOP_LINEAR
 	_play_clip(CLIP_IDLE)
@@ -3632,6 +4281,31 @@ func _sit_base_clip() -> StringName:
 	var h: Vector3 = heading()
 	var diff: float = wrapf(atan2(facing.x, facing.z) - atan2(h.x, h.z), -PI, PI)
 	return GolemSitAnim.CLIP_TURN_L if diff > 0.0 else GolemSitAnim.CLIP_TURN_R
+
+
+## The clip she dies with: seated or in the crab stand sit_death (user spec 2026-11-18), else death.
+func death_clip() -> StringName:
+	if stance == STANCE_SIT and _anim != null and _anim.has_animation(CLIP_SIT_DEATH):
+		return CLIP_SIT_DEATH
+	return CLIP_DEATH
+
+
+## The crab walk's clips: crab_up / crab_down stretched to their time, in the stand crab_walk by the
+## real speed (CRAB_CLIP_STRIDE per loop, or the hands and feet slide) or crab_idle; the strike at
+## an airship (crab_swat) plays out first.
+func _crab_visual(ground_speed: float) -> void:
+	match _crab:
+		CRAB_UP:
+			_play_clip(CLIP_CRAB_UP, CRAB_CLIP_LENGTH / crab_switch_time())
+		CRAB_DOWN:
+			_play_clip(CLIP_CRAB_DOWN, CRAB_CLIP_LENGTH / crab_switch_time())
+		_:
+			if _clip == CLIP_CRAB_SWAT and _anim.is_playing():
+				return
+			if ground_speed > WALK_THRESHOLD:
+				_play_clip(CLIP_CRAB_WALK, ground_speed / (crab_clip_speed() * _shown_size))
+			else:
+				_play_clip(CLIP_CRAB_IDLE)
 
 
 ## Plays `clip` if the model has it. `restart` re-triggers a clip that is
@@ -3700,10 +4374,14 @@ func _tick_visual(delta: float) -> void:
 		return
 	if state == State.DEAD:
 		if _dead_time == 0.0:
-			_play_clip(CLIP_DEATH, 1.0, true)
+			# Seated or in the crab stand she dies sitting (sit_death); the model keeps its
+			# seated offset. The layer tree hands the figure back to the player first.
+			if _sit_anim != null and _sit_anim.is_active():
+				_sit_anim.set_active(false)
+			_play_clip(death_clip(), 1.0, true)
 		_dead_time += delta
 		# With a collapse clip the body falls first and sinks afterwards.
-		if _dead_time >= SINK_DELAY or _clip != CLIP_DEATH:
+		if _dead_time >= SINK_DELAY or (_clip != CLIP_DEATH and _clip != CLIP_SIT_DEATH):
 			position.y -= SINK_SPEED * delta
 		return
 	var body_dir: Vector3 = heading()
@@ -3729,7 +4407,7 @@ func _tick_visual(delta: float) -> void:
 		# An attack clip plays out; afterwards walk or idle by the real speed.
 		var attacking: bool = ATTACK_CLIPS.has(_clip) and _anim.is_playing()
 		var layered: bool = _sit_anim != null and _sit_anim.usable() \
-			and stance == STANCE_SIT and not is_switching_stance()
+			and stance == STANCE_SIT and not is_switching_stance() and not is_crabbing()
 		if _sit_anim != null and _sit_anim.is_active() != layered:
 			_sit_anim.set_active(layered)
 			if not layered:
@@ -3737,7 +4415,9 @@ func _tick_visual(delta: float) -> void:
 		if layered:
 			_sit_anim.set_base(_sit_base_clip())
 		elif not attacking and not is_switching_stance() and not is_stretching():
-			if stance == STANCE_SIT:
+			if is_crabbing():
+				_crab_visual(ground_speed)
+			elif stance == STANCE_SIT:
 				_play_clip(CLIP_SIT_IDLE)
 			elif stance == STANCE_CROUCH:
 				_play_clip(CLIP_CROUCH_IDLE)

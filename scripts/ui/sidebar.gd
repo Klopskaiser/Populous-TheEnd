@@ -129,6 +129,7 @@ var _crew_slot_buttons: Array[Button] = []
 var _crew_pause_button: Button = null
 var _crew_unload_button: Button = null   # airship "Absetzen an…" (unload arm)
 var _golem_sit_button: Button = null   # golem "Hinsetzen" / "Aufstehen" (key V)
+var _golem_stationary_button: Button = null   # golem "Stationär: an / aus" (crab walk, 2026-11-18)
 ## Edge detection for the crew tab's auto-switch: last polled target, the tab
 ## to return to on deselection, and the currently active tab index.
 var _crew_target_obj: Object = null
@@ -1106,6 +1107,12 @@ func _build_crew_tab() -> Control:
 	UiTheme.style_button(_golem_sit_button)
 	_golem_sit_button.pressed.connect(_on_golem_sit)
 	vb.add_child(_golem_sit_button)
+	# Switch "stationary" (user spec 2026-11-18): off = seated she crab-walks.
+	_golem_stationary_button = Button.new()
+	_golem_stationary_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	UiTheme.style_button(_golem_stationary_button)
+	_golem_stationary_button.pressed.connect(_on_golem_stationary)
+	vb.add_child(_golem_stationary_button)
 
 	scroll.add_child(vb)
 	return scroll
@@ -1114,6 +1121,11 @@ func _build_crew_tab() -> Control:
 func _on_golem_sit() -> void:
 	if _selection != null:
 		_selection.toggle_golem_sit()
+
+
+func _on_golem_stationary() -> void:
+	if _selection != null:
+		_selection.toggle_golem_stationary()
 
 
 func _on_crew_unload() -> void:
@@ -1324,6 +1336,15 @@ func _refresh_crew_tab() -> void:
 				_golem_sit_button.disabled = not g.can_sit() or g.is_sit_locked()
 				_golem_sit_button.tooltip_text = ("Ab %d m Körperhöhe. Sitzend nimmt sie keine Befehle an;" \
 					+ " wer beim Hinsetzen unter ihr steht, nimmt Schaden") % int(Balance.GOLEM_SIT_MIN_HEIGHT)
+	if _golem_stationary_button != null:
+		_golem_stationary_button.visible = target is Golem
+		if target is Golem:
+			var gs: Golem = target as Golem
+			_golem_stationary_button.text = "Stationär: an" if gs.sit_stationary else "Stationär: aus"
+			_golem_stationary_button.disabled = not gs.can_sit() and not gs._wants_sit
+			_golem_stationary_button.tooltip_text = "An: sitzend bleibt sie am Platz. Aus: sitzend krabbelt sie im" \
+				+ " Krebsgang zu Bewegungs- und Angriffszielen und zu Feinden in Aggro-Reichweite," \
+				+ " trampelt dabei mit allen vieren und schlägt Luftschiffe hinter ihrem Kopf"
 
 
 ## Slot click: eject that occupant. The hut eject is MANUAL (pins the crew

@@ -1,5 +1,36 @@
 # 10l – Golem: Haltung „Sitzen“ (Plan, 2026-11-17)
 
+## Krebsgang, Sterben im Sitzen, Zeppelin-Zerstoerer (Nutzervorgaben 2026-11-18, umgesetzt)
+
+- **Sterben im Sitzen** und im Krebsstand: Clip `sit_death` (`Golem.death_clip`), der Sitz-Versatz bleibt.
+- **Schalter "Stationaer"** in der Golem-Ansicht, Standard an (wie bisher). Aus: die Sitzende wechselt selbst in den
+  Krebsgang — fuer Bewegungsbefehle, fuer Angriffsbefehle (hinkrebsen, bis ein Sitzangriff trifft, hinsetzen,
+  angreifen) und von selbst zu Gegnern in Aggro-Reichweite, wenn sie im Sitzen nichts mehr erreicht.
+- **Ablauf:** `crab_up` -> `crab_idle`/`crab_walk` (Fuesse voran, ueberblendet, Schleifen) -> `crab_down` -> sitzen.
+  Tempo **1/3 des Laufens**; gleiche Wegregeln wie beim Laufen. Am Ziel oder in Reichweite setzt sie sich — **auch auf
+  Gebaeude**; die Terrainregeln des Sitzes gelten weiter, Sitzschaden und Einebnen wie beim Hinsetzen, feindliche
+  Gebaeude unter der Sitzflaeche nehmen je Tick den halben Sitzschaden (eigene nichts).
+- **Unterwegs:** Trampelschaden unter allen vier Gliedern, eine gemeinsame Zielobergrenze; kein Sitzschaden, keine
+  Sitzangriffe. Kollisions- und Trefferkreis decken den ganzen Koerper (groesser, anfaellig fuer Angriffe).
+- **Zeppelin-Zerstoerer:** Angriff im Krebsstand, Zielbereich hinter dem Kopf, der einzige Weg, aus dem Sitzen ein
+  Luftschiff zu zerstoeren (stationaer also gar nicht). Huellentreffer wie der Luftschlag im Stand.
+- **Annahmen (Nutzer kann aendern):** Drehrate im Krebsgang 1/3 der Stand-Drehrate; Aufrichten/Absetzen 1,2 s bei
+  30 m, mit Wurzel der Hoehe; Koerperkreis 1,55 m, Gliederkreis 0,3 m, Zielbereich 1,6 m hinter der Mitte mit 1,0 m
+  Radius (je 4-m-Modell); Selbst-Krebsgang nur zu Einheiten (nicht zu Gebaeuden) und zu Luftschiffen; findet sie am
+  Ziel keinen Sitzplatz, bleibt sie im Krebsstand und versucht es jede Sekunde neu.
+
+#### Clipvertrag Krebsgang
+
+| Clip | Laenge bei Tempo 1 | Was passiert |
+|---|---|---|
+| `crab_up` | 0,6 s (gestreckt auf `crab_switch_time`) | Sitz -> Krebsstand |
+| `crab_idle` | 2,0 s, Schleife | Ruhe im Krebsstand |
+| `crab_walk` | 1,0 s, Schleife | Krebsgang auf der Stelle, Fuesse voran; Weg je Durchlauf bei 4 m: Golem 1,029, Daemon 0,997, Genesis 1,012 m |
+| `crab_down` | 0,6 s (gestreckt) | Krebsstand -> Sitz |
+| `sit_death` | 1,4 s | Sterben im Sitzen, bleibt in der Endpose |
+| `crab_swat` | **kommt noch** (Vorschlag 1,2 s, Aufschlag 0,5 s = `GOLEM_CRAB_AIR_IMPACT`) | Zeppelin-Zerstoerer: Schlag hinter den Kopf, aus dem Krebsstand, endet im Krebsstand |
+
+
 Status: **Clips der Sitzangriffe geliefert (2026-11-17, abends)** — alle zwölf (`sit_stomp_l/r`, `sit_kick_l/r`,
 `sit_wipe_l/r`, `sit_hop`, `sit_clap`, `sit_double_stomp`, `sit_turn_l/r`, `sit_grow`) sind in den drei GLB; die
 Aufschlagzeiten aus `GolemSitAnim.SIT_CLIP_IMPACT` sind eingehalten (0,35 s: der Schuh liegt im Bild bei 0,333 s auf).

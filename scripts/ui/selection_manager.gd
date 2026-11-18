@@ -987,7 +987,7 @@ func _selection_has_shaman() -> bool:
 ## Every selected unit is a golem that sits (or is sitting down / getting up).
 func _selection_all_sit_locked() -> bool:
 	for unit in selected:
-		if not (is_instance_valid(unit) and unit is Golem and (unit as Golem).is_sit_locked()):
+		if not (is_instance_valid(unit) and unit is Golem and (unit as Golem).sit_refuses_orders()):
 			return false
 	return not selected.is_empty()
 
@@ -1009,6 +1009,19 @@ func toggle_golem_sit() -> void:
 		_play_blocked_sound()
 	else:
 		_play_move_sound()
+
+
+## Sidebar switch "stationary" (user spec 2026-11-18): flips it for the selected own golems — all
+## take the opposite of the first one's setting.
+func toggle_golem_stationary() -> void:
+	_prune_selection()
+	var golems: Array[Unit] = []
+	for unit in selected:
+		if is_instance_valid(unit) and unit is Golem and unit.tribe_id == player_tribe_id:
+			golems.append(unit)
+	if golems.is_empty() or _tribe_commands == null:
+		return
+	_tribe_commands.set_golem_stationary(golems, not (golems[0] as Golem).sit_stationary)
 
 
 func _selection_has_golem() -> bool:

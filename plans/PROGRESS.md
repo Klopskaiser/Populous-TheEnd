@@ -12855,3 +12855,33 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
   (`GOLEM_GROW_TIME_MAX`); im Sitzen eingereiht hinter laufende Angriffe und Clips (`_sit_layers_busy`), waehrenddessen
   kein Angriff und keine Drehung (`sit_stretching`); `sit_grow` spielt jetzt in dieser Dauer (vorher immer 1 s).
 
+### Golems: Sterben im Sitzen, Krebsgang, Zeppelin-Zerstoerer (2026-11-18)
+
+- **Modelle:** `golem.glb`, `golem_demon.glb`, `golem_genesis.glb` aus `gymnastikschuh/out/golem_krebs/` (alle bisherigen
+  Clips plus `crab_up`, `crab_idle`, `crab_walk`, `crab_down`, `sit_death`), danach `--headless --import`.
+- **Tod im Sitzen:** sitzend und im Krebsstand spielt `sit_death` statt `death` (`Golem.death_clip()`); der Baum der
+  Sitzebenen wird vorher abgeschaltet, der Sitz-Versatz des Modells bleibt.
+- **Schalter "Stationaer"** (`Golem.sit_stationary`, Standard an; Knopf in der Golem-Ansicht der Seitenleiste,
+  `TribeCommands.set_golem_stationary`, `SelectionManager.toggle_golem_stationary`). Aus: die Sitzende nimmt Bewegungs-
+  und Angriffsbefehle an (`can_take_orders` / `sit_refuses_orders` / `crab_ready`; `TribeCommands._unit_active` und
+  der Abgelehnt-Ton fragen `sit_refuses_orders`).
+- **Krebsgang** (`golem.gd`, Abschnitt "Crab walk"): Phasen `_crab` = `CRAB_UP` -> `CRAB_STAND` -> `CRAB_DOWN`, Haltung
+  bleibt `STANCE_SIT`, Standpunkt die Koerpermitte (`_seat_center` folgt). Bewegung ueber den normalen Weg
+  (`_start_path_to`, gleiche Einschraenkungen wie Laufen), Tempo 1/3 (`_slope_speed`, `GOLEM_CRAB_SPEED_SHARE`),
+  Drehrate 1/3 der Stand-Drehrate (`GOLEM_CRAB_TURN_SHARE`, Annahme), Aufrichten/Absetzen
+  `crab_switch_time()` = 1,2 s x Wurzel(Hoehe / 30 m) (Annahme; Daemon 15 % schneller). Ziele: Bewegungsbefehl
+  (`crab_to(goal)`), Angriffsbefehl (kriecht, bis ein einzelner Sitzangriff trifft, `_crab_reaches`; das Ziel bleibt
+  Fokus `_crab_focus`), von selbst (`GolemSitCombat._choose` -> `Golem.sit_nothing_in_reach`: nichts in Reichweite und
+  keine Drehung moeglich -> naechster Feind im Aggro-Radius). Am Ziel `crab_down`: Sitzflaeche auf der Scheibe, Fuesse
+  und Haende auf moeglichem Boden (`_crab_seat_spot`, bis halber Koerperradius daneben), Gebaeude erlaubt; Einebnen und
+  Sitzschaden wie beim Hinsetzen; feindliche Gebaeude unter der Sitzflaeche nehmen je Tick den halben Sitzschaden
+  (`_sit_buildings`). Unterwegs kein Sitzschaden, keine Sitzangriffe.
+- **Koerper im Krebsstand:** Kollisions- und Trefferkreis `crab_body_radius()` (1,55 m des 4-m-Modells von der Mitte;
+  `collision_radius()` fuer Golem-Abstand, `CrewedVehicle.body_radius`, Katapult `body_hit_radius`, `target_radius`).
+  Trampeln nur unter den vier Gliedern (`crab_contacts`, `crab_limb_radius` 0,3 m des Modells, Schaetzwert), eine
+  gemeinsame Zielobergrenze (`_trample_circles`, `_trample_gap`). Im Krebsstand schieben andere Golems sie (`is_rooted`).
+- **Zeppelin-Zerstoerer** (Nutzervorgabe 2026-11-18, Clip `crab_swat` kommt noch): einziger Weg, aus dem Sitzen ein
+  Luftschiff zu treffen. Nur im Krebsstand, Kreis hinter dem Kopf (`crab_air_center`, `GOLEM_CRAB_AIR_BACK` 1,6 m,
+  `GOLEM_CRAB_AIR_RADIUS` 1,0 m des Modells, Vorschlag), Huellentreffer wie der Luftschlag, dessen Ausholzeit und Takt.
+  Nicht stationaer steht sie fuer ein Luftschiff im Aggro-Radius auf, krabbelt heran und dreht ihm den Ruecken zu.
+- **Tests** `test_golem.gd`: `test_crab_*`, `test_dying_seated_plays_sit_death` (1082 gruen).

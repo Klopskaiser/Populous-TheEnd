@@ -4779,3 +4779,276 @@ func test_sit_animation_layers_filter_legs_and_arms() -> void:
 		check(String(layers.tree.get("parameters/base/current_state")) == "turn_l",
 			"turning: the base blends over to sit_turn_l (%s)" % str(layers.tree.get("parameters/base/current_state")))
 	root.queue_free()
+
+
+# --- Krebsgang (Nutzervorgabe 2026-11-18) -----------------------------------------------
+
+## Eine sitzende Golemin bei (64, 40), Blick +z, mit dem Schalter "Stationaer" aus.
+func _crab_golem(w: Dictionary, at: Vector3 = Vector3(64, 5, 40)) -> Golem:
+	var g: Golem = _sit_golem(w, 0, at)
+	g.sit_attacks_enabled = false
+	_sit_until_seated(w, g)
+	g.set_sit_stationary(false)
+	return g
+
+
+## Laeuft die Welt, bis `cond` gilt (oder das Limit); gibt die Zahl der Ticks zurueck.
+func _run_until(w: Dictionary, cond: Callable, limit: int = 2000) -> int:
+	var ticks: int = 0
+	while not cond.call() and ticks < limit:
+		_tick_world(w)
+		ticks += 1
+	return ticks
+
+
+## Schalter "Stationaer": ein frischer Golem ist stationaer (wie bisher, Bewegungsbefehle im Sitzen
+## prallen ab); aus, nimmt die Sitzende Bewegungsbefehle an.
+func test_crab_switch_stationary_decides_whether_she_takes_orders() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _sit_golem(w, 0, Vector3(64, 5, 40))
+	check(g.sit_stationary, "a fresh golem is stationary")
+	check(_sit_until_seated(w, g), "she sits")
+	var sel: Array[Unit] = [g]
+	check(w.commands.order_move(sel, Vector3(64, 5, 70)) == 0 and g.sit_refuses_orders(),
+		"stationary: the move order reaches nobody")
+	check(w.commands.set_golem_stationary(sel, false) == 1 and not g.sit_stationary, "switched off")
+	check(not g.sit_refuses_orders() and g.can_take_orders(), "now she takes orders while seated")
+	check(w.commands.order_move(sel, Vector3(64, 5, 70)) == 1, "the move order reaches her")
+	_tick_world(w)
+	check(g._crab == Golem.CRAB_UP and g.is_sitting(), "she lifts her bottom (crab_up), still in the sit stance")
+	check_near(g._crab_time, g.crab_switch_time(), "crab_up takes crab_switch_time()", 0.0001)
+	g.set_sit_stationary(true)
+	_run_until(w, func() -> bool: return not g.is_crabbing(), 200)
+	check(g.is_sitting() and not g.is_crabbing() and g.crab_goal() == Vector3.INF,
+		"switched on again during the crawl: she sits down where she is")
+	_free_world(w)
+
+
+## Bewegungsbefehl im Sitzen: crab_up -> Krebsgang zum Ziel (ein Drittel des Lauftempos, Fuesse voran)
+## -> crab_down -> sitzt wieder; der Sitzschaden trifft, wer am neuen Platz darunter liegt.
+func test_crab_walk_follows_a_move_order_and_sits_again() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _crab_golem(w)
+	var start: Vector3 = g.position
+	var goal: Vector3 = Vector3(64, 5, start.z + 30.0)
+	g.order_move(goal)
+	_run_until(w, func() -> bool: return g._crab == Golem.CRAB_STAND, 100)
+	check(g._crab == Golem.CRAB_STAND, "in the crab stand")
+	_run_until(w, func() -> bool: return g.state == Unit.State.MOVE, 20)
+	for i in range(5):
+		_tick_world(w)
+	var a: Vector3 = g.position
+	for i in range(10):
+		_tick_world(w)
+	var v: float = _flat(g.position, a) / (10.0 * TICK)
+	check_near(v, g.current_speed() / 3.0, "she crawls at a third of her walking speed (%.2f m/s)" % v, 0.05)
+	check(g.heading().dot(Vector3(0, 0, 1)) > 0.99 and g.position.z > a.z, "feet first, the way she faces")
+	check(g._seat_center == g.position, "her middle moves with her (the seat layout follows)")
+	# Someone at the goal, under the new seat.
+	var victim: Unit = _foe(w, goal.x, goal.z, 100000)
+	_run_until(w, func() -> bool: return not g.is_crabbing(), 2000)
+	check(g.is_sitting() and not g.is_crabbing() and not g.is_switching_stance(), "she sits again")
+	check(_flat(g.position, goal) < 1.0, "at the goal (%.2f m off)" % _flat(g.position, goal))
+	check(g.sit_victims().has(victim) and victim.health < 100000,
+		"the sit damage strikes who is under the new seat")
+	check_near(g.target_radius(), g.selection_ring_radius() * Balance.GOLEM_TARGET_RADIUS_SHARE
+		* Balance.GOLEM_SIT_TARGET_RADIUS_FACTOR, "seated again: the seated target radius", 0.001)
+	_free_world(w)
+
+
+## Im Krebsstand ist der Koerper Kollisions- und Trefferkreis: groesser als im Stand, auch fuer den
+## UnitManager, das Katapult und den Abstand der Golems.
+func test_crab_stand_body_is_the_collision_and_hit_circle() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _crab_golem(w)
+	var seated_radius: float = g.target_radius()
+	check(g.collision_radius() == g.trample_radius(), "seated: the body circle as before")
+	g.order_move(g.position + Vector3(0, 0, 40))
+	_run_until(w, func() -> bool: return g._crab == Golem.CRAB_STAND, 100)
+	var body: float = g.crab_body_radius()
+	check_near(body, Balance.GOLEM_CRAB_BODY_RADIUS * g.model_scale().z * g.size_factor(), "the crab body radius")
+	check(body > g.trample_radius() and body > seated_radius, "bigger than her body circle and her seated target radius")
+	check_near(g.collision_radius(), body, "collision circle = her whole body")
+	check_near(g.target_radius(), body, "hit circle the same (user spec)")
+	check_near(w.um.soa_reach[g._idx], body, "the manager knows", 0.0001)
+	check_near(g.body_hit_radius(), body, "the catapult hits all of her")
+	var other: Golem = _golem(w, 0, Vector3(20, 5, 20))
+	check_near(g._golem_need(other), Golem.golem_pair_need(body, g.height_m(), other.trample_radius(), other.height_m()),
+		"other golems keep clear of her whole body")
+	check(not g.is_rooted(), "in the crab stand she can be pushed like a walker")
+	_free_world(w)
+
+
+## Trampeln im Krebsgang: nur unter den vier Gliedern (nicht unter dem Bauch), die Zielobergrenze
+## gilt fuer alle vier zusammen; eigene Einheiten nie.
+func test_crab_walk_tramples_under_the_four_limbs_with_one_cap() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _crab_golem(w)
+	g.order_move(g.position + Vector3(0, 0, 40))
+	_run_until(w, func() -> bool: return g._crab == Golem.CRAB_STAND, 100)
+	check(g.crab_walking(), "crawling")
+	var limbs: Array[Vector3] = g.crab_contacts()
+	var r: float = g.crab_limb_radius()
+	check(r > 1.0 and r < g.trample_radius(), "a limb treads a smaller circle than the body (%.2f m)" % r)
+	var belly: Unit = _foe(w, g.position.x, g.position.z, 1000)
+	var foot: Unit = _foe(w, limbs[0].x, limbs[0].z, 1000)
+	var hand: Unit = _foe(w, limbs[3].x, limbs[3].z, 1000)
+	var own: Unit = _spawn(w, BRAVE_SCENE, 0, Vector3(limbs[1].x, 5, limbs[1].z))
+	g._tick_pos = g.position - Vector3(0, 0, 1)
+	g._tick_trample(TICK)
+	check(foot.health < 1000 and hand.health < 1000, "under a foot and under a hand: trampled")
+	check(belly.health == 1000, "under her belly: not")
+	check(own.health == own.max_health, "her own: never")
+	# The cap counts for all four limbs together.
+	g._trampled.clear()
+	var crowd: Array[Unit] = []
+	for i in range(g.max_targets() + 4):
+		var p: Vector3 = limbs[i % 4]
+		crowd.append(_foe(w, p.x + 0.1 * float(i / 4), p.z, 1000))
+	g._tick_pos = g.position - Vector3(0, 0, 1)
+	g._tick_trample(TICK)
+	var hit: int = 0
+	for u in crowd:
+		if u.health < 1000:
+			hit += 1
+	check(hit == g.max_targets() - 2, "the cap holds for all four limbs (%d hit, cap %d, 2 places still taken)" % [hit, g.max_targets()])
+	_free_world(w)
+
+
+## Angriffsbefehl im Sitzen: sie krabbelt, bis ein Sitzangriff das Ziel erreicht, setzt sich und
+## greift an. Ohne Befehl krabbelt sie zu Feinden in Aggro-Reichweite, die sie im Sitzen nicht
+## erreicht; stationaer nicht.
+func test_crab_walk_takes_her_within_reach_of_a_target() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _crab_golem(w)
+	var foe: Unit = _foe(w, 64.0, g.position.z + 45.0, 100000)
+	check(not g._crab_reaches(foe) and _flat(g.position, foe.position) < g.aggro_radius(),
+		"a foe in her aggro radius, out of her reach from the seat")
+	var sel: Array[Unit] = [g]
+	w.commands.order_attack(sel, foe)
+	check(g.crab_target() == foe and g._crab_focus == foe, "she means to crawl to it")
+	_run_until(w, func() -> bool: return g.is_crabbing(), 20)
+	_run_until(w, func() -> bool: return not g.is_crabbing(), 2000)
+	check(g.is_sitting() and g._crab_reaches(foe), "she sat down within reach of it")
+	# Of her own accord: a stationary one stays, a mobile one crawls.
+	var w2: Dictionary = _make_world()
+	var still: Golem = _sit_golem(w2, 0, Vector3(64, 5, 40))
+	_sit_until_seated(w2, still)
+	var far: Unit = _foe(w2, 64.0, still.position.z + 45.0, 100000)
+	for i in range(30):
+		_tick_world(w2)
+	check(not still.is_crabbing() and still.crab_target() == null, "stationary: she stays seated")
+	still.set_sit_stationary(false)
+	_run_until(w2, func() -> bool: return still.is_crabbing(), 40)
+	check(still.is_crabbing() and still.crab_target() == far, "not stationary: she crawls toward the foe")
+	_free_world(w)
+	_free_world(w2)
+
+
+## Aus dem Krebsgang darf sie sich auf Gebaeude setzen; feindliche Gebaeude unter der Sitzflaeche
+## nehmen je Sitzschaden-Tick die Haelfte davon in Lebenspunkten, eigene nichts.
+func test_crab_walk_sits_down_on_buildings() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _crab_golem(w)
+	var goal: Vector3 = Vector3(64, 5, g.position.z + 25.0)
+	var hut: Building = w.bm.place(HUT_SCENE, w.t1, Vector2i(int(goal.x) + 1, int(goal.z) - 1), 0, true)
+	var own: Building = w.bm.place(HUT_SCENE, w.t0, Vector2i(int(goal.x) - 4, int(goal.z) - 1), 0, true)
+	check(hut != null and own != null, "an enemy and an own hut at the goal")
+	check(not g.seat_free(goal, Vector3(0, 0, 1), g.seat_half_extent()), "the seat at the goal touches them")
+	g.order_move(goal)
+	_run_until(w, func() -> bool: return g._crab == Golem.CRAB_DOWN, 2000)
+	var hp: int = hut.health   # (her feet may have trampled it on the way)
+	var own_hp: int = own.health
+	_run_until(w, func() -> bool: return not g.is_crabbing(), 200)
+	check(g.is_sitting() and _flat(g.position, goal) < 1.5, "she sat down on them (%.2f m off)" % _flat(g.position, goal))
+	check(g.sit_buildings().has(hut) and not g.sit_buildings().has(own), "the enemy hut is under her, her own does not count")
+	var dmg: int = g.building_damage_for(Balance.GOLEM_SIT_DAMAGE_MULT * g.trample_damage())
+	check(hut.health == hp - dmg, "the enemy hut takes half the sit damage (%d -> %d)" % [hp, hut.health])
+	check(own.health == own_hp, "her own hut nothing")
+	_free_world(w)
+
+
+## Ruft man sie im Krebsgang auf (Aufstehen), setzt sie sich erst und steht dann auf.
+func test_crab_stand_up_sits_down_first() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _crab_golem(w)
+	g.order_move(g.position + Vector3(0, 0, 40))
+	_run_until(w, func() -> bool: return g.crab_walking() and g.state == Unit.State.MOVE, 100)
+	check(g.stand_up(), "called up while crawling")
+	_tick_world(w)
+	check(g._crab == Golem.CRAB_DOWN and g.state == Unit.State.IDLE, "she stops and sits down first")
+	_run_until(w, func() -> bool: return g.stance == Golem.STANCE_STAND and not g.is_sit_locked(), 400)
+	check(g.stance == Golem.STANCE_STAND and not g.is_sit_locked() and not g.is_crabbing(), "then she stands")
+	_free_world(w)
+
+
+## Zeppelin-Zerstoerer: nur im Krebsstand, Zielbereich hinter dem Kopf. Der einzige Weg, aus dem
+## Sitzen ein Luftschiff zu treffen — stationaer bleibt sie sitzen und trifft es nie.
+func test_crab_strike_behind_her_head_brings_airships_down() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _sit_golem(w, 0, Vector3(64, 5, 70))
+	g.sit_attacks_enabled = false
+	_sit_until_seated(w, g)
+	var behind: Vector3 = g.crab_air_center()
+	check(_flat(behind, g.position) > g.seat_back_m(), "the area lies behind her head (%.1f m behind her middle)"
+		% _flat(behind, g.position))
+	var ship: Airship = _crewed_airship(w, 1, Vector3(behind.x, 5, behind.z))
+	check(ship.auto_attackable(), "a crewed enemy airship behind her")
+	for i in range(40):
+		_tick_world(w)
+	check(ship._hull_hits == 0 and not g.is_crabbing(), "stationary: seated she cannot strike it")
+	g.set_sit_stationary(false)
+	_run_until(w, func() -> bool: return g.crab_air_pending(), 200)
+	check(g.crab_air_pending() and g._crab == Golem.CRAB_STAND, "not stationary: up into the crab stand, she winds up")
+	check(g.in_crab_air_zone(ship.position), "the ship is in the area behind her head")
+	_run_until(w, func() -> bool: return ship.state == Unit.State.DEAD, 400)
+	check(ship.state == Unit.State.DEAD, "two strikes bring it down (%d hull hits)" % ship._hull_hits)
+	_run_until(w, func() -> bool: return not g.is_crabbing(), 400)
+	check(g.is_sitting() and not g.is_crabbing(), "nothing left to strike: she sits down again")
+	_free_world(w)
+
+
+## Ein Luftschiff in Aggro-Reichweite vor ihr: sie krabbelt heran, dreht ihm den Ruecken zu und schlaegt.
+func test_crab_strike_she_turns_her_back_to_an_airship() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _crab_golem(w)
+	var ship: Airship = _crewed_airship(w, 1, Vector3(64, 5, g.position.z + 30.0))
+	check(_flat(g.position, ship.position) <= g.aggro_radius(), "the ship is in her aggro radius")
+	_run_until(w, func() -> bool: return g.crab_air_pending() or ship.state == Unit.State.DEAD, 1500)
+	check(g.crab_air_pending() or ship._hull_hits > 0, "she gets it behind her head and strikes")
+	check(g.heading().dot(Vector3(0, 0, 1)) < 0.0, "she turned her back to it")
+	_free_world(w)
+
+
+## Tod im Sitzen und im Krebsstand: Clip sit_death statt death (der Sitz-Versatz des Modells bleibt).
+## Die neuen Clips sind im Modell, crab_idle und crab_walk laufen in Schleife.
+func test_dying_seated_plays_sit_death() -> void:
+	var tree: SceneTree = Engine.get_main_loop() as SceneTree
+	for f in ["res://scenes/units/golem.tscn", "res://scenes/units/demon_golem.tscn", "res://scenes/units/genesis_golem.tscn"]:
+		var g: Golem = (load(f) as PackedScene).instantiate() as Golem
+		tree.root.add_child(g)
+		if g._model == null:
+			g._create_model()   # (inside the test runner the root is not ready yet: no _ready)
+		check(g._anim != null, "%s: the model has its clips" % f)
+		for clip in [Golem.CLIP_SIT_DEATH, Golem.CLIP_CRAB_UP, Golem.CLIP_CRAB_IDLE, Golem.CLIP_CRAB_WALK, Golem.CLIP_CRAB_DOWN]:
+			check(g._anim.has_animation(clip), "%s has %s" % [f.get_file(), clip])
+		check(g._anim.get_animation(Golem.CLIP_CRAB_WALK).loop_mode == Animation.LOOP_LINEAR
+			and g._anim.get_animation(Golem.CLIP_CRAB_IDLE).loop_mode == Animation.LOOP_LINEAR, "crab_idle / crab_walk loop")
+		check(g.death_clip() == Golem.CLIP_DEATH, "standing she dies with death")
+		g.stance = Golem.STANCE_SIT
+		check(g.death_clip() == Golem.CLIP_SIT_DEATH, "seated (and in the crab stand) with sit_death")
+		g.queue_free()
+
+
+## Die Schrittweite von crab_walk je Modell (sonst rutschen Haende und Fuesse); Tempo ein Drittel.
+func test_crab_walk_strides_per_model() -> void:
+	var g: Golem = Golem.new()
+	var d: DemonGolem = DemonGolem.new()
+	var gen: GenesisGolem = GenesisGolem.new()
+	check_near(g.crab_clip_speed(), 1.029 * g.model_scale().z, "golem 1,029 m per loop at 4 m")
+	check_near(d.crab_clip_speed(), 0.997 * d.model_scale().z, "demon golem 0,997 m")
+	check_near(gen.crab_clip_speed(), 1.012 * gen.model_scale().z, "genesis golem 1,012 m")
+	check_near(Balance.GOLEM_CRAB_SPEED_SHARE, 1.0 / 3.0, "a third of the walking speed (user spec)")
+	g.free()
+	d.free()
+	gen.free()

@@ -282,6 +282,33 @@ const GOLEM_SIT_TURN_PLAN_PER_THINK: int = 4
 ## GOLEM_SIT_TURN_SAMPLE_DEG Grad) — notfalls den laengeren Weg herum; ist die Richtung gar nicht erreichbar,
 ## dreht sie sich nicht dorthin.
 const GOLEM_SIT_TURN_SAMPLE_DEG: float = 10.0
+## KREBSGANG (Nutzervorgabe 2026-11-18, plans/10l_golem_sitting.md): ist der Schalter "Stationaer" aus,
+## krabbelt eine sitzende Golemin auf allen vieren (Fuesse voran) — fuer Bewegungs- und Angriffsbefehle
+## und von selbst zu Feinden im Aggro-Radius, die im Sitzen nichts erreicht. Tempo GOLEM_CRAB_SPEED_SHARE
+## des Laufens (Nutzer: ein Drittel), Drehrate GOLEM_CRAB_TURN_SHARE der Drehrate im Stand (Annahme).
+## Aufrichten (crab_up) und Absetzen (crab_down) dauern je GOLEM_CRAB_SWITCH_TIME bei
+## GOLEM_SIT_REF_HEIGHT, mal Wurzel(Hoehe / GOLEM_SIT_REF_HEIGHT) wie das Hinsetzen (Annahme; Clips 0,6 s).
+const GOLEM_CRAB_SPEED_SHARE: float = 1.0 / 3.0
+const GOLEM_CRAB_TURN_SHARE: float = 1.0 / 3.0
+const GOLEM_CRAB_SWITCH_TIME: float = 1.2
+## Koerper im Krebsstand (Meter des 4-m-Modells, gemessen von der Sitzmitte): Kollisions- und
+## Trefferkreis mit GOLEM_CRAB_BODY_RADIUS (deckt Schuhspitzen und Haende ab; Nutzer: groesser als im
+## Stand, anfaellig fuer Angriffe). Fuesse GOLEM_CRAB_FOOT_FORWARD weiter vorn, Haende
+## GOLEM_CRAB_HAND_BACK weiter hinten als im Sitz (Clip, LIESMICH_POPULOUS). Getrampelt wird nur unter
+## den vier Gliedern, je ein Kreis mit GOLEM_CRAB_LIMB_RADIUS (Schaetzwert); die Zielobergrenze des
+## Trampelns gilt fuer alle vier zusammen.
+const GOLEM_CRAB_BODY_RADIUS: float = 1.55
+const GOLEM_CRAB_FOOT_FORWARD: float = 0.13
+const GOLEM_CRAB_HAND_BACK: float = 0.21
+const GOLEM_CRAB_LIMB_RADIUS: float = 0.3
+## ZEPPELIN-ZERSTOERER (Nutzervorgabe 2026-11-18): der einzige Weg, aus dem Sitzen ein Luftschiff zu
+## treffen — nur im Krebsstand, Zielbereich hinter dem Kopf: ein Kreis mit GOLEM_CRAB_AIR_RADIUS um den
+## Punkt GOLEM_CRAB_AIR_BACK hinter der Sitzmitte (Meter des 4-m-Modells, flach gemessen; Vorschlag).
+## Wirkung wie der Luftschlag im Stand: ein Huellentreffer je Schlag, Ausholzeit und Takt des Luftschlags.
+## Clip "crab_swat" (kommt noch; bis dahin ohne Bild), Aufschlag bei GOLEM_CRAB_AIR_IMPACT (Vorschlag).
+const GOLEM_CRAB_AIR_BACK: float = 1.6
+const GOLEM_CRAB_AIR_RADIUS: float = 1.0
+const GOLEM_CRAB_AIR_IMPACT: float = 0.5
 ## STRECKEN BEIM WACHSEN (Nutzer 2026-11-16): bei jedem Stufenaufstieg und jedem
 ## Wachstumsschritt nach Stufe 7 reckt sich der Golem einmal (Clip "grow", Sound
 ## "golem_grow"). Das kostet GOLEM_GROW_TIME Sekunden, in denen er weder
