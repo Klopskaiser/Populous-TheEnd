@@ -207,6 +207,8 @@ func _run(mode: String, seed_value: int = 4711) -> void:
 	var last_wave_t: float = WAVE_INTERVAL * float(waves - 1)
 	var started_ms: int = Time.get_ticks_msec()
 	var crab_ticks: int = 0
+	var melee_peak: Dictionary = {}
+	var melee_next: float = 0.0
 	var report_at: float = 0.0
 	print("  Zeit  Welle  Leben       Hoehe   Kills  Angreifer lebend / gespawnt  | davon Feuerkrieger, vom Sitz erreichbar")
 	while true:
@@ -244,6 +246,12 @@ func _run(mode: String, seed_value: int = 4711) -> void:
 					u.order_move(_aim(g), false, true)
 		if is_instance_valid(g) and g.state != Unit.State.DEAD:
 			min_hp = mini(min_hp, g.health)
+		if is_instance_valid(g) and g.state != Unit.State.DEAD and t >= melee_next:
+			melee_next += 1.0
+			var ms: Dictionary = _melee_stats(g, enemies)
+			if int(ms.n) > int(melee_peak.get("n", -1)):
+				melee_peak = ms
+				melee_peak["t"] = t
 		if OS.get_environment("GOLEM_TRACE") != "" and t >= float(OS.get_environment("GOLEM_TRACE")) and is_instance_valid(g):
 			var near: int = 0
 			for u in enemies:
@@ -308,6 +316,14 @@ func _run(mode: String, seed_value: int = 4711) -> void:
 	print("  Kills %d von %d gespawnten Angreifern (gewollt %d), %d noch am Leben" % [kills, spawned, wanted, _alive(enemies)])
 	print("  Groesse am Ende %.1f m; Zeit im Krebsgang %.0f s; Rechenzeit %.0f s" % [g.height_m() if is_instance_valid(g) else 0.0,
 		float(crab_ticks) * TICK, float(Time.get_ticks_msec() - started_ms) / 1000.0])
+	if not melee_peak.is_empty():
+		print("  Nahkampf am Koerper, Hoechststand bei %.0f s (%.1f m, Zielradius %.2f m, Ring %.2f m): %d Nahkaempfer in" % [
+			melee_peak.t, melee_peak.h, melee_peak.tr, melee_peak.tr + Unit.MELEE_RANGE, melee_peak.n]
+			+ " Reichweite, davon %d innerhalb des Zielradius (unter ihr); Abstand zum naechsten Nahkaempfer: min %.2f m, Median %.2f m;" % [
+			melee_peak.inside, melee_peak.nn_min, melee_peak.nn_med]
+			+ " belegter Bogen %.0f Grad;" % melee_peak.arc
+			+ " %d naeher als 0,3 m, %d naeher als 0,2 m; Ring-Plaetze bei 1 m: %d, bei 0,44 m (Abstandsregel): %d" % [
+			melee_peak.close3, melee_peak.close2, melee_peak.slots_1m, melee_peak.slots_sep])
 	if is_instance_valid(g):
 		_print_stats(g)
 		var taken: int = 0
@@ -358,3 +374,49 @@ func _strikes(g: Golem) -> int:
 	for k in g.attack_stats:
 		n += int(g.attack_stats[k][0])
 	return n
+
+
+## Melee fighters striking her right now: in reach of her target circle, attacking her, not firewarriors —
+## how many, how many stand inside the circle (under her), and how close they stand to each other.
+func _melee_stats(g: Golem, enemies: Array) -> Dictionary:
+	var tr: float = g.target_radius()
+	var pts: Array[Vector2] = []
+	var angles: Array[float] = []
+	var inside: int = 0
+	for u in enemies:
+		if not is_instance_valid(u) or u.state != Unit.State.ATTACK or u.attack_target != g or u is Firewarrior:
+			continue
+		var d: float = Vector2(u.position.x - g.position.x, u.position.z - g.position.z).length()
+		if d - tr > Unit.MELEE_RANGE:
+			continue
+		pts.append(Vector2(u.position.x, u.position.z))
+		angles.append(atan2(u.position.x - g.position.x, u.position.z - g.position.z))
+		if d < tr:
+			inside += 1
+	var nn: Array[float] = []
+	var close3: int = 0
+	var close2: int = 0
+	for i in range(pts.size()):
+		var best: float = INF
+		for k in range(pts.size()):
+			if k != i:
+				best = minf(best, pts[i].distance_to(pts[k]))
+		if best < INF:
+			nn.append(best)
+			if best < 0.3:
+				close3 += 1
+			if best < 0.2:
+				close2 += 1
+	nn.sort()
+	angles.sort()
+	var gap: float = TAU
+	for i in range(angles.size()):
+		var nxt: float = angles[(i + 1) % angles.size()] + (TAU if i == angles.size() - 1 else 0.0)
+		gap = minf(gap, TAU) if angles.size() < 2 else (maxf(nxt - angles[i], 0.0) if i == 0 else maxf(gap, nxt - angles[i]))
+	var arc: float = 0.0 if angles.size() < 2 else rad_to_deg(TAU - gap)
+	var ring: float = TAU * (tr + Unit.MELEE_SLOT_RADIUS)
+	@warning_ignore("integer_division")
+	var mid: int = nn.size() / 2
+	return {"n": pts.size(), "inside": inside, "h": g.height_m(), "tr": tr,
+		"nn_min": nn[0] if not nn.is_empty() else 0.0, "nn_med": nn[mid] if not nn.is_empty() else 0.0,
+		"arc": arc, "close3": close3, "close2": close2, "slots_1m": int(ring / 1.0), "slots_sep": int(ring / UnitManager.SEPARATION_RADIUS)}

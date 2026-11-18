@@ -557,7 +557,7 @@ func test_kills_raise_the_health_limit_and_heal_up_to_it() -> void:
 	check(g.max_health == start_max + Balance.GOLEM_MAX_HP_PER_KILL
 		and Balance.GOLEM_MAX_HP_PER_KILL == 5, "the kill raised the health limit by 5")
 	check(g.health == start_max - 30 + Balance.GOLEM_HP_PER_KILL
-		and Balance.GOLEM_HP_PER_KILL == 10, "and healed exactly 10")
+		and Balance.GOLEM_HP_PER_KILL == 15, "and healed exactly 15 (user spec 2026-11-18, before 10)")
 
 	# Nearly full: the heal stops at the (raised) limit.
 	g.health = g.max_health - 2
@@ -689,29 +689,36 @@ func test_levels_grow_size_reach_area_damage_and_speed() -> void:
 		"level 7 adds 5 damage like the others; trampling is 16,9 m / 3,2 = 5")
 	g.health = 100
 	g._tick_level_regen(1.0)
-	check(g.health == 121, "level 7 heals 21 per second (3 more than level 6)")
-	check(g.max_health == Balance.GOLEM_MAX_HP_CAP and Balance.GOLEM_MAX_HP_CAP == 1000,
-		"its health limit is a flat 1000")
+	check(g.health == 127, "level 7 heals 6 + 21 per second (3 more than level 6)")
+	check(g.max_health == Balance.GOLEM_MAX_HP_CAP + Balance.GOLEM_GIANT_MAX_HP and g.max_health == 1030,
+		"its health limit is 1000 + 30 (user spec 2026-11-18)")
 	_free_world(w)
 
 
-## Ab Stufe 1 heilt er 3 Leben je Sekunde und Stufe — bis zur Lebensobergrenze,
-## nie darueber.
+## Grundheilung 6 LP/s schon auf Stufe 0 (Nutzervorgabe 2026-11-18), dazu ab Stufe 1 3 Leben je Sekunde und
+## Stufe — bis zur Lebensobergrenze, nie darueber; die Erholung gewoehnlicher Einheiten gilt nicht.
 func test_level_regeneration_heals_three_per_second_and_level() -> void:
 	var w: Dictionary = _make_world()
 	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
 	g.health = 500
 	g._tick_level_regen(1.0)
-	check(g.health == 500, "level 0 does not regenerate")
+	check(g.health == 506, "level 0 heals its base 6 per second")
 	_level_to(g, 1)
 	g.health = 500
 	g._tick_level_regen(1.0)
-	check(g.health == 503, "level 1 heals 3 per second")
+	check(g.health == 509, "level 1 heals 6 + 3 per second")
 	_level_to(g, 4)
 	g.health = 500
 	for i in range(10):
 		g._tick_level_regen(TICK)
-	check(g.health == 512, "level 4 heals 12 per second (in 0,1-s ticks)")
+	check(g.health == 518, "level 4 heals 6 + 12 per second (in 0,1-s ticks)")
+	# The ordinary units' rest healing (5/s after 8 s out of combat) does not apply to her.
+	var lone: Golem = _golem(w, 0, Vector3(90, 5, 90))
+	lone.health = 300
+	var before: int = lone.health
+	for i in range(int(12.0 / TICK)):
+		lone._tick_regen(TICK)
+	check(lone.health == before, "no rest healing of ordinary units (12 s out of combat: %d)" % (lone.health - before))
 	g.health = g.max_health - 5
 	g._tick_level_regen(1.0)
 	check(g.health == g.max_health, "the regeneration stops at the health limit")
@@ -933,12 +940,17 @@ func test_giant_keeps_growing_beyond_level_seven_up_to_eighty_metres() -> void:
 	var trample7: float = g.trample_radius()
 	var speed7: float = g.speed
 	var dmg7: int = g.attack_damage(Golem.ATTACK_KICK)
-	for i in range(Balance.GOLEM_GROWTH_KILLS - 1):
+	check(Golem.kills_for_growth_step(1) == 21 and Golem.kills_for_growth_step(2) == 22
+		and Golem.kills_for_growth_step(6) == 27 and Golem.kills_for_growth_step(21) == 73,
+		"each growth step 8 % more kills than the one before, rounded down: 21, 22 ... 27 ... 73 (user spec 2026-11-18)")
+	check(Golem.kills_for_level(Balance.GOLEM_MAX_LEVEL) + Golem.kills_for_growth_steps(21) == 912,
+		"80 m after 912 kills")
+	for i in range(Golem.kills_for_growth_step(1) - 1):
 		g._credit_kill()
 	check(g.growth_steps == 0 and is_equal_approx(g.size_factor(), size7),
-		"19 more kills: nothing yet")
+		"20 more kills: nothing yet")
 	g._credit_kill()
-	check(g.growth_steps == 1 and g.level == 7, "the 20th kill is one growth step (still level 7)")
+	check(g.growth_steps == 1 and g.level == 7, "the 21st kill is one growth step (still level 7)")
 	check_near(g.size_factor(), size7 * 1.08, "the body is 8 percent bigger")
 	check_near(g.reach(), Balance.GOLEM_REACH * Golem.limb_factor_for(size7 * 1.08),
 		"the reach grows with the limbs", 0.0005)
@@ -947,17 +959,17 @@ func test_giant_keeps_growing_beyond_level_seven_up_to_eighty_metres() -> void:
 	check_near(g.reach_factor(), Golem.reach_factor_for(7) * 1.019645, "the strike areas 1,96 percent", 0.0005)
 	check_near(g.trample_radius(), trample7 * 1.08, "the body radius grows with the BODY (8 percent)", 0.0005)
 	check(g.speed > speed7 and g.speed < speed7 * 1.01, "the speed rises only slightly (%.3f)" % g.speed)
-	for i in range(Balance.GOLEM_GROWTH_KILLS):
+	for i in range(Golem.kills_for_growth_step(2)):
 		g._credit_kill()
 	check_near(g.size_factor(), size7 * 1.08 * 1.08, "the growth compounds", 0.0005)
 	check(g.attack_damage(Golem.ATTACK_KICK) == dmg7, "the damage stays where it was")
-	check(g.max_health == Balance.GOLEM_MAX_HP_CAP + 2 * Balance.GOLEM_GROWTH_MAX_HP
-		and Balance.GOLEM_GROWTH_MAX_HP == 18,
-		"every growth step lifts the health limit by 18 (two steps: 1036)")
-	check_near(g.regen_per_second(), 21.0, "the regeneration stays at 21 per second while he grows")
+	check(g.max_health == Balance.GOLEM_MAX_HP_CAP + Balance.GOLEM_GIANT_MAX_HP + 2 * Balance.GOLEM_GROWTH_MAX_HP
+		and Balance.GOLEM_GROWTH_MAX_HP == 30,
+		"every growth step lifts the health limit by 30 (two steps: 1090)")
+	check_near(g.regen_per_second(), 29.0, "the regeneration grows by 1 per step (6 + 21 + 2 = 29)")
 	g.health = 100
 	g._tick_level_regen(1.0)
-	check(g.health == 121, "and the regeneration stays at 21 per second")
+	check(g.health == 129, "one second heals 29")
 	# The cap: 80 m, however many kills follow.
 	g.kills += 5000
 	g._credit_kill()
@@ -1593,7 +1605,7 @@ func test_fire_burns_at_full_rate_without_panic_until_full_size() -> void:
 	check(after_contact == 800 - Balance.LAVA_CONTACT_DAMAGE, "the lava contact hit applies")
 	for i in range(10):   # 1 s of burning
 		g.tick(TICK)
-	check(g.health == after_contact - 15, "one second of fire costs the full 15 HP (lost %d)"
+	check(g.health == after_contact - 15 + 6, "one second of fire costs the full 15 HP, her base healing gives 6 back (lost %d)"
 		% [after_contact - g.health])
 	check(g.state != Unit.State.PANIC, "still no panic while alight")
 	check_near(g.burn_damage_per_second(), 15.0, "burns like every unit")
@@ -1807,6 +1819,8 @@ func test_status_text_reports_level_size_health_and_lifetime() -> void:
 	check(text.contains("Größe: %.1f m" % g.height_m())
 		and text.contains("Leben: %d/%d" % [g.health, g.max_health]), "size and health")
 	check(text.contains("Lebenszeit: %d s" % int(ceil(g.life_left))), "the lifetime left in seconds")
+	check(text.contains("Heilung: 6.0 LP/s") and text.contains("Tempo: %.1f m/s" % g.current_speed()),
+		"healing and walking speed, as for every golem (user spec 2026-11-18)")
 	_level_to(g, 7)
 	text = g.status_text()
 	check(text.contains("Stufe 7/7") and text.contains("Lebenszeit: unbegrenzt")
@@ -2479,7 +2493,7 @@ func test_slam_radius_reaches_twelve_metres() -> void:
 	_level_to(g, 7)
 	var r7: float = g.slam_radius()
 	check_near(r7, Balance.GOLEM_SLAM_RADIUS * Golem.reach_factor_for(7), "level 7: unchanged (%.1f m)" % r7)
-	for i in range(Balance.GOLEM_GROWTH_KILLS):
+	for i in range(Golem.kills_for_growth_step(1)):
 		g._credit_kill()
 	check(g.growth_steps == 1 and g.slam_radius() > r7 * 1.041 and g.slam_radius() < r7 * 1.043,
 		"one growth step: about 4,2 percent more (%.3f m)" % g.slam_radius())
@@ -2498,23 +2512,24 @@ func test_slam_radius_reaches_twelve_metres() -> void:
 	_free_world(w)
 
 
-## Der ausgewachsene Golem (80 m): noch einmal +3 Leben/s Dauerheilung (24), und
-## die Lebensobergrenze ist 1000 + 21 x 18 = 1378.
+## Der ausgewachsene Golem (80 m): noch einmal +3 Leben/s Dauerheilung, und die Lebensobergrenze bekommt 100
+## dazu (Nutzervorgabe 2026-11-18): 21 + 21 + 3 = 45 LP/s, 1000 + 30 + 21 x 30 + 100 = 1760 LP.
 func test_full_grown_golem_regenerates_three_more_and_has_1378_hp() -> void:
 	var w: Dictionary = _make_world()
 	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
 	_level_to(g, 7)
 	while g.growth_steps < Golem.max_growth_steps() - 1:
 		g._credit_kill()
-	check_near(g.regen_per_second(), 21.0, "one step before the end: still 21 per second")
+	check_near(g.regen_per_second(), 27.0 + float(Golem.max_growth_steps() - 1), "one step before the end: 47 per second")
+	check(g.max_health == 1030 + (Golem.max_growth_steps() - 1) * 30, "and 1630 health (%d)" % g.max_health)
 	_grow_to_the_end(g)
 	check(g.is_full_size(), "grown to 80 m")
-	check_near(g.regen_per_second(), 21.0 + Balance.GOLEM_FULL_SIZE_REGEN, "full-grown: 24 per second")
-	check(g.max_health == 1000 + Golem.max_growth_steps() * 18 and g.max_health == 1378,
-		"the health limit is 1378 (%d)" % g.max_health)
+	check_near(g.regen_per_second(), 48.0 + Balance.GOLEM_FULL_SIZE_REGEN, "full-grown: 6 + 21 + 21 + 3 = 51 per second")
+	check(g.max_health == 1030 + Golem.max_growth_steps() * 30 + 100 and g.max_health == 1760,
+		"the health limit is 1760 (%d)" % g.max_health)
 	g.health = 100
 	g._tick_level_regen(1.0)
-	check(g.health == 124, "one second heals 24")
+	check(g.health == 151, "one second heals 51")
 	_free_world(w)
 
 
@@ -2579,7 +2594,7 @@ func test_growing_golem_stretches_for_a_second() -> void:
 	var giant: Golem = _golem(w, 0, Vector3(20, 5, 20))
 	_level_to(giant, 7)
 	giant._stretch_queued = false
-	for i in range(Balance.GOLEM_GROWTH_KILLS):
+	for i in range(Golem.kills_for_growth_step(1)):
 		giant._credit_kill()
 	check(giant.growth_steps == 1 and giant._stretch_queued, "a growth step beyond level 7 owes a stretch as well")
 	_free_world(w)
@@ -3490,6 +3505,9 @@ func test_a_golem_in_the_way_leaves_her_the_full_reach() -> void:
 	# Where she first has the foe in reach, the other golem is already touching her.
 	other.position = Vector3(foe_x - g.reach() + need + 0.3, 5, 64)
 	var other_start: Vector3 = other.position
+	# The other golem only stands in the way: no scan of its own (its scan phase hangs on its instance id,
+	# so in the full run it sometimes went for the foe itself and walked off).
+	other._target_search_timer = 1.0e9
 	var foe: Unit = _foe(w, foe_x, 64.0, 100000)
 	g.order_attack(foe)
 	var ticks: int = 0
@@ -3780,7 +3798,7 @@ func test_growing_while_seated_keeps_her_seated() -> void:
 	check(_sit_until_seated(w, g), "she sits")
 	var half: Vector2 = g._seat_half
 	var steps: int = g.growth_steps
-	for i in range(Balance.GOLEM_GROWTH_KILLS):
+	while g.kills < Golem.kills_for_level(Balance.GOLEM_MAX_LEVEL) + Golem.kills_for_growth_steps(steps + 1):
 		g._credit_kill()
 	check(g.growth_steps == steps + 1, "she grows a step")
 	for i in range(30):
@@ -5506,15 +5524,23 @@ func test_crab_turn_clips_follow_the_turn() -> void:
 		g.queue_free()
 
 
-## Keine Nahkampfgrenze an Golems (Nutzervorgabe 2026-11-18): mehr als die ueblichen 3 Nahkaempfer greifen sie
-## zugleich an, auf einem Ring mit einem Platz je Meter Umfang; gewoehnliche Einheiten behalten ihre 3.
-func test_any_number_of_melee_attackers_on_a_golem() -> void:
+## Nahkampfgrenze an Golems nach Groesse (Nutzervorgabe 2026-11-18): Ringumfang abgerundet / 0,5 m, davon 30 %,
+## abgerundet — frisch beschworen 4, sitzend bei 31,3 m 24; die Plaetze liegen gleichmaessig rund um den Ring;
+## gewoehnliche Einheiten behalten ihre 3.
+func test_melee_cap_on_a_golem_grows_with_her() -> void:
 	var w: Dictionary = _make_world()
 	var g: Golem = _golem(w, 0, Vector3(64, 5, 64))
 	g.health = 100000
 	g.max_health = 100000
-	check(g.max_melee_attackers() > 1000, "no cap on a golem")
-	check(g.melee_slot_count() >= Unit.MAX_MELEE_ATTACKERS, "at least the usual three seats")
+	var ring: float = TAU * (Unit.MELEE_SLOT_RADIUS + g.target_radius())
+	check(g.max_melee_attackers() == 4, "fresh golem: ring %.1f m -> 8 / 0,5 = 16, 30 %% = 4 (%d)" % [ring,
+		g.max_melee_attackers()])
+	check(g.melee_slot_count() == g.max_melee_attackers(), "as many seats as attackers")
+	var big: Golem = _sit_golem(w, 0, Vector3(30, 5, 100))
+	big._seat_center = big.position
+	check(big.max_melee_attackers() == 24, "seated at 31,3 m: ring 40,1 m -> 80, 30 %% = 24 (%d)" % big.max_melee_attackers())
+	big._seat_center = Vector3.INF
+	check(big.max_melee_attackers() == 13, "standing at 31,3 m: ring 22,9 m -> 44, 30 %% = 13 (%d)" % big.max_melee_attackers())
 	var brave: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(20, 5, 20))
 	check(brave.max_melee_attackers() == Unit.MAX_MELEE_ATTACKERS, "an ordinary unit keeps its 3")
 	var foes: Array = []
@@ -5529,13 +5555,13 @@ func test_any_number_of_melee_attackers_on_a_golem() -> void:
 	for i in range(150):
 		_tick_world(w)
 		peak = maxi(peak, g.active_melee_attacker_count())
-	check(peak >= 8, "at least 8 of 10 warriors fight her at once (peak %d)" % peak)
+	check(peak == 4, "4 of 10 warriors fight her at once, the rest waits (peak %d)" % peak)
 	var r: float = Unit.MELEE_SLOT_RADIUS + g.target_radius()
 	var p0: Vector3 = g.melee_slot_position(0)
 	var p1: Vector3 = g.melee_slot_position(1)
 	check_near(Vector2(p0.x - g.position.x, p0.z - g.position.z).length(), r, "the seats lie on her melee ring")
-	check(Vector2(p0.x - p1.x, p0.z - p1.z).length() >= Balance.GOLEM_MELEE_SLOT_SPACING * 0.9,
-		"one seat per metre round it")
+	check_near(Vector2(p0.x - p1.x, p0.z - p1.z).length(), 2.0 * r * sin(PI / 4.0),
+		"four seats evenly round it", 0.01)
 	_free_world(w)
 
 

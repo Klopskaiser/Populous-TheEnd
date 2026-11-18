@@ -43,7 +43,9 @@ var _heal_frac: float = 0.0
 
 func _init() -> void:
 	super._init()
-	max_health = Balance.DEMON_GOLEM_HP
+	# Summoned with his first growth step (user spec 2026-11-18): 5 m and its bonuses.
+	growth_steps = Balance.DEMON_GOLEM_START_STEPS
+	max_health = max_health_cap()
 	health = max_health
 	speed = current_speed()
 	_shown_size = size_factor()   # he starts small — no shrinking from the golem's size
@@ -60,6 +62,9 @@ func display_name() -> String:
 ## takes him past DEMON_GOLEM_SLOW_HEIGHT (slow_step, the 20th: 22 kills); after it, as much
 ## less every pair of steps (21-22: 20 ... 39-40: 2), never below 1.
 static func kills_for_step(step: int) -> int:
+	# The thresholds moved on by the steps he is summoned with (user spec 2026-11-18): the first two
+	# steps after them cost 4 each.
+	step -= Balance.DEMON_GOLEM_START_STEPS
 	var pair: int = Balance.DEMON_GOLEM_GROWTH_KILLS_STEP
 	var add: int = Balance.DEMON_GOLEM_GROWTH_KILLS_ADD
 	var top: int = slow_step()
@@ -76,10 +81,10 @@ static func slow_step() -> int:
 		/ Balance.DEMON_GOLEM_GROWTH_HEIGHT - 0.000001))
 
 
-## Kills needed for `steps` growth steps in total.
+## Kills needed for `steps` growth steps in total (counted from 2 m; the steps he is summoned with are free).
 static func kills_for_steps(steps: int) -> int:
 	var total: int = 0
-	for s in range(1, steps + 1):
+	for s in range(Balance.DEMON_GOLEM_START_STEPS + 1, steps + 1):
 		total += kills_for_step(s)
 	return total
 
@@ -92,7 +97,7 @@ static func max_steps() -> int:
 
 ## Growth steps a demon golem with `p_kills` kills has taken.
 static func steps_for_kills(p_kills: int) -> int:
-	var steps: int = 0
+	var steps: int = Balance.DEMON_GOLEM_START_STEPS
 	var left: int = p_kills
 	while steps < max_steps() and left >= kills_for_step(steps + 1):
 		left -= kills_for_step(steps + 1)
@@ -157,7 +162,7 @@ func max_targets() -> int:
 
 
 func regen_per_second() -> float:
-	return Balance.DEMON_GOLEM_GROWTH_REGEN * float(growth_steps)
+	return Balance.GOLEM_BASE_REGEN + Balance.DEMON_GOLEM_GROWTH_REGEN * float(growth_steps)
 
 
 func max_health_cap() -> int:
@@ -377,10 +382,8 @@ func status_text() -> String:
 	if growth_steps < max_steps():
 		next = "   noch %d Kills bis %d m" % [
 			kills_for_steps(growth_steps + 1) - kills, int(round(height_for_steps(growth_steps + 1)))]
-	var pose: String = stance_name()
-	return "Dämonengolem   Größe: %d m%s\nLeben: %d/%d   Heilung: %.2f/s\nKills: %d   Ziele: %d   Haltung: %s" % [
-		int(round(height_m())), next, health, max_health, regen_per_second(), kills,
-		max_targets(), pose]
+	return status_lines("Dämonengolem   Wachstumsstufe %d/%d%s" % [growth_steps, max_steps(), next],
+		"Ziele: %d" % max_targets())
 
 
 # --- Build ----------------------------------------------------------------------------

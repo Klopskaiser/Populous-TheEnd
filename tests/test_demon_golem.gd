@@ -2,6 +2,7 @@ extends TestBase
 
 ## Zauber 14 "Dämonengolem beschwören" (Nutzervorgabe 2026-11-16): der zweite
 ## Golem. Diese Datei nagelt die Vorgabe fest (Werte in Balance.DEMON_GOLEM_*):
+## (seit 2026-11-18: mit der ersten Wachstumsstufe beschworen, 5 m und 520 LP; die Stufen zaehlen ab 2 m)
 ## 2 m gross und 500 LP beim Erscheinen, keine Stufen, keine Lebenszeit; je
 ## Wachstumsstufe +1 m, +5 LP, +0,15 LP/s, +1 Ziel und Schaden (Handschlag +0,75,
 ## Tritt +0,8, Trommeln +1,2) auf den halben Startschaden des Golems; die Stufe kostet
@@ -99,8 +100,9 @@ func test_spell_is_the_players_alone_and_costs_what_the_golem_costs() -> void:
 		check(found is Golem and found.unit_kind() == &"golem", "he IS a golem (rules, sidebar row)")
 		check(found.display_name() == "Dämonengolem", "with his own name")
 		check(found.terrain_ctx == w.ctx, "and got the spell context (levelling the ground later)")
-		check(found.health == 500 and found.max_health == 500, "500 LP")
-		check_near(found.height_m(), 2.0, "2 m tall")
+		check(found.health == 520 and found.max_health == 520, "520 LP (500 + his first step's 20)")
+		check_near(found.height_m(), 5.0, "5 m tall (user spec 2026-11-18: summoned with his first step)")
+		check(found.growth_steps == 1, "growth step 1")
 	_free_world(w)
 
 
@@ -118,46 +120,49 @@ func test_lone_demon_golem_is_no_follower() -> void:
 func test_growth_step_costs_four_kills_two_more_every_two_steps_then_fewer_past_sixty_metres() -> void:
 	check(DemonGolem.slow_step() == 20 and is_equal_approx(DemonGolem.height_for_steps(20), 62.0),
 		"the 20th step takes him past 60 m (62 m)")
-	check(DemonGolem.kills_for_step(1) == 4 and DemonGolem.kills_for_step(2) == 4,
-		"steps 1-2 cost 4 kills each")
-	check(DemonGolem.kills_for_step(3) == 6 and DemonGolem.kills_for_step(4) == 6,
-		"steps 3-4 cost 6")
-	check(DemonGolem.kills_for_step(5) == 8 and DemonGolem.kills_for_step(19) == 22
-		and DemonGolem.kills_for_step(20) == 22, "5-6 cost 8 ... 19-20 cost 22")
-	check(DemonGolem.kills_for_step(21) == 20 and DemonGolem.kills_for_step(22) == 20
-		and DemonGolem.kills_for_step(23) == 18, "past 60 m: 21-22 cost 20, 23-24 cost 18")
-	check(DemonGolem.kills_for_step(39) == 2 and DemonGolem.kills_for_step(40) == 2, "... 39-40 cost 2")
-	check(DemonGolem.kills_for_steps(2) == 8 and DemonGolem.kills_for_steps(4) == 20
-		and DemonGolem.kills_for_steps(10) == 80 and DemonGolem.kills_for_steps(20) == 260,
-		"summed: 8 after two steps, 20 after four, 80 after ten, 260 to 62 m")
-	check(DemonGolem.steps_for_kills(3) == 0 and DemonGolem.steps_for_kills(4) == 1
-		and DemonGolem.steps_for_kills(7) == 1 and DemonGolem.steps_for_kills(8) == 2
-		and DemonGolem.steps_for_kills(79) == 9 and DemonGolem.steps_for_kills(80) == 10,
+	# Summoned with step 1 (user spec 2026-11-18): the thresholds moved on by one step.
+	check(DemonGolem.kills_for_step(2) == 4 and DemonGolem.kills_for_step(3) == 4,
+		"steps 2-3 (the first two after the summoning) cost 4 kills each")
+	check(DemonGolem.kills_for_step(4) == 6 and DemonGolem.kills_for_step(5) == 6,
+		"steps 4-5 cost 6")
+	check(DemonGolem.kills_for_step(6) == 8 and DemonGolem.kills_for_step(20) == 22
+		and DemonGolem.kills_for_step(21) == 22, "6-7 cost 8 ... 20-21 cost 22")
+	check(DemonGolem.kills_for_step(22) == 20 and DemonGolem.kills_for_step(23) == 20
+		and DemonGolem.kills_for_step(24) == 18, "then 22-23 cost 20, 24-25 cost 18")
+	check(DemonGolem.kills_for_step(40) == 2, "... 40 costs 2")
+	check(DemonGolem.kills_for_steps(1) == 0 and DemonGolem.kills_for_steps(3) == 8
+		and DemonGolem.kills_for_steps(5) == 20 and DemonGolem.kills_for_steps(11) == 80
+		and DemonGolem.kills_for_steps(21) == 260,
+		"summed from his first step: 8 after two more, 20 after four, 80 to 32 m, 260 to 62 m")
+	check(DemonGolem.steps_for_kills(0) == 1 and DemonGolem.steps_for_kills(3) == 1
+		and DemonGolem.steps_for_kills(4) == 2 and DemonGolem.steps_for_kills(8) == 3
+		and DemonGolem.steps_for_kills(79) == 10 and DemonGolem.steps_for_kills(80) == 11,
 		"the step count follows the kills")
-	check(DemonGolem.max_steps() == 40 and DemonGolem.kills_for_steps(39) == 478
-		and DemonGolem.kills_for_steps(40) == 480, "119 m after 478 kills, 120 m after 480")
+	check(DemonGolem.max_steps() == 40 and DemonGolem.kills_for_steps(39) == 476
+		and DemonGolem.kills_for_steps(40) == 478, "119 m after 476 kills, 120 m after 478")
 
 
 func test_every_step_adds_three_metres_fifteen_health_and_forty_five_hundredths_regen() -> void:
 	var w: Dictionary = _make_world()
 	var d: DemonGolem = _demon(w, 0, Vector3(50, 5, 50))
-	check(d.level == 0 and d.growth_steps == 0, "no levels; no growth step yet")
-	check_near(d.regen_per_second(), 0.0, "no regeneration at the start")
+	check(d.level == 0 and d.growth_steps == 1, "no levels; summoned with growth step 1")
+	check(d.max_health == 520 and d.health == 520, "520 LP")
+	check_near(d.regen_per_second(), 6.5, "the golems' base 6 and his first step's 0,5 health per second")
 	for i in range(3):
 		d._credit_kill()
-	check(d.growth_steps == 0 and is_equal_approx(d.height_m(), 2.0), "three kills: still 2 m")
+	check(d.growth_steps == 1 and is_equal_approx(d.height_m(), 5.0), "three kills: still 5 m")
 	d._credit_kill()
-	check(d.growth_steps == 1, "the fourth kill is a growth step")
-	check_near(d.height_m(), 5.0, "exactly three metres taller (no percentage)")
-	check(d.max_health == 515, "+15 health limit")
-	check_near(d.regen_per_second(), 0.45, "+0,45 health per second")
+	check(d.growth_steps == 2, "the fourth kill is a growth step")
+	check_near(d.height_m(), 8.0, "exactly three metres taller (no percentage)")
+	check(d.max_health == 540, "+20 health limit (user spec 2026-11-18)")
+	check_near(d.regen_per_second(), 7.0, "+0,5 health per second")
 	check(d.level == 0, "and still no level")
 	check(d.is_stretching() or d._stretch_queued, "he stretches when he grows")
 	_grow_to(d, 25.0)
-	check(d.growth_steps == 8 and is_equal_approx(d.height_m(), 26.0) and d.max_health == 500 + 15 * 8,
-		"26 m: step 8, 620 LP")
-	check_near(d.regen_per_second(), 3.6, "3,6 health per second")
-	check(d.kills == DemonGolem.kills_for_steps(8) and d.kills == 56, "after exactly the kills the table gives (56)")
+	check(d.growth_steps == 8 and is_equal_approx(d.height_m(), 26.0) and d.max_health == 500 + 20 * 8,
+		"26 m: step 8, 660 LP")
+	check_near(d.regen_per_second(), 10.0, "6 + 4 health per second")
+	check(d.kills == DemonGolem.kills_for_steps(8) and d.kills == 46, "after exactly the kills the table gives (46)")
 	_free_world(w)
 
 
@@ -168,7 +173,7 @@ func test_he_falls_apart_at_one_hundred_and_twenty_metres() -> void:
 	check(d.state != Unit.State.DEAD and is_equal_approx(d.height_m(), 119.0), "119 m (step 39): alive")
 	_grow_to(d, 120.0)
 	check(d.state == Unit.State.DEAD, "reaching 120 m he falls apart")
-	check(d.kills == 480, "after 480 kills (540 before 2026-11-18)")
+	check(d.kills == 478, "after 478 kills (480 before he was summoned with his first step)")
 	_free_world(w)
 
 
@@ -187,11 +192,12 @@ func test_no_lifetime() -> void:
 func test_damage_starts_at_half_the_golems_and_grows_per_step() -> void:
 	var w: Dictionary = _make_world()
 	var d: DemonGolem = _demon(w, 0, Vector3(50, 5, 50))
-	check_near(d.damage_exact(Golem.ATTACK_SLAM), 15.5, "slam 15,5 (half of 25, +3)")
-	check_near(d.damage_exact(Golem.ATTACK_KICK), 24.5, "kick 24,5 (half of 45, +2)")
-	check_near(d.damage_exact(Golem.ATTACK_DRUM), 24.0, "drum 24 for the three hits (half of 42, +3)")
-	check(d.attack_damage(Golem.ATTACK_SLAM) == 16 and d.attack_damage(Golem.ATTACK_KICK) == 25
-		and d.attack_damage(Golem.ATTACK_DRUM) == 24, "rounded when it lands: 16 / 25 / 24")
+	# The base (2 m) is half the golem's plus the start bonus; he is summoned one step on.
+	check_near(d.damage_exact(Golem.ATTACK_SLAM), 15.5 + 2.25, "slam 15,5 (half of 25, +3) + his first step")
+	check_near(d.damage_exact(Golem.ATTACK_KICK), 24.5 + 2.4, "kick 24,5 (half of 45, +2) + his first step")
+	check_near(d.damage_exact(Golem.ATTACK_DRUM), 24.0 + 3.6, "drum 24 (half of 42, +3) + his first step")
+	check(d.attack_damage(Golem.ATTACK_SLAM) == 18 and d.attack_damage(Golem.ATTACK_KICK) == 27
+		and d.attack_damage(Golem.ATTACK_DRUM) == 28, "rounded when it lands: 18 / 27 / 28")
 	check(d.level_damage_bonus() == 0, "no level bonus")
 	_grow_to(d, 32.0)   # ten growth steps
 	check(d.growth_steps == 10, "32 m: ten steps")
@@ -220,7 +226,7 @@ func test_damage_starts_at_half_the_golems_and_grows_per_step() -> void:
 func test_trample_and_stomp_damage_follow_the_height_like_the_golems() -> void:
 	var w: Dictionary = _make_world()
 	var d: DemonGolem = _demon(w, 0, Vector3(50, 5, 50))
-	check(d.trample_damage() == 1 and d.attack_damage(Golem.ATTACK_STOMP) == 2, "2 m: 1 and 2")
+	check(d.trample_damage() == 2 and d.attack_damage(Golem.ATTACK_STOMP) == 4, "5 m: 2 and 4")
 	_grow_to(d, 50.0)
 	check(d.trample_damage() == 16 and d.attack_damage(Golem.ATTACK_STOMP) == 32,
 		"50 m: height / 3,2 = 16, the stomp twice that")
@@ -230,10 +236,10 @@ func test_trample_and_stomp_damage_follow_the_height_like_the_golems() -> void:
 func test_targets_start_at_three_and_three_more_every_step() -> void:
 	var w: Dictionary = _make_world()
 	var d: DemonGolem = _demon(w, 0, Vector3(50, 5, 50))
-	check(d.max_targets() == 3, "three targets at the start")
-	check(d.max_targets_of(Golem.ATTACK_SLAM) == 3 and d.max_targets_of(Golem.ATTACK_KICK) == 1
-		and d.max_targets_of(Golem.ATTACK_DRUM) == 3 and d.max_targets_of(Golem.ATTACK_STOMP) == 6,
-		"shares like the golem's: slam 3, kick 1, drum 3, stomp 6")
+	check(d.max_targets() == 6, "3 + his first step's 3 at the summoning")
+	check(d.max_targets_of(Golem.ATTACK_SLAM) == 6 and d.max_targets_of(Golem.ATTACK_KICK) == 3
+		and d.max_targets_of(Golem.ATTACK_DRUM) == 7 and d.max_targets_of(Golem.ATTACK_STOMP) == 12,
+		"shares like the golem's: slam 6, kick 3, drum 7, stomp 12")
 	_grow_to(d, 26.0)
 	check(d.max_targets() == 27, "26 m (8 steps): 27")
 	check(d.max_targets_of(Golem.ATTACK_KICK) == 16 and d.max_targets_of(Golem.ATTACK_DRUM) == 33
@@ -301,7 +307,7 @@ func test_a_kill_without_health_heals_ten_at_once_and_fifteen_over_five_seconds_
 	d.health = 100
 	d._credit_kill()
 	check(d.health == 110, "ten at once")
-	check(d.max_health == 500, "a kill alone does not raise the limit")
+	check(d.max_health == 520, "a kill alone does not raise the limit")
 	for i in range(25):
 		d._tick_kill_heal(TICK)
 	check(d.health >= 116 and d.health <= 118, "about 7,5 more after 2,5 s (got %d)" % d.health)
@@ -334,13 +340,13 @@ func test_a_kill_without_health_heals_ten_at_once_and_fifteen_over_five_seconds_
 func test_regeneration_heals_in_a_fight_up_to_the_limit() -> void:
 	var w: Dictionary = _make_world()
 	var d: DemonGolem = _demon(w, 0, Vector3(50, 5, 50))
-	_grow_to(d, 20.0)   # 6 steps: 2,7 health per second
+	_grow_to(d, 20.0)   # 6 steps: 6 + 3 health per second
 	d._heal_stacks.clear()
 	d._heal_frac = 0.0
 	d.health = 100
 	for i in range(100):
 		d._tick_level_regen(TICK)
-	check(d.health >= 126 and d.health <= 128, "6 steps x 0,45 = 2,7/s: about 27 in 10 s (got %d)" % d.health)
+	check(d.health >= 189 and d.health <= 191, "6 + 6 steps x 0,5 = 9/s: about 90 in 10 s (got %d)" % d.health)
 	_free_world(w)
 
 
@@ -349,14 +355,14 @@ func test_regeneration_heals_in_a_fight_up_to_the_limit() -> void:
 func test_everything_that_hangs_on_the_size_uses_the_golems_formula() -> void:
 	var w: Dictionary = _make_world()
 	var d: DemonGolem = _demon(w, 0, Vector3(50, 5, 50))
-	check_near(d.size_factor(), 2.0 / Balance.GOLEM_HEIGHT, "size factor = height in fresh golems")
+	check_near(d.size_factor(), 5.0 / Balance.GOLEM_HEIGHT, "size factor = height in fresh golems")
 	check_near(d.reach(), Balance.GOLEM_REACH * Golem.limb_factor_for(d.size_factor()),
 		"reach from the limb factor of his size")
-	check(d.reach() < Balance.GOLEM_REACH, "shorter than a fresh golem's while he is small (%.2f m)" % d.reach())
+	check(d.reach() > Balance.GOLEM_REACH, "a little longer than a fresh golem's (5 m against 4,7 m: %.2f m)" % d.reach())
 	check_near(d.current_speed(), Golem.speed_for_size(d.size_factor()) * 1.15,
-		"the golem's speed at 2 m, 15 % faster — no floor any more (2,6 m/s)")
-	check(d.current_speed() < 4.0, "slower than 4 m/s while he is small")
-	check_near(d.aggro_radius(), Balance.MELEE_AGGRO_RADIUS, "aggro never below the plain 8 m")
+		"the golem's speed at 5 m, 15 % faster")
+	check(d.current_speed() > Balance.GOLEM_SPEED, "faster than a fresh golem")
+	check_near(d.aggro_radius(), Balance.MELEE_AGGRO_RADIUS * d.size_factor(), "aggro 8 m x size, as the golem's")
 	_grow_to(d, 80.0)
 	check_near(d.height_m(), 80.0, "80 m after 26 steps")
 	var full: Golem = GOLEM_SCENE.instantiate() as Golem
@@ -413,8 +419,8 @@ func test_he_is_a_quarter_stockier_than_the_golem() -> void:
 func test_all_attacks_are_fifteen_percent_faster_than_a_golems_of_the_same_size() -> void:
 	var w: Dictionary = _make_world()
 	var d: DemonGolem = _demon(w, 0, Vector3(50, 5, 50))
-	check_near(d.strike_cooldown(), (1.8 + 1.2 * (2.0 - 4.725) / (80.0 - 4.725)) * 0.85,
-		"2 m: the golem's line carried back, 15 % shorter")
+	check_near(d.strike_cooldown(), (1.8 + 1.2 * (5.0 - 4.725) / (80.0 - 4.725)) * 0.85,
+		"5 m: the golem's line, 15 % shorter")
 	_grow_to(d, 80.0)
 	var full: Golem = GOLEM_SCENE.instantiate() as Golem
 	while not full.is_full_size():
@@ -490,7 +496,7 @@ func test_he_is_never_hardened() -> void:
 	check(d.burn_damage_per_second() > Balance.GOLEM_BURN_DPS, "fire still burns at the full rate")
 	check(d.siege_shock_damage(15, 0.0) == Balance.GOLEM_SIEGE_DAMAGE_MAX,
 		"a catapult's direct hit does the full 80 (no cap at 40)")
-	check(is_equal_approx(d.regen_per_second(), 0.45 * d.growth_steps), "and no extra regeneration")
+	check(is_equal_approx(d.regen_per_second(), 6.0 + 0.5 * d.growth_steps), "and no extra regeneration")
 	check(d.is_conversion_immune() and d.is_hypnosis_immune() and d.is_panic_immune(),
 		"the golem's immunities stay")
 	_free_world(w)
@@ -500,8 +506,9 @@ func test_status_text_names_him_and_his_growth() -> void:
 	var w: Dictionary = _make_world()
 	var d: DemonGolem = _demon(w, 0, Vector3(50, 5, 50))
 	var text: String = d.status_text()
-	check(text.contains("Dämonengolem") and text.contains("2 m"), "name and size")
-	check(text.contains("noch 4 Kills bis 5 m"), "kills to the next growth step")
+	check(text.contains("Dämonengolem") and text.contains("5.0 m"), "name and size")
+	check(text.contains("Heilung: 6.5 LP/s") and text.contains("Tempo:"), "healing and walking speed (%s)" % text)
+	check(text.contains("noch 4 Kills bis 8 m"), "kills to the next growth step")
 	check(not text.contains("Stufe") and not text.contains("Lebenszeit"), "no level, no lifetime")
 	_free_world(w)
 
@@ -553,13 +560,13 @@ func test_a_poor_tribe_pays_what_it_earns_and_no_more() -> void:
 func test_a_growth_step_heals_ninety_at_once_and_one_hundred_thirty_five_over_five_seconds() -> void:
 	var w: Dictionary = _make_world()
 	var d: DemonGolem = _demon(w, 0, Vector3(50, 5, 50))
-	for i in range(DemonGolem.kills_for_step(1) - 1):
+	for i in range(DemonGolem.kills_for_step(2) - 1):
 		d._credit_kill()
 	d._heal_stacks.clear()
 	d._heal_frac = 0.0
 	d.health = 100
 	d._credit_kill()
-	check(d.growth_steps == 1 and d.max_health == 515, "this kill is a growth step (limit 515)")
+	check(d.growth_steps == 2 and d.max_health == 540, "this kill is a growth step (limit 540)")
 	check(d.health == 200, "90 for the growth and 10 for the kill at once (got %d)" % d.health)
 	check_near(d.pending_kill_heal(), 150.0, "135 + 15 still to come", 0.001)
 	for i in range(25):
@@ -569,11 +576,11 @@ func test_a_growth_step_heals_ninety_at_once_and_one_hundred_thirty_five_over_fi
 		d._tick_kill_heal(TICK)
 	check(d.health == 350, "all of it after 5 s: 100 + 100 + 150 (got %d)" % d.health)
 	# The limit holds here as well.
-	while d.kills < DemonGolem.kills_for_steps(2) - 1:
+	while d.kills < DemonGolem.kills_for_steps(3) - 1:
 		d._credit_kill()
 	d.health = d.max_health - 5
 	d._credit_kill()
-	check(d.growth_steps == 2 and d.health == d.max_health, "never past the (raised) limit")
+	check(d.growth_steps == 3 and d.health == d.max_health, "never past the (raised) limit")
 	for i in range(60):
 		d._tick_kill_heal(TICK)
 	check(d.health == d.max_health, "not over time either")

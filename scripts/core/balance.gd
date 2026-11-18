@@ -480,13 +480,24 @@ const GOLEM_LIFE_PER_KILL: float = 6.0
 ## sie um GOLEM_GROWTH_MAX_HP (2026-11-17: 18 statt 7, am 80-m-Ende 1378). Die Obergrenze GILT: Kill-Heilung und
 ## Dauerheilung enden an ihr — sonst heilte er sich passiv unendlich hoch.
 ## Als Kill zaehlt auch ein vom Golem zerstoertes GEBAEUDE.
-const GOLEM_HP_PER_KILL: int = 10
+## Nutzervorgabe 2026-11-18: je Kill 15 statt 10 Leben sofort; Stufe 7 hebt die Obergrenze um
+## GOLEM_GIANT_MAX_HP ueber die 1000, jede Wachstumsstufe danach um GOLEM_GROWTH_MAX_HP (30 statt 18) und
+## die Dauerheilung um GOLEM_GROWTH_REGEN; bei 80 m kommen GOLEM_FULL_SIZE_MAX_HP dazu (und weiter
+## GOLEM_FULL_SIZE_REGEN). 80 m: 1000 + 30 + 21 x 30 + 100 = 1760 LP, 21 + 21 + 3 = 45 LP/s.
+const GOLEM_HP_PER_KILL: int = 15
 const GOLEM_MAX_HP_PER_KILL: int = 5
 const GOLEM_MAX_HP_CAP: int = 1000
-const GOLEM_GROWTH_MAX_HP: int = 18
+const GOLEM_GIANT_MAX_HP: int = 30
+const GOLEM_GROWTH_MAX_HP: int = 30
+const GOLEM_GROWTH_REGEN: float = 1.0
+const GOLEM_FULL_SIZE_MAX_HP: int = 100
 ## Der AUSGEWACHSENE Golem (80 m) heilt noch einmal so viel Leben je Sekunde
 ## mehr (Nutzer 2026-11-16: 21 -> 24).
 const GOLEM_FULL_SIZE_REGEN: float = 3.0
+## Nutzervorgabe 2026-11-18: jeder Golem (alle drei) hat von Anfang an GOLEM_BASE_REGEN Leben je Sekunde
+## Dauerheilung, auch im Kampf — die Stufenboni kommen darauf. Die Erholung gewoehnlicher Einheiten
+## (REGEN_RATE nach REGEN_DELAY ohne Kampf) gilt fuer Golems dafuer nicht mehr (Golem._tick_regen).
+const GOLEM_BASE_REGEN: float = 6.0
 ## STUFEN (Nutzervorgabe 2026-11-15): der Golem beginnt auf Stufe 0 und steigt
 ## nach GOLEM_LEVEL_KILLS Kills je Stufe auf (s. dort), bis Stufe
 ## GOLEM_FINAL_BONUS_LEVEL (6). Je Stufe:
@@ -579,9 +590,14 @@ const GOLEM_DROWN_DEPTH: float = 0.8
 ## vom RAND dieses Kreises entfernt stehen, statt sich unter ihm zu draengen. Der
 ## Gigant ebnet den Boden nur noch in diesem Kreis ein.
 const GOLEM_TARGET_RADIUS_SHARE: float = 0.5
-## Keine Nahkampfgrenze an Golems (Nutzervorgabe 2026-11-18): beliebig viele Nahkaempfer greifen
-## sie zugleich an; ihr Nahkampfring hat einen Platz je so viel Meter Umfang (Golem.melee_slot_count).
-const GOLEM_MELEE_SLOT_SPACING: float = 1.0
+## Nahkampfgrenze an Golems nach Groesse (Nutzervorgabe 2026-11-18, ersetzt "keine Grenze"): der Umfang
+## ihres Nahkampfrings (Radius Zielradius + Unit.MELEE_SLOT_RADIUS) abgerundet auf ganze Meter, geteilt
+## durch GOLEM_MELEE_CALC_SPACING (nur zum Rechnen, keine eigene Abstandsmechanik — die Einheiten halten
+## ohnehin UnitManager.SEPARATION_RADIUS), davon GOLEM_MELEE_SLOT_SHARE, abgerundet, hoechstens so viele
+## Nahkaempfer gleichzeitig (mindestens die ueblichen 3). Frisch beschworen 8,2 m Ring: 8 / 0,5 = 16, 30 % = 4.
+## So viele Plaetze liegen auch gleichmaessig rund um den Ring (Golem.melee_slot_count).
+const GOLEM_MELEE_CALC_SPACING: float = 0.5
+const GOLEM_MELEE_SLOT_SHARE: float = 0.3
 ## Mehrere Golems mit einem Bewegungsbefehl bekommen Zielpunkte, die um die Summe
 ## ihrer Koerperradien plus diesen Rand (m) auseinanderliegen (Bugfix 2026-11-16:
 ## die festen Packabstaende legten die Ziele ineinander).
@@ -601,7 +617,11 @@ const GOLEM_SLOT_MARGIN: float = 0.5
 ## Schaden steigen nicht mehr. Schluss ist bei GOLEM_MAX_HEIGHT (80 m, Nutzer
 ## 2026-11-17, vorher 100 m) nach 21 Schritten = 420 Kills ueber Stufe 7 (482
 ## insgesamt); dort gibt es die Haertung und +3 Leben/s (s. is_full_size).
+## Nutzervorgabe 2026-11-18: ab Stufe 7 kostet jede Wachstumsstufe GOLEM_GROWTH_KILLS_RISE mehr Kills als
+## die davor, abgerundet — ausgehend von den 20 Kills der Stufe 7 (GOLEM_GROWTH_KILLS): 21, 22, 23, 24, 25, 27 ...
+## 73; Sitzgroesse 31,3 m nach 264 Kills, 80 m nach 912 (vorher je Stufe 20: 222 / 482; zuerst 16 %: 371 / 2836).
 const GOLEM_GROWTH_KILLS: int = 20
+const GOLEM_GROWTH_KILLS_RISE: float = 0.08
 const GOLEM_GROWTH_SIZE: float = 0.08
 const GOLEM_GROWTH_AREA_EXPONENT: float = 0.2527848   # = log(1,0075) / log(1,03)
 const GOLEM_GROWTH_SPEED_EXPONENT: float = 0.0844716  # = log(1,0025) / log(1,03)
@@ -932,7 +952,12 @@ const GOLEM_SEPARATION: float = 1.0
 ##    80 m ihn nicht veraendert.
 ## Die Werte aller Groessen druckt tests/diag_demon_golem_values.gd.
 const DEMON_GOLEM_HP: int = 500   # 400 -> 500 (Nutzervorgabe 2026-11-16)
+## Die Stufen zaehlen ab 2 m (DEMON_GOLEM_START_HEIGHT); seit 2026-11-18 (Nutzervorgabe) wird er aber mit
+## DEMON_GOLEM_START_STEPS Stufen beschworen, also 5 m gross und mit allen Boni dieser Stufe (Leben,
+## Heilung, Schaden, Ziele, Groesse). Die Kill-Schwellen ruecken um diese Stufe weiter: die erste und
+## zweite Stufe danach kosten je 4 Kills, dann 6, 6, 8, 8 ...
 const DEMON_GOLEM_START_HEIGHT: float = 2.0
+const DEMON_GOLEM_START_STEPS: int = 1
 const DEMON_GOLEM_GROWTH_HEIGHT: float = 3.0
 const DEMON_GOLEM_MAX_HEIGHT: float = 120.0
 const DEMON_GOLEM_WIDTH_FACTOR: float = 1.25
@@ -941,8 +966,8 @@ const DEMON_GOLEM_GROWTH_KILLS_STEP: int = 2
 const DEMON_GOLEM_GROWTH_KILLS_ADD: int = 2
 const DEMON_GOLEM_SLOW_HEIGHT: float = 60.0
 const DEMON_GOLEM_SLOW_TARGETS_STEP: int = 2
-const DEMON_GOLEM_GROWTH_MAX_HP: int = 15
-const DEMON_GOLEM_GROWTH_REGEN: float = 0.45
+const DEMON_GOLEM_GROWTH_MAX_HP: int = 20   # 15 -> 20 (Nutzervorgabe 2026-11-18)
+const DEMON_GOLEM_GROWTH_REGEN: float = 0.5   # 0,45 -> 0,5 (Nutzervorgabe 2026-11-18)
 const DEMON_GOLEM_DAMAGE_SHARE: float = 0.5
 const DEMON_GOLEM_START_SLAM_BONUS: float = 3.0
 const DEMON_GOLEM_START_KICK_BONUS: float = 2.0
@@ -1021,10 +1046,10 @@ const GENESIS_GOLEM_AGGRO_SHARE: float = 0.5
 const GENESIS_GOLEM_BUILDING_WOOD_SHARE: float = 0.5
 const GENESIS_GOLEM_WOOD_IDLE_TIME: float = 30.0
 const GENESIS_GOLEM_WOOD_BURN_RATE: float = 15.0
-const GENESIS_GOLEM_WOOD_GROWTH_RATE: float = 0.02
+const GENESIS_GOLEM_WOOD_GROWTH_RATE: float = 0.01   # 2 % -> 1 % je Sekunde (Nutzervorgabe 2026-11-18)
 const GENESIS_GOLEM_MAX_HEIGHT: float = 100.0
-const GENESIS_GOLEM_WOOD_HP_PER_M: float = 3.0   # 2 -> 3 (Nutzervorgabe 2026-11-17)
-const GENESIS_GOLEM_WOOD_REGEN_PER_M: float = 0.15
+const GENESIS_GOLEM_WOOD_HP_PER_M: float = 4.0   # 2 -> 3 (2026-11-17) -> 4 (Nutzervorgabe 2026-11-18)
+const GENESIS_GOLEM_WOOD_REGEN_PER_M: float = 0.3   # 0,15 -> 0,3 (Nutzervorgabe 2026-11-18)
 ## Abstand des mitgefuehrten Holzstapels vor seinem Koerperrand (Annahme): dort
 ## erreichen ihn die Braves, ohne unter den Koerper zu muessen.
 const GENESIS_GOLEM_PILE_GAP: float = 0.8

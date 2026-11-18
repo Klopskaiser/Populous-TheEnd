@@ -12930,8 +12930,8 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
 - **Wellen-Diagnose `mobile_x15` (2026-11-18):** Wellen x1,5 (25 je Trupp, oben und unten, alle 30 s) gegen die sitzende,
   nicht stationaere 31-m-Golemin mit Wachsen; meist gefallen in Welle 6 nach ~165 s. Trace-Schalter `GOLEM_TRACE` /
   `GOLEM_ZONES`. Befunde in `plans/10l_golem_sitting.md`.
-- **Keine Nahkampfgrenze an Golems (2026-11-18):** `Unit.max_melee_attackers()` / `melee_slot_count()` (Golem: unbegrenzt,
-  ein Platz je Meter Ringumfang), genutzt in `_bind_to_fight`, `_melee_engage_cost`, `CombatGroup.promote_waiters`,
+- **Nahkampfgrenze an Golems nach Groesse (2026-11-18):** `Unit.max_melee_attackers()` / `melee_slot_count()` (Golem:
+  Ringumfang abgerundet / 0,5 m x 30 %, mindestens 3, gleichmaessig verteilte Plaetze; zuerst unbegrenzt), genutzt in `_bind_to_fight`, `_melee_engage_cost`, `CombatGroup.promote_waiters`,
   `TribeCommands` (Angriffsbefehl, Umverteilung). Diagnose: `Golem.damage_taken`. Clipvertrag fuer den seitlichen
   Handschlag im Sitzen: `gymnastikschuh/AUFTRAG_SITZ_HANDSCHLAG_SEITLICH.md`.
 - **Seitlicher Handschlag im Sitzen (2026-11-18):** Clips `sit_hand_slam_l/_r` aus `gymnastikschuh/out/golem_handschlag` in
@@ -12939,3 +12939,20 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
   `GolemSitAnim.LAYER_ARM_TORSO`, Debugansicht (Taste G) zeigt die beiden Kreise. Test
   `test_side_hand_slam_strikes_the_blind_spot`. Nachgestellt: Radius +5 % (0,7 des Fuss-Stampfers), 75 Schaden und 1,7 s
   Abklingzeit, der Wischer 1,3 s (alles bei 31,3 m).
+
+- **Golem-Werte vereinheitlicht (Nutzervorgabe 2026-11-18):**
+  - Golem: je Kill 15 LP sofort (vorher 10); Stufe 7 +30 Lebensobergrenze (1030), je Wachstumsschritt +30 (vorher 18) und
+    +1 LP/s Dauerheilung, bei 80 m +100 LP und +3 LP/s (1760 LP, 45 LP/s); jeder Wachstumsschritt kostet mehr Kills
+    als der davor — zuerst 16 %, auf Nutzerwunsch 8 % —, abgerundet (`Golem.kills_for_growth_step`: 21, 22, 23 ... 73;
+    Sitzgroesse 31,3 m nach 264 Kills, 80 m nach 912, vorher 222 / 482).
+  - Daemonengolem: mit seiner ersten Wachstumsstufe beschworen (`DEMON_GOLEM_START_STEPS`: 5 m, 520 LP, alle Boni der
+    Stufe), Kill-Schwellen um eine Stufe weitergerueckt (die ersten beiden danach je 4), je Stufe +20 LP und +0,5 LP/s
+    (vorher 15 / 0,45); 120 m nach 478 Kills.
+  - Genesisgolem: Holzwachstum 1 %/s (vorher 2 %), je Meter +4 LP und +0,3 LP/s (vorher 3 / 0,15). Sein Schaden bleibt
+    der Grundschaden des Daemonengolems (15,5 / 24,5 / 24), obwohl dieser jetzt eine Stufe hoeher startet.
+  - `test_a_golem_in_the_way_leaves_her_the_full_reach` hing an der Reihenfolge der Tests (der zweite Golem suchte im ganzen
+    Lauf je nach Takt seiner Instanz-ID selbst den Feind und lief weg): er sucht im Test nicht mehr selbst.
+- **Grundheilung der Golems (Nutzervorgabe 2026-11-18):** keine Erholung gewoehnlicher Einheiten mehr (`Golem._tick_regen`
+  zaehlt nur die Zeit), dafuer `GOLEM_BASE_REGEN` 6 LP/s von Anfang an, auch im Kampf, bei allen drei Golems (Golem 80 m:
+  51 LP/s). Statusanzeige vereinheitlicht (`Golem.status_lines`): Name/Stufe, Groesse/Leben, Heilung/Tempo, dann
+  Lebenszeit bzw. Ziele bzw. Holz, Kills, Haltung.

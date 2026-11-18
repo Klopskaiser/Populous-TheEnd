@@ -82,10 +82,16 @@
   Nahkampf; der Po-Klatscher reicht schon ueber den Nahkampfring (31,3 m: 6,95 gegen 6,68 m; bei allen Golems und
   Groessen, Test `test_po_clap_reaches_every_melee_attacker`). Erlittener Schaden (`Golem.damage_taken`): Feuerkrieger
   52-59 %, Krieger 41-46 %.
-- **Keine Nahkampfgrenze an Golems (Nutzervorgabe 2026-11-18):** `Unit.max_melee_attackers()` (3) /
-  `Golem.max_melee_attackers()` (unbegrenzt), Nahkampfring mit einem Platz je Meter (`Golem.melee_slot_count`,
-  `GOLEM_MELEE_SLOT_SPACING`). Folge in `mobile_x15`: gefallen in Welle 2 nach 42-50 s (6 von 7 Seeds), Krieger 75-87 %
-  des Schadens. Test `test_any_number_of_melee_attackers_on_a_golem`.
+- **Keine Nahkampfgrenze an Golems (Nutzervorgabe 2026-11-18, erste Fassung):** unbegrenzt, ein Platz je Meter Ring.
+  Folge in `mobile_x15`: gefallen in Welle 2 nach 42-50 s (6 von 7 Seeds), Krieger 75-87 % des Schadens; im alten Test
+  (`mobile`, +8 je Welle) 6 von 7 in Welle 2 (vorher mit 3 Plaetzen 5 von 7 ueberlebt).
+- **Gestapelt wird nicht** (Messung `_melee_stats` in der Wellen-Diagnose): die Nahkaempfer halten mindestens 0,44 m
+  (`UnitManager.SEPARATION_RADIUS`), hoechstens 13-15 schlugen zugleich zu, verteilt auf 120-190 Grad des Rings; bei 58 m
+  standen 12 von 15 innerhalb ihres Zielkreises (unter ihr).
+- **Nahkampfgrenze nach Groesse (Nutzervorgabe 2026-11-18, ersetzt die erste Fassung):** Ringumfang (Zielradius + 0,9 m)
+  abgerundet auf ganze Meter / 0,5 m (`GOLEM_MELEE_CALC_SPACING`, nur zum Rechnen) x 30 % (`GOLEM_MELEE_SLOT_SHARE`),
+  abgerundet, mindestens 3; so viele Plaetze gleichmaessig rund um den Ring. Frisch 4, 31,3 m stehend 13 / sitzend 24,
+  80 m stehend 29 / sitzend 55. Test `test_melee_cap_on_a_golem_grows_with_her`. Leben und Werte passt der Nutzer danach an.
 - **Seitlicher Handschlag (Nutzervorgabe 2026-11-18, im Spiel):** Clips `sit_hand_slam_l/_r` (0,9 s, Aufschlag 0,35 s,
   `gymnastikschuh/AUFTRAG_SITZ_HANDSCHLAG_SEITLICH.md`) fuer den blinden Fleck aussen neben Oberschenkel und Knie.
   `GolemSitCombat.HAND_SLAM_L/_R`: Armangriff (Arm-Kanal, statt des Wischers, mit Beinangriffen kombinierbar), Kreis um

@@ -140,12 +140,12 @@ func test_every_stage_adds_three_and_a_half_metres_forty_health_two_regen() -> v
 	check(g.stage == 1, "stage 1 after ten braves")
 	check_near(g.height_m(), 8.5, "8,5 m")
 	check(g.max_health == 1040 and g.health == 1040, "1040 health (%d/%d)" % [g.health, g.max_health])
-	check_near(g.regen_per_second(), 2.0, "2 health per second")
+	check_near(g.regen_per_second(), 8.0, "6 + 2 health per second")
 	_to_stage(g, 8)
 	check(g.stage == 8, "stage 8")
 	check_near(g.height_m(), 33.0, "33 m at the last stage")
 	check(g.max_health == 1320, "1320 health")
-	check_near(g.regen_per_second(), 16.0, "16 health per second")
+	check_near(g.regen_per_second(), 22.0, "6 + 16 health per second")
 	g.credit_brave(500.0)
 	check_near(g.height_m(), 33.0, "the stages end at 33 m")
 	_free_world(w)
@@ -194,9 +194,13 @@ func test_start_values_damage_of_the_demon_reach_of_the_golem() -> void:
 	var g: GenesisGolem = _genesis(w, 0, Vector3(40, 5, 50))
 	var golem: Golem = w.um.spawn_unit(GOLEM_SCENE, 0, Vector3(60, 5, 50)) as Golem
 	var demon: DemonGolem = w.um.spawn_unit(DEMON_SCENE, 0, Vector3(80, 5, 50)) as DemonGolem
-	for kind in [Golem.ATTACK_SLAM, Golem.ATTACK_KICK, Golem.ATTACK_DRUM]:
-		check_near(g.damage_exact(kind), demon.damage_exact(kind),
-			"%s: the freshly summoned demon golem's damage" % kind)
+	# The demon golem's base (2 m) damage: 15,5 / 24,5 / 24 — since 2026-11-18 the demon golem himself is
+	# summoned one growth step on (5 m), the genesis golem keeps these values.
+	var base: Dictionary = {Golem.ATTACK_SLAM: 15.5, Golem.ATTACK_KICK: 24.5, Golem.ATTACK_DRUM: 24.0}
+	for kind in base:
+		check_near(g.damage_exact(kind), float(base[kind]), "%s: the demon golem's base damage" % kind)
+	check(demon.damage_exact(Golem.ATTACK_SLAM) > g.damage_exact(Golem.ATTACK_SLAM),
+		"(a freshly summoned demon golem starts one step above it)")
 	check_near(g.reach(), golem.reach(), "the fresh golem's reach")
 	check_near(g.slam_radius(), golem.slam_radius(), "the fresh golem's slam circle")
 	check_near(g.reach_factor(), golem.reach_factor(), "and lane width")
@@ -406,11 +410,11 @@ func test_unused_wood_is_eaten_after_thirty_seconds_for_growth() -> void:
 	for i in range(int(10.5 / TICK)):
 		g._tick_wood_growth(TICK)
 	check(g.total_wood() == 0, "then 15 a second: all 150 in 10 s (%d left)" % g.total_wood())
-	var want: float = 33.0 * pow(1.02, 10.0)
-	check_near(g.height_m(), want, "2 %% a second: %.2f m" % want, 0.05)
+	var want: float = 33.0 * pow(1.01, 10.0)
+	check_near(g.height_m(), want, "1 %% a second (user spec 2026-11-18, before 2 %%): %.2f m" % want, 0.05)
 	var grown: float = g.wood_growth_m
-	check(g.max_health == 1320 + int(floor(3.0 * grown + 0.000001)), "+3 health a metre (%d)" % g.max_health)
-	check_near(g.regen_per_second(), 16.0 + 0.15 * grown, "+0,15 regen a metre")
+	check(g.max_health == 1320 + int(floor(4.0 * grown + 0.000001)), "+4 health a metre (%d)" % g.max_health)
+	check_near(g.regen_per_second(), 22.0 + 0.3 * grown, "+0,3 regen a metre")
 	_free_world(w)
 
 
@@ -447,6 +451,8 @@ func test_status_text_names_him_his_stage_and_wood() -> void:
 	var text: String = g.status_text()
 	check(text.contains("Genesisgolem") and text.contains("Stufe 0/8")
 		and text.contains("noch 10 Braves") and text.contains("Holz: 7"), text)
+	check(text.contains("Heilung: 6.0 LP/s") and text.contains("Tempo: %.1f m/s" % g.current_speed())
+		and text.contains("Größe: 5.0 m") and text.contains("Leben: 1000/1000"), "the golems' common lines: %s" % text)
 	_free_world(w)
 
 

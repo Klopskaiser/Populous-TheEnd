@@ -428,12 +428,25 @@ func status_text() -> String:
 	elif growth_steps < max_growth_steps():
 		var base: int = kills_for_level(Balance.GOLEM_MAX_LEVEL)
 		next = "   noch %d Kills bis zum nächsten Wachstum" % [
-			base + (growth_steps + 1) * Balance.GOLEM_GROWTH_KILLS - kills]
+			base + kills_for_growth_steps(growth_steps + 1) - kills]
 	var life: String = "unbegrenzt" if level >= Balance.GOLEM_FINAL_BONUS_LEVEL \
 		else "%d s" % int(ceil(maxf(life_left, 0.0)))
-	var pose: String = stance_name()
-	return "Stufe %d/%d%s\nGröße: %.1f m   Leben: %d/%d\nLebenszeit: %s   Kills: %d   Haltung: %s" % [
-		level, Balance.GOLEM_MAX_LEVEL, next, height_m(), health, max_health, life, kills, pose]
+	return status_lines("Golem   Stufe %d/%d%s" % [level, Balance.GOLEM_MAX_LEVEL, next], "Lebenszeit: %s" % life)
+
+
+## The panel's lines, the same for all three golems (user spec 2026-11-18): the head (name, step, what
+## comes next), size and health, healing and walking speed, then `extra` (lifetime, targets, wood), kills
+## and stance.
+func status_lines(head: String, extra: String) -> String:
+	return "%s\nGröße: %.1f m   Leben: %d/%d\nHeilung: %.1f LP/s   Tempo: %.1f m/s\n%s   Kills: %d   Haltung: %s" % [
+		head, height_m(), health, max_health, regen_per_second(), current_speed(), extra, kills, stance_name()]
+
+
+## Golems take no part in the ordinary units' rest healing (REGEN_RATE after REGEN_DELAY out of combat;
+## user spec 2026-11-18) — their own healing (regen_per_second, from GOLEM_BASE_REGEN on) runs through
+## every fight instead. The combat-free time still counts.
+func _tick_regen(delta: float) -> void:
+	_no_combat_timer += delta
 
 
 func _is_combatant() -> bool:
@@ -666,14 +679,18 @@ func max_targets_of(kind: StringName) -> int:
 ## Permanent healing per second right now: GOLEM_LEVEL_REGEN per level, and
 ## GOLEM_FULL_SIZE_REGEN on top for the full-grown golem.
 func regen_per_second() -> float:
-	var regen: float = Balance.GOLEM_LEVEL_REGEN * float(level)
+	var regen: float = Balance.GOLEM_BASE_REGEN + Balance.GOLEM_LEVEL_REGEN * float(level) \
+		+ Balance.GOLEM_GROWTH_REGEN * float(growth_steps)
 	return regen + Balance.GOLEM_FULL_SIZE_REGEN if is_full_size() else regen
 
 
 ## Health ceiling right now: GOLEM_MAX_HP_CAP, plus GOLEM_GROWTH_MAX_HP for every
 ## growth step beyond level 7.
 func max_health_cap() -> int:
-	return Balance.GOLEM_MAX_HP_CAP + Balance.GOLEM_GROWTH_MAX_HP * growth_steps
+	if level < Balance.GOLEM_MAX_LEVEL:
+		return Balance.GOLEM_MAX_HP_CAP
+	return Balance.GOLEM_MAX_HP_CAP + Balance.GOLEM_GIANT_MAX_HP + Balance.GOLEM_GROWTH_MAX_HP * growth_steps \
+		+ (Balance.GOLEM_FULL_SIZE_MAX_HP if is_full_size() else 0)
 
 
 ## Level a golem with `p_kills` kills has reached.
@@ -718,9 +735,28 @@ static func speed_for_size(s: float) -> float:
 ## GOLEM_GROWTH_KILLS, until the body would pass GOLEM_MAX_HEIGHT.
 static func growth_steps_for_kills(p_kills: int) -> int:
 	var extra: int = p_kills - kills_for_level(Balance.GOLEM_MAX_LEVEL)
-	if extra <= 0:
-		return 0
-	return mini(extra / Balance.GOLEM_GROWTH_KILLS, max_growth_steps())
+	var steps: int = 0
+	while steps < max_growth_steps() and extra >= kills_for_growth_step(steps + 1):
+		extra -= kills_for_growth_step(steps + 1)
+		steps += 1
+	return steps
+
+
+## Kills growth step `step` (1 = the first after level 7) costs by itself (user spec 2026-11-18):
+## GOLEM_GROWTH_KILLS_RISE more than the step before, rounded down, from the GOLEM_GROWTH_KILLS of level 7.
+static func kills_for_growth_step(step: int) -> int:
+	var k: int = Balance.GOLEM_GROWTH_KILLS
+	for i in range(step):
+		k = int(floor(float(k) * (1.0 + Balance.GOLEM_GROWTH_KILLS_RISE) + 0.000001))
+	return k
+
+
+## Kills the first `steps` growth steps cost together (beyond level 7).
+static func kills_for_growth_steps(steps: int) -> int:
+	var total: int = 0
+	for s in range(1, steps + 1):
+		total += kills_for_growth_step(s)
+	return total
 
 
 ## The step at which the body reaches GOLEM_MAX_HEIGHT (its size is clamped there).
@@ -1675,17 +1711,19 @@ func take_damage(amount: int, attacker = null) -> void:
 	super.take_damage(amount, attacker)
 
 
-## No melee cap on a golem (user spec 2026-11-18): any number may fight her at once — the
-## pairing rules' 3 seats (Unit.MAX_MELEE_ATTACKERS) are for bodies of a man's size.
+## Her melee cap by size (user spec 2026-11-18): the circumference of her melee ring, floored to whole
+## metres, over GOLEM_MELEE_CALC_SPACING, times GOLEM_MELEE_SLOT_SHARE, floored — at least the usual
+## three (Unit.MAX_MELEE_ATTACKERS). Seated her target circle doubles, and so does the ring.
 func max_melee_attackers() -> int:
-	return 1 << 20
+	var ring: float = floorf(TAU * (MELEE_SLOT_RADIUS + target_radius()))
+	return maxi(MAX_MELEE_ATTACKERS,
+		int(floorf(ring / Balance.GOLEM_MELEE_CALC_SPACING * Balance.GOLEM_MELEE_SLOT_SHARE)))
 
 
-## Seats on her melee ring: one every GOLEM_MELEE_SLOT_SPACING metres round it (at least the
-## usual three); more attackers share them.
+## Seats on her melee ring: as many as may fight her, evenly round it — her attackers spread out
+## instead of crowding the side they came from.
 func melee_slot_count() -> int:
-	var r: float = MELEE_SLOT_RADIUS + target_radius()
-	return maxi(MAX_MELEE_ATTACKERS, int(TAU * r / Balance.GOLEM_MELEE_SLOT_SPACING))
+	return max_melee_attackers()
 
 
 ## Adds to the diagnostics tally of `kind` (attack_stats).
@@ -3020,7 +3058,7 @@ func _level_up() -> void:
 	_queue_stretch()
 	life_left += Balance.GOLEM_LEVEL_LIFETIME
 	if level >= Balance.GOLEM_MAX_LEVEL:
-		max_health = Balance.GOLEM_MAX_HP_CAP   # the giant: flat 1000 (user spec)
+		max_health = max_health_cap()   # the giant: 1000 + GOLEM_GIANT_MAX_HP (user spec 2026-11-18)
 	_apply_speed()
 	_sync_soa_flags()   # level 1 switches the unit collision off
 
