@@ -70,7 +70,33 @@
   violett, Sitzflaeche rot; im Krebsstand Koerperkreis (weiss), Trampelkreise der Glieder (orange), Zeppelinzone (blau).
 - **Staerke-Diagnose** `tests/diag_golem_sit_waves.gd` (2026-11-18): Wellen von oben und unten, je Trupp 25 + 8 je Welle,
   alle 30 s, 10 Wellen, Mischung wie der Ueberlebensmodus; Varianten still/mobile/stand, `_fixed` ohne Wachsen; druckt
-  Verlauf und Angriffsverteilung (`Golem.attack_stats`, `tally`).
+  Verlauf und Angriffsverteilung (`Golem.attack_stats`, `tally`). Modus `mobile_x15` (Nutzerwunsch 2026-11-18):
+  wachsende Wellen, je Trupp 25 und jede Welle 1,5-mal so viele, sitzend, nicht stationaer, mit Wachsen (256er-Karte,
+  kein Einheitenlimit fuer die Angreifer). Ergebnis Seeds 1-6 und 4711: fuenfmal gefallen in Welle 6 (2 x 190, nach
+  ~165 s, schon 80 m gross), zweimal frueh (Welle 2 und 3, noch 42-58 m). Befunde: die Nahkaempfer stehen auf dem Ring
+  Zielradius + Nahkampfreichweite (~9,5 m bei 43 m), knapp ausserhalb des Po-Klatschers; vorn seitlich neben den
+  Hueften eine Luecke zwischen Wischer, Bein-Schneise und Doppelstampfer (dort auch die Feuerkrieger); 13 Streckungen
+  beim Wachsen (je 1,4-2,5 s ohne Angriff) fallen in die heisse Phase. Der Vergleich `mobile` (+8 je Welle) ueber
+  dieselben Seeds: einmal gefallen (Welle 4), einmal knapp (98 LP) — die 10 Wellen sind also nicht sicher.
+  Korrektur: die Einheiten bei ~9,5 m standen im Wartering (hoechstens 3 Nahkaempfer je Verteidiger), nicht im
+  Nahkampf; der Po-Klatscher reicht schon ueber den Nahkampfring (31,3 m: 6,95 gegen 6,68 m; bei allen Golems und
+  Groessen, Test `test_po_clap_reaches_every_melee_attacker`). Erlittener Schaden (`Golem.damage_taken`): Feuerkrieger
+  52-59 %, Krieger 41-46 %.
+- **Keine Nahkampfgrenze an Golems (Nutzervorgabe 2026-11-18):** `Unit.max_melee_attackers()` (3) /
+  `Golem.max_melee_attackers()` (unbegrenzt), Nahkampfring mit einem Platz je Meter (`Golem.melee_slot_count`,
+  `GOLEM_MELEE_SLOT_SPACING`). Folge in `mobile_x15`: gefallen in Welle 2 nach 42-50 s (6 von 7 Seeds), Krieger 75-87 %
+  des Schadens. Test `test_any_number_of_melee_attackers_on_a_golem`.
+- **Seitlicher Handschlag (Nutzervorgabe 2026-11-18, im Spiel):** Clips `sit_hand_slam_l/_r` (0,9 s, Aufschlag 0,35 s,
+  `gymnastikschuh/AUFTRAG_SITZ_HANDSCHLAG_SEITLICH.md`) fuer den blinden Fleck aussen neben Oberschenkel und Knie.
+  `GolemSitCombat.HAND_SLAM_L/_R`: Armangriff (Arm-Kanal, statt des Wischers, mit Beinangriffen kombinierbar), Kreis um
+  die gemessene Aufschlagstelle `GOLEM_SIT_HAND_SLAM_LAND` (0,92 seitlich, 0,70 hinter den Fuessen, 4-m-Modell; bei
+  31,3 m 8,0 m seitlich, 6,1 m hinter den Fuessen), Radius 2/3 des Fuss-Stampfers plus 5 %
+  (`GOLEM_SIT_HAND_SLAM_RADIUS_SHARE` 0,7; 31,3 m: 3,11 m). Nutzerwerte bei 31,3 m: 75 Schaden (1,25 x Handschlag,
+  `GOLEM_SIT_HAND_SLAM_DAMAGE_FACTOR`), 1,7 s Abklingzeit (`GOLEM_SIT_HAND_SLAM_COOLDOWN_SHARE`); Zielzahl und Ausholzeit
+  wie der Fuss-Stampfer. Der Arm-Wischer hat seitdem 1,3 s Abklingzeit bei 31,3 m (`GOLEM_SIT_WIPE_COOLDOWN_SHARE`,
+  vorher 1,39 s). Beide Anteile wachsen mit der Groesse wie der uebrige Takt. Animation auf der eigenen Ebene
+  `GolemSitAnim.LAYER_ARM_TORSO` (beide Arme, Spine/Chest/UpperChest, Nacken, Kopf — sie lehnt sich auf die Stuetzhand
+  zurueck), damit der Wischer seine Ebene ohne Oberkoerper behaelt. Test `test_side_hand_slam_strikes_the_blind_spot`.
 - **Drehen im Krebsstand (Clips `crab_turn_l` / `crab_turn_r` aus der Werkstatt, 2026-11-18):** dreht sie sich im
   Krebsstand, spielt `_crab_visual` den Drehclip statt `crab_idle` — links (Winkel `atan2(x, z)` waechst, gegen den
   Uhrzeigersinn von oben) `_l`, sonst `_r`, wie `sit_turn_l/_r`. Die Drehrate misst der Visual-Tick an der echten
@@ -89,6 +115,7 @@
 | `crab_down` | 0,6 s (gestreckt) | Krebsstand -> Sitz |
 | `sit_death` | 1,4 s | Sterben im Sitzen, bleibt in der Endpose |
 | `crab_headbutt` | 1,0 s, Aufschlag 0,4 s (`GOLEM_CRAB_AIR_IMPACT`; gespielt so, dass er auf die Ausholzeit faellt) | Zeppelin-Zerstoerer: Kopfstoss nach hinten aus dem Krebsstand, beginnt und endet in der Ruhe im Krebsstand |
+| `sit_hand_slam_l` / `_r` | 0,9 s, Aufschlag 0,35 s | Handschlag seitlich: eine Schuh-Hand schlaegt von oben flach neben Oberschenkel und Knie auf (x 0,92 / z -0,70), Kopf zur Aufschlagstelle, Oberkoerper und Stuetzarm gehen mit (Ebene `arm_torso`) |
 | `crab_turn_l` / `crab_turn_r` | 1,0 s, Schleife | Umsetzen auf der Stelle um die Sitzmitte (= Standpunkt im Spiel); 33,3 Grad je Durchlauf, links = gegen den Uhrzeigersinn von oben; das Spiel dreht die Figur, der Clip setzt nur um |
 
 

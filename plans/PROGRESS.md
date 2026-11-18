@@ -12927,3 +12927,15 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
   GLB kopiert und importiert. `Golem._crab_visual(ground_speed, turn_rate)` spielt sie nach der im Visual-Tick gemessenen
   Drehrate (`_measure_turn`, Tempo Drehrate / `CRAB_TURN_CLIP_ANGLE` 0,581 rad); beim Krabbeln mit Drehung gewinnt der
   Clip, der Haende und Fuesse schneller bewegt (`crab_limb_reach`). Test `test_crab_turn_clips_follow_the_turn`.
+- **Wellen-Diagnose `mobile_x15` (2026-11-18):** Wellen x1,5 (25 je Trupp, oben und unten, alle 30 s) gegen die sitzende,
+  nicht stationaere 31-m-Golemin mit Wachsen; meist gefallen in Welle 6 nach ~165 s. Trace-Schalter `GOLEM_TRACE` /
+  `GOLEM_ZONES`. Befunde in `plans/10l_golem_sitting.md`.
+- **Keine Nahkampfgrenze an Golems (2026-11-18):** `Unit.max_melee_attackers()` / `melee_slot_count()` (Golem: unbegrenzt,
+  ein Platz je Meter Ringumfang), genutzt in `_bind_to_fight`, `_melee_engage_cost`, `CombatGroup.promote_waiters`,
+  `TribeCommands` (Angriffsbefehl, Umverteilung). Diagnose: `Golem.damage_taken`. Clipvertrag fuer den seitlichen
+  Handschlag im Sitzen: `gymnastikschuh/AUFTRAG_SITZ_HANDSCHLAG_SEITLICH.md`.
+- **Seitlicher Handschlag im Sitzen (2026-11-18):** Clips `sit_hand_slam_l/_r` aus `gymnastikschuh/out/golem_handschlag` in
+  die drei GLB; `GolemSitCombat.HAND_SLAM_L/_R` (Arm-Kanal, Kreis 2/3 Fuss-Stampfer um x 0,92 / z -0,70 des 4-m-Modells),
+  `GolemSitAnim.LAYER_ARM_TORSO`, Debugansicht (Taste G) zeigt die beiden Kreise. Test
+  `test_side_hand_slam_strikes_the_blind_spot`. Nachgestellt: Radius +5 % (0,7 des Fuss-Stampfers), 75 Schaden und 1,7 s
+  Abklingzeit, der Wischer 1,3 s (alles bei 31,3 m).

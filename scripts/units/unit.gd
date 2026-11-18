@@ -4150,8 +4150,8 @@ func _melee_engage_cost(u: Unit) -> int:
 		return 0   # one of OUR own attackers — that is our fight anyway
 	if g.defender == u:
 		var n: int = g.attackers.size()
-		if n < MAX_MELEE_ATTACKERS:
-			return n
+		if n < u.max_melee_attackers():
+			return mini(n, MAX_MELEE_ATTACKERS - 1)   # a defender without a cap (golem) stays joinable
 		return 10 + g.waiters.size()
 	if g.is_waiter(u):
 		return 0   # waiting around someone else's fight: free for a 1v1
@@ -4188,7 +4188,7 @@ func _bind_to_fight(enemy: Unit, allow_wait: bool) -> int:
 		if idx >= 0:
 			return idx
 		g.prune()
-		if g.attackers.size() < MAX_MELEE_ATTACKERS:
+		if g.attackers.size() < enemy.max_melee_attackers():
 			_leave_combat_group()
 			g.attackers.append(self)
 			combat_group = g
@@ -4342,10 +4342,23 @@ func active_melee_attacker_count() -> int:
 	return g.attackers.size()
 
 
+## How many may fight this unit in melee at once (the rest waits in the second row).
+## MAX_MELEE_ATTACKERS; the golem has no cap (Golem.max_melee_attackers).
+func max_melee_attackers() -> int:
+	return MAX_MELEE_ATTACKERS
+
+
+## How many seats the melee ring around this unit has (melee_slot_position).
+func melee_slot_count() -> int:
+	return MAX_MELEE_ATTACKERS
+
+
 ## Ring position for slot index around this (target) unit — outside its target
-## radius (a golem is struck at the edge of it, not at its centre).
+## radius (a golem is struck at the edge of it, not at its centre). More attackers
+## than seats share them (round the ring again).
 func melee_slot_position(slot: int) -> Vector3:
-	var angle: float = TAU * float(slot) / float(MAX_MELEE_ATTACKERS)
+	var n: int = maxi(melee_slot_count(), 1)
+	var angle: float = TAU * float(slot % n) / float(n)
 	var r: float = MELEE_SLOT_RADIUS + target_radius()
 	return position + Vector3(cos(angle) * r, 0.0, sin(angle) * r)
 

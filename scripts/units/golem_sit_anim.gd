@@ -10,6 +10,9 @@ class_name GolemSitAnim extends RefCounted
 ##     -> Ebene ARME   (OneShot, nur Schulter, Ober-/Unterarm, Hand und Finger — und
 ##                      seit 2026-11-17 Nacken und Kopf: beim Wischer wendet sie den
 ##                      Kopf zur Seite des Arms)
+##     -> Ebene ARME+OBERKOERPER (OneShot: beide Arme, Spine/Chest/UpperChest, Nacken, Kopf —
+##                      der seitliche Handschlag, 2026-11-18: sie lehnt sich auf die Stuetzhand
+##                      zurueck, neigt sich zur Schlagseite; laeuft im Arm-Kanal wie der Wischer)
 ##     -> Ebene KOERPER (OneShot ohne Filter: Po-Huepfer, Doppelklatscher, Doppelstampfer)
 ##     -> Ausgabe
 ##
@@ -24,7 +27,8 @@ class_name GolemSitAnim extends RefCounted
 const LAYER_LEGS: int = 0
 const LAYER_ARMS: int = 1
 const LAYER_FULL: int = 2
-const LAYER_NAMES: Array[String] = ["legs", "arms", "full"]
+const LAYER_ARM_TORSO: int = 3
+const LAYER_NAMES: Array[String] = ["legs", "arms", "full", "arm_torso"]
 
 ## Clips, die das Sitzen nutzt (Clipvertrag, LIESMICH_POPULOUS.md).
 const CLIP_TURN_L: StringName = &"sit_turn_l"
@@ -32,13 +36,13 @@ const CLIP_TURN_R: StringName = &"sit_turn_r"
 const CLIP_GROW: StringName = &"sit_grow"
 const LAYER_CLIPS: Array[StringName] = [&"sit_stomp_l", &"sit_stomp_r", &"sit_kick_l",
 	&"sit_kick_r", &"sit_wipe_l", &"sit_wipe_r", &"sit_hop", &"sit_clap",
-	&"sit_double_stomp", CLIP_TURN_L, CLIP_TURN_R, CLIP_GROW]
+	&"sit_double_stomp", CLIP_TURN_L, CLIP_TURN_R, CLIP_GROW, &"sit_hand_slam_l", &"sit_hand_slam_r"]
 ## Zeitpunkt des Aufschlags im Clip bei Tempo 1 (Sekunden) — VORSCHLAG fuer den
 ## Clipvertrag; der Clip wird so schnell gespielt, dass er auf die Ausholzeit faellt.
 const SIT_CLIP_IMPACT: Dictionary = {
 	&"sit_stomp_l": 0.35, &"sit_stomp_r": 0.35, &"sit_kick_l": 0.5, &"sit_kick_r": 0.5,
 	&"sit_wipe_l": 0.35, &"sit_wipe_r": 0.35, &"sit_hop": 0.6, &"sit_clap": 0.35,
-	&"sit_double_stomp": 0.35,
+	&"sit_double_stomp": 0.35, &"sit_hand_slam_l": 0.35, &"sit_hand_slam_r": 0.35,
 	&"sit_grow": 1.0,   # its whole clip: fired with the stretch's duration it plays that long
 }
 
@@ -52,6 +56,8 @@ var arm_paths: Array[NodePath] = []
 ## Neck and head: they ride on the ARM layer too (user request 2026-11-17: the head
 ## turns to the side the arm wipes on — sit_wipe_l/_r carry that turn).
 var head_paths: Array[NodePath] = []
+## Spine, chest, upper chest: only the arm+torso layer (the side hand slam leans the upper body).
+var torso_paths: Array[NodePath] = []
 
 
 func _init(p_player: AnimationPlayer) -> void:
@@ -73,6 +79,12 @@ static func part_of(bone: String) -> int:
 	return 0
 
 
+## Upper body bone (VRM names "spine", "chest", "upperChest")?
+static func is_torso(bone: String) -> bool:
+	var b: String = bone.to_lower()
+	return b == "spine" or b == "chest" or b == "upperchest"
+
+
 ## Neck or head bone (VRM names "neck", "head")?
 static func is_head(bone: String) -> bool:
 	var b: String = bone.to_lower()
@@ -90,6 +102,8 @@ func _read_paths() -> void:
 			continue
 		if is_head(String(path.get_subname(0))) and not head_paths.has(path):
 			head_paths.append(path)
+		if is_torso(String(path.get_subname(0))) and not torso_paths.has(path):
+			torso_paths.append(path)
 		match part_of(String(path.get_subname(0))):
 			1:
 				if not leg_paths.has(path):
@@ -126,7 +140,7 @@ func _build() -> void:
 		_blend.connect_node(&"base", idx, StringName("base_" + BASE_INPUTS[clip]))
 		idx += 1
 	var below: StringName = &"base"
-	for layer in [LAYER_LEGS, LAYER_ARMS, LAYER_FULL]:
+	for layer in [LAYER_LEGS, LAYER_ARMS, LAYER_ARM_TORSO, LAYER_FULL]:
 		var n: String = LAYER_NAMES[layer]
 		var clip: AnimationNodeAnimation = AnimationNodeAnimation.new()
 		clip.animation = Golem.CLIP_SIT_IDLE
@@ -139,8 +153,11 @@ func _build() -> void:
 			shot.filter_enabled = true
 			for p in (leg_paths if layer == LAYER_LEGS else arm_paths):
 				shot.set_filter_path(p, true)
-			if layer == LAYER_ARMS:
+			if layer != LAYER_LEGS:
 				for p in head_paths:
+					shot.set_filter_path(p, true)
+			if layer == LAYER_ARM_TORSO:
+				for p in torso_paths:
 					shot.set_filter_path(p, true)
 		_blend.add_node(StringName(n), shot)
 		_blend.connect_node(StringName(n + "_speed"), 0, StringName(n + "_clip"))

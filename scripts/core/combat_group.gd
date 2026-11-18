@@ -50,7 +50,9 @@ func remove_member(u) -> void:
 ## Moves waiters into free attacker slots (arrival order), skipping stale
 ## entries. Rule 5: the second row fills slots the moment they free up.
 func promote_waiters() -> void:
-	while attackers.size() < Unit.MAX_MELEE_ATTACKERS and not waiters.is_empty():
+	var cap: int = defender.max_melee_attackers() if defender != null and is_instance_valid(defender) \
+		else Unit.MAX_MELEE_ATTACKERS
+	while attackers.size() < cap and not waiters.is_empty():
 		var w = waiters.pop_front()
 		if w != null and is_instance_valid(w) and w.state != Unit.State.DEAD \
 				and w.combat_group == self:

@@ -362,6 +362,8 @@ var _crab_air_ship: Airship = null
 ## Diagnostics (tests/diag_golem_sit_waves.gd): per attack kind [strikes, units hit, kills, damage dealt]
 ## — standing attacks, sit attacks, the crab headbutt, trampling and the sit damage.
 var attack_stats: Dictionary = {}
+## Diagnostics: damage she took, by the attacker's kind (unit_kind(); &"other" without an attacker).
+var damage_taken: Dictionary = {}
 var _crab_air_time: float = 0.0
 var _crab_air_cooldown: float = 0.0
 ## The stomp has landed and its clip is still settling into the crouch: once it
@@ -1018,7 +1020,7 @@ func _sit_layers_busy() -> bool:
 	if sit_combat != null and sit_combat.is_busy():
 		return true
 	if _sit_anim != null and _sit_anim.is_active():
-		for layer in [GolemSitAnim.LAYER_LEGS, GolemSitAnim.LAYER_ARMS, GolemSitAnim.LAYER_FULL]:
+		for layer in [GolemSitAnim.LAYER_LEGS, GolemSitAnim.LAYER_ARMS, GolemSitAnim.LAYER_ARM_TORSO, GolemSitAnim.LAYER_FULL]:
 			if _sit_anim.layer_running(layer):
 				return true
 	return false
@@ -1666,6 +1668,26 @@ static func _debug_circle(c: Vector3, r: float, n: int = 40) -> PackedVector2Arr
 	return pts
 
 
+func take_damage(amount: int, attacker = null) -> void:
+	if state != State.DEAD and amount > 0:
+		var k: StringName = (attacker as Unit).unit_kind() if attacker is Unit and is_instance_valid(attacker) else &"other"
+		damage_taken[k] = int(damage_taken.get(k, 0)) + amount
+	super.take_damage(amount, attacker)
+
+
+## No melee cap on a golem (user spec 2026-11-18): any number may fight her at once — the
+## pairing rules' 3 seats (Unit.MAX_MELEE_ATTACKERS) are for bodies of a man's size.
+func max_melee_attackers() -> int:
+	return 1 << 20
+
+
+## Seats on her melee ring: one every GOLEM_MELEE_SLOT_SPACING metres round it (at least the
+## usual three); more attackers share them.
+func melee_slot_count() -> int:
+	var r: float = MELEE_SLOT_RADIUS + target_radius()
+	return maxi(MAX_MELEE_ATTACKERS, int(TAU * r / Balance.GOLEM_MELEE_SLOT_SPACING))
+
+
 ## Adds to the diagnostics tally of `kind` (attack_stats).
 func tally(kind: StringName, strikes: int, hit: int, killed: int, dealt: int) -> void:
 	var st: Array = attack_stats.get(kind, [0, 0, 0, 0])
@@ -1846,7 +1868,7 @@ func _crab_reaches(o: Object) -> bool:
 		sit_combat = GolemSitCombat.new(self)
 	var kinds: Array[StringName] = [GolemSitCombat.STOMP_L, GolemSitCombat.STOMP_R, GolemSitCombat.KICK_L,
 		GolemSitCombat.KICK_R, GolemSitCombat.WIPE_L, GolemSitCombat.WIPE_R, GolemSitCombat.DOUBLE_STOMP,
-		GolemSitCombat.CLAP, GolemSitCombat.HOP]   # (crawling backward she may arrive head first)
+		GolemSitCombat.CLAP, GolemSitCombat.HOP, GolemSitCombat.HAND_SLAM_L, GolemSitCombat.HAND_SLAM_R]   # (crawling backward she may arrive head first)
 	for k in kinds:
 		if o is Unit:
 			if sit_combat.in_area(k, (o as Unit).position):
@@ -1870,7 +1892,7 @@ func _crab_reaches_deep(o) -> bool:
 	var deeper: Vector3 = p + away.normalized() * (seat_back_m() * Balance.GOLEM_CRAB_REACH_DEPTH)
 	for k in [GolemSitCombat.STOMP_L, GolemSitCombat.STOMP_R, GolemSitCombat.KICK_L, GolemSitCombat.KICK_R,
 			GolemSitCombat.WIPE_L, GolemSitCombat.WIPE_R, GolemSitCombat.DOUBLE_STOMP, GolemSitCombat.CLAP,
-			GolemSitCombat.HOP]:
+			GolemSitCombat.HOP, GolemSitCombat.HAND_SLAM_L, GolemSitCombat.HAND_SLAM_R]:
 		if sit_combat.in_area(k, deeper):
 			return true
 	return false

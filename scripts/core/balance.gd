@@ -235,6 +235,20 @@ const GOLEM_SIT_WIPE_FRONT: float = 0.2
 ## "kann 5 Grad weiter nach vorn reichen"): je Meter nach aussen tan(5 Grad) weiter vorn.
 const GOLEM_SIT_WIPE_FRONT_DEG: float = 5.0
 const GOLEM_SIT_WIPE_BACK_DEG: float = 30.0
+## 7. Handschlag seitlich (Nutzervorgabe 2026-11-18, Clips sit_hand_slam_l/_r): die Schuh-Hand schlaegt
+## aussen neben Oberschenkel und Knie auf — in den blinden Fleck vor dem Wischer und hinter dem
+## Doppelstampfer. Aufschlagstelle (Sohlenmitte) seitlich / vor feet_point in Metern des 4-m-Modells,
+## an allen drei GLB gemessen (Golem 0,929 / -0,721, Daemon 0,932 / -0,663, Genesis 0,923 / -0,707);
+## Kreis mit diesem Anteil des Fuss-Stampfer-Radius (Nutzervorgabe: 2/3, dann 5 % groesser).
+const GOLEM_SIT_HAND_SLAM_LAND: Vector2 = Vector2(0.92, -0.70)
+const GOLEM_SIT_HAND_SLAM_RADIUS_SHARE: float = 2.0 / 3.0 * 1.05
+## Nutzervorgabe 2026-11-18 (Werte des Golems bei 31,3 m): Handschlag seitlich 75 Schaden (der Handschlag macht
+## dort 60, also das 1,25-Fache) und 1,7 s Abklingzeit; der Arm-Wischer 1,3 s. Die Abklingzeit beider war dort
+## 1,39015 s (Takt des gebueckten Handschlags x GOLEM_SIT_COOLDOWN_FACTOR); die Anteile darauf wachsen mit der
+## Groesse und gelten fuer alle drei Golems gleich.
+const GOLEM_SIT_HAND_SLAM_DAMAGE_FACTOR: float = 1.25
+const GOLEM_SIT_HAND_SLAM_COOLDOWN_SHARE: float = 1.7 / 1.39015
+const GOLEM_SIT_WIPE_COOLDOWN_SHARE: float = 1.3 / 1.39015
 ## 6. Handstampfer hinten (Doppelklatscher): Kreis des Trommelns um jede Hand, aber nur
 ## hinter der Mitte der Sitzflaeche (Rueckenbereich); Schaden und Zielzahl wie das
 ## Trommeln, Abklingzeit die des Trommelns mal diesem Anteil (zwischen den schnellen
@@ -565,6 +579,9 @@ const GOLEM_DROWN_DEPTH: float = 0.8
 ## vom RAND dieses Kreises entfernt stehen, statt sich unter ihm zu draengen. Der
 ## Gigant ebnet den Boden nur noch in diesem Kreis ein.
 const GOLEM_TARGET_RADIUS_SHARE: float = 0.5
+## Keine Nahkampfgrenze an Golems (Nutzervorgabe 2026-11-18): beliebig viele Nahkaempfer greifen
+## sie zugleich an; ihr Nahkampfring hat einen Platz je so viel Meter Umfang (Golem.melee_slot_count).
+const GOLEM_MELEE_SLOT_SPACING: float = 1.0
 ## Mehrere Golems mit einem Bewegungsbefehl bekommen Zielpunkte, die um die Summe
 ## ihrer Koerperradien plus diesen Rand (m) auseinanderliegen (Bugfix 2026-11-16:
 ## die festen Packabstaende legten die Ziele ineinander).

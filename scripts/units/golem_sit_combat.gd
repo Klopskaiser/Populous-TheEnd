@@ -15,6 +15,10 @@ class_name GolemSitCombat extends RefCounted
 ##     gestreckten Schuhs, so breit wie das Bein. Werte wie der Tritt.
 ##  5. Arm-Wischer (Arme, immer nur EIN Arm): Kegel neben ihr auf seiner Seite, etwas hinter
 ##     den Ruecken, Reichweite reach(). Schaden und Zielzahl wie der Luftschlag, schnell.
+##  7. Handschlag seitlich (Arme, links ODER rechts; Nutzervorgabe 2026-11-18): eine Schuh-Hand
+##     schlaegt von oben flach auf den blinden Fleck aussen neben Oberschenkel und Knie (vor dem
+##     Wischer, hinter dem Doppelstampfer). Kreis mit 2/3 des Fuss-Stampfer-Radius um die gemessene
+##     Aufschlagstelle; Werte und Tempo wie der Fuss-Stampfer. Kopf und Oberkoerper drehen mit.
 ## Welche Seite: die, deren Angriff mehr bringt; bei Gleichstand die, deren Aufschlag
 ## naeher an den getroffenen Feinden liegt.
 ## GROSSE ANGRIFFE (brauchen und sperren beide Kanaele, erst ab GOLEM_SIT_BIG_MIN_TARGETS):
@@ -42,11 +46,16 @@ const WIPE_R: StringName = &"sit_wipe_r"
 const HOP: StringName = &"sit_hop"
 const CLAP: StringName = &"sit_clap"
 const DOUBLE_STOMP: StringName = &"sit_double_stomp"
+const HAND_SLAM_L: StringName = &"sit_hand_slam_l"
+const HAND_SLAM_R: StringName = &"sit_hand_slam_r"
 ## The stretch when she grows on the seat (clip sit_grow): not chosen like the attacks,
 ## it strikes once per growth (grow_strike) — like the kick, in both legs' lanes.
 const GROW: StringName = &"sit_grow"
 const KINDS: Array[StringName] = [STOMP_L, STOMP_R, KICK_L, KICK_R, WIPE_L, WIPE_R,
-	HOP, CLAP, DOUBLE_STOMP]
+	HOP, CLAP, DOUBLE_STOMP, HAND_SLAM_L, HAND_SLAM_R]
+## The single attacks of each channel (the choice weighs them against each other).
+const LEG_KINDS: Array[StringName] = [STOMP_L, STOMP_R, KICK_L, KICK_R]
+const ARM_KINDS: Array[StringName] = [WIPE_L, WIPE_R, HAND_SLAM_L, HAND_SLAM_R]
 
 const CH_LEGS: int = 0
 const CH_ARMS: int = 1
@@ -102,6 +111,8 @@ var _c_wipe_r: float
 var _c_hop_r: float
 var _c_clap_r: float
 var _c_dstomp_r: float
+var _c_hslam: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]   # left, right
+var _c_hslam_r: float
 var _c_kick_out: float
 var _think: float = 0.0
 ## Guard against a turn that hangs (bugfix 2026-11-18): seconds without progress, angle turned in this
@@ -155,7 +166,7 @@ func reset() -> void:
 static func debug_group(kind: StringName) -> String:
 	if kind == HOP or kind == CLAP or kind == DOUBLE_STOMP:
 		return "big"
-	if kind == WIPE_L or kind == WIPE_R:
+	if kind == WIPE_L or kind == WIPE_R or kind == HAND_SLAM_L or kind == HAND_SLAM_R:
 		return "arms"
 	return "legs"
 
@@ -164,7 +175,7 @@ static func debug_group(kind: StringName) -> String:
 static func channels_of(kind: StringName) -> Array[int]:
 	if kind == HOP or kind == CLAP or kind == DOUBLE_STOMP:
 		return [CH_LEGS, CH_ARMS]
-	if kind == WIPE_L or kind == WIPE_R:
+	if kind == WIPE_L or kind == WIPE_R or kind == HAND_SLAM_L or kind == HAND_SLAM_R:
 		return [CH_ARMS]
 	return [CH_LEGS]
 
@@ -175,6 +186,8 @@ static func layer_of(kind: StringName) -> int:
 		return GolemSitAnim.LAYER_FULL
 	if kind == WIPE_L or kind == WIPE_R:
 		return GolemSitAnim.LAYER_ARMS
+	if kind == HAND_SLAM_L or kind == HAND_SLAM_R:
+		return GolemSitAnim.LAYER_ARM_TORSO   # both arms, upper body, neck and head (the clip leans)
 	return GolemSitAnim.LAYER_LEGS
 
 
@@ -195,6 +208,8 @@ static func model_of(kind: StringName) -> StringName:
 func damage(kind: StringName) -> int:
 	if kind == GROW:
 		return g.trample_damage()   # the stretch on the seat: one trample tick (user spec 2026-11-17)
+	if kind == HAND_SLAM_L or kind == HAND_SLAM_R:
+		return roundi(g.attack_damage(model_of(kind)) * Balance.GOLEM_SIT_HAND_SLAM_DAMAGE_FACTOR)   # 75 at 31,3 m
 	return g.attack_damage(model_of(kind))
 
 
@@ -207,7 +222,8 @@ func max_targets(kind: StringName) -> int:
 ## The attack whose tempo it takes: the quick crouched slam for the foot stomps and the
 ## wipes (user's choice 2026-11-17), its own otherwise.
 static func tempo_of(kind: StringName) -> StringName:
-	if kind == STOMP_L or kind == STOMP_R or kind == WIPE_L or kind == WIPE_R:
+	if kind == STOMP_L or kind == STOMP_R or kind == WIPE_L or kind == WIPE_R \
+			or kind == HAND_SLAM_L or kind == HAND_SLAM_R:
 		return Golem.ATTACK_SLAM
 	return model_of(kind)
 
@@ -221,6 +237,10 @@ func cooldown_of(kind: StringName) -> float:
 		return cd * Balance.GOLEM_SIT_CLAP_COOLDOWN_SHARE
 	if kind == HOP:
 		cd *= Balance.GOLEM_SIT_HOP_COOLDOWN_FACTOR * Balance.GOLEM_SIT_HOP_SLOWER_COOLDOWN
+	elif kind == HAND_SLAM_L or kind == HAND_SLAM_R:
+		cd *= Balance.GOLEM_SIT_HAND_SLAM_COOLDOWN_SHARE   # 1,7 s at 31,3 m (user spec 2026-11-18)
+	elif kind == WIPE_L or kind == WIPE_R:
+		cd *= Balance.GOLEM_SIT_WIPE_COOLDOWN_SHARE   # 1,3 s at 31,3 m
 	return cd * Balance.GOLEM_SIT_COOLDOWN_FACTOR
 
 
@@ -322,6 +342,8 @@ func _frame() -> void:
 	_c_hop_r = hop_radius()
 	_c_clap_r = clap_radius()
 	_c_dstomp_r = double_stomp_radius()
+	_c_hslam = [hand_slam_point(1.0), hand_slam_point(-1.0)]
+	_c_hslam_r = hand_slam_radius()
 	_c_kick_out = (Balance.GOLEM_SIT_KICK_SIDE + Balance.GOLEM_SIT_KICK_WIDTH * 0.5) * _c_sx * area_scale()
 
 
@@ -361,6 +383,17 @@ func hop_radius() -> float:
 	return g.stomp_radius() * area_scale() * Balance.GOLEM_SIT_HOP_AREA_FACTOR
 
 
+## Where the shoe-hand of side comes down in the side hand slam (clip sit_hand_slam_l/_r, measured
+## on all three models: beside her thigh and knee, out of reach of every other sit attack).
+func hand_slam_point(side: float) -> Vector3:
+	return _off(feet_point(), side, Balance.GOLEM_SIT_HAND_SLAM_LAND.x, Balance.GOLEM_SIT_HAND_SLAM_LAND.y)
+
+
+## Radius of the side hand slam's circle: GOLEM_SIT_HAND_SLAM_RADIUS_SHARE of the foot stomp's (user spec).
+func hand_slam_radius() -> float:
+	return stomp_radius() * Balance.GOLEM_SIT_HAND_SLAM_RADIUS_SHARE
+
+
 ## Radius of the circles of the hand stomp behind her (around each hand).
 func clap_radius() -> float:
 	return g.ground_radius(Golem.ATTACK_DRUM) * Balance.GOLEM_SIT_CLAP_AREA_FACTOR
@@ -378,9 +411,9 @@ func double_stomp_point() -> Vector3:
 
 ## +1 for the attacks of her left side, -1 for the right, 0 for the others.
 static func side_of_kind(kind: StringName) -> float:
-	if kind == STOMP_L or kind == KICK_L or kind == WIPE_L:
+	if kind == STOMP_L or kind == KICK_L or kind == WIPE_L or kind == HAND_SLAM_L:
 		return 1.0
-	if kind == STOMP_R or kind == KICK_R or kind == WIPE_R:
+	if kind == STOMP_R or kind == KICK_R or kind == WIPE_R or kind == HAND_SLAM_R:
 		return -1.0
 	return 0.0
 
@@ -394,6 +427,8 @@ func impact_point(kind: StringName) -> Vector3:
 			return stomp_point(side)
 		WIPE_L, WIPE_R:
 			return hand_point(side)
+		HAND_SLAM_L, HAND_SLAM_R:
+			return hand_slam_point(side)
 		KICK_L, KICK_R:
 			return _off(feet_point(), side, Balance.GOLEM_SIT_KICK_SIDE, 0.0)
 		DOUBLE_STOMP:
@@ -416,6 +451,9 @@ func bound_of(kind: StringName) -> Vector3:
 			r = _c_stomp_r
 		WIPE_L, WIPE_R:
 			r = _c_wipe_r
+		HAND_SLAM_L, HAND_SLAM_R:
+			c = _c_hslam[0 if side > 0.0 else 1]
+			r = _c_hslam_r
 		KICK_L, KICK_R:
 			var back: float = Balance.GOLEM_SIT_KICK_FROM * _c_sz
 			var ahead: float = Balance.GOLEM_SIT_KICK_TO * _c_sz
@@ -442,6 +480,8 @@ func in_area(kind: StringName, p: Vector3, at: Vector3 = Vector3.INF) -> bool:
 				and _flat(p - _c_feet).dot(_c_fw) >= -Balance.GOLEM_SIT_HEEL_BACK * _c_sz
 		WIPE_L, WIPE_R:
 			return in_wipe_cone(p, side)
+		HAND_SLAM_L, HAND_SLAM_R:
+			return _flat(p - _c_hslam[0 if side > 0.0 else 1]).length() <= _c_hslam_r
 		KICK_L, KICK_R:
 			return in_kick_lane(p, side)
 		GROW:
@@ -607,8 +647,8 @@ func _choose() -> void:
 			return
 	if _turn_sweep(foes, builds):
 		return
-	var best_legs: Dictionary = _best_of([STOMP_L, STOMP_R, KICK_L, KICK_R], foes, builds) if legs else {}
-	var best_arms: Dictionary = _best_of([WIPE_L, WIPE_R], foes, builds) if arms else {}
+	var best_legs: Dictionary = _best_of(LEG_KINDS, foes, builds) if legs else {}
+	var best_arms: Dictionary = _best_of(ARM_KINDS, foes, builds) if arms else {}
 	var single: float = float(best_legs.get("value", 0.0)) + float(best_arms.get("value", 0.0))
 	if legs and arms and not is_busy():
 		var min_hit: int = Balance.GOLEM_SIT_BIG_MIN_TARGETS if single > 0.0 else 1
@@ -661,6 +701,7 @@ func zone_outlines() -> Array:
 			lane.append(_xz(_c_feet + _c_lf * (side * corner.x) + _c_fw * corner.y))
 		out.append([k_kind, lane])
 		out.append([WIPE_L if side > 0.0 else WIPE_R, _wipe_outline(side)])
+		out.append([HAND_SLAM_L if side > 0.0 else HAND_SLAM_R, _circle(_c_hslam[0 if side > 0.0 else 1], _c_hslam_r)])
 	out.append([HOP, _circle(g.position, _c_hop_r)])
 	out.append([DOUBLE_STOMP, _circle(_c_dstomp, _c_dstomp_r)])
 	for h in _c_hand:
@@ -990,8 +1031,8 @@ func _end_turn() -> void:
 ## `strict`: the big attacks always need GOLEM_SIT_BIG_MIN_TARGETS (a turned heading must not win
 ## by leaving the single attacks nothing, which lets a big one strike a single foe).
 func _plan(foes: Array[Unit], builds: Array, lead: float, strict: bool = false) -> Dictionary:
-	var legs: Dictionary = _best_of([STOMP_L, STOMP_R, KICK_L, KICK_R], foes, builds)
-	var arms: Dictionary = _best_of([WIPE_L, WIPE_R], foes, builds)
+	var legs: Dictionary = _best_of(LEG_KINDS, foes, builds)
+	var arms: Dictionary = _best_of(ARM_KINDS, foes, builds)
 	var raw: float = float(legs.get("value", 0.0)) + float(arms.get("value", 0.0))
 	var single: float = _stretched(legs, lead) + _stretched(arms, lead)
 	var min_hit: int = Balance.GOLEM_SIT_BIG_MIN_TARGETS if raw > 0.0 or strict else 1

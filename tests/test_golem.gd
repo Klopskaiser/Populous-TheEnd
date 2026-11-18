@@ -4776,6 +4776,11 @@ func test_sit_animation_layers_filter_legs_and_arms() -> void:
 		and arms.is_path_filtered(layers.head_paths[1]) and not legs.is_path_filtered(layers.head_paths[0]),
 		"... and neck and head (%d tracks): the head turns with the wipe" % layers.head_paths.size())
 	check(not (layers._blend.get_node(&"full") as AnimationNodeOneShot).filter_enabled, "the body layer moves everything")
+	var arm_torso: AnimationNodeOneShot = layers._blend.get_node(&"arm_torso") as AnimationNodeOneShot
+	check(layers.torso_paths.size() >= 2 and arm_torso.is_path_filtered(layers.torso_paths[0])
+		and arm_torso.is_path_filtered(arm_path) and arm_torso.is_path_filtered(layers.head_paths[1])
+		and not arm_torso.is_path_filtered(leg_path) and not arms.is_path_filtered(layers.torso_paths[0]),
+		"the arm+torso layer (side hand slam): arms, upper body (%d tracks), neck and head, no legs; the wipe's layer keeps the upper body still" % layers.torso_paths.size())
 	if not has_clips:
 		var lib: AnimationLibrary = player.get_animation_library(&"")
 		lib.add_animation(&"sit_stomp_l", player.get_animation(&"kick").duplicate())
@@ -5418,7 +5423,7 @@ func test_sit_zone_debug_outlines_match_the_zones() -> void:
 	_sit_until_seated(w, g)
 	var c: GolemSitCombat = g.sit_combat if g.sit_combat != null else GolemSitCombat.new(g)
 	var zones: Array = c.zone_outlines()
-	check(zones.size() == 10, "ten outlines: two stomps, two lanes, two wipes, po clap, double stomp, two hand stomps")
+	check(zones.size() == 12, "twelve outlines: two stomps, two lanes, two wipes, two side hand slams, po clap, double stomp, two hand stomps")
 	for z in zones:
 		var kind: StringName = z[0]
 		var pts: PackedVector2Array = z[1]
@@ -5499,3 +5504,116 @@ func test_crab_turn_clips_follow_the_turn() -> void:
 		check(GolemSitAnim.CLIP_TURN_L == &"sit_turn_l" and g._sit_base_clip() == Golem.CLIP_SIT_IDLE,
 			"%s: same sign convention as the seated turn (_sit_base_clip: facing angle above heading = left)" % fname)
 		g.queue_free()
+
+
+## Keine Nahkampfgrenze an Golems (Nutzervorgabe 2026-11-18): mehr als die ueblichen 3 Nahkaempfer greifen sie
+## zugleich an, auf einem Ring mit einem Platz je Meter Umfang; gewoehnliche Einheiten behalten ihre 3.
+func test_any_number_of_melee_attackers_on_a_golem() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _golem(w, 0, Vector3(64, 5, 64))
+	g.health = 100000
+	g.max_health = 100000
+	check(g.max_melee_attackers() > 1000, "no cap on a golem")
+	check(g.melee_slot_count() >= Unit.MAX_MELEE_ATTACKERS, "at least the usual three seats")
+	var brave: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(20, 5, 20))
+	check(brave.max_melee_attackers() == Unit.MAX_MELEE_ATTACKERS, "an ordinary unit keeps its 3")
+	var foes: Array = []
+	for i in range(10):
+		var a: float = TAU * float(i) / 10.0
+		var u: Unit = _spawn(w, WARRIOR_SCENE, 1, g.position + Vector3(sin(a), 0, cos(a)) * 6.0)
+		u.health = 100000
+		u.max_health = 100000
+		u.order_attack(g)
+		foes.append(u)
+	var peak: int = 0
+	for i in range(150):
+		_tick_world(w)
+		peak = maxi(peak, g.active_melee_attacker_count())
+	check(peak >= 8, "at least 8 of 10 warriors fight her at once (peak %d)" % peak)
+	var r: float = Unit.MELEE_SLOT_RADIUS + g.target_radius()
+	var p0: Vector3 = g.melee_slot_position(0)
+	var p1: Vector3 = g.melee_slot_position(1)
+	check_near(Vector2(p0.x - g.position.x, p0.z - g.position.z).length(), r, "the seats lie on her melee ring")
+	check(Vector2(p0.x - p1.x, p0.z - p1.z).length() >= Balance.GOLEM_MELEE_SLOT_SPACING * 0.9,
+		"one seat per metre round it")
+	_free_world(w)
+
+
+## Der Po-Klatscher erreicht im Sitzen jeden, der sie im Nahkampf schlagen kann (Ring Zielradius + Nahkampf-
+## reichweite um die Sitzmitte; Nutzervorgabe 2026-11-18) — bei allen drei Golems und jeder Sitzgroesse.
+func test_po_clap_reaches_every_melee_attacker() -> void:
+	var w: Dictionary = _make_world()
+	var golems: Array = [_golem(w, 0, Vector3(64, 5, 64)),
+		_spawn(w, load("res://scenes/units/demon_golem.tscn"), 0, Vector3(30, 5, 64)),
+		_spawn(w, load("res://scenes/units/genesis_golem.tscn"), 0, Vector3(98, 5, 64))]
+	var ge: GenesisGolem = golems[2]
+	for i in range(700):
+		var any: bool = false
+		for gg in golems:
+			var g: Golem = gg
+			if g is GenesisGolem:
+				ge.stage = 8
+				ge.wood_growth_m = float(i) * 0.1
+			elif g.height_m() < 119.0:
+				g._credit_kill()
+			if g.height_m() < 30.0:
+				continue
+			g._seat_center = g.position
+			var c: GolemSitCombat = GolemSitCombat.new(g)
+			var ring: float = g.target_radius() + Unit.MELEE_RANGE
+			if c.hop_radius() < ring:
+				check(false, "%s at %.1f m: po clap %.2f m short of the melee ring %.2f m" % [g.unit_kind(), g.height_m(),
+					c.hop_radius(), ring])
+				any = true
+			g._seat_center = Vector3.INF
+		if any:
+			break
+	check(true, "po clap covers the melee ring")
+	_free_world(w)
+
+
+## Handschlag seitlich (Nutzervorgabe 2026-11-18, Clips sit_hand_slam_l/_r): Armangriff in den blinden Fleck aussen
+## neben Oberschenkel und Knie — Kreis mit 2/3 des Fuss-Stampfer-Radius um die gemessene Aufschlagstelle, dort trifft
+## sonst kein Einzelangriff; mit einem Beinangriff gleichzeitig, auf der Arm-Ebene mit Oberkoerper.
+func test_side_hand_slam_strikes_the_blind_spot() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _sit_golem(w, 0, Vector3(64, 5, 64))
+	_sit_until_seated(w, g)
+	var c: GolemSitCombat = g.sit_combat if g.sit_combat != null else GolemSitCombat.new(g)
+	var sx: float = g.model_scale().x * g.size_factor()
+	var sz: float = g.model_scale().z * g.size_factor()
+	check_near(c.hand_slam_radius(), c.stomp_radius() * 2.0 / 3.0 * 1.05, "radius 2/3 of the foot stomp's, 5 % more")
+	check(g.height_m() > 31.0 and g.height_m() < 31.5, "(first sit size, %.2f m)" % g.height_m())
+	check(c.damage(GolemSitCombat.HAND_SLAM_L) == 75, "75 damage at 31,3 m (%d)" % c.damage(GolemSitCombat.HAND_SLAM_L))
+	check_near(c.cooldown_of(GolemSitCombat.HAND_SLAM_R), 1.7, "cooldown 1,7 s at 31,3 m", 0.001)
+	check_near(c.cooldown_of(GolemSitCombat.WIPE_L), 1.3, "the wipe's 1,3 s at 31,3 m", 0.001)
+	check_near(c.cooldown_of(GolemSitCombat.STOMP_L), 1.39015, "the foot stomp keeps its 1,39 s", 0.001)
+	for side in [1.0, -1.0]:
+		var kind: StringName = GolemSitCombat.HAND_SLAM_L if side > 0.0 else GolemSitCombat.HAND_SLAM_R
+		var p: Vector3 = c.hand_slam_point(side)
+		var rel: Vector3 = p - c.feet_point()
+		check_near(rel.dot(c.left()) * side / sx, 0.92, "%s: 0,92 m to her side (4-m model)" % kind, 0.001)
+		check_near(rel.dot(c.forward()) / sz, -0.70, "%s: 0,70 m behind the feet" % kind, 0.001)
+		check(c.in_area(kind, p) and not c.in_area(kind, p + c.left() * side * (c.hand_slam_radius() + 0.1)),
+			"%s: a circle round the impact" % kind)
+		var others: Array = []
+		for k in [GolemSitCombat.STOMP_L, GolemSitCombat.STOMP_R, GolemSitCombat.KICK_L, GolemSitCombat.KICK_R,
+				GolemSitCombat.WIPE_L, GolemSitCombat.WIPE_R]:
+			if c.in_area(k, p):
+				others.append(k)
+		check(others.is_empty(), "%s: its middle lies in no other single attack's zone (%s)" % [kind, str(others)])
+		check(GolemSitCombat.channels_of(kind) == [GolemSitCombat.CH_ARMS], "%s: an arm attack" % kind)
+		check(GolemSitCombat.layer_of(kind) == GolemSitAnim.LAYER_ARM_TORSO, "%s: on the arm+torso layer" % kind)
+		check(GolemSitCombat.side_of_kind(kind) == side and GolemSitCombat.debug_group(kind) == "arms", "%s: its side" % kind)
+	# A foe in the left blind spot: she strikes it with the left hand.
+	var foe: Unit = _spawn(w, BRAVE_SCENE, 1, c.hand_slam_point(1.0))
+	foe.health = 10000
+	foe.max_health = 10000
+	var struck: bool = false
+	for i in range(40):
+		_tick_world(w)
+		if c.pending[GolemSitCombat.CH_ARMS] == GolemSitCombat.HAND_SLAM_L:
+			struck = true
+			break
+	check(struck, "a foe in the blind spot draws the side hand slam (arms: %s)" % c.pending[GolemSitCombat.CH_ARMS])
+	_free_world(w)
