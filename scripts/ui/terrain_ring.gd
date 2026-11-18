@@ -77,6 +77,38 @@ static func add_band_triangles(im: ImmediateMesh, center: Vector3, radius: float
 		have_prev = true
 
 
+## Batched polyline band (same contract as add_band_triangles: the caller has the surface open):
+## the flat outline `pts` (x, y = world x, z), closed when `closed`, drawn `thickness` wide and
+## lifted onto the terrain — every segment is sampled at most `step` metres apart, so long
+## outlines follow the ground too. Used by the sit-zone debug view (RangeRenderer, key G).
+static func add_path_triangles(im: ImmediateMesh, pts: PackedVector2Array, td: TerrainData,
+		color: Color, thickness: float = THICKNESS, closed: bool = true, y_offset: float = Y_OFFSET,
+		step: float = 1.0) -> void:
+	var n: int = pts.size()
+	if n < 2:
+		return
+	var segs: int = n if closed else n - 1
+	var half: float = thickness * 0.5
+	for i in range(segs):
+		var a: Vector2 = pts[i]
+		var b: Vector2 = pts[(i + 1) % n]
+		var d: Vector2 = b - a
+		var length: float = d.length()
+		if length < 0.0001:
+			continue
+		var side: Vector2 = Vector2(-d.y, d.x) / length * half
+		var parts: int = maxi(1, int(ceil(length / step)))
+		for k in range(parts):
+			var p0: Vector2 = a + d * (float(k) / float(parts))
+			var p1: Vector2 = a + d * (float(k + 1) / float(parts))
+			_add_quad_triangles(im, color, _on_ground(p0 + side, td, y_offset), _on_ground(p0 - side, td, y_offset),
+				_on_ground(p1 + side, td, y_offset), _on_ground(p1 - side, td, y_offset))
+
+
+static func _on_ground(p: Vector2, td: TerrainData, y_offset: float) -> Vector3:
+	return Vector3(p.x, (td.get_height(p.x, p.y) if td != null else 0.0) + y_offset, p.y)
+
+
 ## One ring segment's trapezoid (o0-i0-o1-i1) as two independent triangles —
 ## matches the winding add_band's triangle-strip produces, but needs no
 ## adjacency to neighbouring rings (safe to batch unrelated rings together).

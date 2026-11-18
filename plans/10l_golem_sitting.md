@@ -62,6 +62,23 @@
   waechst weiter mit dem Koerper). Folge in der Drehwahl: fuer eine Gruppe seitlich hinter ihr dreht sie sich jetzt eher
   den Ruecken zu (Handstampfer hinten) als eine Vierteldrehung fuer den Fuss-Stampfer.
 
+- **Spieltest 2026-11-18, Runde 6:** Handstampfer hinten Radius 6 m bei 31,3 m (`GOLEM_SIT_CLAP_AREA_FACTOR` 0,7751
+  statt 0,85; 80 m: 15,3 m), Bein strecken bis 9,2 m vor den Fuessen bei 31,3 m (`GOLEM_SIT_KICK_TO` 1,057; 80 m: 23,5 m).
+- **Debugansicht (Nutzerwunsch 2026-11-18):** Taste **G** (Reichweitenanzeige, `RangeRenderer`) zeichnet fuer jede
+  eigene sitzende Golemin die Umrisse der Sitzzonen aufs Gelaende (`Golem.debug_zone_outlines`,
+  `GolemSitCombat.zone_outlines`, `TerrainRing.add_path_triangles`): Beine orange, Arme tuerkis, grosse Flaechenangriffe
+  violett, Sitzflaeche rot; im Krebsstand Koerperkreis (weiss), Trampelkreise der Glieder (orange), Zeppelinzone (blau).
+- **Staerke-Diagnose** `tests/diag_golem_sit_waves.gd` (2026-11-18): Wellen von oben und unten, je Trupp 25 + 8 je Welle,
+  alle 30 s, 10 Wellen, Mischung wie der Ueberlebensmodus; Varianten still/mobile/stand, `_fixed` ohne Wachsen; druckt
+  Verlauf und Angriffsverteilung (`Golem.attack_stats`, `tally`).
+- **Drehen im Krebsstand (Clips `crab_turn_l` / `crab_turn_r` aus der Werkstatt, 2026-11-18):** dreht sie sich im
+  Krebsstand, spielt `_crab_visual` den Drehclip statt `crab_idle` — links (Winkel `atan2(x, z)` waechst, gegen den
+  Uhrzeigersinn von oben) `_l`, sonst `_r`, wie `sit_turn_l/_r`. Die Drehrate misst der Visual-Tick an der echten
+  Koerperdrehung (`_measure_turn`); abgespielt wird mit Drehrate / 0,581 rad (`CRAB_TURN_CLIP_ANGLE`, 33,3 Grad je
+  Durchlauf, alle drei Golems gleich), damit Haende und Fuesse nicht rutschen. Unter 0,05 rad/s zaehlt es nicht als
+  Drehen. Dreht sie beim Krabbeln, gewinnt der Clip, der Haende und Fuesse schneller bewegt: Drehclip, wenn Drehrate x
+  mittlerer Abstand der Glieder von der Koerpermitte (`crab_limb_reach`) groesser ist als das Krabbeltempo.
+
 #### Clipvertrag Krebsgang
 
 | Clip | Laenge bei Tempo 1 | Was passiert |
@@ -72,6 +89,7 @@
 | `crab_down` | 0,6 s (gestreckt) | Krebsstand -> Sitz |
 | `sit_death` | 1,4 s | Sterben im Sitzen, bleibt in der Endpose |
 | `crab_headbutt` | 1,0 s, Aufschlag 0,4 s (`GOLEM_CRAB_AIR_IMPACT`; gespielt so, dass er auf die Ausholzeit faellt) | Zeppelin-Zerstoerer: Kopfstoss nach hinten aus dem Krebsstand, beginnt und endet in der Ruhe im Krebsstand |
+| `crab_turn_l` / `crab_turn_r` | 1,0 s, Schleife | Umsetzen auf der Stelle um die Sitzmitte (= Standpunkt im Spiel); 33,3 Grad je Durchlauf, links = gegen den Uhrzeigersinn von oben; das Spiel dreht die Figur, der Clip setzt nur um |
 
 
 Status: **Clips der Sitzangriffe geliefert (2026-11-17, abends)** — alle zwölf (`sit_stomp_l/r`, `sit_kick_l/r`,

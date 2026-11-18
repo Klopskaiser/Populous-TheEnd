@@ -199,13 +199,13 @@ const GOLEM_SIT_STOMP_RADIUS_SHARE: float = 0.7026
 ## GOLEM_BODY_SCALE_HEIGHT (also immer, wenn sie sitzt) mit dem Koerper — GOLEM_BODY_*.
 ## 2. Bein strecken (links/rechts): eine Schneise vom Koerper (Hueftgelenk, so weit hinter
 ## feet_point) nach vorn bis GOLEM_SIT_KICK_TO (die gestreckte Schuhspitze liegt bei 1,03;
-## seit Spieltest 2026-11-18 wieder genau bis dorthin — vorher 1,6, "muss laenger sein, aber nicht
-## uebertreiben", Nutzer 2026-11-17; bei 31,3 m 9,0 statt 13,9 m vor den Fuessen), so breit wie das Bein,
+## seit Spieltest 2026-11-18 knapp darueber: 9,2 m vor den Fuessen bei 31,3 m — vorher 1,6, "muss laenger sein,
+## aber nicht uebertreiben", Nutzer 2026-11-17, dann kurz 1,03 = genau die Schuhspitze), so breit wie das Bein,
 ## so weit neben der Mitte.
 ## Schaden, Zielzahl, Takt wie der Tritt.
 const GOLEM_SIT_KICK_SIDE: float = 0.18
 const GOLEM_SIT_KICK_FROM: float = 1.25
-const GOLEM_SIT_KICK_TO: float = 1.03
+const GOLEM_SIT_KICK_TO: float = 1.057
 const GOLEM_SIT_KICK_WIDTH: float = 0.3
 ## 3. Po-Klatscher (Po-Huepfer): Flaeche, Schaden und Zielzahl wie der Sprung, um die
 ## Mitte der Sitzflaeche; Abklingzeit die des Sprungs mal diesem Faktor (minimal langsamer
@@ -242,7 +242,8 @@ const GOLEM_SIT_WIPE_BACK_DEG: float = 30.0
 const GOLEM_SIT_CLAP_COOLDOWN_SHARE: float = 0.83
 ## Radius seiner Kreise: dieser Anteil des Trommel-Radius (Nutzervorgabe 2026-11-17: um 15 %
 ## kleiner).
-const GOLEM_SIT_CLAP_AREA_FACTOR: float = 0.85
+## Spieltest 2026-11-18 (Nutzer): Radius 6 m bei 31,3 m (vorher 0,85 = 6,6 m); waechst mit dem Koerper.
+const GOLEM_SIT_CLAP_AREA_FACTOR: float = 0.7751
 ## Im Sitzen greift es sich leichter an (Nutzervorgabe 2026-11-17): alle Sitzangriffe ausser
 ## dem Handstampfer hinten kommen um diesen Faktor schneller wieder (Abklingzeit x 0,9) und
 ## haben dafuer um diesen Faktor kleinere Zielbereiche (Radien, Kegel-Reichweite, Breite der

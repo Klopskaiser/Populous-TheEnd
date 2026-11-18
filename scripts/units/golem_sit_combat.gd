@@ -151,6 +151,15 @@ func reset() -> void:
 
 # --- What each attack is -------------------------------------------------------------
 
+## Colour group of an attack in the debug view: "legs", "arms" or "big".
+static func debug_group(kind: StringName) -> String:
+	if kind == HOP or kind == CLAP or kind == DOUBLE_STOMP:
+		return "big"
+	if kind == WIPE_L or kind == WIPE_R:
+		return "arms"
+	return "legs"
+
+
 ## Which channels an attack needs (true = it uses or blocks that channel).
 static func channels_of(kind: StringName) -> Array[int]:
 	if kind == HOP or kind == CLAP or kind == DOUBLE_STOMP:
@@ -634,6 +643,82 @@ func _units_in_reach(foes: Array[Unit]) -> bool:
 	return false
 
 
+# --- Debug view (RangeRenderer, key G; user request 2026-11-18) -----------------------------
+## Outlines of her sit attack zones as she sits now, flat in world x/z: [[kind, PackedVector2Array], ...]
+## — built from the same measures in_area uses (circles cut where in_area cuts them).
+func zone_outlines() -> Array:
+	_frame()
+	var out: Array = []
+	for side in [1.0, -1.0]:
+		var s_kind: StringName = STOMP_L if side > 0.0 else STOMP_R
+		out.append([s_kind, _cut(_circle(_c_stomp[0 if side > 0.0 else 1], _c_stomp_r), _c_feet,
+			-Balance.GOLEM_SIT_HEEL_BACK * _c_sz, INF)])
+		var k_kind: StringName = KICK_L if side > 0.0 else KICK_R
+		var back: float = Balance.GOLEM_SIT_KICK_FROM * _c_sz
+		var ahead: float = Balance.GOLEM_SIT_KICK_TO * _c_sz
+		var lane: PackedVector2Array = PackedVector2Array()
+		for corner in [Vector2(0.0, -back), Vector2(0.0, ahead), Vector2(_c_kick_out, ahead), Vector2(_c_kick_out, -back)]:
+			lane.append(_xz(_c_feet + _c_lf * (side * corner.x) + _c_fw * corner.y))
+		out.append([k_kind, lane])
+		out.append([WIPE_L if side > 0.0 else WIPE_R, _wipe_outline(side)])
+	out.append([HOP, _circle(g.position, _c_hop_r)])
+	out.append([DOUBLE_STOMP, _circle(_c_dstomp, _c_dstomp_r)])
+	for h in _c_hand:
+		out.append([CLAP, _cut(_circle(h, _c_clap_r), g.position, -INF, 0.0)])
+	return out
+
+
+static func _xz(p: Vector3) -> Vector2:
+	return Vector2(p.x, p.z)
+
+
+func _circle(c: Vector3, r: float, n: int = 48) -> PackedVector2Array:
+	var pts: PackedVector2Array = PackedVector2Array()
+	for i in range(n):
+		var a: float = TAU * float(i) / float(n)
+		pts.append(Vector2(c.x + cos(a) * r, c.z + sin(a) * r))
+	return pts
+
+
+## Moves every point whose distance ahead of `base` (along her heading) lies outside [lo, hi]
+## onto that limit — the straight cut of a circle (heel line, middle of the seat).
+func _cut(pts: PackedVector2Array, base: Vector3, lo: float, hi: float) -> PackedVector2Array:
+	var fw: Vector2 = Vector2(_c_fw.x, _c_fw.z)
+	var b: Vector2 = Vector2(base.x, base.z)
+	var out: PackedVector2Array = PackedVector2Array()
+	for p in pts:
+		var a: float = (p - b).dot(fw)
+		out.append(p + fw * (clampf(a, lo, hi) - a))
+	return out
+
+
+## The wipe's cone on `side`: from the middle of the seat out along the back edge (GOLEM_SIT_WIPE_BACK_DEG
+## behind the cross direction), round the arc of its reach, back in along the tilted front edge.
+func _wipe_outline(side: float) -> PackedVector2Array:
+	var r: float = _c_wipe_r
+	var front: float = Balance.GOLEM_SIT_WIPE_FRONT * _c_sz
+	var tilt: float = tan(deg_to_rad(Balance.GOLEM_SIT_WIPE_FRONT_DEG))
+	var at = func(out_m: float, ahead_m: float) -> Vector2:
+		return _xz(g.position + _c_lf * (side * out_m) + _c_fw * ahead_m)
+	var pts: PackedVector2Array = PackedVector2Array([at.call(0.0, 0.0)])
+	var a0: float = -deg_to_rad(Balance.GOLEM_SIT_WIPE_BACK_DEG)
+	var a: float = a0
+	var step: float = deg_to_rad(3.0)
+	while a < PI * 0.5:
+		var o: float = r * cos(a)
+		var f: float = r * sin(a)
+		if f > front + o * tilt:
+			break
+		pts.append(at.call(o, f))
+		a += step
+	# The front edge, from where it meets the arc back to the body.
+	var o_end: float = r * cos(a)
+	for i in range(6, -1, -1):
+		var o: float = o_end * float(i) / 6.0
+		pts.append(at.call(o, front + o * tilt))
+	return pts
+
+
 ## Radius around the seat beyond which no sit attack reaches.
 func _scan_radius() -> float:
 	return g.seat_back_m() + g.reach() + g.ground_radius(Golem.ATTACK_DRUM)
@@ -827,11 +912,17 @@ func _wind_up(kind: StringName, at: Vector3) -> void:
 func _land(kind: StringName, at: Vector3) -> void:
 	var dmg: int = damage(kind)
 	var struck: Array[Unit] = victims(kind, at, _foes_around())
+	var dealt: int = 0
+	var killed: int = 0
 	for u in struck:
 		var hp: int = Golem.kill_hp_of(u)
+		var before: int = u.health
 		u.take_damage(dmg, g)
+		dealt += before - (maxi(u.health, 0) if is_instance_valid(u) else 0)
 		if not is_instance_valid(u) or u.state == Unit.State.DEAD or u.doomed:
+			killed += 1
 			g._credit_kill(hp)
+	g.tally(kind, 1, struck.size(), killed, dealt)
 	var struck_v: Array = vehicles_struck(kind, _vehicles_around(), struck.size())
 	for v in struck_v:
 		if is_instance_valid(v) and v.state != Unit.State.DEAD:

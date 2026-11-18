@@ -126,6 +126,15 @@ const CLIP_CRAB_DOWN: StringName = &"crab_down"
 ## The airship strike in the crab stand: a headbutt backward with the head-shoe (1,0 s, impact at
 ## GOLEM_CRAB_AIR_IMPACT; without the clip the strike lands unseen).
 const CLIP_CRAB_HEADBUTT: StringName = &"crab_headbutt"
+## Turning in the crab stand (user spec 2026-11-18): the clip only shifts hands and feet, the game turns
+## the figure. Left = counter-clockwise from above (like sit_turn_l). One loop (1,0 s) goes with
+## CRAB_TURN_CLIP_ANGLE of turn about the middle of the seat, the same for all three golems — played at
+## turn rate / that angle, nothing slides (golem_bewegung_niedlich_krebs.mjs, CRAB_TURN_WINKEL).
+const CLIP_CRAB_TURN_L: StringName = &"crab_turn_l"
+const CLIP_CRAB_TURN_R: StringName = &"crab_turn_r"
+const CRAB_TURN_CLIP_ANGLE: float = 0.581   # rad per loop (33,3 degrees)
+## Below this turn rate (rad/s) she counts as not turning.
+const CRAB_TURN_MIN_RATE: float = 0.05
 const CRAB_CLIP_LENGTH: float = 0.6
 ## Ground covered by one loop of crab_walk at 4 m (metres of the model, measured on the export).
 const CRAB_CLIP_STRIDE: float = 1.029
@@ -350,6 +359,9 @@ var _sit_buildings: Array = []
 ## The airship strike in the crab stand: the ship it is wound up at, seconds to the impact,
 ## seconds to the next strike.
 var _crab_air_ship: Airship = null
+## Diagnostics (tests/diag_golem_sit_waves.gd): per attack kind [strikes, units hit, kills, damage dealt]
+## — standing attacks, sit attacks, the crab headbutt, trampling and the sit damage.
+var attack_stats: Dictionary = {}
 var _crab_air_time: float = 0.0
 var _crab_air_cooldown: float = 0.0
 ## The stomp has landed and its clip is still settling into the crouch: once it
@@ -373,6 +385,8 @@ var _arm_anim: float = 1.0
 var _rise: float = 0.0
 var _dead_time: float = 0.0
 var _last_pos: Vector3 = Vector3.INF
+## The body's heading angle at the last visual tick (the crab turn clips play by the real turn rate).
+var _last_heading_angle: float = INF
 
 
 func _init() -> void:
@@ -1596,8 +1610,11 @@ func _sit_damage_tick() -> void:
 			continue
 		var hp: int = kill_hp_of(u)
 		var foe: bool = u.tribe_id != tribe_id
+		var before: int = u.health
 		u.take_damage(damage, self)
-		if not is_instance_valid(u) or u.state == State.DEAD or u.doomed:
+		var gone: bool = not is_instance_valid(u) or u.state == State.DEAD or u.doomed
+		tally(&"sit_damage", 0, 1, 1 if gone and foe else 0, before - (maxi(u.health, 0) if is_instance_valid(u) else 0))
+		if gone:
 			if foe:
 				_credit_kill(hp)
 			continue
@@ -1613,6 +1630,50 @@ func _sit_damage_tick() -> void:
 		if is_instance_valid(b) and b.health > 0:
 			standing.append(b)
 	_sit_buildings = standing
+
+
+## Debug view (RangeRenderer, key G; user request 2026-11-18): the outlines to draw for her, flat in world
+## x/z, as [[group, PackedVector2Array], ...] — group "legs", "arms", "big", "seat" while she sits; "body",
+## "limb", "air" in the crab stand. Empty when she neither sits nor crawls.
+func debug_zone_outlines() -> Array:
+	var out: Array = []
+	if stance != STANCE_SIT or is_switching_stance() or _seat_center == Vector3.INF:
+		return out
+	if is_crabbing():
+		out.append(["body", _debug_circle(position, crab_body_radius())])
+		for p in crab_contacts():
+			out.append(["limb", _debug_circle(p, crab_limb_radius())])
+		out.append(["air", _debug_circle(crab_air_center(), crab_air_radius())])
+		return out
+	if sit_combat == null:
+		sit_combat = GolemSitCombat.new(self)
+	for z in sit_combat.zone_outlines():
+		out.append([GolemSitCombat.debug_group(z[0]), z[1]])
+	var right: Vector3 = Vector3(_seat_fwd.z, 0.0, -_seat_fwd.x)
+	var seat: PackedVector2Array = PackedVector2Array()
+	for c in [Vector2(-1, -1), Vector2(-1, 1), Vector2(1, 1), Vector2(1, -1)]:
+		var p: Vector3 = _seat_center + right * (_seat_half.x * c.x) + _seat_fwd * (_seat_half.y * c.y)
+		seat.append(Vector2(p.x, p.z))
+	out.append(["seat", seat])
+	return out
+
+
+static func _debug_circle(c: Vector3, r: float, n: int = 40) -> PackedVector2Array:
+	var pts: PackedVector2Array = PackedVector2Array()
+	for i in range(n):
+		var a: float = TAU * float(i) / float(n)
+		pts.append(Vector2(c.x + cos(a) * r, c.z + sin(a) * r))
+	return pts
+
+
+## Adds to the diagnostics tally of `kind` (attack_stats).
+func tally(kind: StringName, strikes: int, hit: int, killed: int, dealt: int) -> void:
+	var st: Array = attack_stats.get(kind, [0, 0, 0, 0])
+	st[0] += strikes
+	st[1] += hit
+	st[2] += killed
+	st[3] += dealt
+	attack_stats[kind] = st
 
 
 ## The victims she sat down on that are still in the list (tests, panel).
@@ -1676,6 +1737,24 @@ func crab_contacts() -> Array[Vector3]:
 	var hands: Vector3 = sit_feet - fwd * ((Balance.GOLEM_SIT_HAND_BACK + Balance.GOLEM_CRAB_HAND_BACK) * sz)
 	var hand: Vector3 = right * (Balance.GOLEM_SIT_HAND_SIDE * sx)
 	return [feet + foot, feet - foot, hands + hand, hands - hand]
+
+
+## The body's turn rate since the last visual tick (rad/s, + = left, counter-clockwise from above).
+func _measure_turn(angle: float, delta: float) -> float:
+	var rate: float = 0.0
+	if _last_heading_angle != INF and delta > 0.0:
+		rate = wrapf(angle - _last_heading_angle, -PI, PI) / delta
+	_last_heading_angle = angle
+	return rate
+
+
+## Mean distance of her hands and feet from the middle of her body in the crab stand: how fast they
+## move over the ground when she turns (crab turn clip against crab walk clip).
+func crab_limb_reach() -> float:
+	var sum: float = 0.0
+	for p in crab_contacts():
+		sum += Vector2(p.x - position.x, p.z - position.z).length()
+	return sum / 4.0
 
 
 ## Seconds crab_up / crab_down take: GOLEM_CRAB_SWITCH_TIME at GOLEM_SIT_REF_HEIGHT, with the root of
@@ -2324,6 +2403,7 @@ func _land_crab_headbutt(ship: Airship) -> bool:
 	_play_strike_sfx(ATTACK_SWAT)
 	ship.register_hull_hit(position)
 	_crab_chase_time = 0.0
+	tally(CLIP_CRAB_HEADBUTT, 1, 1, 1 if not is_instance_valid(ship) or ship.state == State.DEAD else 0, 0)
 	return true
 
 
@@ -3139,8 +3219,12 @@ func _tick_trample(delta: float) -> void:
 		room -= 1
 		_no_combat_timer = 0.0
 		var hp: int = kill_hp_of(u)
+		var before: int = u.health
 		u.take_damage(damage, self)
-		if not is_instance_valid(u) or u.state == State.DEAD or u.doomed:
+		var gone: bool = not is_instance_valid(u) or u.state == State.DEAD or u.doomed
+		tally(&"crab_trample" if crab else &"trample", 0, 1, 1 if gone else 0,
+			before - (maxi(u.health, 0) if is_instance_valid(u) else 0))
+		if gone:
 			_credit_kill(hp)
 	if not is_giant():
 		return
@@ -4356,10 +4440,15 @@ func _land_attack(kind: StringName, hit: int = 0) -> Dictionary:
 	# Everything struck is collected first: a kill can raise the level, and the
 	# area and the target cap of THIS attack must not grow while it lands.
 	var struck: Dictionary = _struck_targets(kind)
+	var dealt: int = 0
+	var killed: int = 0
 	for u in struck.units:
 		var hp: int = kill_hp_of(u)
+		var before: int = u.health
 		u.take_damage(damage, self)
+		dealt += before - (maxi(u.health, 0) if is_instance_valid(u) else 0)
 		if not is_instance_valid(u) or u.state == State.DEAD or u.doomed:
+			killed += 1
 			_credit_kill(hp)
 			continue
 		if kick:
@@ -4402,6 +4491,7 @@ func _land_attack(kind: StringName, hit: int = 0) -> Dictionary:
 			continue
 		struck_buildings[b] = true
 		_strike_building(b, to_building)
+	tally(kind, 1 if last_hit else 0, (struck.units as Array).size(), killed, dealt)
 	if not last_hit:
 		return struck_buildings
 	# The giant's blows wreck vehicles too.
@@ -4538,7 +4628,7 @@ func _prepare_clips() -> void:
 	if _anim == null:
 		return
 	for clip in [CLIP_IDLE, CLIP_WALK, CLIP_CROUCH_IDLE, CLIP_SIT_IDLE, GolemSitAnim.CLIP_TURN_L, GolemSitAnim.CLIP_TURN_R,
-			CLIP_CRAB_IDLE, CLIP_CRAB_WALK]:
+			CLIP_CRAB_IDLE, CLIP_CRAB_WALK, CLIP_CRAB_TURN_L, CLIP_CRAB_TURN_R]:
 		if _anim.has_animation(clip):
 			_anim.get_animation(clip).loop_mode = Animation.LOOP_LINEAR
 	_play_clip(CLIP_IDLE)
@@ -4561,9 +4651,10 @@ func death_clip() -> StringName:
 
 
 ## The crab walk's clips: crab_up / crab_down stretched to their time, in the stand crab_walk by the
-## real speed (CRAB_CLIP_STRIDE per loop, or the hands and feet slide) or crab_idle; the strike at
-## an airship (crab_headbutt) plays out first.
-func _crab_visual(ground_speed: float) -> void:
+## real speed (CRAB_CLIP_STRIDE per loop, or the hands and feet slide), crab_turn_l / _r by the real
+## turn rate (`turn_rate`, rad/s, + = left) or crab_idle; the strike at an airship (crab_headbutt)
+## plays out first. Turning and crawling at once: the clip of what moves hands and feet faster.
+func _crab_visual(ground_speed: float, turn_rate: float = 0.0) -> void:
 	match _crab:
 		CRAB_UP:
 			_play_clip(CLIP_CRAB_UP, CRAB_CLIP_LENGTH / crab_switch_time())
@@ -4572,7 +4663,10 @@ func _crab_visual(ground_speed: float) -> void:
 		_:
 			if _clip == CLIP_CRAB_HEADBUTT and _anim.is_playing():
 				return
-			if ground_speed > WALK_THRESHOLD:
+			if absf(turn_rate) > CRAB_TURN_MIN_RATE and absf(turn_rate) * crab_limb_reach() > ground_speed:
+				_play_clip(CLIP_CRAB_TURN_L if turn_rate > 0.0 else CLIP_CRAB_TURN_R,
+					absf(turn_rate) / CRAB_TURN_CLIP_ANGLE)
+			elif ground_speed > WALK_THRESHOLD:
 				# Backward the walk clip runs backward (head first, user spec 2026-11-18).
 				var sp: float = ground_speed / (crab_clip_speed() * _shown_size)
 				_play_clip(CLIP_CRAB_WALK, -sp if _crab_backward else sp)
@@ -4658,6 +4752,7 @@ func _tick_visual(delta: float) -> void:
 		return
 	var body_dir: Vector3 = heading()
 	rotation.y = atan2(body_dir.x, body_dir.z)
+	var turn_speed: float = _measure_turn(rotation.y, delta)
 	if _model != null:
 		# Seated, her logic position lies on the seat: the figure (origin at the
 		# feet) is drawn that far forward again (_on_seated).
@@ -4688,7 +4783,7 @@ func _tick_visual(delta: float) -> void:
 			_sit_anim.set_base(_sit_base_clip())
 		elif not attacking and not is_switching_stance() and not is_stretching():
 			if is_crabbing():
-				_crab_visual(ground_speed)
+				_crab_visual(ground_speed, turn_speed)
 			elif stance == STANCE_SIT:
 				_play_clip(CLIP_SIT_IDLE)
 			elif stance == STANCE_CROUCH:

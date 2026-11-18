@@ -14,6 +14,14 @@ const C_PREACHER: Color = Color(0.65, 0.45, 1.0, 0.8)
 const C_SIEGE: Color = Color(1.0, 0.30, 0.20, 0.85)
 const C_SIEGE_MIN: Color = Color(1.0, 0.30, 0.20, 0.4)
 const C_AIRSHIP: Color = Color(0.95, 0.85, 0.35, 0.8)
+## Golem sit zones (debug view, user request 2026-11-18): legs, arms, the big area attacks, the seat
+## (sit damage); in the crab stand her body, her four limbs (trampling) and the airship area.
+const GOLEM_ZONE_COLORS: Dictionary = {
+	"legs": Color(1.0, 0.5, 0.15, 0.9), "arms": Color(0.2, 0.9, 0.8, 0.9), "big": Color(0.75, 0.5, 1.0, 0.9),
+	"seat": Color(1.0, 0.2, 0.2, 0.95), "body": Color(1.0, 1.0, 1.0, 0.6), "limb": Color(1.0, 0.5, 0.15, 0.9),
+	"air": Color(0.3, 0.6, 1.0, 0.95),
+}
+const GOLEM_ZONE_THICKNESS: float = 0.35
 
 var _unit_manager: UnitManager = null
 var _player_id: int = 0
@@ -81,6 +89,9 @@ func _process(_delta: float) -> void:
 			continue
 		if unit.siege_engine != null:
 			continue   # siege crew: no range of its own
+		if unit is Golem:
+			_add_golem_zones(unit as Golem)
+			continue
 		if unit is Airship:
 			# Deck combat has TWO different reaches — firewarriors fire farther
 			# (8+3) than preachers convert (5+3). Draw a ring per crew kind that
@@ -120,6 +131,16 @@ func _add_airship_rings(ship: Airship) -> void:
 	if ship._has_deck_preacher():
 		_draw_ring(ship.position, Preacher.CONVERT_RANGE + Balance.AIRSHIP_RANGE_BONUS,
 			C_PREACHER)
+
+
+## A seated (or crawling) golem: the outlines of her sit zones (Golem.debug_zone_outlines).
+func _add_golem_zones(g: Golem) -> void:
+	for z in g.debug_zone_outlines():
+		if not _batch_open:
+			_im.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+			_batch_open = true
+		TerrainRing.add_path_triangles(_im, z[1], _terrain_data, GOLEM_ZONE_COLORS.get(z[0], Color.WHITE),
+			GOLEM_ZONE_THICKNESS)
 
 
 ## Appends one ring into the shared per-frame batch surface (opened lazily on

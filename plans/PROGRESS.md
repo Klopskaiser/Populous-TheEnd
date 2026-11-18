@@ -12917,3 +12917,13 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
   weiter hinten und 0,3 m kleiner bei 31,3 m (`GOLEM_SIT_STOMP_LAND.y` 0,353, `GOLEM_SIT_STOMP_RADIUS_SHARE` 0,7026).
   `test_sitting_she_turns_for_a_much_better_attack` prueft jetzt, dass der gewaehlte Plan die Gruppe trifft (nicht mehr
   eine feste Richtung). `test_perf.gd` (2000 Krieger) schwankt um sein Budget, ohne Bezug zum Golem.
+- **Runde 6 (2026-11-18):** Handstampfer hinten 6 m bei 31,3 m (`GOLEM_SIT_CLAP_AREA_FACTOR` 0,7751), Bein strecken
+  bis 9,2 m vor den Fuessen (`GOLEM_SIT_KICK_TO` 1,057).
+- **Debugansicht und Staerke-Diagnose (2026-11-18):** Taste G zeigt die Sitzzonen eigener Golems
+  (`Golem.debug_zone_outlines`, `GolemSitCombat.zone_outlines`, `TerrainRing.add_path_triangles`, `RangeRenderer`);
+  `tests/diag_golem_sit_waves.gd` misst eine sitzende 31-m-Golemin gegen Wellen (mit/ohne Wachsen, stationaer/mobil/
+  stehend) samt Angriffsverteilung (`Golem.attack_stats`). Test `test_sit_zone_debug_outlines_match_the_zones`.
+- **Drehclips im Krebsstand (2026-11-18):** `crab_turn_l` / `crab_turn_r` aus `gymnastikschuh/out/golem_krebs` in die drei
+  GLB kopiert und importiert. `Golem._crab_visual(ground_speed, turn_rate)` spielt sie nach der im Visual-Tick gemessenen
+  Drehrate (`_measure_turn`, Tempo Drehrate / `CRAB_TURN_CLIP_ANGLE` 0,581 rad); beim Krabbeln mit Drehung gewinnt der
+  Clip, der Haende und Fuesse schneller bewegt (`crab_limb_reach`). Test `test_crab_turn_clips_follow_the_turn`.

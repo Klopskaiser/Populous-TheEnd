@@ -4017,8 +4017,8 @@ func test_sit_leg_lane_runs_from_her_body_to_the_stretched_foot() -> void:
 	var sx: float = g.model_scale().x * g.size_factor()
 	var mid_r: Vector3 = c.impact_point(GolemSitCombat.KICK_R)
 	check(c.in_kick_lane(mid_r + fwd * (Balance.GOLEM_SIT_KICK_TO * sz * 0.9), -1.0)
-		and not c.in_kick_lane(mid_r + fwd * (Balance.GOLEM_SIT_KICK_TO * sz + 0.5), -1.0), "it ends at the tip of the stretched shoe")
-	check_near(Balance.GOLEM_SIT_KICK_TO, 1.03, "the tip of the stretched shoe in the clip (user spec 2026-11-18)")
+		and not c.in_kick_lane(mid_r + fwd * (Balance.GOLEM_SIT_KICK_TO * sz + 0.5), -1.0), "it ends just beyond the tip of the stretched shoe")
+	check_near(Balance.GOLEM_SIT_KICK_TO * sz, 9.2, "9,2 m ahead of her feet at 31,3 m (user spec 2026-11-18)", 0.05)
 	check(Balance.GOLEM_SIT_KICK_TO * sz > c._ahead_of_feet(c.stomp_point(-1.0)) + c.stomp_radius(),
 		"it reaches further ahead than the foot stomp")
 	check(c.in_kick_lane(mid_r - fwd * (Balance.GOLEM_SIT_KICK_FROM * sz * 0.9), -1.0)
@@ -4067,7 +4067,9 @@ func test_sit_big_attacks_take_the_users_values() -> void:
 	check(c.damage(clap) == g.attack_damage(Golem.ATTACK_DRUM)
 		and c.cooldown_of(clap) < g.cooldown_for(Golem.ATTACK_DRUM) and c.cooldown_of(clap) > g.cooldown_for(Golem.ATTACK_SLAM),
 		"hand stomp behind: the drum's damage, a shorter cooldown (%.2f s)" % c.cooldown_of(clap))
-	check_near(c.clap_radius(), g.ground_radius(Golem.ATTACK_DRUM) * 0.85, "its circles 15 % smaller than the drum's")
+	check_near(c.clap_radius(), g.ground_radius(Golem.ATTACK_DRUM) * Balance.GOLEM_SIT_CLAP_AREA_FACTOR,
+		"its circles a share of the drum's (since 2026-11-18: 6 m at 31,3 m)")
+	check_near(c.clap_radius(), 6.0, "6 m at her first sit size (user spec 2026-11-18)", 0.05)
 	check(c.in_area(clap, c.hand_point(1.0)) and not c.in_area(clap, g.position + g.heading() * 1.0),
 		"only behind her: at the hands yes, ahead of the seat no")
 	_free_world(w)
@@ -5109,8 +5111,10 @@ func test_dying_seated_plays_sit_death() -> void:
 			g._create_model()   # (inside the test runner the root is not ready yet: no _ready)
 		check(g._anim != null, "%s: the model has its clips" % f)
 		for clip in [Golem.CLIP_SIT_DEATH, Golem.CLIP_CRAB_UP, Golem.CLIP_CRAB_IDLE, Golem.CLIP_CRAB_WALK, Golem.CLIP_CRAB_DOWN,
-				Golem.CLIP_CRAB_HEADBUTT]:
+				Golem.CLIP_CRAB_HEADBUTT, Golem.CLIP_CRAB_TURN_L, Golem.CLIP_CRAB_TURN_R]:
 			check(g._anim.has_animation(clip), "%s has %s" % [f.get_file(), clip])
+		check(g._anim.get_animation(Golem.CLIP_CRAB_TURN_L).loop_mode == Animation.LOOP_LINEAR
+			and g._anim.get_animation(Golem.CLIP_CRAB_TURN_R).loop_mode == Animation.LOOP_LINEAR, "crab_turn_l / _r loop")
 		check(g._anim.get_animation(Golem.CLIP_CRAB_WALK).loop_mode == Animation.LOOP_LINEAR
 			and g._anim.get_animation(Golem.CLIP_CRAB_IDLE).loop_mode == Animation.LOOP_LINEAR, "crab_idle / crab_walk loop")
 		check(g.death_clip() == Golem.CLIP_DEATH, "standing she dies with death")
@@ -5403,3 +5407,95 @@ func test_crab_waits_for_a_foe_nearly_in_reach_and_sits_with_it_well_inside() ->
 	_run_until(w, func() -> bool: return g._crab == Golem.CRAB_DOWN or not g.is_crabbing(), 600)
 	check(g._crab_reaches_deep(foe), "she sits down with it well within reach, not at the edge")
 	_free_world(w)
+
+
+## Debugansicht der Sitzzonen (Nutzerwunsch 2026-11-18, Taste G): jeder Umriss umschliesst genau die Zone, in der
+## sie trifft (ein Punkt knapp innen liegt in der Zone, knapp aussen meist nicht), und die Reichweitenanzeige
+## zeichnet sie fuer eine eigene sitzende Golemin.
+func test_sit_zone_debug_outlines_match_the_zones() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _sit_golem(w, 0, Vector3(64, 5, 64))
+	_sit_until_seated(w, g)
+	var c: GolemSitCombat = g.sit_combat if g.sit_combat != null else GolemSitCombat.new(g)
+	var zones: Array = c.zone_outlines()
+	check(zones.size() == 10, "ten outlines: two stomps, two lanes, two wipes, po clap, double stomp, two hand stomps")
+	for z in zones:
+		var kind: StringName = z[0]
+		var pts: PackedVector2Array = z[1]
+		var centre: Vector2 = Vector2.ZERO
+		for q in pts:
+			centre += q
+		centre /= float(pts.size())
+		var inside: int = 0
+		var outside: int = 0
+		for q in pts:
+			var to: Vector2 = (centre - q).normalized()
+			var qi: Vector2 = q + to * 0.25
+			var qo: Vector2 = q - to * 0.25
+			if c.in_area(kind, Vector3(qi.x, 5, qi.y)):
+				inside += 1
+			if not c.in_area(kind, Vector3(qo.x, 5, qo.y)):
+				outside += 1
+		check(inside >= int(pts.size() * 0.9), "%s: points just inside are in the zone (%d of %d)" % [kind, inside, pts.size()])
+		check(outside >= int(pts.size() * 0.75), "%s: points just outside mostly not (%d of %d)" % [kind, outside, pts.size()])
+	var groups: Dictionary = {}
+	for z in g.debug_zone_outlines():
+		groups[z[0]] = true
+	check(groups.has("legs") and groups.has("arms") and groups.has("big") and groups.has("seat"),
+		"seated: legs, arms, big attacks and the seat (%s)" % str(groups.keys()))
+	var ranges: RangeRenderer = RangeRenderer.new()
+	ranges.setup(w.um, 0, w.td)
+	ranges._ready()
+	ranges.enabled = true
+	ranges._process(TICK)
+	check(ranges._im.get_surface_count() == 1, "key G draws them (one batched surface)")
+	g.set_sit_stationary(false)
+	g.order_move(g.position + Vector3(0, 0, 30))
+	_run_until(w, func() -> bool: return g._crab == Golem.CRAB_STAND, 100)
+	groups.clear()
+	for z in g.debug_zone_outlines():
+		groups[z[0]] = true
+	check(groups.has("body") and groups.has("limb") and groups.has("air") and not groups.has("legs"),
+		"crab stand: body, limbs and the airship area (%s)" % str(groups.keys()))
+	ranges.free()
+	_free_world(w)
+
+
+## Drehen im Krebsstand (Nutzervorgabe 2026-11-18): crab_turn_l / crab_turn_r nach der echten Drehrate
+## (links = gegen den Uhrzeigersinn von oben, wie sit_turn_l), abgespielt mit Drehrate / 33,3 Grad je
+## Durchlauf, damit nichts rutscht; dreht sie beim Krabbeln, gewinnt, was Haende und Fuesse schneller bewegt.
+func test_crab_turn_clips_follow_the_turn() -> void:
+	var tree: SceneTree = Engine.get_main_loop() as SceneTree
+	for f in ["res://scenes/units/golem.tscn", "res://scenes/units/demon_golem.tscn", "res://scenes/units/genesis_golem.tscn"]:
+		var g: Golem = (load(f) as PackedScene).instantiate() as Golem
+		tree.root.add_child(g)
+		if g._model == null:
+			g._create_model()
+		g.stance = Golem.STANCE_SIT
+		g._crab = Golem.CRAB_STAND
+		var fname: String = f.get_file()
+		g._crab_visual(0.0, 0.7)
+		check(g._clip == Golem.CLIP_CRAB_TURN_L, "%s: turning left on the spot: crab_turn_l (%s)" % [fname, g._clip])
+		check_near(g._anim.speed_scale, 0.7 / Golem.CRAB_TURN_CLIP_ANGLE, "%s: played at turn rate / 33,3 degrees" % fname)
+		g._crab_visual(0.0, -0.7)
+		check(g._clip == Golem.CLIP_CRAB_TURN_R, "%s: turning right: crab_turn_r" % fname)
+		g._crab_visual(0.0, 0.0)
+		check(g._clip == Golem.CLIP_CRAB_IDLE, "%s: no turn, no crawl: crab_idle" % fname)
+		var reach: float = g.crab_limb_reach()
+		check(reach > 0.5 and reach < 3.0, "%s: hands and feet %.2f m from the middle at summoning size" % [fname, reach])
+		g._crab_visual(reach * 0.7 * 0.5, 0.7)
+		check(g._clip == Golem.CLIP_CRAB_TURN_L, "%s: crawling slowly while turning fast: the turn clip" % fname)
+		g._crab_visual(reach * 0.7 * 2.0, 0.7)
+		check(g._clip == Golem.CLIP_CRAB_WALK, "%s: crawling fast while turning slowly: the walk clip" % fname)
+		g._crab_visual(1.0, 0.01)
+		check(g._clip == Golem.CLIP_CRAB_WALK, "%s: a tiny turn does not count" % fname)
+		# The visual tick measures the turn from the body's angle (rotation.y = atan2(x, z) of the heading):
+		# the angle growing = left, as sit_turn_l; across the +-PI seam too.
+		check_near(g._measure_turn(0.0, 0.1), 0.0, "%s: the first tick measures nothing" % fname)
+		check_near(g._measure_turn(0.06, 0.1), 0.6, "%s: angle growing: +0,6 rad/s (left)" % fname, 0.0001)
+		check_near(g._measure_turn(0.0, 0.1), -0.6, "%s: angle falling: right" % fname, 0.0001)
+		g._measure_turn(PI - 0.03, 0.1)
+		check_near(g._measure_turn(-PI + 0.03, 0.1), 0.6, "%s: over the seam still left" % fname, 0.0001)
+		check(GolemSitAnim.CLIP_TURN_L == &"sit_turn_l" and g._sit_base_clip() == Golem.CLIP_SIT_IDLE,
+			"%s: same sign convention as the seated turn (_sit_base_clip: facing angle above heading = left)" % fname)
+		g.queue_free()
