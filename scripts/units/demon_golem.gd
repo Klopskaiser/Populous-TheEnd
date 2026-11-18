@@ -223,6 +223,11 @@ func sit_switch_time() -> float:
 	return super.sit_switch_time() * (1.0 - Balance.DEMON_GOLEM_ATTACK_SPEEDUP)
 
 
+## He turns 15 % faster than the golem of his size, standing and seated (user spec 2026-11-18).
+func turn_rate() -> float:
+	return super.turn_rate() * (1.0 + Balance.DEMON_GOLEM_TURN_SPEEDUP)
+
+
 func aggro_radius() -> float:
 	return clampf(AGGRO_RADIUS * size_factor(), AGGRO_RADIUS, Balance.GOLEM_AGGRO_MAX)
 

@@ -12806,4 +12806,15 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
   Trampeltick (`trample_damage()`).
 - **Startmission:** ein normaler Golem des Spielers mit 31,3 m (erste Groesse ab 30 m, sitzfaehig) suedlich der
   blauen Basis (`Main._spawn_chamber_golem`, `CHAMBER_GOLEM_HEIGHT`).
+- **Runde 5 (2026-11-18):** Wischer-Kegel 5 Grad weiter nach vorn (`GOLEM_SIT_WIPE_FRONT_DEG`); Po-Klatscher
+  +0,2 s Abklingzeit und Animation (30-m-Basis), Kreis 10 % kleiner, ohne Anvisieren auch waehrend des Drehens
+  (`_hop_while_turning`); Drehen folgt dem gemerkten Ziel und bricht ab, wenn es tot, weg oder ausser
+  Aggro-Reichweite ist (`_turn_goal_point`). Tests: Po-Klatscher beim Drehen, Drehen endet bei totem Ziel.
+- **Drehraten (2026-11-18):** Sitz-Drehrate eigene Gerade (`Golem.sit_turn_rate_at`: 30 m 41, 80 m 13 Grad/s, weiter
+  fallend, Untergrenze 9,5 Grad/s); Daemonengolem dreht 15 % schneller (`DEMON_GOLEM_TURN_SPEEDUP`). Im Stand
+  sonst unveraendert.
+- **Drehung in der Sitz-Wahl (2026-11-18):** `GolemSitCombat._turn_sweep` rechnet 16 Richtungen (4 je Ueberlegung) mit
+  der Drehzeit als Vorlauf (wie `Golem.attack_time` im Stand) und dreht sich, wenn ein gedrehter Plan mehr bringt;
+  `_turn_still_pays` bricht ab. Bugfix: Ausweichdrehung nur, wenn kein Angriff etwas erreicht. Geometrie-Cache
+  (`_frame`) und Kreistest (`bound_of`) machen die Wahl 5- bis 10-mal schneller.
 

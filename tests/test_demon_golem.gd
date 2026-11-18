@@ -350,7 +350,7 @@ func test_everything_that_hangs_on_the_size_uses_the_golems_formula() -> void:
 	check_near(d._kick_extent().x, full._kick_extent().x, "the length of the kick's lane", 0.1)
 	check(d.trample_damage() == full.trample_damage() and d.trample_damage() == 25, "its trample damage (25)")
 	check_near(d.stance_switch_time(), full.stance_switch_time() * 0.85, "its stance switch, 15 % shorter", 0.01)
-	check_near(d.turn_rate(), full.turn_rate(), "and its turn rate", 0.01)
+	check_near(d.turn_rate(), full.turn_rate() * 1.15, "and its turn rate, 15 % faster (user spec 2026-11-18)", 0.01)
 	# The areas grow as the golem's do beyond level 7 — from the start.
 	check_near(d.reach_factor(), pow(d.size_factor(), DemonGolem.area_exponent()), "area factor = size ^ 0,25")
 	check_near(d.slam_radius(), Balance.GOLEM_SLAM_RADIUS * pow(d.size_factor(), DemonGolem.slam_exponent()),

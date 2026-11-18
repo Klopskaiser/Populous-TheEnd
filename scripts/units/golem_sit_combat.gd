@@ -60,8 +60,38 @@ var pending: Array[StringName] = [&"", &""]
 var pending_time: Array[float] = [0.0, 0.0]
 var aim: Array[Vector3] = [Vector3.INF, Vector3.INF]
 var cooldown: Array[float] = [0.0, 0.0]
-## She is turning toward an enemy none of her limbs reaches.
+## She is turning toward an enemy none of her limbs reaches (_turn_goal: that unit or
+## building — gone, dead or out of her aggro radius, she stops turning).
 var turning: bool = false
+var _turn_goal: Object = null
+## Turning for a better plan (user spec 2026-11-18): the direction she turns to and what that
+## plan strikes — all of it dead or gone, she stops turning.
+var _turn_dir: Vector3 = Vector3.ZERO
+var _turn_targets: Array = []
+## The round over the other headings (_turn_sweep): next one to weigh (0 = none running), the
+## heading it is measured from, and the best so far.
+var _sweep_i: int = 0
+var _sweep_from: Vector3 = Vector3.ZERO
+var _sweep_v: float = 0.0
+var _sweep_dir: Vector3 = Vector3.ZERO
+var _sweep_parts: Array = []
+## Her limbs' places and the area sizes, kept while heading, position and size stay the same
+## (in_area runs for every target and, in the choice, for many headings).
+var _ck: Array = [Vector3.INF, Vector3.INF, -1.0]
+var _c_fw: Vector3
+var _c_lf: Vector3
+var _c_feet: Vector3
+var _c_sx: float
+var _c_sz: float
+var _c_stomp: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]   # left, right
+var _c_hand: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]
+var _c_dstomp: Vector3
+var _c_stomp_r: float
+var _c_wipe_r: float
+var _c_hop_r: float
+var _c_clap_r: float
+var _c_dstomp_r: float
+var _c_kick_out: float
 var _think: float = 0.0
 ## Last landings (tests, diagnostics): kind -> victims struck, kind -> buildings struck.
 var last_struck: Dictionary = {}
@@ -79,7 +109,7 @@ func reset() -> void:
 	pending_time = [0.0, 0.0]
 	aim = [Vector3.INF, Vector3.INF]
 	cooldown = [0.0, 0.0]
-	turning = false
+	_end_turn()
 	_think = 0.0
 	_grow_left = 0.0
 
@@ -146,7 +176,7 @@ func cooldown_of(kind: StringName) -> float:
 	if kind == CLAP:
 		return cd * Balance.GOLEM_SIT_CLAP_COOLDOWN_SHARE
 	if kind == HOP:
-		cd *= Balance.GOLEM_SIT_HOP_COOLDOWN_FACTOR
+		cd *= Balance.GOLEM_SIT_HOP_COOLDOWN_FACTOR * Balance.GOLEM_SIT_HOP_SLOWER_COOLDOWN
 	return cd * Balance.GOLEM_SIT_COOLDOWN_FACTOR
 
 
@@ -156,7 +186,9 @@ static func area_scale() -> float:
 
 
 func windup_of(kind: StringName) -> float:
-	return g.current_windup(tempo_of(kind))
+	var w: float = g.current_windup(tempo_of(kind))
+	# The po clap plays its clip longer (the clip is fitted to the wind-up: impact mid-clip).
+	return w * Balance.GOLEM_SIT_HOP_SLOWER_ANIM if kind == HOP else w
 
 
 # --- Where her limbs are -------------------------------------------------------------
@@ -219,15 +251,39 @@ func _ahead_of_feet(p: Vector3) -> float:
 	return _flat(p - feet_point()).dot(forward())
 
 
+## Fills the cache of her limbs' places for the current heading, position and size.
+func _frame() -> void:
+	var h: Vector3 = g.heading()
+	var sf: float = g.size_factor()
+	if h == _ck[0] and g.position == _ck[1] and sf == _ck[2]:
+		return
+	_ck = [h, g.position, sf]
+	_c_fw = forward()
+	_c_lf = left()
+	_c_feet = feet_point()
+	_c_sx = _sx()
+	_c_sz = _sz()
+	_c_stomp = [stomp_point(1.0), stomp_point(-1.0)]
+	_c_hand = [hand_point(1.0), hand_point(-1.0)]
+	_c_dstomp = double_stomp_point()
+	_c_stomp_r = stomp_radius()
+	_c_wipe_r = g.reach() * area_scale()
+	_c_hop_r = hop_radius()
+	_c_clap_r = clap_radius()
+	_c_dstomp_r = double_stomp_radius()
+	_c_kick_out = (Balance.GOLEM_SIT_KICK_SIDE + Balance.GOLEM_SIT_KICK_WIDTH * 0.5) * _c_sx * area_scale()
+
+
 ## The leg's lane on side: from her hip joint to the tip of the stretched shoe, as
 ## wide as the leg — and inward up to her middle (the knees touch; user report
 ## 2026-11-17: a foe between her shoes was never struck by a single attack).
 func in_kick_lane(p: Vector3, side: float) -> bool:
-	var d: Vector3 = _flat(p - feet_point())
-	var along: float = d.dot(forward())
-	var out: float = d.dot(left()) * side
-	return along >= -Balance.GOLEM_SIT_KICK_FROM * _sz() and along <= Balance.GOLEM_SIT_KICK_TO * _sz() \
-		and out >= 0.0 and out <= (Balance.GOLEM_SIT_KICK_SIDE + Balance.GOLEM_SIT_KICK_WIDTH * 0.5) * _sx() * area_scale()
+	_frame()
+	var d: Vector3 = _flat(p - _c_feet)
+	var along: float = d.dot(_c_fw)
+	var out: float = d.dot(_c_lf) * side
+	return along >= -Balance.GOLEM_SIT_KICK_FROM * _c_sz and along <= Balance.GOLEM_SIT_KICK_TO * _c_sz \
+		and out >= 0.0 and out <= _c_kick_out
 
 
 ## The wipe's cone on side: beside the seat within reach(), from GOLEM_SIT_WIPE_BACK_DEG
@@ -235,17 +291,23 @@ func in_kick_lane(p: Vector3, side: float) -> bool:
 ## GOLEM_SIT_WIPE_FRONT before the middle of the seat (user report 2026-11-17: it
 ## reached out to her legs).
 func in_wipe_cone(p: Vector3, side: float) -> bool:
+	_frame()
 	var d: Vector3 = _flat(p - g.position)
 	var dist: float = d.length()
-	if dist > g.reach() * area_scale() or dist < 0.001:
+	if dist > _c_wipe_r or dist < 0.001:
 		return dist < 0.001
-	var out: float = d.dot(left()) * side
+	var out: float = d.dot(_c_lf) * side
 	if out <= 0.0:
 		return false
-	var ahead: float = d.dot(forward())
-	if ahead > Balance.GOLEM_SIT_WIPE_FRONT * _sz():
-		return false
+	var ahead: float = d.dot(_c_fw)
+	if ahead > Balance.GOLEM_SIT_WIPE_FRONT * _c_sz + out * tan(deg_to_rad(Balance.GOLEM_SIT_WIPE_FRONT_DEG)):
+		return false   # the front edge leans GOLEM_SIT_WIPE_FRONT_DEG forward
 	return rad_to_deg(atan2(ahead, out)) >= -Balance.GOLEM_SIT_WIPE_BACK_DEG
+
+
+## Radius of the po clap's circle around the middle of the seat.
+func hop_radius() -> float:
+	return g.stomp_radius() * area_scale() * Balance.GOLEM_SIT_HOP_AREA_FACTOR
 
 
 ## Radius of the circles of the hand stomp behind her (around each hand).
@@ -290,14 +352,43 @@ func impact_point(kind: StringName) -> Vector3:
 	return g.position
 
 
+## A circle (x, z = centre, w = radius) that surely holds the whole area of `kind` — a cheap
+## first test before in_area (the choice weighs many headings, user spec 2026-11-18).
+func bound_of(kind: StringName) -> Vector3:
+	_frame()
+	var side: float = side_of_kind(kind)
+	var c: Vector3 = g.position
+	var r: float = INF
+	match kind:
+		STOMP_L, STOMP_R:
+			c = _c_stomp[0 if side > 0.0 else 1]
+			r = _c_stomp_r
+		WIPE_L, WIPE_R:
+			r = _c_wipe_r
+		KICK_L, KICK_R:
+			var back: float = Balance.GOLEM_SIT_KICK_FROM * _c_sz
+			var ahead: float = Balance.GOLEM_SIT_KICK_TO * _c_sz
+			c = _c_feet + _c_fw * ((ahead - back) * 0.5) + _c_lf * (side * _c_kick_out * 0.5)
+			r = Vector2((ahead + back) * 0.5, _c_kick_out * 0.5).length()
+		CLAP:
+			r = _flat(_c_hand[0] - g.position).length() + _c_clap_r
+		DOUBLE_STOMP:
+			c = _c_dstomp
+			r = _c_dstomp_r
+		HOP:
+			r = _c_hop_r
+	return Vector3(c.x, c.z, r + 0.01)
+
+
 ## Is p struck by the attack kind? (at is kept for callers; every sit attack
 ## lands at its fixed place.)
 func in_area(kind: StringName, p: Vector3, at: Vector3 = Vector3.INF) -> bool:
+	_frame()
 	var side: float = side_of_kind(kind)
 	match kind:
 		STOMP_L, STOMP_R:
-			return _flat(p - stomp_point(side)).length() <= stomp_radius() \
-				and _ahead_of_feet(p) >= -Balance.GOLEM_SIT_HEEL_BACK * _sz()
+			return _flat(p - _c_stomp[0 if side > 0.0 else 1]).length() <= _c_stomp_r \
+				and _flat(p - _c_feet).dot(_c_fw) >= -Balance.GOLEM_SIT_HEEL_BACK * _c_sz
 		WIPE_L, WIPE_R:
 			return in_wipe_cone(p, side)
 		KICK_L, KICK_R:
@@ -305,14 +396,13 @@ func in_area(kind: StringName, p: Vector3, at: Vector3 = Vector3.INF) -> bool:
 		GROW:
 			return in_kick_lane(p, 1.0) or in_kick_lane(p, -1.0)
 		CLAP:
-			if _flat(p - g.position).dot(forward()) > 0.0:
+			if _flat(p - g.position).dot(_c_fw) > 0.0:
 				return false   # only behind the middle of the seat: her back
-			var r: float = clap_radius()
-			return _flat(p - hand_point(1.0)).length() <= r or _flat(p - hand_point(-1.0)).length() <= r
+			return _flat(p - _c_hand[0]).length() <= _c_clap_r or _flat(p - _c_hand[1]).length() <= _c_clap_r
 		DOUBLE_STOMP:
-			return _flat(p - double_stomp_point()).length() <= double_stomp_radius()
+			return _flat(p - _c_dstomp).length() <= _c_dstomp_r
 		HOP:
-			return _flat(p - g.position).length() <= g.stomp_radius() * area_scale()
+			return _flat(p - g.position).length() <= _c_hop_r
 	return false
 
 
@@ -350,12 +440,32 @@ func tick(delta: float) -> void:
 			_grow_left = 0.0
 			_land(GROW, Vector3.INF)
 	if turning:
-		if g.is_turned_to(g.facing, Balance.GOLEM_SIT_TURN_DONE_DEG):
+		var goal: Vector3 = _turn_goal_point()
+		if goal == Vector3.INF:
+			# The one she turned to is dead or gone (user report 2026-11-18: she turned on to
+			# a dead target): stop where she is, look again at once.
+			g.facing = g.heading()
 			g.sit_turn_tick()
-			turning = false
+			_end_turn()
+			_think = 0.0
+		elif g.is_turned_to(g.facing, Balance.GOLEM_SIT_TURN_DONE_DEG):
+			g.sit_turn_tick()
+			_end_turn()
 			_think = 0.0
 		else:
+			var want: Vector3 = _flat(goal - g.position)
+			if want.length_squared() > 0.0001:
+				g.facing = want.normalized()   # follow it while it moves
 			g.sit_turn_tick()
+			_think -= delta
+			if _think <= 0.0:
+				_think = THINK_INTERVAL
+				if _turn_goal == null and not _turn_still_pays():
+					g.facing = g.heading()   # the plan she turned for is no longer worth it
+					g.sit_turn_tick()
+					_end_turn()
+					return
+				_hop_while_turning()
 			return
 	_think -= delta
 	if _think > 0.0:
@@ -388,6 +498,8 @@ func _choose() -> void:
 		if not is_busy():
 			_maybe_turn(foes)   # maybe a building further off
 		return
+	if _turn_sweep(foes, builds):
+		return
 	var best_legs: Dictionary = _best_of([STOMP_L, STOMP_R, KICK_L, KICK_R], foes, builds) if legs else {}
 	var best_arms: Dictionary = _best_of([WIPE_L, WIPE_R], foes, builds) if arms else {}
 	var single: float = float(best_legs.get("value", 0.0)) + float(best_arms.get("value", 0.0))
@@ -401,7 +513,10 @@ func _choose() -> void:
 		_wind_up(best_legs.kind, best_legs.at)
 	if not best_arms.is_empty():
 		_wind_up(best_arms.kind, best_arms.at)
-	if best_legs.is_empty() and best_arms.is_empty() and not is_busy():
+	if best_legs.is_empty() and best_arms.is_empty() and not is_busy() \
+			and float(_plan(foes, builds, 0.0).value) <= 0.0:
+		# Only when NO attack reaches anything — not when the free channel reaches nothing while
+		# the other cools down with a foe in its area (she turned away from it, 2026-11-18).
 		_maybe_turn(foes)
 
 
@@ -473,7 +588,7 @@ func _best_of(kinds: Array, foes: Array[Unit], builds: Array = [], min_big: int 
 		var near: float = _spread(kind, hit, hit_b)
 		var bv: float = float(best.get("value", 0.0))
 		if v > bv + 0.000001 or (absf(v - bv) <= 0.000001 and near < float(best.get("near", INF))):
-			best = {"kind": kind, "at": Vector3.INF, "value": v, "near": near}
+			best = {"kind": kind, "at": Vector3.INF, "value": v, "near": near, "hit": hit, "hit_b": hit_b}
 	return best
 
 
@@ -502,8 +617,14 @@ func _value(kind: StringName, hit: Array[Unit], hit_b: Array = []) -> float:
 ## the impact first, up to its target cap.
 func victims(kind: StringName, at: Vector3, foes: Array[Unit]) -> Array[Unit]:
 	var hit: Array[Unit] = []
+	var bd: Vector3 = bound_of(kind)
+	var r2: float = bd.z * bd.z
 	for u in foes:
-		if is_instance_valid(u) and u.state != Unit.State.DEAD and in_area(kind, u.position, at):
+		if not is_instance_valid(u) or u.state == Unit.State.DEAD:
+			continue
+		var dx: float = u.position.x - bd.x
+		var dz: float = u.position.z - bd.y
+		if dx * dx + dz * dz <= r2 and in_area(kind, u.position, at):
 			hit.append(u)
 	var centre: Vector3 = impact_point(kind)
 	hit.sort_custom(func(a: Unit, b: Unit) -> bool:
@@ -521,8 +642,13 @@ func buildings_struck(kind: StringName, builds: Array, units_hit: int) -> Array:
 	if free <= 0:
 		return out
 	var centre: Vector3 = impact_point(kind)
+	var bd: Vector3 = bound_of(kind)
 	for b in builds:
-		if is_instance_valid(b) and b.health > 0 and building_in_area(kind, b):
+		if not is_instance_valid(b) or b.health <= 0:
+			continue
+		if b.footprint_distance_to(Vector2(bd.x, bd.y)) > bd.z:
+			continue   # nowhere near the area
+		if building_in_area(kind, b):
 			out.append(b)
 	out.sort_custom(func(a, b) -> bool:
 		return _flat(a.center_world() - centre).length_squared() < _flat(b.center_world() - centre).length_squared())
@@ -560,18 +686,167 @@ func _land(kind: StringName, at: Vector3) -> void:
 	g._play_strike_sfx(model_of(kind))
 
 
+## Where the one she turns to stands — INF when it is dead, gone, no longer an enemy
+## target or out of her aggro radius.
+func _turn_goal_point() -> Vector3:
+	if _turn_goal == null and _turn_dir != Vector3.ZERO:
+		# Turning for a plan: on while anything it strikes is still there.
+		for o in _turn_targets:
+			if _alive_at(o, _scan_radius() + 0.5) != Vector3.INF:
+				return g.position + _turn_dir
+		return Vector3.INF
+	return _alive_at(_turn_goal, g.aggro_radius() + 0.5)
+
+
+## Where the enemy unit or building `o` stands — INF when it is dead, gone, no longer an
+## enemy target or farther than `max_dist` from her.
+func _alive_at(o: Object, max_dist: float) -> Vector3:
+	if o == null or not is_instance_valid(o):
+		return Vector3.INF
+	var at: Vector3 = Vector3.INF
+	if o is Unit:
+		var u: Unit = o as Unit
+		if u.state == Unit.State.DEAD or u.doomed or u.tribe_id == g.tribe_id or not u.is_targetable():
+			return Vector3.INF
+		at = u.position
+	else:
+		if o.health <= 0 or o.tribe_id == g.tribe_id or not o.is_attackable():
+			return Vector3.INF
+		at = o.center_world()
+	return at if _flat(at - g.position).length() <= max_dist else Vector3.INF
+
+
+func _end_turn() -> void:
+	_sweep_i = 0
+	turning = false
+	_turn_goal = null
+	_turn_dir = Vector3.ZERO
+	_turn_targets = []
+
+
+## Her best plan as _choose would pick it with both channels free, facing her current
+## heading: {value, parts}. Each attack's time is stretched by `lead` (seconds of turning
+## first) over GOLEM_SIT_TURN_PLAN_ATTACKS attacks — like the turn standing (attack_time).
+## `strict`: the big attacks always need GOLEM_SIT_BIG_MIN_TARGETS (a turned heading must not win
+## by leaving the single attacks nothing, which lets a big one strike a single foe).
+func _plan(foes: Array[Unit], builds: Array, lead: float, strict: bool = false) -> Dictionary:
+	var legs: Dictionary = _best_of([STOMP_L, STOMP_R, KICK_L, KICK_R], foes, builds)
+	var arms: Dictionary = _best_of([WIPE_L, WIPE_R], foes, builds)
+	var raw: float = float(legs.get("value", 0.0)) + float(arms.get("value", 0.0))
+	var single: float = _stretched(legs, lead) + _stretched(arms, lead)
+	var min_hit: int = Balance.GOLEM_SIT_BIG_MIN_TARGETS if raw > 0.0 or strict else 1
+	var big: Dictionary = _best_of([HOP, CLAP, DOUBLE_STOMP], foes, builds, min_hit)
+	var big_v: float = _stretched(big, lead)
+	if big_v > single:
+		return {"value": big_v, "parts": [big]}
+	return {"value": single, "parts": [legs, arms]}
+
+
+func _stretched(best: Dictionary, lead: float) -> float:
+	if best.is_empty():
+		return 0.0
+	var cd: float = maxf(cooldown_of(best.kind), 0.05)
+	return float(best.value) * cd / (cd + lead / float(Balance.GOLEM_SIT_TURN_PLAN_ATTACKS))
+
+
+## Would another heading bring more? (user spec 2026-11-18: the turn counts in the choice.)
+## GOLEM_SIT_TURN_PLAN_HEADINGS directions all round (at least GOLEM_SIT_TURN_MIN_DEG off),
+## each weighed with its turn as a lead-in — GOLEM_SIT_TURN_PLAN_PER_THINK of them per call, so
+## a round spreads over several thinks while she goes on striking. At the end of the round the
+## best one beating the plan she has here wins and she turns to it (once she is not winding up).
+## Returns true when she turns.
+func _turn_sweep(foes: Array[Unit], builds: Array) -> bool:
+	var cur: Vector3 = g.heading()
+	if _sweep_i == 0 or cur.dot(_sweep_from) < 0.9999:
+		_sweep_i = 1
+		_sweep_from = cur
+		_sweep_v = 0.0
+		_sweep_dir = Vector3.ZERO
+		_sweep_parts = []
+	var here: Dictionary = _plan(foes, builds, 0.0)
+	var n: int = Balance.GOLEM_SIT_TURN_PLAN_HEADINGS
+	if _sweep_i < n:
+		var cur_a: float = atan2(cur.x, cur.z)
+		var rate: float = maxf(g.turn_rate(), 0.001)
+		var saved: Vector3 = g._heading
+		var done: int = 0
+		while _sweep_i < n and done < Balance.GOLEM_SIT_TURN_PLAN_PER_THINK:
+			var turn: float = TAU * float(_sweep_i) / float(n)
+			_sweep_i += 1
+			var ang: float = minf(turn, TAU - turn)
+			if ang < deg_to_rad(Balance.GOLEM_SIT_TURN_MIN_DEG):
+				continue
+			done += 1
+			var a: float = cur_a + turn
+			var dir: Vector3 = Vector3(sin(a), 0.0, cos(a))
+			var lead: float = maxf(ang - deg_to_rad(Balance.GOLEM_SIT_TURN_DONE_DEG), 0.0) / rate
+			g._heading = dir
+			var p: Dictionary = _plan(foes, builds, lead, float(here.value) > 0.0)
+			if float(p.value) > _sweep_v + 0.000001:
+				_sweep_v = float(p.value)
+				_sweep_dir = dir
+				_sweep_parts = p.parts
+		g._heading = saved
+		if _sweep_i < n:
+			return false
+	if is_busy():
+		return false   # the round is done: hold its result until she is free
+	_sweep_i = 0
+	if _sweep_dir == Vector3.ZERO or _sweep_v <= float(here.value) + 0.000001:
+		return false
+	var best_dir: Vector3 = _sweep_dir
+	var targets: Array = []
+	for part in _sweep_parts:
+		if not part.is_empty():
+			targets.append_array(part.hit)
+			targets.append_array(part.hit_b)
+	g.facing = best_dir
+	turning = true
+	_turn_goal = null
+	_turn_dir = best_dir
+	_turn_targets = targets
+	return true
+
+
+## Turning for a plan: is the rest of the turn still worth more than the plan where she
+## points now? (Its foes died or moved off: she stops.)
+func _turn_still_pays() -> bool:
+	var foes: Array[Unit] = _foes_around()
+	var builds: Array = _buildings_around()
+	var here: Dictionary = _plan(foes, builds, 0.0)
+	var left_rad: float = acos(clampf(g.heading().dot(_turn_dir), -1.0, 1.0))
+	var lead: float = maxf(left_rad - deg_to_rad(Balance.GOLEM_SIT_TURN_DONE_DEG), 0.0) / maxf(g.turn_rate(), 0.001)
+	var saved: Vector3 = g._heading
+	g._heading = _turn_dir
+	var there: Dictionary = _plan(foes, builds, lead, float(here.value) > 0.0)
+	g._heading = saved
+	return float(there.value) > float(here.value) + 0.000001
+
+
+## The po clap needs no aiming (user spec 2026-11-18, like the jump standing): while she
+## turns, it still comes for whatever is under and around her — one target is enough.
+func _hop_while_turning() -> void:
+	if not channel_free(CH_LEGS) or not channel_free(CH_ARMS) or is_busy():
+		return
+	var hop: Dictionary = _best_of([HOP], _foes_around(), _buildings_around(), 1)
+	if not hop.is_empty():
+		_wind_up(hop.kind, hop.at)
+
+
 ## Nothing in reach: she turns (slowly) toward the nearest enemy unit within her aggro
 ## radius — none there, toward the nearest enemy building within it (user report
 ## 2026-11-17: she never turned to an airship wharf beside her) — if it lies more than
 ## GOLEM_SIT_TURN_MIN_DEG off her heading.
 func _maybe_turn(foes: Array[Unit]) -> void:
 	var goal: Vector3 = Vector3.INF
+	var goal_obj: Object = null
 	var best: float = INF
 	for u in foes:
 		var d: float = _flat(u.position - g.position).length()
 		if d <= g.aggro_radius() and d < best:
 			best = d
 			goal = u.position
+			goal_obj = u
 	if goal == Vector3.INF and g.building_manager != null:
 		for b in g.building_manager.buildings:
 			if not is_instance_valid(b) or b.health <= 0 or b.tribe_id == g.tribe_id or not b.is_attackable():
@@ -580,6 +855,7 @@ func _maybe_turn(foes: Array[Unit]) -> void:
 			if d <= g.aggro_radius() and d < best:
 				best = d
 				goal = b.center_world()
+				goal_obj = b
 	if goal == Vector3.INF:
 		return
 	var want: Vector3 = _flat(goal - g.position).normalized()
@@ -587,3 +863,6 @@ func _maybe_turn(foes: Array[Unit]) -> void:
 		return
 	g.facing = want
 	turning = true
+	_turn_goal = goal_obj
+	_turn_dir = Vector3.ZERO
+	_turn_targets = []

@@ -3888,9 +3888,10 @@ func test_sit_wipe_strikes_a_cone_beside_her_one_arm_each_side() -> void:
 		"far behind: no")
 	check(not c.in_area(GolemSitCombat.WIPE_L, g.position + fwd * (reach * 0.7)), "straight ahead: no")
 	var pelvis: float = Balance.GOLEM_SIT_WIPE_FRONT * g.model_scale().z * g.size_factor()
-	check(c.in_area(GolemSitCombat.WIPE_L, g.position + c.left() * (reach * 0.6) + fwd * (pelvis * 0.5))
-		and not c.in_area(GolemSitCombat.WIPE_L, g.position + c.left() * (reach * 0.6) + fwd * (pelvis + 1.0)),
-		"it ends at her pelvis, not out at her legs")
+	var front: float = pelvis + reach * 0.6 * tan(deg_to_rad(Balance.GOLEM_SIT_WIPE_FRONT_DEG))   # the front edge leans 5 degrees forward
+	check(c.in_area(GolemSitCombat.WIPE_L, g.position + c.left() * (reach * 0.6) + fwd * (front - 0.3))
+		and not c.in_area(GolemSitCombat.WIPE_L, g.position + c.left() * (reach * 0.6) + fwd * (front + 0.5)),
+		"it ends at her pelvis, leaning 5 degrees forward, not out at her legs")
 	check(not c.in_area(GolemSitCombat.WIPE_L, g.position + c.left() * (reach + 0.5)), "beyond reach: no")
 	var foe: Unit = _foe(w, g.position.x - reach * 0.6, g.position.z - 1.0, 100000)
 	_tick_golem_until(g, func() -> bool: return c.pending[GolemSitCombat.CH_ARMS] != &"")
@@ -3958,9 +3959,13 @@ func test_sit_big_attacks_take_the_users_values() -> void:
 	var hop: StringName = GolemSitCombat.HOP
 	check(c.damage(hop) == g.attack_damage(Golem.ATTACK_STOMP) and c.max_targets(hop) == g.max_targets_of(Golem.ATTACK_STOMP),
 		"po clap: damage and targets of the jump")
-	check_near(c.cooldown_of(hop), g.cooldown_for(Golem.ATTACK_STOMP) * Balance.GOLEM_SIT_HOP_COOLDOWN_FACTOR * Balance.GOLEM_SIT_COOLDOWN_FACTOR,
-		"its cooldown: 1,1 x the jump's, seated 10 % faster (%.2f s)" % c.cooldown_of(hop))
-	var hop_r: float = g.stomp_radius() * Balance.GOLEM_SIT_AREA_FACTOR
+	check_near(c.cooldown_of(hop), g.cooldown_for(Golem.ATTACK_STOMP) * Balance.GOLEM_SIT_HOP_COOLDOWN_FACTOR
+		* Balance.GOLEM_SIT_HOP_SLOWER_COOLDOWN * Balance.GOLEM_SIT_COOLDOWN_FACTOR,
+		"its cooldown: 1,1 x the jump's, about 0,2 s more at 30 m, seated 10 % faster (%.2f s)" % c.cooldown_of(hop))
+	check_near(c.windup_of(hop), g.current_windup(Golem.ATTACK_STOMP) * Balance.GOLEM_SIT_HOP_SLOWER_ANIM,
+		"its clip plays longer (wind-up %.2f s)" % c.windup_of(hop))
+	var hop_r: float = g.stomp_radius() * Balance.GOLEM_SIT_AREA_FACTOR * Balance.GOLEM_SIT_HOP_AREA_FACTOR
+	check_near(c.hop_radius(), hop_r, "its circle another 10 % smaller")
 	check(c.in_area(hop, g.position + g.heading() * (hop_r * 0.95)) and not c.in_area(hop, g.position + g.heading() * (hop_r + 0.5)),
 		"the jump's circle around the seat, 10 % smaller")
 	var ds: StringName = GolemSitCombat.DOUBLE_STOMP
@@ -4131,6 +4136,103 @@ func test_sitting_she_turns_toward_an_enemy_building() -> void:
 	_free_world(w)
 
 
+## Der Po-Klatscher braucht kein Anvisieren (Nutzervorgabe 2026-11-18): waehrend sie sich zu
+## einem fernen Feind dreht, kommt er trotzdem fuer einen Feind unter ihr.
+func test_sitting_the_po_clap_comes_while_she_turns() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _seated(w)
+	var c: GolemSitCombat = g.sit_combat
+	var far: Unit = _foe(w, g.position.x + 6.0, g.position.z - 17.0, 100000)   # behind her on the left
+	_tick_golem_until(g, func() -> bool: return c.turning, 20)
+	check(c.turning, "she turns toward the far foe")
+	var under: Vector3 = g.position + g.heading() * 1.0
+	var near: Unit = _foe(w, under.x, under.z, 100000)
+	check(c.in_area(GolemSitCombat.HOP, near.position), "a foe under her, in the po clap's circle")
+	_tick_golem_until(g, func() -> bool: return c.pending[GolemSitCombat.CH_LEGS] == GolemSitCombat.HOP, 20)
+	check(c.pending[GolemSitCombat.CH_LEGS] == GolemSitCombat.HOP and c.turning, "the po clap comes while she still turns")
+	check(far.health == 100000, "(the far one untouched)")
+	_free_world(w)
+
+
+## Stirbt das Ziel, zu dem sie sich dreht, hoert sie auf zu drehen (Nutzermeldung 2026-11-18:
+## sie drehte sich weiter auf ein totes Ziel).
+func test_sitting_she_stops_turning_when_the_target_is_gone() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _seated(w)
+	var c: GolemSitCombat = g.sit_combat
+	var foe: Unit = _foe(w, g.position.x + 6.0, g.position.z - 17.0, 100000)
+	_tick_golem_until(g, func() -> bool: return c.turning, 20)
+	check(c.turning, "she turns toward it")
+	g.tick(TICK)
+	var heading_then: Vector3 = g.heading()
+	foe.health = 0
+	foe.state = Unit.State.DEAD
+	g.tick(TICK)
+	g.tick(TICK)
+	check(not c.turning, "the target died: she stops turning")
+	check(g.heading().angle_to(heading_then) < deg_to_rad(5.0), "and stays facing where she was")
+	_free_world(w)
+
+
+## Die Drehung zaehlt in der Wahl (Nutzervorgabe 2026-11-18): trifft sie nach einer Drehung
+## deutlich mehr, dreht sie sich dafuer — die Drehzeit als Vorlauf angerechnet wie im Stand.
+func test_sitting_she_turns_for_a_much_better_attack() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _seated(w)
+	var c: GolemSitCombat = g.sit_combat
+	var fwd: Vector3 = g.heading()
+	var turned: Vector3 = Vector3(fwd.z, 0.0, -fwd.x)   # a quarter turn to her left
+	var saved: Vector3 = g._heading
+	g._heading = turned
+	var there: Vector3 = c.stomp_point(1.0)
+	g._heading = saved
+	check(not c.in_area(GolemSitCombat.STOMP_L, there) and not c.in_area(GolemSitCombat.STOMP_R, there),
+		"(the spot lies outside her foot stomps as she sits now)")
+	var lone: Unit = _foe(w, g.position.x - c.left().x * g.reach() * 0.6, g.position.z - c.left().z * g.reach() * 0.6, 100000)
+	check(c.in_area(GolemSitCombat.WIPE_R, lone.position), "(one foe in her right wipe)")
+	var group: Array[Unit] = []
+	for i in range(6):
+		var a: float = TAU * float(i) / 6.0
+		group.append(_foe(w, there.x + cos(a) * 1.0, there.z + sin(a) * 1.0, 100000))
+	_tick_golem_until(g, func() -> bool: return c.turning, 40)
+	check(c.turning, "six foes a quarter turn away: she turns for them")
+	check(c._turn_dir.angle_to(turned) < deg_to_rad(30.0), "toward them (%.0f deg off)" % rad_to_deg(c._turn_dir.angle_to(turned)))
+	check(c._turn_goal == null and c._turn_targets.size() >= 6, "she keeps what that plan strikes")
+	# They die: she stops turning.
+	for u in group:
+		u.health = 0
+		u.state = Unit.State.DEAD
+	_tick_golem_until(g, func() -> bool: return not c.turning, 4)   # her next think
+	check(not c.turning, "they are dead: she stops turning")
+	_free_world(w)
+
+
+## ... aber nicht fuer ein einzelnes Ziel, wenn sie schon eines erreicht: die Drehzeit frisst den Vorteil.
+func test_sitting_she_does_not_turn_for_one_more_foe() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _seated(w)
+	var c: GolemSitCombat = g.sit_combat
+	var fwd: Vector3 = g.heading()
+	var saved: Vector3 = g._heading
+	g._heading = -fwd   # half a turn
+	var there: Vector3 = c.stomp_point(1.0)
+	g._heading = saved
+	var here: Vector3 = c.stomp_point(1.0)
+	_foe(w, here.x, here.z, 100000)   # in her left foot stomp
+	_foe(w, there.x, there.z, 100000)   # where it would come down after half a turn
+	for kind in GolemSitCombat.KINDS:
+		if kind != GolemSitCombat.GROW and c.in_area(kind, there):
+			check(false, "(the second one is out of her reach now: %s)" % kind)
+	var turned: bool = false
+	var wiped: bool = false
+	for i in range(40):   # a whole round over the headings and more
+		g.tick(TICK)
+		turned = turned or c.turning
+		wiped = wiped or c.pending[GolemSitCombat.CH_LEGS] == GolemSitCombat.STOMP_L
+	check(wiped and not turned, "she stomps the one in reach and does not turn for the other")
+	_free_world(w)
+
+
 ## Erreicht kein Glied einen Feind, dreht sie sich langsam zu ihm (um den Po) — und
 ## greift waehrenddessen nicht an.
 func test_sitting_she_turns_slowly_toward_an_enemy_out_of_reach() -> void:
@@ -4154,9 +4256,12 @@ func test_sitting_she_turns_slowly_toward_an_enemy_out_of_reach() -> void:
 	if g._anim != null and g._anim.has_animation(GolemSitAnim.CLIP_TURN_L):
 		check(g._anim.get_animation(GolemSitAnim.CLIP_TURN_L).loop_mode == Animation.LOOP_LINEAR,
 			"the turn clip loops (it froze after one pass)")
-	var standing_rate: float = g.turn_rate() / Balance.GOLEM_SIT_TURN_SHARE
-	check_near(g.turn_rate(), standing_rate * Balance.GOLEM_SIT_TURN_SHARE, "an eighth of her standing turn rate")
-	check_near(Balance.GOLEM_SIT_TURN_SHARE, 0.125, "halved (user spec 2026-11-17)")
+	check_near(g.turn_rate(), Golem.sit_turn_rate_at(g.height_m()), "the seated turn rate of her height")
+	check_near(rad_to_deg(Golem.sit_turn_rate_at(30.0)), rad_to_deg(Golem.standing_turn_rate(30.0)) * 0.125, "30 m: an eighth of the standing rate (41 deg/s)", 0.1)
+	check_near(rad_to_deg(Golem.sit_turn_rate_at(80.0)), 13.0, "80 m: 13 deg/s (user spec 2026-11-18)", 0.01)
+	check(Golem.sit_turn_rate_at(83.0) < Golem.sit_turn_rate_at(80.0), "beyond 80 m it falls on")
+	check_near(rad_to_deg(Golem.sit_turn_rate_at(100.0)), 9.5, "down to 9,5 deg/s", 0.01)
+	check_near(rad_to_deg(Golem.sit_turn_rate_at(120.0)), 9.5, "and no lower", 0.01)
 	var struck: bool = false
 	var ticks: int = 0
 	while c.turning and ticks < 400:

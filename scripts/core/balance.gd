@@ -199,6 +199,14 @@ const GOLEM_SIT_KICK_WIDTH: float = 0.3
 ## Mitte der Sitzflaeche; Abklingzeit die des Sprungs mal diesem Faktor (minimal langsamer
 ## als der Sprung, schneller als der Luftschlag).
 const GOLEM_SIT_HOP_COOLDOWN_FACTOR: float = 1.1
+## Nutzervorgabe 2026-11-18: Abklingzeit und Animation um 0,2 s laenger (beim 30-m-Golem), der
+## Kreis 10 % kleiner. Die Faktoren sind beim normalen Golem mit 30 m gerechnet (Abklingzeit
+## 1,21 -> 1,41 s, Animation 1,47 -> 1,67 s, also Ausholen 0,73 -> 0,83 s) und gelten fuer
+## jede Groesse gleich. Der Po-Klatscher braucht kein Anvisieren: er kommt auch, waehrend sie
+## sich dreht (wie der Sprung im Stand).
+const GOLEM_SIT_HOP_SLOWER_COOLDOWN: float = 1.165
+const GOLEM_SIT_HOP_SLOWER_ANIM: float = 1.136
+const GOLEM_SIT_HOP_AREA_FACTOR: float = 0.9
 ## 4. Doppelstampfer: Kreis des Trommelns um eine Stelle so weit vor feet_point (negativ:
 ## dahinter; Nutzervorgabe 2026-11-17: "geht zu weit nach vorn, weiter nach hinten" —
 ## vorher 0,30 vor, an der Landestelle der Schuhe), mit diesem Anteil des Radius;
@@ -211,6 +219,9 @@ const GOLEM_SIT_DOUBLE_STOMP_AREA_FACTOR: float = 0.9
 ## des 4-m-Modells) vor der Sitzmitte (Nutzerhinweis 2026-11-17: vorher reichte er bis zu
 ## den Beinen). Schaden und Zielzahl wie der Luftschlag, schnell wie der gebueckte Handschlag.
 const GOLEM_SIT_WIPE_FRONT: float = 0.2
+## ... und die vordere Grenze ist um so viel Grad nach vorn geneigt (Nutzervorgabe 2026-11-18:
+## "kann 5 Grad weiter nach vorn reichen"): je Meter nach aussen tan(5 Grad) weiter vorn.
+const GOLEM_SIT_WIPE_FRONT_DEG: float = 5.0
 const GOLEM_SIT_WIPE_BACK_DEG: float = 30.0
 ## 6. Handstampfer hinten (Doppelklatscher): Kreis des Trommelns um jede Hand, aber nur
 ## hinter der Mitte der Sitzflaeche (Rueckenbereich); Schaden und Zielzahl wie das
@@ -236,8 +247,23 @@ const GOLEM_SIT_BIG_MIN_TARGETS: int = 3
 ## fertig bis auf GOLEM_SIT_TURN_DONE_DEG. Waehrend sie sich dreht, greift sie nicht an
 ## (Vorschlaege; die Drehrate hat der Nutzer am 2026-11-17 halbiert, vorher 0,25).
 const GOLEM_SIT_TURN_SHARE: float = 0.125
+## Seit 2026-11-18 (Nutzer) gilt GOLEM_SIT_TURN_SHARE nur noch bei GOLEM_SIT_MIN_HEIGHT (30 m:
+## 41 Grad/s). Von dort faellt die Sitz-Drehrate linear in der Koerperhoehe auf
+## GOLEM_SIT_TURN_RATE_AT_MAX_DEG bei GOLEM_MAX_HEIGHT (80 m: 13 statt 9,1 Grad/s) und mit derselben
+## Neigung weiter, bis GOLEM_SIT_TURN_RATE_MIN_DEG (ab rund 86 m). Im Stand bleibt alles wie es war.
+const GOLEM_SIT_TURN_RATE_AT_MAX_DEG: float = 13.0
+const GOLEM_SIT_TURN_RATE_MIN_DEG: float = 9.5
 const GOLEM_SIT_TURN_MIN_DEG: float = 20.0
 const GOLEM_SIT_TURN_DONE_DEG: float = 3.0
+## Drehen fuer einen besseren Angriff (Nutzervorgabe 2026-11-18): die Wahl rechnet auch die Plaene
+## anderer Blickrichtungen (GOLEM_SIT_TURN_PLAN_HEADINGS Richtungen rundum, mindestens
+## GOLEM_SIT_TURN_MIN_DEG daneben) und rechnet die Drehzeit wie im Stand als Vorlauf an, verteilt auf
+## GOLEM_SIT_TURN_PLAN_ATTACKS Angriffe. Ist ein gedrehter Plan mehr wert als der jetzige, dreht sie
+## sich. Je Ueberlegung (alle 0,25 s) werden GOLEM_SIT_TURN_PLAN_PER_THINK Richtungen gerechnet, eine
+## Runde dauert also rund 1 s (Rechenzeit); waehrenddessen greift sie normal an.
+const GOLEM_SIT_TURN_PLAN_ATTACKS: int = 3
+const GOLEM_SIT_TURN_PLAN_HEADINGS: int = 16
+const GOLEM_SIT_TURN_PLAN_PER_THINK: int = 4
 ## STRECKEN BEIM WACHSEN (Nutzer 2026-11-16): bei jedem Stufenaufstieg und jedem
 ## Wachstumsschritt nach Stufe 7 reckt sich der Golem einmal (Clip "grow", Sound
 ## "golem_grow"). Das kostet GOLEM_GROW_TIME Sekunden, in denen er weder
@@ -790,6 +816,9 @@ const DEMON_GOLEM_GROWTH_HEAL_OVER_TIME: int = 135   # 45 -> 135 (Nutzervorgabe 
 const DEMON_GOLEM_GROWTH_HEAL_DURATION: float = 5.0
 const DEMON_GOLEM_ATTACK_SPEEDUP: float = 0.15
 const DEMON_GOLEM_MOVE_SPEEDUP: float = 0.15
+## Er dreht sich auch 15 % schneller als der Golem gleicher Groesse, im Stand und im Sitzen
+## (Nutzer 2026-11-18; die Untergrenze im Sitzen also 10,9 Grad/s).
+const DEMON_GOLEM_TURN_SPEEDUP: float = 0.15
 ## = log(12 / 2,6 / 2,214) / (53 * log(1,03)): der Exponent, den der Golem bis
 ## 2026-11-17 (100 m, 53 Schritte zu 3 %) fuer seinen Handschlag hatte.
 const DEMON_GOLEM_SLAM_EXPONENT: float = 0.4687749

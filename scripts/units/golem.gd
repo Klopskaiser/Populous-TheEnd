@@ -1634,11 +1634,30 @@ func cooldown_for(kind: StringName) -> float:
 
 
 ## How fast the body turns (rad/s): GOLEM_TURN_RATE at the starting size, down to
-## GOLEM_TURN_RATE_FULL_SHARE of the fire ram's rate at 100 m.
+## GOLEM_TURN_RATE_FULL_SHARE of the fire ram's rate at 80 m. Seated: sit_turn_rate().
 func turn_rate() -> float:
-	var r: float = lerpf(Balance.GOLEM_TURN_RATE,
-		Balance.FIRERAM_TURN_RATE * Balance.GOLEM_TURN_RATE_FULL_SHARE, growth_t())
-	return r * Balance.GOLEM_SIT_TURN_SHARE if stance == STANCE_SIT else r
+	return sit_turn_rate() if stance == STANCE_SIT else standing_turn_rate(height_m())
+
+
+## The standing turn rate of a golem `h` metres tall (rad/s).
+static func standing_turn_rate(h: float) -> float:
+	var t: float = clampf((h - Balance.GOLEM_HEIGHT) / (Balance.GOLEM_MAX_HEIGHT - Balance.GOLEM_HEIGHT), 0.0, 1.0)
+	return lerpf(Balance.GOLEM_TURN_RATE, Balance.FIRERAM_TURN_RATE * Balance.GOLEM_TURN_RATE_FULL_SHARE, t)
+
+
+## The seated turn rate (rad/s, user spec 2026-11-18): GOLEM_SIT_TURN_SHARE of the standing
+## rate at GOLEM_SIT_MIN_HEIGHT, falling linearly in the height to GOLEM_SIT_TURN_RATE_AT_MAX_DEG
+## at GOLEM_MAX_HEIGHT and on at the same slope beyond, never below GOLEM_SIT_TURN_RATE_MIN_DEG.
+func sit_turn_rate() -> float:
+	return Golem.sit_turn_rate_at(height_m())
+
+
+static func sit_turn_rate_at(h: float) -> float:
+	var lo: float = Balance.GOLEM_SIT_MIN_HEIGHT
+	var at_lo: float = standing_turn_rate(lo) * Balance.GOLEM_SIT_TURN_SHARE
+	var at_max: float = deg_to_rad(Balance.GOLEM_SIT_TURN_RATE_AT_MAX_DEG)
+	var r: float = at_lo + (at_max - at_lo) * (h - lo) / (Balance.GOLEM_MAX_HEIGHT - lo)
+	return maxf(r, deg_to_rad(Balance.GOLEM_SIT_TURN_RATE_MIN_DEG))
 
 
 ## Has her body turned to within `deg` degrees of the flat direction `dir`?

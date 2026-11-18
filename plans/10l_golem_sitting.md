@@ -82,6 +82,36 @@ Animationsbaum bleibt aus.
   - **Wachsen im Sitzen:** die gestreckten Beine treffen in beiden Bein-Schneisen zugleich (Zielzahl 2 × Tritt),
     0,43 s nach Beginn des Streckens (`GolemSitCombat.GROW`, `grow_strike`), mit dem Schaden eines Trampelticks
     (Nutzervorgabe 2026-11-17; zuerst der des Tritts).
+  - **Runde 5 (Nutzervorgaben 2026-11-18):**
+    - **Wischer** reicht 5° weiter nach vorn: die vordere Grenze ist um `GOLEM_SIT_WIPE_FRONT_DEG` geneigt (je Meter
+      nach außen tan 5° weiter vorn).
+    - **Po-Klatscher:** Abklingzeit × 1,165 und Ausholen × 1,136 (`GOLEM_SIT_HOP_SLOWER_*`; beim 30-m-Golem je
+      +0,2 s: Abklingzeit 1,21 → 1,41 s, Animation 1,47 → 1,67 s), Kreis 10 % kleiner (`GOLEM_SIT_HOP_AREA_FACTOR`,
+      `hop_radius()`). **Braucht kein Anvisieren:** während sie sich dreht, kommt er für jeden Feind in seinem Kreis
+      (`_hop_while_turning`, ein Ziel reicht, beide Kanäle frei).
+    - **Drehen** merkt sich sein Ziel (`_turn_goal`) und folgt ihm; ist es tot, kein Feind mehr, nicht mehr
+      anvisierbar oder außer Aggro-Reichweite, hört sie sofort auf zu drehen (vorher drehte sie bis zur Richtung
+      eines schon toten Ziels weiter).
+    - **Drehrate im Sitzen** (`Golem.sit_turn_rate_at`): bei 30 m wie bisher 1/8 der Stand-Drehrate (41°/s), linear
+      in der Höhe auf **13°/s bei 80 m** (vorher 9,1°/s) und mit derselben Neigung weiter bis **9,5°/s** (ab rund
+      86 m). Der **Dämonengolem dreht 15 % schneller** (`DEMON_GOLEM_TURN_SPEEDUP`, im Stand und im Sitzen).
+    - **Die Drehung zählt in der Wahl** (`_turn_sweep`, `_plan`): sie rechnet auch die Pläne von 16 Richtungen rundum
+      (`GOLEM_SIT_TURN_PLAN_HEADINGS`, mindestens 20° daneben) — je Plan das, was `_choose` mit beiden freien Kanälen
+      wählen würde — und schlägt die Drehzeit wie im Stand als Vorlauf auf, verteilt auf 3 Angriffe
+      (`GOLEM_SIT_TURN_PLAN_ATTACKS`: Wert × Abklingzeit / (Abklingzeit + Drehzeit / 3)). Ist der beste gedrehte Plan
+      mehr wert als der jetzige, dreht sie sich dorthin. Gerechnet werden 4 Richtungen je Überlegung
+      (`GOLEM_SIT_TURN_PLAN_PER_THINK`, eine Runde ≈ 1 s), währenddessen greift sie normal an. In gedrehten Richtungen
+      gilt die Ausnahme „ein Ziel reicht für einen großen Angriff“ nur, wenn sie jetzt nichts erreicht (sonst drehte sie
+      sich weg, um einen einzelnen Feind mit dem Handstampfer zu treffen). Beim Drehen prüft sie jede Überlegung, ob
+      sich der Rest der Drehung noch lohnt (`_turn_still_pays`), sonst hört sie auf. Faustregel (Stampfer): bei 31 m
+      lohnt eine Vierteldrehung ab etwa dem 1,5-Fachen des jetzigen Werts, eine halbe ab dem 2-Fachen; bei 80 m ab dem
+      2,2- bzw. 3,4-Fachen.
+    - **Bugfix:** die Ausweichdrehung zum nächsten Feind („nichts erreichbar“) kam auch, wenn nur der freie Kanal
+      nichts erreichte, während der andere mit einem Feind in seiner Zone abklang — sie drehte sich von ihm weg.
+      Jetzt nur, wenn kein Angriff etwas erreicht.
+    - **Rechenzeit:** Orte der Glieder und Größen der Zonen werden je Blickrichtung, Position und Größe zwischengespeichert
+      (`_frame`), vor jeder Zonenprüfung steht ein grober Kreistest (`bound_of`). Messung (Debug, 80 Feinde, 6 Hütten):
+      eine Wahl 3,3 ms statt 26–61 ms, eine Überlegung mit 4 gedrehten Richtungen rund 16 ms.
 - *Stand davor (Vorschläge):*
 - **Doppelklatscher**: beide Hände schlagen neben ihr auf (Kreis um jede Hand); **sperrt die Füße**.
 - **Doppelstampfer**: beide Füße (Kreis um die Füße, 1,5 × Handschlag-Radius: Vorschlag); **sperrt
@@ -92,7 +122,7 @@ Animationsbaum bleibt aus.
   Einzelangriffe beider Kanäle zusammen).
 - **Drehen im Sitzen**: erreicht kein Glied einen Feind, dreht sie sich zum nächsten im Aggro-Radius
   (ab 20° Abweichung), mit 12,5 % ihrer Drehrate im Stand (2026-11-17 halbiert, vorher 25 %), um den Po (ihr Standpunkt bleibt). **Während
-  des Drehens keine Angriffe.** Die Sitzfläche dreht mit; der Sitzschaden trifft weiter nur, wer beim
+  des Drehens keine Angriffe** — außer dem Po-Klatscher (seit 2026-11-18). Die Sitzfläche dreht mit; der Sitzschaden trifft weiter nur, wer beim
   Aufsetzen darunter stand.
 - **Werte vorerst geborgt** (Vorschlag, Nutzer legt fest): Stampfer und Wischer wie der Handschlag,
   Bein strecken wie der Tritt, Doppelklatscher und Doppelstampfer wie das Trommeln (alle drei Schläge
