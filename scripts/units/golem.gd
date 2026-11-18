@@ -1220,7 +1220,23 @@ func _begin_attack_building(building) -> void:
 ## Sit-locked and no crab walk possible right now: move and attack orders do not reach her
 ## (TribeCommands, SelectionManager: rejected cue).
 func sit_refuses_orders() -> bool:
-	return is_sit_locked() and not crab_ready()
+	return is_sit_locked() and not crab_takes_orders()
+
+
+## Does she take move and attack orders for the crab walk? Not stationary and sitting — or still on her
+## way down: then the order waits until she sits (bug report 2026-11-18: an order given while she sat
+## down was lost). Not while she gets up.
+func crab_takes_orders() -> bool:
+	return not sit_stationary and _wants_sit and not _leaving_sit and state != State.DEAD and not doomed
+
+
+## An order waits for the crab walk while she sits (a move goal, or the target the player sent her
+## against): the sit attacks start nothing new, so she gets up as soon as the wound-up ones have landed
+## (bug report 2026-11-18: in a fight one channel was always busy and she never got up).
+func crab_order_pending() -> bool:
+	if _crab != CRAB_NONE:
+		return false
+	return _crab_goal != Vector3.INF or (_crab_focus != null and _crab_target == _crab_focus)
 
 
 ## May she crab-walk now? Not stationary, seated for good (not on her way down or up) — or
@@ -1870,7 +1886,7 @@ func set_sit_stationary(on: bool) -> void:
 ## Sends her crawling: to `goal` (a move order; INF = none) or toward `target` (unit, building,
 ## airship) until she can strike it. False when she may not crab-walk now.
 func crab_to(goal: Vector3, target: Object) -> bool:
-	if not crab_ready():
+	if not crab_takes_orders():
 		return false
 	_crab_goal = goal
 	_crab_target = target
@@ -4031,8 +4047,9 @@ func _tick_air_chase(delta: float) -> void:
 ## move orders pass through.
 func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = false) -> void:
 	if is_sit_locked():
-		# Seated: only stand_up() reaches her — unless she may crab-walk (user spec 2026-11-18).
-		if crab_ready():
+		# Seated: only stand_up() reaches her — unless she may crab-walk (user spec 2026-11-18; on her way
+		# down the order waits until she sits).
+		if crab_takes_orders():
 			_crab_focus = null
 			crab_to(target, null)
 		return
@@ -4044,7 +4061,7 @@ func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = fals
 
 func order_attack(enemy: Unit) -> void:
 	if is_sit_locked():
-		if crab_ready() and enemy != null and is_instance_valid(enemy) and enemy.tribe_id != tribe_id:
+		if crab_takes_orders() and enemy != null and is_instance_valid(enemy) and enemy.tribe_id != tribe_id:
 			_crab_focus = enemy   # crawl within reach, sit down, strike (user spec 2026-11-18)
 			crab_to(Vector3.INF, enemy)
 		return
@@ -4055,7 +4072,7 @@ func order_attack(enemy: Unit) -> void:
 
 func order_attack_building(building) -> void:
 	if is_sit_locked():
-		if crab_ready() and building != null and is_instance_valid(building) and building.tribe_id != tribe_id:
+		if crab_takes_orders() and building != null and is_instance_valid(building) and building.tribe_id != tribe_id:
 			_crab_focus = building
 			crab_to(Vector3.INF, building)
 		return

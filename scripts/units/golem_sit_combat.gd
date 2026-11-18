@@ -624,6 +624,8 @@ func grow_strike(delay: float) -> void:
 func _choose() -> void:
 	if g._stretch_queued:
 		return   # the stretch is owed: no new attack before it (it queues behind the running ones)
+	if g.crab_order_pending():
+		return   # an order waits for the crab walk: nothing new, she gets up once the wound-up ones land
 	var legs: bool = channel_free(CH_LEGS)
 	var arms: bool = channel_free(CH_ARMS)
 	if not legs and not arms:

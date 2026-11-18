@@ -12969,3 +12969,11 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
 - **Mana-Unterhalt aller Golems (2026-11-18):** `Golem._pay_upkeep` / `mana_upkeep_rate` (vorher nur der Daemonengolem mit
   5 Mana/s): Golem und Daemonengolem 8 %, Genesisgolem 5 % des Brutto-Einkommens (`Tribe.mana_rate`) + 2 Mana/s, als
   Anspruch wie die Foersterei (`claim_upkeep_rate`). Test `test_every_golem_costs_a_share_of_the_income_plus_two_per_second`.
+
+- **Bugfix Krebsgang-Befehle (2026-11-18):** sitzend mit „Stationaer“ aus gingen Bewegungsbefehle verloren oder hingen:
+  (1) waehrend des Hinsetzens wurden sie abgewiesen (`crab_ready` erst im Sitz) — jetzt nimmt sie sie an und fuehrt sie
+  aus, sobald sie sitzt (`Golem.crab_takes_orders`); (2) im Kampf stand sie erst auf, wenn kein Sitzangriff mehr
+  ausstand und keine Ebene lief, die Sitzkampf-Logik setzte aber immer neue an — mit offenem Befehl
+  (`Golem.crab_order_pending`) setzt `GolemSitCombat._choose` nichts Neues an. Test
+  `test_crab_move_order_is_not_lost_in_a_fight_or_while_sitting_down` (Fall 2 headless nicht nachstellbar: ohne Modell
+  laufen keine Animationsebenen).

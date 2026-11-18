@@ -5643,3 +5643,46 @@ func test_side_hand_slam_strikes_the_blind_spot() -> void:
 			break
 	check(struck, "a foe in the blind spot draws the side hand slam (arms: %s)" % c.pending[GolemSitCombat.CH_ARMS])
 	_free_world(w)
+
+
+## Bugmeldung 2026-11-18: sitzend, "Stationaer" aus, ignorierte sie manchmal Bewegungsbefehle. (1) Mitten im
+## Kampf: sie stand erst auf, wenn kein Sitzangriff mehr ausstand — die Sitzkampf-Logik setzte aber immer wieder
+## neue an. Jetzt setzt sie mit einem offenen Befehl nichts Neues an und steht auf, sobald die angesetzten
+## gelandet sind. (2) Ein Befehl waehrend des Hinsetzens wurde abgewiesen; jetzt wartet er, bis sie sitzt.
+func test_crab_move_order_is_not_lost_in_a_fight_or_while_sitting_down() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _sit_golem(w, 0, Vector3(64, 5, 50))
+	_sit_until_seated(w, g)
+	g.set_sit_stationary(false)
+	# Sturdy foes all round her, within reach of her sit attacks: she keeps striking.
+	for i in range(16):
+		var a: float = TAU * float(i) / 16.0
+		_foe(w, g.position.x + sin(a) * 7.0, g.position.z + cos(a) * 7.0, 1000000)
+	for i in range(30):
+		_tick_world(w)
+	var c: GolemSitCombat = g.sit_combat
+	check(c != null and (c.is_busy() or c.cooldown[0] > 0.0 or c.cooldown[1] > 0.0), "she fights from the seat")
+	var sel: Array[Unit] = [g]
+	check(w.commands.order_move(sel, Vector3(64, 5, 100)) == 1, "the move order reaches her")
+	check(g.crab_order_pending(), "the order waits for the crab walk")
+	var ticks: int = _run_until(w, func() -> bool: return g._crab != Golem.CRAB_NONE, 60)
+	check(g._crab != Golem.CRAB_NONE, "she gets up into the crab stand within %.1f s (after %d ticks)" % [60.0 * TICK, ticks])
+	_free_world(w)
+	# On her way down.
+	w = _make_world()
+	g = _sit_golem(w, 0, Vector3(64, 5, 50))
+	g.set_sit_stationary(false)
+	check(g.sit_down(), "she sits down")
+	for i in range(3):
+		_tick_world(w)
+	check(not g.is_sitting() or g.is_switching_stance(), "(still on her way down)")
+	check(not g.sit_refuses_orders(), "not stationary: the order is taken on her way down too")
+	sel = [g]
+	var goal: Vector3 = Vector3(64, 5, 90)
+	check(w.commands.order_move(sel, goal) == 1, "the move order reaches her")
+	_run_until(w, func() -> bool: return g.is_sitting() and not g.is_switching_stance(), 400)
+	_run_until(w, func() -> bool: return g._crab != Golem.CRAB_NONE, 40)
+	check(g._crab != Golem.CRAB_NONE, "once seated she gets up and crawls")
+	_run_until(w, func() -> bool: return not g.is_crabbing(), 3000)
+	check(_flat(g.position, goal) < 1.5, "she arrives (%.2f m off)" % _flat(g.position, goal))
+	_free_world(w)
