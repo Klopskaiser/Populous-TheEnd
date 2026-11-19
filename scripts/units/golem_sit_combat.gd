@@ -121,6 +121,8 @@ var _c_hslam: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]   # left, right
 var _c_hslam_r: float
 var _c_kick_out: float
 var _think: float = 0.0
+## Counts her looks (each _choose): what is judged once per look (Golem._foe_closing_in) keys on it.
+var think_round: int = 0
 ## Guard against a turn that hangs (bugfix 2026-11-18): seconds without progress, angle turned in this
 ## turn without an attack, the heading last tick, seconds no new turn may start.
 var _turn_stall: float = 0.0
@@ -250,11 +252,12 @@ func damage(kind: StringName) -> int:
 	return roundi(dmg * Balance.GOLEM_SIT_MULT_DAMAGE * float(g.sit_mod()["damage"]))
 
 
-## Target cap: its share (column targets) of the golem's base count, rounded down, at least 1.
+## Target cap: its share (column targets) of the golem's base count, times GOLEM_SIT_MULT_TARGETS, rounded down, at least 1.
 func max_targets(kind: StringName) -> int:
 	if kind == GROW:
 		return 2 * g.max_targets_of(Golem.ATTACK_KICK)   # both legs' lanes, each with the kick's cap
-	return maxi(g.max_targets() * int(sit_attack(kind)["targets"]) / 100, 1)
+	return maxi(int(floor(float(g.max_targets()) * float(sit_attack(kind)["targets"]) / 100.0
+		* Balance.GOLEM_SIT_MULT_TARGETS + 0.000001)), 1)
 
 
 ## Cooldown: its own at 30 m (sit table), grown with her rhythm (Golem.sit_rhythm), times GOLEM_SIT_MULT_COOLDOWN
@@ -618,6 +621,7 @@ func tick(delta: float) -> void:
 	if _think > 0.0:
 		return
 	_think = THINK_INTERVAL
+	think_round += 1
 	if not is_busy() and not g.sit_heading_ok(g.heading()):
 		_escape_pose()
 		return
@@ -695,6 +699,8 @@ func _choose() -> void:
 		if float(big.get("value", 0.0)) > single:
 			_wind_up(big.kind, big.at)
 			return
+	elif legs != arms and _wait_for_big(legs, best_legs if legs else best_arms, foes, builds):
+		return   # the free channel holds for a big attack (both channels) once the other comes free
 	if not best_legs.is_empty():
 		_wind_up(best_legs.kind, best_legs.at)
 	if not best_arms.is_empty():
@@ -711,6 +717,29 @@ func _choose() -> void:
 			nothing_for = 0.0
 	else:
 		nothing_for = 0.0
+
+
+## One channel is free, the other still busy: should the free one hold for a big attack (they need both
+## channels)? Since a free channel chooses at once, the two hardly ever came free together and the big
+## attacks starved (user report 2026-11-19: no po clap in 33 s of fighting). It holds when the big attack,
+## its damage per second spread over its cooldown plus the wait for the other channel, beats what the two
+## channels would strike apart (the free one now, the other one when it comes free) — at most
+## BIG_WAIT_MAX seconds ahead.
+const BIG_WAIT_MAX: float = 1.5
+
+func _wait_for_big(legs_free: bool, best_free: Dictionary, foes: Array[Unit], builds: Array) -> bool:
+	var other: int = CH_ARMS if legs_free else CH_LEGS
+	var wait: float = maxf(cooldown[other], pending_time[other] if pending[other] != &"" else 0.0)
+	if wait > BIG_WAIT_MAX:
+		return false
+	var best_other: Dictionary = _best_of(ARM_KINDS if legs_free else LEG_KINDS, foes, builds)
+	var apart: float = float(best_free.get("value", 0.0)) + float(best_other.get("value", 0.0))
+	var big: Dictionary = _best_of([HOP, CLAP, DOUBLE_STOMP], foes, builds,
+		Balance.GOLEM_SIT_BIG_MIN_TARGETS if apart > 0.0 else 1)
+	if big.is_empty():
+		return false
+	var cd: float = maxf(cooldown_of(big.kind), 0.05)
+	return float(big.value) * cd / (cd + wait) > apart
 
 
 ## Is any of `foes` (enemy units) inside the area of one of her sit attacks as she faces now?
@@ -1139,8 +1168,10 @@ func _turn_sweep(foes: Array[Unit], builds: Array) -> bool:
 		g._heading = saved
 		if _sweep_i < n:
 			return false
-	if is_busy():
-		return false   # the round is done: hold its result until she is free
+	if g._sit_layers_busy():
+		# The round is done: hold its result until she is free — no attack wound up and no attack clip
+		# playing any more (user spec 2026-11-19: the po clap's clip, filling its cooldown, went on into the turn).
+		return false
 	_sweep_i = 0
 	if _sweep_dir == Vector3.ZERO or _sweep_v <= float(here.value) * Balance.GOLEM_SIT_TURN_PLAN_MARGIN + 0.000001:
 		return false   # not clearly better: no turn for a trifle (bug report 2026-11-18)
@@ -1217,8 +1248,8 @@ func _situation_changed() -> bool:
 ## 2026-11-17: she never turned to an airship wharf beside her) — if it lies more than
 ## GOLEM_SIT_TURN_MIN_DEG off her heading.
 func _maybe_turn(foes: Array[Unit]) -> void:
-	if turn_block > 0.0:
-		return
+	if turn_block > 0.0 or g._sit_layers_busy():
+		return   # (no turn while an attack is wound up or its clip still plays, user spec 2026-11-19)
 	var goal: Vector3 = Vector3.INF
 	var goal_obj: Object = null
 	var best: float = INF

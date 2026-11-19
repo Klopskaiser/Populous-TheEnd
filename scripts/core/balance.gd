@@ -148,22 +148,24 @@ const GOLEM_STAND_ATTACKS: Dictionary = {
 ## 4,45 m; Bein strecken 75, 1,89 s; Handschlag seitlich 75, 1,59 s; Wischer 60, 1,3 s; Doppelstampfer 95,
 ## Handstampfer hinten 85; Po-Klatscher 1,27 s (Nutzervorgaben 2026-11-19).
 const GOLEM_SIT_ATTACKS: Dictionary = {
-	&"sit_stomp":        {damage = 55.0, category = &"slam",    targets = 100, cooldown = 1.4809, area = 4.7331},
-	&"sit_kick":         {damage = 75.0, category = &"kick",    targets = 60,  cooldown = 2.0805, area = 2.5},
+	&"sit_stomp":        {damage = 60.0, category = &"slam",    targets = 100, cooldown = 1.4809, area = 4.7331},
+	&"sit_kick":         {damage = 80.0, category = &"kick",    targets = 60,  cooldown = 1.9805, area = 2.5},
 	&"sit_wipe":         {damage = 60.0, category = &"swat",    targets = 100, cooldown = 1.4306, area = 14.9787},
 	&"sit_hand_slam":    {damage = 75.0, category = &"slam",    targets = 100, cooldown = 1.7484, area = 3.3131},
 	&"sit_hop":          {damage = 2.0,  category = &"trample", targets = 200, cooldown = 1.4015, area = 7.3929},
 	&"sit_double_stomp": {damage = 95.0, category = &"drum",    targets = 130, cooldown = 2.2029, area = 6.6691},
-	&"sit_clap":         {damage = 85.0, category = &"drum",    targets = 130, cooldown = 2.0316, area = 6.3818},
+	&"sit_clap":         {damage = 90.0, category = &"drum",    targets = 130, cooldown = 2.0316, area = 6.3818},
 	&"crab_headbutt":    {damage = 0.0,  category = &"swat",    targets = 0,   cooldown = 2.4477, area = 7.4074},
 }
 ## SITZFAKTOREN (Nutzervorgabe 2026-11-17: im Sitzen greift es sich leichter an — schneller wieder,
 ## dafuer kleinere Flaechen): gelten fuer JEDEN Sitzangriff (auch den Kopfstoss), auf die Grundwerte der
-## Tabelle; die Animation folgt der Abklingzeit. area verkleinert Radien, Kegel-Reichweite und die Breite
-## der Bein-Schneise (ihre Laenge haengt an Huefte und Schuhspitze). Die Zielzahl bleibt.
+## Tabelle; die Animation folgt der Abklingzeit. area skaliert Radien, Kegel-Reichweite und die Breite
+## der Bein-Schneise (ihre Laenge haengt an Huefte und Schuhspitze); targets die Zielzahl.
 const GOLEM_SIT_MULT_DAMAGE: float = 1.0
 const GOLEM_SIT_MULT_COOLDOWN: float = 0.8   # 0,9 -> 0,85 -> 0,8 (Nutzervorgaben 2026-11-19)
-const GOLEM_SIT_MULT_AREA: float = 0.9
+const GOLEM_SIT_MULT_AREA: float = 1.0   # 0,9 -> 1,0 (Nutzervorgabe 2026-11-19)
+## Zielzahl im Sitzen: Faktor auf den Zielanteil jedes Sitzangriffs (Nutzervorgabe 2026-11-19: +20 %), abgerundet.
+const GOLEM_SIT_MULT_TARGETS: float = 1.2
 ## SITZ-MODIFIKATOREN JE GOLEM (Nutzervorgabe 2026-11-19): veraendern die Sitzangriffe eines Golems
 ## unabhaengig von seiner Stufe — Faktoren auf Schaden, Abklingzeit und Flaeche (vorerst alle 1; der
 ## Tempovorteil des Daemonengolems steckt schon in seinem Takt).
@@ -285,8 +287,8 @@ const GOLEM_SIT_STOMP_LAND: Vector2 = Vector2(0.18, 0.353)
 const GOLEM_SIT_KICK_SIDE: float = 0.18
 const GOLEM_SIT_KICK_FROM: float = 1.25
 const GOLEM_SIT_KICK_TO: float = 1.057
-## Po-Klatscher: um die Mitte der Sitzflaeche. Er braucht kein Anvisieren: er kommt auch, waehrend
-## sie sich dreht (wie der Sprung im Stand).
+## Po-Klatscher: um die Mitte der Sitzflaeche. Waehrend sie sich dreht, greift sie nicht an, auch er nicht;
+## eine Drehung beginnt erst, wenn kein Angriffsclip mehr laeuft (Nutzervorgabe 2026-11-19).
 ## Doppelstampfer: Kreis um eine Stelle so weit vor feet_point (negativ: dahinter; Nutzervorgabe
 ## 2026-11-17: "geht zu weit nach vorn, weiter nach hinten" — vorher 0,30 vor).
 const GOLEM_SIT_DOUBLE_STOMP_LAND: float = -0.10
@@ -315,13 +317,14 @@ const GOLEM_SIT_BIG_MIN_TARGETS: int = 3
 ## Blickrichtung liegt — mit GOLEM_SIT_TURN_SHARE ihrer Drehrate im Stand, um den Po;
 ## fertig bis auf GOLEM_SIT_TURN_DONE_DEG. Waehrend sie sich dreht, greift sie nicht an
 ## (Vorschlaege; die Drehrate hat der Nutzer am 2026-11-17 halbiert, vorher 0,25).
-const GOLEM_SIT_TURN_SHARE: float = 0.125
+const GOLEM_SIT_TURN_SHARE: float = 0.375   # x3 (Nutzervorgabe 2026-11-19; vorher 0,125)
 ## Seit 2026-11-18 (Nutzer) gilt GOLEM_SIT_TURN_SHARE nur noch bei GOLEM_SIT_MIN_HEIGHT (30 m:
 ## 41 Grad/s). Von dort faellt die Sitz-Drehrate linear in der Koerperhoehe auf
 ## GOLEM_SIT_TURN_RATE_AT_MAX_DEG bei GOLEM_MAX_HEIGHT (80 m: 13 statt 9,1 Grad/s) und mit derselben
 ## Neigung weiter, bis GOLEM_SIT_TURN_RATE_MIN_DEG (ab rund 86 m). Im Stand bleibt alles wie es war.
-const GOLEM_SIT_TURN_RATE_AT_MAX_DEG: float = 13.0
-const GOLEM_SIT_TURN_RATE_MIN_DEG: float = 9.5
+## Nutzervorgabe 2026-11-19: die ganze Kurve verdreifacht (30 m: 123 Grad/s, 80 m: 39 Grad/s, Untergrenze 28,5).
+const GOLEM_SIT_TURN_RATE_AT_MAX_DEG: float = 39.0
+const GOLEM_SIT_TURN_RATE_MIN_DEG: float = 28.5
 const GOLEM_SIT_TURN_MIN_DEG: float = 20.0
 const GOLEM_SIT_TURN_DONE_DEG: float = 3.0
 ## Drehen fuer einen besseren Angriff (Nutzervorgabe 2026-11-18): die Wahl rechnet auch die Plaene
@@ -370,6 +373,11 @@ const GOLEM_CRAB_IDLE_SIT_TIME: float = 4.0
 ## (innerhalb des Suchradius der Sitzangriffe), steht sie erst auf, wenn sie so lange nichts erreicht hat.
 ## Luftschiffe, befohlene Ziele, weiter entfernte Einheiten und Gebaeude: sofort.
 const GOLEM_CRAB_PATIENCE: float = 3.0
+## Herankommende abwarten (Nutzermeldung 2026-11-19: sie stand fuer einen Feind knapp ausserhalb des Suchradius auf,
+## krabbelte ihm entgegen und setzte sich, sobald er ankam, 5 s ohne Angriff): kommt eine feindliche Einheit in
+## ihrem Aggro-Radius naeher (je Blick, alle 0,25 s, um mindestens so viele Meter), steht sie gar nicht erst auf,
+## auch nicht fuer ein Luftschiff. Befohlene Ziele gelten weiter sofort.
+const GOLEM_CRAB_CLOSING_MIN: float = 0.05
 ## Krabbelt sie zu einer Einheit, setzt sie sich erst, wenn diese GOLEM_CRAB_REACH_DEPTH der Sitzlaenge
 ## (Fuesse bis Sitzmitte) innerhalb einer Zone liegt — nicht schon am Rand (sonst war sie nach einem Schritt oder
 ## einem Tritt wieder draussen und sie stand gleich wieder auf; Spieltest 2026-11-18). Nutzervorgabe 2026-11-19: 30 % statt 20 %.

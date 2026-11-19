@@ -281,6 +281,11 @@ var _chase_ship: Airship = null
 ## The airship the player ordered her against standing (order_attack_airship, user report 2026-11-19):
 ## she walks under it and swats it, before any other — until it falls or another order comes.
 var _ordered_ship: Airship = null
+## Seated, not stationary: the distances of the enemy units in her aggro radius at the last look (_foe_closing_in).
+var _crab_closing_seen: Dictionary = {}
+## The look it was judged in, and the answer (called twice in one look, it must not compare with itself).
+var _crab_closing_round: int = -1
+var _crab_closing_last: bool = false
 ## The building an explicit ORDER sent her against (order_attack_building) — see
 ## has_ordered_building().
 var _ordered_building = null
@@ -2075,6 +2080,11 @@ func sit_nothing_in_reach(foes: Array[Unit]) -> void:
 	var best: Object = null
 	var best_d: float = aggro_radius()
 	var waiting: bool = false
+	if _foe_closing_in():
+		# An enemy unit in her aggro radius comes nearer (user report 2026-11-19: she got up, crawled toward
+		# it and sat down again as soon as it arrived, 5 s without a strike): she lets it come. For an
+		# airship neither.
+		return
 	for u in foes:
 		if not _crab_target_alive(u) or u.is_airborne() or _crab_ignored(u):
 			continue
@@ -2104,6 +2114,31 @@ func sit_nothing_in_reach(foes: Array[Unit]) -> void:
 				best = b
 	if best != null:
 		crab_to(Vector3.INF, best)
+
+
+## Does an enemy unit on the ground in her aggro radius come nearer? Compares each one's distance with the
+## last look (sit_nothing_in_reach, every GolemSitCombat.THINK_INTERVAL while nothing is within reach): nearer
+## by GOLEM_CRAB_CLOSING_MIN or more. A unit she sees for the first time counts as closing in: she gives it one
+## look's time.
+func _foe_closing_in() -> bool:
+	var look: int = sit_combat.think_round if sit_combat != null else -2
+	if look == _crab_closing_round:
+		return _crab_closing_last
+	_crab_closing_round = look
+	var seen: Dictionary = {}
+	var closing: bool = false
+	if path_service != null:
+		for u in path_service.get_units_in_radius(position, aggro_radius()):
+			if u == self or u.tribe_id == tribe_id or u is CrewedVehicle or u.is_airborne() or not _crab_target_alive(u):
+				continue
+			var id: int = u.get_instance_id()
+			var d: float = _flat_dist(position, u.position)
+			seen[id] = d
+			if not _crab_closing_seen.has(id) or float(_crab_closing_seen[id]) - d >= Balance.GOLEM_CRAB_CLOSING_MIN:
+				closing = true
+	_crab_closing_seen = seen
+	_crab_closing_last = closing
+	return closing
 
 
 ## Anything to strike in her aggro radius: an enemy unit on the ground or a crewed enemy airship?

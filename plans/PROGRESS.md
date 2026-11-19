@@ -13098,3 +13098,41 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
 
 - **Ziele je Wachstumsstufe (Nutzervorgabe 2026-11-19):** nach Stufe 7 +2 Grundziele je Wachstumsstufe statt +1
   (`GOLEM_GROWTH_TARGETS_PER_STEP`, ersetzt `GOLEM_GROWTH_STEPS_PER_TARGET`); 31,3 m: 24 statt 16, 80 m: 51 statt 30.
+
+- **Herankommende abwarten (Nutzermeldung 2026-11-19):** sie stand fuer einen Feind knapp ausserhalb des Suchradius auf,
+  krabbelte ihm entgegen und setzte sich, sobald er ankam (gut 5 s ohne Angriff; nachgestellt). Jetzt prueft
+  `Golem._foe_closing_in` je Blick (`GolemSitCombat.think_round`, einmal je Ueberlegung) die Abstaende der Bodenfeinde
+  im Aggro-Radius: kommt einer um mindestens `GOLEM_CRAB_CLOSING_MIN` (0,05 m je 0,25 s) naeher, steht sie von selbst
+  nicht auf — auch nicht fuer ein Luftschiff; befohlene Ziele gelten weiter sofort. Test
+  `test_crab_lets_a_foe_coming_closer_come`.
+
+- **Sitzfaktoren Ziele und Flaeche (Nutzervorgabe 2026-11-19):** neu `GOLEM_SIT_MULT_TARGETS` 1,2 (alle Sitzangriffe
+  +20 % Ziele, abgerundet), `GOLEM_SIT_MULT_AREA` 0,9 -> 1,0. Golem bei 31,3 m: Ziele Fuss-Stampfer/Wischer/Handschlag
+  seitlich 28, Bein 17, Po-Klatscher 57, Doppel-/Handstampfer 37; Radien Fuss-Stampfer 4,94 m, Wischer 15,6 m,
+  Handschlag seitlich 3,46 m, Po-Klatscher 7,72 m, Doppelstampfer 6,97 m, Handstampfer 6,67 m. Zwei Drehtests legen die
+  Feindgruppe jetzt hinter sie (der Wischer erreicht die alte Stelle eine Vierteldrehung weiter).
+
+- **Drehen im Sitzen (Nutzervorgabe 2026-11-19):** Drehrate verdreifacht (`GOLEM_SIT_TURN_SHARE` 0,375,
+  `_RATE_AT_MAX_DEG` 39, `_RATE_MIN_DEG` 28,5; 31,3 m ~121 Grad/s, 80 m 39 Grad/s; gilt auch im Krebsgang). Eine Drehung
+  beginnt erst, wenn kein Angriff ausgeholt ist UND kein Angriffsclip mehr laeuft (`Golem._sit_layers_busy` in
+  `_turn_sweep` / `_maybe_turn`) — seit die Clips die Abklingzeit fuellen, lief z. B. der Po-Klatscher in die Drehung
+  hinein. Drei Tests an das schnellere Drehen angepasst.
+
+- **Grosse Sitzangriffe nicht aushungern (Nutzervorgabe 2026-11-19):** seit ein frei gewordener Kanal sofort neu waehlt,
+  waren Beine und Arme kaum noch gleichzeitig frei — Po-Klatscher, Handstampfer hinten und Doppelstampfer kamen fast nie
+  (80 m, 76 Feinde: 2 Handstampfer in 31 s, kein Po-Klatscher). Jetzt wartet ein freier Kanal auf den anderen
+  (`GolemSitCombat._wait_for_big`), wenn der spaetestens nach `BIG_WAIT_MAX` 1,5 s frei wird und der beste grosse Angriff
+  mit der Wartezeit gerechnet (Wert x Abklingzeit / (Abklingzeit + Wartezeit)) mehr bringt als die beiden Kanaele
+  getrennt. Zielradius und Nahkampfring bleiben (Nutzervorgabe: sie soll angreifbar bleiben). A/B-Probe (stationaer
+  sitzend, Anmarsch aus 45 m, seed 7), ohne -> mit: 80 m gegen 76 gleichzeitig gefallen nach 31 s -> haelt 180 s
+  (tiefster Stand 84 %, 13 Po-Klatscher, 21 Handstampfer); gegen 153 gefallen nach 30 s -> haelt (46 %); gegen 306
+  gefallen nach 20 s -> 23 s. Bei 31,3 m (Feinde aus allen Richtungen, 1,5 x Ziele) faellt sie weiter nach 14–19 s —
+  dort greift die Wartelogik kaum.
+
+- **Sitzschaden wieder angehoben (Nutzervorgabe 2026-11-19):** `GOLEM_SIT_ATTACKS` Fuss-Stampfer 55 -> 60, Bein strecken
+  75 -> 80 und Abklingzeit 2,0805 -> 1,9805 s (Wert bei 30 m vor dem Sitzfaktor), Handstampfer hinten 85 -> 90. Bei 80 m
+  damit 65 / 90 / 98. Acht Tests mit festen Werten nachgezogen. Wachstumsprobe ab 31,3 m (stationaer, Feinde aus 25 m
+  rundum, 1,5 x Ziele): weiter gefallen nach 16–23 s (ein Ausreisser 79 s; die Probe ist trotz Seed nicht ganz
+  deterministisch), ausgeteilt 203–236 statt 186–221 Schaden/s. Der Handstampfer hinten bringt 60–70 % des Schadens;
+  Fuss-Stampfer, Bein und Wischer kommen in 17 s je ein- bis zweimal — die Feinde stehen im Nahkampfring, den sie kaum
+  erreichen. Bei 31 m fehlt es an Haltbarkeit, nicht an Schaden.
