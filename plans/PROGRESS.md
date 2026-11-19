@@ -13095,3 +13095,6 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
 - **Nachtrag:** `GOLEM_SIT_MULT_COOLDOWN` weiter auf 0,8 (Nutzervorgabe 2026-11-19); bei 31,3 m z. B. Fuss-Stampfer
   1,20 s, Bein 1,68 s, Wischer 1,16 s, Handschlag seitlich 1,41 s, Po-Klatscher 1,13 s, Doppelstampfer 1,78 s,
   Handstampfer 1,64 s.
+
+- **Ziele je Wachstumsstufe (Nutzervorgabe 2026-11-19):** nach Stufe 7 +2 Grundziele je Wachstumsstufe statt +1
+  (`GOLEM_GROWTH_TARGETS_PER_STEP`, ersetzt `GOLEM_GROWTH_STEPS_PER_TARGET`); 31,3 m: 24 statt 16, 80 m: 51 statt 30.

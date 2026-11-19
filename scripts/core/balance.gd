@@ -574,8 +574,8 @@ const GOLEM_LEVEL_KILLS: Array[int] = [5, 6, 7, 7, 8, 9, 20]
 ## eskalierte der Flaechenschaden. Jeder Schadenstick des Golems — Handschlag,
 ## Tritt, und beim Trampeln je Sekunde — trifft hoechstens so viele Ziele
 ## (Index = Stufe; fuer Stufe 6 war kein Wert genannt, angenommen 8 wie davor
-## und danach). Nach Stufe 7 kommt alle GOLEM_GROWTH_STEPS_PER_TARGET
-## Wachstumsschritte eines dazu (2026-11-17: jeder Schritt eines, 80 m: 29). Einheiten gehen vor Fahrzeugen und
+## und danach). Nach Stufe 7 kommen je Wachstumsschritt GOLEM_GROWTH_TARGETS_PER_STEP dazu (2026-11-17: einer,
+## seit 2026-11-19: zwei; 80 m: 51). Einheiten gehen vor Fahrzeugen und
 ## Gebaeuden, die naechsten zuerst; das Ziel, das er gerade angreift, wird immer
 ## getroffen und zaehlt mit.
 const GOLEM_MAX_TARGETS: Array[int] = [5, 6, 6, 6, 7, 8, 8, 8]
@@ -589,8 +589,9 @@ const GOLEM_MAX_TARGETS: Array[int] = [5, 6, 6, 6, 7, 8, 8, 8]
 ##   Sprung                   200 %   (              10 / 12 / 12 / 12 / 14 / 16 / 16 / 16;
 ##                                     doppelt so viele wie das Trampeln, Nutzer 2026-11-16 —
 ##                                     vorher 150 %)
-## Golem.max_targets_of(). Bei 80 m (Grundzahl 30, s. GOLEM_FULL_SIZE_TARGETS): 18 / 37 / 60.
-const GOLEM_GROWTH_STEPS_PER_TARGET: int = 1
+## Golem.max_targets_of(). Bei 80 m (Grundzahl 51, s. GOLEM_FULL_SIZE_TARGETS): 30 / 63 / 102.
+## Ziele je Wachstumsstufe nach Stufe 7 (Nutzervorgabe 2026-11-19: 2 statt 1; 80 m: 8 + 21 x 2 + 1 = 51).
+const GOLEM_GROWTH_TARGETS_PER_STEP: int = 2
 ## Der ausgewachsene Golem (80 m) trifft so viele Ziele mehr (Nutzervorgabe 2026-11-19: 29 -> 30).
 const GOLEM_FULL_SIZE_TARGETS: int = 1
 const GOLEM_MAX_LEVEL: int = 7

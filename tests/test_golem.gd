@@ -1993,10 +1993,10 @@ func test_hit_zones_slam_front_half_of_the_body_kick_lane_only() -> void:
 func test_target_cap_limits_every_damage_tick() -> void:
 	check(Balance.GOLEM_MAX_TARGETS == ([5, 6, 6, 6, 7, 8, 8, 8] as Array[int]),
 		"targets per level 0-7: 5, 6, 6, 6, 7, 8, 8, 8")
-	check(Golem.max_targets_for(7, 2) == 10 and Golem.max_targets_for(7, 3) == 11
-		and Golem.max_targets_for(7, Golem.max_growth_steps() - 1) == 28
-		and Golem.max_targets_for(7, Golem.max_growth_steps()) == 30,
-		"beyond level 7 every growth step adds one, 80 m one more (%d at 80 m)"
+	check(Golem.max_targets_for(7, 2) == 12 and Golem.max_targets_for(7, 3) == 14
+		and Golem.max_targets_for(7, Golem.max_growth_steps() - 1) == 48
+		and Golem.max_targets_for(7, Golem.max_growth_steps()) == 51,
+		"beyond level 7 every growth step adds two (user spec 2026-11-19), 80 m one more (%d at 80 m)"
 			% Golem.max_targets_for(7, Golem.max_growth_steps()))
 	# --- slam into a crowd: 5 of 9, the attack target among them -----------------
 	var w: Dictionary = _make_world()
@@ -2620,9 +2620,9 @@ func test_every_attack_has_its_share_of_the_target_count() -> void:
 		check(got == want[lv] and g.max_targets() == want[lv][0],
 			"level %d: slam/kick/drum/stomp %s (want %s), trampling the base %d" % [lv, got, want[lv], g.max_targets()])
 	_grow_to_the_end(g)
-	check(g.max_targets() == 30 and g.max_targets_of(Golem.ATTACK_KICK) == 18
-		and g.max_targets_of(Golem.ATTACK_DRUM) == 37 and g.max_targets_of(Golem.ATTACK_STOMP) == 60,
-		"80 m: base 30, kick 18, drum 37, stomp 60")
+	check(g.max_targets() == 51 and g.max_targets_of(Golem.ATTACK_KICK) == 30
+		and g.max_targets_of(Golem.ATTACK_DRUM) == 63 and g.max_targets_of(Golem.ATTACK_STOMP) == 102,
+		"80 m: base 51, kick 30, drum 63, stomp 102")
 	_free_world(w)
 
 
@@ -4077,8 +4077,8 @@ func test_sit_big_attacks_take_the_users_values() -> void:
 	check(c.in_area(hop, g.position + g.heading() * (hop_r * 0.95)) and not c.in_area(hop, g.position + g.heading() * (hop_r + 0.5)),
 		"the circle around the seat")
 	var ds: StringName = GolemSitCombat.DOUBLE_STOMP
-	check(c.damage(ds) > g.attack_damage(Golem.ATTACK_SWAT) and c.max_targets(ds) == g.max_targets_of(Golem.ATTACK_DRUM),
-		"double stomp: more than the swat, the drum's targets")
+	check(c.damage(ds) > g.attack_damage(Golem.ATTACK_SWAT) and c.max_targets(ds) == maxi(g.max_targets() * 130 / 100, 1),
+		"double stomp: more than the swat, 130 % of her base targets (%d)" % c.max_targets(ds))
 	check_near(c.cooldown_of(ds), 1.779374, "its cooldown at 31,3 m: 1,78 s", 0.0001)
 	check_near(c.cooldown_of(GolemSitCombat.CLAP), 1.641008, "the hand stomp behind: 1,64 s at 31,3 m", 0.0001)
 	check(c.in_area(ds, c.feet_point() - g.heading() * 1.0), "it reaches a little behind the feet")

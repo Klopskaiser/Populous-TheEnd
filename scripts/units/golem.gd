@@ -693,13 +693,13 @@ static func kills_for_level(p_level: int) -> int:
 
 ## Most targets ONE damage tick of the golem strikes (slam, kick; trampling: per
 ## second): GOLEM_MAX_TARGETS by level, plus one for every
-## GOLEM_GROWTH_STEPS_PER_TARGET growth steps beyond level 7, and GOLEM_FULL_SIZE_TARGETS
+## GOLEM_GROWTH_TARGETS_PER_STEP for every growth step beyond level 7, and GOLEM_FULL_SIZE_TARGETS
 ## more for the full-grown golem (80 m, user spec 2026-11-19).
 static func max_targets_for(p_level: int, p_growth_steps: int) -> int:
 	var table: Array[int] = Balance.GOLEM_MAX_TARGETS
 	var full_size: bool = p_level >= Balance.GOLEM_MAX_LEVEL and p_growth_steps >= max_growth_steps()
 	return table[clampi(p_level, 0, table.size() - 1)] \
-		+ p_growth_steps / Balance.GOLEM_GROWTH_STEPS_PER_TARGET \
+		+ p_growth_steps * Balance.GOLEM_GROWTH_TARGETS_PER_STEP \
 		+ (Balance.GOLEM_FULL_SIZE_TARGETS if full_size else 0)
 
 

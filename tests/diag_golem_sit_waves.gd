@@ -23,6 +23,8 @@ extends SceneTree
 ##   Welle 1 je Trupp 25 (Sueden und Norden), jede Welle 1,5-mal so gross wie die davor (gerundet), alle 30 s, bis sie
 ##   faellt (hoechstens X15_WAVES Wellen). Dafuer eine 256er-Karte (gleicher Anmarsch: Front 52 m vor ihr, breitere
 ##   Reihen) und KEIN Einheitenlimit fuer den Angreiferstamm (nur in dieser Diagnose).
+##   ... -- mobile_ramp [seed]: wie mobile, aber die ersten RAMP_FLAT_WAVES Wellen bleiben bei GROUP_START je Trupp,
+##   danach wieder die normale Kurve (Welle 5: 25 + 4 x 8 = 57, dann +8 je Welle; Nutzerwunsch 2026-11-19).
 ##   ... -- demon_<modus> [seed] (z. B. demon_mobile): dasselbe mit der Daemonengolemin, ab ihrer ersten moeglichen
 ##   Sitzgroesse (32 m, durch Kills gewachsen wie im Spiel).
 ## Ohne Argument laufen still, mobile, still_fixed, mobile_fixed.
@@ -40,6 +42,8 @@ const WAVES: int = 10
 const WAVE_INTERVAL: float = 30.0
 const GROUP_START: int = 25
 const GROUP_STEP: int = 8
+## mobile_ramp: so viele Wellen bleiben bei GROUP_START, danach die normale Kurve.
+const RAMP_FLAT_WAVES: int = 4
 const REORDER_INTERVAL: float = 6.0
 const AFTER_LAST_WAVE: float = 120.0
 const X15_FACTOR: float = 1.5
@@ -50,6 +54,7 @@ const FRONT_DIST: float = 52.0
 
 var _centre: Vector3 = Vector3(64, 5, 64)
 var _x15: bool = false
+var _ramp: bool = false
 
 
 ## The attackers' tribe in the growing waves: no unit cap (only in this diagnosis).
@@ -99,7 +104,7 @@ func _initialize() -> void:
 	var args: PackedStringArray = OS.get_cmdline_user_args()
 	var modes: Array[String] = ["still", "mobile", "still_fixed", "mobile_fixed"]
 	var base_arg: String = args[0].trim_prefix("demon_") if args.size() > 0 else ""
-	if args.size() > 0 and (base_arg.trim_suffix("_fixed") in ["still", "mobile", "stand"] or base_arg == "mobile_x15"):
+	if args.size() > 0 and (base_arg.trim_suffix("_fixed") in ["still", "mobile", "stand", "mobile_ramp"] or base_arg == "mobile_x15"):
 		modes = [args[0]]
 	var seed_value: int = int(args[1]) if args.size() > 1 and args[1].is_valid_int() else 4711
 	for m in modes:
@@ -110,6 +115,8 @@ func _initialize() -> void:
 func group_size(wave: int) -> int:
 	if _x15:
 		return roundi(float(GROUP_START) * pow(X15_FACTOR, wave - 1))
+	if _ramp and wave <= RAMP_FLAT_WAVES:
+		return GROUP_START
 	return GROUP_START + GROUP_STEP * (wave - 1)
 
 
@@ -189,13 +196,15 @@ func _run(mode: String, seed_value: int = 4711) -> void:
 	var demon: bool = mode.begins_with("demon_")
 	var base_mode: String = mode.trim_prefix("demon_")
 	_x15 = base_mode == "mobile_x15"
+	_ramp = base_mode.trim_suffix("_fixed") == "mobile_ramp"
 	_centre = Vector3(float(X15_MAP) * 0.5, 5, float(X15_MAP) * 0.5) if _x15 else Vector3(64, 5, 64)
 	var waves: int = X15_WAVES if _x15 else WAVES
 	var w: Dictionary = _world()
 	var g: Golem = _golem(w, mode)
 	var fixed: bool = base_mode.ends_with("_fixed")
 	var label: String = {"still": "sitzend, stationaer an", "mobile": "sitzend, stationaer aus (Krebsgang)",
-		"stand": "stehend (Vergleich)", "mobile_x15": "sitzend, stationaer aus, Wellen x1,5"}[base_mode.trim_suffix("_fixed")] \
+		"stand": "stehend (Vergleich)", "mobile_x15": "sitzend, stationaer aus, Wellen x1,5",
+		"mobile_ramp": "sitzend, stationaer aus, Wellen 1-4 je 25, dann +8"}[base_mode.trim_suffix("_fixed")] \
 		+ (", OHNE Wachsen" if fixed else "")
 	var base_steps: int = g.growth_steps
 	var base_level: int = g.level
@@ -230,7 +239,7 @@ func _run(mode: String, seed_value: int = 4711) -> void:
 			enemies.append_array(b)
 			if a.size() + b.size() < 2 * n:
 				print("  (Welle %d: nur %d von %d gespawnt — Einheitenlimit des Stammes)" % [next_wave, a.size() + b.size(), 2 * n])
-			if _x15:
+			if _x15 or _ramp:
 				print("  >> Welle %d bei %.0f s: 2 x %d (vorher noch %d lebend; Golemin %.1f m, %d/%d LP)" % [next_wave, t, n,
 					_alive(enemies) - a.size() - b.size(), g.height_m(), g.health, g.max_health])
 			next_wave += 1
