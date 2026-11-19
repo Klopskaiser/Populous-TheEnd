@@ -1,5 +1,12 @@
 # 10l – Golem: Haltung „Sitzen“ (Plan, 2026-11-17)
 
+> **Seit 2026-11-19:** Die Werte der Sitzangriffe stehen als eigene Zeilen in `Balance.GOLEM_SIT_ATTACKS`
+> (Schaden, Ziele, Abklingzeit, Ausholzeit, Fläche), darauf für alle gleich `GOLEM_SIT_MULT_*`. Die unten
+> genannten Einzelkonstanten (`GOLEM_SIT_*_SHARE`, `_FACTOR`, `GOLEM_SIT_HOP_SLOWER_*`, `GOLEM_TARGET_PERCENT_*` …)
+> gibt es nicht mehr. Ebenfalls seit 2026-11-19: jeder Sitzclip füllt genau die Abklingzeit seines Angriffs, der
+> Aufschlag fällt beim selben Anteil wie im Clip (`GolemSitAnim.SIT_CLIP_LENGTH` / `SIT_CLIP_IMPACT`) — eigene
+> Ausholzeiten gibt es nicht mehr.
+
 ## Krebsgang, Sterben im Sitzen, Zeppelin-Zerstoerer (Nutzervorgaben 2026-11-18, umgesetzt)
 
 - **Sterben im Sitzen** und im Krebsstand: Clip `sit_death` (`Golem.death_clip`), der Sitz-Versatz bleibt.
@@ -7,14 +14,14 @@
   Krebsgang — fuer Bewegungsbefehle, fuer Angriffsbefehle (hinkrebsen, bis ein Sitzangriff trifft, hinsetzen,
   angreifen) und von selbst zu Gegnern in Aggro-Reichweite, wenn sie im Sitzen nichts mehr erreicht.
 - **Ablauf:** `crab_up` -> `crab_idle`/`crab_walk` (Fuesse voran, ueberblendet, Schleifen) -> `crab_down` -> sitzen.
-  Tempo **1/3 des Laufens**; gleiche Wegregeln wie beim Laufen. Am Ziel oder in Reichweite setzt sie sich — **auch auf
+  Tempo **40 % des Laufens** (2026-11-19, vorher 1/3); gleiche Wegregeln wie beim Laufen. Am Ziel oder in Reichweite setzt sie sich — **auch auf
   Gebaeude**; die Terrainregeln des Sitzes gelten weiter, Sitzschaden und Einebnen wie beim Hinsetzen, feindliche
   Gebaeude unter der Sitzflaeche nehmen je Tick den halben Sitzschaden (eigene nichts).
 - **Unterwegs:** Trampelschaden unter allen vier Gliedern, eine gemeinsame Zielobergrenze; kein Sitzschaden, keine
   Sitzangriffe. Kollisions- und Trefferkreis decken den ganzen Koerper (groesser, anfaellig fuer Angriffe).
 - **Zeppelin-Zerstoerer:** Angriff im Krebsstand, Zielbereich hinter dem Kopf, der einzige Weg, aus dem Sitzen ein
   Luftschiff zu zerstoeren (stationaer also gar nicht). Huellentreffer wie der Luftschlag im Stand.
-- **Annahmen (Nutzer kann aendern):** Drehrate im Krebsgang 1/3 der Stand-Drehrate; Aufrichten/Absetzen 1,2 s bei
+- **Annahmen (Nutzer kann aendern):** Drehrate im Krebsgang 1/3 der Stand-Drehrate; Aufrichten/Absetzen 1,2 s (seit 2026-11-19: 1,0 s) bei
   30 m, mit Wurzel der Hoehe; Koerperkreis 1,55 m, Gliederkreis 0,3 m, Zielbereich 1,6 m hinter der Mitte mit 1,0 m
   Radius (je 4-m-Modell); Selbst-Krebsgang nur zu Einheiten (nicht zu Gebaeuden) und zu Luftschiffen; findet sie am
   Ziel keinen Sitzplatz, bleibt sie im Krebsstand und versucht es jede Sekunde neu.
@@ -52,7 +59,7 @@
   sodass bei jedem Absetzen sofort alle Angriffe kamen — jetzt laufen sie beim Krabbeln weiter (`leave_seat`, `cool`).
   "Steht auf und setzt sich gleich wieder": sie stand fuer Feinde knapp ausser Reichweite auf und setzte sich, sobald sie
   am Rand der Zone waren. Jetzt **Geduld** 3 s fuer Einheiten im Suchradius der Sitzangriffe (`GOLEM_CRAB_PATIENCE`,
-  `GolemSitCombat.nothing_for`) und **Tiefe**: hinsetzen erst, wenn das Ziel 20 % der Sitzlaenge in der Zone liegt
+  `GolemSitCombat.nothing_for`) und **Tiefe**: hinsetzen erst, wenn das Ziel 20 % (seit 2026-11-19: 30 %) der Sitzlaenge in der Zone liegt
   (`GOLEM_CRAB_REACH_DEPTH`, `_crab_reaches_deep`). In 8 Gefechten: Aufstehen 54 -> 41, Kurz-Krabbeln unter 2 m 14 -> 1.
 
 - **Spieltest 2026-11-18, Runde 5 (Sitzzonen):** Bein-Schneisen wieder genau bis zur gestreckten Schuhspitze im Clip
@@ -449,3 +456,16 @@ die Aufschlagzeiten oben sind Vorschläge und werden mit den Clips festgelegt.
 - Drehen im Sitzen möglich, langsam, möglichst mit Animation.
 - Aufstehen dauert so lang wie Hinsetzen.
 - Taste `V`.
+
+## Kampfruhe und lückenlose Angriffe (Nutzermeldung 2026-11-19, umgesetzt)
+
+- **Problem:** Zwischen zwei Sitzangriffen kam `sit_idle` durch (Ausblenden der Angriffsebene in den letzten 0,15 s
+  plus bis zu 0,25 s bis zur nächsten Wahl); der Kopf zuckte in die Idle-Bewegung (bis 28° von der Ruhehaltung)
+  und wurde beim nächsten Angriff in 0,1 s wieder herausgerissen.
+- **Lösung:** zwei gefilterte Blend2-Ebenen über dem Grundclip (`rest_legs`: Beine; `rest_arms`: Arme, Nacken,
+  Kopf, Oberkörper) mit der Ruhehaltung (sit_idle, Tempo 0, erstes Bild). An, solange `GolemSitCombat.rest_wanted(ch)`:
+  Angriff ausgeholt, ein Angriff des Kanals erreichte bei der letzten Wahl einen Feind, oder der letzte Angriff
+  liegt weniger als Abklingzeit + `COMBAT_REST_HOLD` (1,5 s) zurück. Ein 0,15 s, aus 0,4 s.
+- Ein frei gewordener Kanal wählt sofort (`_think = 0`), nicht erst im 0,25-s-Takt.
+- Gemessen (`tests/diag_golem_sit_rest_pose.gd`): alle Sitzangriffsclips beginnen und enden auf 0,1° in der
+  Ruhehaltung (alle drei Modelle); im Baum steht der Kopf nach 5 s sit_idle 14° daneben, mit Kampfruhe 0,00°.

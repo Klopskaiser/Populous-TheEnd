@@ -51,7 +51,7 @@ func _row(d: DemonGolem) -> void:
 		d.attack_damage(Golem.ATTACK_SLAM), d.damage_exact(Golem.ATTACK_SLAM), d.slam_radius(),
 		Balance.GOLEM_SLAM_FORWARD * d.limb_factor(),
 		d.attack_damage(Golem.ATTACK_KICK), d.damage_exact(Golem.ATTACK_KICK),
-		Balance.GOLEM_KICK_WIDTH * r, lane.x, lane.y,
+		float(Golem.stand_attack(Golem.ATTACK_KICK)["area"]) * r, lane.x, lane.y,
 		d.attack_damage(Golem.ATTACK_DRUM), d.damage_exact(Golem.ATTACK_DRUM),
 		d.ground_radius(Golem.ATTACK_DRUM), d.trample_damage(),
 		d.attack_damage(Golem.ATTACK_STOMP), d.stomp_radius(),

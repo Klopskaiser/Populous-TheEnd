@@ -207,7 +207,7 @@ func test_damage_starts_at_half_the_golems_and_grows_per_step() -> void:
 	check(d.attack_damage(Golem.ATTACK_SLAM) == 38 and d.attack_damage(Golem.ATTACK_KICK) == 49
 		and d.attack_damage(Golem.ATTACK_DRUM) == 60, "38 / 49 / 60")
 	var sum: int = 0
-	for hit in range(Balance.GOLEM_DRUM_HITS.size()):
+	for hit in range(Golem.DRUM_HITS.size()):
 		sum += d.drum_hit_damage(hit)
 	check(sum == d.attack_damage(Golem.ATTACK_DRUM), "the three hits add up to the drum's damage")
 	check(d.drum_hit_damage(0) == 20 and d.drum_hit_damage(2) == 20, "20 / 20 / 20")
@@ -381,7 +381,7 @@ func test_everything_that_hangs_on_the_size_uses_the_golems_formula() -> void:
 	check_near(d._base_slam_scale(), pow(d.size_factor(), DemonGolem.slam_exponent()), "own slam scale = size ^ 0,47")
 	check_near(d.slam_radius(), full.slam_radius() * Balance.DEMON_GOLEM_WIDTH_FACTOR,
 		"80 m: the 80-m golem's slam, 25 % more (%.1f m)" % d.slam_radius(), 0.01)
-	check_near(d.ground_radius(Golem.ATTACK_DRUM), d.slam_radius() * Balance.GOLEM_DRUM_RADIUS_FACTOR,
+	check_near(d.ground_radius(Golem.ATTACK_DRUM), d.slam_radius() * (float(Golem.stand_attack(Golem.ATTACK_DRUM)["area"]) / Golem.SLAM_RADIUS),
 		"the drum's circle 10 % larger, as the golem's")
 	full.free()
 	_free_world(w)

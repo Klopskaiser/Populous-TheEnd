@@ -12986,3 +12986,65 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
 - **Po-Klatscher wieder schneller (Nutzervorgabe 2026-11-18):** Abklingzeit und Animation je 0,15 s kuerzer beim
   30-m-Golem (1,41 -> 1,26 s, Clip 1,67 -> 1,52 s; `GOLEM_SIT_HOP_SLOWER_COOLDOWN` 1,041, `_ANIM` 1,034). Bei 31,3 m
   1,27 s Abklingzeit und 0,77 s Ausholen (vorher 1,43 / 0,84), bei 80 m 1,72 / 1,03 s.
+
+- **Golem-Balance nach Stufe 7 (Nutzervorgabe 2026-11-19):** Stufe 7 und jede Wachstumsstufe +40 statt +30
+  Lebensobergrenze (`GOLEM_GIANT_MAX_HP`, `GOLEM_GROWTH_MAX_HP`), jede Wachstumsstufe +3 statt +1 LP/s
+  (`GOLEM_GROWTH_REGEN`); bei 80 m +120 statt +100 LP, +10 statt +3 LP/s (`GOLEM_FULL_SIZE_*`) und neu ein Ziel mehr
+  (`GOLEM_FULL_SIZE_TARGETS`, in `Golem.max_targets_for`; Daemonen- und Genesisgolem haben eigene `max_targets`).
+  80 m: 2000 LP, 100 LP/s, 30 Ziele (Tritt 18, Trommeln 37, Sprung 60); vorher 1760 / 51 / 29. Tests in
+  `tests/test_golem.gd` nachgezogen.
+
+- **Angriffstabelle der Golems (Nutzervorgabe 2026-11-19, reiner Umbau, Werte im Spiel unveraendert):**
+  `Balance.GOLEM_STAND_ATTACKS` (slam, kick, drum, stomp, swat) und `Balance.GOLEM_SIT_ATTACKS` (sieben
+  Sitzangriffe, jetzt eigenstaendig statt als Anteile der Standangriffe) mit denselben Spalten: damage + curve,
+  targets, cooldown, windup, (clip), area + grow. Darauf fuer jeden Sitzangriff ohne Ausnahme
+  `GOLEM_SIT_MULT_DAMAGE/_COOLDOWN/_WINDUP/_AREA` (vorher hatte der Handstampfer hinten eigene Faktoren ohne die
+  allgemeinen 0,9; seine Grundwerte sind so umgerechnet, dass im Spiel dasselbe herauskommt). Entfallen sind die
+  Einzelkonstanten `GOLEM_SLAM_RADIUS/_DAMAGE/_WINDUP/_COOLDOWN`, `GOLEM_KICK_WIDTH/_DAMAGE/_WINDUP`,
+  `GOLEM_DRUM_RADIUS_FACTOR/_HIT_DAMAGE`, `GOLEM_STOMP_*` (ausser `_BUILDING_STAGES`), `GOLEM_SWAT_WINDUP`,
+  `GOLEM_TARGET_PERCENT_*`, `Golem.CLIP_LENGTH` und alle Sitz-Anteile/-Faktoren (`GOLEM_SIT_*_SHARE`, `_FACTOR`,
+  `GOLEM_SIT_HOP_SLOWER_*`, `GOLEM_SIT_KICK_WIDTH`). Code: `Golem.stand_attack/clip_length/curve_base/curve_damage/
+  scaled_damage`, `GolemSitCombat.sit_attack/area_of`; Daemonen- und Genesisgolem teilen `DemonGolem.damage_exact_at`
+  (vorher kopiert). Die Sitz-Ausholzeit haengt nicht mehr an der Clip-Geschwindigkeit des Standangriffs, sondern ist
+  eigener Wert x Takt — bei allen Sitzgroessen aller drei Golems rechnerisch gleich (Abspielgrenze greift dort immer).
+  Nachweis: `tests/diag_golem_attack_table.gd` (neu) vor und nach dem Umbau, 198 Zeilen identisch; Sitztests pruefen
+  jetzt Tabelle x Takt x Sitzfaktor und feste Werte bei 31,3 m (`test_every_attack_takes_its_row_of_the_attack_table`).
+
+- **Animation fuellt die Abklingzeit (Nutzervorgabe 2026-11-19):** die Abklingzeit ist der einzige Zeitwert der
+  Angriffstabelle; Spalten windup/clip, `GOLEM_SIT_MULT_WINDUP`, `Golem.clip_rate`/`CLIP_IMPACT` und die
+  1/Wurzel-Regel von `attack_speed` sind entfallen. Jeder Clip spielt mit Cliplaenge / Abklingzeit, der Aufschlag
+  (und der Schaden) faellt beim Anteil seines Aufschlags im Clip. Clipdaten als Modelldaten: `Golem.ATTACK_CLIP`,
+  `Golem.DRUM_HITS` (vorher `Balance.GOLEM_DRUM_HITS`), `GolemSitAnim.SIT_CLIP_LENGTH` (neu, aus LIESMICH_POPULOUS)
+  und `SIT_CLIP_IMPACT`; Kopfstoss im Krebsstand ebenso (`CRAB_HEADBUTT_LENGTH`). Daemonengolem: eigene
+  `attack_speed` entfallen (seine 15 % kommen ueber die Abklingzeit). Folgen laut Vorher/Nachher von
+  `diag_golem_attack_table.gd` (Schaden, Ziele, Abklingzeit, Flaechen unveraendert): kleine Golems im Stand schlagen
+  spaeter auf (frisch: Handschlag 0,35 -> 0,49 s, Tritt/Luftschlag 0,5 -> 0,75 s, Trommeln 0,35 -> 0,37 s), ab
+  mittleren Stufen unveraendert; Sitzangriffe bei 31,3 m: Fuss-Stampfer 0,60 -> 0,54 s, Bein 0,93 -> 0,83 s,
+  Wischer 0,60 -> 0,46 s, Po-Klatscher 0,77 -> 0,64 s, Handschlag seitlich 0,60 -> 0,66 s, Doppelstampfer und
+  Handstampfer 0,46 -> 0,70 / 0,72 s; kein Sitzclip ist mehr laenger als seine Abklingzeit.
+
+- **Kampfruhe im Sitzen (Nutzermeldung 2026-11-19):** zwischen Sitzangriffen spielte `sit_idle` kurz durch (Kopf
+  zuckte). `GolemSitAnim` hat zwei gefilterte Ruhe-Ebenen (Beine; Arme+Nacken+Kopf+Oberkoerper) mit der
+  Ruhehaltung, `GolemSitCombat.rest_wanted` schaltet sie je Kanal (Feind in Reichweite, Angriff laeuft oder liegt
+  weniger als Abklingzeit + `COMBAT_REST_HOLD` 1,5 s zurueck), `Golem._tick_visual` blendet (`update_rest`, ein
+  0,15 s / aus 0,4 s). Frei gewordene Kanaele waehlen sofort neu. Tests
+  `test_sit_combat_rest_holds_the_rest_pose_of_its_limbs`, `test_sit_combat_rest_and_attacks_follow_without_a_gap`;
+  Diagnose `tests/diag_golem_sit_rest_pose.gd` (Posen nur mit echten Frames messbar — der AnimationTree rechnet
+  headless erst im Frame). `test_seated_the_stretch_queues_behind_her_attacks` zaehlt nur noch Angriffe, solange
+  sie streckt (der freie Kanal schlaegt jetzt im Tick zu, in dem das Strecken endet).
+
+- **Befohlener Luftschiffangriff der Golems (Nutzermeldung 2026-11-19):** Rechtsklick auf ein Luftschiff (oder einen
+  Deck-Passagier) ging bei Golems an einen Passagier (`_is_ranged()` true, `_may_target_vehicle` false ->
+  `_nearest_airship_crew`); der Krebsgang hielt ihn fuer eine Einheit am Boden (Reichweite flach gemessen), sie setzte
+  sich und kaempfte darunter weiter. Jetzt: `TribeCommands.order_attack` gibt Golems das Schiff
+  (`Golem.order_attack_airship`, `Golem.airship_of_rider`); sitzend nicht stationaer wird es `_crab_focus`/Krebsgang-Ziel,
+  stehend `_ordered_ship` (Marsch unter das Schiff ohne Radiusgrenze, Vorrang in `_airship_in_reach`, neu gezielt in
+  `_tick_air_chase`, endet bei jedem anderen Befehl, beim Hinsetzen und wenn das Schiff faellt). `Golem.order_attack`
+  leitet Deck-Passagiere ebenso um. Tests `test_crab_ordered_attack_on_an_airship_brings_it_down`,
+  `test_crab_already_walking_takes_the_airship_order_without_sitting`, `test_standing_ordered_attack_on_an_airship_swats_it`.
+
+- **Krebsgang (Nutzervorgabe 2026-11-19):** Tempo 40 % des Laufens (`GOLEM_CRAB_SPEED_SHARE`, vorher 1/3; die Clips
+  passen sich ueber `_crab_visual` an), Tiefenmarge beim Hinsetzen 30 % der Sitzlaenge (`GOLEM_CRAB_REACH_DEPTH`,
+  vorher 20 %). Golem bei 31,3 m: Krabbeln 2,79 m/s (vorher 2,33), Aufrichten und Absetzen je 1,23 s.
+- **Krebsgang Aufrichten/Absetzen (Nutzervorgabe 2026-11-19):** `GOLEM_CRAB_SWITCH_TIME` 1,0 s bei 30 m (vorher 1,2 s),
+  weiter mal Wurzel(Hoehe / 30 m): 31,3 m 1,02 s, 80 m 1,63 s, Daemonengolem 15 % schneller.

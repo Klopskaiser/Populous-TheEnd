@@ -75,27 +75,92 @@ const GOLEM_REACH: float = 3.0
 ## einebnet. Die Wirkflaechen der Angriffe stehen unten.
 const GOLEM_BODY_HALF_WIDTH: float = 0.77625
 const GOLEM_BODY_HALF_DEPTH: float = 0.6075
-## ZWEI ANGRIFFE (Nutzervorgabe 2026-11-15), beide im Takt GOLEM_STRIKE_COOLDOWN:
+## =====================================================================================
+## ANGRIFFSTABELLE DER GOLEMS (Nutzervorgabe 2026-11-19) — fuer ALLE DREI Golems.
+## Jeder Angriff, im Stand wie im Sitzen, hat dieselben Grundwerte. Wie sie mit der Groesse
+## wachsen und wie schnell ein Golem ist (der Daemonengolem 15 % schneller), regelt jeder
+## Golem selbst (Golem und seine Unterklassen). Die Werte gelten fuer den FRISCH BESCHWORENEN
+## Golem (GOLEM_HEIGHT) beim Grundtakt GOLEM_STRIKE_COOLDOWN:
+##   damage    Schaden. Waechst wie die Schadenskurve `curve` dieses Golems (Golem.curve_damage),
+##             im Verhaeltnis zu deren Grundwert: slam / kick / drum = wie Handschlag / Tritt /
+##             Trommeln (Stufenbonus; beim Daemonen- und Genesisgolem ihr Wachstum je Stufe),
+##             trample = Vielfaches des Trampelschadens (aus der Hoehe; beim frischen Golem 1).
+##             Gerundet wird beim Treffer.
+##   targets   Anteil der Grundzielzahl (GOLEM_MAX_TARGETS u. a.) in Prozent, abgerundet, mind. 1.
+##   cooldown  Abklingzeit in Sekunden, von Angriffsbeginn bis zum naechsten Angriff; waechst mit dem
+##             Takt (Golem.strike_cooldown, 3 s bei 80 m). DER EINZIGE ZEITWERT (Nutzervorgabe 2026-11-19):
+##             die Animation fuellt immer genau die Abklingzeit (kein Herumstehen im Kampf), und der
+##             Aufschlag — und mit ihm der Schaden — faellt beim selben Anteil der Abklingzeit wie im
+##             Clip (Laenge und Aufschlag der Clips sind Modelldaten: Golem.ATTACK_CLIP,
+##             GolemSitAnim.SIT_CLIP_LENGTH / SIT_CLIP_IMPACT). Kuerzer = schneller UND oefter.
+##   area      Groesse der Wirkflaeche in Metern; sie waechst nach `grow`:
+##             circle = wie der Kreis des Handschlags (Golem.slam_scale),
+##             lane   = wie die Breite der Tritt-Schneise (Golem.reach_factor),
+##             limb   = wie die Reichweite (Golem.limb_factor),
+##             body   = als Anteil des Koerperradius (Golem.trample_radius),
+##             model  = Meter des 4-m-Modells, wachsen wie das Modell.
+##             Ab GOLEM_BODY_SCALE_HEIGHT (30 m) wachsen alle Flaechen genau mit dem Koerper.
+## Wo eine Flaeche liegt (Abstand vor ihr, Seiten, Laengen am Koerper), steht beim Angriff weiter unten.
 ##
+## STANDANGRIFFE (Nutzervorgaben 2026-11-15/16):
+##   slam   Handschlag, gebueckt: Kreis um die Haende GOLEM_SLAM_FORWARD vor ihr.
+##   kick   Tritt, stehend: Schneise, area = Breite; Laenge GOLEM_KICK_LENGTH, dahinter GOLEM_KICK_BACK_SHARE.
+##   drum   Trommeln, gebueckt: drei Schlaege (Golem.DRUM_HITS), damage = alle drei zusammen; Kreis wie
+##          der Handschlag + 10 % (2,6 x 1,1).
+##   stomp  Sprung, stehend: Kreis um ihre Mitte, area = Anteil des Koerperradius; endet gebueckt.
+##   swat   Luftschlag gegen Luftschiffe: ein Huellentreffer; area = Reichweite (GOLEM_REACH).
+const GOLEM_STAND_ATTACKS: Dictionary = {
+	&"slam":  {damage = 25.0, curve = &"slam",    targets = 100, cooldown = 1.25, area = 2.6,         grow = &"circle"},
+	&"kick":  {damage = 45.0, curve = &"kick",    targets = 60,  cooldown = 1.8,  area = 1.8,         grow = &"lane"},
+	&"drum":  {damage = 42.0, curve = &"drum",    targets = 125, cooldown = 1.8,  area = 2.86,        grow = &"circle"},
+	&"stomp": {damage = 2.0,  curve = &"trample", targets = 200, cooldown = 1.0,  area = 5.0 / 3.0,   grow = &"body"},
+	&"swat":  {damage = 25.0, curve = &"slam",    targets = 100, cooldown = 1.8,  area = GOLEM_REACH, grow = &"limb"},
+}
+## SITZANGRIFFE (Nutzervorgaben 2026-11-17/18, scripts/units/golem_sit_combat.gd) — eigene Angriffe mit
+## eigenen Grundwerten (bis 2026-11-19 als Anteile der Standangriffe gefuehrt). Lage und Form der Zonen
+## stehen bei GOLEM_SIT_FOOT_SIDE ff.
+##   sit_stomp         Fuss-Stampfer (links/rechts, Beine): Kreis um die Landestelle des Schuhs.
+##   sit_kick          Bein strecken (links/rechts, Beine): Schneise, area = Beinbreite (Modellmeter).
+##   sit_wipe          Arm-Wischer (links/rechts, Arme): Kegel neben ihr, area = Reichweite.
+##   sit_hand_slam     Handschlag seitlich (links/rechts, Arme): Kreis neben Oberschenkel und Knie.
+##   sit_hop           Po-Klatscher (gross): Kreis um die Sitzmitte, area = Anteil des Koerperradius.
+##   sit_double_stomp  Doppelstampfer (gross): Kreis um die Fersen.
+##   sit_clap          Handstampfer hinten (gross): Kreis um jede Hand, nur hinter der Sitzmitte.
+## Bei 31,3 m (Golem, Stufe 7 + 8 Schritte) heisst das z. B.: Handschlag seitlich 75 Schaden und 1,7 s
+## Abklingzeit, Wischer 1,3 s, Fuss-Stampfer 1,39 s und Radius 4,45 m, Po-Klatscher 1,27 s.
+const GOLEM_SIT_ATTACKS: Dictionary = {
+	&"sit_stomp":        {damage = 25.0,  curve = &"slam",    targets = 100, cooldown = 1.25,        area = 1.82676,     grow = &"circle"},
+	&"sit_kick":         {damage = 45.0,  curve = &"kick",    targets = 60,  cooldown = 1.8,         area = 0.3,         grow = &"model"},
+	&"sit_wipe":         {damage = 25.0,  curve = &"slam",    targets = 100, cooldown = 1.168938604, area = 3.0,         grow = &"limb"},
+	&"sit_hand_slam":    {damage = 31.25, curve = &"slam",    targets = 100, cooldown = 1.528612020, area = 1.278732,    grow = &"circle"},
+	&"sit_hop":          {damage = 2.0,   curve = &"trample", targets = 200, cooldown = 1.145136364, area = 1.5,         grow = &"body"},
+	&"sit_double_stomp": {damage = 42.0,  curve = &"drum",    targets = 125, cooldown = 1.8,         area = 2.574,       grow = &"circle"},
+	&"sit_clap":         {damage = 42.0,  curve = &"drum",    targets = 125, cooldown = 1.66,        area = 2.463095556, grow = &"circle"},
+}
+## SITZFAKTOREN (Nutzervorgabe 2026-11-17: im Sitzen greift es sich leichter an — schneller wieder,
+## dafuer kleinere Flaechen): gelten fuer JEDEN Sitzangriff, auf die Grundwerte der Tabelle; die
+## Animation folgt der Abklingzeit.
+## area verkleinert Radien, Kegel-Reichweite und die Breite der Bein-Schneise (ihre Laenge haengt an
+## Huefte und Schuhspitze). Die Zielzahl bleibt.
+const GOLEM_SIT_MULT_DAMAGE: float = 1.0
+const GOLEM_SIT_MULT_COOLDOWN: float = 0.9
+const GOLEM_SIT_MULT_AREA: float = 0.9
+## =====================================================================================
 ## HANDSCHLAG (slam): sie bueckt sich und schlaegt beide Haende auf den Boden —
-## Flaechenschaden RUNDHERUM. Kreis mit GOLEM_SLAM_RADIUS um den Punkt
-## GOLEM_SLAM_FORWARD vor ihr (dort treffen die Haende auf: seit 2026-11-16
-## liegen beide Hand-Schuhe dicht nebeneinander auf diesem Punkt, im Clip 0,91 m
-## bei 4 m Modellhoehe, also 1,2 m bei 5,25 m). 2,6 m Radius sind 21 m2, genau die
-## Flaeche des alten Schlags (Hitbox 4x3 + Feld 3x3).
-const GOLEM_SLAM_RADIUS: float = 2.6
+## Flaechenschaden RUNDHERUM. Kreis um den Punkt GOLEM_SLAM_FORWARD vor ihr (dort
+## treffen die Haende auf: seit 2026-11-16 liegen beide Hand-Schuhe dicht nebeneinander
+## auf diesem Punkt, im Clip 0,91 m bei 4 m Modellhoehe, also 1,2 m bei 5,25 m). 2,6 m
+## Radius sind 21 m2, genau die Flaeche des alten Schlags (Hitbox 4x3 + Feld 3x3).
+## Ausholzeit aus der GEBUECKTEN Haltung (Clip `slam_low`); bis 2026-11-16 waren es 0,8 s,
+## das Buecken steckte im Angriff. Jetzt ist das Buecken der Haltungswechsel
+## (GOLEM_STANCE_SWITCH_TIME 0,4 s), aus dem Stand dauert der erste Handschlag also 0,75 s.
+## Abklingzeit 1,35 -> 1,25 s (Nutzer 2026-11-16).
 const GOLEM_SLAM_FORWARD: float = 1.2
-const GOLEM_SLAM_DAMAGE: int = 25
-## Sekunden vom Ansetzen bis zum Aufschlag — aus der GEBUECKTEN Haltung (Clip
-## `slam_low`). Bis 2026-11-16 waren es 0,8 s: das Buecken steckte im Angriff.
-## Jetzt ist das Buecken der Haltungswechsel (GOLEM_STANCE_SWITCH_TIME 0,4 s),
-## aus dem Stand dauert der erste Handschlag also 0,75 s.
-const GOLEM_SLAM_WINDUP: float = 0.35
 ## HALTUNG (Nutzervorgabe 2026-11-15, gebaut 2026-11-16): der Golem steht ODER
 ## ist gebueckt.
 ##   STEHEND  — Tritt, Luftschlag, Laufen.
 ##   GEBUECKT — Handschlag und Trommeln; die kommen von dort schneller (kuerzere
-##              Ausholzeit; der Handschlag kommt alle GOLEM_SLAM_COOLDOWN wieder,
+##              Ausholzeit; der Handschlag kommt alle 1,25 s wieder,
 ##              das Trommeln im normalen Takt), aber er kann so weder laufen
 ##              noch treten.
 ## Der Wechsel dauert GOLEM_STANCE_SWITCH_TIME Sekunden mal Wurzel(Groesse),
@@ -175,97 +240,47 @@ const GOLEM_SIT_HAND_SIDE: float = 0.7
 const GOLEM_SIT_LEVEL_FRONT: float = 0.35
 const GOLEM_SIT_LEVEL_BACK: float = 2.35
 const GOLEM_SIT_LEVEL_HALF_WIDTH: float = 0.8
-## SITZANGRIFFE (Nutzervorgabe 2026-11-17, scripts/units/golem_sit_combat.gd): Beine und
-## Arme greifen unabhaengig an. ZONEN UND WERTE DER SITZANGRIFFE (Nutzervorgaben
-## 2026-11-17). Masse in Metern des 4-m-Modells, gemessen an den Clips
-## (gymnastikschuh, golem_bewegung_niedlich_sitzen.mjs) gegen feet_point (den Ursprung des
-## Modells; die Mitte der ruhenden Schuhe liegt 0,03 davor); das Spiel skaliert sie wie das Modell
-## (model_scale() x size_factor()). Wer einen Clip aendert, misst sie nach.
+## LAGE UND FORM DER SITZANGRIFFE (Nutzervorgaben 2026-11-17/18; ihre Werte stehen in GOLEM_SIT_ATTACKS).
+## Masse in Metern des 4-m-Modells, gemessen an den Clips (gymnastikschuh,
+## golem_bewegung_niedlich_sitzen.mjs) gegen feet_point (den Ursprung des Modells; die Mitte der
+## ruhenden Schuhe liegt 0,03 davor); das Spiel skaliert sie wie das Modell (model_scale() x
+## size_factor()). Wer einen Clip aendert, misst sie nach.
 ## Ruhender Schuh: seine Mitte so weit neben feet_point, seine Ferse so weit dahinter.
 const GOLEM_SIT_FOOT_SIDE: float = 0.245
 const GOLEM_SIT_HEEL_BACK: float = 0.16
-## 1. Fuss-Stampfer (links/rechts): Aufschlag, wo der Schuh im Clip landet (seine Mitte
-## so weit aussen / vorn gegen die Ruhelage); Kreis mit diesem Anteil des Handschlag-
-## Radius ("Bereich mittel", Vorschlag), der nicht hinter die Ferse des ruhenden Schuhs
-## reicht. Schnell wie der gebueckte Handschlag (Ausholen, Abklingzeit), Schaden und
-## Zielzahl wie der Handschlag.
-## Spieltest 2026-11-18 (Nutzer): Kreise 0,5 m weiter hinten und 0,3 m kleiner, gemessen bei 31,3 m — umgerechnet
-## aufs 4-m-Modell (vorher 0,41 vorn und Anteil 0,75; bei 31,3 m jetzt 3,1 m vor den Fuessen, Radius 4,45 m), sie
-## wachsen weiter mit dem Koerper.
+## Fuss-Stampfer: Aufschlag, wo der Schuh im Clip landet (seine Mitte so weit aussen / vorn gegen
+## die Ruhelage); der Kreis reicht nicht hinter die Ferse des ruhenden Schuhs. Spieltest 2026-11-18
+## (Nutzer): 0,5 m weiter hinten und 0,3 m kleiner, gemessen bei 31,3 m (bei 31,3 m 3,1 m vor den
+## Fuessen, Radius 4,45 m).
 const GOLEM_SIT_STOMP_LAND: Vector2 = Vector2(0.18, 0.353)
-const GOLEM_SIT_STOMP_RADIUS_SHARE: float = 0.7026
-## Die Sitzzonen wachsen genau mit dem Koerper (Nutzervorgabe 2026-11-18): ihre Kreise und der
-## Wischer nehmen Handschlag-, Trommel-Radius und Reichweite im Stand, und die wachsen ab
-## GOLEM_BODY_SCALE_HEIGHT (also immer, wenn sie sitzt) mit dem Koerper — GOLEM_BODY_*.
-## 2. Bein strecken (links/rechts): eine Schneise vom Koerper (Hueftgelenk, so weit hinter
-## feet_point) nach vorn bis GOLEM_SIT_KICK_TO (die gestreckte Schuhspitze liegt bei 1,03;
-## seit Spieltest 2026-11-18 knapp darueber: 9,2 m vor den Fuessen bei 31,3 m — vorher 1,6, "muss laenger sein,
-## aber nicht uebertreiben", Nutzer 2026-11-17, dann kurz 1,03 = genau die Schuhspitze), so breit wie das Bein,
-## so weit neben der Mitte.
-## Schaden, Zielzahl, Takt wie der Tritt.
+## Bein strecken: eine Schneise vom Koerper (Hueftgelenk, GOLEM_SIT_KICK_FROM hinter feet_point) nach
+## vorn bis GOLEM_SIT_KICK_TO (die gestreckte Schuhspitze liegt bei 1,03; seit Spieltest 2026-11-18
+## knapp darueber: 9,2 m vor den Fuessen bei 31,3 m), das Bein GOLEM_SIT_KICK_SIDE neben der Mitte;
+## nach innen reicht sie bis zur Mitte, nach aussen bis zur Seite plus halber Beinbreite (area).
 const GOLEM_SIT_KICK_SIDE: float = 0.18
 const GOLEM_SIT_KICK_FROM: float = 1.25
 const GOLEM_SIT_KICK_TO: float = 1.057
-const GOLEM_SIT_KICK_WIDTH: float = 0.3
-## 3. Po-Klatscher (Po-Huepfer): Flaeche, Schaden und Zielzahl wie der Sprung, um die
-## Mitte der Sitzflaeche; Abklingzeit die des Sprungs mal diesem Faktor (minimal langsamer
-## als der Sprung, schneller als der Luftschlag).
-const GOLEM_SIT_HOP_COOLDOWN_FACTOR: float = 1.1
-## Nutzervorgabe 2026-11-18: Abklingzeit und Animation um 0,2 s laenger (beim 30-m-Golem), der
-## Kreis 10 % kleiner. Die Faktoren sind beim normalen Golem mit 30 m gerechnet (Abklingzeit
-## 1,21 -> 1,41 s, Animation 1,47 -> 1,67 s, also Ausholen 0,73 -> 0,83 s) und gelten fuer
-## jede Groesse gleich. Der Po-Klatscher braucht kein Anvisieren: er kommt auch, waehrend sie
-## sich dreht (wie der Sprung im Stand).
-## Nutzervorgabe 2026-11-18 (spaeter): wieder 0,15 s schneller, beides beim 30-m-Golem — Abklingzeit
-## 1,41 -> 1,26 s, Animation 1,67 -> 1,52 s (Ausholen 0,83 -> 0,76 s); bei 31,3 m 1,28 s und 0,77 s.
-const GOLEM_SIT_HOP_SLOWER_COOLDOWN: float = (1.21 * 1.165 - 0.15) / 1.21   # 1,041 (vorher 1,165)
-const GOLEM_SIT_HOP_SLOWER_ANIM: float = (1.47 * 1.136 - 0.15) / 1.47       # 1,034 (vorher 1,136)
-const GOLEM_SIT_HOP_AREA_FACTOR: float = 0.9
-## 4. Doppelstampfer: Kreis des Trommelns um eine Stelle so weit vor feet_point (negativ:
-## dahinter; Nutzervorgabe 2026-11-17: "geht zu weit nach vorn, weiter nach hinten" —
-## vorher 0,30 vor, an der Landestelle der Schuhe), mit diesem Anteil des Radius;
-## Zielzahl, Takt und Schaden wie das Trommeln.
+## Po-Klatscher: um die Mitte der Sitzflaeche. Er braucht kein Anvisieren: er kommt auch, waehrend
+## sie sich dreht (wie der Sprung im Stand).
+## Doppelstampfer: Kreis um eine Stelle so weit vor feet_point (negativ: dahinter; Nutzervorgabe
+## 2026-11-17: "geht zu weit nach vorn, weiter nach hinten" — vorher 0,30 vor).
 const GOLEM_SIT_DOUBLE_STOMP_LAND: float = -0.10
-const GOLEM_SIT_DOUBLE_STOMP_AREA_FACTOR: float = 0.9
-## 5. Arm-Wischer (links/rechts): ein Kegel neben ihr auf seiner Seite, von der Mitte der
-## Sitzflaeche aus, Reichweite reach(), von so viel Grad hinter der Querrichtung (etwas
-## hinter den Ruecken) nach vorn bis zum Becken: hoechstens GOLEM_SIT_WIPE_FRONT (Meter
-## des 4-m-Modells) vor der Sitzmitte (Nutzerhinweis 2026-11-17: vorher reichte er bis zu
-## den Beinen). Schaden und Zielzahl wie der Luftschlag, schnell wie der gebueckte Handschlag.
+## Arm-Wischer: ein Kegel neben ihr auf seiner Seite, von der Mitte der Sitzflaeche aus, von
+## GOLEM_SIT_WIPE_BACK_DEG hinter der Querrichtung (etwas hinter den Ruecken) nach vorn bis zum
+## Becken: hoechstens GOLEM_SIT_WIPE_FRONT (Meter des 4-m-Modells) vor der Sitzmitte (Nutzerhinweis
+## 2026-11-17: vorher reichte er bis zu den Beinen), die vordere Grenze um GOLEM_SIT_WIPE_FRONT_DEG
+## nach vorn geneigt (Nutzervorgabe 2026-11-18: je Meter nach aussen tan(5 Grad) weiter vorn).
 const GOLEM_SIT_WIPE_FRONT: float = 0.2
-## ... und die vordere Grenze ist um so viel Grad nach vorn geneigt (Nutzervorgabe 2026-11-18:
-## "kann 5 Grad weiter nach vorn reichen"): je Meter nach aussen tan(5 Grad) weiter vorn.
 const GOLEM_SIT_WIPE_FRONT_DEG: float = 5.0
 const GOLEM_SIT_WIPE_BACK_DEG: float = 30.0
-## 7. Handschlag seitlich (Nutzervorgabe 2026-11-18, Clips sit_hand_slam_l/_r): die Schuh-Hand schlaegt
-## aussen neben Oberschenkel und Knie auf — in den blinden Fleck vor dem Wischer und hinter dem
-## Doppelstampfer. Aufschlagstelle (Sohlenmitte) seitlich / vor feet_point in Metern des 4-m-Modells,
-## an allen drei GLB gemessen (Golem 0,929 / -0,721, Daemon 0,932 / -0,663, Genesis 0,923 / -0,707);
-## Kreis mit diesem Anteil des Fuss-Stampfer-Radius (Nutzervorgabe: 2/3, dann 5 % groesser).
+## Handschlag seitlich (Clips sit_hand_slam_l/_r): die Schuh-Hand schlaegt aussen neben Oberschenkel
+## und Knie auf — in den blinden Fleck vor dem Wischer und hinter dem Doppelstampfer. Aufschlagstelle
+## (Sohlenmitte) seitlich / vor feet_point, an allen drei GLB gemessen (Golem 0,929 / -0,721, Daemon
+## 0,932 / -0,663, Genesis 0,923 / -0,707).
 const GOLEM_SIT_HAND_SLAM_LAND: Vector2 = Vector2(0.92, -0.70)
-const GOLEM_SIT_HAND_SLAM_RADIUS_SHARE: float = 2.0 / 3.0 * 1.05
-## Nutzervorgabe 2026-11-18 (Werte des Golems bei 31,3 m): Handschlag seitlich 75 Schaden (der Handschlag macht
-## dort 60, also das 1,25-Fache) und 1,7 s Abklingzeit; der Arm-Wischer 1,3 s. Die Abklingzeit beider war dort
-## 1,39015 s (Takt des gebueckten Handschlags x GOLEM_SIT_COOLDOWN_FACTOR); die Anteile darauf wachsen mit der
-## Groesse und gelten fuer alle drei Golems gleich.
-const GOLEM_SIT_HAND_SLAM_DAMAGE_FACTOR: float = 1.25
-const GOLEM_SIT_HAND_SLAM_COOLDOWN_SHARE: float = 1.7 / 1.39015
-const GOLEM_SIT_WIPE_COOLDOWN_SHARE: float = 1.3 / 1.39015
-## 6. Handstampfer hinten (Doppelklatscher): Kreis des Trommelns um jede Hand, aber nur
-## hinter der Mitte der Sitzflaeche (Rueckenbereich); Schaden und Zielzahl wie das
-## Trommeln, Abklingzeit die des Trommelns mal diesem Anteil (zwischen den schnellen
-## Einzelangriffen und dem Trommeln; Nutzerentscheidung).
-const GOLEM_SIT_CLAP_COOLDOWN_SHARE: float = 0.83
-## Radius seiner Kreise: dieser Anteil des Trommel-Radius (Nutzervorgabe 2026-11-17: um 15 %
-## kleiner).
-## Spieltest 2026-11-18 (Nutzer): Radius 6 m bei 31,3 m (vorher 0,85 = 6,6 m); waechst mit dem Koerper.
-const GOLEM_SIT_CLAP_AREA_FACTOR: float = 0.7751
-## Im Sitzen greift es sich leichter an (Nutzervorgabe 2026-11-17): alle Sitzangriffe ausser
-## dem Handstampfer hinten kommen um diesen Faktor schneller wieder (Abklingzeit x 0,9) und
-## haben dafuer um diesen Faktor kleinere Zielbereiche (Radien, Kegel-Reichweite, Breite der
-## Bein-Schneisen; deren Laenge haengt an Huefte und Schuhspitze). Die Zielzahl bleibt.
-const GOLEM_SIT_COOLDOWN_FACTOR: float = 0.9
-const GOLEM_SIT_AREA_FACTOR: float = 0.9
+## Handstampfer hinten: Kreis um jede Hand (GOLEM_SIT_HAND_BACK / _SIDE), nur hinter der Mitte der
+## Sitzflaeche (Rueckenbereich).
+##
 ## Die grossen Sitzangriffe (Po-Huepfer, Doppelklatscher, Doppelstampfer) sind
 ## Flaechenangriffe: sie kommen erst in Frage, wenn sie mindestens so viele Feinde
 ## treffen (Vorschlag).
@@ -306,11 +321,12 @@ const GOLEM_SIT_TURN_SAMPLE_DEG: float = 10.0
 ## KREBSGANG (Nutzervorgabe 2026-11-18, plans/10l_golem_sitting.md): ist der Schalter "Stationaer" aus,
 ## krabbelt eine sitzende Golemin auf allen vieren (Fuesse voran) — fuer Bewegungs- und Angriffsbefehle
 ## und von selbst zu Feinden im Aggro-Radius, die im Sitzen nichts erreicht. Tempo GOLEM_CRAB_SPEED_SHARE
-## des Laufens (Nutzer: ein Drittel), Drehrate wie im Sitzen (Nutzervorgabe 2026-11-18; vorher ein Drittel der Stand-Drehrate).
+## des Laufens (Nutzer: ein Drittel; 2026-11-19: 40 %), Drehrate wie im Sitzen (Nutzervorgabe 2026-11-18; vorher ein Drittel der Stand-Drehrate).
 ## Aufrichten (crab_up) und Absetzen (crab_down) dauern je GOLEM_CRAB_SWITCH_TIME bei
-## GOLEM_SIT_REF_HEIGHT, mal Wurzel(Hoehe / GOLEM_SIT_REF_HEIGHT) wie das Hinsetzen (Annahme; Clips 0,6 s).
-const GOLEM_CRAB_SPEED_SHARE: float = 1.0 / 3.0
-const GOLEM_CRAB_SWITCH_TIME: float = 1.2
+## GOLEM_SIT_REF_HEIGHT, mal Wurzel(Hoehe / GOLEM_SIT_REF_HEIGHT) wie das Hinsetzen (Clips 0,6 s; Nutzervorgabe
+## 2026-11-19: 1,0 s bei 30 m, vorher 1,2 s).
+const GOLEM_CRAB_SPEED_SHARE: float = 0.4
+const GOLEM_CRAB_SWITCH_TIME: float = 1.0
 ## Koerper im Krebsstand (Meter des 4-m-Modells, gemessen von der Sitzmitte): Kollisions- und
 ## Trefferkreis mit GOLEM_CRAB_BODY_RADIUS (deckt Schuhspitzen und Haende ab; Nutzer: groesser als im
 ## Stand, anfaellig fuer Angriffe). Fuesse GOLEM_CRAB_FOOT_FORWARD weiter vorn, Haende
@@ -331,8 +347,8 @@ const GOLEM_CRAB_IDLE_SIT_TIME: float = 4.0
 const GOLEM_CRAB_PATIENCE: float = 3.0
 ## Krabbelt sie zu einer Einheit, setzt sie sich erst, wenn diese GOLEM_CRAB_REACH_DEPTH der Sitzlaenge
 ## (Fuesse bis Sitzmitte) innerhalb einer Zone liegt — nicht schon am Rand (sonst war sie nach einem Schritt oder
-## einem Tritt wieder draussen und sie stand gleich wieder auf; Spieltest 2026-11-18).
-const GOLEM_CRAB_REACH_DEPTH: float = 0.2
+## einem Tritt wieder draussen und sie stand gleich wieder auf; Spieltest 2026-11-18). Nutzervorgabe 2026-11-19: 30 % statt 20 %.
+const GOLEM_CRAB_REACH_DEPTH: float = 0.3
 ## Im Krebsgang krabbelt sie auch rueckwaerts (Kopf voran, Nutzervorgabe 2026-11-18; beim Laufen nicht), gleich
 ## schnell: sie nimmt die Richtung, die weniger Drehung kostet — ausser ihr Ziel verlangt eine bestimmte
 ## Blickrichtung (Luftschiff: Ruecken zum Schiff).
@@ -402,29 +418,24 @@ const GOLEM_STRUCTURE_VALUE: float = 30.0
 ## noch an Lebenspunkten hat — unabhaengig davon, wie viel Schaden es wirklich nimmt (GOLEM_BUILDING_DAMAGE_SHARE).
 const GOLEM_BUILDING_VALUE_SHARE: float = 0.5
 const GOLEM_STANCE_PLAN_ATTACKS: int = 3
-## Abklingzeit des Handschlags bei Startgroesse (1,35 -> 1,25 s, Nutzer
-## 2026-11-16). Sie waechst mit der Groesse im selben Verhaeltnis wie der normale
-## Takt (GOLEM_STRIKE_COOLDOWN 1,8 s -> 4 s bei 100 m, der Handschlag also 2,78 s).
-const GOLEM_SLAM_COOLDOWN: float = 1.25
 ## TRITT (kick): ein Fussballtritt nach vorn — Schaden in einer SCHNEISE:
-## GOLEM_KICK_WIDTH breit, von der Riesin GOLEM_KICK_LENGTH nach vorn (9 m2,
+## so breit wie in der Angriffstabelle, von der Riesin GOLEM_KICK_LENGTH nach vorn (9 m2,
 ## weniger als die Haelfte des Handschlags). Dafuer mehr Schaden und VIEL
 ## Rueckstoss: JEDER Ueberlebende fliegt in Trittrichtung davon.
 ## 2026-11-15 (Nutzer): die Schneise reicht auch nach HINTEN — das Bein holt aus.
 ## Vorn 15 % kuerzer (5,0 -> 4,25 m), dafuer GOLEM_KICK_BACK_SHARE (70 %) der
 ## vorderen Laenge auch hinter ihr: 1,8 x 7,2 m = 13 m2. Wer hinten getroffen
 ## wird, fliegt nach hinten weg.
-const GOLEM_KICK_WIDTH: float = 1.8
 const GOLEM_KICK_LENGTH: float = 4.25
 const GOLEM_KICK_BACK_SHARE: float = 0.7
-const GOLEM_KICK_DAMAGE: int = 45
-const GOLEM_KICK_WINDUP: float = 0.5
 ## Wurf des Tritts (waagerecht / senkrecht, m/s): dreimal so weit wie der Wurf
 ## des Handschlags (GOLEM_LIFT_PUSH). Wer geworfen wird, entscheidet seit
 ## 2026-11-16 die Groesse (GOLEM_KNOCK_*).
 const GOLEM_KICK_PUSH: float = 9.0
 const GOLEM_KICK_UP: float = 5.5
-## 2,0 -> 1,8 s (Nutzervorgabe 2026-09-09). Gilt fuer beide Angriffe.
+## GRUNDTAKT: der Takt beim Grundwert (2,0 -> 1,8 s, Nutzervorgabe 2026-09-09). Die Abklingzeiten
+## und Ausholzeiten der Angriffstabelle gelten bei diesem Takt; mit der Groesse waechst er bis
+## GOLEM_STRIKE_COOLDOWN_MAX (Golem.strike_cooldown) und alle Zeiten im selben Verhaeltnis.
 const GOLEM_STRIKE_COOLDOWN: float = 1.8
 ## RUECKSTOSS NACH GROESSE (Nutzervorgabe 2026-11-16, ersetzt "Tritt wirft jeden,
 ## Handschlag 30 % Hochwirbeln / 30 % Rollen"): ob ein Ueberlebender geworfen oder
@@ -486,16 +497,19 @@ const GOLEM_LIFE_PER_KILL: float = 6.0
 ## GOLEM_GIANT_MAX_HP ueber die 1000, jede Wachstumsstufe danach um GOLEM_GROWTH_MAX_HP (30 statt 18) und
 ## die Dauerheilung um GOLEM_GROWTH_REGEN; bei 80 m kommen GOLEM_FULL_SIZE_MAX_HP dazu (und weiter
 ## GOLEM_FULL_SIZE_REGEN). 80 m: 1000 + 30 + 21 x 30 + 100 = 1760 LP, 21 + 21 + 3 = 45 LP/s.
+## Nutzervorgabe 2026-11-19: Stufe 7 und jede Wachstumsstufe +40 LP (statt 30), jede Wachstumsstufe +3 LP/s
+## (statt 1); bei 80 m +120 LP (statt 100) und +10 LP/s (statt 3) und ein Ziel mehr (GOLEM_FULL_SIZE_TARGETS).
+## 80 m: 1000 + 40 + 21 x 40 + 120 = 2000 LP, 6 + 21 + 21 x 3 + 10 = 100 LP/s, 8 + 21 + 1 = 30 Ziele.
 const GOLEM_HP_PER_KILL: int = 15
 const GOLEM_MAX_HP_PER_KILL: int = 5
 const GOLEM_MAX_HP_CAP: int = 1000
-const GOLEM_GIANT_MAX_HP: int = 30
-const GOLEM_GROWTH_MAX_HP: int = 30
-const GOLEM_GROWTH_REGEN: float = 1.0
-const GOLEM_FULL_SIZE_MAX_HP: int = 100
+const GOLEM_GIANT_MAX_HP: int = 40
+const GOLEM_GROWTH_MAX_HP: int = 40
+const GOLEM_GROWTH_REGEN: float = 3.0
+const GOLEM_FULL_SIZE_MAX_HP: int = 120
 ## Der AUSGEWACHSENE Golem (80 m) heilt noch einmal so viel Leben je Sekunde
-## mehr (Nutzer 2026-11-16: 21 -> 24).
-const GOLEM_FULL_SIZE_REGEN: float = 3.0
+## mehr (Nutzer 2026-11-16: 21 -> 24; 2026-11-19: 10 statt 3).
+const GOLEM_FULL_SIZE_REGEN: float = 10.0
 ## Nutzervorgabe 2026-11-18: jeder Golem (alle drei) hat von Anfang an GOLEM_BASE_REGEN Leben je Sekunde
 ## Dauerheilung, auch im Kampf — die Stufenboni kommen darauf. Die Erholung gewoehnlicher Einheiten
 ## (REGEN_RATE nach REGEN_DELAY ohne Kampf) gilt fuer Golems dafuer nicht mehr (Golem._tick_regen).
@@ -515,7 +529,7 @@ const GOLEM_BASE_REGEN: float = 6.0
 ## Tempo: GOLEM_SPEED * Wurzel(Groessenfaktor) — die Schritte werden laenger, die
 ## Schrittfolge etwas ruhiger (Stufe 6: 6,05 m/s).
 ## DIE ENDBONI gibt es ab Stufe GOLEM_FINAL_BONUS_LEVEL (6): keine
-## Lebenszeitbegrenzung mehr, und er jagt Luftschiffe (s. GOLEM_SWAT_WINDUP).
+## Lebenszeitbegrenzung mehr, und er jagt Luftschiffe (Luftschlag swat, s. GOLEM_STAND_ATTACKS).
 ##
 ## STUFE 7, der GIGANT (Nutzervorgabe 2026-11-15, 2026-11-17 neu): 20 weitere
 ## Kills nach Stufe 6, also 62 insgesamt. Der Koerper waechst noch einmal um
@@ -544,17 +558,17 @@ const GOLEM_MAX_TARGETS: Array[int] = [5, 6, 6, 6, 7, 8, 8, 8]
 ## ZIELZAHL JE ANGRIFF (Nutzer 2026-11-16, ersetzt GOLEM_KICK_TARGETS_LESS "der
 ## Tritt trifft eines weniger"): GOLEM_MAX_TARGETS ist die GRUNDZAHL. Jeder
 ## Angriff trifft einen Anteil davon (Prozent, ABGERUNDET, mindestens 1):
+## (Spalte targets der Angriffstabelle):
 ##   Handschlag und Trampeln  100 %   (Stufe 0-7: 5 / 6 / 6 / 6 / 7 / 8 / 8 / 8)
 ##   Tritt                     60 %   (40 % weniger:  3 / 3 / 3 / 3 / 4 / 4 / 4 / 4)
 ##   Trommeln                 125 %   (je Schlag:     6 / 7 / 7 / 7 / 8 / 10 / 10 / 10)
 ##   Sprung                   200 %   (              10 / 12 / 12 / 12 / 14 / 16 / 16 / 16;
 ##                                     doppelt so viele wie das Trampeln, Nutzer 2026-11-16 —
 ##                                     vorher 150 %)
-## Golem.max_targets_of(). Bei 80 m (Grundzahl 29): 17 / 36 / 58.
-const GOLEM_TARGET_PERCENT_KICK: int = 60
-const GOLEM_TARGET_PERCENT_DRUM: int = 125
-const GOLEM_TARGET_PERCENT_STOMP: int = 200
+## Golem.max_targets_of(). Bei 80 m (Grundzahl 30, s. GOLEM_FULL_SIZE_TARGETS): 18 / 37 / 60.
 const GOLEM_GROWTH_STEPS_PER_TARGET: int = 1
+## Der ausgewachsene Golem (80 m) trifft so viele Ziele mehr (Nutzervorgabe 2026-11-19: 29 -> 30).
+const GOLEM_FULL_SIZE_TARGETS: int = 1
 const GOLEM_MAX_LEVEL: int = 7
 const GOLEM_FINAL_BONUS_LEVEL: int = 6
 const GOLEM_TOP_LEVEL_GROWTH: float = 0.2
@@ -615,10 +629,10 @@ const GOLEM_SLOT_MARGIN: float = 0.5
 ##   Tempo     x (Groesse / Stufe-7-Groesse) ^ GOLEM_GROWTH_SPEED_EXPONENT (je
 ##             Schritt 0,65 %; frueher 0,25 % je 3 %).
 ## Dieselben Potenzen gelten fuer Daemonen- und Genesisgolem ueber die ganze Groesse.
-## Je Schritt +GOLEM_GROWTH_MAX_HP Lebensobergrenze und +1 Ziel; Dauerheilung und
-## Schaden steigen nicht mehr. Schluss ist bei GOLEM_MAX_HEIGHT (80 m, Nutzer
+## Je Schritt +GOLEM_GROWTH_MAX_HP Lebensobergrenze, +GOLEM_GROWTH_REGEN Dauerheilung
+## (seit 2026-11-18) und +1 Ziel; der Schaden steigt nicht mehr. Schluss ist bei GOLEM_MAX_HEIGHT (80 m, Nutzer
 ## 2026-11-17, vorher 100 m) nach 21 Schritten = 420 Kills ueber Stufe 7 (482
-## insgesamt); dort gibt es die Haertung und +3 Leben/s (s. is_full_size).
+## insgesamt); dort gibt es die Haertung, +10 Leben/s, +120 LP und ein Ziel mehr (s. is_full_size).
 ## Nutzervorgabe 2026-11-18: ab Stufe 7 kostet jede Wachstumsstufe GOLEM_GROWTH_KILLS_RISE mehr Kills als
 ## die davor, abgerundet — ausgehend von den 20 Kills der Stufe 7 (GOLEM_GROWTH_KILLS): 21, 22, 23, 24, 25, 27 ...
 ## 73; Sitzgroesse 31,3 m nach 264 Kills, 80 m nach 912 (vorher je Stufe 20: 222 / 482; zuerst 16 %: 371 / 2836).
@@ -786,10 +800,10 @@ const GOLEM_ATTACK_ALIGN_DEG: float = 25.0
 const GOLEM_TURN_MIN_SPEED_SHARE: float = 0.2
 ## TROMMELN (Nutzer 2026-11-15): eine Variante des Handschlags — drei Schlaege
 ## auf den Boden, linke Hand, rechte Hand, linke Hand (Clip "drum_low", Aufschlaege
-## GOLEM_DRUM_HITS Sekunden nach Beginn; aus dem Stand kommt das Buecken davor).
+## Golem.DRUM_HITS im Clip; aus dem Stand kommt das Buecken davor).
 ## Flaeche wie der Handschlag. Werte seit 2026-11-16 (Nutzer; vorher 40 Schaden
 ## gesamt, 1,4-fache Abklingzeit des Handschlags):
-##   JEDER Schlag macht GOLEM_DRUM_HIT_DAMAGE (14, zusammen 42);
+##   JEDER Schlag macht ein Drittel des Tabellenschadens (14, zusammen 42);
 ##   je Stufe bekommt jeder Schlag GOLEM_DRUM_LEVEL_DAMAGE_PER_HIT (+1) dazu,
 ##   ZUSAETZLICH zum normalen Stufenbonus (GOLEM_LEVEL_DAMAGE, +5 fuer den ganzen
 ##   Angriff, auf die drei Schlaege verteilt) — also +8 je Stufe insgesamt
@@ -801,20 +815,16 @@ const GOLEM_TURN_MIN_SPEED_SHARE: float = 0.2
 ## Fahrzeugtreffer gibt es nur beim LETZTEN der drei Schlaege.
 ## RADIUS DES TROMMELNS (Nutzer 2026-11-16): 10 % groesser als der Kreis des
 ## Handschlags, auf allen Stufen (Golem.ground_radius) — Mittelpunkt wie dort.
-const GOLEM_DRUM_RADIUS_FACTOR: float = 1.1
-const GOLEM_DRUM_HIT_DAMAGE: int = 14
+## Die Aufschlaege im Clip stehen in Golem.DRUM_HITS (Modelldaten).
 const GOLEM_DRUM_LEVEL_DAMAGE_PER_HIT: int = 1
-const GOLEM_DRUM_HITS: Array[float] = [0.35, 0.8, 1.25]   # aus der gebueckten Haltung (Clip drum_low)
 ## SPRUNG (stomp, Nutzer 2026-11-16): sie springt auf der Stelle und landet auf
 ## beiden Fuessen — Schaden RUNDHERUM UM SIE SELBST. Nur aus dem Stand.
-##   Flaeche:  Kreis um ihre Mitte, der Trampelradius (Koerper) mal
-##             GOLEM_STOMP_RADIUS_FACTOR (zwei Drittel groesser: Stufe 0 1,29 m,
-##             Stufe 6 3,87 m, Stufe 7 5,80 m)
-##   Schaden:  GOLEM_STOMP_TRAMPLE_MULT mal der Trampelschaden (aus der Groesse,
-##             kein Stufenbonus: Stufe 0-2 2, Stufe 3-5 4, Stufe 6 6, Stufe 7 8,
-##             100 m 40) — bei der LANDUNG, GOLEM_STOMP_WINDUP nach dem Ansetzen
+##   Flaeche:  Kreis um ihre Mitte, der Trampelradius (Koerper) mal 5/3 (zwei
+##             Drittel groesser: Stufe 0 1,29 m, Stufe 6 3,87 m, Stufe 7 5,80 m)
+##   Schaden:  2 x der Trampelschaden (aus der Groesse, kein Stufenbonus: Stufe 0-2
+##             2, Stufe 3-5 4, Stufe 6 6, Stufe 7 8, 80 m 50) — bei der LANDUNG
 ##   Ziele:    doppelt so viele wie die Grundzahl, also wie das Trampeln
-##             (GOLEM_TARGET_PERCENT_STOMP, 2026-11-16; vorher die Haelfte mehr)
+##             (2026-11-16; vorher die Haelfte mehr)
 ##   Gebaeude: jedes in der Flaeche verliert GOLEM_STOMP_BUILDING_STAGES Stufen
 ##             (wie bei den anderen Angriffen; 0 = der Sprung laesst Gebaeude
 ##             stehen), der Gigant trifft auch Fahrzeuge. Niemand wird geworfen.
@@ -824,14 +834,9 @@ const GOLEM_DRUM_HITS: Array[float] = [0.35, 0.8, 1.25]   # aus der gebueckten H
 ## richtet sich sofort wieder auf; das kostet die normale Zeit eines
 ## Haltungswechsels (Clip "crouch_up") und gehoert ebenfalls noch zum Angriff
 ## (die Mindestzeit der Haltung gilt dafuer nicht).
-## Abklingzeit GOLEM_STOMP_COOLDOWN bei Startgroesse: genau die Laenge des Clips —
-## wer unten bleibt, schlaegt gleich nach dem Abfangen weiter. Sie waechst mit der
-## Groesse wie der normale Takt.
-const GOLEM_STOMP_RADIUS_FACTOR: float = 5.0 / 3.0
-const GOLEM_STOMP_TRAMPLE_MULT: int = 2
-## (2026-11-16, Nutzer: 0,2 s schneller — vorher Landung 0,8 s, Abklingzeit 1,2 s.)
-const GOLEM_STOMP_WINDUP: float = 0.6
-const GOLEM_STOMP_COOLDOWN: float = 1.0
+## Abklingzeit bei Startgroesse: genau die Laenge des Clips — wer unten bleibt, schlaegt
+## gleich nach dem Abfangen weiter (2026-11-16, Nutzer: 0,2 s schneller — vorher Landung
+## 0,8 s, Abklingzeit 1,2 s).
 const GOLEM_STOMP_BUILDING_STAGES: int = 1
 ## LUFTSCHLAG NACH HOEHE (Nutzer 2026-11-15): Luftschiffe fliegen auf 10 m, schon
 ## der Stufe-6-Golem ist 14 m gross — ein Schlag nach OBEN passt dann nicht mehr.
@@ -859,9 +864,8 @@ const GOLEM_TRAMPLE_MIN_SPEED: float = 0.5
 ## AUF DER HOECHSTEN STUFE schlaegt der Golem auch nach LUFTSCHIFFEN (Nutzervorgabe
 ## 2026-11-15): steht ein bemanntes feindliches Luftschiff in seiner Reichweite
 ## (flach gemessen, dieselbe wie am Boden), holt er mit einem eigenen Schlag nach
-## oben aus (Clip `swat`, Aufschlag nach GOLEM_SWAT_WINDUP). Jeder Treffer ist EIN
+## oben aus (Clip `swat`, Werte in der Angriffstabelle). Jeder Treffer ist EIN
 ## Huellentreffer wie beim Katapult — AIRSHIP_HULL_HITS (2) zerstoeren das Schiff.
-const GOLEM_SWAT_WINDUP: float = 0.5
 ## ...und er VERFOLGT sie: steht er sonst untaetig herum, laeuft er einem bemannten
 ## feindlichen Luftschiff im Umkreis GOLEM_AIR_CHASE_RADIUS nach — aber nur, wenn
 ## er eine Stelle in Schlagweite des Schiffs zu Fuss erreichen kann (gleiche

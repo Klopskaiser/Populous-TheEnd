@@ -181,7 +181,7 @@ func test_slam_hits_a_circle_around_the_golem_and_spares_friends() -> void:
 		u.max_health = 1000
 		u.health = 1000
 	g._smash()
-	var hit: int = 1000 - Balance.GOLEM_SLAM_DAMAGE
+	var hit: int = 1000 - int(Golem.stand_attack(Golem.ATTACK_SLAM)["damage"])
 	check(in_front.health == hit, "in front of the golem takes GOLEM_SLAM_DAMAGE")
 	check(beside.health == hit, "beside the golem counts (damage all AROUND)")
 	check(behind.health == hit, "behind the golem counts too")
@@ -220,7 +220,7 @@ func test_kick_hits_a_lane_ahead_and_behind_and_throws_everyone() -> void:
 		u.max_health = 1000
 		u.health = 1000
 	g._kick()
-	var hit: int = 1000 - Balance.GOLEM_KICK_DAMAGE
+	var hit: int = 1000 - int(Golem.stand_attack(Golem.ATTACK_KICK)["damage"])
 	check(near.health == hit and far.health == hit, "the whole lane ahead takes GOLEM_KICK_DAMAGE")
 	check(edge.health == hit, "0,8 m aside is inside the 1,8-m-wide lane")
 	# (The kick strikes three targets at level 0: the one behind her gets a kick of
@@ -253,10 +253,10 @@ func test_kick_hits_a_lane_ahead_and_behind_and_throws_everyone() -> void:
 		and not Golem.in_kick_lane(-back - 0.01, 0.0),
 		"the lane predicate has the documented edges")
 	# User spec: more damage and knockback, but less area than the slam.
-	check(Balance.GOLEM_KICK_DAMAGE > Balance.GOLEM_SLAM_DAMAGE, "the kick hurts more than the slam")
+	check(int(Golem.stand_attack(Golem.ATTACK_KICK)["damage"]) > int(Golem.stand_attack(Golem.ATTACK_SLAM)["damage"]), "the kick hurts more than the slam")
 	check(Balance.GOLEM_KICK_PUSH > Balance.GOLEM_LIFT_PUSH * 2.0, "and throws much further")
-	var lane_area: float = Balance.GOLEM_KICK_WIDTH * (len + back)
-	var slam_area: float = PI * Balance.GOLEM_SLAM_RADIUS * Balance.GOLEM_SLAM_RADIUS
+	var lane_area: float = float(Golem.stand_attack(Golem.ATTACK_KICK)["area"]) * (len + back)
+	var slam_area: float = PI * Golem.SLAM_RADIUS * Golem.SLAM_RADIUS
 	check(lane_area < slam_area, "but still covers less area than the slam (%.1f vs %.1f m2)"
 		% [lane_area, slam_area])
 	_free_world(w)
@@ -372,18 +372,19 @@ func test_attack_lands_after_its_wind_up() -> void:
 	check(g.attack_anim == Golem.ATTACK_KICK, "the attack names its animation")
 	check(foe.health == 100000, "winding up does no damage yet")
 	var at: Vector3 = g.position
-	# Kick wind-up is 0,5 s; the tick that set it already counted 0,1 s of it.
-	for i in range(3):
+	# Kick wind-up at level 0 (since 2026-11-19 the clip fills the cooldown): 0,5 / 1,2 of 1,8 s = 0,75 s;
+	# the tick that set it already counted 0,1 s of it.
+	for i in range(6):
 		_tick_world(w)
-	check(foe.health == 100000, "0,4 s in: still winding up")
+	check(foe.health == 100000, "0,7 s in: still winding up")
 	check(g.position.is_equal_approx(at), "she stands still while winding up")
-	for i in range(2):
+	for i in range(1):
 		_tick_world(w)
-	check(foe.health == 100000 - Balance.GOLEM_KICK_DAMAGE, "the kick lands after GOLEM_KICK_WINDUP")
+	check(foe.health == 100000 - int(Golem.stand_attack(Golem.ATTACK_KICK)["damage"]), "the kick lands after its wind-up (0,75 s)")
 	check(g._pending_attack == &"", "and the wind-up is over")
-	check(is_equal_approx(Golem.attack_windup(Golem.ATTACK_SLAM), Balance.GOLEM_SLAM_WINDUP)
-		and Balance.GOLEM_SLAM_WINDUP < Balance.GOLEM_STRIKE_COOLDOWN
-		and Balance.GOLEM_KICK_WINDUP < Balance.GOLEM_STRIKE_COOLDOWN,
+	check(is_equal_approx(Golem.attack_windup(Golem.ATTACK_SLAM), Golem.attack_windup(Golem.ATTACK_SLAM))
+		and Golem.attack_windup(Golem.ATTACK_SLAM) < Balance.GOLEM_STRIKE_COOLDOWN
+		and Golem.attack_windup(Golem.ATTACK_KICK) < Balance.GOLEM_STRIKE_COOLDOWN,
 		"both wind-ups fit inside the attack cooldown")
 	_free_world(w)
 
@@ -631,8 +632,8 @@ func test_levels_grow_size_reach_area_damage_and_speed() -> void:
 	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
 	g.facing = Vector3(0, 0, 1)
 	check_near(g.reach(), Balance.GOLEM_REACH, "level 0 has the base reach")
-	check(g.attack_damage(Golem.ATTACK_SLAM) == Balance.GOLEM_SLAM_DAMAGE
-		and g.attack_damage(Golem.ATTACK_KICK) == Balance.GOLEM_KICK_DAMAGE,
+	check(g.attack_damage(Golem.ATTACK_SLAM) == int(Golem.stand_attack(Golem.ATTACK_SLAM)["damage"])
+		and g.attack_damage(Golem.ATTACK_KICK) == int(Golem.stand_attack(Golem.ATTACK_KICK)["damage"]),
 		"level 0 has the base damage")
 	check_near(g.speed, Balance.GOLEM_SPEED, "level 0 has the base speed")
 	var r2: float = pow(1.0 + Balance.GOLEM_LEVEL_REACH_GROWTH, 2.0)   # 1,21
@@ -651,8 +652,8 @@ func test_levels_grow_size_reach_area_damage_and_speed() -> void:
 	check_near(g.reach(), Balance.GOLEM_REACH * g.limb_factor(), "the reach follows the limbs, not the areas")
 	check(g.limb_factor() > r2 and g.limb_factor() < g.size_factor(),
 		"the limbs grow faster than the areas and a little slower than the body (%.2f)" % g.limb_factor())
-	check(g.attack_damage(Golem.ATTACK_SLAM) == Balance.GOLEM_SLAM_DAMAGE + 10
-		and g.attack_damage(Golem.ATTACK_KICK) == Balance.GOLEM_KICK_DAMAGE + 10
+	check(g.attack_damage(Golem.ATTACK_SLAM) == int(Golem.stand_attack(Golem.ATTACK_SLAM)["damage"]) + 10
+		and g.attack_damage(Golem.ATTACK_KICK) == int(Golem.stand_attack(Golem.ATTACK_KICK)["damage"]) + 10
 		and g.trample_damage() == maxi(1, int(round(g.height_m() / 3.2))),
 		"every level adds 5 damage flat to the attacks; trampling follows the size")
 	check_near(g.speed, Balance.GOLEM_SPEED * sqrt(1.44), "the speed grows with the root of the SIZE")
@@ -662,7 +663,7 @@ func test_levels_grow_size_reach_area_damage_and_speed() -> void:
 		and not Golem.in_kick_lane(Balance.GOLEM_KICK_LENGTH * r2 + 0.01, 0.0, r2),
 		"both strike areas scale with the reach factor")
 	g._smash()
-	check(bystander.health == 1000 - (Balance.GOLEM_SLAM_DAMAGE + 10),
+	check(bystander.health == 1000 - (int(Golem.stand_attack(Golem.ATTACK_SLAM)["damage"]) + 10),
 		"at level 2 the slam reaches 3 m and hits for 35")
 
 	_level_to(g, Balance.GOLEM_FINAL_BONUS_LEVEL)
@@ -684,14 +685,14 @@ func test_levels_grow_size_reach_area_damage_and_speed() -> void:
 	check_near(g.reach_factor(), r6 * 1.1, "reach and areas are 10 percent bigger than at 6")
 	check_near(g.speed, Balance.GOLEM_SPEED * sqrt(s6 * 1.2), "the speed follows the size")
 	check(g.attack_damage(Golem.ATTACK_KICK) == dmg6 + 5
-		and g.attack_damage(Golem.ATTACK_SLAM) == Balance.GOLEM_SLAM_DAMAGE + 35
+		and g.attack_damage(Golem.ATTACK_SLAM) == int(Golem.stand_attack(Golem.ATTACK_SLAM)["damage"]) + 35
 		and g.trample_damage() == 5,
 		"level 7 adds 5 damage like the others; trampling is 16,9 m / 3,2 = 5")
 	g.health = 100
 	g._tick_level_regen(1.0)
 	check(g.health == 127, "level 7 heals 6 + 21 per second (3 more than level 6)")
-	check(g.max_health == Balance.GOLEM_MAX_HP_CAP + Balance.GOLEM_GIANT_MAX_HP and g.max_health == 1030,
-		"its health limit is 1000 + 30 (user spec 2026-11-18)")
+	check(g.max_health == Balance.GOLEM_MAX_HP_CAP + Balance.GOLEM_GIANT_MAX_HP and g.max_health == 1040,
+		"its health limit is 1000 + 40 (user spec 2026-11-19)")
 	_free_world(w)
 
 
@@ -964,12 +965,12 @@ func test_giant_keeps_growing_beyond_level_seven_up_to_eighty_metres() -> void:
 	check_near(g.size_factor(), size7 * 1.08 * 1.08, "the growth compounds", 0.0005)
 	check(g.attack_damage(Golem.ATTACK_KICK) == dmg7, "the damage stays where it was")
 	check(g.max_health == Balance.GOLEM_MAX_HP_CAP + Balance.GOLEM_GIANT_MAX_HP + 2 * Balance.GOLEM_GROWTH_MAX_HP
-		and Balance.GOLEM_GROWTH_MAX_HP == 30,
-		"every growth step lifts the health limit by 30 (two steps: 1090)")
-	check_near(g.regen_per_second(), 29.0, "the regeneration grows by 1 per step (6 + 21 + 2 = 29)")
+		and Balance.GOLEM_GROWTH_MAX_HP == 40,
+		"every growth step lifts the health limit by 40 (two steps: 1120)")
+	check_near(g.regen_per_second(), 33.0, "the regeneration grows by 3 per step (6 + 21 + 6 = 33)")
 	g.health = 100
 	g._tick_level_regen(1.0)
-	check(g.health == 129, "one second heals 29")
+	check(g.health == 133, "one second heals 33")
 	# The cap: 80 m, however many kills follow.
 	g.kills += 5000
 	g._credit_kill()
@@ -991,28 +992,24 @@ func test_attack_cooldown_and_animations_slow_down_with_the_size() -> void:
 	var w: Dictionary = _make_world()
 	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
 	check_near(g.strike_cooldown(), Balance.GOLEM_STRIKE_COOLDOWN, "level 0 attacks every 1,8 s")
-	for kind in [Golem.ATTACK_SLAM, Golem.ATTACK_KICK, Golem.ATTACK_SWAT]:
-		check_near(g.attack_speed(kind), 1.0, "level 0 plays %s at full speed" % kind)
-	check_near(g.current_windup(Golem.ATTACK_KICK), Balance.GOLEM_KICK_WINDUP,
-		"and lands the kick after the plain wind-up")
-	_level_to(g, 2)
-	check_near(g.attack_speed(Golem.ATTACK_KICK), 1.0 / sqrt(g.size_factor()),
-		"level 2 swings slower, with the root of the size (%.2f)" % g.attack_speed(Golem.ATTACK_KICK))
+	# Every clip fills its cooldown (user spec 2026-11-19): no idling, the impact at its share of the clip.
+	for kind in [Golem.ATTACK_SLAM, Golem.ATTACK_KICK, Golem.ATTACK_SWAT, Golem.ATTACK_DRUM, Golem.ATTACK_STOMP]:
+		check_near(g.attack_duration(kind), g.cooldown_for(kind), "level 0: the %s clip fills its cooldown" % kind)
+	check_near(g.current_windup(Golem.ATTACK_KICK), 0.75, "level 0 lands the kick at 0,5 / 1,2 of its 1,8 s")
 	_level_to(g, 7)
 	check(g.strike_cooldown() > 1.95 and g.strike_cooldown() < 2.05,
 		"level 7 (16,9 m): the cooldown has grown only a little (%.2f s)" % g.strike_cooldown())
 	var fits: bool = true
 	for kind in [Golem.ATTACK_SLAM, Golem.ATTACK_KICK, Golem.ATTACK_SWAT, Golem.ATTACK_DRUM]:
-		var played: float = float(Golem.CLIP_LENGTH[kind]) / (g.attack_speed(kind) * Golem.clip_rate(kind))
-		fits = fits and played <= g.cooldown_for(kind) + 0.0001 \
+		fits = fits and absf(g.attack_duration(kind) - g.cooldown_for(kind)) < 0.0001 \
 			and g.current_windup(kind) < g.cooldown_for(kind)
-	check(fits, "at level 7 every attack animation fits into its cooldown")
-	check_near(float(Golem.CLIP_LENGTH[Golem.ATTACK_KICK]) / g.attack_speed(Golem.ATTACK_KICK),
+	check(fits, "at level 7 every attack animation fills its cooldown")
+	check_near(Golem.clip_length(Golem.ATTACK_KICK) / g.attack_speed(Golem.ATTACK_KICK),
 		g.strike_cooldown(), "the giant's kick fills the whole cooldown — no idling in between")
 	_grow_to_the_end(g)
 	check_near(g.strike_cooldown(), Balance.GOLEM_STRIKE_COOLDOWN_MAX, "at 80 m: one attack every 3 s")
 	check(Balance.GOLEM_STRIKE_COOLDOWN_MAX == 3.0, "the documented 3 s")
-	check_near(float(Golem.CLIP_LENGTH[Golem.ATTACK_KICK]) / g.attack_speed(Golem.ATTACK_KICK), 3.0,
+	check_near(Golem.clip_length(Golem.ATTACK_KICK) / g.attack_speed(Golem.ATTACK_KICK), 3.0,
 		"and the kick animation stretches over those 3 s")
 	# In play: after a kick the next attack waits for the grown cooldown.
 	g._wind_up(Golem.ATTACK_KICK)
@@ -1122,7 +1119,7 @@ func test_drum_lands_three_hits_and_is_chosen_for_big_crowds() -> void:
 	var w: Dictionary = _make_world()
 	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
 	g.facing = Vector3(0, 0, 1)
-	check(Balance.GOLEM_DRUM_HIT_DAMAGE == 14 and g.drum_hit_damage(0) == 14
+	check((int(Golem.stand_attack(Golem.ATTACK_DRUM)["damage"]) / Golem.DRUM_HITS.size()) == 14 and g.drum_hit_damage(0) == 14
 		and g.drum_hit_damage(1) == 14 and g.drum_hit_damage(2) == 14
 		and g.attack_damage(Golem.ATTACK_DRUM) == 42,
 		"level 0: every hit does 14, 42 in all")
@@ -1143,7 +1140,7 @@ func test_drum_lands_three_hits_and_is_chosen_for_big_crowds() -> void:
 	check(lv.attack_damage(Golem.ATTACK_DRUM) == 98, "level 7 adds 8 like every level (14 + 7 + 35/3 per hit, 98)")
 	lv.position = Vector3(20, 5, 90)
 	lv._sync_soa_pos()
-	check(float(Golem.CLIP_LENGTH[Golem.ATTACK_DRUM]) <= g.cooldown_for(Golem.ATTACK_DRUM),
+	check(Golem.clip_length(Golem.ATTACK_DRUM) <= g.cooldown_for(Golem.ATTACK_DRUM),
 		"long enough for the whole crouched drum clip (1,7 s)")
 	var hut: Building = w.bm.place(HUT_SCENE, w.t1, Vector2i(48, 53), 0, true)
 	var crowd: Array = []
@@ -1160,9 +1157,9 @@ func test_drum_lands_three_hits_and_is_chosen_for_big_crowds() -> void:
 		"healthy targets in the circle: the drum does the most damage per second")
 	g._wind_up(g._choose_attack())
 	check(g._pending_attack == Golem.ATTACK_DRUM
-		and is_equal_approx(g._pending_time, Balance.GOLEM_DRUM_HITS[0])
-		and Balance.GOLEM_DRUM_HITS == ([0.35, 0.8, 1.25] as Array[float]),
-		"from the crouch the first hit lands 0,35 s after the start")
+		and is_equal_approx(g._pending_time, Golem.DRUM_HITS[0] * 1.8 / 1.7)
+		and Golem.DRUM_HITS == ([0.35, 0.8, 1.25] as Array[float]),
+		"from the crouch the first hit lands 0,37 s after the start (the 1,7-s clip fills 1,8 s)")
 	var hit_times: Array = []
 	var seen: int = 100000
 	var thrown_early: bool = false
@@ -1181,9 +1178,10 @@ func test_drum_lands_three_hits_and_is_chosen_for_big_crowds() -> void:
 			seen = now
 	check(hit_times.size() == 3, "three hits landed (%d)" % hit_times.size())
 	if hit_times.size() == 3:
-		check(absf(hit_times[0] - 0.35) < 0.11 and absf(hit_times[1] - 0.8) < 0.11
-			and absf(hit_times[2] - 1.25) < 0.11,
-			"at 0,35 / 0,8 / 1,25 s (%.2f / %.2f / %.2f)" % [hit_times[0], hit_times[1], hit_times[2]])
+		var k: float = 1.8 / 1.7   # the clip stretched over the drum's cooldown
+		check(absf(hit_times[0] - 0.35 * k) < 0.11 and absf(hit_times[1] - 0.8 * k) < 0.11
+			and absf(hit_times[2] - 1.25 * k) < 0.11,
+			"at 0,37 / 0,85 / 1,32 s (%.2f / %.2f / %.2f)" % [hit_times[0], hit_times[1], hit_times[2]])
 	check(crowd[0].health == 100000 - 42, "each unit took 42 in all")
 	check(not thrown_early, "the first two hits only hurt, nobody is thrown yet")
 	check(hut.max_health - hut.health == 21, "the building lost 3 x 7 hit points (2026-11-18)")
@@ -1260,7 +1258,7 @@ func test_attack_clips_alternate_legs_and_follow_the_airships_height() -> void:
 	var low: StringName = g._clip_for(Golem.ATTACK_SWAT, ship)
 	check(low == Golem.ATTACK_KICK or low == Golem.CLIP_KICK_LEFT,
 		"the 100-m giant kicks at a ship at 10 m")
-	check_near(g.current_windup(Golem.ATTACK_SWAT), Balance.GOLEM_SWAT_WINDUP / g.attack_speed(Golem.ATTACK_SWAT),
+	check_near(g.current_windup(Golem.ATTACK_SWAT), Golem.attack_windup(Golem.ATTACK_SWAT) / g.attack_speed(Golem.ATTACK_SWAT),
 		"whichever clip: the strike keeps the swat's timing")
 	_free_world(w)
 
@@ -1952,7 +1950,7 @@ func test_hit_zones_slam_front_half_of_the_body_kick_lane_only() -> void:
 	check(not g._in_hit_zone(Golem.ATTACK_SLAM, at.call(-1.0, body - 0.5), forward, right),
 		"slam: the BACK half of the body circle is not added")
 	# KICK
-	var half: float = Balance.GOLEM_KICK_WIDTH * 0.5 * r
+	var half: float = float(Golem.stand_attack(Golem.ATTACK_KICK)["area"]) * 0.5 * r
 	g.kick_side = 1.0
 	var mid: float = g.kick_leg_offset()   # the right leg's lane
 	check(g._in_hit_zone(Golem.ATTACK_KICK, at.call(0.0, mid + half - 0.1), forward, right)
@@ -1996,8 +1994,9 @@ func test_target_cap_limits_every_damage_tick() -> void:
 	check(Balance.GOLEM_MAX_TARGETS == ([5, 6, 6, 6, 7, 8, 8, 8] as Array[int]),
 		"targets per level 0-7: 5, 6, 6, 6, 7, 8, 8, 8")
 	check(Golem.max_targets_for(7, 2) == 10 and Golem.max_targets_for(7, 3) == 11
-		and Golem.max_targets_for(7, Golem.max_growth_steps()) == 29,
-		"beyond level 7 every growth step adds one (%d at 80 m)"
+		and Golem.max_targets_for(7, Golem.max_growth_steps() - 1) == 28
+		and Golem.max_targets_for(7, Golem.max_growth_steps()) == 30,
+		"beyond level 7 every growth step adds one, 80 m one more (%d at 80 m)"
 			% Golem.max_targets_for(7, Golem.max_growth_steps()))
 	# --- slam into a crowd: 5 of 9, the attack target among them -----------------
 	var w: Dictionary = _make_world()
@@ -2177,8 +2176,8 @@ func test_stance_crouching_makes_the_ground_attacks_faster() -> void:
 	check_near(g.stance_switch_time(), Balance.GOLEM_STANCE_SWITCH_TIME, "level 0 switches in 0,4 s")
 	check(Balance.GOLEM_STANCE_SWITCH_TIME == 0.4, "the documented 0,4 s")
 	check_near(g.cooldown_for(Golem.ATTACK_SLAM),
-		Balance.GOLEM_SLAM_COOLDOWN, "the crouched slam comes back after 1,25 s")
-	check(Balance.GOLEM_SLAM_COOLDOWN == 1.25, "the documented 1,25 s")
+		float(Golem.stand_attack(Golem.ATTACK_SLAM)["cooldown"]), "the crouched slam comes back after 1,25 s")
+	check(float(Golem.stand_attack(Golem.ATTACK_SLAM)["cooldown"]) == 1.25, "the documented 1,25 s")
 	check(g.status_text().contains("Haltung: stehend"), "the panel shows the stance")
 	g.order_attack(front)
 	var t: float = 0.0
@@ -2204,7 +2203,7 @@ func test_stance_crouching_makes_the_ground_attacks_faster() -> void:
 	check(saw_switch_without_attack, "foes in the slam's circle only: she bends down first, without striking yet")
 	check(hits.size() >= 2, "then the slams land (%d)" % hits.size())
 	if hits.size() >= 2:
-		check_near(hits[0] - bent_at, Balance.GOLEM_SLAM_WINDUP,
+		check_near(hits[0] - bent_at, Golem.attack_windup(Golem.ATTACK_SLAM),
 			"the first slam lands 0,35 s after she is down (%.2f)" % (hits[0] - bent_at), TICK * 1.5)
 		check_near(hits[1] - hits[0], g.cooldown_for(Golem.ATTACK_SLAM),
 			"the next one follows after 1,25 s — no bending in between (%.2f)" % (hits[1] - hits[0]), TICK * 1.5)
@@ -2353,7 +2352,7 @@ func test_reach_grows_with_the_limbs() -> void:
 	g.facing = forward
 	check(g._in_hit_zone(Golem.ATTACK_KICK, g.position + forward * g.reach(), forward, right),
 		"a target at the edge of the reach lies in the kick's lane")
-	check_near(Balance.GOLEM_KICK_WIDTH * g.reach_factor(), 1.8 * Golem.reach_factor_for(7),
+	check_near(float(Golem.stand_attack(Golem.ATTACK_KICK)["area"]) * g.reach_factor(), 1.8 * Golem.reach_factor_for(7),
 		"the lane's WIDTH still follows the slow area growth", 0.001)
 	_grow_to_the_end(g)
 	check_near(g.limb_factor(), Balance.GOLEM_BODY_LIMB_FACTOR_AT_ANCHOR * g.body_anchor_ratio(),
@@ -2439,13 +2438,14 @@ func test_bending_takes_four_tenths_and_the_slam_winds_up_035() -> void:
 	var w: Dictionary = _make_world()
 	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
 	check_near(g.stance_switch_time(), 0.4, "level 0: bending down takes 0,4 s")
-	check_near(Balance.GOLEM_SLAM_WINDUP, 0.35, "the slam's wind-up is 0,35 s")
-	check_near(g.current_windup(Golem.ATTACK_SLAM), 0.35, "level 0: the slam lands 0,35 s after its start")
-	check_near(g.stance_switch_time() + g.current_windup(Golem.ATTACK_SLAM), 0.75,
-		"from the stand the first slam lands after 0,75 s")
-	check_near(Golem.clip_rate(Golem.ATTACK_SLAM), 1.0, "the slam's clip plays as it was built")
+	check_near(Golem.attack_windup(Golem.ATTACK_SLAM), 0.35, "the slam's impact lies 0,35 s into its 0,9-s clip")
+	# Since 2026-11-19 the clip fills the slam's 1,25 s: the impact at 0,35 / 0,9 of it.
+	var slam_windup: float = 1.25 * 0.35 / 0.9
+	check_near(g.current_windup(Golem.ATTACK_SLAM), slam_windup, "level 0: the slam lands 0,49 s after its start")
+	check_near(g.stance_switch_time() + g.current_windup(Golem.ATTACK_SLAM), 0.4 + slam_windup,
+		"from the stand the first slam lands after 0,89 s")
 	g._wind_up(Golem.ATTACK_SLAM)
-	check_near(g._pending_time, 0.35, "winding up sets the 0,35 s")
+	check_near(g._pending_time, slam_windup, "winding up sets the 0,49 s")
 	_level_to(g, 6)
 	check(g.stance_switch_time() > 0.68 and g.stance_switch_time() < 0.70,
 		"level 6: %.2f s (0,4 x root of the size)" % g.stance_switch_time())
@@ -2487,20 +2487,20 @@ func test_kick_strikes_forty_percent_fewer_targets() -> void:
 func test_slam_radius_reaches_twelve_metres() -> void:
 	var w: Dictionary = _make_world()
 	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
-	check_near(g.slam_radius(), Balance.GOLEM_SLAM_RADIUS, "level 0: 2,6 m")
+	check_near(g.slam_radius(), Golem.SLAM_RADIUS, "level 0: 2,6 m")
 	_level_to(g, 6)
-	check_near(g.slam_radius(), Balance.GOLEM_SLAM_RADIUS * Golem.reach_factor_for(6), "level 6: unchanged (4,6 m)")
+	check_near(g.slam_radius(), Golem.SLAM_RADIUS * Golem.reach_factor_for(6), "level 6: unchanged (4,6 m)")
 	_level_to(g, 7)
 	var r7: float = g.slam_radius()
-	check_near(r7, Balance.GOLEM_SLAM_RADIUS * Golem.reach_factor_for(7), "level 7: unchanged (%.1f m)" % r7)
+	check_near(r7, Golem.SLAM_RADIUS * Golem.reach_factor_for(7), "level 7: unchanged (%.1f m)" % r7)
 	for i in range(Golem.kills_for_growth_step(1)):
 		g._credit_kill()
 	check(g.growth_steps == 1 and g.slam_radius() > r7 * 1.041 and g.slam_radius() < r7 * 1.043,
 		"one growth step: about 4,2 percent more (%.3f m)" % g.slam_radius())
-	check_near(Balance.GOLEM_KICK_WIDTH * g.reach_factor(), Balance.GOLEM_KICK_WIDTH * Golem.reach_factor_for(7) * 1.019645,
+	check_near(float(Golem.stand_attack(Golem.ATTACK_KICK)["area"]) * g.reach_factor(), float(Golem.stand_attack(Golem.ATTACK_KICK)["area"]) * Golem.reach_factor_for(7) * 1.019645,
 		"the lane's width takes its 1,96 percent", 0.0005)
 	_grow_to_the_end(g)
-	check_near(g.slam_radius(), Balance.GOLEM_SLAM_RADIUS * Balance.GOLEM_BODY_SLAM_SCALE_AT_ANCHOR * g.body_anchor_ratio(),
+	check_near(g.slam_radius(), Golem.SLAM_RADIUS * Balance.GOLEM_BODY_SLAM_SCALE_AT_ANCHOR * g.body_anchor_ratio(),
 		"at 80 m: with the body from 30 m on, about 18 m (%.1f; 12 m before 2026-11-18)" % g.slam_radius(), 0.001)
 	check(Balance.GOLEM_SLAM_RADIUS_AT_MAX == 12.0, "the documented 12 m")
 	# In play: an enemy 11 m from where the hands land is struck, one at 13 m is not.
@@ -2512,24 +2512,25 @@ func test_slam_radius_reaches_twelve_metres() -> void:
 	_free_world(w)
 
 
-## Der ausgewachsene Golem (80 m): noch einmal +3 Leben/s Dauerheilung, und die Lebensobergrenze bekommt 100
-## dazu (Nutzervorgabe 2026-11-18): 21 + 21 + 3 = 45 LP/s, 1000 + 30 + 21 x 30 + 100 = 1760 LP.
-func test_full_grown_golem_regenerates_three_more_and_has_1378_hp() -> void:
+## Der ausgewachsene Golem (80 m): noch einmal +10 Leben/s Dauerheilung, und die Lebensobergrenze bekommt 120
+## dazu (Nutzervorgabe 2026-11-19): 6 + 21 + 21 x 3 + 10 = 100 LP/s, 1000 + 40 + 21 x 40 + 120 = 2000 LP.
+func test_full_grown_golem_regenerates_ten_more_and_has_2000_hp() -> void:
 	var w: Dictionary = _make_world()
 	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
 	_level_to(g, 7)
 	while g.growth_steps < Golem.max_growth_steps() - 1:
 		g._credit_kill()
-	check_near(g.regen_per_second(), 27.0 + float(Golem.max_growth_steps() - 1), "one step before the end: 47 per second")
-	check(g.max_health == 1030 + (Golem.max_growth_steps() - 1) * 30, "and 1630 health (%d)" % g.max_health)
+	check_near(g.regen_per_second(), 27.0 + 3.0 * float(Golem.max_growth_steps() - 1), "one step before the end: 87 per second")
+	check(g.max_health == 1040 + (Golem.max_growth_steps() - 1) * 40 and g.max_health == 1840,
+		"and 1840 health (%d)" % g.max_health)
 	_grow_to_the_end(g)
 	check(g.is_full_size(), "grown to 80 m")
-	check_near(g.regen_per_second(), 48.0 + Balance.GOLEM_FULL_SIZE_REGEN, "full-grown: 6 + 21 + 21 + 3 = 51 per second")
-	check(g.max_health == 1030 + Golem.max_growth_steps() * 30 + 100 and g.max_health == 1760,
-		"the health limit is 1760 (%d)" % g.max_health)
+	check_near(g.regen_per_second(), 90.0 + Balance.GOLEM_FULL_SIZE_REGEN, "full-grown: 6 + 21 + 63 + 10 = 100 per second")
+	check(g.max_health == 1040 + Golem.max_growth_steps() * 40 + 120 and g.max_health == 2000,
+		"the health limit is 2000 (%d)" % g.max_health)
 	g.health = 100
 	g._tick_level_regen(1.0)
-	check(g.health == 151, "one second heals 51")
+	check(g.health == 200, "one second heals 100")
 	_free_world(w)
 
 
@@ -2549,7 +2550,7 @@ func test_growing_golem_stretches_for_a_second() -> void:
 	# She winds up a kick; the kill that lifts her to level 1 lands with it.
 	g._wind_up(Golem.ATTACK_KICK)
 	var clip_time: float = g._attack_anim_left
-	check_near(clip_time, 1.2, "the kick's animation takes 1,2 s at level 0")
+	check_near(clip_time, 1.8, "the kick's animation fills its 1,8 s at level 0")
 	_level_to(g, 1)
 	check(g._stretch_queued and g.level == 1, "the level-up owes a stretch")
 	var t: float = 0.0
@@ -2609,8 +2610,8 @@ func test_growing_golem_stretches_for_a_second() -> void:
 func test_every_attack_has_its_share_of_the_target_count() -> void:
 	var w: Dictionary = _make_world()
 	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
-	check(Balance.GOLEM_TARGET_PERCENT_KICK == 60 and Balance.GOLEM_TARGET_PERCENT_DRUM == 125
-		and Balance.GOLEM_TARGET_PERCENT_STOMP == 200, "kick 60 %, drum 125 %, stomp 200 % of the base count")
+	check(Golem.target_percent(Golem.ATTACK_KICK) == 60 and Golem.target_percent(Golem.ATTACK_DRUM) == 125
+		and Golem.target_percent(Golem.ATTACK_STOMP) == 200, "kick 60 %, drum 125 %, stomp 200 % of the base count")
 	var want: Dictionary = {0: [5, 3, 6, 10], 1: [6, 3, 7, 12], 4: [7, 4, 8, 14], 7: [8, 4, 10, 16]}
 	for lv in [0, 1, 4, 7]:
 		_level_to(g, lv)
@@ -2619,9 +2620,9 @@ func test_every_attack_has_its_share_of_the_target_count() -> void:
 		check(got == want[lv] and g.max_targets() == want[lv][0],
 			"level %d: slam/kick/drum/stomp %s (want %s), trampling the base %d" % [lv, got, want[lv], g.max_targets()])
 	_grow_to_the_end(g)
-	check(g.max_targets() == 29 and g.max_targets_of(Golem.ATTACK_KICK) == 17
-		and g.max_targets_of(Golem.ATTACK_DRUM) == 36 and g.max_targets_of(Golem.ATTACK_STOMP) == 58,
-		"80 m: base 29, kick 17, drum 36, stomp 58")
+	check(g.max_targets() == 30 and g.max_targets_of(Golem.ATTACK_KICK) == 18
+		and g.max_targets_of(Golem.ATTACK_DRUM) == 37 and g.max_targets_of(Golem.ATTACK_STOMP) == 60,
+		"80 m: base 30, kick 18, drum 37, stomp 60")
 	_free_world(w)
 
 
@@ -2632,7 +2633,7 @@ func test_stomp_strikes_all_around_her_with_twice_the_trample_damage() -> void:
 	var w: Dictionary = _make_world()
 	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
 	g.facing = Vector3(0, 0, 1)
-	check_near(Balance.GOLEM_STOMP_RADIUS_FACTOR, 5.0 / 3.0, "two thirds more than the trample radius")
+	check_near(float(Golem.stand_attack(Golem.ATTACK_STOMP)["area"]), 5.0 / 3.0, "two thirds more than the trample radius")
 	check_near(g.stomp_radius(), g.trample_radius() * 5.0 / 3.0, "the stomp's radius follows the body (%.2f m)" % g.stomp_radius())
 	check(g.attack_damage(Golem.ATTACK_STOMP) == 2 * g.trample_damage() and g.attack_damage(Golem.ATTACK_STOMP) == 2,
 		"level 0: twice the trample tick = 2")
@@ -2704,7 +2705,7 @@ func test_stomp_lands_after_the_jump_and_leaves_her_crouched() -> void:
 	check(Golem.stance_for(Golem.ATTACK_STOMP) == Golem.STANCE_STAND and g.can_stomp(), "the stomp is struck standing")
 	check_near(Golem.attack_windup(Golem.ATTACK_STOMP), 0.6, "the landing comes 0,6 s after the start")
 	check_near(g.cooldown_for(Golem.ATTACK_STOMP), 1.0, "its cooldown is the clip's length (1,0 s)")
-	check_near(float(Golem.CLIP_LENGTH[Golem.ATTACK_STOMP]), 1.0, "the clip takes 1,0 s")
+	check_near(Golem.clip_length(Golem.ATTACK_STOMP), 1.0, "the clip takes 1,0 s")
 	check(Golem.ATTACK_CLIPS.has(Golem.ATTACK_STOMP) and Golem.strike_sfx_key(Golem.ATTACK_STOMP) == &"golem_stomp",
 		"it is an attack clip with its own sound")
 	g.stance = Golem.STANCE_CROUCH
@@ -2987,7 +2988,7 @@ func test_a_small_golem_throws_and_rolls_nobody() -> void:
 		v.health = 1000
 		g._smash()
 		g._kick()
-		g._land_attack(Golem.ATTACK_DRUM, Balance.GOLEM_DRUM_HITS.size() - 1)
+		g._land_attack(Golem.ATTACK_DRUM, Golem.DRUM_HITS.size() - 1)
 		still = still and v.state != Unit.State.THROWN and v.state != Unit.State.ROLL and v.health < 1000
 		v.take_damage(100000)
 		w.um.tick(TICK)
@@ -3022,7 +3023,7 @@ func test_drum_never_throws_and_rolls_by_its_chance() -> void:
 		var v: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(50.0, 5, 51.5))
 		v.max_health = 1000
 		v.health = 1000
-		g._land_attack(Golem.ATTACK_DRUM, Balance.GOLEM_DRUM_HITS.size() - 1)
+		g._land_attack(Golem.ATTACK_DRUM, Golem.DRUM_HITS.size() - 1)
 		thrown = thrown or v.state == Unit.State.THROWN
 		all_rolled = all_rolled and v.state == Unit.State.ROLL
 		v.take_damage(100000)
@@ -3956,9 +3957,9 @@ func test_sit_stomp_lands_where_the_foot_comes_down() -> void:
 	var heel: float = Balance.GOLEM_SIT_HEEL_BACK * g.model_scale().z * g.size_factor()
 	var behind: Vector3 = sl - fwd * ((sl - f).dot(fwd) + heel + 0.05)
 	check(not c.in_area(GolemSitCombat.STOMP_L, behind), "nothing behind the resting shoe's heel")
-	check(GolemSitCombat.tempo_of(GolemSitCombat.STOMP_L) == Golem.ATTACK_SLAM
-		and is_equal_approx(c.cooldown_of(GolemSitCombat.STOMP_L), g.cooldown_for(Golem.ATTACK_SLAM) * Balance.GOLEM_SIT_COOLDOWN_FACTOR),
-		"quick: the crouched slam's tempo, seated 10 % faster")
+	check(is_equal_approx(c.cooldown_of(GolemSitCombat.STOMP_L), float(GolemSitCombat.sit_attack(GolemSitCombat.STOMP_L)["cooldown"])
+			* g.strike_cooldown() / Balance.GOLEM_STRIKE_COOLDOWN * Balance.GOLEM_SIT_MULT_COOLDOWN),
+		"quick: its own cooldown, grown with her rhythm, times the sit factor")
 	var foe: Unit = _foe(w, sl.x + r * 0.5, sl.z, 100000)
 	_tick_golem_until(g, func() -> bool: return c.pending[GolemSitCombat.CH_LEGS] != &"")
 	check(c.pending[GolemSitCombat.CH_LEGS] == GolemSitCombat.STOMP_L, "the LEFT foot stomps (%s)" % c.pending[GolemSitCombat.CH_LEGS])
@@ -4041,7 +4042,8 @@ func test_sit_leg_lane_runs_from_her_body_to_the_stretched_foot() -> void:
 		"it reaches further ahead than the foot stomp")
 	check(c.in_kick_lane(mid_r - fwd * (Balance.GOLEM_SIT_KICK_FROM * sz * 0.9), -1.0)
 		and not c.in_kick_lane(mid_r - fwd * (Balance.GOLEM_SIT_KICK_FROM * sz + 0.5), -1.0), "it starts at her hip")
-	check(not c.in_kick_lane(mid_r - c.left() * (Balance.GOLEM_SIT_KICK_WIDTH * 0.5 * sx + 0.3), -1.0), "as narrow as the leg")
+	check(not c.in_kick_lane(mid_r - c.left() * (float(GolemSitCombat.sit_attack(GolemSitCombat.KICK_R)["area"]) * 0.5 * sx + 0.3), -1.0),
+		"as narrow as the leg")
 	var knee: Vector3 = mid_r - fwd * (Balance.GOLEM_SIT_KICK_FROM * sz * 0.5)
 	check(c.in_kick_lane(knee, -1.0) and not c.in_kick_lane(knee, 1.0)
 		and not c.in_area(GolemSitCombat.STOMP_R, knee) and not c.in_area(GolemSitCombat.WIPE_R, knee),
@@ -4064,36 +4066,65 @@ func test_sit_big_attacks_take_the_users_values() -> void:
 	var hop: StringName = GolemSitCombat.HOP
 	check(c.damage(hop) == g.attack_damage(Golem.ATTACK_STOMP) and c.max_targets(hop) == g.max_targets_of(Golem.ATTACK_STOMP),
 		"po clap: damage and targets of the jump")
-	check_near(c.cooldown_of(hop), g.cooldown_for(Golem.ATTACK_STOMP) * Balance.GOLEM_SIT_HOP_COOLDOWN_FACTOR
-		* Balance.GOLEM_SIT_HOP_SLOWER_COOLDOWN * Balance.GOLEM_SIT_COOLDOWN_FACTOR,
-		"its cooldown: 1,1 x the jump's, about 0,05 s more at 30 m, seated 10 % faster (%.2f s)" % c.cooldown_of(hop))
-	# (user spec 2026-11-18: first 0,2 s slower at 30 m, then 0,15 s faster again: 1,26 s and a 1,52-s clip)
-	check_near(1.21 * Balance.GOLEM_SIT_HOP_SLOWER_COOLDOWN, 1.26, "30 m: cooldown 1,26 s (was 1,41)", 0.001)
-	check_near(1.47 * Balance.GOLEM_SIT_HOP_SLOWER_ANIM, 1.52, "30 m: clip 1,52 s (was 1,67)", 0.001)
-	check_near(c.windup_of(hop), g.current_windup(Golem.ATTACK_STOMP) * Balance.GOLEM_SIT_HOP_SLOWER_ANIM,
-		"its clip plays longer (wind-up %.2f s)" % c.windup_of(hop))
-	var hop_r: float = g.stomp_radius() * Balance.GOLEM_SIT_AREA_FACTOR * Balance.GOLEM_SIT_HOP_AREA_FACTOR
-	check_near(c.hop_radius(), hop_r, "its circle another 10 % smaller")
+	# (user spec 2026-11-18: first 0,2 s slower at 30 m, then 0,15 s faster again; values of the
+	# attack table since 2026-11-19 — pinned here at her first seated size, 31,3 m)
+	check_near(g.height_m(), 31.337, "her first seated size", 0.01)
+	check_near(c.cooldown_of(hop), 1.273529, "its cooldown at 31,3 m: 1,27 s (%.4f s)" % c.cooldown_of(hop), 0.0001)
+	check_near(c.windup_of(hop), 0.636765, "its wind-up at 31,3 m: 0,64 s, half its clip of its cooldown (%.4f s)" % c.windup_of(hop), 0.0001)
+	var hop_r: float = c.hop_radius()
+	check_near(hop_r, 6.950150, "its circle at 31,3 m: 6,95 m", 0.0001)
 	check(c.in_area(hop, g.position + g.heading() * (hop_r * 0.95)) and not c.in_area(hop, g.position + g.heading() * (hop_r + 0.5)),
-		"the jump's circle around the seat, 10 % smaller")
+		"the circle around the seat")
 	var ds: StringName = GolemSitCombat.DOUBLE_STOMP
-	check(c.damage(ds) > g.attack_damage(Golem.ATTACK_SWAT) and c.max_targets(ds) == g.max_targets_of(Golem.ATTACK_DRUM)
-		and is_equal_approx(c.cooldown_of(ds), g.cooldown_for(Golem.ATTACK_DRUM) * Balance.GOLEM_SIT_COOLDOWN_FACTOR),
-		"double stomp: more than the swat, the drum's targets, its cooldown 10 % shorter")
-	check_near(c.cooldown_of(GolemSitCombat.CLAP), g.cooldown_for(Golem.ATTACK_DRUM) * Balance.GOLEM_SIT_CLAP_COOLDOWN_SHARE,
-		"the hand stomp behind keeps its cooldown")
+	check(c.damage(ds) > g.attack_damage(Golem.ATTACK_SWAT) and c.max_targets(ds) == g.max_targets_of(Golem.ATTACK_DRUM),
+		"double stomp: more than the swat, the drum's targets")
+	check_near(c.cooldown_of(ds), 2.001816, "its cooldown at 31,3 m: 2,0 s", 0.0001)
+	check_near(c.cooldown_of(GolemSitCombat.CLAP), 1.846119, "the hand stomp behind: 1,85 s at 31,3 m", 0.0001)
 	check(c.in_area(ds, c.feet_point() - g.heading() * 1.0), "it reaches a little behind the feet")
 	check(not c.in_area(ds, c.feet_point() + g.heading() * (c.double_stomp_radius() * 0.9)), "and not as far ahead as before")
 	var clap: StringName = GolemSitCombat.CLAP
 	check(c.damage(clap) == g.attack_damage(Golem.ATTACK_DRUM)
 		and c.cooldown_of(clap) < g.cooldown_for(Golem.ATTACK_DRUM) and c.cooldown_of(clap) > g.cooldown_for(Golem.ATTACK_SLAM),
 		"hand stomp behind: the drum's damage, a shorter cooldown (%.2f s)" % c.cooldown_of(clap))
-	check_near(c.clap_radius(), g.ground_radius(Golem.ATTACK_DRUM) * Balance.GOLEM_SIT_CLAP_AREA_FACTOR,
-		"its circles a share of the drum's (since 2026-11-18: 6 m at 31,3 m)")
 	check_near(c.clap_radius(), 6.0, "6 m at her first sit size (user spec 2026-11-18)", 0.05)
 	check(c.in_area(clap, c.hand_point(1.0)) and not c.in_area(clap, g.position + g.heading() * 1.0),
 		"only behind her: at the hands yes, ahead of the seat no")
 	_free_world(w)
+
+
+## Angriffstabelle (Nutzervorgabe 2026-11-19): jeder Sitzangriff rechnet seine eigenen Grundwerte
+## aus Balance.GOLEM_SIT_ATTACKS mit dem Takt hoch und nimmt die Sitzfaktoren GOLEM_SIT_MULT_* —
+## ohne Ausnahme; die Standangriffe ihre Werte aus GOLEM_STAND_ATTACKS. Bei allen drei Golems.
+func test_every_attack_takes_its_row_of_the_attack_table() -> void:
+	var scenes: Array = [GOLEM_SCENE, load("res://scenes/units/demon_golem.tscn"),
+		load("res://scenes/units/genesis_golem.tscn")]
+	for scene in scenes:
+		var g: Golem = (scene as PackedScene).instantiate() as Golem
+		if g is GenesisGolem:
+			(g as GenesisGolem).wood_growth_m = 30.0
+		else:
+			while g.height_m() < 40.0:
+				g._credit_kill()
+		var rhythm: float = g.strike_cooldown() / Balance.GOLEM_STRIKE_COOLDOWN
+		for kind in Balance.GOLEM_STAND_ATTACKS:
+			var row: Dictionary = Golem.stand_attack(kind)
+			check_near(g.cooldown_for(kind), float(row["cooldown"]) * rhythm, "%s %s: cooldown from the table" % [g.unit_kind(), kind], 0.000001)
+			check_near(g.attack_duration(kind), g.cooldown_for(kind), "%s: the clip fills the cooldown" % kind, 0.000001)
+			check_near(g.current_windup(kind) / g.cooldown_for(kind), Golem.attack_windup(kind) / Golem.clip_length(kind),
+				"%s: the impact at its share of the clip" % kind, 0.000001)
+			check(g.max_targets_of(kind) == maxi(g.max_targets() * int(row["targets"]) / 100, 1), "%s: targets from the table" % kind)
+		var c: GolemSitCombat = GolemSitCombat.new(g)
+		for kind in GolemSitCombat.TABLE_KEY:
+			var row: Dictionary = GolemSitCombat.sit_attack(kind)
+			check_near(c.cooldown_of(kind), float(row["cooldown"]) * rhythm * Balance.GOLEM_SIT_MULT_COOLDOWN,
+				"%s: cooldown = table x rhythm x sit factor" % kind, 0.000001)
+			check_near(c.windup_of(kind) / c.cooldown_of(kind),
+				float(GolemSitAnim.SIT_CLIP_IMPACT[kind]) / float(GolemSitAnim.SIT_CLIP_LENGTH[kind]),
+				"%s: the clip fills the cooldown, the impact at its share" % kind, 0.000001)
+			check(c.max_targets(kind) == maxi(g.max_targets() * int(row["targets"]) / 100, 1), "%s: targets from the table" % kind)
+		check_near(c.clap_radius(), float(GolemSitCombat.sit_attack(GolemSitCombat.CLAP)["area"]) * g.slam_scale()
+			* Balance.GOLEM_SIT_MULT_AREA, "the hand stomp behind takes the sit factor like every other", 0.000001)
+		g.free()
 
 
 func test_sit_big_attacks_take_both_channels() -> void:
@@ -4417,10 +4448,11 @@ func test_sit_zones_grow_exactly_with_the_body() -> void:
 	while not g.can_sit():
 		g._credit_kill()
 	var c: GolemSitCombat = GolemSitCombat.new(g)
-	check_near(c.stomp_radius(), g.slam_radius() * Balance.GOLEM_SIT_STOMP_RADIUS_SHARE * Balance.GOLEM_SIT_AREA_FACTOR,
-		"first seated size: the foot stomp as before (%.2f m)" % c.stomp_radius(), 0.001)
-	check_near(c.wipe_reach(), g.reach() * Balance.GOLEM_SIT_AREA_FACTOR, "the wipe as before", 0.001)
-	check_near(c.clap_radius(), g.ground_radius(Golem.ATTACK_DRUM) * Balance.GOLEM_SIT_CLAP_AREA_FACTOR, "the hand stomp as before", 0.001)
+	check_near(c.stomp_radius(), 4.449629, "first seated size: the foot stomp as before (%.2f m)" % c.stomp_radius(), 0.001)
+	check_near(c.wipe_reach(), 14.081736, "the wipe as before", 0.001)
+	check_near(c.clap_radius(), 5.999618, "the hand stomp as before", 0.001)
+	check_near(c.hand_slam_radius(), 3.114741, "the side hand slam as before", 0.001)
+	check_near(c.double_stomp_radius(), 6.269759, "the double stomp as before", 0.001)
 	var at_first: Array = _sit_zone_shares(g, c)
 	while not g.is_full_size():
 		g._credit_kill()
@@ -4724,7 +4756,8 @@ func test_seated_the_stretch_queues_behind_her_attacks() -> void:
 	while g.sit_stretching() and ticks < 100:
 		g.tick(TICK)
 		ticks += 1
-		struck = struck or c.pending[GolemSitCombat.CH_LEGS] != &"" or c.pending[GolemSitCombat.CH_ARMS] != &""
+		# (A channel that came free during the stretch strikes in the very tick it ends: no idle after it.)
+		struck = struck or g.sit_stretching() and (c.pending[GolemSitCombat.CH_LEGS] != &"" or c.pending[GolemSitCombat.CH_ARMS] != &"")
 	check(not struck, "no attack while she stretches")
 	check_near(float(ticks) * TICK, g.grow_time(), "it takes her stretch time (%.1f s)" % (float(ticks) * TICK), TICK * 1.5)
 	_free_world(w)
@@ -4822,6 +4855,67 @@ func test_sit_animation_layers_filter_legs_and_arms() -> void:
 	root.queue_free()
 
 
+## KAMPFRUHE (Nutzermeldung 2026-11-19): zwischen zwei Angriffen spielte sit_idle durch — der Kopf zuckte in
+## die Idle-Bewegung und wurde beim naechsten Angriff wieder herausgerissen. Im Kampf halten Beine bzw. Arme
+## mit Nacken, Kopf und Oberkoerper die Ruhehaltung (erstes Bild von sit_idle, darin beginnen und enden
+## alle Sitzangriffsclips); ein- und ausgeblendet.
+func test_sit_combat_rest_holds_the_rest_pose_of_its_limbs() -> void:
+	var root: Node3D = (load("res://assets/models/units/golem.glb") as PackedScene).instantiate()
+	(Engine.get_main_loop() as SceneTree).root.add_child(root)
+	var player: AnimationPlayer = root.find_children("*", "AnimationPlayer", true, false)[0]
+	var layers: GolemSitAnim = GolemSitAnim.new(player)
+	var rest_legs: AnimationNodeBlend2 = layers._blend.get_node(&"rest_legs") as AnimationNodeBlend2
+	var rest_arms: AnimationNodeBlend2 = layers._blend.get_node(&"rest_arms") as AnimationNodeBlend2
+	var leg_path: NodePath = layers.leg_paths[0]
+	var head_path: NodePath = layers.head_paths[layers.head_paths.size() - 1]
+	check(rest_legs.is_path_filtered(leg_path) and not rest_legs.is_path_filtered(head_path), "the leg rest holds only the legs")
+	check(rest_arms.is_path_filtered(head_path) and rest_arms.is_path_filtered(layers.arm_paths[0])
+		and rest_arms.is_path_filtered(layers.torso_paths[0]) and not rest_arms.is_path_filtered(leg_path),
+		"the arm rest holds arms, neck, head and upper body, no legs")
+	layers.update_rest(false, true, GolemSitAnim.REST_FADE_IN * 0.5)
+	check_near(layers.rest_amount(GolemSitAnim.REST_ARMS), 0.5, "it blends in over REST_FADE_IN", 0.001)
+	check_near(layers.rest_amount(GolemSitAnim.REST_LEGS), 0.0, "the legs stay with the idle")
+	check_near(float(layers.tree.get("parameters/rest_arms/blend_amount")), 0.5, "the tree takes it", 0.001)
+	check_near(float(layers.tree.get("parameters/rest_arms_hold/scale")), 0.0, "the rest pose stands still (frame 0)")
+	# (The poses themselves only show with real frames: tests/diag_golem_sit_rest_pose.gd measures the head.)
+	layers.update_rest(false, true, 1.0)
+	layers.update_rest(false, false, GolemSitAnim.REST_FADE_OUT * 0.5)
+	check_near(layers.rest_amount(GolemSitAnim.REST_ARMS), 0.5, "and blends out more slowly, over REST_FADE_OUT", 0.001)
+	root.queue_free()
+
+
+## Kampfruhe und Takt im Sitzkampf: Beine wie Arme wollen die Ruhehaltung, solange eines ihrer Angriffe
+## einen Feind erreicht oder ihr letzter Angriff weniger als COMBAT_REST_HOLD nach seiner Abklingzeit
+## zurueckliegt. Ein frei gewordener Kanal waehlt sofort neu (nicht erst im 0,25-s-Takt), es bleibt keine
+## Luecke zwischen zwei Angriffen.
+func test_sit_combat_rest_and_attacks_follow_without_a_gap() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _seated(w)
+	var c: GolemSitCombat = g.sit_combat
+	var legs: int = GolemSitCombat.CH_LEGS
+	check(not c.rest_wanted(legs) and not c.rest_wanted(GolemSitCombat.CH_ARMS), "no foe, no attack: the idle plays")
+	var sl: Vector3 = c.stomp_point(1.0)
+	var foe: Unit = _foe(w, sl.x + c.stomp_radius() * 0.5, sl.z, 100000)
+	_tick_golem_until(g, func() -> bool: return c.pending[legs] != &"")
+	check(c.rest_wanted(legs), "a leg attack wound up: the legs hold the rest pose")
+	var cd: float = c.cooldown_of(c.pending[legs])
+	_tick_golem_until(g, func() -> bool: return c.pending[legs] == &"")
+	var n: int = _tick_golem_until(g, func() -> bool: return c.pending[legs] != &"")
+	check(c.pending[legs] != &"", "she strikes again")
+	check(c._since_attack[legs] < TICK + 0.0001 and float(n) * TICK > 0.0,
+		"the next one starts the tick her legs come free")
+	check(c._attack_cycle[legs] <= cd + 0.0001, "after the cooldown (%.2f s)" % cd)
+	check(c.rest_wanted(legs), "still in combat: the legs keep the rest pose")
+	foe.position = g.position + Vector3(200, 0, 0)   # far out of reach
+	_tick_golem_until(g, func() -> bool: return c.pending[legs] == &"")
+	_tick_golem_until(g, func() -> bool: return not c.rest_wanted(legs),
+		int(ceil((cd + GolemSitCombat.COMBAT_REST_HOLD + 1.0) / TICK)))
+	check(not c.rest_wanted(legs), "nothing in reach any more: after COMBAT_REST_HOLD the idle comes back")
+	check(c._since_attack[legs] >= c._attack_cycle[legs] + GolemSitCombat.COMBAT_REST_HOLD - TICK,
+		"not before the hold ran out (%.2f s after the attack)" % c._since_attack[legs])
+	_free_world(w)
+
+
 # --- Krebsgang (Nutzervorgabe 2026-11-18) -----------------------------------------------
 
 ## Eine sitzende Golemin bei (64, 40), Blick +z, mit dem Schalter "Stationaer" aus.
@@ -4883,7 +4977,7 @@ func test_crab_walk_follows_a_move_order_and_sits_again() -> void:
 	for i in range(10):
 		_tick_world(w)
 	var v: float = _flat(g.position, a) / (10.0 * TICK)
-	check_near(v, g.current_speed() / 3.0, "she crawls at a third of her walking speed (%.2f m/s)" % v, 0.05)
+	check_near(v, g.current_speed() * Balance.GOLEM_CRAB_SPEED_SHARE, "she crawls at 40 % of her walking speed (%.2f m/s)" % v, 0.05)
 	check(g.heading().dot(Vector3(0, 0, 1)) > 0.99 and g.position.z > a.z, "feet first, the way she faces")
 	check(g._seat_center == g.position, "her middle moves with her (the seat layout follows)")
 	# Someone at the goal, under the new seat.
@@ -5041,7 +5135,8 @@ func test_crab_strike_behind_her_head_brings_airships_down() -> void:
 	g.set_sit_stationary(false)
 	_run_until(w, func() -> bool: return g.crab_air_pending(), 200)
 	check(g.crab_air_pending() and g._crab == Golem.CRAB_STAND, "not stationary: up into the crab stand, she winds up")
-	check_near(g._crab_air_time + TICK, g.current_windup(Golem.ATTACK_SWAT), "with the swat's wind-up", TICK + 0.0001)
+	check_near(g._crab_air_time + TICK, g.cooldown_for(Golem.ATTACK_SWAT) * Balance.GOLEM_CRAB_AIR_IMPACT / Golem.CRAB_HEADBUTT_LENGTH,
+		"its clip fills the swat's cooldown, the impact at its share", TICK + 0.0001)
 	check(g.in_crab_air_zone(ship.position), "the ship is in the area behind her head")
 	_run_until(w, func() -> bool: return ship.state == Unit.State.DEAD, 400)
 	check(ship.state == Unit.State.DEAD, "two strikes bring it down (%d hull hits)" % ship._hull_hits)
@@ -5105,6 +5200,91 @@ func test_crab_foes_in_reach_go_before_an_airship() -> void:
 	_free_world(w)
 
 
+## BEFOHLENER ZEPPELINANGRIFF IM SITZEN (Nutzermeldung 2026-11-19): der Rechtsklick auf ein Luftschiff ging
+## an einen Deck-Passagier, den der Krebsgang fuer eine Einheit am Boden hielt — sie setzte sich "in
+## Reichweite" und kaempfte darunter weiter. Jetzt wird das Schiff selbst ihr Ziel: auch mit einem Feind in
+## Reichweite ihrer Sitzangriffe steht sie auf, krabbelt hin, ohne sich zwischendurch zu setzen, und schlaegt.
+func test_crab_ordered_attack_on_an_airship_brings_it_down() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _crab_golem(w)
+	g.sit_attacks_enabled = true
+	var ship: Airship = _crewed_airship(w, 1, Vector3(64, 5, g.position.z + 35.0))
+	var passenger: Unit = null
+	for m in ship.crew:
+		if is_instance_valid(m) and m.rides_airborne():
+			passenger = m
+	check(passenger != null and Golem.airship_of_rider(passenger) == ship, "a passenger rides on its deck")
+	var feet: Vector3 = g.position + g.heading() * g.seat_back_m()
+	var foe: Unit = _foe(w, feet.x, feet.z + 2.0, 100000)
+	check(g._crab_reaches(foe), "a foe within reach of her sit attacks")
+	# The player clicks on the passenger (or the ship: the same way through TribeCommands).
+	w.commands.order_attack([g] as Array[Unit], passenger)
+	check(g.crab_target() == ship and g._crab_focus == ship, "the order goes to the ship itself, not the passenger")
+	_run_until(w, func() -> bool: return g._crab == Golem.CRAB_STAND and g.state == Unit.State.MOVE, 300)
+	check(g._crab == Golem.CRAB_STAND and g.state == Unit.State.MOVE, "she gets up and crawls toward it, the foe beside her")
+	var sat: bool = false
+	var ticks: int = 0
+	# (Until the ship is wrecked: falling it is no target any more, and she sits down again.)
+	while ship._hull_hits < Balance.AIRSHIP_HULL_HITS and ticks < 1500:
+		_tick_world(w)
+		ticks += 1
+		sat = sat or g._crab == Golem.CRAB_DOWN and ship._hull_hits < Balance.AIRSHIP_HULL_HITS   # (wrecked: she may sit)
+	check(not sat, "she does not sit down on the way")
+	check(ship._hull_hits >= Balance.AIRSHIP_HULL_HITS, "her headbutt brings it down (%d ticks, %d hull hits)" % [ticks, ship._hull_hits])
+	_free_world(w)
+
+
+## Schon im Krebsgang: ein Angriffsbefehl auf ein Luftschiff (Klick aufs Schiff) laesst sie nicht erst hinsetzen
+## (Nutzermeldung 2026-11-19), auch wenn ein Feind in Reichweite ihrer Sitzangriffe kommt.
+func test_crab_already_walking_takes_the_airship_order_without_sitting() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _crab_golem(w)
+	g.sit_attacks_enabled = true
+	var ship: Airship = _crewed_airship(w, 1, Vector3(64, 5, g.position.z + 40.0))
+	g.order_move(g.position + Vector3(-12, 0, 0))
+	_run_until(w, func() -> bool: return g._crab == Golem.CRAB_STAND and g.state == Unit.State.MOVE, 300)
+	check(g._crab == Golem.CRAB_STAND and g.state == Unit.State.MOVE, "(she crawls to a move goal)")
+	var near: Vector3 = g.position + g.heading() * (g.seat_back_m() + 2.0)
+	var foe: Unit = _foe(w, near.x, near.z, 100000)
+	w.commands.order_attack([g] as Array[Unit], ship)
+	check(g.crab_target() == ship, "the ship is her goal now")
+	var sat: bool = false
+	var ticks: int = 0
+	while ship._hull_hits < Balance.AIRSHIP_HULL_HITS and ticks < 1500:
+		_tick_world(w)
+		ticks += 1
+		sat = sat or g._crab == Golem.CRAB_DOWN and ship._hull_hits < Balance.AIRSHIP_HULL_HITS   # (wrecked: she may sit)
+	check(not sat, "she does not sit down first")
+	check(ship._hull_hits >= Balance.AIRSHIP_HULL_HITS, "and brings it down (%d ticks)" % ticks)
+	check(foe != null, "(foe placed)")
+	_free_world(w)
+
+
+## Im Stand (sobald sie Luftschiffe schlagen kann): der Befehl schickt sie unter das Schiff — auch ausserhalb
+## des Verfolgungsradius und an Feinden vorbei —, sie schlaegt es herunter; ein anderer Befehl beendet das.
+## Kann sie die Luft noch nicht treffen, nimmt sie den Befehl nicht an.
+func test_standing_ordered_attack_on_an_airship_swats_it() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _crewed_airship(w, 1, Vector3(40, 5, 50))
+	var g: Golem = _golem(w, 0, Vector3(40.0 + Balance.GOLEM_AIR_CHASE_RADIUS + 8.0, 5, 50))
+	check(not g.order_attack_airship(ship), "below the maximum level she cannot strike the air: no order")
+	_level_to(g, Balance.GOLEM_FINAL_BONUS_LEVEL)
+	check(g._chase_target() == null, "the ship lies beyond her own chase radius")
+	var foe: Unit = _foe(w, g.position.x - 6.0, 52.0, 100000)
+	w.commands.order_attack([g] as Array[Unit], ship)
+	check(g._ordered_ship == ship and g.state == Unit.State.MOVE, "ordered: she walks after it")
+	var ticks: int = _run_until(w, func() -> bool: return ship.state == Unit.State.DEAD, 600)
+	check(ship.state == Unit.State.DEAD, "and swats it out of the sky (%d ticks)" % ticks)
+	check(g._ordered_ship == null or not is_instance_valid(g._ordered_ship) or g._ordered_ship.state == Unit.State.DEAD,
+		"the order is done with it")
+	var other: Airship = _crewed_airship(w, 1, Vector3(40, 5, 20))
+	g.order_attack_airship(other)
+	g.order_move(Vector3(70, 5, 70))
+	check(g._ordered_ship == null, "a move order ends the airship order")
+	check(foe != null, "(foe placed)")
+	_free_world(w)
+
+
 ## Steht sie im Krebsstand 4 s still und ist nichts in ihrer Aggro-Reichweite zum Angreifen, setzt sie
 ## sich hin (Nutzervorgabe 2026-11-18).
 func test_crab_idle_four_seconds_without_foes_she_sits_down() -> void:
@@ -5157,7 +5337,7 @@ func test_crab_walk_strides_per_model() -> void:
 	check_near(g.crab_clip_speed(), 1.029 * g.model_scale().z, "golem 1,029 m per loop at 4 m")
 	check_near(d.crab_clip_speed(), 0.997 * d.model_scale().z, "demon golem 0,997 m")
 	check_near(gen.crab_clip_speed(), 1.012 * gen.model_scale().z, "genesis golem 1,012 m")
-	check_near(Balance.GOLEM_CRAB_SPEED_SHARE, 1.0 / 3.0, "a third of the walking speed (user spec)")
+	check_near(Balance.GOLEM_CRAB_SPEED_SHARE, 0.4, "40 % of the walking speed (user spec 2026-11-19)")
 	g.free()
 	d.free()
 	gen.free()
@@ -5227,7 +5407,7 @@ func test_crab_walks_backward_to_save_a_turn() -> void:
 	var a: Vector3 = g.position
 	for i in range(10):
 		_tick_world(w)
-	check_near(_flat(g.position, a) / (10.0 * TICK), g.current_speed() / 3.0, "as fast as forward", 0.05)
+	check_near(_flat(g.position, a) / (10.0 * TICK), g.current_speed() * Balance.GOLEM_CRAB_SPEED_SHARE, "as fast as forward", 0.05)
 	_run_until(w, func() -> bool: return not g.is_crabbing(), 2000)
 	check(g.is_sitting() and _flat(g.position, start - Vector3(0, 0, 25)) < 1.0, "she sits at the goal")
 	check(g.heading().dot(Vector3(0, 0, 1)) > 0.99, "still facing as before")
@@ -5251,7 +5431,7 @@ func test_building_hits_count_half_in_the_attack_choice() -> void:
 	for kind in [Golem.ATTACK_KICK, Golem.ATTACK_SLAM, Golem.ATTACK_DRUM]:
 		var unit_worth: float = 0.0
 		if kind == Golem.ATTACK_DRUM:
-			for hit in range(Balance.GOLEM_DRUM_HITS.size()):
+			for hit in range(Golem.DRUM_HITS.size()):
 				unit_worth += float(g.drum_hit_damage(hit))
 		else:
 			unit_worth = float(g.attack_damage(kind))

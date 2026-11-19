@@ -6,6 +6,11 @@ class_name GolemSitAnim extends RefCounted
 ## AnimationTree ueber denselben Player:
 ##
 ##   Grundclip (sit_idle, beim Drehen sit_turn_l / sit_turn_r)
+##     -> KAMPFRUHE BEINE / ARME (Blend2 mit Filter, 2026-11-19): im Kampf halten Beine bzw. Arme
+##        mit Nacken, Kopf und Oberkoerper die Ruhehaltung (erstes Bild von sit_idle) statt sit_idle
+##        zu spielen — zwischen zwei Angriffen zuckte sonst der Kopf in die Idle-Bewegung und wurde
+##        beim naechsten Angriff wieder herausgerissen (Nutzermeldung). Gesteuert von
+##        GolemSitCombat.rest_wanted, weich ein- und ausgeblendet (REST_FADE_IN / _OUT).
 ##     -> Ebene BEINE  (OneShot, nur die Beinknochen: *UpperLeg, *LowerLeg, *Foot, *Toes)
 ##     -> Ebene ARME   (OneShot, nur Schulter, Ober-/Unterarm, Hand und Finger — und
 ##                      seit 2026-11-17 Nacken und Kopf: beim Wischer wendet sie den
@@ -44,6 +49,13 @@ const SIT_CLIP_IMPACT: Dictionary = {
 	&"sit_wipe_l": 0.35, &"sit_wipe_r": 0.35, &"sit_hop": 0.6, &"sit_clap": 0.35,
 	&"sit_double_stomp": 0.35, &"sit_hand_slam_l": 0.35, &"sit_hand_slam_r": 0.35,
 	&"sit_grow": 1.0,   # its whole clip: fired with the stretch's duration it plays that long
+}
+## Length of the sit attack clips at speed 1 (seconds, LIESMICH_POPULOUS.md). Model data, not balance:
+## every sit attack plays its clip so that it fills the attack's cooldown (user spec 2026-11-19).
+const SIT_CLIP_LENGTH: Dictionary = {
+	&"sit_stomp_l": 0.9, &"sit_stomp_r": 0.9, &"sit_kick_l": 1.2, &"sit_kick_r": 1.2,
+	&"sit_wipe_l": 1.0, &"sit_wipe_r": 1.0, &"sit_hop": 1.2, &"sit_clap": 0.9,
+	&"sit_double_stomp": 1.0, &"sit_hand_slam_l": 0.9, &"sit_hand_slam_r": 0.9,
 }
 
 var player: AnimationPlayer = null
@@ -113,6 +125,16 @@ func _read_paths() -> void:
 					arm_paths.append(path)
 
 
+## Combat rest (GolemSitCombat.COMBAT_REST_HOLD): the two groups, and how fast the rest pose blends
+## in (seconds from none to full) and back out to sit_idle.
+const REST_LEGS: int = 0
+const REST_ARMS: int = 1
+const REST_NAMES: Array[String] = ["rest_legs", "rest_arms"]
+const REST_FADE_IN: float = 0.15
+const REST_FADE_OUT: float = 0.4
+var _rest: Array[float] = [0.0, 0.0]
+
+
 ## The base clips and their input names in the base transition (BASE_XFADE seconds
 ## of crossfade; each starts from its beginning — all three begin in the rest pose).
 const BASE_INPUTS: Dictionary = {&"sit_idle": "idle", &"sit_turn_l": "turn_l", &"sit_turn_r": "turn_r"}
@@ -140,6 +162,22 @@ func _build() -> void:
 		_blend.connect_node(&"base", idx, StringName("base_" + BASE_INPUTS[clip]))
 		idx += 1
 	var below: StringName = &"base"
+	# Combat rest: the rest pose (sit_idle held at its first frame) over the base, per group.
+	for group in [REST_LEGS, REST_ARMS]:
+		var rn: String = REST_NAMES[group]
+		var pose: AnimationNodeAnimation = AnimationNodeAnimation.new()
+		pose.animation = Golem.CLIP_SIT_IDLE
+		_blend.add_node(StringName(rn + "_pose"), pose)
+		_blend.add_node(StringName(rn + "_hold"), AnimationNodeTimeScale.new())   # scale 0: frame 0
+		var mix: AnimationNodeBlend2 = AnimationNodeBlend2.new()
+		mix.filter_enabled = true
+		for p in (leg_paths if group == REST_LEGS else arm_paths + head_paths + torso_paths):
+			mix.set_filter_path(p, true)
+		_blend.add_node(StringName(rn), mix)
+		_blend.connect_node(StringName(rn + "_hold"), 0, StringName(rn + "_pose"))
+		_blend.connect_node(StringName(rn), 0, below)
+		_blend.connect_node(StringName(rn), 1, StringName(rn + "_hold"))
+		below = StringName(rn)
 	for layer in [LAYER_LEGS, LAYER_ARMS, LAYER_ARM_TORSO, LAYER_FULL]:
 		var n: String = LAYER_NAMES[layer]
 		var clip: AnimationNodeAnimation = AnimationNodeAnimation.new()
@@ -173,6 +211,9 @@ func _build() -> void:
 	tree.anim_player = tree.get_path_to(player)
 	_base_clip = Golem.CLIP_SIT_IDLE
 	tree.set("parameters/base/transition_request", "idle")   # the transition has no state until asked
+	for rn in REST_NAMES:
+		tree.set("parameters/%s_hold/scale" % rn, 0.0)
+		tree.set("parameters/%s/blend_amount" % rn, 0.0)
 
 
 ## Does the model bring any clip the layers are for? Without one the tree stays off.
@@ -204,6 +245,25 @@ func set_base(clip: StringName) -> void:
 
 func base_clip() -> StringName:
 	return _base_clip
+
+
+## Blends the combat rest of each group toward on (1) or off (0): in within REST_FADE_IN seconds,
+## out within REST_FADE_OUT.
+func update_rest(legs_on: bool, arms_on: bool, delta: float) -> void:
+	var want: Array[bool] = [legs_on, arms_on]
+	for group in [REST_LEGS, REST_ARMS]:
+		var target: float = 1.0 if want[group] else 0.0
+		var fade: float = REST_FADE_IN if target > _rest[group] else REST_FADE_OUT
+		var next: float = move_toward(_rest[group], target, delta / fade)
+		if next != _rest[group]:
+			_rest[group] = next
+			if tree != null:
+				tree.set("parameters/%s/blend_amount" % REST_NAMES[group], next)
+
+
+## How far the combat rest of `group` is blended in (0..1).
+func rest_amount(group: int) -> float:
+	return _rest[group]
 
 
 ## Plays `clip` once on `layer`, so fast that its impact (SIT_CLIP_IMPACT) meets

@@ -4,24 +4,25 @@ class_name Golem extends Unit
 ## Wachturm (GOLEM_HEIGHT), schlank (Koerperbox 1,55 m breit x 1,22 m tief, eigenes 3D-Modell
 ## statt Sprite), stark (GOLEM_HP), langsam im Angriff und zeitlich begrenzt.
 ##
-## Kampf: ZWEI Flaechenangriffe im Takt GOLEM_STRIKE_COOLDOWN (Nutzervorgabe
-## 2026-11-15), sobald das Ziel innerhalb GOLEM_REACH steht:
+## Kampf: Flaechenangriffe (Nutzervorgabe 2026-11-15), sobald das Ziel innerhalb
+## GOLEM_REACH steht. Ihre Grundwerte (Schaden, Ziele, Abklingzeit, Ausholzeit, Clip,
+## Flaeche) stehen in Balance.GOLEM_STAND_ATTACKS (stand_attack()):
 ##   HANDSCHLAG (slam) — sie bueckt sich und schlaegt beide Haende auf den Boden:
-##     Schaden RUNDHERUM, ein Kreis (GOLEM_SLAM_RADIUS) um den Aufschlagpunkt
-##     GOLEM_SLAM_FORWARD vor ihr. GOLEM_SLAM_DAMAGE; Ueberlebende werden mit je
-##     30 % hochgewirbelt oder ins Rollen gebracht, vom Golem weg.
+##     Schaden RUNDHERUM, ein Kreis um den Aufschlagpunkt GOLEM_SLAM_FORWARD vor
+##     ihr; Ueberlebende werden je nach Groesse hochgewirbelt oder ins Rollen
+##     gebracht, vom Golem weg.
 ##   TRITT (kick) — ein Fussballtritt: Schaden in einer SCHNEISE nach vorn
-##     (GOLEM_KICK_WIDTH x GOLEM_KICK_LENGTH, weniger als die halbe Flaeche).
-##     Mehr Schaden (GOLEM_KICK_DAMAGE) und viel Rueckstoss: JEDER Ueberlebende
-##     fliegt in Trittrichtung davon.
+##     (GOLEM_KICK_LENGTH, dahinter GOLEM_KICK_BACK_SHARE davon). Mehr Schaden
+##     und viel Rueckstoss.
+##   TROMMELN (drum) und LUFTSCHLAG (swat) s. Balance.
 ##   SPRUNG (stomp, 2026-11-16) — sie springt auf der Stelle und landet auf beiden
 ##     Fuessen: Schaden rundherum um sie selbst (Trampelradius mal 5/3, doppelter
 ##     Trampelschaden, doppelt so viele Ziele wie das Trampeln). Nur aus dem Stand; nach der
 ##     Landung ist sie GEBUECKT und bleibt es oder richtet sich sofort wieder auf
-##     (s. Balance.GOLEM_STOMP_*, _tick_stance).
+##     (_tick_stance).
 ## Wahl (_choose_attack, seit 2026-11-16 nach erwartetem Schaden je Sekunde; frueher: stehen mindestens 3 Feinde in der
-## Flaeche des Handschlags, schlaegt sie, sonst tritt sie. Beide Angriffe haben
-## eine AUSHOLZEIT (GOLEM_*_WINDUP): der Angriff wird angesetzt, der Schaden
+## Flaeche des Handschlags, schlaegt sie, sonst tritt sie. Alle Angriffe haben
+## eine AUSHOLZEIT (windup): der Angriff wird angesetzt, der Schaden
 ## faellt erst beim Aufschlag der Animation — in der dann aktuellen Blickrichtung.
 ## Jedes feindliche Gebaeude in der Wirkflaeche verliert eine Zerstoerungsstufe.
 ## Sitzende (Bekehrung) werden wie beim Katapult mitgetroffen; eigene Einheiten
@@ -78,6 +79,9 @@ const ATTACK_DRUM: StringName = &"drum"
 ## The jump on the spot (2026-11-16): she lands on both feet and the damage falls
 ## all around her. Struck only from standing — and it leaves her CROUCHED.
 const ATTACK_STOMP: StringName = &"stomp"
+## Damage curves of the attack table (column curve): slam / kick / drum grow like those
+## attacks, trample is a multiple of the trample damage (from the height).
+const CURVE_TRAMPLE: StringName = &"trample"
 ## Extra clips the model may bring for the same attacks: the kick with the other
 ## leg, and the level strike at an airship hovering at chest height.
 const CLIP_KICK_LEFT: StringName = &"kick_l"
@@ -157,15 +161,29 @@ const GROW_STRIKE_SHARE: float = 0.43
 ## slam = circle of SLAM_RADIUS around the point SLAM_FORWARD ahead,
 ## kick = lane -KICK_BACK <= along <= KICK_LENGTH, |side| <= KICK_HALF_WIDTH (the
 ## leg swings back first, so the lane reaches behind her too).
-const SLAM_RADIUS: float = Balance.GOLEM_SLAM_RADIUS
+const SLAM_RADIUS: float = Balance.GOLEM_STAND_ATTACKS[&"slam"]["area"]
 const SLAM_FORWARD: float = Balance.GOLEM_SLAM_FORWARD
-const KICK_HALF_WIDTH: float = Balance.GOLEM_KICK_WIDTH * 0.5
+const KICK_HALF_WIDTH: float = Balance.GOLEM_STAND_ATTACKS[&"kick"]["area"] * 0.5
 const KICK_LENGTH: float = Balance.GOLEM_KICK_LENGTH
 const KICK_BACK: float = Balance.GOLEM_KICK_LENGTH * Balance.GOLEM_KICK_BACK_SHARE
-## Length of the model's attack clips (seconds, golem_export.mjs) — an attack
-## animation may be slowed down until it fills the attack cooldown, no further.
-const CLIP_LENGTH: Dictionary = {&"slam": 0.9, &"kick": 1.2, &"swat": 1.2, &"drum": 1.7, &"stomp": 1.0}   # slam_low / drum_low
 const STRIKE_COOLDOWN: float = Balance.GOLEM_STRIKE_COOLDOWN
+## THE MODEL'S ATTACK CLIPS (golem_export.mjs) — model data, not balance: their length at
+## speed 1 and when the impact falls in them. Every attack clip plays so fast that it fills
+## the attack's cooldown exactly (user spec 2026-11-19: no standing idle in a fight, one
+## value to balance); the damage falls with the impact, at the same share of the cooldown.
+## The drum strikes three times (DRUM_HITS, from the crouch, clip drum_low); the stomp's
+## impact is the landing; slam_low is the slam's clip.
+const DRUM_HITS: Array[float] = [0.35, 0.8, 1.25]
+const ATTACK_CLIP: Dictionary = {
+	&"slam": {length = 0.9, impact = 0.35},
+	&"kick": {length = 1.2, impact = 0.5},
+	&"drum": {length = 1.7, impact = 0.35},
+	&"stomp": {length = 1.0, impact = 0.6},
+	&"swat": {length = 1.2, impact = 0.5},
+}
+## The crab stand's headbutt at an airship (clip crab_headbutt, 1,0 s; impact Balance.GOLEM_CRAB_AIR_IMPACT):
+## it fills the swat's cooldown like every attack clip.
+const CRAB_HEADBUTT_LENGTH: float = 1.0
 ## A swat still hits an airship that drifted this far beyond reach() during the
 ## wind-up (factor on the reach).
 const SWAT_SLACK: float = 1.15
@@ -260,6 +278,9 @@ var _air_cooldown: float = 0.0
 ## The airship the golem is walking after (maximum level, see _tick_air_chase),
 ## and the seconds until the chase looks again.
 var _chase_ship: Airship = null
+## The airship the player ordered her against standing (order_attack_airship, user report 2026-11-19):
+## she walks under it and swats it, before any other — until it falls or another order comes.
+var _ordered_ship: Airship = null
 ## The building an explicit ORDER sent her against (order_attack_building) — see
 ## has_ordered_building().
 var _ordered_building = null
@@ -672,28 +693,51 @@ static func kills_for_level(p_level: int) -> int:
 
 ## Most targets ONE damage tick of the golem strikes (slam, kick; trampling: per
 ## second): GOLEM_MAX_TARGETS by level, plus one for every
-## GOLEM_GROWTH_STEPS_PER_TARGET growth steps beyond level 7.
+## GOLEM_GROWTH_STEPS_PER_TARGET growth steps beyond level 7, and GOLEM_FULL_SIZE_TARGETS
+## more for the full-grown golem (80 m, user spec 2026-11-19).
 static func max_targets_for(p_level: int, p_growth_steps: int) -> int:
 	var table: Array[int] = Balance.GOLEM_MAX_TARGETS
+	var full_size: bool = p_level >= Balance.GOLEM_MAX_LEVEL and p_growth_steps >= max_growth_steps()
 	return table[clampi(p_level, 0, table.size() - 1)] \
-		+ p_growth_steps / Balance.GOLEM_GROWTH_STEPS_PER_TARGET
+		+ p_growth_steps / Balance.GOLEM_GROWTH_STEPS_PER_TARGET \
+		+ (Balance.GOLEM_FULL_SIZE_TARGETS if full_size else 0)
 
 
 func max_targets() -> int:
 	return max_targets_for(level, growth_steps)
 
 
+# --- The attack table (Balance.GOLEM_STAND_ATTACKS, user spec 2026-11-19) ------------
+
+## The row of the standing attack `kind` in the attack table (empty for anything else).
+static func stand_attack(kind: StringName) -> Dictionary:
+	return Balance.GOLEM_STAND_ATTACKS.get(kind, {})
+
+
+## Length of the model's clip of the attack `kind` at speed 1 (seconds, ATTACK_CLIP).
+static func clip_length(kind: StringName, fallback: float = 0.0) -> float:
+	return float(ATTACK_CLIP.get(kind, {}).get("length", fallback))
+
+
 ## Share of the base target count (max_targets) the attack `kind` strikes, in
-## per cent: slam (and trampling) the base, kick 40 % fewer, drum a quarter more,
-## stomp twice as many — twice the trampling's (user spec 2026-11-16).
+## per cent (column targets): slam (and trampling) the base, kick 40 % fewer, drum a
+## quarter more, stomp twice as many — twice the trampling's (user spec 2026-11-16).
 static func target_percent(kind: StringName) -> int:
-	if kind == ATTACK_KICK:
-		return Balance.GOLEM_TARGET_PERCENT_KICK
-	if kind == ATTACK_DRUM:
-		return Balance.GOLEM_TARGET_PERCENT_DRUM
-	if kind == ATTACK_STOMP:
-		return Balance.GOLEM_TARGET_PERCENT_STOMP
-	return 100
+	return int(stand_attack(kind).get("targets", 100))
+
+
+## The base value of a damage curve (column curve of the attack table): the damage of
+## its attack for a freshly summoned golem; one trample tick (1) for `trample`.
+static func curve_base(curve: StringName) -> float:
+	if curve == CURVE_TRAMPLE:
+		return 1.0
+	return float(stand_attack(curve)["damage"])
+
+
+## Damage `curve` scaled by `factor` (an attack's damage over its curve's base value):
+## rounded when it lands; a factor of 1 keeps the curve's whole number.
+static func scaled_damage(curve_now: int, factor: float) -> int:
+	return curve_now if factor == 1.0 else roundi(float(curve_now) * factor)
 
 
 ## The cap for ONE landing of the attack `kind`: its share of the base count,
@@ -702,8 +746,8 @@ func max_targets_of(kind: StringName) -> int:
 	return maxi(max_targets() * target_percent(kind) / 100, 1)
 
 
-## Permanent healing per second right now: GOLEM_LEVEL_REGEN per level, and
-## GOLEM_FULL_SIZE_REGEN on top for the full-grown golem.
+## Permanent healing per second right now: GOLEM_BASE_REGEN, GOLEM_LEVEL_REGEN per level,
+## GOLEM_GROWTH_REGEN per growth step, and GOLEM_FULL_SIZE_REGEN on top for the full-grown golem.
 func regen_per_second() -> float:
 	var regen: float = Balance.GOLEM_BASE_REGEN + Balance.GOLEM_LEVEL_REGEN * float(level) \
 		+ Balance.GOLEM_GROWTH_REGEN * float(growth_steps)
@@ -873,14 +917,18 @@ func slam_radius() -> float:
 	return SLAM_RADIUS * slam_scale()
 
 
-## Radius of the circle around the hands for the ground attack `kind`: the drum's
-## is GOLEM_DRUM_RADIUS_FACTOR larger than the slam's (user spec 2026-11-16).
+## Radius of the circle around the hands for the ground attack `kind` (slam or drum):
+## its area in the attack table, grown like the slam's circle — the drum's is 10 %
+## larger than the slam's (user spec 2026-11-16).
 func ground_radius(kind: StringName) -> float:
 	return slam_radius() * _ground_factor(kind)
 
 
+## The drum's circle over the slam's (1 for the slam itself).
 static func _ground_factor(kind: StringName) -> float:
-	return Balance.GOLEM_DRUM_RADIUS_FACTOR if kind == ATTACK_DRUM else 1.0
+	if kind != ATTACK_DRUM:
+		return 1.0
+	return float(stand_attack(ATTACK_DRUM)["area"]) / SLAM_RADIUS
 
 
 ## Exponent of the limb factor: chosen so that at GOLEM_LIMB_ANCHOR_HEIGHT (the
@@ -948,30 +996,41 @@ func level_damage_bonus() -> int:
 	return Balance.GOLEM_LEVEL_DAMAGE * level
 
 
-## Damage of an attack at the current level.
+## Damage of the standing attack `kind` right now: its damage curve (column curve)
+## times the attack's damage over the curve's base value (Balance.GOLEM_STAND_ATTACKS) —
+## the swat takes the slam's, the stomp twice the trample damage.
 func attack_damage(kind: StringName) -> int:
-	var base: int = Balance.GOLEM_KICK_DAMAGE if kind == ATTACK_KICK else Balance.GOLEM_SLAM_DAMAGE
-	if kind == ATTACK_DRUM:
-		# All three hits together: every hit's own damage, plus the flat level
-		# bonus once for the whole attack.
-		return Balance.GOLEM_DRUM_HITS.size() * _drum_own_hit_damage() + level_damage_bonus()
-	if kind == ATTACK_STOMP:
-		# From the size, like the trampling it doubles — no level bonus on top.
-		return Balance.GOLEM_STOMP_TRAMPLE_MULT * trample_damage()
-	return base + level_damage_bonus()
+	var row: Dictionary = stand_attack(kind)
+	if row.is_empty():
+		row = stand_attack(ATTACK_SLAM)
+	var curve: StringName = row["curve"]
+	return scaled_damage(curve_damage(curve), float(row["damage"]) / curve_base(curve))
 
 
-## What every single hit of the drum brings by itself: GOLEM_DRUM_HIT_DAMAGE,
-## plus GOLEM_DRUM_LEVEL_DAMAGE_PER_HIT for every level (like the flat bonus).
+## A damage curve right now (whole number): the slam's / kick's damage plus the flat
+## level bonus, the drum's three hits together (every hit's own damage, plus the flat
+## level bonus once for the whole attack), or the trample damage (from the size).
+## The demon and genesis golems grow it their own way (curve_damage there).
+func curve_damage(curve: StringName) -> int:
+	if curve == CURVE_TRAMPLE:
+		return trample_damage()
+	if curve == ATTACK_DRUM:
+		return DRUM_HITS.size() * _drum_own_hit_damage() + level_damage_bonus()
+	return int(stand_attack(curve)["damage"]) + level_damage_bonus()
+
+
+## What every single hit of the drum brings by itself: a third of the drum's damage
+## in the attack table, plus GOLEM_DRUM_LEVEL_DAMAGE_PER_HIT for every level (like the flat bonus).
 func _drum_own_hit_damage() -> int:
-	return Balance.GOLEM_DRUM_HIT_DAMAGE + Balance.GOLEM_DRUM_LEVEL_DAMAGE_PER_HIT * level
+	return roundi(float(stand_attack(ATTACK_DRUM)["damage"]) / float(DRUM_HITS.size())) \
+		+ Balance.GOLEM_DRUM_LEVEL_DAMAGE_PER_HIT * level
 
 
 ## Damage of ONE of the drum's hits: its own damage (14, +1 per level) plus its
 ## share of the flat level bonus (+5 per level for the whole attack, split over
 ## the hits; the last one takes the remainder).
 func drum_hit_damage(hit: int) -> int:
-	var hits: int = Balance.GOLEM_DRUM_HITS.size()
+	var hits: int = DRUM_HITS.size()
 	var shared: int = level_damage_bonus()
 	var each: int = shared / hits
 	return _drum_own_hit_damage() + (shared - each * (hits - 1) if hit >= hits - 1 else each)
@@ -995,9 +1054,10 @@ func trample_radius() -> float:
 	return body_half_width() * size_factor()
 
 
-## Radius of the stomp around her own centre: the body circle and two thirds more.
+## Radius of the stomp around her own centre: the body circle and two thirds more
+## (its area in the attack table is a share of the body radius).
 func stomp_radius() -> float:
-	return trample_radius() * Balance.GOLEM_STOMP_RADIUS_FACTOR
+	return trample_radius() * float(stand_attack(ATTACK_STOMP)["area"])
 
 
 ## 0 at the starting size, 1 at GOLEM_MAX_HEIGHT — linear in the body height.
@@ -1160,6 +1220,7 @@ func sit_down() -> bool:
 	_clear_building_target()
 	_ordered_building = null
 	_chase_ship = null
+	_ordered_ship = null
 	waypoint_queue.clear()
 	_pending_target = Vector3.INF
 	_clear_path()
@@ -2483,8 +2544,8 @@ func _tick_crab_air(delta: float) -> void:
 	if target == null:
 		return
 	_crab_air_ship = target
-	_crab_air_time = current_windup(ATTACK_SWAT)
 	_crab_air_cooldown = cooldown_for(ATTACK_SWAT)
+	_crab_air_time = _crab_air_cooldown * Balance.GOLEM_CRAB_AIR_IMPACT / CRAB_HEADBUTT_LENGTH   # the clip fills the cooldown
 	_no_combat_timer = 0.0
 	_play_clip(CLIP_CRAB_HEADBUTT, Balance.GOLEM_CRAB_AIR_IMPACT / maxf(_crab_air_time, 0.05), true)
 
@@ -2751,7 +2812,7 @@ static func building_damage_for(amount: int) -> int:
 func building_value(kind: StringName) -> float:
 	var dmg: float = 0.0
 	if kind == ATTACK_DRUM:
-		for hit in range(Balance.GOLEM_DRUM_HITS.size()):
+		for hit in range(DRUM_HITS.size()):
 			dmg += float(drum_hit_damage(hit))
 	else:
 		dmg = float(attack_damage(kind))
@@ -2762,7 +2823,7 @@ func building_value(kind: StringName) -> float:
 func building_damage_total(kind: StringName) -> int:
 	if kind == ATTACK_DRUM:
 		var sum: int = 0
-		for hit in range(Balance.GOLEM_DRUM_HITS.size()):
+		for hit in range(DRUM_HITS.size()):
 			sum += building_damage_for(drum_hit_damage(hit))
 		return sum
 	return building_damage_for(attack_damage(kind))
@@ -2781,7 +2842,7 @@ func _drum_unit_worth() -> float:
 	for u in order:
 		left.append(float(u.health))
 	var worth: float = 0.0
-	for hit in range(Balance.GOLEM_DRUM_HITS.size()):
+	for hit in range(DRUM_HITS.size()):
 		var damage: float = float(drum_hit_damage(hit))
 		var struck: int = 0
 		for i in range(left.size()):
@@ -2861,7 +2922,7 @@ func attack_value(kind: StringName) -> float:
 
 ## Seconds the clip of the attack `kind` plays at the current size.
 func attack_duration(kind: StringName) -> float:
-	return float(CLIP_LENGTH.get(kind, 0.0)) / (attack_speed(kind) * clip_rate(kind))
+	return clip_length(kind) / attack_speed(kind)
 
 
 ## The stomp as a plan (damage per second over the whole plan): it costs its
@@ -2899,17 +2960,11 @@ func strike_cooldown() -> float:
 	return lerpf(STRIKE_COOLDOWN, Balance.GOLEM_STRIKE_COOLDOWN_MAX, growth_t())
 
 
-## The cooldown the attack `kind` leaves behind: the drum takes longer.
-## The slam is struck crouched and comes back faster; the drum takes the plain rhythm.
+## The cooldown the attack `kind` leaves behind: its cooldown in the attack table, grown
+## with the rhythm (strike_cooldown over GOLEM_STRIKE_COOLDOWN). The slam is struck
+## crouched and comes back faster; the stomp as long as its clip.
 func cooldown_for(kind: StringName) -> float:
-	if kind == ATTACK_DRUM:
-		return strike_cooldown()   # three hits: the plain attack rhythm (1,8 s at the start)
-	if kind == ATTACK_SLAM:
-		return strike_cooldown() * Balance.GOLEM_SLAM_COOLDOWN / Balance.GOLEM_STRIKE_COOLDOWN
-	if kind == ATTACK_STOMP:
-		# As long as its clip: whoever stays down strikes on right after settling.
-		return strike_cooldown() * Balance.GOLEM_STOMP_COOLDOWN / Balance.GOLEM_STRIKE_COOLDOWN
-	return strike_cooldown()
+	return strike_cooldown() * (float(stand_attack(kind).get("cooldown", STRIKE_COOLDOWN)) / STRIKE_COOLDOWN)
 
 
 ## How fast the body turns (rad/s): GOLEM_TURN_RATE at the starting size, down to
@@ -3003,7 +3058,7 @@ func _slope_speed(slope: float) -> float:
 	if want_dir.length_squared() > 0.000001:
 		share = maxf(Balance.GOLEM_TURN_MIN_SPEED_SHARE, heading().dot(want_dir.normalized()))
 	if crab:
-		share *= Balance.GOLEM_CRAB_SPEED_SHARE   # a third of her walking speed (user spec 2026-11-18)
+		share *= Balance.GOLEM_CRAB_SPEED_SHARE   # 40 % of her walking speed (user spec 2026-11-19, before a third)
 	return super._slope_speed(slope) * share
 
 
@@ -3735,40 +3790,24 @@ static func in_attack_area(kind: StringName, along: float, side: float,
 	return in_slam_area(along, side, scale, limb)
 
 
+## Where the impact of the attack `kind` lies in its clip at speed 1 (seconds, ATTACK_CLIP;
+## the drum: its first hit, the stomp: the landing).
 static func attack_windup(kind: StringName) -> float:
-	if kind == ATTACK_SWAT:
-		return Balance.GOLEM_SWAT_WINDUP
-	if kind == ATTACK_DRUM:
-		return Balance.GOLEM_DRUM_HITS[0]
-	if kind == ATTACK_STOMP:
-		return Balance.GOLEM_STOMP_WINDUP   # the landing
-	return Balance.GOLEM_KICK_WINDUP if kind == ATTACK_KICK else Balance.GOLEM_SLAM_WINDUP
+	return float(ATTACK_CLIP.get(kind, ATTACK_CLIP[ATTACK_SLAM])["impact"])
 
 
-## Playback speed of an attack animation: a bigger body swings slower (with the
-## root of its size, like the stride) — but never so slow that the animation
-## would outlast the attack's cooldown. At that limit one attack flows straight
-## into the next; she no longer stands idle in between. The cooldown itself grows
-## with the size (strike_cooldown), so the animations of a giant stretch further.
+## Playback speed of an attack animation (user spec 2026-11-19): exactly so fast that
+## the clip fills the attack's cooldown — one attack flows straight into the next, she
+## never stands idle in a fight, and the cooldown is the only time to balance. The
+## cooldown grows with the size (strike_cooldown; the demon golem's is 15 % shorter),
+## so a giant's clips stretch further.
 func attack_speed(kind: StringName) -> float:
-	var slowest: float = float(CLIP_LENGTH.get(kind, STRIKE_COOLDOWN)) / clip_rate(kind) \
-		/ cooldown_for(kind)
-	return clampf(1.0 / sqrt(size_factor()), minf(slowest, 1.0), 1.0)
+	var clip: float = clip_length(kind)
+	return clip / cooldown_for(kind) if clip > 0.0 else 1.0
 
 
-## Where in its clip an attack's impact lies (seconds, golem_bewegung.mjs) — only
-## for attacks whose wind-up was tuned away from the clip afterwards.
-const CLIP_IMPACT: Dictionary = {&"slam": 0.35}
-
-## How much faster than the animation was built an attack's clip has to play so
-## that its impact meets the wind-up (slam: 0,35 s in the clip, 0,3 s wind-up).
-static func clip_rate(kind: StringName) -> float:
-	if not CLIP_IMPACT.has(kind):
-		return 1.0
-	return float(CLIP_IMPACT[kind]) / attack_windup(kind)
-
-
-## Seconds from the start of an attack to its impact at the current size.
+## Seconds from the start of an attack to its impact at the current size: the impact's
+## share of its clip, of the cooldown.
 func current_windup(kind: StringName) -> float:
 	return attack_windup(kind) / attack_speed(kind)
 
@@ -3969,6 +4008,8 @@ func can_strike_air() -> bool:
 func _airship_in_reach() -> Airship:
 	if not can_strike_air() or path_service == null:
 		return null
+	if _ordered_ship != null and is_instance_valid(_ordered_ship) and _ordered_ship.auto_attackable() 			and _flat_dist(position, _ordered_ship.position) <= reach():
+		return _ordered_ship   # the ordered one first
 	var best: Airship = null
 	var best_d: float = INF
 	for u in path_service.get_enemy_vehicles_in_radius(position, reach(), tribe_id):
@@ -4029,6 +4070,13 @@ func _tick_air_chase(delta: float) -> void:
 	if _chase_timer > 0.0:
 		return
 	_chase_timer = AIR_CHASE_INTERVAL
+	if _ordered_ship != null:
+		if is_instance_valid(_ordered_ship) and _ordered_ship.state != State.DEAD 				and _ordered_ship.auto_attackable():
+			_chase_ship = _ordered_ship
+			_aim_at_ordered_ship()   # the ship drifts: re-aim
+			return
+		_ordered_ship = null   # it fell (or nobody serves aboard): back to her own choices
+		_chase_ship = null
 	var chasing: bool = _chase_ship != null and state == State.MOVE
 	if state != State.IDLE and not chasing:
 		return
@@ -4055,17 +4103,73 @@ func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = fals
 		return
 	if not _own_order:
 		_chase_ship = null
+		_ordered_ship = null
 	_ordered_building = null
 	super.order_move(target, queue_up, aggressive)
 
 
+## The airship `u` rides on as deck crew (null: none).
+static func airship_of_rider(u: Unit) -> Airship:
+	if u != null and is_instance_valid(u) and u.rides_airborne() and u.siege_engine is Airship:
+		return u.siege_engine as Airship
+	return null
+
+
+## Attack order on an enemy AIRSHIP (user report 2026-11-19: the order went to a deck passenger, whom
+## she took for a unit on the ground — she sat down "within reach" and fought on below it). Seated and
+## not stationary: the ship becomes her crawl target — backward to it, her back to it, the headbutt from
+## the crab stand (GolemSitCombat starts nothing new until she is up, she does not sit down for other
+## foes on the way and does not give up on it). Standing, once she can strike the air: she walks under
+## it and swats it. False when she can do nothing against it now.
+func order_attack_airship(ship: Airship) -> bool:
+	if ship == null or not is_instance_valid(ship) or ship.tribe_id == tribe_id or not ship.auto_attackable():
+		return false
+	if is_sit_locked():
+		if not crab_takes_orders():
+			return false
+		_crab_focus = ship
+		return crab_to(Vector3.INF, ship)
+	if not can_strike_air():
+		return false
+	_end_attack()
+	_clear_building_target()
+	_ordered_building = null
+	_ordered_ship = ship
+	_chase_ship = ship
+	_chase_timer = 0.0
+	_aim_at_ordered_ship()
+	return true
+
+
+## Standing after the ordered airship: under it she stops (the swat comes from _tick_air_strike), far off
+## she walks to the spot below it — a plain march, she does not stop for the fights on the way.
+func _aim_at_ordered_ship() -> void:
+	if _flat_dist(position, _ordered_ship.position) <= reach() * AIR_CHASE_STAND:
+		if state == State.MOVE:
+			_clear_path()
+			_pending_target = Vector3.INF
+			_set_state(State.IDLE)
+		return
+	var spot: Vector3 = _chase_point(_ordered_ship)
+	if spot == Vector3.INF:
+		return   # not to be reached on foot (over open water): she swats it if it comes by
+	_own_order = true
+	order_move(spot, false, false)
+	_own_order = false
+
+
 func order_attack(enemy: Unit) -> void:
+	var ship: Airship = airship_of_rider(enemy)
+	if ship != null:
+		order_attack_airship(ship)   # a deck passenger: she goes for the ship (user report 2026-11-19)
+		return
 	if is_sit_locked():
 		if crab_takes_orders() and enemy != null and is_instance_valid(enemy) and enemy.tribe_id != tribe_id:
 			_crab_focus = enemy   # crawl within reach, sit down, strike (user spec 2026-11-18)
 			crab_to(Vector3.INF, enemy)
 		return
 	_chase_ship = null
+	_ordered_ship = null
 	_ordered_building = null
 	super.order_attack(enemy)
 
@@ -4077,6 +4181,7 @@ func order_attack_building(building) -> void:
 			crab_to(Vector3.INF, building)
 		return
 	_chase_ship = null
+	_ordered_ship = null
 	var walking: bool = state == State.MOVE or (state == State.ATTACK and _closing_in)
 	super.order_attack_building(building)
 	_ordered_building = attack_building if attack_building == building else null
@@ -4423,8 +4528,8 @@ func _wind_up(kind: StringName, building = null, ship: Airship = null) -> void:
 	_arm_anim = 0.0
 	_no_combat_timer = 0.0
 	var clip: StringName = _clip_for(kind, ship)
-	var rate: float = attack_speed(kind) * clip_rate(kind)
-	_attack_anim_left = float(CLIP_LENGTH.get(kind, 0.0)) / rate
+	var rate: float = attack_speed(kind)
+	_attack_anim_left = clip_length(kind) / rate
 	_play_clip(clip, rate, true)
 
 
@@ -4443,10 +4548,10 @@ func _tick_pending_attack(delta: float) -> void:
 	var building = _pending_building
 	var ship: Airship = _pending_airship if is_instance_valid(_pending_airship) else null
 	# The drum lands three times; she stays wound up until the last hit.
-	if kind == ATTACK_DRUM and _pending_hit < Balance.GOLEM_DRUM_HITS.size() - 1:
+	if kind == ATTACK_DRUM and _pending_hit < DRUM_HITS.size() - 1:
 		_land_attack(kind, _pending_hit)
-		_pending_time += (Balance.GOLEM_DRUM_HITS[_pending_hit + 1]
-			- Balance.GOLEM_DRUM_HITS[_pending_hit]) / attack_speed(kind)
+		_pending_time += (DRUM_HITS[_pending_hit + 1]
+			- DRUM_HITS[_pending_hit]) / attack_speed(kind)
 		_pending_hit += 1
 		return
 	_pending_attack = &""
@@ -4459,7 +4564,7 @@ func _tick_pending_attack(delta: float) -> void:
 	if building != null and is_instance_valid(building) and building.health > 0 \
 			and not struck.has(building) and state == State.ATTACK \
 			and attack_building == building and kind != ATTACK_STOMP:
-		_strike_building(building, building_damage_for(drum_hit_damage(Balance.GOLEM_DRUM_HITS.size() - 1)
+		_strike_building(building, building_damage_for(drum_hit_damage(DRUM_HITS.size() - 1)
 			if kind == ATTACK_DRUM else attack_damage(kind)))   # (the stomp only strikes what stands around her)
 
 
@@ -4538,7 +4643,7 @@ func _land_attack(kind: StringName, hit: int = 0) -> Dictionary:
 		_stance_target = STANCE_CROUCH
 		_stance_age = 0.0
 		_stomp_landed = true
-	var last_hit: bool = not drum or hit >= Balance.GOLEM_DRUM_HITS.size() - 1
+	var last_hit: bool = not drum or hit >= DRUM_HITS.size() - 1
 	var damage: int = drum_hit_damage(hit) if drum else attack_damage(kind)
 	# Everything struck is collected first: a kill can raise the level, and the
 	# area and the target cap of THIS attack must not grow while it lands.
@@ -4882,8 +4987,13 @@ func _tick_visual(delta: float) -> void:
 			_sit_anim.set_active(layered)
 			if not layered:
 				_clip = &""   # the player takes over again: replay its clip
+				_sit_anim.update_rest(false, false, GolemSitAnim.REST_FADE_OUT)   # sits down again without it
 		if layered:
 			_sit_anim.set_base(_sit_base_clip())
+			# Combat rest (user report 2026-11-19): limbs whose attacks are possible hold the rest pose.
+			var c: GolemSitCombat = sit_combat
+			_sit_anim.update_rest(c != null and c.rest_wanted(GolemSitCombat.CH_LEGS),
+				c != null and c.rest_wanted(GolemSitCombat.CH_ARMS), delta)
 		elif not attacking and not is_switching_stance() and not is_stretching():
 			if is_crabbing():
 				_crab_visual(ground_speed, turn_speed)

@@ -268,28 +268,19 @@ func level_damage_bonus() -> int:
 
 
 ## Damage with its fraction: the freshly summoned demon golem's, plus two thirds of
-## the demon golem's gain for every metre he has grown.
-func damage_exact(kind: StringName) -> float:
-	var n: float = combat_demon_steps()
-	if kind == ATTACK_KICK:
-		return float(Balance.GOLEM_KICK_DAMAGE) * Balance.DEMON_GOLEM_DAMAGE_SHARE \
-			+ Balance.DEMON_GOLEM_START_KICK_BONUS + Balance.DEMON_GOLEM_GROWTH_KICK_DAMAGE * n
-	if kind == ATTACK_DRUM:
-		return float(Balance.GOLEM_DRUM_HIT_DAMAGE * Balance.GOLEM_DRUM_HITS.size()) \
-			* Balance.DEMON_GOLEM_DAMAGE_SHARE + Balance.DEMON_GOLEM_START_DRUM_BONUS \
-			+ Balance.DEMON_GOLEM_GROWTH_DRUM_DAMAGE * n
-	return float(Balance.GOLEM_SLAM_DAMAGE) * Balance.DEMON_GOLEM_DAMAGE_SHARE \
-		+ Balance.DEMON_GOLEM_START_SLAM_BONUS + Balance.DEMON_GOLEM_GROWTH_SLAM_DAMAGE * n
+## the demon golem's gain for every metre he has grown (DemonGolem.damage_exact_at).
+func damage_exact(curve: StringName) -> float:
+	return DemonGolem.damage_exact_at(curve, combat_demon_steps())
 
 
-func attack_damage(kind: StringName) -> int:
-	if kind == ATTACK_STOMP:
-		return Balance.GOLEM_STOMP_TRAMPLE_MULT * trample_damage()
-	return int(round(damage_exact(kind)))
+func curve_damage(curve: StringName) -> int:
+	if curve == CURVE_TRAMPLE:
+		return trample_damage()
+	return int(round(damage_exact(curve)))
 
 
 func drum_hit_damage(hit: int) -> int:
-	var hits: int = Balance.GOLEM_DRUM_HITS.size()
+	var hits: int = DRUM_HITS.size()
 	var total: int = attack_damage(ATTACK_DRUM)
 	var each: int = total / hits
 	return total - each * (hits - 1) if hit >= hits - 1 else each
@@ -646,7 +637,7 @@ func _land_attack(kind: StringName, hit: int = 0) -> Dictionary:
 	var struck: Dictionary = super._land_attack(kind, hit)
 	if _harvest_strike != null:
 		var tree = _harvest_strike   # untyped: may be freed by now
-		if kind != ATTACK_DRUM or hit >= Balance.GOLEM_DRUM_HITS.size() - 1:
+		if kind != ATTACK_DRUM or hit >= DRUM_HITS.size() - 1:
 			_harvest_strike = null
 		# An area order: every tree of the order in the blow's area falls with it.
 		var tm: TreeManager = _trees()

@@ -971,6 +971,13 @@ func order_attack(units: Array[Unit], enemy: Unit) -> void:
 			continue
 		if unit.tribe_id == enemy.tribe_id:
 			continue   # never attack own tribe
+		# A golem goes for the airship itself — clicked on the ship or on one of its deck passengers
+		# (user report 2026-11-19: she took the passenger for a unit on the ground and never struck the ship).
+		if unit is Golem:
+			var ship: Airship = enemy as Airship if enemy is Airship else Golem.airship_of_rider(enemy)
+			if ship != null:
+				(unit as Golem).order_attack_airship(ship)
+				continue
 		var target: Unit = enemy
 		# Airship target: only units that may aim at the hull (catapults) keep
 		# it; everyone else is redirected onto the ship's boarded crew — the

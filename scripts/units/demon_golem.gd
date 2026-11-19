@@ -176,31 +176,33 @@ func level_damage_bonus() -> int:
 ## Damage of an attack as it stands in the books — with its fraction: half the
 ## golem's starting damage, a start bonus (slam +3, kick +2, drum +3), plus the gain
 ## of every growth step.
-func damage_exact(kind: StringName) -> float:
-	var n: float = float(growth_steps)
-	if kind == ATTACK_KICK:
-		return float(Balance.GOLEM_KICK_DAMAGE) * Balance.DEMON_GOLEM_DAMAGE_SHARE \
-			+ Balance.DEMON_GOLEM_START_KICK_BONUS + Balance.DEMON_GOLEM_GROWTH_KICK_DAMAGE * n
-	if kind == ATTACK_DRUM:
-		return float(Balance.GOLEM_DRUM_HIT_DAMAGE * Balance.GOLEM_DRUM_HITS.size()) \
-			* Balance.DEMON_GOLEM_DAMAGE_SHARE + Balance.DEMON_GOLEM_START_DRUM_BONUS \
-			+ Balance.DEMON_GOLEM_GROWTH_DRUM_DAMAGE * n
-	return float(Balance.GOLEM_SLAM_DAMAGE) * Balance.DEMON_GOLEM_DAMAGE_SHARE \
-		+ Balance.DEMON_GOLEM_START_SLAM_BONUS + Balance.DEMON_GOLEM_GROWTH_SLAM_DAMAGE * n
+## (Curve slam, kick or drum of the attack table; the genesis golem takes the same with
+## his own steps, damage_exact_at.)
+static func damage_exact_at(curve: StringName, steps: float) -> float:
+	var base: float = float(Golem.stand_attack(curve)["damage"]) * Balance.DEMON_GOLEM_DAMAGE_SHARE
+	if curve == ATTACK_KICK:
+		return base + Balance.DEMON_GOLEM_START_KICK_BONUS + Balance.DEMON_GOLEM_GROWTH_KICK_DAMAGE * steps
+	if curve == ATTACK_DRUM:
+		return base + Balance.DEMON_GOLEM_START_DRUM_BONUS + Balance.DEMON_GOLEM_GROWTH_DRUM_DAMAGE * steps
+	return base + Balance.DEMON_GOLEM_START_SLAM_BONUS + Balance.DEMON_GOLEM_GROWTH_SLAM_DAMAGE * steps
 
 
-## Damage of an attack right now: the exact value, rounded when it lands. The
-## stomp comes from the size like the golem's (twice the trample damage).
-func attack_damage(kind: StringName) -> int:
-	if kind == ATTACK_STOMP:
-		return Balance.GOLEM_STOMP_TRAMPLE_MULT * trample_damage()
-	return int(round(damage_exact(kind)))
+func damage_exact(curve: StringName) -> float:
+	return damage_exact_at(curve, float(growth_steps))
+
+
+## A damage curve right now (Golem.attack_damage scales it per attack): the exact value,
+## rounded when it lands; the trample damage from the size like the golem's.
+func curve_damage(curve: StringName) -> int:
+	if curve == CURVE_TRAMPLE:
+		return trample_damage()
+	return int(round(damage_exact(curve)))
 
 
 ## Damage of ONE of the drum's hits: the whole attack split evenly, the last hit
 ## takes the remainder.
 func drum_hit_damage(hit: int) -> int:
-	var hits: int = Balance.GOLEM_DRUM_HITS.size()
+	var hits: int = DRUM_HITS.size()
 	var total: int = attack_damage(ATTACK_DRUM)
 	var each: int = total / hits
 	return total - each * (hits - 1) if hit >= hits - 1 else each
@@ -275,15 +277,6 @@ func strike_cooldown() -> float:
 		/ (Balance.GOLEM_MAX_HEIGHT - Balance.GOLEM_HEIGHT)
 	return lerpf(STRIKE_COOLDOWN, Balance.GOLEM_STRIKE_COOLDOWN_MAX, t) \
 		* (1.0 - Balance.DEMON_GOLEM_ATTACK_SPEEDUP)
-
-
-## Playback speed of an attack animation: the golem's at this size (slower with
-## the root of the size — and faster for a small body), sped up so that it takes
-## 15 % less time, and never so slow that it would outlast the attack's cooldown.
-func attack_speed(kind: StringName) -> float:
-	var slowest: float = float(CLIP_LENGTH.get(kind, STRIKE_COOLDOWN)) / clip_rate(kind) \
-		/ cooldown_for(kind)
-	return maxf(1.0 / sqrt(size_factor()) / (1.0 - Balance.DEMON_GOLEM_ATTACK_SPEEDUP), slowest)
 
 
 # --- Kills ----------------------------------------------------------------------------

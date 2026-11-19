@@ -6,28 +6,27 @@ class_name GolemSitCombat extends RefCounted
 ## erreichen, und dreht sich (langsam) nach Feinden, die keines erreicht.
 ##
 ## ZWEI KANAELE, BEINE und ARME, jeder mit eigener Ausholzeit und Abklingzeit; beide
-## duerfen gleichzeitig angreifen. Zonen und Werte nach den Vorgaben vom 2026-11-17
-## (Masse in Balance.GOLEM_SIT_*, gemessen an den Clips):
-##  1. Fuss-Stampfer (Beine, links ODER rechts): Kreis (mittel) um die Stelle, an der der
-##     Schuh landet, nicht hinter die Ferse des ruhenden Schuhs. Schnell (wie der gebueckte
-##     Handschlag), Schaden und Zielzahl wie der Handschlag.
+## duerfen gleichzeitig angreifen. Zonen nach den Vorgaben vom 2026-11-17/18 (Lage in
+## Balance.GOLEM_SIT_*, gemessen an den Clips); jeder Sitzangriff hat seine eigenen Werte —
+## Schaden, Ziele, Abklingzeit, Ausholzeit, Flaeche — in Balance.GOLEM_SIT_ATTACKS, darauf die
+## Sitzfaktoren GOLEM_SIT_MULT_* fuer alle gleich (Nutzervorgabe 2026-11-19):
+##  1. Fuss-Stampfer (Beine, links ODER rechts): Kreis um die Stelle, an der der Schuh
+##     landet, nicht hinter die Ferse des ruhenden Schuhs.
 ##  2. Bein strecken (Beine, links ODER rechts): Schneise vom Hueftgelenk bis zur Spitze des
-##     gestreckten Schuhs, so breit wie das Bein. Werte wie der Tritt.
+##     gestreckten Schuhs, so breit wie das Bein.
 ##  5. Arm-Wischer (Arme, immer nur EIN Arm): Kegel neben ihr auf seiner Seite, etwas hinter
-##     den Ruecken, Reichweite reach(). Schaden und Zielzahl wie der Luftschlag, schnell.
+##     den Ruecken.
 ##  7. Handschlag seitlich (Arme, links ODER rechts; Nutzervorgabe 2026-11-18): eine Schuh-Hand
 ##     schlaegt von oben flach auf den blinden Fleck aussen neben Oberschenkel und Knie (vor dem
-##     Wischer, hinter dem Doppelstampfer). Kreis mit 2/3 des Fuss-Stampfer-Radius um die gemessene
-##     Aufschlagstelle; Werte und Tempo wie der Fuss-Stampfer. Kopf und Oberkoerper drehen mit.
+##     Wischer, hinter dem Doppelstampfer). Kreis um die gemessene Aufschlagstelle. Kopf und
+##     Oberkoerper drehen mit.
 ## Welche Seite: die, deren Angriff mehr bringt; bei Gleichstand die, deren Aufschlag
 ## naeher an den getroffenen Feinden liegt.
 ## GROSSE ANGRIFFE (brauchen und sperren beide Kanaele, erst ab GOLEM_SIT_BIG_MIN_TARGETS):
-##  3. Po-Klatscher (sit_hop): Kreis des Sprungs um die Mitte der Sitzflaeche (alles unter
-##     ihr). Schaden und Zielzahl wie der Sprung, Abklingzeit etwas laenger als dessen.
-##  4. Doppelstampfer: Kreis des Trommelns um die Stelle, an der beide Schuhe landen (reicht
-##     ein Stueck hinter die Fuesse). Werte wie das Trommeln.
-##  6. Handstampfer hinten (sit_clap): Kreis des Trommelns um jede Hand, nur hinter der
-##     Sitzmitte. Schaden und Zielzahl wie das Trommeln, Abklingzeit kuerzer.
+##  3. Po-Klatscher (sit_hop): Kreis um die Mitte der Sitzflaeche (alles unter ihr).
+##  4. Doppelstampfer: Kreis um die Stelle, an der beide Schuhe landen (reicht ein Stueck
+##     hinter die Fuesse).
+##  6. Handstampfer hinten (sit_clap): Kreis um jede Hand, nur hinter der Sitzmitte.
 ## Waehrend sie sich dreht, greift sie nicht an (und beginnt keine Drehung, solange ein
 ## Angriff ausholt). Die Wahl haengt allein daran, wo die Feinde stehen: jeder Angriff
 ## wird mit dem bewertet, was er in seiner Zone jetzt trifft.
@@ -59,8 +58,15 @@ const ARM_KINDS: Array[StringName] = [WIPE_L, WIPE_R, HAND_SLAM_L, HAND_SLAM_R]
 
 const CH_LEGS: int = 0
 const CH_ARMS: int = 1
-## How often a free channel looks for something to strike (seconds).
+## How often a free channel looks for something to strike (seconds). A channel that just
+## came free looks at once (user report 2026-11-19: up to this long the idle showed between attacks).
 const THINK_INTERVAL: float = 0.25
+## COMBAT REST (user report 2026-11-19): while a channel's attacks are possible, its limbs (arms with
+## neck, head and upper body; legs) hold the rest pose instead of playing sit_idle between attacks —
+## the attack clips start and end in it (tests/diag_golem_sit_rest_pose.gd). "Possible": a foe in
+## reach of one of its attacks at the last choice, or its last attack's cooldown ran out less than
+## this long ago (seconds). GolemSitAnim blends it in and out.
+const COMBAT_REST_HOLD: float = 1.5
 
 var g: Golem = null
 ## Per channel: the attack wound up (&"" = none), seconds to its impact, where it
@@ -129,6 +135,11 @@ var last_struck: Dictionary = {}
 var last_struck_buildings: Dictionary = {}
 ## Seconds until the stretch of growing on the seat strikes (0 = none owed).
 var _grow_left: float = 0.0
+## Combat rest per channel (COMBAT_REST_HOLD): seconds since its last attack started, that attack's
+## cooldown, and whether one of its attacks reached a foe at the last choice.
+var _since_attack: Array[float] = [INF, INF]
+var _attack_cycle: Array[float] = [0.0, 0.0]
+var _reach: Array[bool] = [false, false]
 
 
 func _init(p_golem: Golem) -> void:
@@ -158,6 +169,14 @@ func reset() -> void:
 	_end_turn()
 	_think = 0.0
 	_grow_left = 0.0
+	_since_attack = [INF, INF]
+	_attack_cycle = [0.0, 0.0]
+	_reach = [false, false]
+
+
+## Should the limbs of channel `ch` hold the rest pose (COMBAT_REST_HOLD)?
+func rest_wanted(ch: int) -> bool:
+	return pending[ch] != &"" or _reach[ch] or _since_attack[ch] < _attack_cycle[ch] + COMBAT_REST_HOLD
 
 
 # --- What each attack is -------------------------------------------------------------
@@ -191,7 +210,21 @@ static func layer_of(kind: StringName) -> int:
 	return GolemSitAnim.LAYER_LEGS
 
 
-## The standing attack it sounds like (and whose numbers it starts from).
+## Row of each sit attack in Balance.GOLEM_SIT_ATTACKS (left and right share one).
+const TABLE_KEY: Dictionary = {
+	STOMP_L: &"sit_stomp", STOMP_R: &"sit_stomp", KICK_L: &"sit_kick", KICK_R: &"sit_kick",
+	WIPE_L: &"sit_wipe", WIPE_R: &"sit_wipe", HAND_SLAM_L: &"sit_hand_slam", HAND_SLAM_R: &"sit_hand_slam",
+	HOP: &"sit_hop", DOUBLE_STOMP: &"sit_double_stomp", CLAP: &"sit_clap",
+}
+
+
+## The row of the sit attack `kind` in the attack table (user spec 2026-11-19: the sit
+## attacks are attacks of their own, with their own base values).
+static func sit_attack(kind: StringName) -> Dictionary:
+	return Balance.GOLEM_SIT_ATTACKS[TABLE_KEY[kind]]
+
+
+## The standing attack it sounds like (and plays the strike sound of).
 static func model_of(kind: StringName) -> StringName:
 	if kind == KICK_L or kind == KICK_R or kind == GROW:
 		return Golem.ATTACK_KICK
@@ -204,55 +237,59 @@ static func model_of(kind: StringName) -> StringName:
 	return Golem.ATTACK_SLAM
 
 
-## Damage and target cap: those of the standing attack (model_of).
+## Damage: its damage curve on this golem (Golem.curve_damage) times its damage over the
+## curve's base value, times GOLEM_SIT_MULT_DAMAGE. The stretch on the seat (GROW) is no
+## attack of the table: one trample tick (user spec 2026-11-17).
 func damage(kind: StringName) -> int:
 	if kind == GROW:
-		return g.trample_damage()   # the stretch on the seat: one trample tick (user spec 2026-11-17)
-	if kind == HAND_SLAM_L or kind == HAND_SLAM_R:
-		return roundi(g.attack_damage(model_of(kind)) * Balance.GOLEM_SIT_HAND_SLAM_DAMAGE_FACTOR)   # 75 at 31,3 m
-	return g.attack_damage(model_of(kind))
+		return g.trample_damage()
+	var row: Dictionary = sit_attack(kind)
+	var curve: StringName = row["curve"]
+	return Golem.scaled_damage(g.curve_damage(curve),
+		float(row["damage"]) / Golem.curve_base(curve) * Balance.GOLEM_SIT_MULT_DAMAGE)
 
 
+## Target cap: its share (column targets) of the golem's base count, rounded down, at least 1.
 func max_targets(kind: StringName) -> int:
 	if kind == GROW:
 		return 2 * g.max_targets_of(Golem.ATTACK_KICK)   # both legs' lanes, each with the kick's cap
-	return g.max_targets_of(model_of(kind))
+	return maxi(g.max_targets() * int(sit_attack(kind)["targets"]) / 100, 1)
 
 
-## The attack whose tempo it takes: the quick crouched slam for the foot stomps and the
-## wipes (user's choice 2026-11-17), its own otherwise.
-static func tempo_of(kind: StringName) -> StringName:
-	if kind == STOMP_L or kind == STOMP_R or kind == WIPE_L or kind == WIPE_R \
-			or kind == HAND_SLAM_L or kind == HAND_SLAM_R:
-		return Golem.ATTACK_SLAM
-	return model_of(kind)
+## Seconds per GOLEM_STRIKE_COOLDOWN of her rhythm right now: every time of the attack
+## table grows with it (and the demon golem's is 15 % shorter).
+func _rhythm() -> float:
+	return g.strike_cooldown() / Balance.GOLEM_STRIKE_COOLDOWN
 
 
-## Seated she strikes more easily (user spec 2026-11-17): every sit attack but the hand
-## stomp behind her comes back GOLEM_SIT_COOLDOWN_FACTOR faster — and reaches
-## GOLEM_SIT_AREA_FACTOR less far (area_scale).
+## Cooldown: its own (column cooldown), grown with her rhythm, times GOLEM_SIT_MULT_COOLDOWN
+## (seated she strikes more easily, user spec 2026-11-17).
 func cooldown_of(kind: StringName) -> float:
-	var cd: float = g.cooldown_for(tempo_of(kind))
-	if kind == CLAP:
-		return cd * Balance.GOLEM_SIT_CLAP_COOLDOWN_SHARE
-	if kind == HOP:
-		cd *= Balance.GOLEM_SIT_HOP_COOLDOWN_FACTOR * Balance.GOLEM_SIT_HOP_SLOWER_COOLDOWN
-	elif kind == HAND_SLAM_L or kind == HAND_SLAM_R:
-		cd *= Balance.GOLEM_SIT_HAND_SLAM_COOLDOWN_SHARE   # 1,7 s at 31,3 m (user spec 2026-11-18)
-	elif kind == WIPE_L or kind == WIPE_R:
-		cd *= Balance.GOLEM_SIT_WIPE_COOLDOWN_SHARE   # 1,3 s at 31,3 m
-	return cd * Balance.GOLEM_SIT_COOLDOWN_FACTOR
+	return float(sit_attack(kind)["cooldown"]) * _rhythm() * Balance.GOLEM_SIT_MULT_COOLDOWN
 
 
-## Size of the target areas of the sit attacks (all but the hand stomp behind her).
-static func area_scale() -> float:
-	return Balance.GOLEM_SIT_AREA_FACTOR
-
-
+## Wind-up (user spec 2026-11-19): the clip fills the attack's cooldown, so the impact — and
+## the damage — falls at the impact's share of the clip, of the cooldown. GolemSitAnim.fire
+## plays the clip so that its impact meets this wind-up.
 func windup_of(kind: StringName) -> float:
-	var w: float = g.current_windup(tempo_of(kind))
-	# The po clap plays its clip longer (the clip is fitted to the wind-up: impact mid-clip).
-	return w * Balance.GOLEM_SIT_HOP_SLOWER_ANIM if kind == HOP else w
+	return cooldown_of(kind) * float(GolemSitAnim.SIT_CLIP_IMPACT[kind]) / float(GolemSitAnim.SIT_CLIP_LENGTH[kind])
+
+
+## Size of the area of the sit attack `kind` (column area), grown as its column grow says,
+## times GOLEM_SIT_MULT_AREA (seated the areas are smaller, user spec 2026-11-17).
+func area_of(kind: StringName) -> float:
+	var row: Dictionary = sit_attack(kind)
+	var a: float = float(row["area"]) * Balance.GOLEM_SIT_MULT_AREA
+	match row["grow"]:
+		&"circle":
+			return a * g.slam_scale()
+		&"limb":
+			return a * g.limb_factor()
+		&"body":
+			return a * g.trample_radius()
+		&"lane":
+			return a * g.reach_factor()
+	return a * _sx()   # model
 
 
 # --- Where her limbs are -------------------------------------------------------------
@@ -306,15 +343,15 @@ func stomp_point(side: float) -> Vector3:
 
 
 ## Radius of the foot stomp's circle. Like every sit zone it grows exactly with her body (user
-## spec 2026-11-18): the standing slam's radius, which grows with the body from 30 m on.
+## spec 2026-11-18; area_of).
 func stomp_radius() -> float:
-	return g.slam_radius() * Balance.GOLEM_SIT_STOMP_RADIUS_SHARE * area_scale()
+	return area_of(STOMP_L)
 
 
 ## How far the wipe reaches from the middle of the seat (the standing reach at her first
 ## seated size, grown with the body).
 func wipe_reach() -> float:
-	return g.reach() * area_scale()
+	return area_of(WIPE_L)
 
 
 ## How far ahead of feet_point p lies (negative: behind).
@@ -344,7 +381,7 @@ func _frame() -> void:
 	_c_dstomp_r = double_stomp_radius()
 	_c_hslam = [hand_slam_point(1.0), hand_slam_point(-1.0)]
 	_c_hslam_r = hand_slam_radius()
-	_c_kick_out = (Balance.GOLEM_SIT_KICK_SIDE + Balance.GOLEM_SIT_KICK_WIDTH * 0.5) * _c_sx * area_scale()
+	_c_kick_out = (Balance.GOLEM_SIT_KICK_SIDE + float(sit_attack(KICK_L)["area"]) * 0.5) * _c_sx 		* Balance.GOLEM_SIT_MULT_AREA
 
 
 ## The leg's lane on side: from her hip joint to the tip of the stretched shoe, as
@@ -380,7 +417,7 @@ func in_wipe_cone(p: Vector3, side: float) -> bool:
 
 ## Radius of the po clap's circle around the middle of the seat.
 func hop_radius() -> float:
-	return g.stomp_radius() * area_scale() * Balance.GOLEM_SIT_HOP_AREA_FACTOR
+	return area_of(HOP)
 
 
 ## Where the shoe-hand of side comes down in the side hand slam (clip sit_hand_slam_l/_r, measured
@@ -389,19 +426,19 @@ func hand_slam_point(side: float) -> Vector3:
 	return _off(feet_point(), side, Balance.GOLEM_SIT_HAND_SLAM_LAND.x, Balance.GOLEM_SIT_HAND_SLAM_LAND.y)
 
 
-## Radius of the side hand slam's circle: GOLEM_SIT_HAND_SLAM_RADIUS_SHARE of the foot stomp's (user spec).
+## Radius of the side hand slam's circle (user spec 2026-11-18: 2/3 of the foot stomp's, then 5 % more).
 func hand_slam_radius() -> float:
-	return stomp_radius() * Balance.GOLEM_SIT_HAND_SLAM_RADIUS_SHARE
+	return area_of(HAND_SLAM_L)
 
 
 ## Radius of the circles of the hand stomp behind her (around each hand).
 func clap_radius() -> float:
-	return g.ground_radius(Golem.ATTACK_DRUM) * Balance.GOLEM_SIT_CLAP_AREA_FACTOR
+	return area_of(CLAP)
 
 
 ## Radius of the double stomp's circle.
 func double_stomp_radius() -> float:
-	return g.ground_radius(Golem.ATTACK_DRUM) * area_scale() * Balance.GOLEM_SIT_DOUBLE_STOMP_AREA_FACTOR
+	return area_of(DOUBLE_STOMP)
 
 
 ## Where the double stomp's circle lies: about the heels of the resting shoes.
@@ -516,7 +553,9 @@ func channel_free(ch: int) -> bool:
 ## limb reaches.
 func tick(delta: float) -> void:
 	turn_block = maxf(turn_block - delta, 0.0)
+	var was_free: Array[bool] = [channel_free(CH_LEGS), channel_free(CH_ARMS)]
 	for ch in [CH_LEGS, CH_ARMS]:
+		_since_attack[ch] += delta
 		cooldown[ch] = maxf(cooldown[ch] - delta, 0.0)
 		if pending[ch] == &"":
 			continue
@@ -526,6 +565,9 @@ func tick(delta: float) -> void:
 			_land(kind, aim[ch])
 			for c in channels_of(kind):
 				pending[c] = &""
+	for ch in [CH_LEGS, CH_ARMS]:
+		if not was_free[ch] and channel_free(ch):
+			_think = 0.0   # it just came free: choose at once, no idle between two attacks
 	if _grow_left > 0.0:
 		_grow_left -= delta
 		if _grow_left <= 0.0:
@@ -633,6 +675,7 @@ func _choose() -> void:
 	var foes: Array[Unit] = _foes_around()
 	var builds: Array = _buildings_around()
 	if foes.is_empty() and builds.is_empty() and _vehicles.is_empty():
+		_reach = [false, false]
 		if not is_busy():
 			_maybe_turn(foes)   # maybe a building further off
 			if not turning:
@@ -651,6 +694,10 @@ func _choose() -> void:
 		return
 	var best_legs: Dictionary = _best_of(LEG_KINDS, foes, builds) if legs else {}
 	var best_arms: Dictionary = _best_of(ARM_KINDS, foes, builds) if arms else {}
+	if legs:
+		_reach[CH_LEGS] = not best_legs.is_empty()
+	if arms:
+		_reach[CH_ARMS] = not best_arms.is_empty()
 	var single: float = float(best_legs.get("value", 0.0)) + float(best_arms.get("value", 0.0))
 	if legs and arms and not is_busy():
 		var min_hit: int = Balance.GOLEM_SIT_BIG_MIN_TARGETS if single > 0.0 else 1
@@ -946,6 +993,8 @@ func _wind_up(kind: StringName, at: Vector3) -> void:
 		pending_time[ch] = t
 		aim[ch] = at
 		cooldown[ch] = cooldown_of(kind)
+		_since_attack[ch] = 0.0
+		_attack_cycle[ch] = cooldown[ch]
 	g.sit_attack_started(kind, t)
 
 
