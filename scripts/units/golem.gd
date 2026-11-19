@@ -79,9 +79,9 @@ const ATTACK_DRUM: StringName = &"drum"
 ## The jump on the spot (2026-11-16): she lands on both feet and the damage falls
 ## all around her. Struck only from standing — and it leaves her CROUCHED.
 const ATTACK_STOMP: StringName = &"stomp"
-## Damage curves of the attack table (column curve): slam / kick / drum grow like those
-## attacks, trample is a multiple of the trample damage (from the height).
-const CURVE_TRAMPLE: StringName = &"trample"
+## Damage categories of the attack table (column category): slam, kick, drum, swat — and trample,
+## a multiple of the trample damage (from the height).
+const CATEGORY_TRAMPLE: StringName = &"trample"
 ## Extra clips the model may bring for the same attacks: the kick with the other
 ## leg, and the level strike at an airship hovering at chest height.
 const CLIP_KICK_LEFT: StringName = &"kick_l"
@@ -726,20 +726,6 @@ static func target_percent(kind: StringName) -> int:
 	return int(stand_attack(kind).get("targets", 100))
 
 
-## The base value of a damage curve (column curve of the attack table): the damage of
-## its attack for a freshly summoned golem; one trample tick (1) for `trample`.
-static func curve_base(curve: StringName) -> float:
-	if curve == CURVE_TRAMPLE:
-		return 1.0
-	return float(stand_attack(curve)["damage"])
-
-
-## Damage `curve` scaled by `factor` (an attack's damage over its curve's base value):
-## rounded when it lands; a factor of 1 keeps the curve's whole number.
-static func scaled_damage(curve_now: int, factor: float) -> int:
-	return curve_now if factor == 1.0 else roundi(float(curve_now) * factor)
-
-
 ## The cap for ONE landing of the attack `kind`: its share of the base count,
 ## rounded DOWN, at least one.
 func max_targets_of(kind: StringName) -> int:
@@ -990,50 +976,76 @@ func strike_distance() -> float:
 		+ slam_radius() * Balance.GOLEM_CLOSE_IN_SLAM_SHARE)
 
 
-## Flat damage bonus of the current level: GOLEM_LEVEL_DAMAGE per level — level 7
-## too since 2026-11-17 (user spec; before it added none).
-func level_damage_bonus() -> int:
-	return Balance.GOLEM_LEVEL_DAMAGE * level
+# --- Sit attacks: base values at 30 m (user spec 2026-11-19) --------------------------------
+
+## The normal golem's body width at GOLEM_SIT_MIN_HEIGHT (30 m): what the areas of the sit table refer to.
+static func sit_ref_body_width() -> float:
+	return MODEL_SCALE * Balance.GOLEM_SIT_MIN_HEIGHT / Balance.GOLEM_HEIGHT
 
 
-## Damage of the standing attack `kind` right now: its damage curve (column curve)
-## times the attack's damage over the curve's base value (Balance.GOLEM_STAND_ATTACKS) —
-## the swat takes the slam's, the stomp twice the trample damage.
+## The normal golem's rhythm at 30 m (strike_cooldown there): what the cooldowns of the sit table refer to.
+static func sit_ref_strike_cooldown() -> float:
+	return lerpf(STRIKE_COOLDOWN, Balance.GOLEM_STRIKE_COOLDOWN_MAX,
+		(Balance.GOLEM_SIT_MIN_HEIGHT - Balance.GOLEM_HEIGHT) / (Balance.GOLEM_MAX_HEIGHT - Balance.GOLEM_HEIGHT))
+
+
+## Her body width over the normal golem's at 30 m: the sit areas grow exactly with it.
+func sit_body_ratio() -> float:
+	return model_scale().x * size_factor() / sit_ref_body_width()
+
+
+## Her rhythm over the normal golem's at 30 m: the sit cooldowns grow with it (the demon golem's is 15 %
+## shorter, so his sit attacks stay quicker).
+func sit_rhythm() -> float:
+	return strike_cooldown() / sit_ref_strike_cooldown()
+
+
+## This golem's modifiers on its sit attacks (damage, cooldown, area; whatever its level).
+func sit_mod() -> Dictionary:
+	return Balance.GOLEM_SIT_MOD
+
+
+## What the sit attacks of `category` gain on top of their damage at 30 m: only growth steps that begin at
+## 30 m or more count. The normal golem: only the full-size bonus at 80 m (his last step; GOLEM_FULL_SIZE_DAMAGE).
+func sit_damage_growth(category: StringName) -> float:
+	return float(full_size_damage_bonus(category))
+
+
+## The full-grown golem's (80 m) extra damage for attacks of `category` (user spec 2026-11-19), standing and seated.
+func full_size_damage_bonus(category: StringName) -> int:
+	return int(Balance.GOLEM_FULL_SIZE_DAMAGE.get(category, 0)) if is_full_size() else 0
+
+
+## Flat damage bonus of the current level for attacks of `category`: GOLEM_LEVEL_DAMAGE of the
+## category per level (user spec 2026-11-19; level 7 too since 2026-11-17). Nothing beyond level 7.
+func level_damage_bonus(category: StringName) -> int:
+	return int(Balance.GOLEM_LEVEL_DAMAGE.get(category, 0)) * level
+
+
+## Damage of an attack of the attack table right now, with its fraction (user spec 2026-11-19): its OWN
+## base damage (row damage, level 0) plus this golem's bonus for its category — no attack depends on
+## another one's value, nothing grows with the size. Category trample: a multiple of the trample damage
+## (that comes from the height). The demon and genesis golems add their own bonuses (damage_value there).
+func damage_value(row: Dictionary) -> float:
+	var category: StringName = row["category"]
+	if category == CATEGORY_TRAMPLE:
+		return float(row["damage"]) * float(trample_damage())
+	return float(row["damage"]) + float(level_damage_bonus(category) + full_size_damage_bonus(category))
+
+
+## Damage of the standing attack `kind` right now (Balance.GOLEM_STAND_ATTACKS, damage_value).
 func attack_damage(kind: StringName) -> int:
 	var row: Dictionary = stand_attack(kind)
-	if row.is_empty():
-		row = stand_attack(ATTACK_SLAM)
-	var curve: StringName = row["curve"]
-	return scaled_damage(curve_damage(curve), float(row["damage"]) / curve_base(curve))
+	return roundi(damage_value(row if not row.is_empty() else stand_attack(ATTACK_SLAM)))
 
 
-## A damage curve right now (whole number): the slam's / kick's damage plus the flat
-## level bonus, the drum's three hits together (every hit's own damage, plus the flat
-## level bonus once for the whole attack), or the trample damage (from the size).
-## The demon and genesis golems grow it their own way (curve_damage there).
-func curve_damage(curve: StringName) -> int:
-	if curve == CURVE_TRAMPLE:
-		return trample_damage()
-	if curve == ATTACK_DRUM:
-		return DRUM_HITS.size() * _drum_own_hit_damage() + level_damage_bonus()
-	return int(stand_attack(curve)["damage"]) + level_damage_bonus()
-
-
-## What every single hit of the drum brings by itself: a third of the drum's damage
-## in the attack table, plus GOLEM_DRUM_LEVEL_DAMAGE_PER_HIT for every level (like the flat bonus).
-func _drum_own_hit_damage() -> int:
-	return roundi(float(stand_attack(ATTACK_DRUM)["damage"]) / float(DRUM_HITS.size())) \
-		+ Balance.GOLEM_DRUM_LEVEL_DAMAGE_PER_HIT * level
-
-
-## Damage of ONE of the drum's hits: its own damage (14, +1 per level) plus its
-## share of the flat level bonus (+5 per level for the whole attack, split over
-## the hits; the last one takes the remainder).
+## Damage of ONE of the drum's hits: the whole attack split evenly, the last hit takes the
+## remainder (level 7: 32 / 32 / 34).
 func drum_hit_damage(hit: int) -> int:
 	var hits: int = DRUM_HITS.size()
-	var shared: int = level_damage_bonus()
-	var each: int = shared / hits
-	return _drum_own_hit_damage() + (shared - each * (hits - 1) if hit >= hits - 1 else each)
+	var total: int = attack_damage(ATTACK_DRUM)
+	var each: int = total / hits
+	return total - each * (hits - 1) if hit >= hits - 1 else each
 
 
 ## Trample damage comes from the SIZE (user spec 2026-11-15): body height in
@@ -2489,7 +2501,13 @@ func crab_air_center() -> Vector3:
 
 
 func crab_air_radius() -> float:
-	return Balance.GOLEM_CRAB_AIR_RADIUS * model_scale().z * size_factor()
+	return float(Balance.GOLEM_SIT_ATTACKS[&"crab_headbutt"]["area"]) * sit_body_ratio() 		* Balance.GOLEM_SIT_MULT_AREA * float(sit_mod()["area"])
+
+
+## The headbutt's cooldown (sit table, crab_headbutt): its own at 30 m, grown with her rhythm, times the
+## sit factor and her sit modifier — like every sit attack (user spec 2026-11-19).
+func crab_headbutt_cooldown() -> float:
+	return float(Balance.GOLEM_SIT_ATTACKS[&"crab_headbutt"]["cooldown"]) * sit_rhythm() 		* Balance.GOLEM_SIT_MULT_COOLDOWN * float(sit_mod()["cooldown"])
 
 
 ## How far from her middle an airship may be to come into the area once she turns her back to it.
@@ -2551,7 +2569,7 @@ func _tick_crab_air(delta: float) -> void:
 	if target == null:
 		return
 	_crab_air_ship = target
-	_crab_air_cooldown = cooldown_for(ATTACK_SWAT)
+	_crab_air_cooldown = crab_headbutt_cooldown()
 	_crab_air_time = _crab_air_cooldown * Balance.GOLEM_CRAB_AIR_IMPACT / CRAB_HEADBUTT_LENGTH   # the clip fills the cooldown
 	_no_combat_timer = 0.0
 	_play_clip(CLIP_CRAB_HEADBUTT, Balance.GOLEM_CRAB_AIR_IMPACT / maxf(_crab_air_time, 0.05), true)

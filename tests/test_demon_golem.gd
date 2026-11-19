@@ -198,7 +198,7 @@ func test_damage_starts_at_half_the_golems_and_grows_per_step() -> void:
 	check_near(d.damage_exact(Golem.ATTACK_DRUM), 24.0 + 3.6, "drum 24 (half of 42, +3) + his first step")
 	check(d.attack_damage(Golem.ATTACK_SLAM) == 18 and d.attack_damage(Golem.ATTACK_KICK) == 27
 		and d.attack_damage(Golem.ATTACK_DRUM) == 28, "rounded when it lands: 18 / 27 / 28")
-	check(d.level_damage_bonus() == 0, "no level bonus")
+	check(d.level_damage_bonus(&"slam") == 0 and d.level_damage_bonus(&"drum") == 0, "no level bonus")
 	_grow_to(d, 32.0)   # ten growth steps
 	check(d.growth_steps == 10, "32 m: ten steps")
 	check_near(d.damage_exact(Golem.ATTACK_SLAM), 15.5 + 2.25 * 10, "slam +2,25 a step")

@@ -13053,3 +13053,45 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
   fest — vom Drehclip `sit_turn_l/_r` (Arme bis 29 Grad, Beine 10, Kopf 6) blieb nur das Becken. Jetzt nur ueber
   sit_idle (`Golem.sit_rest_wanted`), beim Drehen in `BASE_XFADE` ausgeblendet. Test in
   `test_sitting_she_turns_slowly_toward_an_enemy_out_of_reach`.
+
+- **Sitzangriffe nachjustiert (Nutzervorgabe 2026-11-19, `GOLEM_SIT_ATTACKS`):** Fuss-Stampfer 20 statt 25 und Bein
+  strecken 40 statt 45 Grundschaden, Doppelstampfer und Handstampfer hinten 34 statt 42 und 130 % Ziele (vorher 125 %);
+  Abklingzeit (Grundwert) Fuss-Stampfer 1,21 statt 1,25 s, Bein strecken 1,7 statt 1,8 s, Handschlag seitlich 1,43 statt
+  1,53 s. Der Schaden waechst weiter anteilig mit seiner Kurve: bei 31,3 m Fuss-Stampfer 48 (vorher 60), Bein 71 (80),
+  Doppel-/Handstampfer 79 (98); Abklingzeiten 1,35 / 1,89 / 1,59 s. Ziele erst ab Grundzahl 20 hoeher (80 m: 39 statt 37).
+  Flaeche bei 31,3 m: Handstampfer hinten 226 m2 (zwei volle Kreise r 6,0 m, die Haende liegen 7 m hinter der Sitzmitte,
+  die Grenze "nur hinten" schneidet nichts ab), Doppelstampfer 124 m2 (ein Kreis r 6,27 m), keine Ueberschneidung.
+
+- **Eigenstaendiger Schaden je Angriff (Nutzervorgabe 2026-11-19):** Spalte `curve` -> `category`; jeder Angriff hat
+  seinen eigenen Grundschaden (Stufe 0), die Boni kommen je Golem nach Kategorie dazu (`Golem.damage_value`):
+  normaler Golem flach `GOLEM_LEVEL_DAMAGE` je Stufe (Dictionary slam 5, kick 5, drum 8, swat 5, trample 0; ersetzt
+  `GOLEM_LEVEL_DAMAGE` 5 und `GOLEM_DRUM_LEVEL_DAMAGE_PER_HIT` 1 — Trommelschlaege rechnerisch gleich), Daemonen-
+  und Genesisgolem halber eigener Grundwert + Startbonus + Wachstum (`DemonGolem.damage_exact_at(row, steps)`).
+  Entfallen: `curve_base`, `curve_damage`, `scaled_damage`. Handschlag seitlich Grundwert 40. Normaler Golem sitzend
+  (Stufe 7): Fuss-Stampfer 55, Bein 75, Doppel-/Handstampfer 90, Handschlag seitlich 75, Wischer 60; Standangriffe
+  aller drei Golems unveraendert. Daemonen-/Genesisgolem: Sitzangriffe verschoben (z. B. Daemon 80 m Fuss-Stampfer
+  72 statt 59, Handschlag seitlich 82 statt 93) — ihr Balancing kommt spaeter.
+- **Nachtrag (Nutzervorgabe 2026-11-19):** Doppelstampfer Grundwert 39 (+5), Handstampfer hinten 29 (-5); normaler
+  Golem sitzend 95 bzw. 85.
+
+- **Sitzangriffe mit Bezug 30 m (Nutzervorgabe 2026-11-19):** `GOLEM_SIT_ATTACKS` enthaelt Schaden, Abklingzeit und
+  Flaeche (Meter) eines 30 m grossen Golems, fuer alle drei Golems gleich, aus dem normalen Golem bei 31,3 m
+  zurueckgerechnet (4 Nachkommastellen); Spalte `grow` entfallen. Neue Zeile `crab_headbutt` (Kopfstoss im
+  Krebsstand: Abklingzeit, Radius der Zone; `GOLEM_CRAB_AIR_RADIUS` entfallen; mit den Sitzfaktoren, Grundwerte so
+  gewaehlt, dass sich nichts aendert). Rechnung: Abklingzeit x `Golem.sit_rhythm()` (Takt / Takt des normalen Golems
+  bei 30 m — der Daemon bleibt 15 % schneller), Flaeche x `sit_body_ratio()` (Koerperbreite / die des Golems bei
+  30 m), Schaden + `sit_damage_growth(category)` (nur Wachstumsstufen ab 30 m: Golem 0, Daemon je Schritt ab 32 m,
+  Genesis je Meter ueber 33 m x 2/3), jeweils x Sitzfaktor x Sitz-Modifikator des Golems (`GOLEM_SIT_MOD` u. a.,
+  vorerst 1). Ziele unveraendert. Vorher/Nachher: normaler Golem unveraendert (Rundung in der 4. Stelle),
+  Abklingzeiten und Flaechen aller Golems unveraendert; Daemon und Genesis beginnen im Sitzen mit den Golemwerten
+  (Daemon 32 m Fuss-Stampfer 55 statt 36, 80 m 91 statt 72). Test `test_sit_damage_counts_only_growth_from_thirty_metres`.
+
+- **80-m-Schadensbonus und Sitzfaktor (Nutzervorgabe 2026-11-19):** der ausgewachsene normale Golem bekommt je
+  Kategorie Schaden dazu, im Stand und im Sitzen (`GOLEM_FULL_SIZE_DAMAGE`: Handschlag +5, Tritt +10, Trommeln +8;
+  `Golem.full_size_damage_bonus`, im Sitzen ueber `sit_damage_growth`). 80 m stehend: Handschlag 65, Tritt 90,
+  Trommeln 106 (35/35/36); sitzend: Fuss-Stampfer 60, Bein 85, Handschlag seitlich 80, Doppelstampfer 103,
+  Handstampfer 93 (Wischer, Po-Klatscher, Luftschlag unveraendert). `GOLEM_SIT_MULT_COOLDOWN` 0,9 -> 0,85 (alle
+  Sitzangriffe und der Kopfstoss rund 5,6 % schneller). Test `test_full_grown_golem_strikes_harder_by_category`.
+- **Nachtrag:** `GOLEM_SIT_MULT_COOLDOWN` weiter auf 0,8 (Nutzervorgabe 2026-11-19); bei 31,3 m z. B. Fuss-Stampfer
+  1,20 s, Bein 1,68 s, Wischer 1,16 s, Handschlag seitlich 1,41 s, Po-Klatscher 1,13 s, Doppelstampfer 1,78 s,
+  Handstampfer 1,64 s.

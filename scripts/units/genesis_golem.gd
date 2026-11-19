@@ -263,27 +263,41 @@ func max_health_cap() -> int:
 		+ int(floor(Balance.GENESIS_GOLEM_WOOD_HP_PER_M * wood_growth_m + 0.000001))
 
 
-func level_damage_bonus() -> int:
+func level_damage_bonus(_category: StringName) -> int:
 	return 0
 
 
 ## Damage with its fraction: the freshly summoned demon golem's, plus two thirds of
 ## the demon golem's gain for every metre he has grown (DemonGolem.damage_exact_at).
-func damage_exact(curve: StringName) -> float:
-	return DemonGolem.damage_exact_at(curve, combat_demon_steps())
+func damage_exact(kind: StringName) -> float:
+	return DemonGolem.damage_exact_at(Golem.stand_attack(kind), combat_demon_steps())
 
 
-func curve_damage(curve: StringName) -> int:
-	if curve == CURVE_TRAMPLE:
-		return trample_damage()
-	return int(round(damage_exact(curve)))
+## The first stage height of 30 m or more (stage 8: 33 m): the growth beyond it counts for his sit attacks
+## (user spec 2026-11-19: no gain from before 30 m, the stage 29,5 -> 33 m neither).
+static func sit_ref_height() -> float:
+	var s: int = 0
+	while stage_height(s) < Balance.GOLEM_SIT_MIN_HEIGHT - 0.0001:
+		s += 1
+	return stage_height(s)
 
 
-func drum_hit_damage(hit: int) -> int:
-	var hits: int = DRUM_HITS.size()
-	var total: int = attack_damage(ATTACK_DRUM)
-	var each: int = total / hits
-	return total - each * (hits - 1) if hit >= hits - 1 else each
+## Two thirds of the demon golem's gain per step, for every 3 m he has grown beyond sit_ref_height().
+func sit_damage_growth(category: StringName) -> float:
+	if category == CATEGORY_TRAMPLE:
+		return 0.0
+	var metres: float = maxf(height_m() - sit_ref_height(), 0.0) * Balance.GENESIS_GOLEM_GROWTH_SHARE
+	return DemonGolem.damage_growth_per_step(category) * metres / Balance.DEMON_GOLEM_GROWTH_HEIGHT
+
+
+func sit_mod() -> Dictionary:
+	return Balance.GENESIS_GOLEM_SIT_MOD
+
+
+func damage_value(row: Dictionary) -> float:
+	if row["category"] == CATEGORY_TRAMPLE:
+		return super.damage_value(row)
+	return DemonGolem.damage_exact_at(row, combat_demon_steps())
 
 
 # --- Tick -----------------------------------------------------------------------------

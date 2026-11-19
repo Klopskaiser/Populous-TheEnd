@@ -81,11 +81,14 @@ const GOLEM_BODY_HALF_DEPTH: float = 0.6075
 ## wachsen und wie schnell ein Golem ist (der Daemonengolem 15 % schneller), regelt jeder
 ## Golem selbst (Golem und seine Unterklassen). Die Werte gelten fuer den FRISCH BESCHWORENEN
 ## Golem (GOLEM_HEIGHT) beim Grundtakt GOLEM_STRIKE_COOLDOWN:
-##   damage    Schaden. Waechst wie die Schadenskurve `curve` dieses Golems (Golem.curve_damage),
-##             im Verhaeltnis zu deren Grundwert: slam / kick / drum = wie Handschlag / Tritt /
-##             Trommeln (Stufenbonus; beim Daemonen- und Genesisgolem ihr Wachstum je Stufe),
-##             trample = Vielfaches des Trampelschadens (aus der Hoehe; beim frischen Golem 1).
+##   damage    Grundschaden des Angriffs auf Stufe 0 — EIGENSTAENDIG (Nutzervorgabe 2026-11-19): kein
+##             Angriff haengt am Wert eines anderen, und er waechst nicht mit der Groesse. Jeder Golem
+##             gibt seine eigenen Boni je Stufe/Wachstumsstufe dazu, nach der Kategorie `category`
+##             (Golem.damage_value; der normale Golem: GOLEM_LEVEL_DAMAGE). Ausnahme Kategorie
+##             trample: damage ist ein Vielfaches des Trampelschadens, der aus der Koerperhoehe kommt.
 ##             Gerundet wird beim Treffer.
+##   category  slam (Handschlag), kick (Tritt), drum (Trommeln), swat (Luftschlag), trample (Trampeln):
+##             wofuer die Boni der Golems gelten — Kategorien lassen sich gezielt beguenstigen.
 ##   targets   Anteil der Grundzielzahl (GOLEM_MAX_TARGETS u. a.) in Prozent, abgerundet, mind. 1.
 ##   cooldown  Abklingzeit in Sekunden, von Angriffsbeginn bis zum naechsten Angriff; waechst mit dem
 ##             Takt (Golem.strike_cooldown, 3 s bei 80 m). DER EINZIGE ZEITWERT (Nutzervorgabe 2026-11-19):
@@ -110,41 +113,63 @@ const GOLEM_BODY_HALF_DEPTH: float = 0.6075
 ##   stomp  Sprung, stehend: Kreis um ihre Mitte, area = Anteil des Koerperradius; endet gebueckt.
 ##   swat   Luftschlag gegen Luftschiffe: ein Huellentreffer; area = Reichweite (GOLEM_REACH).
 const GOLEM_STAND_ATTACKS: Dictionary = {
-	&"slam":  {damage = 25.0, curve = &"slam",    targets = 100, cooldown = 1.25, area = 2.6,         grow = &"circle"},
-	&"kick":  {damage = 45.0, curve = &"kick",    targets = 60,  cooldown = 1.8,  area = 1.8,         grow = &"lane"},
-	&"drum":  {damage = 42.0, curve = &"drum",    targets = 125, cooldown = 1.8,  area = 2.86,        grow = &"circle"},
-	&"stomp": {damage = 2.0,  curve = &"trample", targets = 200, cooldown = 1.0,  area = 5.0 / 3.0,   grow = &"body"},
-	&"swat":  {damage = 25.0, curve = &"slam",    targets = 100, cooldown = 1.8,  area = GOLEM_REACH, grow = &"limb"},
+	&"slam":  {damage = 25.0, category = &"slam",    targets = 100, cooldown = 1.25, area = 2.6,         grow = &"circle"},
+	&"kick":  {damage = 45.0, category = &"kick",    targets = 60,  cooldown = 1.8,  area = 1.8,         grow = &"lane"},
+	&"drum":  {damage = 42.0, category = &"drum",    targets = 125, cooldown = 1.8,  area = 2.86,        grow = &"circle"},
+	&"stomp": {damage = 2.0,  category = &"trample", targets = 200, cooldown = 1.0,  area = 5.0 / 3.0,   grow = &"body"},
+	&"swat":  {damage = 25.0, category = &"swat",    targets = 100, cooldown = 1.8,  area = GOLEM_REACH, grow = &"limb"},
 }
 ## SITZANGRIFFE (Nutzervorgaben 2026-11-17/18, scripts/units/golem_sit_combat.gd) — eigene Angriffe mit
-## eigenen Grundwerten (bis 2026-11-19 als Anteile der Standangriffe gefuehrt). Lage und Form der Zonen
-## stehen bei GOLEM_SIT_FOOT_SIDE ff.
+## eigenen Grundwerten. Lage und Form der Zonen stehen bei GOLEM_SIT_FOOT_SIDE ff.
+## BEZUG 30 m (Nutzervorgabe 2026-11-19): gesessen wird erst ab GOLEM_SIT_MIN_HEIGHT, deshalb gelten die
+## Grundwerte der Sitzangriffe (und des Kopfstosses im Krebsstand) fuer einen 30 m grossen Golem — fuer
+## ALLE drei Golems gleich, aus den Werten des normalen Golems bei 31,3 m zurueckgerechnet:
+##   damage    Schaden bei 30 m. Dazu kommt nur das Wachstum aus Wachstumsstufen, die bei mindestens 30 m
+##             beginnen (Golem.sit_damage_growth: der normale Golem keines — nach Stufe 7 waechst sein
+##             Schaden nicht mehr —, Daemonen- und Genesisgolem ihres je Kategorie). Stufen davor zaehlen
+##             nicht. Kategorie trample: Vielfaches des Trampelschadens (aus der Hoehe), wie im Stand.
+##   targets   Anteil der Grundzielzahl des Golems in Prozent — dieselbe wie im Stand.
+##   cooldown  Abklingzeit in Sekunden bei 30 m; waechst mit dem Takt des Golems (Golem.strike_cooldown,
+##             gemessen am Takt des normalen Golems bei 30 m — der Daemonengolem bleibt 15 % schneller).
+##   area      Groesse der Wirkflaeche in Metern bei 30 m (Radius, Reichweite, Breite der Bein-Schneise);
+##             waechst genau mit der Koerperbreite (der Daemonengolem ist 25 % breiter).
+## Darauf die Sitzfaktoren GOLEM_SIT_MULT_* (alle Sitzangriffe) und die Sitz-Modifikatoren des Golems
+## (GOLEM_SIT_MOD, DEMON_GOLEM_SIT_MOD, GENESIS_GOLEM_SIT_MOD; unabhaengig von seiner Stufe).
 ##   sit_stomp         Fuss-Stampfer (links/rechts, Beine): Kreis um die Landestelle des Schuhs.
-##   sit_kick          Bein strecken (links/rechts, Beine): Schneise, area = Beinbreite (Modellmeter).
+##   sit_kick          Bein strecken (links/rechts, Beine): Schneise, area = Beinbreite.
 ##   sit_wipe          Arm-Wischer (links/rechts, Arme): Kegel neben ihr, area = Reichweite.
 ##   sit_hand_slam     Handschlag seitlich (links/rechts, Arme): Kreis neben Oberschenkel und Knie.
-##   sit_hop           Po-Klatscher (gross): Kreis um die Sitzmitte, area = Anteil des Koerperradius.
+##   sit_hop           Po-Klatscher (gross): Kreis um die Sitzmitte.
 ##   sit_double_stomp  Doppelstampfer (gross): Kreis um die Fersen.
 ##   sit_clap          Handstampfer hinten (gross): Kreis um jede Hand, nur hinter der Sitzmitte.
-## Bei 31,3 m (Golem, Stufe 7 + 8 Schritte) heisst das z. B.: Handschlag seitlich 75 Schaden und 1,7 s
-## Abklingzeit, Wischer 1,3 s, Fuss-Stampfer 1,39 s und Radius 4,45 m, Po-Klatscher 1,27 s.
+##   crab_headbutt     Kopfstoss im Krebsstand gegen Luftschiffe (Zeppelin-Zerstoerer): ein Huellentreffer, kein
+##                     Schaden, keine Ziele; area = Radius der Zone hinter dem Kopf (GOLEM_CRAB_AIR_BACK).
+## Werte des normalen Golems bei 31,3 m (seiner ersten Sitzgroesse): Fuss-Stampfer 55 Schaden, 1,35 s, Radius
+## 4,45 m; Bein strecken 75, 1,89 s; Handschlag seitlich 75, 1,59 s; Wischer 60, 1,3 s; Doppelstampfer 95,
+## Handstampfer hinten 85; Po-Klatscher 1,27 s (Nutzervorgaben 2026-11-19).
 const GOLEM_SIT_ATTACKS: Dictionary = {
-	&"sit_stomp":        {damage = 25.0,  curve = &"slam",    targets = 100, cooldown = 1.25,        area = 1.82676,     grow = &"circle"},
-	&"sit_kick":         {damage = 45.0,  curve = &"kick",    targets = 60,  cooldown = 1.8,         area = 0.3,         grow = &"model"},
-	&"sit_wipe":         {damage = 25.0,  curve = &"slam",    targets = 100, cooldown = 1.168938604, area = 3.0,         grow = &"limb"},
-	&"sit_hand_slam":    {damage = 31.25, curve = &"slam",    targets = 100, cooldown = 1.528612020, area = 1.278732,    grow = &"circle"},
-	&"sit_hop":          {damage = 2.0,   curve = &"trample", targets = 200, cooldown = 1.145136364, area = 1.5,         grow = &"body"},
-	&"sit_double_stomp": {damage = 42.0,  curve = &"drum",    targets = 125, cooldown = 1.8,         area = 2.574,       grow = &"circle"},
-	&"sit_clap":         {damage = 42.0,  curve = &"drum",    targets = 125, cooldown = 1.66,        area = 2.463095556, grow = &"circle"},
+	&"sit_stomp":        {damage = 55.0, category = &"slam",    targets = 100, cooldown = 1.4809, area = 4.7331},
+	&"sit_kick":         {damage = 75.0, category = &"kick",    targets = 60,  cooldown = 2.0805, area = 2.5},
+	&"sit_wipe":         {damage = 60.0, category = &"swat",    targets = 100, cooldown = 1.4306, area = 14.9787},
+	&"sit_hand_slam":    {damage = 75.0, category = &"slam",    targets = 100, cooldown = 1.7484, area = 3.3131},
+	&"sit_hop":          {damage = 2.0,  category = &"trample", targets = 200, cooldown = 1.4015, area = 7.3929},
+	&"sit_double_stomp": {damage = 95.0, category = &"drum",    targets = 130, cooldown = 2.2029, area = 6.6691},
+	&"sit_clap":         {damage = 85.0, category = &"drum",    targets = 130, cooldown = 2.0316, area = 6.3818},
+	&"crab_headbutt":    {damage = 0.0,  category = &"swat",    targets = 0,   cooldown = 2.4477, area = 7.4074},
 }
 ## SITZFAKTOREN (Nutzervorgabe 2026-11-17: im Sitzen greift es sich leichter an — schneller wieder,
-## dafuer kleinere Flaechen): gelten fuer JEDEN Sitzangriff, auf die Grundwerte der Tabelle; die
-## Animation folgt der Abklingzeit.
-## area verkleinert Radien, Kegel-Reichweite und die Breite der Bein-Schneise (ihre Laenge haengt an
-## Huefte und Schuhspitze). Die Zielzahl bleibt.
+## dafuer kleinere Flaechen): gelten fuer JEDEN Sitzangriff (auch den Kopfstoss), auf die Grundwerte der
+## Tabelle; die Animation folgt der Abklingzeit. area verkleinert Radien, Kegel-Reichweite und die Breite
+## der Bein-Schneise (ihre Laenge haengt an Huefte und Schuhspitze). Die Zielzahl bleibt.
 const GOLEM_SIT_MULT_DAMAGE: float = 1.0
-const GOLEM_SIT_MULT_COOLDOWN: float = 0.9
+const GOLEM_SIT_MULT_COOLDOWN: float = 0.8   # 0,9 -> 0,85 -> 0,8 (Nutzervorgaben 2026-11-19)
 const GOLEM_SIT_MULT_AREA: float = 0.9
+## SITZ-MODIFIKATOREN JE GOLEM (Nutzervorgabe 2026-11-19): veraendern die Sitzangriffe eines Golems
+## unabhaengig von seiner Stufe — Faktoren auf Schaden, Abklingzeit und Flaeche (vorerst alle 1; der
+## Tempovorteil des Daemonengolems steckt schon in seinem Takt).
+const GOLEM_SIT_MOD: Dictionary = {damage = 1.0, cooldown = 1.0, area = 1.0}
+const DEMON_GOLEM_SIT_MOD: Dictionary = {damage = 1.0, cooldown = 1.0, area = 1.0}
+const GENESIS_GOLEM_SIT_MOD: Dictionary = {damage = 1.0, cooldown = 1.0, area = 1.0}
 ## =====================================================================================
 ## HANDSCHLAG (slam): sie bueckt sich und schlaegt beide Haende auf den Boden —
 ## Flaechenschaden RUNDHERUM. Kreis um den Punkt GOLEM_SLAM_FORWARD vor ihr (dort
@@ -357,15 +382,14 @@ const GOLEM_CRAB_REACH_DEPTH: float = 0.3
 const GOLEM_SIT_TURN_STALL_TIME: float = 2.0
 const GOLEM_SIT_TURN_BLOCK_TIME: float = 3.0
 ## ZEPPELIN-ZERSTOERER (Nutzervorgabe 2026-11-18): der einzige Weg, aus dem Sitzen ein Luftschiff zu
-## treffen — nur im Krebsstand, Zielbereich hinter dem Kopf: ein Kreis mit GOLEM_CRAB_AIR_RADIUS um den
-## Punkt GOLEM_CRAB_AIR_BACK hinter der Sitzmitte (Meter des 4-m-Modells, flach gemessen; Vorschlag).
-## Wirkung wie der Luftschlag im Stand: ein Huellentreffer je Schlag, Ausholzeit und Takt des Luftschlags.
+## treffen — nur im Krebsstand, Zielbereich hinter dem Kopf: ein Kreis (Radius und Abklingzeit: Zeile
+## crab_headbutt in GOLEM_SIT_ATTACKS) um den Punkt GOLEM_CRAB_AIR_BACK hinter der Sitzmitte (Meter des
+## 4-m-Modells, flach gemessen; Vorschlag). Wirkung wie der Luftschlag im Stand: ein Huellentreffer je Schlag.
 ## Clip "crab_headbutt" (Kopfstoss nach hinten, 1,0 s), Aufschlag bei GOLEM_CRAB_AIR_IMPACT (Werkstatt: 0,4 s); das
 ## Spiel spielt ihn so schnell, dass der Aufschlag auf die Ausholzeit faellt.
 ## Nutzervorgabe 2026-11-18 (Spieltest): weiter nach hinten, 20 % kleiner — vorher 1,6 / 1,0; die Zone
 ## beginnt jetzt an der Spitze des Kopf-Schuhs beim Kopfstoss.
 const GOLEM_CRAB_AIR_BACK: float = 2.2
-const GOLEM_CRAB_AIR_RADIUS: float = 0.8
 const GOLEM_CRAB_AIR_IMPACT: float = 0.4
 ## STRECKEN BEIM WACHSEN (Nutzer 2026-11-16): bei jedem Stufenaufstieg und jedem
 ## Wachstumsschritt nach Stufe 7 reckt sich der Golem einmal (Clip "grow", Sound
@@ -646,7 +670,14 @@ const GOLEM_LEVEL_LIFETIME: float = 20.0
 const GOLEM_LEVEL_REGEN: float = 3.0
 const GOLEM_LEVEL_GROWTH: float = 0.2
 const GOLEM_LEVEL_REACH_GROWTH: float = 0.1
-const GOLEM_LEVEL_DAMAGE: int = 5
+## SCHADEN JE STUFE des normalen Golems nach Kategorie der Angriffe (Stufe 0-7; danach waechst der Schaden
+## nicht mehr): flach auf den Grundschaden jedes Angriffs dieser Kategorie, im Stand wie im Sitzen
+## (Nutzervorgabe 2026-11-19). Trommeln +8 = frueher +1 je Schlag und +5 fuer den ganzen Angriff; die
+## drei Schlaege teilen sich den ganzen Schaden (Golem.drum_hit_damage).
+const GOLEM_LEVEL_DAMAGE: Dictionary = {&"slam": 5, &"kick": 5, &"drum": 8, &"swat": 5, &"trample": 0}
+## Der AUSGEWACHSENE normale Golem (80 m, mit der letzten Wachstumsstufe) bekommt noch einmal so viel Schaden
+## je Kategorie dazu, im Stand wie im Sitzen (Nutzervorgabe 2026-11-19): Handschlag +5, Tritt +10, Trommeln +8.
+const GOLEM_FULL_SIZE_DAMAGE: Dictionary = {&"slam": 5, &"kick": 10, &"drum": 8, &"swat": 0, &"trample": 0}
 ## AB STUFE 1 ignoriert der Golem die Kollision mit Einheiten (er laeuft durch sie
 ## hindurch, niemand wird von ihm weggeschoben) und TRAMPELT: jeder Feind unter
 ## seinem Koerper nimmt den Trampelschaden (aus der Groesse, s. u.), solange der Golem
@@ -803,11 +834,8 @@ const GOLEM_TURN_MIN_SPEED_SHARE: float = 0.2
 ## Golem.DRUM_HITS im Clip; aus dem Stand kommt das Buecken davor).
 ## Flaeche wie der Handschlag. Werte seit 2026-11-16 (Nutzer; vorher 40 Schaden
 ## gesamt, 1,4-fache Abklingzeit des Handschlags):
-##   JEDER Schlag macht ein Drittel des Tabellenschadens (14, zusammen 42);
-##   je Stufe bekommt jeder Schlag GOLEM_DRUM_LEVEL_DAMAGE_PER_HIT (+1) dazu,
-##   ZUSAETZLICH zum normalen Stufenbonus (GOLEM_LEVEL_DAMAGE, +5 fuer den ganzen
-##   Angriff, auf die drei Schlaege verteilt) — also +8 je Stufe insgesamt
-##   (Stufe 6: 3 x 30 = 90);
+##   die drei Schlaege teilen sich den Schaden des Angriffs (Grundwert 42, je Stufe +8,
+##   GOLEM_LEVEL_DAMAGE drum — Stufe 6: 3 x 30 = 90; der letzte Schlag nimmt den Rest);
 ##   die Abklingzeit ist der normale Angriffstakt (1,8 s bei Startgroesse), nicht
 ##   der verkuerzte der gebueckten Haltung.
 ## Gewaehlt wird es, wenn es mehr Schaden je Sekunde bringt als Handschlag und
@@ -816,7 +844,6 @@ const GOLEM_TURN_MIN_SPEED_SHARE: float = 0.2
 ## RADIUS DES TROMMELNS (Nutzer 2026-11-16): 10 % groesser als der Kreis des
 ## Handschlags, auf allen Stufen (Golem.ground_radius) — Mittelpunkt wie dort.
 ## Die Aufschlaege im Clip stehen in Golem.DRUM_HITS (Modelldaten).
-const GOLEM_DRUM_LEVEL_DAMAGE_PER_HIT: int = 1
 ## SPRUNG (stomp, Nutzer 2026-11-16): sie springt auf der Stelle und landet auf
 ## beiden Fuessen — Schaden RUNDHERUM UM SIE SELBST. Nur aus dem Stand.
 ##   Flaeche:  Kreis um ihre Mitte, der Trampelradius (Koerper) mal 5/3 (zwei

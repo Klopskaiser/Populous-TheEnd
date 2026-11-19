@@ -237,16 +237,17 @@ static func model_of(kind: StringName) -> StringName:
 	return Golem.ATTACK_SLAM
 
 
-## Damage: its damage curve on this golem (Golem.curve_damage) times its damage over the
-## curve's base value, times GOLEM_SIT_MULT_DAMAGE. The stretch on the seat (GROW) is no
-## attack of the table: one trample tick (user spec 2026-11-17).
+## Damage (user spec 2026-11-19): its damage at 30 m (sit table) plus what this golem gains for its category
+## from growth steps that began at 30 m or more (Golem.sit_damage_growth) — category trample: a multiple of
+## the trample damage (from the height) —, times GOLEM_SIT_MULT_DAMAGE and the golem's sit modifier. The
+## stretch on the seat (GROW) is no attack of the table: one trample tick (user spec 2026-11-17).
 func damage(kind: StringName) -> int:
 	if kind == GROW:
 		return g.trample_damage()
 	var row: Dictionary = sit_attack(kind)
-	var curve: StringName = row["curve"]
-	return Golem.scaled_damage(g.curve_damage(curve),
-		float(row["damage"]) / Golem.curve_base(curve) * Balance.GOLEM_SIT_MULT_DAMAGE)
+	var category: StringName = row["category"]
+	var dmg: float = float(row["damage"]) * float(g.trample_damage()) if category == Golem.CATEGORY_TRAMPLE 		else float(row["damage"]) + g.sit_damage_growth(category)
+	return roundi(dmg * Balance.GOLEM_SIT_MULT_DAMAGE * float(g.sit_mod()["damage"]))
 
 
 ## Target cap: its share (column targets) of the golem's base count, rounded down, at least 1.
@@ -256,16 +257,10 @@ func max_targets(kind: StringName) -> int:
 	return maxi(g.max_targets() * int(sit_attack(kind)["targets"]) / 100, 1)
 
 
-## Seconds per GOLEM_STRIKE_COOLDOWN of her rhythm right now: every time of the attack
-## table grows with it (and the demon golem's is 15 % shorter).
-func _rhythm() -> float:
-	return g.strike_cooldown() / Balance.GOLEM_STRIKE_COOLDOWN
-
-
-## Cooldown: its own (column cooldown), grown with her rhythm, times GOLEM_SIT_MULT_COOLDOWN
-## (seated she strikes more easily, user spec 2026-11-17).
+## Cooldown: its own at 30 m (sit table), grown with her rhythm (Golem.sit_rhythm), times GOLEM_SIT_MULT_COOLDOWN
+## (seated she strikes more easily, user spec 2026-11-17) and the golem's sit modifier.
 func cooldown_of(kind: StringName) -> float:
-	return float(sit_attack(kind)["cooldown"]) * _rhythm() * Balance.GOLEM_SIT_MULT_COOLDOWN
+	return float(sit_attack(kind)["cooldown"]) * g.sit_rhythm() * Balance.GOLEM_SIT_MULT_COOLDOWN 		* float(g.sit_mod()["cooldown"])
 
 
 ## Wind-up (user spec 2026-11-19): the clip fills the attack's cooldown, so the impact — and
@@ -275,21 +270,15 @@ func windup_of(kind: StringName) -> float:
 	return cooldown_of(kind) * float(GolemSitAnim.SIT_CLIP_IMPACT[kind]) / float(GolemSitAnim.SIT_CLIP_LENGTH[kind])
 
 
-## Size of the area of the sit attack `kind` (column area), grown as its column grow says,
-## times GOLEM_SIT_MULT_AREA (seated the areas are smaller, user spec 2026-11-17).
+## Size of the area of the sit attack `kind`: its own at 30 m (sit table), grown exactly with her body
+## (Golem.sit_body_ratio), times GOLEM_SIT_MULT_AREA (seated the areas are smaller, user spec 2026-11-17) and the
+## golem's sit modifier.
 func area_of(kind: StringName) -> float:
-	var row: Dictionary = sit_attack(kind)
-	var a: float = float(row["area"]) * Balance.GOLEM_SIT_MULT_AREA
-	match row["grow"]:
-		&"circle":
-			return a * g.slam_scale()
-		&"limb":
-			return a * g.limb_factor()
-		&"body":
-			return a * g.trample_radius()
-		&"lane":
-			return a * g.reach_factor()
-	return a * _sx()   # model
+	return float(sit_attack(kind)["area"]) * g.sit_body_ratio() * _area_mult()
+
+
+func _area_mult() -> float:
+	return Balance.GOLEM_SIT_MULT_AREA * float(g.sit_mod()["area"])
 
 
 # --- Where her limbs are -------------------------------------------------------------
@@ -381,7 +370,8 @@ func _frame() -> void:
 	_c_dstomp_r = double_stomp_radius()
 	_c_hslam = [hand_slam_point(1.0), hand_slam_point(-1.0)]
 	_c_hslam_r = hand_slam_radius()
-	_c_kick_out = (Balance.GOLEM_SIT_KICK_SIDE + float(sit_attack(KICK_L)["area"]) * 0.5) * _c_sx 		* Balance.GOLEM_SIT_MULT_AREA
+	# The lane: the leg GOLEM_SIT_KICK_SIDE beside her middle, half its width (the sit table's area) beyond.
+	_c_kick_out = Balance.GOLEM_SIT_KICK_SIDE * _c_sx * _area_mult() + area_of(KICK_L) * 0.5
 
 
 ## The leg's lane on side: from her hip joint to the tip of the stretched shoe, as

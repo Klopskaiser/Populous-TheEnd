@@ -169,43 +169,61 @@ func max_health_cap() -> int:
 	return Balance.DEMON_GOLEM_HP + Balance.DEMON_GOLEM_GROWTH_MAX_HP * growth_steps
 
 
-func level_damage_bonus() -> int:
+func level_damage_bonus(_category: StringName) -> int:
 	return 0
 
 
-## Damage of an attack as it stands in the books — with its fraction: half the
-## golem's starting damage, a start bonus (slam +3, kick +2, drum +3), plus the gain
-## of every growth step.
-## (Curve slam, kick or drum of the attack table; the genesis golem takes the same with
-## his own steps, damage_exact_at.)
-static func damage_exact_at(curve: StringName, steps: float) -> float:
-	var base: float = float(Golem.stand_attack(curve)["damage"]) * Balance.DEMON_GOLEM_DAMAGE_SHARE
-	if curve == ATTACK_KICK:
+## Damage of an attack of the attack table as it stands in the books — with its fraction: half the
+## attack's OWN base damage (user spec 2026-11-19: no attack depends on another one's value), a start
+## bonus by its category (slam +3, kick +2, drum +3; swat as slam), plus the gain of every growth step.
+## The genesis golem takes the same with his own steps.
+static func damage_exact_at(row: Dictionary, steps: float) -> float:
+	var category: StringName = row["category"]
+	var base: float = float(row["damage"]) * Balance.DEMON_GOLEM_DAMAGE_SHARE
+	if category == ATTACK_KICK:
 		return base + Balance.DEMON_GOLEM_START_KICK_BONUS + Balance.DEMON_GOLEM_GROWTH_KICK_DAMAGE * steps
-	if curve == ATTACK_DRUM:
+	if category == ATTACK_DRUM:
 		return base + Balance.DEMON_GOLEM_START_DRUM_BONUS + Balance.DEMON_GOLEM_GROWTH_DRUM_DAMAGE * steps
 	return base + Balance.DEMON_GOLEM_START_SLAM_BONUS + Balance.DEMON_GOLEM_GROWTH_SLAM_DAMAGE * steps
 
 
-func damage_exact(curve: StringName) -> float:
-	return damage_exact_at(curve, float(growth_steps))
+## Growth per step for attacks of `category` (slam, kick, drum; swat as slam).
+static func damage_growth_per_step(category: StringName) -> float:
+	if category == ATTACK_KICK:
+		return Balance.DEMON_GOLEM_GROWTH_KICK_DAMAGE
+	if category == ATTACK_DRUM:
+		return Balance.DEMON_GOLEM_GROWTH_DRUM_DAMAGE
+	return Balance.DEMON_GOLEM_GROWTH_SLAM_DAMAGE
 
 
-## A damage curve right now (Golem.attack_damage scales it per attack): the exact value,
-## rounded when it lands; the trample damage from the size like the golem's.
-func curve_damage(curve: StringName) -> int:
-	if curve == CURVE_TRAMPLE:
-		return trample_damage()
-	return int(round(damage_exact(curve)))
+## Growth steps that began at GOLEM_SIT_MIN_HEIGHT (30 m) or more: 29 -> 32 m does not count, 32 -> 35 m does.
+func sit_steps() -> int:
+	var n: int = 0
+	for k in range(1, growth_steps + 1):
+		if height_for_steps(k - 1) >= Balance.GOLEM_SIT_MIN_HEIGHT - 0.0001:
+			n += 1
+	return n
 
 
-## Damage of ONE of the drum's hits: the whole attack split evenly, the last hit
-## takes the remainder.
-func drum_hit_damage(hit: int) -> int:
-	var hits: int = DRUM_HITS.size()
-	var total: int = attack_damage(ATTACK_DRUM)
-	var each: int = total / hits
-	return total - each * (hits - 1) if hit >= hits - 1 else each
+func sit_damage_growth(category: StringName) -> float:
+	if category == CATEGORY_TRAMPLE:
+		return 0.0
+	return damage_growth_per_step(category) * float(sit_steps())
+
+
+func sit_mod() -> Dictionary:
+	return Balance.DEMON_GOLEM_SIT_MOD
+
+
+## The standing attack `kind` (tests, diagnostics).
+func damage_exact(kind: StringName) -> float:
+	return damage_exact_at(Golem.stand_attack(kind), float(growth_steps))
+
+
+func damage_value(row: Dictionary) -> float:
+	if row["category"] == CATEGORY_TRAMPLE:
+		return super.damage_value(row)   # from the size like the golem's
+	return damage_exact_at(row, float(growth_steps))
 
 
 # --- Values that follow the size ------------------------------------------------------
