@@ -314,17 +314,16 @@ const GOLEM_SIT_HAND_SLAM_LAND: Vector2 = Vector2(0.92, -0.70)
 const GOLEM_SIT_BIG_MIN_TARGETS: int = 3
 ## DREHEN IM SITZEN: erreicht keines ihrer Glieder einen Feind, dreht sie sich zum
 ## naechsten in ihrem Aggro-Radius, wenn er mehr als GOLEM_SIT_TURN_MIN_DEG neben ihrer
-## Blickrichtung liegt — mit GOLEM_SIT_TURN_SHARE ihrer Drehrate im Stand, um den Po;
-## fertig bis auf GOLEM_SIT_TURN_DONE_DEG. Waehrend sie sich dreht, greift sie nicht an
-## (Vorschlaege; die Drehrate hat der Nutzer am 2026-11-17 halbiert, vorher 0,25).
-const GOLEM_SIT_TURN_SHARE: float = 0.375   # x3 (Nutzervorgabe 2026-11-19; vorher 0,125)
-## Seit 2026-11-18 (Nutzer) gilt GOLEM_SIT_TURN_SHARE nur noch bei GOLEM_SIT_MIN_HEIGHT (30 m:
-## 41 Grad/s). Von dort faellt die Sitz-Drehrate linear in der Koerperhoehe auf
-## GOLEM_SIT_TURN_RATE_AT_MAX_DEG bei GOLEM_MAX_HEIGHT (80 m: 13 statt 9,1 Grad/s) und mit derselben
-## Neigung weiter, bis GOLEM_SIT_TURN_RATE_MIN_DEG (ab rund 86 m). Im Stand bleibt alles wie es war.
-## Nutzervorgabe 2026-11-19: die ganze Kurve verdreifacht (30 m: 123 Grad/s, 80 m: 39 Grad/s, Untergrenze 28,5).
-const GOLEM_SIT_TURN_RATE_AT_MAX_DEG: float = 39.0
-const GOLEM_SIT_TURN_RATE_MIN_DEG: float = 28.5
+## Blickrichtung liegt — mit der Sitz-Drehrate, um den Po; fertig bis auf
+## GOLEM_SIT_TURN_DONE_DEG. Waehrend sie sich dreht, greift sie nicht an.
+## Sitz-Drehrate (Nutzervorgabe 2026-11-19, ersetzt Anteil der Standrate + lineare Gerade): fest bei
+## GOLEM_MAX_HEIGHT (80 m) GOLEM_SIT_TURN_RATE_AT_MAX_DEG, darunter und darueber mit der Wurzel der Groesse
+## (Golem.sit_turn_rate_at: Rate x Wurzel(80 m / Hoehe)) — wie Aufstehen und Haltungswechsel. 30 m 45,9, 31,3 m 44,9,
+## 50 m 35,5, 80 m 28,1, 100 m 25,1 Grad/s. Vorher linear von 99 (30 m) auf 31,2 (80 m): bei 30 m viel zu schnell.
+## Drehclips im Sitzen und im Krebsgang laufen mit der Drehrate, aber hoechstens GOLEM_TURN_CLIP_MAX_LOOPS
+## Durchlaeufe je Sekunde (Nutzervorgabe 2026-11-19: Animationsbremse; darueber rutschen die Glieder etwas).
+const GOLEM_TURN_CLIP_MAX_LOOPS: float = 2.0
+const GOLEM_SIT_TURN_RATE_AT_MAX_DEG: float = 28.08   # -20 %, dann -10 % (2026-11-19; vorher 39 / 31,2)
 const GOLEM_SIT_TURN_MIN_DEG: float = 20.0
 const GOLEM_SIT_TURN_DONE_DEG: float = 3.0
 ## Drehen fuer einen besseren Angriff (Nutzervorgabe 2026-11-18): die Wahl rechnet auch die Plaene
@@ -827,15 +826,18 @@ const GOLEM_KICK_LANE_SLACK: float = 0.001
 ## Nutzer 2026-11-17: 3 s bei 80 m (vorher 4 s bei 100 m; bei 80 m waren es 3,54 s).
 const GOLEM_STRIKE_COOLDOWN_MAX: float = 3.0
 ## DREHRATE (Nutzer 2026-11-15): der Golem dreht sich nicht mehr augenblicklich.
-## Sein Koerper folgt der Blickrichtung mit GOLEM_TURN_RATE (rad/s) bei
-## Startgroesse, linear in der Koerperhoehe fallend bis GOLEM_TURN_RATE_FULL_SHARE
-## der Feuerrammen-Drehrate bei 100 m. Seit 2026-11-16 (Nutzer) dauert die Drehung
+## Sein Koerper folgt der Blickrichtung mit GOLEM_TURN_RATE_FULL_SHARE der Feuerrammen-Drehrate
+## bei 80 m (GOLEM_MAX_HEIGHT), darunter und darueber mit der Wurzel der Groesse (Nutzervorgabe
+## 2026-11-19, Golem.standing_turn_rate: Rate x Wurzel(80 m / Hoehe), unter GOLEM_HEIGHT wie dort —
+## frisch 300, Stufe 7 159, 31,3 m 117, 50 m 92, 80 m 73 Grad/s; vorher linear von GOLEM_TURN_RATE
+## 8 rad/s = 458 Grad/s bei Startgroesse, bei 31,3 m noch 322 Grad/s). Bis 2026-11-17 galt der Wert bei 100 m. Seit 2026-11-16 (Nutzer) dauert die Drehung
 ## dort 10 % laenger: 0,7 / 1,1 = 63,6 % (1,27 rad/s: eine halbe Drehung in 2,5 s
 ## statt 2,2 s); dazwischen faellt die Rate weiter linear. Angegriffen wird erst, wenn er bis auf GOLEM_ATTACK_ALIGN_DEG auf
 ## das Ziel gedreht ist; solange er sich dreht, laeuft er langsamer (mindestens
 ## GOLEM_TURN_MIN_SPEED_SHARE seines Tempos), damit er nicht seitwaerts gleitet.
-const GOLEM_TURN_RATE: float = 8.0
-const GOLEM_TURN_RATE_FULL_SHARE: float = 0.7 / 1.1
+## Nutzervorgabe 2026-11-19: die Drehung im Stand wieder 10 % schneller (0,7 / 1,1 x 1,1 = 0,7; 80 m 80 Grad/s,
+## 31,3 m 128, frisch 330 Grad/s).
+const GOLEM_TURN_RATE_FULL_SHARE: float = 0.7
 const GOLEM_ATTACK_ALIGN_DEG: float = 25.0
 const GOLEM_TURN_MIN_SPEED_SHARE: float = 0.2
 ## TROMMELN (Nutzer 2026-11-15): eine Variante des Handschlags — drei Schlaege
@@ -2399,3 +2401,22 @@ const SURVIVAL_START_BRAVES: int = 12
 ## voll geladen. Das normale Einkommen der kleinen Basis (~2 Mana/s) braechte
 ## sonst nach den Startladungen kaum einen Zauber nach (ein Golem kostet 900).
 const SURVIVAL_REFILL_SPELLS_EACH_WAVE: bool = true
+## UEBERLEBEN AUF GROSSER KARTE (Nutzervorgabe 2026-11-19): dieselbe Basis und dieselben 20 Wellen auf einer
+## Insel doppelter Kantenlaenge (MapGenerator.ISLAND_LARGE, 288), der Zuwachs je Welle mal
+## SURVIVAL_LARGE_GROWTH_MULT (lineare und quadratische Steigerung; die erste Welle bleibt 8), die Pause
+## zwischen den Wellen mal SURVIVAL_LARGE_INTERVAL_MULT (90 s). Welle 10: 66, Welle 20: 184.
+const SURVIVAL_LARGE_GROWTH_MULT: int = 2
+const SURVIVAL_LARGE_INTERVAL_MULT: float = 2.0
+## GOLEMSZENARIO (Nutzervorgabe 2026-11-19): der Spieler hat nur GOLEM_SURVIVAL_GOLEMS normale Golems,
+## schon auf GOLEM_SURVIVAL_HEIGHT gewachsen (erste Sitzgroesse, 31,3 m); verloren erst, wenn alle tot sind.
+## Endlose Wellen von allen Seiten in kleinen Trupps (jeder Spawnpunkt jede Welle): erste Welle
+## GOLEM_SURVIVAL_FIRST_WAVE Einheiten, jede weitere GOLEM_SURVIVAL_WAVE_STEP mehr, alle
+## GOLEM_SURVIVAL_INTERVAL Sekunden; die erste nach GOLEM_SURVIVAL_FIRST_DELAY.
+const GOLEM_SURVIVAL_GOLEMS: int = 2
+const GOLEM_SURVIVAL_HEIGHT: float = 31.3
+const GOLEM_SURVIVAL_FIRST_WAVE: int = 50
+const GOLEM_SURVIVAL_WAVE_STEP: int = 14
+const GOLEM_SURVIVAL_INTERVAL: float = 45.0
+const GOLEM_SURVIVAL_FIRST_DELAY: float = 20.0
+## Abstand der beiden Golems von der Kartenmitte (Zellen, links und rechts).
+const GOLEM_SURVIVAL_SPREAD: int = 10

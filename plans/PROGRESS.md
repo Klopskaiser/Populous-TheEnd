@@ -13136,3 +13136,72 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
   deterministisch), ausgeteilt 203–236 statt 186–221 Schaden/s. Der Handstampfer hinten bringt 60–70 % des Schadens;
   Fuss-Stampfer, Bein und Wischer kommen in 17 s je ein- bis zweimal — die Feinde stehen im Nahkampfring, den sie kaum
   erreichen. Bei 31 m fehlt es an Haltbarkeit, nicht an Schaden.
+
+- **Drehen im Sitzen -20 % (Nutzervorgabe 2026-11-19, nach der Wachstumsprobe):** `GOLEM_SIT_TURN_SHARE` 0,375 -> 0,3,
+  `_RATE_AT_MAX_DEG` 39 -> 31,2, `_RATE_MIN_DEG` 28,5 -> 22,8 (die ganze Kurve x0,8; 30 m 99 Grad/s, 31,3 m ~97, 80 m
+  31,2). Gilt auch im Krebsgang. Vorher gemessen (31,3 -> 80 m, gleicher Mix, Zufuhr = gleichzeitig x Zielzahl, nach
+  Leben gedrosselt): sitzend x0,5 380 s, x1,0 283–320 s, ab x1,5 gefallen; stehend x1,0 1267–1384 s, x1,5 377 s bzw.
+  gefallen, x2,5 gefallen. Vier Tests der Drehrate nachgezogen.
+
+- **Startmission: zweiter Golem mit 80 m (Nutzervorgabe 2026-11-19):** neben der 31,3-m-Golemin steht jetzt eine
+  ausgewachsene (80 m, 2000 LP, gehaertet) noerdlich der blauen Basis (`CHAMBER_BIG_GOLEM_HEIGHT` =
+  `GOLEM_MAX_HEIGHT`, `CHAMBER_BIG_GOLEM_OFFSET` (0, -34), 23 m bis zum naechsten eigenen Gebaeude bei 13,1 m
+  Koerperradius). `Main._spawn_chamber_golem` nimmt die Hoehe jetzt als Parameter. Headless geladen und geprueft.
+
+- **Drehen im Sitzen skaliert mit der Wurzel, Drehclip laeuft mit (Nutzervorgabe 2026-11-19):** die Sitz-Drehrate war
+  ein Anteil der Standrate bei 30 m plus eine Gerade bis 80 m — 99 Grad/s bei 30 m gegen 31,2 bei 80 m (Faktor 3,2 bei
+  2,7-facher Groesse; Abklingzeiten wachsen auf derselben Strecke nur 1,36-fach, Aufstehen 1,63-fach). Jetzt
+  `Golem.sit_turn_rate_at` = `GOLEM_SIT_TURN_RATE_AT_MAX_DEG` x Wurzel(80 m / Hoehe), unter 30 m wie bei 30 m: 30 m 51,
+  31,3 m 50, 50 m 39, 80 m 31,2, 120 m 25,5 Grad/s. `GOLEM_SIT_TURN_SHARE` und `_RATE_MIN_DEG` entfallen. Der Drehclip
+  `sit_turn_l/_r` lief immer mit 1x; er ist fuer 11,9 Grad/s unter den Fuessen gebaut (2 x 0,075 rad je 0,72 s am Boden,
+  `DREH` in golem_bewegung_niedlich_sitzen.mjs) — bei 31 m drehte der Koerper 8-mal schneller als die Fuesse umsetzten.
+  Jetzt TimeScale-Knoten vor den Drehclips (`GolemSitAnim.set_turn_speed`, `TURN_CLIP_RATE`), gespeist mit der
+  gemessenen Drehrate (hoechstens 1,5 x die Sollrate): 31,3 m 4,2x, 80 m 2,6x; die Haende (7,9 Grad/s) rutschen etwas.
+  In der Startmission headless nachgemessen (Clip 4,18x bei 49,9 Grad/s). Unit-Tests laden kein Modell, dort ist nur die
+  Rate geprueft.
+- **Startmission:** der 80-m-Golem steht jetzt bei (14, -26) vom blauen Anker statt (0, -34) — dort fand `find_seat`
+  keinen Sitzplatz, jetzt setzt sie sich sofort (16,6 m bis zum naechsten Gebaeude).
+
+- **Drehen im Stand mit der Wurzel, Sitz -10 %, Animationsbremse (Nutzervorgabe 2026-11-19):**
+  - `Golem.standing_turn_rate` = 63,6 % der Feuerrammen-Drehrate (73 Grad/s) bei 80 m x Wurzel(80 m / Hoehe), unter
+    4,73 m wie dort: frisch 300 (vorher 458), Stufe 7 159 (396), 31,3 m 117 (322), 50 m 92 (227), 80 m 73 Grad/s;
+    `GOLEM_TURN_RATE` entfaellt. Balancewirkung: sie greift erst bis auf 25 Grad gedreht an, die Wahl rechnet die
+    Drehzeit — kleine und mittlere Golems verlieren etwas Schaden; nicht nachgemessen. Einen Drehclip im Stand gibt
+    es nicht (beim Drehen auf der Stelle laeuft idle).
+  - `GOLEM_SIT_TURN_RATE_AT_MAX_DEG` 31,2 -> 28,08: 30 m 45,9, 31,3 m 44,9, 80 m 28,1 Grad/s.
+  - `GOLEM_TURN_CLIP_MAX_LOOPS` 2: Dreh-Clips im Sitzen (`GolemSitAnim.set_turn_speed`, 2-s-Clip -> hoechstens 4x) und
+    im Krebsgang (`Golem._crab_visual`, 1-s-Clip -> hoechstens 2x) laufen hoechstens 2-mal je Sekunde. Beim normalen
+    Golem greift sie derzeit nicht (31,3 m sitzend 3,76x), beim Daemonengolem (+15 %) knapp.
+  - Startmission headless nachgemessen. Zwei Tests auf die Wurzel umgestellt: die halbe Drehung des Giganten dauert
+    jetzt 3,7- statt ueber 4-mal so lange; der Pfadtest (Bugmeldung 2026-11-16) folgt dem Raster (erst 59 Grad schraeg,
+    dann gerade) und summiert dabei 53 Grad — Schwelle 70 Grad plus neue Pruefung, nie mehr als 60 Grad vom Ziel weg.
+
+- **Tritt ohne Drehung (Nutzervorgabe 2026-11-19, `Golem._kick_while_turning`):** vorher drehte sie sich fuer ein Ziel
+  in der hinteren Trittschneise erst ganz um (Probe, Gegner mittig hinter ihr bei 60 % der hinteren Schneise, Sprung
+  aus: 11,8 m Trommeln nach 1,8 s, 16,9 m nach 2,0 s, 31,3 m nach 2,7 s, 80 m Tritt nach 2,4 s, jeweils 168–180 Grad
+  gedreht). Jetzt prueft die Kampfschleife (Einheit und Gebaeude) vor dem Sprung, ob die Schneise eines Beins das Ziel
+  in der echten Koerperrichtung erreicht (`_target_in_kick_lane`); Tritt jetzt = Wert / Abklingzeit, gegen den besten
+  Plan nach der Drehung (wie `_stomp_while_turning`, mit Drehzeit). Mindestens so gut: Tritt sofort mit diesem Bein,
+  Blickrichtung bis zum Aufschlag gehalten (`_kick_holds_heading` in `_slew_heading`). Probe danach: alle Groessen
+  treten nach 0,2 s ungedreht und treffen; mit Sprung waehlt sie bei 31 und 80 m den Sprung (Plan Sprung + Trommeln
+  bringt gegen ein Einzelziel mehr); bei 120 % der Schneise dreht sie sich wie bisher. Neuer Test
+  `test_she_kicks_back_without_turning_when_the_lane_reaches`; der Drehtest des 80-m-Golems laesst jetzt einen Tritt
+  zu, sobald die Schneise beim Drehen ueber das Ziel streicht.
+
+- **Zwei Survivalszenarien, Standdrehung +10 % (Nutzervorgabe 2026-11-19):**
+  - `SurvivalMode` hat Stellschrauben (vor `setup()` setzen, Vorgabe = bisheriges Ueberleben): `wave_interval`,
+    `first_wave_delay`, `growth_mult`, `linear_first`/`linear_step`, `all_fronts`, `guardians`; dazu `size_of`,
+    `composition_of`, `slots_of`, `guardians_alive`. Die statischen Funktionen (`wave_size` usw.) bleiben fuer den
+    Grundmodus. `_hunt_target` jagt ohne Anhaenger und Gebaeude die Waechter.
+  - **Grosse Karte** (`MatchConfig.survival_large`, `variant` large, `MapGenerator.ISLAND_LARGE` = Insel mit 288):
+    20 Wellen, Zuwachs x2 (8, 12, 16, 22, 28 … 66 … 184), Pause 90 s. `Main` nimmt die `map_id` jetzt auch im
+    Ueberleben aus der Konfiguration.
+  - **Golem-Ueberleben** (`MatchConfig.survival_golems`, `Main._setup_golem_survival`, `_spawn_grown_golem`): zwei
+    Golems auf 31,3 m (1360 LP), Modell sofort in voller Groesse (`Golem.snap_shown_size`, auch in der Startmission —
+    vorher wuchs die Figur mit `GROW_SPEED` 0,25/s gut 20 s lang), endlose Wellen aus allen 8 Spawnpunkten, 50 +14 je
+    Welle, alle 45 s, erste nach 20 s; verloren, wenn beide Golems tot sind (`guardians`, Siegpruefungs-Ausnahme).
+  - Menue: zwei neue Eintraege auf „Survivalszenarien“, Direktstart `-- survival_large` / `-- survival_golems`.
+  - Standdrehung: `GOLEM_TURN_RATE_FULL_SHARE` 0,7/1,1 -> 0,7 (80 m 80, 31,3 m 128, frisch 330 Grad/s).
+  - Headless durchgespielt (Startmission-artiger Lauf mit main.tscn): Golem-Szenario Welle 1 nach 20 s mit 50 Einheiten,
+    nach dem Tod beider Golems Spiel vorbei und Spieler besiegt; grosse Karte 288, 8 Spawnpunkte, Welle 1 nach 30 s.
+    Neue Tests in `test_survival.gd` (Wellenformen, Waechter, Konfigurationen). Balance nicht gemessen.

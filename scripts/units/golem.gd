@@ -314,6 +314,8 @@ var _kick_left: bool = false
 var kick_side: float = 1.0
 var _last_kick_side: float = -1.0
 var _kick_leg_locked: bool = false
+## A kick struck without turning first (_kick_while_turning): the body holds its heading until it lands.
+var _kick_holds_heading: bool = false
 ## Which of the drum's hits lands next (0-based) while a drum is wound up.
 var _pending_hit: int = 0
 ## Stance right now (STANCE_STAND / STANCE_CROUCH), the one a running switch
@@ -1961,6 +1963,15 @@ func crab_clip_speed() -> float:
 
 
 ## The switch "stationary" (sidebar). Switched on during a crawl she sits down where she is.
+## The figure shows her real size at once instead of growing into it at GROW_SPEED (a golem put on
+## the map already grown — start mission, golem survival; user report 2026-11-19: she seemed to grow
+## for a long while at the start).
+func snap_shown_size() -> void:
+	_shown_size = size_factor()
+	if _model != null:
+		_model.scale = model_scale() * _shown_size
+
+
 func set_sit_stationary(on: bool) -> void:
 	sit_stationary = on
 	if on:
@@ -2969,6 +2980,54 @@ func _stomp_while_turning(building = null) -> bool:
 	return true
 
 
+## The kick without turning (user spec 2026-11-19): its lane runs ahead of her and, as the leg swings
+## back, behind her. When the lane of one leg already reaches her target in the body's REAL direction,
+## kicking now (its worth over its cooldown, no turn) is weighed against the best plan once turned (which
+## pays the turn, as in _stomp_while_turning). At least as good: she kicks at once with that leg and
+## holds her heading until it lands, so the lane does not swing off the target. Standing only.
+func _kick_while_turning(building = null) -> bool:
+	if _stretch_queued or stance != STANCE_STAND or is_switching_stance() or _airship_in_reach() != null:
+		return false
+	var best_side: float = 0.0
+	var best_worth: float = 0.0
+	var saved_side: float = kick_side
+	for side in [1.0, -1.0]:
+		kick_side = side
+		if not _target_in_kick_lane(building):
+			continue
+		var worth: float = _worth_now(ATTACK_KICK)
+		if worth > best_worth + 0.0001:
+			best_worth = worth
+			best_side = side
+	kick_side = saved_side
+	if best_side == 0.0:
+		return false
+	var now: float = best_worth / maxf(cooldown_for(ATTACK_KICK), 0.01)
+	var turned: float = 0.0
+	var want: Vector3 = Vector3(facing.x, 0.0, facing.z)
+	if want.length_squared() > 0.000001:
+		var saved: Vector3 = _heading
+		_assumed_turn_time = turn_time_needed()
+		_heading = want.normalized()
+		turned = attack_value(_choose_attack())
+		_heading = saved
+		_assumed_turn_time = -1.0
+	if now + 0.0001 < turned:
+		return false
+	kick_side = best_side
+	_kick_leg_locked = true
+	_wind_up(ATTACK_KICK, building)
+	_kick_holds_heading = true
+	return true
+
+
+## Does the lane of the leg kick_side reach her current target (unit or building) right now?
+func _target_in_kick_lane(building = null) -> bool:
+	if building != null:
+		return _building_target_valid() and _buildings_in_area(ATTACK_KICK).has(attack_building)
+	return _target_valid(attack_target) and _victims(ATTACK_KICK).has(attack_target)
+
+
 ## Expected damage per second of the attack `kind` right now (see attack_worth).
 ## Read as a PLAN this is "a lead-in plus GOLEM_STANCE_PLAN_ATTACKS attacks":
 ## without a lead-in the attack's worth over its cooldown, with a stance switch
@@ -3027,8 +3086,8 @@ func cooldown_for(kind: StringName) -> float:
 	return strike_cooldown() * (float(stand_attack(kind).get("cooldown", STRIKE_COOLDOWN)) / STRIKE_COOLDOWN)
 
 
-## How fast the body turns (rad/s): GOLEM_TURN_RATE at the starting size, down to
-## GOLEM_TURN_RATE_FULL_SHARE of the fire ram's rate at 80 m. Seated: sit_turn_rate().
+## How fast the body turns (rad/s): GOLEM_TURN_RATE_FULL_SHARE of the fire ram's rate at 80 m, with the
+## root of the size below and above (user spec 2026-11-19). Seated: sit_turn_rate().
 func turn_rate() -> float:
 	# (the crab walk turns as slowly as the sit — user spec 2026-11-18; it stays in STANCE_SIT)
 	return sit_turn_rate() if stance == STANCE_SIT else standing_turn_rate(height_m())
@@ -3036,23 +3095,19 @@ func turn_rate() -> float:
 
 ## The standing turn rate of a golem `h` metres tall (rad/s).
 static func standing_turn_rate(h: float) -> float:
-	var t: float = clampf((h - Balance.GOLEM_HEIGHT) / (Balance.GOLEM_MAX_HEIGHT - Balance.GOLEM_HEIGHT), 0.0, 1.0)
-	return lerpf(Balance.GOLEM_TURN_RATE, Balance.FIRERAM_TURN_RATE * Balance.GOLEM_TURN_RATE_FULL_SHARE, t)
+	var at_max: float = Balance.FIRERAM_TURN_RATE * Balance.GOLEM_TURN_RATE_FULL_SHARE
+	return at_max * sqrt(Balance.GOLEM_MAX_HEIGHT / maxf(h, Balance.GOLEM_HEIGHT))
 
 
-## The seated turn rate (rad/s, user spec 2026-11-18): GOLEM_SIT_TURN_SHARE of the standing
-## rate at GOLEM_SIT_MIN_HEIGHT, falling linearly in the height to GOLEM_SIT_TURN_RATE_AT_MAX_DEG
-## at GOLEM_MAX_HEIGHT and on at the same slope beyond, never below GOLEM_SIT_TURN_RATE_MIN_DEG.
+## The seated turn rate (rad/s, user spec 2026-11-19): GOLEM_SIT_TURN_RATE_AT_MAX_DEG at
+## GOLEM_MAX_HEIGHT, with the root of the size below and above (as sitting down and the stance
+## switch) — rate x sqrt(80 m / height); below GOLEM_SIT_MIN_HEIGHT as at it.
 func sit_turn_rate() -> float:
 	return Golem.sit_turn_rate_at(height_m())
 
 
 static func sit_turn_rate_at(h: float) -> float:
-	var lo: float = Balance.GOLEM_SIT_MIN_HEIGHT
-	var at_lo: float = standing_turn_rate(lo) * Balance.GOLEM_SIT_TURN_SHARE
-	var at_max: float = deg_to_rad(Balance.GOLEM_SIT_TURN_RATE_AT_MAX_DEG)
-	var r: float = at_lo + (at_max - at_lo) * (h - lo) / (Balance.GOLEM_MAX_HEIGHT - lo)
-	return maxf(r, deg_to_rad(Balance.GOLEM_SIT_TURN_RATE_MIN_DEG))
+	return deg_to_rad(Balance.GOLEM_SIT_TURN_RATE_AT_MAX_DEG) * sqrt(Balance.GOLEM_MAX_HEIGHT / maxf(h, Balance.GOLEM_SIT_MIN_HEIGHT))
 
 
 ## Has her body turned to within `deg` degrees of the flat direction `dir`?
@@ -3078,6 +3133,10 @@ func snap_heading() -> void:
 
 ## Rotates the body toward `facing` at turn_rate() — the fire ram's slew.
 func _slew_heading(delta: float) -> void:
+	if _kick_holds_heading:
+		if _pending_attack == ATTACK_KICK and state != State.DEAD:
+			return   # a kick without turning: its lane stays on the target until it lands
+		_kick_holds_heading = false
 	var want_dir: Vector3 = Vector3(facing.x, 0.0, facing.z)
 	if want_dir.length_squared() < 0.000001:
 		return
@@ -3747,9 +3806,10 @@ func _tick_attack(delta: float) -> void:
 	_attack_cooldown -= delta
 	if _attack_cooldown <= 0.0:
 		if not is_turned_to_facing():
-			# Still turning toward it (see turn_rate) — only the stomp needs
-			# no aim and may come at once, when it is the best plan.
-			_stomp_while_turning()
+			# Still turning toward it (see turn_rate) — a kick whose lane (ahead or behind
+			# her) already reaches it, or the stomp, may come at once when it pays.
+			if not _kick_while_turning():
+				_stomp_while_turning()
 			return
 		_attack_or_switch()
 
@@ -3817,7 +3877,8 @@ func _bombard_building(building, delta: float) -> void:
 	_attack_cooldown -= delta
 	if _attack_cooldown <= 0.0:
 		if not is_turned_to_facing():
-			_stomp_while_turning(building)   # the stomp needs no aim
+			if not _kick_while_turning(building):   # a lane that already reaches it
+				_stomp_while_turning(building)   # the stomp needs no aim
 			return
 		_attack_or_switch(building)
 
@@ -4568,6 +4629,7 @@ func _wind_up(kind: StringName, building = null, ship: Airship = null) -> void:
 	if not is_switching_stance() and stance != stance_for(kind):
 		stance = stance_for(kind)
 		_stance_age = 0.0
+	_kick_holds_heading = false
 	if kind == ATTACK_KICK:
 		if not _kick_leg_locked:
 			_pick_kick_leg()   # the leg that strikes more (its lane is fixed until it lands)
@@ -4932,8 +4994,10 @@ func _crab_visual(ground_speed: float, turn_rate: float = 0.0) -> void:
 			if _clip == CLIP_CRAB_HEADBUTT and _anim.is_playing():
 				return
 			if absf(turn_rate) > CRAB_TURN_MIN_RATE and absf(turn_rate) * crab_limb_reach() > ground_speed:
-				_play_clip(CLIP_CRAB_TURN_L if turn_rate > 0.0 else CLIP_CRAB_TURN_R,
-					absf(turn_rate) / CRAB_TURN_CLIP_ANGLE)
+				# At most GOLEM_TURN_CLIP_MAX_LOOPS loops a second (user spec 2026-11-19).
+				var turn_clip: StringName = CLIP_CRAB_TURN_L if turn_rate > 0.0 else CLIP_CRAB_TURN_R
+				var loop: float = _anim.get_animation(turn_clip).length if _anim.has_animation(turn_clip) else 1.0
+				_play_clip(turn_clip, minf(absf(turn_rate) / CRAB_TURN_CLIP_ANGLE, Balance.GOLEM_TURN_CLIP_MAX_LOOPS * loop))
 			elif ground_speed > WALK_THRESHOLD:
 				# Backward the walk clip runs backward (head first, user spec 2026-11-18).
 				var sp: float = ground_speed / (crab_clip_speed() * _shown_size)
@@ -5050,6 +5114,8 @@ func _tick_visual(delta: float) -> void:
 				_sit_anim.update_rest(false, false, GolemSitAnim.REST_FADE_OUT)   # sits down again without it
 		if layered:
 			_sit_anim.set_base(_sit_base_clip())
+			# The turn clip steps at the real turn rate (user spec 2026-11-19), capped against one-frame jumps.
+			_sit_anim.set_turn_speed(minf(absf(turn_speed), turn_rate() * 1.5) if is_sit_turning() else 0.0)
 			# Combat rest (user report 2026-11-19): limbs whose attacks are possible hold the rest pose —
 			# over sit_idle only; while she turns, the turn clip moves arms, legs and head (it blends out
 			# as fast as the base blends over to the turn clip).

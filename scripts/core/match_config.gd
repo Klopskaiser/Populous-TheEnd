@@ -15,6 +15,13 @@ var ai_count: int = 1
 ## SURVIVAL only: endless survival — the waves never stop and keep growing
 ## (user spec 2026-11-16); the match ends only with the player's defeat.
 var endless: bool = false
+## SURVIVAL only: the scenario (user spec 2026-11-19) — VARIANT_BASE (the base against the waves),
+## VARIANT_LARGE (the same on the large island: twice the growth, twice the pause) or VARIANT_GOLEMS
+## (two golems, nothing else, endless waves from every side).
+const VARIANT_BASE: StringName = &"base"
+const VARIANT_LARGE: StringName = &"large"
+const VARIANT_GOLEMS: StringName = &"golems"
+var variant: StringName = VARIANT_BASE
 ## Map selection (phase 7i: island / seenland / bergpass / plateau).
 var map_id: String = MapGenerator.DEFAULT_MAP
 
@@ -60,6 +67,24 @@ static func survival() -> MatchConfig:
 ## but past wave SURVIVAL_WAVE_COUNT it goes on, every wave bigger than the last.
 static func survival_endless() -> MatchConfig:
 	var config: MatchConfig = survival()
+	config.endless = true
+	return config
+
+
+## Survival on the large island (user spec 2026-11-19): the 20 waves with twice the growth per wave
+## and twice the pause between them (Balance.SURVIVAL_LARGE_*).
+static func survival_large() -> MatchConfig:
+	var config: MatchConfig = survival()
+	config.variant = VARIANT_LARGE
+	config.map_id = MapGenerator.ISLAND_LARGE
+	return config
+
+
+## Golem survival (user spec 2026-11-19): two golems grown to their first sit size, no base; endless
+## waves in small groups from every side; lost only when both golems are dead (Balance.GOLEM_SURVIVAL_*).
+static func survival_golems() -> MatchConfig:
+	var config: MatchConfig = survival()
+	config.variant = VARIANT_GOLEMS
 	config.endless = true
 	return config
 

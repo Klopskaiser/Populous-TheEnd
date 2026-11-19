@@ -40,6 +40,11 @@ const CHAMBER_RED_ARMY: int = 100
 const GOLEM_SCENE: PackedScene = preload("res://scenes/units/golem.tscn")
 const CHAMBER_GOLEM_HEIGHT: float = 30.0
 const CHAMBER_GOLEM_OFFSET: Vector2i = Vector2i(0, 24)
+## Start mission (user request 2026-11-19): a second, full-grown golem (80 m) on the free
+## ground north-east of the blue base, far enough from the buildings for her body and her levelling,
+## and on a spot where she can sit down at once (find_seat; straight north she could not).
+const CHAMBER_BIG_GOLEM_HEIGHT: float = Balance.GOLEM_MAX_HEIGHT
+const CHAMBER_BIG_GOLEM_OFFSET: Vector2i = Vector2i(14, -26)
 
 ## Phase 8.1 (Stufe A): route unit path requests through the off-main-thread
 ## PathWorker. Set to false for an A/B comparison or as an emergency fallback to
@@ -171,7 +176,7 @@ func _ready() -> void:
 	# Map (phase 7i): skirmish uses the chosen map; other modes use the default
 	# island. The map decides the grid size (128 or 256) and its heightmap.
 	var map_id: String = config.map_id if config.mode == MatchConfig.Mode.SKIRMISH \
-		else MapGenerator.DEFAULT_MAP
+		or config.mode == MatchConfig.Mode.SURVIVAL else MapGenerator.DEFAULT_MAP
 	GameState.map_id = map_id
 	var td: TerrainData = MapGenerator.create_terrain(map_id, GameState.ISLAND_SEED)
 	GameState.terrain_data = td
@@ -325,7 +330,10 @@ func _ready() -> void:
 		MatchConfig.Mode.SURVIVAL:
 			# Tracking first: _setup_survival shields the wave tribe from it.
 			GameState.start_win_tracking()
-			camera_anchor = _setup_survival(tribes, nav)
+			if config.variant == MatchConfig.VARIANT_GOLEMS:
+				camera_anchor = _setup_golem_survival(tribes, nav)
+			else:
+				camera_anchor = _setup_survival(tribes, nav)
 
 	# Start the camera over the player's base (skirmish) or the island centre.
 	_camera_rig.global_position = nav.cell_to_world(camera_anchor)
@@ -478,9 +486,75 @@ func _setup_survival(tribes: Array[Tribe], nav: NavGrid) -> Vector2i:
 	survival.name = "SurvivalMode"
 	var config: MatchConfig = GameState.match_config
 	survival.endless = config != null and config.endless
+	if config != null and config.variant == MatchConfig.VARIANT_LARGE:
+		# The large island (user spec 2026-11-19): twice the growth, twice the pause.
+		survival.growth_mult = Balance.SURVIVAL_LARGE_GROWTH_MULT
+		survival.wave_interval = SurvivalMode.WAVE_INTERVAL * Balance.SURVIVAL_LARGE_INTERVAL_MULT
 	add_child(survival)
 	survival.setup(tribes[1], player, _unit_manager, _tribe_commands, nav, anchor,
 		GameState)
+	_add_survival_hud(survival)
+	_end_screen.victory_subtitle = "Du hast alle %d Wellen überstanden." \
+		% SurvivalMode.WAVE_COUNT
+	print("Überleben: %d Spawnpunkte, erste Welle in %.0f s" % [
+		survival.spawn_cells.size(), survival.first_wave_delay])
+	return anchor
+
+
+## Golem survival (user spec 2026-11-19): the player has nothing but Balance.GOLEM_SURVIVAL_GOLEMS
+## normal golems on the map centre, already grown to GOLEM_SURVIVAL_HEIGHT (and shown at that size at
+## once). Endless waves in small groups from every spawn point, GOLEM_SURVIVAL_FIRST_WAVE units and
+## GOLEM_SURVIVAL_WAVE_STEP more each wave, every GOLEM_SURVIVAL_INTERVAL seconds. The golems are the
+## guardians: the match is lost only when all of them are dead.
+func _setup_golem_survival(tribes: Array[Tribe], nav: NavGrid) -> Vector2i:
+	var anchor: Vector2i = TerrainData.center_cell(nav.terrain)
+	var player: Tribe = tribes[GameState.PLAYER_TRIBE]
+	var golems: Array[Unit] = []
+	for i in range(Balance.GOLEM_SURVIVAL_GOLEMS):
+		var side: int = -1 if i % 2 == 0 else 1
+		@warning_ignore("integer_division")
+		var at: Vector2i = anchor + Vector2i(side * Balance.GOLEM_SURVIVAL_SPREAD * (1 + i / 2), 0)
+		var golem: Golem = _spawn_grown_golem(player, at, nav, Balance.GOLEM_SURVIVAL_HEIGHT)
+		if golem != null:
+			golems.append(golem)
+	var survival: SurvivalMode = SurvivalMode.new()
+	survival.name = "SurvivalMode"
+	survival.endless = true
+	survival.all_fronts = true
+	survival.linear_first = Balance.GOLEM_SURVIVAL_FIRST_WAVE
+	survival.linear_step = Balance.GOLEM_SURVIVAL_WAVE_STEP
+	survival.wave_interval = Balance.GOLEM_SURVIVAL_INTERVAL
+	survival.first_wave_delay = Balance.GOLEM_SURVIVAL_FIRST_DELAY
+	survival.guardians = golems
+	add_child(survival)
+	survival.setup(tribes[1], player, _unit_manager, _tribe_commands, nav, anchor, GameState)
+	_add_survival_hud(survival)
+	print("Golem-Überleben: %d Golems, %d Spawnpunkte, erste Welle in %.0f s" % [
+		golems.size(), survival.spawn_cells.size(), survival.first_wave_delay])
+	return anchor
+
+
+## A normal golem of `tribe` near `at`, grown by kills to at least `height` metres (golem sizes come
+## in steps) — level, size and values those of a real golem with that many kills; no stretching for the
+## skipped steps, full health, and the figure at its size at once.
+func _spawn_grown_golem(tribe: Tribe, at: Vector2i, nav: NavGrid, height: float) -> Golem:
+	var cell: Vector2i = _find_walkable_near(at, nav, 0)
+	if cell.x < 0:
+		return null
+	var golem: Golem = _unit_manager.spawn_unit(GOLEM_SCENE, tribe.id, nav.cell_to_world(cell)) as Golem
+	if golem == null:
+		return null
+	golem.terrain_ctx = _tribe_commands.spell_context
+	while golem.height_m() < height - 0.05 and golem.growth_steps < Golem.max_growth_steps():
+		golem._credit_kill()
+	golem._stretch_queued = false
+	golem.health = golem.max_health
+	golem.snap_shown_size()
+	return golem
+
+
+## The wave HUD over the play area (survival scenarios).
+func _add_survival_hud(survival: SurvivalMode) -> void:
 	survival.wave_spawned.connect(func(wave: int, count: int) -> void:
 		print("Überleben: %s — %d Einheiten" % [
 			SurvivalHud.wave_text(wave, 0 if survival.endless else SurvivalMode.WAVE_COUNT),
@@ -491,11 +565,6 @@ func _setup_survival(tribes: Array[Tribe], nav: NavGrid) -> Vector2i:
 	# Below the end screen, which has to cover everything once the match is decided.
 	$UI.move_child(hud, _end_screen.get_index())
 	hud.setup(survival)
-	_end_screen.victory_subtitle = "Du hast alle %d Wellen überstanden." \
-		% SurvivalMode.WAVE_COUNT
-	print("Überleben: %d Spawnpunkte, erste Welle in %.0f s" % [
-		survival.spawn_cells.size(), SurvivalMode.FIRST_WAVE_DELAY])
-	return anchor
 
 
 ## Debug-Testkammer (Startmission, user request): blue base on the WEST side
@@ -536,7 +605,8 @@ func _setup_chamber_blue(tribe: Tribe, anchor: Vector2i, nav: NavGrid) -> void:
 		if cell.x >= 0:
 			_unit_manager.spawn_unit(entry[0], tribe.id, nav.cell_to_world(cell))
 	_spawn_braves_near(tribe.id, anchor + Vector2i(0, 2), CHAMBER_BRAVES, nav)
-	_spawn_chamber_golem(tribe, anchor + CHAMBER_GOLEM_OFFSET, nav)
+	_spawn_chamber_golem(tribe, anchor + CHAMBER_GOLEM_OFFSET, nav, CHAMBER_GOLEM_HEIGHT)
+	_spawn_chamber_golem(tribe, anchor + CHAMBER_BIG_GOLEM_OFFSET, nav, CHAMBER_BIG_GOLEM_HEIGHT)
 	# The hut as a full palace, fully manned, and the production chain set up
 	# (user request 2026-11-16): the hut sends its braves into the fire temple, the
 	# fire temple sends its firewarriors to the shaman's spot.
@@ -549,8 +619,8 @@ func _setup_chamber_blue(tribe: Tribe, anchor: Vector2i, nav: NavGrid) -> void:
 ## CHAMBER_GOLEM_HEIGHT, big enough to sit down (Golem.can_sit) — to try the sit
 ## attacks. Golem sizes come in steps: it is the first one at or above that height
 ## (31,3 m). Grown by crediting kills, so level, size and values are those of a real
-## golem with that many kills.
-func _spawn_chamber_golem(tribe: Tribe, at: Vector2i, nav: NavGrid) -> void:
+## golem with that many kills. Since 2026-11-19 a second one at full size (80 m).
+func _spawn_chamber_golem(tribe: Tribe, at: Vector2i, nav: NavGrid, height: float) -> void:
 	var cell: Vector2i = _find_walkable_near(at, nav, 0)
 	if cell.x < 0:
 		return
@@ -558,10 +628,11 @@ func _spawn_chamber_golem(tribe: Tribe, at: Vector2i, nav: NavGrid) -> void:
 	if golem == null:
 		return
 	golem.terrain_ctx = _tribe_commands.spell_context
-	while golem.height_m() < CHAMBER_GOLEM_HEIGHT and golem.growth_steps < Golem.max_growth_steps():
+	while golem.height_m() < height - 0.01 and golem.growth_steps < Golem.max_growth_steps():
 		golem._credit_kill()
 	golem._stretch_queued = false   # no stretching for the steps it skipped
 	golem.health = golem.max_health
+	golem.snap_shown_size()   # her full size at once, not grown into over some 20 s
 
 
 ## Every hut of `tribe` jumps to the highest upgrade stage (start mission).

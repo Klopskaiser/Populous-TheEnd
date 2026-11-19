@@ -1023,7 +1023,10 @@ func test_attack_cooldown_and_animations_slow_down_with_the_size() -> void:
 func test_body_turns_slower_the_bigger_the_golem_is() -> void:
 	var w: Dictionary = _make_world()
 	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
-	check_near(g.turn_rate(), Balance.GOLEM_TURN_RATE, "a fresh golem turns at GOLEM_TURN_RATE")
+	# User spec 2026-11-19: the 80-m rate with the root of the size (was linear from 8 rad/s).
+	check_near(g.turn_rate(), Balance.FIRERAM_TURN_RATE * Balance.GOLEM_TURN_RATE_FULL_SHARE * sqrt(Balance.GOLEM_MAX_HEIGHT / Balance.GOLEM_HEIGHT),
+		"a fresh golem turns at the 80-m rate x root(80 m / her height) (%.0f deg/s)" % rad_to_deg(g.turn_rate()))
+	check_near(Golem.standing_turn_rate(20.0) * sqrt(20.0), Golem.standing_turn_rate(45.0) * sqrt(45.0), "rate x root of the height stays the same", 0.000001)
 	g.facing = Vector3(0, 0, 1)
 	g.tick(TICK)
 	check(g.heading().dot(Vector3(0, 0, 1)) > 0.999, "the first tick takes the facing as it is")
@@ -1038,14 +1041,15 @@ func test_body_turns_slower_the_bigger_the_golem_is() -> void:
 		g._slew_heading(TICK)
 		ticks_small += 1
 	_grow_to_the_end(g)
-	check_near(g.turn_rate(), Balance.FIRERAM_TURN_RATE * 0.7 / 1.1,
-		"at 100 m: the turn takes 10 percent longer than at 70 percent of the fire ram's rate (%.2f rad/s)" % g.turn_rate())
+	check_near(g.turn_rate(), Balance.FIRERAM_TURN_RATE * 0.7,
+		"full grown: 70 percent of the fire ram's rate again (10 percent quicker, user spec 2026-11-19; %.2f rad/s)" % g.turn_rate())
 	g.facing = Vector3(0, 0, 1)
 	var ticks_big: int = 0
 	while not g.is_turned_to_facing() and ticks_big < 400:
 		g._slew_heading(TICK)
 		ticks_big += 1
-	check(ticks_big > ticks_small * 4,
+	# Root of the size since 2026-11-19: 80 m / 4,73 m -> 4,1 times the time (was linear, more than 4 x).
+	check(ticks_big > ticks_small * 3,
 		"the half turn takes the giant far longer (%d ticks instead of %d)" % [ticks_big, ticks_small])
 	check_near(float(ticks_big) * TICK, (PI - deg_to_rad(Balance.GOLEM_ATTACK_ALIGN_DEG)) / g.turn_rate(),
 		"exactly the angle divided by the rate", TICK * 1.5)
@@ -1072,7 +1076,10 @@ func test_body_turns_slower_the_bigger_the_golem_is() -> void:
 			break
 	check(wound_up_at > int(1.0 / TICK),
 		"he needs well over a second to turn before he winds up (tick %d)" % wound_up_at)
-	check(g2.is_turned_to_facing(), "and he is turned to the target when he does")
+	# Since 2026-11-19 a kick may come before: once the lane of one leg sweeps over the target
+	# while he turns, he kicks it from there and holds his heading (_kick_while_turning).
+	check(g2.is_turned_to_facing() or (g2._pending_attack == Golem.ATTACK_KICK and g2._kick_holds_heading),
+		"and he is turned to the target when he does, or kicks it with a lane that reaches it (%s)" % g2._pending_attack)
 	_free_world(w2)
 
 
@@ -3058,6 +3065,7 @@ func test_a_queued_path_does_not_turn_her_the_wrong_way_first() -> void:
 		"the queued path no longer starts in her own cell")
 	var want: float = atan2(target.x - g.position.x, target.z - g.position.z)
 	var away: float = 0.0
+	var worst: float = 0.0
 	var prev: float = absf(wrapf(want - atan2(g.heading().x, g.heading().z), -PI, PI))
 	for i in range(30):
 		g.tick(0.05)
@@ -3065,7 +3073,12 @@ func test_a_queued_path_does_not_turn_her_the_wrong_way_first() -> void:
 		if now > prev + 0.001:
 			away += now - prev
 		prev = now
-	check(away < deg_to_rad(50.0), "she does not swing away from the goal first (%.0f degrees)" % rad_to_deg(away))
+		worst = maxf(worst, now)
+	# She follows the grid path (first a diagonal, then straight on — both ahead of her on the left); since
+	# she turns with the root of her size (2026-11-19, 300 instead of 458 deg/s) that adds up to ~53 degrees.
+	# The bug turned her round to the cell centre behind her.
+	check(away < deg_to_rad(70.0), "she does not swing away from the goal first (%.0f degrees)" % rad_to_deg(away))
+	check(worst < deg_to_rad(60.0), "never more than 60 degrees off the goal (%.0f)" % rad_to_deg(worst))
 	_free_world(w)
 
 
@@ -4889,11 +4902,20 @@ func test_sitting_she_turns_slowly_toward_an_enemy_out_of_reach() -> void:
 		check(g._anim.get_animation(GolemSitAnim.CLIP_TURN_L).loop_mode == Animation.LOOP_LINEAR,
 			"the turn clip loops (it froze after one pass)")
 	check_near(g.turn_rate(), Golem.sit_turn_rate_at(g.height_m()), "the seated turn rate of her height")
-	check_near(rad_to_deg(Golem.sit_turn_rate_at(30.0)), rad_to_deg(Golem.standing_turn_rate(30.0)) * 0.375, "30 m: 3/8 of the standing rate (123 deg/s, tripled 2026-11-19)", 0.1)
-	check_near(rad_to_deg(Golem.sit_turn_rate_at(80.0)), 39.0, "80 m: 39 deg/s (tripled, user spec 2026-11-19)", 0.01)
-	check(Golem.sit_turn_rate_at(83.0) < Golem.sit_turn_rate_at(80.0), "beyond 80 m it falls on")
-	check_near(rad_to_deg(Golem.sit_turn_rate_at(100.0)), 28.5, "down to 28,5 deg/s", 0.01)
-	check_near(rad_to_deg(Golem.sit_turn_rate_at(120.0)), 28.5, "and no lower", 0.01)
+	# User spec 2026-11-19: 31,2 deg/s at 80 m, with the root of the size below and above (was linear
+	# from 99 deg/s at 30 m — far too quick there).
+	check_near(rad_to_deg(Golem.sit_turn_rate_at(80.0)), 28.08, "80 m: 28,1 deg/s (-10 %, 2026-11-19)", 0.01)
+	check_near(rad_to_deg(Golem.sit_turn_rate_at(30.0)), 28.08 * sqrt(80.0 / 30.0), "30 m: 45,9 deg/s, the root of the size", 0.01)
+	check_near(Golem.sit_turn_rate_at(45.0) * sqrt(45.0), Golem.sit_turn_rate_at(60.0) * sqrt(60.0), "rate x root of the height stays the same", 0.000001)
+	check_near(rad_to_deg(Golem.sit_turn_rate_at(120.0)), 28.08 * sqrt(80.0 / 120.0), "beyond 80 m on by the same law (22,9 deg/s at 120 m)", 0.01)
+	check_near(Golem.sit_turn_rate_at(20.0), Golem.sit_turn_rate_at(Balance.GOLEM_SIT_MIN_HEIGHT), "below the sit height as at it")
+	# The turn clip steps at the real turn rate, so the feet do not slide (user spec 2026-11-19).
+	check_near(rad_to_deg(GolemSitAnim.TURN_CLIP_RATE), 11.94, "the turn clip at 1x: 11,9 deg/s under the feet", 0.01)
+	if g._sit_anim != null and g._sit_anim.is_active():
+		g.tick(TICK)
+		check_near(g._sit_anim.turn_speed(), minf(g.turn_rate() / GolemSitAnim.TURN_CLIP_RATE,
+			Balance.GOLEM_TURN_CLIP_MAX_LOOPS * g._sit_anim.turn_clip_length()),
+			"the turn clip plays at turn rate / clip rate (%.2fx)" % g._sit_anim.turn_speed(), 0.3)
 	var struck: bool = false
 	var ticks: int = 0
 	while c.turning and ticks < 400:
@@ -6040,3 +6062,41 @@ func test_sitting_she_does_not_turn_on_a_stale_plan() -> void:
 			turned_once = true
 	check(not turned_once, "the reason is gone: she does not turn on the old values")
 	_free_world(w)
+
+
+## Tritt ohne Drehung (Nutzervorgabe 2026-11-19): die Schneise reicht auch hinter sie. Steht ihr Ziel in der
+## Schneise eines Beins, tritt sie sofort zu statt sich erst umzudrehen, und haelt die Blickrichtung, bis der
+## Tritt landet. Liegt es ausserhalb, dreht sie sich wie bisher.
+func test_she_kicks_back_without_turning_when_the_lane_reaches() -> void:
+	for frac in [0.6, 1.2]:
+		var w: Dictionary = _make_world()
+		var g: Golem = _golem(w, 0, Vector3(64, 5, 64))
+		while g.height_m() < 16.0:
+			g._credit_kill()
+		g._stretch_queued = false
+		g.stomp_enabled = false
+		g.facing = Vector3(0, 0, 1)
+		g.snap_heading()
+		g._slew_heading(0.0)
+		var fwd: Vector3 = g.heading()
+		var p: Vector3 = g.position - fwd * (g._kick_extent().y * frac)
+		var foe: Unit = _foe(w, p.x, p.z, 100000)
+		var first: StringName = &""
+		var turned_at_first: float = -1.0
+		var t: float = 0.0
+		while t < 4.0 and foe.health == 100000:
+			g.tick(TICK)
+			w.um.tick(TICK)
+			t += TICK
+			if first == &"" and g._pending_attack != &"":
+				first = g._pending_attack
+				turned_at_first = rad_to_deg(fwd.angle_to(g.heading()))
+		var turned_at_hit: float = rad_to_deg(fwd.angle_to(g.heading()))
+		if frac < 1.0:
+			check(first == Golem.ATTACK_KICK and turned_at_first < 1.0,
+				"in the lane behind her: she kicks at once, unturned (%s, %.0f deg)" % [first, turned_at_first])
+			check(100000 - foe.health == g.attack_damage(Golem.ATTACK_KICK) and turned_at_hit < 1.0,
+				"the kick lands on it, her heading held until then (%d, %.0f deg)" % [100000 - foe.health, turned_at_hit])
+		else:
+			check(turned_at_first > 150.0, "beyond the lane behind her: she turns first (%.0f deg)" % turned_at_first)
+		_free_world(w)

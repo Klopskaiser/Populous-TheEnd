@@ -139,6 +139,11 @@ var _rest: Array[float] = [0.0, 0.0]
 ## of crossfade; each starts from its beginning — all three begin in the rest pose).
 const BASE_INPUTS: Dictionary = {&"sit_idle": "idle", &"sit_turn_l": "turn_l", &"sit_turn_r": "turn_r"}
 const BASE_XFADE: float = 0.3
+## The turn clips (user spec 2026-11-19) play at the real turn rate over this rate, so the feet do not
+## slide: at 1x the ground under her feet turns 2 x 0,075 rad in 0,72 s (DREH.fuss and anteilFuss in
+## golem_bewegung_niedlich_sitzen.mjs, a step each second) — 0,208 rad/s, 11,9 degrees/s. The hands
+## step slower (7,9 degrees/s); they slide a little. Same for all three golems.
+const TURN_CLIP_RATE: float = 0.15 / 0.72
 
 
 func _build() -> void:
@@ -159,7 +164,14 @@ func _build() -> void:
 	_blend.add_node(&"base", base)
 	idx = 0
 	for clip in BASE_INPUTS:
-		_blend.connect_node(&"base", idx, StringName("base_" + BASE_INPUTS[clip]))
+		var node: StringName = StringName("base_" + BASE_INPUTS[clip])
+		if clip != Golem.CLIP_SIT_IDLE:
+			# The turn clips run at the turn rate (set_turn_speed).
+			var speed: StringName = StringName(String(node) + "_speed")
+			_blend.add_node(speed, AnimationNodeTimeScale.new())
+			_blend.connect_node(speed, 0, node)
+			node = speed
+		_blend.connect_node(&"base", idx, node)
 		idx += 1
 	var below: StringName = &"base"
 	# Combat rest: the rest pose (sit_idle held at its first frame) over the base, per group.
@@ -245,6 +257,25 @@ func set_base(clip: StringName) -> void:
 
 func base_clip() -> StringName:
 	return _base_clip
+
+
+## Plays the turn clips at `rate` (rad/s, the body's real turn rate): TURN_CLIP_RATE is 1x — but at
+## most Balance.GOLEM_TURN_CLIP_MAX_LOOPS loops a second (user spec 2026-11-19).
+func set_turn_speed(rate: float) -> void:
+	if tree == null:
+		return
+	var s: float = minf(absf(rate) / TURN_CLIP_RATE, Balance.GOLEM_TURN_CLIP_MAX_LOOPS * turn_clip_length())
+	for input in ["turn_l", "turn_r"]:
+		tree.set("parameters/base_%s_speed/scale" % input, s)
+
+
+## Length of one loop of the turn clip (s; 2,0 s without the model's clip).
+func turn_clip_length() -> float:
+	return player.get_animation(CLIP_TURN_L).length if player != null and player.has_animation(CLIP_TURN_L) else 2.0
+
+
+func turn_speed() -> float:
+	return float(tree.get("parameters/base_turn_l_speed/scale")) if tree != null else 0.0
 
 
 ## Blends the combat rest of each group toward on (1) or off (0): in within REST_FADE_IN seconds,

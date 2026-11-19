@@ -85,6 +85,13 @@ func _ready() -> void:
 	if args.has("survival_endless"):
 		_launch.call_deferred(MatchConfig.survival_endless())
 		return
+	# `-- survival_large` / `-- survival_golems`: the scenarios of 2026-11-19 directly.
+	if args.has("survival_large"):
+		_launch.call_deferred(MatchConfig.survival_large())
+		return
+	if args.has("survival_golems"):
+		_launch.call_deferred(MatchConfig.survival_golems())
+		return
 	var map_arg: String = MapGenerator.DEFAULT_MAP
 	for arg in args:
 		if arg.begins_with("map="):
@@ -160,9 +167,15 @@ func _build_survival_page() -> Control:
 	var vb: VBoxContainer = _make_page("Survivalszenarien")
 	_add_button(vb, "Überleben (%d Wellen)" % Balance.SURVIVAL_WAVE_COUNT, _start_survival)
 	_add_button(vb, "Endlos-Überleben", _start_survival_endless)
+	_add_button(vb, "Überleben auf großer Karte (%d Wellen)" % Balance.SURVIVAL_WAVE_COUNT,
+		func() -> void: _launch(MatchConfig.survival_large()))
+	_add_button(vb, "Golem-Überleben", func() -> void: _launch(MatchConfig.survival_golems()))
 	var note: Label = Label.new()
-	note.text = "Endlos: nach Welle %d geht es weiter, jede Welle größer als die " \
-		% Balance.SURVIVAL_WAVE_COUNT + "davor — bis die Basis fällt."
+	note.text = ("Endlos: nach Welle %d geht es weiter, jede Welle größer als die davor — bis die Basis fällt.\n"
+		+ "Große Karte: doppelte Kantenlänge, doppelter Zuwachs je Welle, doppelte Pause.\n"
+		+ "Golem-Überleben: zwei Golems mit %.1f m, Gegner von allen Seiten, %d mehr je Welle alle %.0f s — "
+		+ "verloren, wenn beide tot sind.") % [Balance.SURVIVAL_WAVE_COUNT, Balance.GOLEM_SURVIVAL_HEIGHT,
+		Balance.GOLEM_SURVIVAL_WAVE_STEP, Balance.GOLEM_SURVIVAL_INTERVAL]
 	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	note.custom_minimum_size = Vector2(300, 0)
 	note.add_theme_color_override("font_color", UiTheme.GOLD)

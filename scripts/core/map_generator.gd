@@ -19,6 +19,9 @@ const STANDARD_SIZE: int = 144
 const LARGE_SIZE: int = 2 * STANDARD_SIZE      # 288, "twice the standard map"
 
 const DEFAULT_MAP: String = "island"
+## The island at twice the edge (288; user spec 2026-11-19, survival on the large map). Not in the
+## skirmish list (map_ids) — only the survival scenario uses it.
+const ISLAND_LARGE: String = "island_large"
 
 # --- Generation tuning --------------------------------------------------------
 const SEA: float = TerrainData.SEA_LEVEL       # 2.0
@@ -57,6 +60,7 @@ static func map_ids() -> PackedStringArray:
 static func display_name(map_id: String) -> String:
 	match map_id:
 		"island": return "Insel"
+		ISLAND_LARGE: return "Große Insel"
 		"seenland": return "Seenland"
 		"bergpass": return "Bergpass"
 		"plateau": return "Plateau"
@@ -64,7 +68,7 @@ static func display_name(map_id: String) -> String:
 
 static func map_size(map_id: String) -> int:
 	match map_id:
-		"seenland", "bergpass": return LARGE_SIZE
+		"seenland", "bergpass", ISLAND_LARGE: return LARGE_SIZE
 	return STANDARD_SIZE
 
 ## Jede Karte IST eine Scheibe (Phase 10j) — die Maske ist keine Kosmetik der

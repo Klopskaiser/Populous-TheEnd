@@ -55,6 +55,20 @@ var wave: int = 0
 ## shielded for good: the match ends only with the player's defeat. Set before
 ## setup().
 var endless: bool = false
+## Scenario knobs (user spec 2026-11-19), set before setup(); the defaults are the base survival.
+## Seconds from one wave's appearance to the next, and until the first.
+var wave_interval: float = WAVE_INTERVAL
+var first_wave_delay: float = FIRST_WAVE_DELAY
+## The growth per wave (linear and quadratic part) times this; the first wave stays WAVE_BASE_SIZE.
+var growth_mult: int = 1
+## > 0: linear waves instead — the first has linear_first units, every further one linear_step more.
+var linear_first: int = 0
+var linear_step: int = 0
+## Every wave comes from EVERY spawn point at once (small groups all around) instead of its fronts.
+var all_fronts: bool = false
+## The player's units the match hangs on when he has no followers (the golem survival): while one of
+## them lives the player tribe is shielded from the defeat check; when the last falls the shield goes.
+var guardians: Array[Unit] = []
 ## Cells the waves appear at, one per direction that has walkable ground
 ## (see find_spawn_cells). Index-aligned with wave_spawn_slots().
 var spawn_cells: Array[Vector2i] = []
@@ -179,12 +193,56 @@ func setup(p_wave_tribe: Tribe, p_player_tribe: Tribe, p_unit_manager: UnitManag
 	if spawn_cells.is_empty():
 		push_warning("Überleben: kein Spawnpunkt am Kartenrand gefunden")
 	wave = 0
-	_timer = FIRST_WAVE_DELAY
+	_timer = first_wave_delay
 	_regroup_timer = REGROUP_INTERVAL
 	# The wave tribe starts without a single unit: shield it, or the very first
 	# defeat check would eliminate it and hand the player the match.
 	if _game_state != null and _wave_tribe != null:
 		_game_state.set_defeat_exempt(_wave_tribe.id, true)
+	# Guardians (golems are no followers): the player stands while one of them lives.
+	if _game_state != null and _player_tribe != null and not guardians.is_empty():
+		_game_state.set_defeat_exempt(_player_tribe.id, true)
+
+
+## Units in wave `p_wave` (1-based) of THIS scenario (see the knobs; the defaults give wave_size).
+func size_of(p_wave: int) -> int:
+	var k: int = maxi(p_wave, 1) - 1
+	if linear_first > 0:
+		return linear_first + linear_step * k
+	@warning_ignore("integer_division")
+	return WAVE_BASE_SIZE + growth_mult * (WAVE_GROWTH * k + (WAVE_GROWTH_SQ_PERCENT * k * k) / 100)
+
+
+## Mix of wave `p_wave` of this scenario, split like wave_composition.
+func composition_of(p_wave: int) -> Dictionary[StringName, int]:
+	var total: int = size_of(p_wave)
+	@warning_ignore("integer_division")
+	var firewarriors: int = (total * FIREWARRIOR_PERCENT) / 100
+	@warning_ignore("integer_division")
+	var preachers: int = (total * PREACHER_PERCENT) / 100
+	return {
+		KIND_WARRIOR: total - firewarriors - preachers,
+		KIND_FIREWARRIOR: firewarriors,
+		KIND_PREACHER: preachers,
+	}
+
+
+## The spawn points wave `p_wave` uses: its fronts, or with all_fronts every point.
+func slots_of(p_wave: int) -> PackedInt32Array:
+	if not all_fronts:
+		return wave_spawn_slots(p_wave, spawn_cells.size())
+	var slots: PackedInt32Array = PackedInt32Array()
+	for k in range(spawn_cells.size()):
+		slots.append(k)
+	return slots
+
+
+## Is any guardian still alive?
+func guardians_alive() -> bool:
+	for unit in guardians:
+		if is_instance_valid(unit) and unit.state != Unit.State.DEAD and not unit.doomed:
+			return true
+	return false
 
 
 # --- Queries (HUD) -----------------------------------------------------------------
@@ -222,13 +280,17 @@ func _physics_process(delta: float) -> void:
 func tick(delta: float) -> void:
 	if _wave_tribe == null or _match_over():
 		return
+	# The last guardian fell: the player's shield goes, the ordinary defeat check decides.
+	if not guardians.is_empty() and _game_state != null and _player_tribe != null 			and _game_state.is_defeat_exempt(_player_tribe.id) and not guardians_alive():
+		_game_state.set_defeat_exempt(_player_tribe.id, false)
+		_game_state.check_defeats()
 	if not all_waves_spawned():
 		_timer -= delta
 		if _timer <= 0.0:
 			_spawn_next_wave()
 			# Measured from the wave's APPEARANCE; carrying the remainder keeps the
 			# rhythm exact however coarse the tick is.
-			_timer += WAVE_INTERVAL
+			_timer += wave_interval
 	_tick_regroup(delta)
 
 
@@ -241,7 +303,7 @@ func _match_over() -> bool:
 func _spawn_next_wave() -> void:
 	wave += 1
 	var spawned: Array[Unit] = []
-	var slots: PackedInt32Array = wave_spawn_slots(wave, spawn_cells.size())
+	var slots: PackedInt32Array = slots_of(wave)
 	if not slots.is_empty():
 		# Deal the units round robin onto the fronts: every front gets the same
 		# mix. Warriors come first in the list and therefore stand in the middle
@@ -250,7 +312,7 @@ func _spawn_next_wave() -> void:
 		for k in range(slots.size()):
 			per_front.append([])
 		var index: int = 0
-		for scene in _wave_scenes(wave):
+		for scene in _scenes_of(wave):
 			per_front[index % slots.size()].append(scene)
 			index += 1
 		for k in range(slots.size()):
@@ -273,9 +335,17 @@ func _refill_player_spells() -> void:
 	_player_tribe._emit_spell_charges()
 
 
+## The wave's units of this scenario as a scene list (see _wave_scenes).
+func _scenes_of(p_wave: int) -> Array[PackedScene]:
+	return _scenes_for(composition_of(p_wave))
+
+
 ## The wave's units as a scene list: warriors, then firewarriors, then preachers.
 static func _wave_scenes(p_wave: int) -> Array[PackedScene]:
-	var mix: Dictionary[StringName, int] = wave_composition(p_wave)
+	return _scenes_for(wave_composition(p_wave))
+
+
+static func _scenes_for(mix: Dictionary[StringName, int]) -> Array[PackedScene]:
 	var scenes: Array[PackedScene] = []
 	for i in range(mix[KIND_WARRIOR]):
 		scenes.append(WARRIOR_SCENE)
@@ -381,4 +451,14 @@ func _hunt_target(from: Vector3) -> Vector3:
 			if d < best_dist:
 				best_dist = d
 				best = building.center_world()
+		if best_dist < INF:
+			return best
+		# No follower, no building: the guardians (the golem survival).
+		for unit in guardians:
+			if not is_instance_valid(unit) or unit.state == Unit.State.DEAD or not unit.is_targetable():
+				continue
+			var d: float = unit.position.distance_squared_to(from)
+			if d < best_dist:
+				best_dist = d
+				best = unit.position
 	return best

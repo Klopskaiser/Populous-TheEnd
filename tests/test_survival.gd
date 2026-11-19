@@ -423,3 +423,62 @@ func test_endless_config_and_hud() -> void:
 	check(not MatchConfig.survival().endless, "the plain survival stays at 20 waves")
 	check(config.tribe_count() == 2, "two tribes as before")
 	check(SurvivalHud.wave_text(23, 0) == "Welle 23", "endless counter has no total")
+
+
+## Szenarien vom 2026-11-19 (Nutzervorgabe): grosse Karte mit doppeltem Zuwachs und doppelter Pause,
+## Golem-Ueberleben mit linearen Wellen von allen Seiten und den Golems als Waechtern.
+func test_scenario_knobs_shape_the_waves() -> void:
+	var w: Dictionary = _make_world()
+	var mode: SurvivalMode = w.mode
+	for k in range(1, 26):
+		check(mode.size_of(k) == SurvivalMode.wave_size(k), "defaults: the base survival's waves (wave %d)" % k)
+	mode.growth_mult = 2
+	check(mode.size_of(1) == SurvivalMode.WAVE_BASE_SIZE, "twice the growth: the first wave stays %d" % SurvivalMode.WAVE_BASE_SIZE)
+	check(mode.size_of(10) - SurvivalMode.WAVE_BASE_SIZE == 2 * (SurvivalMode.wave_size(10) - SurvivalMode.WAVE_BASE_SIZE),
+		"twice the growth: wave 10 grew twice as much (%d)" % mode.size_of(10))
+	mode.linear_first = 50
+	mode.linear_step = 14
+	check(mode.size_of(1) == 50 and mode.size_of(2) == 64 and mode.size_of(5) == 106, "linear waves: 50, +14 each")
+	var mix: Dictionary = mode.composition_of(5)
+	check(int(mix[SurvivalMode.KIND_WARRIOR]) + int(mix[SurvivalMode.KIND_FIREWARRIOR]) + int(mix[SurvivalMode.KIND_PREACHER]) == 106,
+		"the mix adds up to the wave")
+	mode.all_fronts = true
+	var all: PackedInt32Array = PackedInt32Array()
+	for k in range(mode.spawn_cells.size()):
+		all.append(k)
+	check(mode.slots_of(3) == all and all.size() > 3, "all fronts: every spawn point every wave (%d)" % all.size())
+	_free_world(w)
+
+
+func test_guardians_keep_the_player_in_the_match_until_the_last_falls() -> void:
+	var w: Dictionary = _make_world()
+	var golems: Array[Unit] = []
+	for x in [-6, 6]:
+		golems.append(w.um.spawn_unit(preload("res://scenes/units/golem.tscn"), PLAYER, w.nav.cell_to_world(BASE + Vector2i(x, 0))))
+	var mode: SurvivalMode = SurvivalMode.new()
+	mode.guardians = golems
+	mode.setup(w.waves, w.player, w.um, w.tc, w.nav, BASE, w.gs)
+	check(w.gs.is_defeat_exempt(PLAYER), "guardians: the player is shielded")
+	w.brave.take_damage(999999)
+	w.gs.check_defeats()
+	check(not w.gs.match_over, "no follower left, but the golems live: the match runs")
+	golems[0].take_damage(999999)
+	mode.tick(0.1)
+	w.gs.check_defeats()
+	check(not w.gs.match_over, "one golem dead: still running")
+	golems[1].take_damage(999999)
+	mode.tick(0.1)
+	check(w.gs.match_over and w.winners == ([WAVES] as Array[int]), "both golems dead: the match is lost")
+	mode.free()
+	_free_world(w)
+
+
+func test_scenario_configs() -> void:
+	var large: MatchConfig = MatchConfig.survival_large()
+	check(large.mode == MatchConfig.Mode.SURVIVAL and large.variant == MatchConfig.VARIANT_LARGE and not large.endless,
+		"large: a 20-wave survival")
+	check(MapGenerator.map_size(large.map_id) == 2 * MapGenerator.STANDARD_SIZE, "on the island of twice the edge")
+	check(not MapGenerator.map_ids().has(MapGenerator.ISLAND_LARGE), "(not offered in the skirmish list)")
+	var golems: MatchConfig = MatchConfig.survival_golems()
+	check(golems.variant == MatchConfig.VARIANT_GOLEMS and golems.endless and golems.map_id == MapGenerator.DEFAULT_MAP,
+		"golem survival: endless, on the normal island")
