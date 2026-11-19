@@ -13048,3 +13048,8 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
   vorher 20 %). Golem bei 31,3 m: Krabbeln 2,79 m/s (vorher 2,33), Aufrichten und Absetzen je 1,23 s.
 - **Krebsgang Aufrichten/Absetzen (Nutzervorgabe 2026-11-19):** `GOLEM_CRAB_SWITCH_TIME` 1,0 s bei 30 m (vorher 1,2 s),
   weiter mal Wurzel(Hoehe / 30 m): 31,3 m 1,02 s, 80 m 1,63 s, Daemonengolem 15 % schneller.
+
+- **Bugfix Drehanimation im Sitzen (2026-11-19):** die Kampfruhe hielt Arme, Beine und Kopf auch waehrend des Drehens
+  fest — vom Drehclip `sit_turn_l/_r` (Arme bis 29 Grad, Beine 10, Kopf 6) blieb nur das Becken. Jetzt nur ueber
+  sit_idle (`Golem.sit_rest_wanted`), beim Drehen in `BASE_XFADE` ausgeblendet. Test in
+  `test_sitting_she_turns_slowly_toward_an_enemy_out_of_reach`.

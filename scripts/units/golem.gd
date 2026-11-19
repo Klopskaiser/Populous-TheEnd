@@ -1715,6 +1715,13 @@ func sit_attack_started(kind: StringName, windup: float) -> void:
 		_sit_anim.fire(GolemSitCombat.layer_of(kind), kind, windup)
 
 
+## Should the limbs of channel `ch` hold the combat rest pose now (GolemSitCombat.rest_wanted)? Never while
+## she turns on the seat: the rest replaces sit_idle only, the turn clip moves arms, legs and head (user
+## report 2026-11-19: the turn animation was gone).
+func sit_rest_wanted(ch: int) -> bool:
+	return sit_combat != null and sit_combat.rest_wanted(ch) and not is_sit_turning()
+
+
 ## Is she turning on the seat right now?
 func is_sit_turning() -> bool:
 	return sit_combat != null and sit_combat.turning
@@ -4990,10 +4997,12 @@ func _tick_visual(delta: float) -> void:
 				_sit_anim.update_rest(false, false, GolemSitAnim.REST_FADE_OUT)   # sits down again without it
 		if layered:
 			_sit_anim.set_base(_sit_base_clip())
-			# Combat rest (user report 2026-11-19): limbs whose attacks are possible hold the rest pose.
-			var c: GolemSitCombat = sit_combat
-			_sit_anim.update_rest(c != null and c.rest_wanted(GolemSitCombat.CH_LEGS),
-				c != null and c.rest_wanted(GolemSitCombat.CH_ARMS), delta)
+			# Combat rest (user report 2026-11-19): limbs whose attacks are possible hold the rest pose —
+			# over sit_idle only; while she turns, the turn clip moves arms, legs and head (it blends out
+			# as fast as the base blends over to the turn clip).
+			var turning: bool = is_sit_turning()
+			_sit_anim.update_rest(sit_rest_wanted(GolemSitCombat.CH_LEGS), sit_rest_wanted(GolemSitCombat.CH_ARMS),
+				delta, GolemSitAnim.BASE_XFADE if turning else GolemSitAnim.REST_FADE_OUT)
 		elif not attacking and not is_switching_stance() and not is_stretching():
 			if is_crabbing():
 				_crab_visual(ground_speed, turn_speed)

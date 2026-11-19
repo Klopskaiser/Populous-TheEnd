@@ -248,12 +248,12 @@ func base_clip() -> StringName:
 
 
 ## Blends the combat rest of each group toward on (1) or off (0): in within REST_FADE_IN seconds,
-## out within REST_FADE_OUT.
-func update_rest(legs_on: bool, arms_on: bool, delta: float) -> void:
+## out within `fade_out` (REST_FADE_OUT; faster when a turn clip takes over).
+func update_rest(legs_on: bool, arms_on: bool, delta: float, fade_out: float = REST_FADE_OUT) -> void:
 	var want: Array[bool] = [legs_on, arms_on]
 	for group in [REST_LEGS, REST_ARMS]:
 		var target: float = 1.0 if want[group] else 0.0
-		var fade: float = REST_FADE_IN if target > _rest[group] else REST_FADE_OUT
+		var fade: float = REST_FADE_IN if target > _rest[group] else maxf(fade_out, 0.01)
 		var next: float = move_toward(_rest[group], target, delta / fade)
 		if next != _rest[group]:
 			_rest[group] = next

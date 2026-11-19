@@ -4783,6 +4783,13 @@ func test_sitting_she_turns_slowly_toward_an_enemy_out_of_reach() -> void:
 	g.tick(TICK)
 	check(c.turning and g.is_sit_turning(), "she turns toward it")
 	check(g._sit_base_clip() == GolemSitAnim.CLIP_TURN_L, "to the left: sit_turn_l")
+	# In a fight the combat rest would hold arms, legs and head still — the turn clip moves just those
+	# (user report 2026-11-19: the turn animation was gone). While she turns it stays off.
+	c._since_attack = [0.0, 0.0]
+	c._attack_cycle = [1.0, 1.0]
+	check(c.rest_wanted(GolemSitCombat.CH_LEGS) and c.rest_wanted(GolemSitCombat.CH_ARMS), "(just struck: the channels want their rest)")
+	check(not g.sit_rest_wanted(GolemSitCombat.CH_LEGS) and not g.sit_rest_wanted(GolemSitCombat.CH_ARMS),
+		"turning: no combat rest over the turn clip")
 	if g._anim != null and g._anim.has_animation(GolemSitAnim.CLIP_TURN_L):
 		check(g._anim.get_animation(GolemSitAnim.CLIP_TURN_L).loop_mode == Animation.LOOP_LINEAR,
 			"the turn clip loops (it froze after one pass)")
