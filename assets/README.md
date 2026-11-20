@@ -312,6 +312,14 @@ Aufschlagorte und Arme sind unverändert. Erzeugt mit `--bewegung=./golem_bewegu
 Die Aufschlagzeiten müssen zu `Balance.GOLEM_SLAM_WINDUP` / `GOLEM_KICK_WINDUP` / `GOLEM_SWAT_WINDUP` passen — dort
 fällt der Schaden. Das Modell des Projekts erzeugt `D:\game\gymnastikschuh\golem_export.mjs`.
 
+**Stand 2026-11-20:** alle drei Golem-Modelle haben **41 Clips** (dazu seit 2026-11-18 Krebsgang, Sterben im Sitzen und der seitliche
+Handschlag) und sind mit `--bewegung=./golem_bewegung_niedlich_spiel.mjs` erzeugt (Arbeitskopien: `D:\game\gymnastikschuh\out\golem_spiel\`).
+Neu darin: `walk`, `kick` und `kick_l` sind die **niedlichen Fassungen** (x-beiniger Gang mit Schuhspitzen nach innen; Schnapptritt statt
+Fußballtritt) – Namen, Dauer, Treffzeit (0,50 s) und Schrittweg (2,658 m je Durchlauf bei 4 m) sind unverändert, am Spielcode ändert sich
+nichts. Beim Tritt kommt der Fuß jetzt von oben (Sohle vor dem Treffer mindestens 0,25 m über dem Boden statt 0,09 m). `swipe` ist
+korrigiert: der Oberarm taucht beim Durchschwingen nicht mehr in den Oberkörper (der alte `swipe` ist entfernt). Die alten `walk`/`kick` liegen nur noch in der Werkstatt
+(`LIESMICH_POPULOUS.md`, Abschnitt „Niedliches Gehen und Treten“).
+
 ### Bäume — `models/trees/<kind>.glb`
 
 Ein Modell je Baumtyp, gezeichnet in **ausgewachsener** Größe (Platzhalter: rund 3 m

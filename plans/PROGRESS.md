@@ -13205,3 +13205,17 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
   - Headless durchgespielt (Startmission-artiger Lauf mit main.tscn): Golem-Szenario Welle 1 nach 20 s mit 50 Einheiten,
     nach dem Tod beider Golems Spiel vorbei und Spieler besiegt; grosse Karte 288, 8 Spawnpunkte, Welle 1 nach 30 s.
     Neue Tests in `test_survival.gd` (Wellenformen, Waechter, Konfigurationen). Balance nicht gemessen.
+
+### Golems: niedliches Gehen und Treten, swipe ohne Eintauchen (2026-11-20)
+
+- Modelle: `golem.glb`, `golem_demon.glb`, `golem_genesis.glb` neu aus der Werkstatt (`D:\game\gymnastikschuh\out\golem_spiel`,
+  `--bewegung=./golem_bewegung_niedlich_spiel.mjs`), weiter je 41 Clips. Netze und 37 Clips sind zahlengleich mit dem Stand davor.
+- `walk`, `kick`, `kick_l` sind jetzt die niedlichen Fassungen (in der Werkstatt `walk_cute`, `kick_cute`, `kick_l_cute`): x-beiniger
+  Gang, Schuhspitzen nach innen, wiegendes Becken, Arme haengen und schwingen klein; Tritt als Schnapptritt (Knie hoch, Unterschenkel
+  schnellt vor), Arme bleiben unten. Namen, Dauer (1,0 / 1,2 s), Treffzeit (0,50 s) und Schrittweg (2,658 m bei 4 m) wie vorher - kein
+  Spielcode geaendert. Unterschied: der Fuss kommt beim Tritt von oben (Sohle vor dem Treffer mindestens 0,25 m ueber dem Boden, vorher 0,09 m).
+- `swipe`: der rechte Oberarm lag beim Durchschwingen bis 0,084 m (Daemonengolem 0,110 m, 4-m-Massstab) im Brustkorb; jetzt bleibt er
+  davor (Rest 0,013 / 0,033 / 0,012 m = Anliegen des haengenden Arms). Vertrag unveraendert (1,2 s, Treffer 0,50 s).
+- Geprueft: Werkstatt `golem_pruefen.mjs` 0 Fehler je Modell (misst seit heute auch Arme gegen den Rumpf); `--headless --import`;
+  `test_golem.gd` 1589, `test_demon_golem.gd` 174, `test_genesis_golem.gd` 119 bestanden, 0 fehlgeschlagen. Standbilder mit dem Renderer
+  von Godot: `gymnastikschuh/out/golem_spiel/bilder/`. Offen: im laufenden Spiel hat die neuen Clips noch niemand angesehen.
