@@ -260,11 +260,11 @@ func base_clip() -> StringName:
 
 
 ## Plays the turn clips at `rate` (rad/s, the body's real turn rate): TURN_CLIP_RATE is 1x — but at
-## most Balance.GOLEM_TURN_CLIP_MAX_LOOPS loops a second (user spec 2026-11-19).
+## most Balance.GOLEM_SIT_TURN_CLIP_MAX_LOOPS loops a second (user spec 2026-11-19, 1,5 since 2026-11-20).
 func set_turn_speed(rate: float) -> void:
 	if tree == null:
 		return
-	var s: float = minf(absf(rate) / TURN_CLIP_RATE, Balance.GOLEM_TURN_CLIP_MAX_LOOPS * turn_clip_length())
+	var s: float = minf(absf(rate) / TURN_CLIP_RATE, Balance.GOLEM_SIT_TURN_CLIP_MAX_LOOPS * turn_clip_length())
 	for input in ["turn_l", "turn_r"]:
 		tree.set("parameters/base_%s_speed/scale" % input, s)
 

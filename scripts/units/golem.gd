@@ -254,6 +254,9 @@ var growth_steps: int = 0
 var _level_regen_frac: float = 0.0
 ## Position at the end of the previous tick (INF = none yet) — how far it walked.
 var _tick_pos: Vector3 = Vector3.INF
+## Heading at the end of the previous tick (ZERO = none yet) — how far it turned (the crab walk tramples
+## turning on the spot as well, user spec 2026-11-20).
+var _tick_heading: Vector3 = Vector3.ZERO
 ## Trample cooldowns: victim instance id -> seconds until it can be hit again.
 var _trampled: Dictionary = {}
 ## Size the model is drawn at right now; eases toward size_factor() on a level-up.
@@ -639,6 +642,16 @@ func selection_ring_radius() -> float:
 	return SELECTION_RING_MESH_RADIUS * selection_ring_scale()
 
 
+## The ring as drawn: seated or in the crab stand it shows her target circle (user spec 2026-11-20 — since the
+## sit factor fell below 2 the ring was larger than the circle enemies strike); standing the plain ring (there the
+## target circle is half of it on purpose). selection_ring_radius() itself stays (target radius, sit levelling).
+func selection_ring_extents() -> Vector2:
+	if _seat_center != Vector3.INF or is_crabbing():
+		var s: float = target_radius() / SELECTION_RING_MESH_RADIUS
+		return Vector2(s, s)
+	return super.selection_ring_extents()
+
+
 ## Others strike her as a big object (user spec 2026-11-16): they are in range
 ## once within their range of a circle half the selection ring's radius
 ## (GOLEM_TARGET_RADIUS_SHARE) — they attack from further away instead of
@@ -684,6 +697,7 @@ func tick(delta: float) -> void:
 		position.y = _seat_floor_y
 		_sync_soa_pos()
 	_tick_pos = position
+	_tick_heading = heading()
 	_tick_visual(delta)
 
 
@@ -2055,23 +2069,56 @@ func _crab_reaches(o: Object) -> bool:
 
 
 ## Crawling: is `o` well within reach — not just at the edge? The point GOLEM_CRAB_REACH_DEPTH of her
-## seat length beyond it (away from her middle) must be in reach too. Buildings and airships: as _crab_reaches.
+## seat length beyond it (away from her middle) must be in reach too. A building (user report 2026-11-20:
+## she sat down as soon as the tip of her leg's lane touched it): some point of its footprint inside a
+## zone with the point that far beyond it inside a zone as well. Airships: as _crab_reaches.
 func _crab_reaches_deep(o) -> bool:
-	if not (o is Unit) or o is Airship:
+	if o is Airship:
 		return _crab_reaches(o)
 	if not _crab_reaches(o):
 		return false
+	if not (o is Unit):
+		return _crab_reaches_building_deep(o)
 	var p: Vector3 = (o as Unit).position
+	return _deep_in_reach(p)
+
+
+## Is the point GOLEM_CRAB_REACH_DEPTH of her seat length beyond `p` (away from her middle) in one of her
+## sit zones? (`p` itself is taken as reached.)
+func _deep_in_reach(p: Vector3) -> bool:
 	var away: Vector3 = Vector3(p.x - position.x, 0.0, p.z - position.z)
 	if away.length_squared() < 0.0001:
 		return true
 	var deeper: Vector3 = p + away.normalized() * (seat_back_m() * Balance.GOLEM_CRAB_REACH_DEPTH)
-	for k in [GolemSitCombat.STOMP_L, GolemSitCombat.STOMP_R, GolemSitCombat.KICK_L, GolemSitCombat.KICK_R,
-			GolemSitCombat.WIPE_L, GolemSitCombat.WIPE_R, GolemSitCombat.DOUBLE_STOMP, GolemSitCombat.CLAP,
-			GolemSitCombat.HOP, GolemSitCombat.HAND_SLAM_L, GolemSitCombat.HAND_SLAM_R]:
+	for k in _crab_reach_kinds():
 		if sit_combat.in_area(k, deeper):
 			return true
 	return false
+
+
+## The building version: the footprint sampled every half cell (as GolemSitCombat.building_in_area).
+func _crab_reaches_building_deep(b) -> bool:
+	var r: Rect2i = b.footprint_rect()
+	var step: float = TerrainData.CELL_SIZE * 0.5
+	for i in range(r.size.x * 2 + 1):
+		for k in range(r.size.y * 2 + 1):
+			var p: Vector3 = Vector3(float(r.position.x) * TerrainData.CELL_SIZE + step * float(i), 0.0,
+				float(r.position.y) * TerrainData.CELL_SIZE + step * float(k))
+			var reached: bool = false
+			for kind in _crab_reach_kinds():
+				if sit_combat.in_area(kind, p):
+					reached = true
+					break
+			if reached and _deep_in_reach(p):
+				return true
+	return false
+
+
+## The sit attacks a crawl aims to bring into reach (all of them: crawling backward she may arrive head first).
+static func _crab_reach_kinds() -> Array[StringName]:
+	return [GolemSitCombat.STOMP_L, GolemSitCombat.STOMP_R, GolemSitCombat.KICK_L, GolemSitCombat.KICK_R,
+		GolemSitCombat.WIPE_L, GolemSitCombat.WIPE_R, GolemSitCombat.DOUBLE_STOMP, GolemSitCombat.CLAP,
+		GolemSitCombat.HOP, GolemSitCombat.HAND_SLAM_L, GolemSitCombat.HAND_SLAM_R]
 
 
 ## GolemSitCombat found nothing within reach and did not turn: not stationary, she crawls toward
@@ -2140,7 +2187,14 @@ func _foe_closing_in() -> bool:
 	var closing: bool = false
 	if path_service != null:
 		for u in path_service.get_units_in_radius(position, aggro_radius()):
-			if u == self or u.tribe_id == tribe_id or u is CrewedVehicle or u.is_airborne() or not _crab_target_alive(u):
+			if u == self or u.tribe_id == tribe_id or u is CrewedVehicle or not _crab_target_alive(u):
+				continue
+			if u.state == Unit.State.THROWN or u.state == Unit.State.ROLL:
+				# Knocked away (her sit attacks throw and roll since 2026-11-20): it lands and comes back —
+				# she waits for it instead of getting up for something else.
+				closing = true
+				continue
+			if u.is_airborne():
 				continue
 			var id: int = u.get_instance_id()
 			var d: float = _flat_dist(position, u.position)
@@ -2348,8 +2402,8 @@ func _crab_plan() -> void:
 		_crab_aimed = _crab_goal
 		_start_path_to(_crab_goal)
 		return
-	if not _crab_target_alive(_crab_target) or _crab_reaches(_crab_target):
-		return
+	if not _crab_target_alive(_crab_target) or _crab_reaches_deep(_crab_target):
+		return   # (deep, not the edge: the crawl goes on until the target lies well within reach)
 	_crab_repath = CRAB_REPATH
 	_crab_aimed = _crab_target_point(_crab_target)
 	if _crab_target is Airship:
@@ -3099,15 +3153,16 @@ static func standing_turn_rate(h: float) -> float:
 	return at_max * sqrt(Balance.GOLEM_MAX_HEIGHT / maxf(h, Balance.GOLEM_HEIGHT))
 
 
-## The seated turn rate (rad/s, user spec 2026-11-19): GOLEM_SIT_TURN_RATE_AT_MAX_DEG at
-## GOLEM_MAX_HEIGHT, with the root of the size below and above (as sitting down and the stance
-## switch) — rate x sqrt(80 m / height); below GOLEM_SIT_MIN_HEIGHT as at it.
+## The seated turn rate (rad/s, user spec 2026-11-19/20): GOLEM_SIT_TURN_RATE_AT_MAX_DEG at
+## GOLEM_MAX_HEIGHT, times (80 m / height) to the power GOLEM_SIT_TURN_EXPONENT below and above (flatter
+## than the root: at 30 m 20 % slower than with it); below GOLEM_SIT_MIN_HEIGHT as at it.
 func sit_turn_rate() -> float:
 	return Golem.sit_turn_rate_at(height_m())
 
 
 static func sit_turn_rate_at(h: float) -> float:
-	return deg_to_rad(Balance.GOLEM_SIT_TURN_RATE_AT_MAX_DEG) * sqrt(Balance.GOLEM_MAX_HEIGHT / maxf(h, Balance.GOLEM_SIT_MIN_HEIGHT))
+	var ratio: float = Balance.GOLEM_MAX_HEIGHT / maxf(h, Balance.GOLEM_SIT_MIN_HEIGHT)
+	return deg_to_rad(Balance.GOLEM_SIT_TURN_RATE_AT_MAX_DEG) * pow(ratio, Balance.GOLEM_SIT_TURN_EXPONENT)
 
 
 ## Has her body turned to within `deg` degrees of the flat direction `dir`?
@@ -3457,12 +3512,18 @@ func _tick_trample(delta: float) -> void:
 			if _trampled[id] <= 0.0:
 				_trampled.erase(id)
 	var crab: bool = crab_walking()
+	# Turning on the seat she treads under her feet and hands as in the crab walk (user spec 2026-11-20).
+	var sit_turn: bool = not crab and sit_turn_tramples()
 	if not tramples() or path_service == null or _tick_pos == Vector3.INF or delta <= 0.0 \
-			or (is_sit_locked() and not crab):
+			or (is_sit_locked() and not crab and not sit_turn):
 		return
-	var walked: float = Vector2(position.x - _tick_pos.x, position.z - _tick_pos.z).length()
-	if walked / delta < Balance.GOLEM_TRAMPLE_MIN_SPEED:
-		return
+	if not sit_turn:
+		var walked: float = Vector2(position.x - _tick_pos.x, position.z - _tick_pos.z).length()
+		# In the crab walk turning on the spot counts as well (user spec 2026-11-20): her limbs step round.
+		var turned: bool = crab and _tick_heading != Vector3.ZERO \
+			and _tick_heading.angle_to(heading()) / delta > CRAB_TURN_MIN_RATE
+		if walked / delta < Balance.GOLEM_TRAMPLE_MIN_SPEED and not turned:
+			return
 	# Target cap (max_targets): at most that many things are under his feet "at
 	# once" — everything trampled stays in _trampled for its interval (units 1 s,
 	# vehicles 2 s, buildings 4 s), and while that list is full nothing new is
@@ -3475,9 +3536,14 @@ func _tick_trample(delta: float) -> void:
 	# 2026-11-18), one circle each; the target cap counts for all four together.
 	var circles: PackedVector3Array = _trample_circles()
 	var radius: float = collision_radius() if crab else trample_radius()
+	if sit_turn:
+		radius = 0.0
+		for c in circles:
+			radius = maxf(radius, Vector2(c.x - position.x, c.z - position.z).length() + c.y)
+	var limbs: bool = crab or sit_turn
 	var under: Array[Unit] = []
 	for u in path_service.get_units_in_radius(position, radius):
-		if not crab or _trample_gap(circles, u.position) <= 0.0:
+		if not limbs or _trample_gap(circles, u.position) <= 0.0:
 			under.append(u)
 	under.sort_custom(func(a: Unit, b: Unit) -> bool:
 		return _trample_gap(circles, a.position) < _trample_gap(circles, b.position))
@@ -3498,7 +3564,7 @@ func _tick_trample(delta: float) -> void:
 		var before: int = u.health
 		u.take_damage(damage, self)
 		var gone: bool = not is_instance_valid(u) or u.state == State.DEAD or u.doomed
-		tally(&"crab_trample" if crab else &"trample", 0, 1, 1 if gone else 0,
+		tally(&"crab_trample" if crab else (&"sit_turn_trample" if sit_turn else &"trample"), 0, 1, 1 if gone else 0,
 			before - (maxi(u.health, 0) if is_instance_valid(u) else 0))
 		if gone:
 			_credit_kill(hp)
@@ -3544,12 +3610,23 @@ func _tick_trample(delta: float) -> void:
 		_strike_building(b, building_damage_for(damage))
 
 
-## Where she treads (x, z = middle, y = radius): her body circle, in the crab walk her four limbs.
+## Does she tread while she turns on the seat (user spec 2026-11-20)? Seated (not in the crab stand), turning.
+func sit_turn_tramples() -> bool:
+	return stance == STANCE_SIT and _seat_center != Vector3.INF and not is_crabbing() and is_sit_turning()
+
+
+## Where she treads (x, z = middle, y = radius): her body circle, in the crab walk her four limbs, turning on
+## the seat her feet and hands where they rest (circles as large as the crab walk's limbs).
 func _trample_circles() -> PackedVector3Array:
 	var out: PackedVector3Array = PackedVector3Array()
 	if crab_walking():
 		var r: float = crab_limb_radius()
 		for p in crab_contacts():
+			out.append(Vector3(p.x, r, p.z))
+	elif sit_turn_tramples():
+		var r: float = crab_limb_radius()
+		for p in [sit_combat.foot_point(1.0), sit_combat.foot_point(-1.0), sit_combat.hand_point(1.0),
+				sit_combat.hand_point(-1.0)]:
 			out.append(Vector3(p.x, r, p.z))
 	else:
 		out.append(Vector3(position.x, trample_radius(), position.z))

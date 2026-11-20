@@ -13206,6 +13206,87 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
     nach dem Tod beider Golems Spiel vorbei und Spieler besiegt; grosse Karte 288, 8 Spawnpunkte, Welle 1 nach 30 s.
     Neue Tests in `test_survival.gd` (Wellenformen, Waechter, Konfigurationen). Balance nicht gemessen.
 
+- **Rueckstoss im Sitzen (Nutzervorgabe 2026-11-19, `GolemSitCombat._knock`, aufgerufen in `_land` fuer jeden
+  Ueberlebenden):** vorher warf und rollte kein Sitzangriff — im Stand fliegt bei 31 m gut jeder zweite Ueberlebende
+  von Handschlag/Tritt aus dem Nahkampfring. Jetzt mit den Chancen des Stands derselben Groesse
+  (`kick_throw_chance`, `drum_roll_chance`, `slam_lift_chance`/`slam_roll_chance`): Bein strecken und Wachstumsschub
+  (`GROW`) wie der Tritt (werfen, vor dem Sitz nach vorn, dahinter nach hinten), Doppelstampfer und Handschlag seitlich
+  wie das Trommeln (rollen), Arm-Wischer wie der Handschlag (ein Wurf: hochwirbeln oder rollen), jeweils vom Sitz weg;
+  Wurf- und Rollweiten wie im Stand. Fuss-Stampfer, Po-Klatscher, Handstampfer hinten, Kopfstoss, Sitzschaden: nur
+  Schaden. Test `test_seated_attacks_knock_back_like_their_standing_kin`. Wirkung im Kampf nicht gemessen.
+
+- **Sitzende Golemin nachjustiert (Nutzervorgabe 2026-11-20):** Zielkreis im Sitzen -10 %
+  (`GOLEM_SIT_TARGET_RADIUS_FACTOR` 2,0 -> 1,8; 31,3 m 5,5 -> 4,9 m, Nahkampfring 6,4 -> 5,8 m, Nahkampfplaetze
+  24 -> 21, bei 80 m 55 -> 50; gilt auch im Krebsstand, dort weiter mindestens der Koerper). Po-Klatscher Flaeche
+  7,3929 -> 7,0233 (-5 %, 31,3 m 7,72 -> 7,34 m, reicht weiter ueber den Ring). Handschlag seitlich Abklingzeit
+  1,7484 -> 1,6484 (Tabellenwert bei 30 m vor dem Sitzfaktor; 31,3 m im Spiel 1,41 -> 1,33 s). Handstampfer hinten
+  Flaeche 6,3818 -> 6,0627 (-5 % des Radiuswerts der Spalte area; 31,3 m 6,67 -> 6,33 m). Sechs Tests mit festen
+  Werten nachgezogen.
+
+- **Krebsgang zu Gebaeuden tief genug, Stampfer kleiner (Nutzervorgabe 2026-11-20):**
+  - `_crab_reaches_deep` galt nur fuer Einheiten; fuer Gebaeude fiel es auf `_crab_reaches` zurueck (irgendeine Zone
+    beruehrt den Grundriss) — sie setzte sich, sobald die Spitze der Beinschneise ein Gebaeude streifte. Neu
+    `_crab_reaches_building_deep`: ein Grundrisspunkt (halbes Zellraster) in einer Zone und der Punkt
+    `GOLEM_CRAB_REACH_DEPTH` x Sitzlaenge dahinter (von ihr weg) ebenfalls; `_deep_in_reach`, `_crab_reach_kinds`
+    gemeinsam mit den Einheiten. `_crab_plan` hoert erst bei tiefer Reichweite auf zu planen (vorher am Rand).
+    A/B bei 31,3 m, Huette vor ihr: vorher Huettenrand 20,4 m vor der Sitzmitte (Schneisenspitze 20,5 m), jetzt 17,0 m.
+    Test `test_crab_crawls_well_into_reach_of_a_building`.
+  - Fuss-Stampfer Flaeche 4,7331 -> 4,4964 (-5 % Radius; 31,3 m 4,94 -> 4,70 m), Doppelstampfer Flaeche 6,6691 ->
+    6,3356 (-5 %; 6,97 -> 6,62 m) und Abklingzeit 2,2029 -> 2,1529 (-0,05 s Tabellenwert; 31,3 m 1,78 -> 1,74 s). Der
+    Handschlag seitlich bleibt bei 3,46 m (sein Test hing am Fuss-Stampfer, jetzt fester Wert).
+
+- **Handstampfer, Beinschneise, Sitz-Drehclip (Nutzervorgabe 2026-11-20):**
+  - Handstampfer hinten: die Kreise liegen nicht mehr um die Haende, sondern naeher zusammen
+    (`GolemSitCombat.clap_point`, `GOLEM_SIT_CLAP_SIDE_SHARE` 0,75 des Seitenabstands der Haende; 31,3 m 4,6 statt
+    6,1 m, gleich weit hinten) — Ueberschneidung mit dem Arm-Wischer 20 -> 14 % der Kreisflaeche, Nahkampfring
+    unveraendert ~44 % (vorab gerechnet). Flaeche nochmals -5 % (6,0627 -> 5,7596; 31,3 m 6,33 -> 6,02 m). Auch die
+    Debuganzeige (G) und die Suchgrenze nutzen die neuen Mitten.
+  - Bein strecken: `GOLEM_SIT_KICK_TO` 1,057 -> 1,1724 — die Schneise (Huefte bis Spitze) 5 % laenger, an der Spitze
+    verlaengert (31,3 m: 10,2 statt 9,2 m vor den Fuessen). Gilt auch fuer den Wachstumsschub.
+  - Sitz-Drehclip: hoechstens 1,5 Durchlaeufe je Sekunde (`GOLEM_SIT_TURN_CLIP_MAX_LOOPS`, 2-s-Clip -> hoechstens 3x;
+    vorher 2 je Sekunde = 4x, das griff beim normalen Golem nie). Bei 31,3 m (rechnerisch 3,76x) greift die Bremse
+    jetzt, die Fuesse rutschen etwa 20 %. Krebsgang bleibt bei 2 je Sekunde.
+
+- **Sitz-Drehrate flacher, Krebsgang 50 %, Warten auf Weggeworfene (Nutzervorgabe 2026-11-20):**
+  - `Golem.sit_turn_rate_at` = 28,08 Grad/s x (80 m / Hoehe) hoch `GOLEM_SIT_TURN_EXPONENT` 0,2725 statt der Wurzel —
+    bei 30 m 20 % langsamer als bisher (45,9 -> 36,7), bei 80 m gleich (28,1); 31,3 m 36,3, 50 m 31,9, 120 m 25,1.
+    Der Sitz-Drehclip liegt damit bei 31,3 m mit rechnerisch 3,04x knapp ueber der Bremse (3x).
+  - `GOLEM_CRAB_SPEED_SHARE` 0,4 -> 0,5.
+  - Folge des Sitz-Rueckstosses (Test `test_crab_foes_in_reach_go_before_an_airship` schlug an): trat sie den Feind
+    mit Bein strecken aus der Reichweite, stand sie fuer ein Luftschiff auf. `_foe_closing_in` zaehlt jetzt jede
+    geworfene oder rollende feindliche Einheit im Aggro-Radius als „kommt naeher“ — sie wartet.
+  - Pruefung Stand: im Sprung dreht sie sich mit voller Drehrate weiter (Probe, Feinde schraeg hinter ihr: 11,8 m von 21
+    auf 126 Grad bis zur Landung, 31,3 m 13 -> 90, 80 m -8 -> -88) — so seit `_stomp_while_turning` (2026-11-16) gewollt.
+
+- **Trampeln beim Drehen im Sitzen, Zielkreis 1,6, Po-Klatscher -10 % (Nutzervorgabe 2026-11-20):**
+  - Solange sie sich im Sitzen dreht (`Golem.sit_turn_tramples`: Sitzhaltung, nicht im Krebsstand, `is_sit_turning`),
+    trampelt sie unter Fuessen und Haenden (`GolemSitCombat.foot_point`/`hand_point`, Kreise `crab_limb_radius` wie
+    im Krebsgang, gemeinsame Zielobergrenze, gleicher Trampelschaden und Abstand je Opfer, Gebaeude/Fahrzeuge wie
+    beim Trampeln); ohne Mindestgeschwindigkeit, denn sie bewegt sich nicht vom Fleck. Tally `sit_turn_trample`.
+    Test `test_turning_on_the_seat_tramples_under_feet_and_hands`.
+  - `GOLEM_SIT_TARGET_RADIUS_FACTOR` 1,8 -> 1,6 (31,3 m Zielkreis 4,4 m, Nahkampfring 5,3 m, Plaetze 19; 80 m 45).
+  - Po-Klatscher Flaeche 7,0233 -> 6,3210 (31,3 m 7,34 -> 6,60 m; reicht weiter ueber den Ring).
+  - Krebsgang (Nachtrag): auch das Drehen auf der Stelle zaehlt jetzt fuers Trampeln unter den vier Gliedern
+    (`_tick_heading` am Tickende, Drehung schneller als `CRAB_TURN_MIN_RATE`); vorher nur Bewegung ueber den Boden.
+
+- **Drehclip-Bremse 1/s, Sitzdrehung bei 30 m nochmals -10 % (Nutzervorgabe 2026-11-20):**
+  `GOLEM_SIT_TURN_CLIP_MAX_LOOPS` 1,5 -> 1,0 und `GOLEM_TURN_CLIP_MAX_LOOPS` (Krebsgang) 2,0 -> 1,0;
+  `GOLEM_SIT_TURN_EXPONENT` 0,2725 -> 0,1651 (30 m 36,7 -> 33,0, 31,3 m 32,8, 50 m 30,4, 80 m 28,1 Grad/s). Bei 31,3 m
+  braeuchte der Sitzclip 2,75x, die Bremse laesst 2x — die Fuesse rutschen dort gut ein Viertel. Krebsclip: 32,8 Grad/s
+  bei 33,3 Grad je Durchlauf, die Bremse greift knapp nicht.
+  Befund Auswahlkreis: er ist im Sitzen so gross wie im Stand (0,83 m x Groesse; 31,3 m 5,5 m), der Zielkreis im Sitzen
+  ist 0,5 x 1,6 = 0,8 davon (4,4 m). Mit dem frueheren Faktor 2,0 lagen beide genau aufeinander; seit 1,8/1,6 nicht mehr.
+  - Auswahlkreis: `Golem.selection_ring_extents` zeichnet sitzend und im Krebsstand den Zielkreis (target_radius /
+    0,34 m Ringradius); `selection_ring_radius()` bleibt (Zielradius, Einebnen beim Hinsetzen). Test
+    `test_seated_selection_ring_shows_the_target_circle`.
+  - Spielmeldung (80 m sitzend, stationaer, Luftschiff darueber, Feindgruppe in theoretischer Beinreichweite, sie dreht
+    sich nicht): im flachen Testgelaende dreht sie sich mit und ohne Schiff/Beschuss und trifft alle. In der
+    Startmission sitzt die 80-m-Golemin bei (37, 38), 49 m von der Kartenmitte: Fuesse liegen 29 m vor, Haende 11 m
+    hinter der Sitzmitte — in vielen Richtungen ueber dem Rand im Void (Kartenradius 72 m). Moeglich nur 30–75,
+    105–165, 285–345 Grad; 90 Grad (Hand ueber dem Rand) trennt die Bereiche, `free_arc` laesst ihr 50 Grad. Eine
+    Gruppe ausserhalb ist fuer sie weder drehbar noch angreifbar; die roten Einheiten der Startmission haben keine KI
+    und reagieren nur in ihrem eigenen Aggro-Radius.
+
 ### Golems: niedliches Gehen und Treten, swipe ohne Eintauchen (2026-11-20)
 
 - Modelle: `golem.glb`, `golem_demon.glb`, `golem_genesis.glb` neu aus der Werkstatt (`D:\game\gymnastikschuh\out\golem_spiel`,

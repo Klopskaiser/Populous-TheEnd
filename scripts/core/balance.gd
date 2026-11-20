@@ -148,13 +148,13 @@ const GOLEM_STAND_ATTACKS: Dictionary = {
 ## 4,45 m; Bein strecken 75, 1,89 s; Handschlag seitlich 75, 1,59 s; Wischer 60, 1,3 s; Doppelstampfer 95,
 ## Handstampfer hinten 85; Po-Klatscher 1,27 s (Nutzervorgaben 2026-11-19).
 const GOLEM_SIT_ATTACKS: Dictionary = {
-	&"sit_stomp":        {damage = 60.0, category = &"slam",    targets = 100, cooldown = 1.4809, area = 4.7331},
+	&"sit_stomp":        {damage = 60.0, category = &"slam",    targets = 100, cooldown = 1.4809, area = 4.4964},
 	&"sit_kick":         {damage = 80.0, category = &"kick",    targets = 60,  cooldown = 1.9805, area = 2.5},
 	&"sit_wipe":         {damage = 60.0, category = &"swat",    targets = 100, cooldown = 1.4306, area = 14.9787},
-	&"sit_hand_slam":    {damage = 75.0, category = &"slam",    targets = 100, cooldown = 1.7484, area = 3.3131},
-	&"sit_hop":          {damage = 2.0,  category = &"trample", targets = 200, cooldown = 1.4015, area = 7.3929},
-	&"sit_double_stomp": {damage = 95.0, category = &"drum",    targets = 130, cooldown = 2.2029, area = 6.6691},
-	&"sit_clap":         {damage = 90.0, category = &"drum",    targets = 130, cooldown = 2.0316, area = 6.3818},
+	&"sit_hand_slam":    {damage = 75.0, category = &"slam",    targets = 100, cooldown = 1.6484, area = 3.3131},
+	&"sit_hop":          {damage = 2.0,  category = &"trample", targets = 200, cooldown = 1.4015, area = 6.3210},
+	&"sit_double_stomp": {damage = 95.0, category = &"drum",    targets = 130, cooldown = 2.1529, area = 6.3356},
+	&"sit_clap":         {damage = 90.0, category = &"drum",    targets = 130, cooldown = 2.0316, area = 5.7596},
 	&"crab_headbutt":    {damage = 0.0,  category = &"swat",    targets = 0,   cooldown = 2.4477, area = 7.4074},
 }
 ## SITZFAKTOREN (Nutzervorgabe 2026-11-17: im Sitzen greift es sich leichter an — schneller wieder,
@@ -241,7 +241,7 @@ const GOLEM_SIT_SEARCH_SHARE: float = 0.5
 const GOLEM_SIT_DAMAGE_MULT: int = 4
 const GOLEM_SIT_DAMAGE_INTERVAL: float = 5.0
 ## Im Sitzen ist sie das groessere Ziel: Zielradius mal diesem Faktor.
-const GOLEM_SIT_TARGET_RADIUS_FACTOR: float = 2.0
+const GOLEM_SIT_TARGET_RADIUS_FACTOR: float = 1.6   # Nutzervorgabe 2026-11-20 (erst 2,0, dann 1,8)
 ## So viele Sekunden VOR dem Aufsetzen wechselt ihr Standpunkt (und mit ihm der
 ## Auswahlkreis) schon auf die Mitte der Sitzflaeche (Nutzer 2026-11-17); der
 ## Sitzschaden faellt erst beim Aufsetzen.
@@ -286,7 +286,7 @@ const GOLEM_SIT_STOMP_LAND: Vector2 = Vector2(0.18, 0.353)
 ## nach innen reicht sie bis zur Mitte, nach aussen bis zur Seite plus halber Beinbreite (area).
 const GOLEM_SIT_KICK_SIDE: float = 0.18
 const GOLEM_SIT_KICK_FROM: float = 1.25
-const GOLEM_SIT_KICK_TO: float = 1.057
+const GOLEM_SIT_KICK_TO: float = 1.1724   # Schneise 5 % laenger (Nutzervorgabe 2026-11-20, vorher 1,057)
 ## Po-Klatscher: um die Mitte der Sitzflaeche. Waehrend sie sich dreht, greift sie nicht an, auch er nicht;
 ## eine Drehung beginnt erst, wenn kein Angriffsclip mehr laeuft (Nutzervorgabe 2026-11-19).
 ## Doppelstampfer: Kreis um eine Stelle so weit vor feet_point (negativ: dahinter; Nutzervorgabe
@@ -306,7 +306,10 @@ const GOLEM_SIT_WIPE_BACK_DEG: float = 30.0
 ## 0,932 / -0,663, Genesis 0,923 / -0,707).
 const GOLEM_SIT_HAND_SLAM_LAND: Vector2 = Vector2(0.92, -0.70)
 ## Handstampfer hinten: Kreis um jede Hand (GOLEM_SIT_HAND_BACK / _SIDE), nur hinter der Mitte der
-## Sitzflaeche (Rueckenbereich).
+## Sitzflaeche (Rueckenbereich). Seit 2026-11-20 (Nutzervorgabe) liegen die beiden Kreise naeher zusammen als die
+## Haende: ihr Seitenabstand ist GOLEM_SIT_CLAP_SIDE_SHARE des Seitenabstands der Haende (31,3 m: 4,6 statt
+## 6,1 m) — weniger Ueberschneidung mit dem Arm-Wischer (20 -> 14 % der Kreisflaeche), Nahkampfring gleich.
+const GOLEM_SIT_CLAP_SIDE_SHARE: float = 0.75
 ##
 ## Die grossen Sitzangriffe (Po-Huepfer, Doppelklatscher, Doppelstampfer) sind
 ## Flaechenangriffe: sie kommen erst in Frage, wenn sie mindestens so viele Feinde
@@ -322,8 +325,15 @@ const GOLEM_SIT_BIG_MIN_TARGETS: int = 3
 ## 50 m 35,5, 80 m 28,1, 100 m 25,1 Grad/s. Vorher linear von 99 (30 m) auf 31,2 (80 m): bei 30 m viel zu schnell.
 ## Drehclips im Sitzen und im Krebsgang laufen mit der Drehrate, aber hoechstens GOLEM_TURN_CLIP_MAX_LOOPS
 ## Durchlaeufe je Sekunde (Nutzervorgabe 2026-11-19: Animationsbremse; darueber rutschen die Glieder etwas).
-const GOLEM_TURN_CLIP_MAX_LOOPS: float = 2.0
+const GOLEM_TURN_CLIP_MAX_LOOPS: float = 1.0   # Krebsgang; 2026-11-20: 1 je Sekunde (vorher 2)
+## Im Sitzen (nicht im Krebsgang) hoechstens so viele Durchlaeufe des Drehclips je Sekunde (Nutzervorgabe 2026-11-20;
+## der 2-s-Clip also hoechstens 3x; vorher galt auch hier GOLEM_TURN_CLIP_MAX_LOOPS).
+const GOLEM_SIT_TURN_CLIP_MAX_LOOPS: float = 1.0   # 2026-11-20: 1 je Sekunde (vorher 1,5, davor 2)
 const GOLEM_SIT_TURN_RATE_AT_MAX_DEG: float = 28.08   # -20 %, dann -10 % (2026-11-19; vorher 39 / 31,2)
+## Wie stark die Sitz-Drehrate unter 80 m steigt: Rate x (80 m / Hoehe) hoch GOLEM_SIT_TURN_EXPONENT (Nutzervorgabe
+## 2026-11-20: bei 30 m 20 % langsamer als mit der Wurzel, bei 80 m gleich; 0,5 + ln 0,8 / ln(80/30) = 0,2725).
+## 30 m 36,7, 31,3 m 36,3, 50 m 31,9, 80 m 28,1, 120 m 25,1 Grad/s (vorher mit der Wurzel 45,9 / 44,9 / 35,5).
+const GOLEM_SIT_TURN_EXPONENT: float = 0.1651   # 2026-11-20: bei 30 m noch einmal -10 % (vorher 0,2725)
 const GOLEM_SIT_TURN_MIN_DEG: float = 20.0
 const GOLEM_SIT_TURN_DONE_DEG: float = 3.0
 ## Drehen fuer einen besseren Angriff (Nutzervorgabe 2026-11-18): die Wahl rechnet auch die Plaene
@@ -352,7 +362,7 @@ const GOLEM_SIT_TURN_SAMPLE_DEG: float = 10.0
 ## Aufrichten (crab_up) und Absetzen (crab_down) dauern je GOLEM_CRAB_SWITCH_TIME bei
 ## GOLEM_SIT_REF_HEIGHT, mal Wurzel(Hoehe / GOLEM_SIT_REF_HEIGHT) wie das Hinsetzen (Clips 0,6 s; Nutzervorgabe
 ## 2026-11-19: 1,0 s bei 30 m, vorher 1,2 s).
-const GOLEM_CRAB_SPEED_SHARE: float = 0.4
+const GOLEM_CRAB_SPEED_SHARE: float = 0.5   # 50 % (Nutzervorgabe 2026-11-20, vorher 40 %)
 const GOLEM_CRAB_SWITCH_TIME: float = 1.0
 ## Koerper im Krebsstand (Meter des 4-m-Modells, gemessen von der Sitzmitte): Kollisions- und
 ## Trefferkreis mit GOLEM_CRAB_BODY_RADIUS (deckt Schuhspitzen und Haende ab; Nutzer: groesser als im

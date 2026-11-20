@@ -111,6 +111,7 @@ var _c_sx: float
 var _c_sz: float
 var _c_stomp: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]   # left, right
 var _c_hand: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]
+var _c_clap: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]
 var _c_dstomp: Vector3
 var _c_stomp_r: float
 var _c_wipe_r: float
@@ -365,6 +366,7 @@ func _frame() -> void:
 	_c_sz = _sz()
 	_c_stomp = [stomp_point(1.0), stomp_point(-1.0)]
 	_c_hand = [hand_point(1.0), hand_point(-1.0)]
+	_c_clap = [clap_point(1.0), clap_point(-1.0)]
 	_c_dstomp = double_stomp_point()
 	_c_stomp_r = stomp_radius()
 	_c_wipe_r = wipe_reach()
@@ -422,6 +424,14 @@ func hand_slam_point(side: float) -> Vector3:
 ## Radius of the side hand slam's circle (user spec 2026-11-18: 2/3 of the foot stomp's, then 5 % more).
 func hand_slam_radius() -> float:
 	return area_of(HAND_SLAM_L)
+
+
+## Middle of the hand stomp's circle on `side`: behind the hand, but only GOLEM_SIT_CLAP_SIDE_SHARE of its
+## distance out from her middle (user spec 2026-11-20: the two circles closer together, less overlap with the wipe).
+func clap_point(side: float) -> Vector3:
+	var h: Vector3 = hand_point(side)
+	var out: float = _flat(h - g.position).dot(left())
+	return h - left() * (out * (1.0 - Balance.GOLEM_SIT_CLAP_SIDE_SHARE))
 
 
 ## Radius of the circles of the hand stomp behind her (around each hand).
@@ -490,7 +500,7 @@ func bound_of(kind: StringName) -> Vector3:
 			c = _c_feet + _c_fw * ((ahead - back) * 0.5) + _c_lf * (side * _c_kick_out * 0.5)
 			r = Vector2((ahead + back) * 0.5, _c_kick_out * 0.5).length()
 		CLAP:
-			r = _flat(_c_hand[0] - g.position).length() + _c_clap_r
+			r = _flat(_c_clap[0] - g.position).length() + _c_clap_r
 		DOUBLE_STOMP:
 			c = _c_dstomp
 			r = _c_dstomp_r
@@ -519,7 +529,7 @@ func in_area(kind: StringName, p: Vector3, at: Vector3 = Vector3.INF) -> bool:
 		CLAP:
 			if _flat(p - g.position).dot(_c_fw) > 0.0:
 				return false   # only behind the middle of the seat: her back
-			return _flat(p - _c_hand[0]).length() <= _c_clap_r or _flat(p - _c_hand[1]).length() <= _c_clap_r
+			return _flat(p - _c_clap[0]).length() <= _c_clap_r or _flat(p - _c_clap[1]).length() <= _c_clap_r
 		DOUBLE_STOMP:
 			return _flat(p - _c_dstomp).length() <= _c_dstomp_r
 		HOP:
@@ -772,7 +782,7 @@ func zone_outlines() -> Array:
 		out.append([HAND_SLAM_L if side > 0.0 else HAND_SLAM_R, _circle(_c_hslam[0 if side > 0.0 else 1], _c_hslam_r)])
 	out.append([HOP, _circle(g.position, _c_hop_r)])
 	out.append([DOUBLE_STOMP, _circle(_c_dstomp, _c_dstomp_r)])
-	for h in _c_hand:
+	for h in _c_clap:
 		out.append([CLAP, _cut(_circle(h, _c_clap_r), g.position, -INF, 0.0)])
 	return out
 
@@ -1004,6 +1014,37 @@ func buildings_struck(kind: StringName, builds: Array, units_hit: int) -> Array:
 	return out
 
 
+## Knockback of a survivor of the seated attack `kind` (user spec 2026-11-19), with the standing chances of
+## her size (Golem.kick_throw_chance & co., GOLEM_KNOCK_*): the leg stretch and the stretch on growing
+## (GROW) like the kick — thrown, forward if ahead of her seat, backward if behind; the double stomp and
+## the side hand slam like the drum — rolled, never thrown; the arm wipe like the slam — one dice, whirled
+## up or rolled. Away means away from her seat. The other seated attacks only hurt.
+func _knock(kind: StringName, u: Unit) -> void:
+	var away: Vector3 = Vector3(u.position.x - g.position.x, 0.0, u.position.z - g.position.z)
+	match kind:
+		KICK_L, KICK_R, GROW:
+			var chance: float = g.kick_throw_chance()
+			# No dice at 0 or 100 percent (the seeded random stream stays as it was there).
+			if chance <= 0.0 or (chance < 1.0 and randf() >= chance):
+				return
+			var f: Vector3 = forward()
+			u.apply_lift(f if away.dot(f) >= 0.0 else -f, Balance.GOLEM_KICK_PUSH, Balance.GOLEM_KICK_UP)
+		DOUBLE_STOMP, HAND_SLAM_L, HAND_SLAM_R, WIPE_L, WIPE_R:
+			var wipe: bool = kind == WIPE_L or kind == WIPE_R
+			var lift: float = g.slam_lift_chance() if wipe else 0.0
+			var roll: float = g.slam_roll_chance() if wipe else g.drum_roll_chance()
+			if lift + roll <= 0.0:
+				return
+			var dice: float = 0.0 if lift + roll >= 1.0 and lift <= 0.0 else randf()
+			if away.length_squared() < 0.000001:
+				away = forward()
+			match Fireball.impact_outcome(dice, lift, roll):
+				Fireball.OUTCOME_LIFT:
+					u.apply_lift(away, Balance.GOLEM_LIFT_PUSH, Balance.GOLEM_LIFT_UP)
+				Fireball.OUTCOME_ROLL:
+					u.start_roll(away.normalized(), Balance.GOLEM_ROLL_DURATION, Balance.GOLEM_ROLL_SPEED)
+
+
 ## Starts the attack: its channels are busy until it lands, its cooldown runs from now.
 func _wind_up(kind: StringName, at: Vector3) -> void:
 	var t: float = windup_of(kind)
@@ -1033,6 +1074,8 @@ func _land(kind: StringName, at: Vector3) -> void:
 		if not is_instance_valid(u) or u.state == Unit.State.DEAD or u.doomed:
 			killed += 1
 			g._credit_kill(hp)
+		else:
+			_knock(kind, u)
 	g.tally(kind, 1, struck.size(), killed, dealt)
 	var struck_v: Array = vehicles_struck(kind, _vehicles_around(), struck.size())
 	for v in struck_v:
