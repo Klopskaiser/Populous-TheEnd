@@ -46,6 +46,8 @@ class TickCache extends RefCounted:
 	var army: Array[Unit] = []
 	var total_firewarriors: int = 0
 	var understaffed_airships: Array[Unit] = []
+	## Own living golems (all three kinds) — AIGolems lets them sit and stand (2026-11-21).
+	var golems: Array[Unit] = []
 	## Own GROUND vehicles (siege / fire ram) — 10g Teil 3 fills their crews.
 	var ground_vehicles: Array[Unit] = []
 	## Usable workshops whose exit a finished vehicle blocks (Workshop.exit_blocked).
@@ -331,6 +333,8 @@ var _expansion_anchor_age: int = 0
 var attack_wave_size: int = AIState.ARMY_ATTACK_SIZE
 ## Periodic status prints (enabled by the `ai-log` command-line user arg).
 var debug_log: bool = false
+## Own golems: sitting/standing and the pure golem decisions (2026-11-21).
+var golem_ai: AIGolems = null
 var _accumulator: float = 0.0
 var _attack_order_countdown: int = 0
 var _tick_count: int = 0
@@ -362,6 +366,7 @@ func setup(p_tribe: Tribe, p_commands: TribeCommands, p_unit_manager: UnitManage
 	tree_manager = p_tree_manager
 	nav_grid = p_nav_grid
 	base_anchor = p_base_anchor
+	golem_ai = AIGolems.new(self)
 
 
 ## Phase-shifts this AI's 1-Hz tick by `fraction` of the interval so several
@@ -475,7 +480,10 @@ func tick_ai() -> void:
 	_man_watchtowers(cache)
 	_man_airships(cache)
 	_tick_spell_charging()
-	_cast_spells()
+	_cast_spells(cache, threat)
+	# Own golems sit down among many enemies (from 30 m) and get up again (2026-11-21).
+	if golem_ai != null:
+		golem_ai.tick(cache.golems)
 	# An attack on the own village takes priority over everything else.
 	if not threat.is_empty():
 		_tick_defend(cache, threat)
@@ -527,9 +535,11 @@ func build_tick_cache() -> TickCache:
 					cache.army.append(unit)
 			&"golem":
 				# A summoned golem is army: it marches with the wave and counts as
-				# military for the state machine (2026-09-06).
-				cache.army_count += 1
+				# military for the state machine (2026-09-06) — since 2026-11-21 by its
+				# health (AIGolems.power_of), not as one man.
+				cache.army_count += AIGolems.power_of(unit)
 				cache.army.append(unit)
+				cache.golems.append(unit)
 			&"siege", &"fireram", &"airship":
 				# Manned vehicles march/fly with the wave (7f) — manned by ACTIVE
 				# crew: a neutral one (crew pacified/fighting on foot) refuses the
@@ -1077,7 +1087,10 @@ func _tick_attack(cache: TickCache) -> void:
 	var target: Vector3 = _attack_target_position()
 	if target == Vector3.INF:
 		return
-	var squad: Array[Unit] = _marching_only(cache.army)
+	var squad: Array[Unit] = []
+	for u in _marching_only(cache.army):
+		if AIGolems.marches_with_wave(u):   # the Genesis golem guards the village (2026-11-21)
+			squad.append(u)
 	var shaman: Unit = tribe.shaman
 	if _shaman_alive() and shaman.state != Unit.State.CAST \
 			and not _tick_unblock_path(target):
@@ -1314,20 +1327,36 @@ func _detect_threat() -> Dictionary:
 	var radius: float = AIState.defend_radius(_arena_span())
 	var nearest: Unit = null
 	var nearest_dist: float = INF
+	# The nearest enemy that is NOT a golem — the militia's target (2026-11-21: braves
+	# are never sent against a golem, they would only feed it kills).
+	var foot: Unit = null
+	var foot_dist: float = INF
+	var foot_count: int = 0
+	var golem: Golem = null
 	var count: int = 0
 	for unit in unit_manager.get_units_in_radius(anchor_world, radius):
 		if unit.tribe_id == tribe.id or unit.state == Unit.State.DEAD:
 			continue
 		if not _in_own_territory(unit.position, unit.tribe_id, anchor_world):
 			continue
-		count += 1
+		# An enemy golem weighs by its health (2026-11-21), not as one man.
+		count += AIGolems.power_of(unit)
 		var d: float = unit.position.distance_to(anchor_world)
 		if d < nearest_dist:
 			nearest_dist = d
 			nearest = unit
+		if unit is Golem:
+			if golem == null or unit.health > golem.health:
+				golem = unit as Golem
+		else:
+			foot_count += 1
+			if d < foot_dist:
+				foot_dist = d
+				foot = unit
 	if nearest == null:
 		return {}
-	return {"enemy": nearest, "count": count, "pos": nearest.position}
+	return {"enemy": nearest, "count": count, "pos": nearest.position, "foot": foot,
+		"foot_count": foot_count, "golem": golem}
 
 
 ## Defends the village when there is a fighting chance: army + shaman move in
@@ -1341,12 +1370,29 @@ func _tick_defend(cache: TickCache, threat: Dictionary) -> void:
 	_attack_order_countdown = ATTACK_ORDER_TICKS
 	var army: Array[Unit] = cache.army
 	var enemy_count: int = threat.get("count", 1)
-	var core_power: float = float(army.size()) \
+	var army_power: int = 0
+	for u in army:
+		army_power += AIGolems.power_of(u)   # own golems by their health (2026-11-21)
+	var core_power: float = float(army_power) \
 		+ (SHAMAN_POWER if cache.shaman_alive else 0.0)
 	var full_power: float = core_power + float(cache.idle_left()) * BRAVE_POWER
 	if full_power < float(enemy_count) * DEFEND_CHANCE_FACTOR:
 		return   # hopeless — spells only
 	var defenders: Array[Unit] = _marching_only(army)
+	# An enemy golem in the village (2026-11-21): the firewarriors take it on directly —
+	# fire burns a golem at full rate and they strike from beyond its reach.
+	var golem = threat.get("golem")
+	if golem != null and is_instance_valid(golem) and golem.state != Unit.State.DEAD:
+		var gunners: Array[Unit] = []
+		var rest: Array[Unit] = []
+		for u in defenders:
+			if u.unit_kind() == &"firewarrior":
+				gunners.append(u)
+			else:
+				rest.append(u)
+		if not gunners.is_empty():
+			commands.order_attack(gunners, golem)
+		defenders = rest
 	var shaman: Unit = tribe.shaman
 	if _shaman_alive() and shaman.state != Unit.State.CAST:
 		defenders.append(shaman)
@@ -1358,9 +1404,15 @@ func _tick_defend(cache: TickCache, threat: Dictionary) -> void:
 		# 10g: gedeckelt. Vorher nahm die Miliz ALLE idle Braves — bei BRAVE_POWER
 		# 0,5 sterben zwanzig fuer zehn Kampfkraft, und sie sind gleichzeitig die
 		# ganze Wirtschaft.
-		var braves: Array[Unit] = cache.take_idle(
-			AIState.militia_count(cache.idle_left()))
-		var enemy: Unit = threat.get("enemy")
+		# 2026-11-21: and no more than there are melee seats around the enemies on foot —
+		# a brave without a seat takes the next enemy with room, and next to an enemy
+		# golem that is the golem (it has many seats).
+		var want: int = AIState.militia_count(cache.idle_left())
+		if threat.get("golem") != null:
+			want = mini(want, int(threat.get("foot_count", 0)) * Unit.MAX_MELEE_ATTACKERS)
+		var braves: Array[Unit] = cache.take_idle(want)
+		# Never against a golem (2026-11-21): the nearest enemy on foot, else nobody.
+		var enemy = threat.get("foot")
 		if not braves.is_empty() and enemy != null and is_instance_valid(enemy):
 			commands.order_attack(braves, enemy)
 			dbg_militia_orders += braves.size()
@@ -1396,6 +1448,9 @@ func _marching_only(squad: Array[Unit]) -> Array[Unit]:
 		# preacher resumes the attack-move on its own once the conversion is done
 		# (Preacher._resume_route_or_idle, 2026-09-06).
 		if u.state == Unit.State.CAST:
+			continue
+		# A seated golem takes no orders anyway (it stands up on its own, AIGolems).
+		if u is Golem and (u as Golem).is_sit_locked():
 			continue
 		out.append(u)
 	return out
@@ -1484,7 +1539,7 @@ func _tick_spell_charging() -> void:
 			dbg_spell_toggles += 1
 
 
-func _cast_spells() -> void:
+func _cast_spells(cache: TickCache = null, threat: Dictionary = {}) -> void:
 	if not _shaman_alive() or unit_manager == null:
 		return
 	var shaman: Unit = tribe.shaman
@@ -1499,6 +1554,16 @@ func _cast_spells() -> void:
 			if _cast(&"lightning", enemy.position):
 				return
 			break
+	# An enemy golem near the shaman (2026-11-21): lightning hits a golem double, the
+	# firestorm burns it at the full rate (never onto own units); and an own golem is
+	# summoned against it (below).
+	var enemy_golem: Golem = AIGolems.biggest_golem(enemies)
+	if enemy_golem != null:
+		if _cast(&"lightning", enemy_golem.position):
+			return
+		if not _own_units_near(enemy_golem.position, FirestormSpell.SPREAD_RADIUS) \
+				and _cast(&"firestorm", enemy_golem.position):
+			return
 	# Enemy preachers are the AI's worst matchup — they convert its army away
 	# and converting units cannot even be attacked in melee. They die first;
 	# lightning one-shots them, fireball is the fallback. Filtering the already
@@ -1513,16 +1578,28 @@ func _cast_spells() -> void:
 		break
 	var target_building: Building = _nearest_enemy_building(shaman.position,
 		SPELL_SCAN_RADIUS)
+	# Own golems (2026-11-21, AIGolems): against an enemy golem, in a big fight, or at an
+	# enemy building (since 2026-09-06) — next to the shaman, facing the foe. Ground foes
+	# only count for the fight (airships and devices are no reason to summon).
+	var ground_foes: Array[Unit] = []
+	for enemy in enemies:
+		if not enemy.is_airborne() and not (enemy is CrewedVehicle):
+			ground_foes.append(enemy)
+	if AIGolems.wants_summon(_own_golem_count(cache), ground_foes.size(), enemy_golem != null,
+			target_building != null):
+		var aim: Vector3 = Vector3.INF
+		if enemy_golem != null:
+			aim = enemy_golem.position
+		elif ground_foes.size() >= Balance.AI_GOLEM_SUMMON_MIN_ENEMIES:
+			aim = _densest_cluster(ground_foes)
+			if aim == Vector3.INF:
+				aim = ground_foes[0].position
+		elif target_building != null:
+			aim = target_building.center_world()
+		if aim != Vector3.INF and _summon_golem(shaman, aim, _shaman_at_home(shaman, threat)):
+			return
 	if target_building != null:
 		var center: Vector3 = target_building.center_world()
-		# A golem next to the shaman, facing the building (2026-09-06): three
-		# minutes of a 400-HP wrecker that takes a stage per swing and scatters
-		# the defenders. The spell snaps the point onto walkable ground itself.
-		var toward: Vector3 = Vector3(center.x - shaman.position.x, 0.0,
-			center.z - shaman.position.z)
-		if toward.length_squared() > 0.001:
-			if _cast(&"golem", shaman.position + toward.normalized() * 3.0):
-				return
 		# Building priorities (7c): volcano on clusters, sink floods coastal
 		# plots, flatten breaks foundations on slopes, then the old
 		# tornado/quake/lightning ladder.
@@ -1559,6 +1636,40 @@ func _cast_spells() -> void:
 			if _cast(&"firestorm", cluster):
 				return
 		_cast(&"fireball", cluster)
+
+
+## The tribe's living golems (from the tick cache when there is one).
+func _own_golem_count(cache: TickCache) -> int:
+	if cache != null:
+		return cache.golems.size()
+	var n: int = 0
+	for u in tribe.units:
+		if is_instance_valid(u) and u is Golem and u.state != Unit.State.DEAD:
+			n += 1
+	return n
+
+
+## Summons a golem 3 m in front of the shaman toward `aim`, trying the golem spells in
+## AIGolems.summon_order (a spell without a charge falls through). The spell snaps the
+## point onto walkable ground itself.
+func _summon_golem(shaman: Unit, aim: Vector3, at_home: bool) -> bool:
+	var toward: Vector3 = Vector3(aim.x - shaman.position.x, 0.0, aim.z - shaman.position.z)
+	var at: Vector3 = shaman.position
+	if toward.length_squared() > 0.001:
+		at += toward.normalized() * 3.0
+	for id in AIGolems.summon_order(at_home):
+		if _cast(id, at):
+			return true
+	return false
+
+
+## Is the shaman defending her own village (a threat there, she within its defend radius)?
+func _shaman_at_home(shaman: Unit, threat: Dictionary) -> bool:
+	if nav_grid == null:
+		return false
+	var anchor_world: Vector3 = nav_grid.cell_to_world(base_anchor)
+	var home: bool = _flat_span(shaman.position, anchor_world) <= AIState.defend_radius(_arena_span())
+	return home and (not threat.is_empty() or state != AIState.State.ATTACK)
 
 
 ## True when any living own unit stands within `radius` of `at` (friendly-fire

@@ -1351,6 +1351,12 @@ func seat_back_m() -> float:
 	return Balance.GOLEM_SIT_SEAT_BACK * model_scale().z * size_factor()
 
 
+## Radius around her beyond which no sit attack reaches (GolemSitCombat scans this far; the AI asks it
+## before it lets her sit, 2026-11-21).
+func sit_reach_radius() -> float:
+	return seat_back_m() + reach() + ground_radius(ATTACK_DRUM)
+
+
 ## Half extents of the seat at her size: x across, y along her heading.
 func seat_half_extent() -> Vector2:
 	return Vector2(Balance.GOLEM_SIT_SEAT_WIDTH * 0.5 * model_scale().x,

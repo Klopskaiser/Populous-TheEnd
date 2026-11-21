@@ -113,10 +113,10 @@ static func create_default_set() -> Array[Spell]:
 	]
 
 
-## The set of the HUMAN player: the default set plus the spells that are his
-## alone for now. Zauber 14 "Dämonengolem beschwören" (2026-11-16) is still
-## being tried out — the AI does not get it (user spec), so its charging and
-## casting logic stays untouched.
+## The FULL set: the default set plus the demon golem (Zauber 14, 2026-11-16) and the
+## Genesis golem (Zauber 15, 2026-11-17). Until 2026-11-21 the human player's alone; since
+## then every tribe in the game gets it (Main), the AI too (AIGolems). The default set stays
+## the thirteen spells the headless tests build their worlds with.
 static func create_player_set() -> Array[Spell]:
 	var set: Array[Spell] = create_default_set()
 	set.append(DemonGolemSpell.new())

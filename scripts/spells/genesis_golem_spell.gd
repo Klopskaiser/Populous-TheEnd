@@ -6,8 +6,8 @@ class_name GenesisGolemSpell extends GolemSpell
 ## Daemonengolem; Ablauf (Zielpunkt auf die naechste begehbare Zelle, Ladung bleibt
 ## bei Fehlschlag) geerbt von GolemSpell.
 ##
-## Wie der Daemonengolem vorerst nur im Satz des menschlichen Spielers
-## (Spell.create_player_set). Sounds: `spell_voice_genesis_golem` (Zauberformel) und
+## Wie der Daemonengolem im vollen Satz (Spell.create_player_set), seit 2026-11-21 fuer
+## jeden Stamm, auch die KI (AIGolems). Sounds: `spell_voice_genesis_golem` (Zauberformel) und
 ## `spell_genesis_golem` (Erscheinen); fehlen die Dateien, bleibt es stumm.
 
 const GENESIS_GOLEM_SCENE: PackedScene = preload("res://scenes/units/genesis_golem.tscn")

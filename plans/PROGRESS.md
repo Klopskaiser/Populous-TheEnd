@@ -13317,3 +13317,18 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
   `--headless --import`; `test_golem.gd` 1589, `test_demon_golem.gd` 174, `test_genesis_golem.gd` 119 bestanden, 0 fehlgeschlagen;
   `--headless --quit` ohne Fehler. Die uebrigen Testdateien liefen nicht (sie laden die Modelle nicht). Standbilder mit dem Renderer von
   Godot: `gymnastikschuh/out/golem_spiel/bilder/ballen_*`. Offen: im laufenden Spiel hat die neuen Clips noch niemand angesehen.
+
+### Golems: Debugansicht der Standangriffe, Bugfix Abliefern, KI mit Golems, kuerzere Ausbildung (2026-11-21)
+
+- Taste G zeigt stehend und gebueckt die Zonen der Standangriffe (`Golem.stand_zone_outlines`, dieselben Masse wie
+  `_in_hit_zone`). Messung des neuen Tritts gegen die Schneise: vorn und seitlich passend, hinten reicht die Schneise
+  (2,98 m bei Stufe 0) gut dreimal so weit wie das Bein (0,88 m); `GOLEM_KICK_BACK_SHARE` bewusst nicht geaendert.
+- Bugfix: `Brave._tick_loose_deliver` pruefte `is WoodDepot` vor `is_instance_valid` (Skriptfehler, wenn das Ziel
+  unterwegs abgerissen wurde); dasselbe Muster in `_drop_held_wood`, vier Golem-Befehlen in `TribeCommands` und
+  `Golem.take_damage` behoben. Regressionstest `test_loose_delivery_survives_a_freed_target`.
+- Ausbildung schneller (Nutzervorgabe): Krieger 2 s, Feuerkrieger 3 s, Prediger 4 s, Techniker 8 s (vorher 3 / 4 / 5 / 10).
+  Die Ritualkammer kostet damit 1,2 statt 1,8 Mana je Opfer (sie ist an die Kasernenzeit gekoppelt).
+- KI und Golems (`scripts/ai/ai_golems.gd`, CLAUDE.md §7): alle drei Golemzauber fuer jeden Stamm, Beschwoeren im Gefecht
+  und gegen feindliche Golems, Genesisgolem als Hauswache, Sitzen ab 30 m, Golems nach Leben gewichtet, Blitz/Feuerregen
+  und Feuerkrieger gegen feindliche Golems, keine Miliz gegen Golems. Tests in `test_ai.gd`.
+

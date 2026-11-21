@@ -212,7 +212,7 @@ func test_training_hall_produces_a_technician() -> void:
 func test_training_hall_numbers() -> void:
 	check(TrainingHall.WOOD_COST == 10, "10 wood (user spec)")
 	check(TrainingHall.FOOTPRINT == Vector2i(4, 4), "4x4 (user spec)")
-	check_near(TrainingHall.TRAINING_TIME, 10.0, "10 s of training (user spec)")
+	check_near(TrainingHall.TRAINING_TIME, 8.0, "8 s of training (user spec 2026-11-21, before 10 s)")
 
 
 func test_training_hall_is_in_the_build_menu() -> void:

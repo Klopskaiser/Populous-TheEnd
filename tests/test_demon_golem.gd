@@ -80,14 +80,14 @@ func test_spell_is_the_players_alone_and_costs_what_the_golem_costs() -> void:
 	var w: Dictionary = _make_world()
 	var spell: Spell = w.t0.get_spell(&"demon_golem")
 	check(spell != null and spell is DemonGolemSpell, "the player's set carries the demon golem")
-	check(w.t1.get_spell(&"demon_golem") == null, "the default set (the AI's) does not")
+	check(w.t1.get_spell(&"demon_golem") == null, "the default set (the tests' base) does not")
 	var golem: Spell = w.t0.get_spell(&"golem")
 	check(is_equal_approx(spell.charge_cost, 600.0) and is_equal_approx(golem.charge_cost, 800.0)
 		and spell.max_charges == golem.max_charges
 		and is_equal_approx(spell.cast_range, golem.cast_range),
 		"600 against the golem's 800 (2026-11-18); same charges and range")
 	check(Spell.create_default_set().size() + 2 == Spell.create_player_set().size(),
-		"the player's set is the default set plus the demon and the Genesis golem")
+		"the full set (every tribe in the game, the AI too since 2026-11-21) is the default set plus the demon and the Genesis golem")
 	spell.charges = 1
 	check(spell.cast(w.t0, Vector3(50, 5, 50), w.ctx), "the cast succeeds")
 	check(spell.charges == 0, "one charge spent")

@@ -840,7 +840,7 @@ func _wipe_outline(side: float) -> PackedVector2Array:
 
 ## Radius around the seat beyond which no sit attack reaches.
 func _scan_radius() -> float:
-	return g.seat_back_m() + g.reach() + g.ground_radius(Golem.ATTACK_DRUM)
+	return g.sit_reach_radius()
 
 
 ## Enemy units around her that any sit attack could ever reach, or that she could

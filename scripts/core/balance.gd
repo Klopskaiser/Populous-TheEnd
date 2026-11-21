@@ -1898,17 +1898,17 @@ const HUT_UPGRADE_STALL_TIMEOUT: float = 120.0
 # --- Kaserne (Krieger) ---
 const WARRIOR_CAMP_WOOD_COST: int = 10
 const WARRIOR_CAMP_HP: int = 600
-const WARRIOR_CAMP_TRAINING_TIME: float = 3.0
+const WARRIOR_CAMP_TRAINING_TIME: float = 2.0   # war 3,0 (Nutzervorgabe 2026-11-21: -1 s)
 
 # --- Tempel (Prediger) ---
 const TEMPLE_WOOD_COST: int = 15
 const TEMPLE_HP: int = 660
-const TEMPLE_TRAINING_TIME: float = 5.0
+const TEMPLE_TRAINING_TIME: float = 4.0   # war 5,0 (Nutzervorgabe 2026-11-21: -1 s)
 
 # --- Feuertempel (Feuerkrieger) ---
 const FIREWARRIOR_CAMP_WOOD_COST: int = 18  # war 20 (10h)
 const FIREWARRIOR_CAMP_HP: int = 900
-const FIREWARRIOR_CAMP_TRAINING_TIME: float = 4.0
+const FIREWARRIOR_CAMP_TRAINING_TIME: float = 3.0   # war 4,0 (Nutzervorgabe 2026-11-21: -1 s)
 
 # --- Förster ---
 const FORESTER_WOOD_COST: int = 18
@@ -2290,6 +2290,22 @@ const AI_MAX_HUT_RACKS: int = 4
 ## Mindestbestand eines Huetten-Regals: genau ein Ausbau.
 const AI_HUT_RACK_STOCK: int = HUT_UPGRADE_WOOD_COST
 
+# --- KI: Golems (Nutzervorgabe 2026-11-21, scripts/ai/ai_golems.gd) ---
+## Die KI hat alle drei Golemzauber. Sie beschwoert, wenn ihre Schamanin vor einem Feindgebaeude
+## steht, in einem grossen Gefecht (mindestens AI_GOLEM_SUMMON_MIN_ENEMIES Feinde im Zauberradius)
+## oder als Antwort auf einen feindlichen Golem — hoechstens AI_GOLEM_MAX eigene Golems gleichzeitig.
+const AI_GOLEM_MAX: int = 3
+const AI_GOLEM_SUMMON_MIN_ENEMIES: int = 6
+## So viel Leben zaehlt als EINE Einheit, wenn die KI Golems wiegt: ein feindlicher Golem zaehlt in
+## der Bedrohung (und der Verteidigungsrechnung) Leben / AI_GOLEM_POWER_HP Gegner, ein eigener in der
+## Armee (Wellengroesse) ebenso viele Kaempfer — vorher zaehlte jeder Golem als ein Mann.
+const AI_GOLEM_POWER_HP: float = 80.0
+## Sitzen (ab GOLEM_SIT_MIN_HEIGHT): ein KI-Golem setzt sich, wenn mindestens AI_GOLEM_SIT_MIN_ENEMIES
+## Feinde in Reichweite seiner Sitzangriffe stehen, und steht wieder auf, wenn AI_GOLEM_STAND_TICKS
+## KI-Takte (je 1 s) lang keiner mehr darin steht.
+const AI_GOLEM_SIT_MIN_ENEMIES: int = 8
+const AI_GOLEM_STAND_TICKS: int = 6
+
 # =============================================================================
 # BUFFS (generisches Effektsystem)
 # =============================================================================
@@ -2358,7 +2374,7 @@ const RITUAL_CHAMBER_MANA_REWARD: float = 20.0
 const TRAINING_HALL_FOOTPRINT: Vector2i = Vector2i(4, 4)
 const TRAINING_HALL_WOOD_COST: int = 10
 const TRAINING_HALL_HP: int = 450
-const TRAINING_HALL_TRAINING_TIME: float = 10.0
+const TRAINING_HALL_TRAINING_TIME: float = 8.0   # war 10,0 (Nutzervorgabe 2026-11-21: -2 s)
 
 # =============================================================================
 # ÜBERLEBEN (Spielmodus: 20 Wellen gegen eine kleine Basis, SurvivalMode)

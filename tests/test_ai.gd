@@ -905,6 +905,195 @@ func test_ai_summons_a_golem_at_an_enemy_building() -> void:
 	_free_world(w)
 
 
+# --- KI und Golems (Nutzervorgabe 2026-11-21, AIGolems) ------------------------
+
+const GOLEM_SCENE: PackedScene = preload("res://scenes/units/golem.tscn")
+const GENESIS_SCENE: PackedScene = preload("res://scenes/units/genesis_golem.tscn")
+const FIREWARRIOR_SCENE: PackedScene = preload("res://scenes/units/firewarrior.tscn")
+
+
+## Arms exactly the spell `id` in the FULL set (all three golems, as in the game since 2026-11-21).
+func _arm_only_full(tribe: Tribe, id: StringName) -> void:
+	tribe.set_spells(Spell.create_player_set())
+	for s in tribe.spells:
+		s.charges = 1 if s.id == id else 0
+
+
+func test_golem_decisions_are_pure_and_follow_the_spec() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = w.unit_manager.spawn_unit(GOLEM_SCENE, 0, Vector3(30, 5, 30)) as Golem
+	var brave: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 0, Vector3(20, 5, 20))
+	check(AIGolems.power_of(brave) == 1, "anyone else counts as one man")
+	check(AIGolems.power_of(g) == roundi(float(g.health) / Balance.AI_GOLEM_POWER_HP),
+		"a golem counts by its health (%d)" % AIGolems.power_of(g))
+	check(AIGolems.power_of(g) >= 5, "a fresh golem is worth several soldiers")
+	check(not AIGolems.wants_summon(0, 2, false, false), "a skirmish is no reason to summon")
+	check(AIGolems.wants_summon(0, Balance.AI_GOLEM_SUMMON_MIN_ENEMIES, false, false), "a big fight is")
+	check(AIGolems.wants_summon(0, 0, true, false), "an enemy golem is")
+	check(AIGolems.wants_summon(0, 0, false, true), "an enemy building is (as since 2026-09-06)")
+	check(not AIGolems.wants_summon(Balance.AI_GOLEM_MAX, 99, true, true), "never beyond AI_GOLEM_MAX")
+	check(AIGolems.summon_order(true)[0] == &"genesis_golem", "at home the Genesis golem first")
+	check(AIGolems.summon_order(false)[0] == &"demon_golem", "out in the field the demon golem first")
+	check(AIGolems.summon_order(false).size() == 3, "all three golems")
+	check(AIGolems.sit_decision(false, true, Balance.AI_GOLEM_SIT_MIN_ENEMIES, 0) == 1, "many foes in reach: sit")
+	check(AIGolems.sit_decision(false, false, 99, 0) == 0, "too small to sit: nothing")
+	check(AIGolems.sit_decision(false, true, Balance.AI_GOLEM_SIT_MIN_ENEMIES - 1, 0) == 0, "too few: stay up")
+	check(AIGolems.sit_decision(true, true, 1, 99) == 0, "seated with a foe in reach: stay")
+	check(AIGolems.sit_decision(true, true, 0, Balance.AI_GOLEM_STAND_TICKS - 1) == 0, "calm only briefly: stay")
+	check(AIGolems.sit_decision(true, true, 0, Balance.AI_GOLEM_STAND_TICKS) == -1, "calm long enough: get up")
+	var gen: Unit = w.unit_manager.spawn_unit(GENESIS_SCENE, 0, Vector3(60, 5, 60))
+	check(AIGolems.marches_with_wave(g) and not AIGolems.marches_with_wave(gen),
+		"the Genesis golem guards the village, the others march")
+	_free_world(w)
+
+
+## Ein feindlicher Golem bei der Schamanin: Blitz (doppelter Schaden), ohne Blitz Feuerregen —
+## aber nie auf eigene Einheiten.
+func test_ai_strikes_an_enemy_golem_with_lightning_or_firestorm() -> void:
+	var w: Dictionary = _make_world()
+	var ai_tribe: Tribe = w.tribes[1]
+	var ai: AIController = _make_ai(w, ai_tribe, Vector2i(40, 40))
+	w.unit_manager.spawn_unit(SHAMAN_SCENE, 1, Vector3(40, 5, 40))
+	w.unit_manager.spawn_unit(GOLEM_SCENE, 0, Vector3(47, 5, 40))
+	_arm_only(ai_tribe, &"lightning")
+	ai._cast_spells()
+	check(_pending_spell_id(ai_tribe) == &"lightning", "lightning on the enemy golem")
+	var w2: Dictionary = _make_world()
+	var ai2: AIController = _make_ai(w2, w2.tribes[1], Vector2i(40, 40))
+	w2.unit_manager.spawn_unit(SHAMAN_SCENE, 1, Vector3(40, 5, 40))
+	w2.unit_manager.spawn_unit(GOLEM_SCENE, 0, Vector3(50, 5, 40))   # beyond the salvo's spread from the shaman
+	_arm_only(w2.tribes[1], &"firestorm")
+	ai2._cast_spells()
+	check(_pending_spell_id(w2.tribes[1]) == &"firestorm", "without lightning: the firestorm on it")
+	ai2.free()
+	_free_world(w2)
+	var w3: Dictionary = _make_world()
+	var ai3: AIController = _make_ai(w3, w3.tribes[1], Vector2i(40, 40))
+	w3.unit_manager.spawn_unit(SHAMAN_SCENE, 1, Vector3(40, 5, 40))
+	w3.unit_manager.spawn_unit(GOLEM_SCENE, 0, Vector3(50, 5, 40))
+	w3.unit_manager.spawn_unit(WARRIOR_SCENE, 1, Vector3(50.5, 5, 41))   # own man at its feet
+	_arm_only(w3.tribes[1], &"firestorm")
+	ai3._cast_spells()
+	check(_pending_spell_id(w3.tribes[1]) == &"", "no firestorm onto the own warrior")
+	ai3.free()
+	_free_world(w3)
+	ai.free()
+	_free_world(w)
+
+
+## Eigene Golems: im grossen Gefecht draussen zuerst der Daemonengolem, daheim unter Angriff zuerst der
+## Genesisgolem, gegen einen feindlichen Golem ebenso — und nie mehr als AI_GOLEM_MAX.
+func test_ai_summons_its_own_golems_in_fights() -> void:
+	var w: Dictionary = _make_world()
+	var ai_tribe: Tribe = w.tribes[1]
+	var ai: AIController = _make_ai(w, ai_tribe, Vector2i(100, 100))   # the shaman is far from home
+	w.unit_manager.spawn_unit(SHAMAN_SCENE, 1, Vector3(40, 5, 40))
+	for i in range(Balance.AI_GOLEM_SUMMON_MIN_ENEMIES):
+		w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, Vector3(46 + float(i % 3), 5, 40 + float(i / 3)))
+	ai_tribe.set_spells(Spell.create_player_set())
+	for s in ai_tribe.spells:
+		s.charges = 1 if s.id in [&"golem", &"demon_golem", &"genesis_golem"] else 0
+	ai._cast_spells()
+	check(_pending_spell_id(ai_tribe) == &"demon_golem", "a big fight in the field: the demon golem")
+	ai.free()
+	_free_world(w)
+
+	var h: Dictionary = _make_world()
+	var home: AIController = _make_ai(h, h.tribes[1], Vector2i(40, 40))
+	h.unit_manager.spawn_unit(SHAMAN_SCENE, 1, Vector3(40, 5, 40))
+	h.unit_manager.spawn_unit(GOLEM_SCENE, 0, Vector3(47, 5, 40))
+	h.tribes[1].set_spells(Spell.create_player_set())
+	for s in h.tribes[1].spells:
+		s.charges = 1 if s.id in [&"golem", &"demon_golem", &"genesis_golem"] else 0
+	home._cast_spells(null, home._detect_threat())
+	check(_pending_spell_id(h.tribes[1]) == &"genesis_golem", "an enemy golem at home: the Genesis golem")
+	home.free()
+	_free_world(h)
+
+	var c: Dictionary = _make_world()
+	var capped: AIController = _make_ai(c, c.tribes[1], Vector2i(100, 100))
+	c.unit_manager.spawn_unit(SHAMAN_SCENE, 1, Vector3(40, 5, 40))
+	for i in range(Balance.AI_GOLEM_MAX):
+		c.unit_manager.spawn_unit(GOLEM_SCENE, 1, Vector3(20 + 8.0 * float(i), 5, 20))
+	for i in range(Balance.AI_GOLEM_SUMMON_MIN_ENEMIES):
+		c.unit_manager.spawn_unit(WARRIOR_SCENE, 0, Vector3(46 + float(i % 3), 5, 40 + float(i / 3)))
+	_arm_only_full(c.tribes[1], &"demon_golem")
+	capped._cast_spells()
+	check(_pending_spell_id(c.tribes[1]) == &"", "AI_GOLEM_MAX golems alive: no further one")
+	capped.free()
+	_free_world(c)
+
+
+## Ein feindlicher Golem im Dorf zaehlt nach seinem Leben; die Feuerkrieger nehmen ihn gezielt aufs Korn,
+## die Miliz geht auf den naechsten Feind zu Fuss — nie auf den Golem.
+func test_ai_defends_against_an_enemy_golem() -> void:
+	var w: Dictionary = _make_world()
+	var ai_tribe: Tribe = w.tribes[1]
+	var ai: AIController = _make_ai(w, ai_tribe, Vector2i(64, 64))
+	var golem: Golem = w.unit_manager.spawn_unit(GOLEM_SCENE, 0, Vector3(66, 5, 64)) as Golem
+	var raider: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, Vector3(70, 5, 64))
+	var threat: Dictionary = ai._detect_threat()
+	check(int(threat.get("count", 0)) == AIGolems.power_of(golem) + 1,
+		"the golem weighs by its health (%d)" % int(threat.get("count", 0)))
+	check(threat.get("golem") == golem and threat.get("foot") == raider, "golem and foot enemy are told apart")
+	var gunner: Unit = w.unit_manager.spawn_unit(FIREWARRIOR_SCENE, 1, Vector3(60, 5, 60))
+	var warrior: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 1, Vector3(60, 5, 62))
+	var braves: Array[Unit] = []
+	for i in range(12):
+		braves.append(w.unit_manager.spawn_unit(BRAVE_SCENE, 1, Vector3(56 + float(i % 4), 5, 56 + float(i / 4))))
+	var cache: AIController.TickCache = ai.build_tick_cache()
+	ai._attack_order_countdown = 0
+	ai._tick_defend(cache, threat)
+	check(gunner.attack_target == golem, "the firewarrior takes on the golem")
+	check(warrior.attack_target != golem, "the warrior attack-moves with the rest")
+	var on_golem: int = 0
+	var on_raider: int = 0
+	for b in braves:
+		if b.attack_target == golem:
+			on_golem += 1
+		elif b.attack_target == raider:
+			on_raider += 1
+	check(on_golem == 0, "no militia brave is sent against the golem")
+	check(on_raider > 0, "the militia goes for the raider (%d)" % on_raider)
+	ai.free()
+	_free_world(w)
+
+
+## Ein KI-Golem ab 30 m setzt sich, wenn genug Feinde in Reichweite seiner Sitzangriffe stehen, und steht
+## wieder auf, wenn AI_GOLEM_STAND_TICKS Takte lang keiner mehr darin steht. Ein eigener Golem zaehlt in der
+## Armee nach seinem Leben.
+func test_ai_golem_sits_among_many_foes_and_gets_up_again() -> void:
+	var w: Dictionary = _make_world()
+	var ai_tribe: Tribe = w.tribes[1]
+	var ai: AIController = _make_ai(w, ai_tribe, Vector2i(20, 20))
+	var g: Golem = w.unit_manager.spawn_unit(GOLEM_SCENE, 1, Vector3(64, 5, 64)) as Golem
+	while not g.can_sit():
+		g._credit_kill()
+	g._stretch_queued = false
+	g.health = g.max_health
+	g.tick(0.1)
+	var cache: AIController.TickCache = ai.build_tick_cache()
+	check(cache.golems.has(g) and cache.army_count == AIGolems.power_of(g),
+		"the golem is in the cache and counts by its health (%d)" % cache.army_count)
+	var foes: Array[Unit] = []
+	for i in range(Balance.AI_GOLEM_SIT_MIN_ENEMIES - 1):
+		foes.append(w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, Vector3(60 + float(i), 5, 75)))
+	ai.golem_ai.tick(cache.golems)
+	check(not g.is_sit_locked(), "too few foes in reach: she stays up")
+	foes.append(w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, Vector3(70, 5, 75)))
+	ai.golem_ai.tick(cache.golems)
+	check(g._wants_sit, "%d foes in reach: she sits down" % foes.size())
+	for f in foes:
+		f.take_damage(99999)
+	for i in range(Balance.AI_GOLEM_STAND_TICKS - 1):
+		ai.golem_ai.tick(cache.golems)
+	check(g._wants_sit, "calm only briefly: she stays seated")
+	ai.golem_ai.tick(cache.golems)
+	check(not g._wants_sit, "calm for AI_GOLEM_STAND_TICKS ticks: she gets up")
+	ai.free()
+	_free_world(w)
+
+
 # --- Elimination (phase 10d) ---------------------------------------------------
 
 ## The defeat chain: last follower dies -> the circle self-destructs -> the
@@ -1542,12 +1731,17 @@ func test_camp_targets_scale_with_the_brave_stream() -> void:
 	var low: Dictionary = AIState.camp_targets(0.0)
 	check(int(low[&"warrior_camp"]) == 1 and int(low[&"temple"]) == 1,
 		"ohne Strom bleibt je Art ein Lager")
-	# 100 Braves/min, Mix 40/30/30: Kaserne 40/min bei 20/min Durchsatz -> 2,
-	# Feuertempel 30/min bei 15 -> 2, Tempel 30/min bei 12 -> 3 (aufgerundet).
+	# 100 Braves/min, Mix 40/30/30 (Ausbildung seit 2026-11-21 2 / 3 / 4 s): Kaserne 40/min
+	# bei 30/min Durchsatz -> 2, Feuertempel 30/min bei 20 -> 2, Tempel 30/min bei 15 -> 2.
 	var high: Dictionary = AIState.camp_targets(100.0)
 	check(int(high[&"warrior_camp"]) == 2, "Kaserne skaliert mit dem Strom")
 	check(int(high[&"firewarrior_camp"]) == 2, "Feuertempel skaliert mit dem Strom")
-	check(int(high[&"temple"]) == 3, "der langsame Tempel braucht am meisten")
+	check(int(high[&"temple"]) == 2, "Tempel skaliert mit dem Strom")
+	# 150 Braves/min: Tempel 45/min bei 15 -> 3, Kaserne 60/min bei 30 -> 2 — der langsame
+	# Tempel braucht am meisten.
+	var higher: Dictionary = AIState.camp_targets(150.0)
+	check(int(higher[&"temple"]) == 3 and int(higher[&"warrior_camp"]) == 2,
+		"der langsame Tempel braucht am meisten (%d / %d)" % [int(higher[&"temple"]), int(higher[&"warrior_camp"])])
 
 
 func test_camp_targets_are_capped_per_kind() -> void:

@@ -223,10 +223,10 @@ func _ready() -> void:
 	spell_ctx.wood_pile_manager = _wood_pile_manager
 	_tribe_commands.spell_context = spell_ctx
 	for tribe in tribes:
-		# The human player also gets the spells that are his alone for now (the
-		# demon golem, 2026-11-16) — the AI keeps the default set.
-		tribe.set_spells(Spell.create_player_set() if tribe.id == GameState.PLAYER_TRIBE
-			else Spell.create_default_set())
+		# Every tribe gets the full set — since 2026-11-21 the AI too (user spec: it summons
+		# all three golems itself, AIGolems); before, the demon and Genesis golems were the
+		# human player's alone.
+		tribe.set_spells(Spell.create_player_set())
 		# Every spell begins with one stored charge — EXCEPT in skirmish, where
 		# both sides start with empty charges and must build mana up first.
 		if config.mode != MatchConfig.Mode.SKIRMISH:

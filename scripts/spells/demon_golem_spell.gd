@@ -6,8 +6,8 @@ class_name DemonGolemSpell extends GolemSpell
 ## beim Golem; Ablauf (Zielpunkt auf die naechste begehbare Zelle, Ladung bleibt
 ## bei Fehlschlag) geerbt von GolemSpell.
 ##
-## Vorerst nur im Satz des menschlichen Spielers (Spell.create_player_set) — die
-## KI bekommt ihn nicht. Sounds: `spell_voice_demon_golem` (Zauberformel) und
+## Im vollen Satz (Spell.create_player_set), den seit 2026-11-21 jeder Stamm im Spiel
+## bekommt — auch die KI (AIGolems). Sounds: `spell_voice_demon_golem` (Zauberformel) und
 ## `spell_demon_golem` (Erscheinen); fehlen die Dateien, bleibt es stumm.
 
 const DEMON_GOLEM_SCENE: PackedScene = preload("res://scenes/units/demon_golem.tscn")
