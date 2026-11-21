@@ -237,6 +237,42 @@ func test_flame_rectangle_hits_and_misses() -> void:
 	_free_world(w)
 
 
+## User spec 2026-11-21: every burst deals FIRERAM_BURST_DAMAGE (5) flat to every unit it hits —
+## ONCE per burst and unit, even if it leaves the jet and comes back; only the next burst
+## deals it again. The burn comes on top as before.
+func test_each_burst_deals_its_flat_damage_once_per_unit() -> void:
+	var w: Dictionary = _make_world()
+	var ram: FireRam = _armed_ram(w)   # heading +z
+	var p: Vector3 = ram.position
+	var foe: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 1, p + Vector3(0, 0, 3.0))
+	var full: int = foe.health
+	ram._reload = 0.0
+	ram._burn_point(foe.position, TICK, false, 3.0)
+	check(ram._flame_time > 0.0, "the burst opens")
+	ram._apply_flames()
+	check(foe.health == full - Balance.FIRERAM_BURST_DAMAGE,
+		"the burst deals %d flat (%d -> %d)" % [Balance.FIRERAM_BURST_DAMAGE, full, foe.health])
+	check(foe.is_burning(), "and sets it alight as before")
+	ram._apply_flames()
+	check(foe.health == full - Balance.FIRERAM_BURST_DAMAGE, "the next check of the SAME burst adds nothing")
+	foe.position = p + Vector3(0, 0, 20.0)   # out of the jet ...
+	foe._sync_soa_pos()
+	w.unit_manager.tick(0.0)
+	ram._apply_flames()
+	foe.position = p + Vector3(0, 0, 3.0)    # ... and back in
+	foe._sync_soa_pos()
+	w.unit_manager.tick(0.0)
+	ram._apply_flames()
+	check(foe.health == full - Balance.FIRERAM_BURST_DAMAGE, "re-entering the jet adds nothing either")
+	# The burst ends, the next one opens: it deals its damage again.
+	ram._flame_time = 0.0
+	ram._reload = 0.0
+	ram._burn_point(foe.position, TICK, false, 3.0)
+	ram._apply_flames()
+	check(foe.health == full - 2 * Balance.FIRERAM_BURST_DAMAGE, "the next burst hits again (%d)" % foe.health)
+	_free_world(w)
+
+
 ## The flame cone fans out 2 -> 3 wide: a unit at a side offset that is OUTSIDE
 ## the cone near the nozzle is INSIDE it near the far end.
 func test_flame_cone_widens_toward_the_far_end() -> void:

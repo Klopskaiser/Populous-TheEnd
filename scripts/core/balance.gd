@@ -1247,6 +1247,10 @@ const FIRERAM_FLAME_WIDTH: float = 2.0
 const FIRERAM_FLAME_END_WIDTH: float = 3.0
 ## Dauer eines Flammenstoßes; danach Nachladen (1 Crew -> MIN, 4 Crew -> FULL).
 const FIRERAM_FLAME_DURATION: float = 1.1
+## Jeder Feuerstoss macht jeder getroffenen Einheit einmal FIRERAM_BURST_DAMAGE flach (Nutzervorgabe
+## 2026-11-21) — auch wer aus dem Strahl laeuft und wieder hinein, erst der naechste Stoss trifft erneut.
+## Der Brand kommt unveraendert dazu.
+const FIRERAM_BURST_DAMAGE: int = 5
 const FIRERAM_COOLDOWN_MIN_CREW: float = 3.0
 const FIRERAM_COOLDOWN_FULL_CREW: float = 1.4
 const FIRERAM_AGGRO_RADIUS: float = 12.0
@@ -1926,22 +1930,22 @@ const WORKSHOP_HP: int = 525
 ## Arbeiter-Sekunden pro Katapult (3 Arbeiter -> 20 s).
 ## Regel: Produktionsaufwand = Holzkosten des Fahrzeugs x 10 Arbeiter-Sekunden.
 const WORKSHOP_WORK_PER_CATAPULT: float = 60.0
-const WORKSHOP_CATAPULT_WOOD: int = 6
+const WORKSHOP_CATAPULT_WOOD: int = 5   # war 6 (Nutzervorgabe 2026-11-21)
 
 # --- Feuerrammenwerkstatt ---
-const FIRERAM_WORKSHOP_WOOD_COST: int = 10  # war 11 (10h)
+const FIRERAM_WORKSHOP_WOOD_COST: int = 8   # war 10 (Nutzervorgabe 2026-11-21), davor 11 (10h)
 const FIRERAM_WORKSHOP_HP: int = 525
 ## Arbeiter-Sekunden pro Feuerramme (3 Arbeiter -> ~13 s); 4 Holz x 10.
 const FIRERAM_WORK_PER_RAM: float = 40.0
-const FIRERAM_WOOD: int = 4
+const FIRERAM_WOOD: int = 3   # war 4 (Nutzervorgabe 2026-11-21)
 
 # --- Luftschiffwerft ---
-const AIRSHIP_WHARF_WOOD_COST: int = 20
+const AIRSHIP_WHARF_WOOD_COST: int = 18   # war 20 (Nutzervorgabe 2026-11-21)
 const AIRSHIP_WHARF_HP: int = 750
 const WHARF_WORKER_SLOTS: int = 4
 ## Arbeiter-Sekunden pro Luftschiff (4 Arbeiter -> 20 s); 8 Holz x 10.
 const WHARF_WORK_PER_AIRSHIP: float = 80.0
-const WHARF_AIRSHIP_WOOD: int = 8
+const WHARF_AIRSHIP_WOOD: int = 7   # war 8 (Nutzervorgabe 2026-11-21)
 
 # --- Holzstation ---
 const WOOD_DEPOT_WOOD_COST: int = 1
@@ -2320,9 +2324,11 @@ const BUFF_CONVERT_RESIST_DELAY: float = 3.0
 ## Der Vorlauf verfaellt, wenn so lange kein Bekehrungsversuch mehr kam — der
 ## Prediger hat aufgehoert. Muss ueber dem Scan-Takt (0,25 s) liegen.
 const BUFF_CONVERT_RESIST_GRACE: float = 0.6
-## Staerke: Angriffsmultiplikator je Stapel, multiplikativ (2 Stapel = 2,25x).
-## Wirkt auf Nahkampf UND die Feuerbaelle des Feuerkriegers.
-const BUFF_STRENGTH_MULT: float = 1.5
+## Staerke: Angriffsmultiplikator je Stapel, multiplikativ (2 Stapel = 2,56x).
+## Wirkt auf Nahkampf UND die Feuerbaelle des Feuerkriegers. Einzige Quelle bisher: die
+## Techniker nach dem ersten auf dem Luftschiff (1,6 je Stapel, Nutzervorgabe 2026-11-21;
+## vorher 1,5).
+const BUFF_STRENGTH_MULT: float = 1.6
 ## Auren (z. B. die Fahrzeugboni des Technikers) werden jeden Tick mit dieser
 ## Restdauer aufgefrischt: faellt die Quelle weg, erlischt der Buff von selbst.
 const BUFF_AURA_REFRESH: float = 0.5
@@ -2338,14 +2344,21 @@ const TECHNICIAN_SPEED: float = BRAVE_SPEED
 const TECHNICIAN_SHOVE_CHANCE: float = 0.0
 const TECHNICIAN_KICK_CHANCE: float = 0.5
 ## Fahrzeugboni ab dem ersten Techniker in der Besatzung.
-## Tempo: einmalig, stapelt NICHT.
+## Tempo: einmalig, stapelt NICHT — ausser bei der Feuerramme: dort bringt jeder weitere
+## Techniker TECHNICIAN_FIRERAM_SPEED_PER_EXTRA dazu (Nutzervorgabe 2026-11-21; 4er-Crew +48 %).
 const TECHNICIAN_VEHICLE_SPEED_BONUS: float = 0.33
+const TECHNICIAN_FIRERAM_SPEED_PER_EXTRA: float = 0.05
 ## Feuerrate: additive Aufschlaege. Das Katapult bekommt den Grundbonus schon
 ## vom ersten Techniker, die Feuerramme nicht (dort zahlt der erste in
-## Resistenzen fuer die Techniker an Bord).
-const TECHNICIAN_SIEGE_FIRERATE_BASE: float = 0.33
+## Resistenzen fuer die Techniker an Bord). Nutzervorgabe 2026-11-21: Katapult erster 20 %
+## (vorher 33 %), jeder weitere 15 % (6er-Crew +95 %); Feuerramme jeder weitere 12 % (vorher 10 %).
+const TECHNICIAN_SIEGE_FIRERATE_BASE: float = 0.20
+const TECHNICIAN_SIEGE_FIRERATE_PER_EXTRA: float = 0.15
 const TECHNICIAN_FIRERAM_FIRERATE_BASE: float = 0.0
-const TECHNICIAN_FIRERATE_PER_EXTRA: float = 0.10
+const TECHNICIAN_FIRERAM_FIRERATE_PER_EXTRA: float = 0.12
+## Reichweite: der ERSTE Techniker laesst das Katapult 1 m weiter schiessen (Nutzervorgabe
+## 2026-11-21; weitere bringen keine).
+const TECHNICIAN_SIEGE_RANGE_BONUS: float = 1.0
 ## Zeppelin: Huellenreparatur wie die Feuerramme, Sekunden je Trefferpunkt.
 const AIRSHIP_HULL_REGEN_TIME: float = 30.0
 

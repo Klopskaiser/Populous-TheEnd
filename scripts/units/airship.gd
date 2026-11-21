@@ -518,7 +518,7 @@ func _tick_hull_regen(delta: float) -> void:
 
 
 ## Every technician AFTER the first buffs EVERY passenger with strength (stacks
-## multiply). One technician alone gives speed and hull repair, no strength.
+## multiply, BUFF_STRENGTH_MULT each). One technician alone gives speed and hull repair, no strength.
 func crew_aura_for(_member) -> Vector2i:
 	var stacks: int = technician_crew_count() - 1
 	if stacks <= 0:

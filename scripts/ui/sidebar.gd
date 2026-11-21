@@ -1250,21 +1250,21 @@ func _technician_hint(e: CrewedVehicle) -> String:
 	var n: int = e.technician_crew_count()
 	if n <= 0:
 		return ""
-	var speed_pct: int = int(round(Balance.TECHNICIAN_VEHICLE_SPEED_BONUS * 100.0))
+	var speed_pct: int = int(round(e.technician_speed_bonus() * 100.0))
 	match e.unit_kind():
 		&"siege":
-			var s_rate: float = Balance.TECHNICIAN_SIEGE_FIRERATE_BASE 				+ Balance.TECHNICIAN_FIRERATE_PER_EXTRA * float(n - 1)
-			return "  — %d Techniker: +%d %% Tempo, +%d %% Feuerrate" % [
-				n, speed_pct, int(round(s_rate * 100.0))]
+			var s_rate: float = Balance.TECHNICIAN_SIEGE_FIRERATE_BASE 				+ Balance.TECHNICIAN_SIEGE_FIRERATE_PER_EXTRA * float(n - 1)
+			return "  — %d Techniker: +%d %% Tempo, +%d %% Feuerrate, +%d m Reichweite" % [
+				n, speed_pct, int(round(s_rate * 100.0)), int(round(Balance.TECHNICIAN_SIEGE_RANGE_BONUS))]
 		&"fireram":
-			var r_rate: float = Balance.TECHNICIAN_FIRERAM_FIRERATE_BASE 				+ Balance.TECHNICIAN_FIRERATE_PER_EXTRA * float(n - 1)
+			var r_rate: float = Balance.TECHNICIAN_FIRERAM_FIRERATE_BASE 				+ Balance.TECHNICIAN_FIRERAM_FIRERATE_PER_EXTRA * float(n - 1)
 			return "  — %d Techniker: +%d %% Tempo, +%d %% Feuerrate, resistent" % [
 				n, speed_pct, int(round(r_rate * 100.0))]
 		&"airship":
 			if n < 2:
 				return "  — 1 Techniker: +%d %% Tempo, Hüllenreparatur" % [speed_pct]
-			return "  — %d Techniker: +%d %% Tempo, Hüllenreparatur, Stärke x%d" % [
-				n, speed_pct, n - 1]
+			return "  — %d Techniker: +%d %% Tempo, Hüllenreparatur, Stärke x%s" % [
+				n, speed_pct, String.num(pow(Balance.BUFF_STRENGTH_MULT, float(n - 1)), 2)]
 	return "  — %d Techniker: +%d %% Tempo" % [n, speed_pct]
 
 

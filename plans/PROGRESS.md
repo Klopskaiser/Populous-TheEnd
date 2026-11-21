@@ -13348,3 +13348,16 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
 - Tests (`test_economy.gd`): `test_fetch_is_called_off_when_others_supplied_the_wood`,
   `test_worker_returns_when_the_job_ends_while_out`, `test_upgrade_fetch_is_called_off_and_the_worker_returns`.
   Gesamte Suite 8675 bestanden, 0 fehlgeschlagen.
+
+### Balance Fahrzeuge: Holzkosten, Techniker, Feuerstoss der Ramme (2026-11-21)
+
+- Holz (Nutzervorgabe): Feuerrammenwerkstatt 8 (vorher 10), Feuerramme 3 (4), Katapult 5 (6), Luftschiffwerft 18 (20),
+  Luftschiff 7 (8). Der Produktionsaufwand (Arbeiter-Sekunden) blieb unveraendert - die Regel "Aufwand = Holz x 10"
+  gilt damit nicht mehr.
+- Techniker: Katapult erster +20 % Feuerrate (vorher 33 %), jeder weitere +15 % (`TECHNICIAN_SIEGE_FIRERATE_PER_EXTRA`),
+  erster +1 m Reichweite (`SiegeEngine.fire_range()`, auch im Reichweitenring). Feuerramme jeder weitere +12 % Feuerrate
+  (vorher 10 %) und +5 % Tempo (`technician_speed_per_extra`). Luftschiff: Staerke 1,6 je Stapel (`BUFF_STRENGTH_MULT`,
+  vorher 1,5; einzige Quelle sind die Techniker an Bord). Tempo +33 % fuer alle wie bisher.
+- Feuerramme: jeder Feuerstoss macht jeder getroffenen Einheit einmal `FIRERAM_BURST_DAMAGE` (5) flach, der Brand bleibt.
+- Tests: `test_technician.gd`, `test_buffs.gd`, `test_fire_ram.gd` (neu: `test_each_burst_deals_its_flat_damage_once_per_unit`).
+

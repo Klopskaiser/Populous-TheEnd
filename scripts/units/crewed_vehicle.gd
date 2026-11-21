@@ -618,8 +618,22 @@ func _refresh_speed_bonus() -> void:
 		base_speed = speed   # self-heal if a subclass' _init forgot it
 	var mult: float = 1.0
 	if technician_crew_count() > 0:
-		mult += Balance.TECHNICIAN_VEHICLE_SPEED_BONUS
+		mult += technician_speed_bonus()
 	speed = base_speed * mult
+
+
+## The speed surcharge technicians give this vehicle right now (0 without one): the base
+## bonus once, plus technician_speed_per_extra() for every technician after the first.
+func technician_speed_bonus() -> float:
+	var n: int = technician_crew_count()
+	if n <= 0:
+		return 0.0
+	return Balance.TECHNICIAN_VEHICLE_SPEED_BONUS + technician_speed_per_extra() * float(n - 1)
+
+
+## Speed each technician after the first adds — none, except on the fire ram (2026-11-21).
+func technician_speed_per_extra() -> float:
+	return 0.0
 
 
 ## Buff bits (x) and strength stacks (y) this vehicle currently grants `member`.

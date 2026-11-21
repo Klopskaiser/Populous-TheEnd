@@ -104,7 +104,7 @@ func _initialize() -> void:
 	_vehicle_line("Katapult 6 Techn.", Balance.SIEGE_SHOT_SHOCK_DAMAGE,
 		SiegeEngine.fire_cooldown_for_crew(6) / (1.0
 			+ Balance.TECHNICIAN_SIEGE_FIRERATE_BASE
-			+ Balance.TECHNICIAN_FIRERATE_PER_EXTRA * 5.0), attackers)
+			+ Balance.TECHNICIAN_SIEGE_FIRERATE_PER_EXTRA * 5.0), attackers)
 	# Die Ramme setzt einen BRAND: 60 HP ueber 4 s, unabhaengig vom Nachladen.
 	# Der Takt sagt daher nur, wie oft sie einen NEUEN Gegner anzuenden kann.
 	# Der Brand selbst ist der Schaden: solange die Ramme das Ziel angezuendet
@@ -120,7 +120,7 @@ func _initialize() -> void:
 		% [FireRam.flame_cooldown_for_crew(1), FireRam.flame_cooldown_for_crew(4),
 			FireRam.flame_cooldown_for_crew(4) / (1.0
 				+ Balance.TECHNICIAN_FIRERAM_FIRERATE_BASE
-				+ Balance.TECHNICIAN_FIRERATE_PER_EXTRA * 3.0)])
+				+ Balance.TECHNICIAN_FIRERAM_FIRERATE_PER_EXTRA * 3.0)])
 
 	print("")
 	print("=== TIME TO KILL in Sekunden (Zeile schlaegt Spalte, 1 gegen 1) ===")

@@ -94,7 +94,7 @@ func _auto_acquire(delta: float) -> bool:
 		return false
 	if not _due_to_scan(delta):
 		return false
-	var u: Unit = _nearest_enemy_unit(FIRE_RANGE)
+	var u: Unit = _nearest_enemy_unit(fire_range())
 	if u != null:
 		_begin_attack(u)   # auto: _target_ordered stays false (no chase)
 		return true
@@ -132,7 +132,7 @@ func _tick_attack(delta: float) -> void:
 		# A unit stepping into the fire band interrupts the siege (throttled);
 		# the building focus stays as the fallback afterwards.
 		if _due_to_scan(delta):
-			var u: Unit = _nearest_enemy_unit(FIRE_RANGE)
+			var u: Unit = _nearest_enemy_unit(fire_range())
 			if u != null:
 				_begin_attack(u)
 				return
@@ -148,7 +148,7 @@ func _tick_attack(delta: float) -> void:
 func _retarget_or_idle() -> void:
 	_end_attack()
 	if active_crew_count() >= MIN_FIRE_CREW:
-		var u: Unit = _nearest_enemy_unit(FIRE_RANGE)
+		var u: Unit = _nearest_enemy_unit(fire_range())
 		if u != null:
 			_begin_attack(u)
 			return
@@ -170,7 +170,7 @@ func _retarget_or_idle() -> void:
 ## that crept inside the minimum range is swapped for another in-band enemy.
 func _bombard_unit(target: Unit, delta: float) -> void:
 	var dist: float = _flat_dist(position, target.position)
-	if dist > FIRE_RANGE:
+	if dist > fire_range():
 		if not _target_ordered:
 			_end_attack()
 			_retarget_or_idle()
@@ -187,7 +187,7 @@ func _bombard_unit(target: Unit, delta: float) -> void:
 		# Unthrottled: this branch only runs in the rare too-close state. The
 		# catapult never reverses (unlike the fire ram); with no alternative it
 		# holds and waits for the target to clear the minimum.
-		var alt: Unit = _nearest_enemy_unit(FIRE_RANGE)
+		var alt: Unit = _nearest_enemy_unit(fire_range())
 		if alt != null and alt != target:
 			_begin_attack(alt)
 			return
@@ -204,7 +204,7 @@ func _bombard_unit(target: Unit, delta: float) -> void:
 ## buildings — stationary and catchable). Never melees.
 func _bombard_point(target_pos: Vector3, delta: float, approach: bool) -> void:
 	var dist: float = _flat_dist(position, target_pos)
-	if dist > FIRE_RANGE:
+	if dist > fire_range():
 		if not approach:
 			return
 		_in_melee = false
@@ -215,7 +215,7 @@ func _bombard_point(target_pos: Vector3, delta: float, approach: bool) -> void:
 		# knapp INNERHALB der Feuerreichweite — der Schuss fliegt eine Parabel und
 		# kennt kein Gelaende, die Hoehe des Ziels ist ihm also gleichgueltig.
 		_approach(stand_off_point(position, target_pos,
-			FIRE_RANGE * APPROACH_RANGE_FRACTION), delta)
+			fire_range() * APPROACH_RANGE_FRACTION), delta)
 		_face_point(target_pos)
 		return
 	if _has_path():
@@ -255,7 +255,7 @@ func fire_cooldown_now(count: int) -> float:
 	if is_inf(base):
 		return base
 	return base / _tech_rate_multiplier(
-		Balance.TECHNICIAN_SIEGE_FIRERATE_BASE, Balance.TECHNICIAN_FIRERATE_PER_EXTRA)
+		Balance.TECHNICIAN_SIEGE_FIRERATE_BASE, Balance.TECHNICIAN_SIEGE_FIRERATE_PER_EXTRA)
 
 
 func _launch_shot(target_pos: Vector3) -> void:
@@ -429,3 +429,11 @@ func _tick_visual(delta: float) -> void:
 	# winds back over ~0.3 s.
 	var snap: float = 1.0 - _arm_anim
 	_arm.rotation.x = 0.6 - snap * 1.5
+
+
+## How far she fires right now: FIRE_RANGE, 1 m more with a technician aboard (user spec
+## 2026-11-21, TECHNICIAN_SIEGE_RANGE_BONUS).
+func fire_range() -> float:
+	if technician_crew_count() > 0:
+		return FIRE_RANGE + Balance.TECHNICIAN_SIEGE_RANGE_BONUS
+	return FIRE_RANGE

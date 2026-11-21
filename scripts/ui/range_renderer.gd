@@ -100,6 +100,8 @@ func _process(_delta: float) -> void:
 			_add_airship_rings(unit as Airship)
 			continue
 		var r: float = range_for_kind(unit.unit_kind())
+		if unit is SiegeEngine:
+			r = (unit as SiegeEngine).fire_range()   # +1 m with a technician (2026-11-21)
 		if r <= 0.0:
 			continue
 		# Garrisoned tower crew (7h): the real reach is +3 m, centred on the

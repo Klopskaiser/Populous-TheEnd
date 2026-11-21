@@ -230,9 +230,11 @@ func test_training_hall_is_in_the_build_menu() -> void:
 # --- Vehicle bonuses ----------------------------------------------------------
 
 func test_speed_bonus_on_every_vehicle_kind() -> void:
-	for entry in [[SIEGE_SCENE, Balance.SIEGE_SPEED],
-			[FIRERAM_SCENE, Balance.FIRERAM_SPEED],
-			[AIRSHIP_SCENE, Balance.AIRSHIP_SPEED]]:
+	# [scene, base speed, bonus with 1 technician, with 2] — the fire ram adds 5 % for
+	# every technician after the first (user spec 2026-11-21), the others do not stack.
+	for entry in [[SIEGE_SCENE, Balance.SIEGE_SPEED, 0.33, 0.33],
+			[FIRERAM_SCENE, Balance.FIRERAM_SPEED, 0.33, 0.38],
+			[AIRSHIP_SCENE, Balance.AIRSHIP_SPEED, 0.33, 0.33]]:
 		var w: Dictionary = _make_world()
 		var v: CrewedVehicle = _spawn(w, entry[0], Vector2i(30, 30)) as CrewedVehicle
 		_board(w, v, BRAVE_SCENE)
@@ -243,13 +245,17 @@ func test_speed_bonus_on_every_vehicle_kind() -> void:
 		_board(w, v, TECHNICIAN_SCENE)
 		for i in range(20):
 			_tick_world(w)
-		check_near(v.speed, float(entry[1]) * 1.33,
-			"%s with a technician aboard is 33 %% faster" % [v.unit_kind()])
+		check_near(v.technician_speed_bonus(), float(entry[2]),
+			"%s: the technician speed bonus is +%d %%" % [v.unit_kind(), roundi(float(entry[2]) * 100.0)])
+		check_near(v.speed, float(entry[1]) * (1.0 + v.technician_speed_bonus()),
+			"%s with a technician aboard is faster by its bonus" % [v.unit_kind()])
 		_board(w, v, TECHNICIAN_SCENE)
 		for i in range(20):
 			_tick_world(w)
-		check_near(v.speed, float(entry[1]) * 1.33,
-			"%s: a second technician does NOT stack the speed" % [v.unit_kind()])
+		check_near(v.technician_speed_bonus(), float(entry[3]),
+			"%s: with a second technician +%d %%" % [v.unit_kind(), roundi(float(entry[3]) * 100.0)])
+		check_near(v.speed, float(entry[1]) * (1.0 + float(entry[3])),
+			"%s: and drives that much faster" % [v.unit_kind()])
 		_free_world(w)
 
 
@@ -266,15 +272,34 @@ func test_catapult_fire_rate_bonus_is_additive() -> void:
 	for i in range(20):
 		_tick_world(w)
 	check(cat.technician_crew_count() == 1, "one technician serves")
-	check_near(cat.fire_cooldown_now(3), SiegeEngine.fire_cooldown_for_crew(3) / 1.33,
-		"the first technician gives +33 % fire rate")
+	check_near(cat.fire_cooldown_now(3), SiegeEngine.fire_cooldown_for_crew(3) / 1.20,
+		"the first technician gives +20 % fire rate (2026-11-21, before 33 %)")
 	_board(w, cat, TECHNICIAN_SCENE)
 	_board(w, cat, TECHNICIAN_SCENE)
 	for i in range(20):
 		_tick_world(w)
 	check(cat.technician_crew_count() == 3, "three technicians serve")
-	check_near(cat.fire_cooldown_now(5), SiegeEngine.fire_cooldown_for_crew(5) / 1.53,
-		"every further one adds 10 %, additively (33 + 10 + 10)")
+	check_near(cat.fire_cooldown_now(5), SiegeEngine.fire_cooldown_for_crew(5) / 1.50,
+		"every further one adds 15 %, additively (20 + 15 + 15; 2026-11-21)")
+	_free_world(w)
+
+
+## User spec 2026-11-21: the catapult's first technician adds 1 m of range (more do not).
+func test_catapult_technician_adds_one_metre_of_range() -> void:
+	var w: Dictionary = _make_world()
+	var cat: SiegeEngine = _spawn(w, SIEGE_SCENE, Vector2i(30, 30)) as SiegeEngine
+	_board(w, cat, BRAVE_SCENE)
+	for i in range(20):
+		_tick_world(w)
+	check_near(cat.fire_range(), SiegeEngine.FIRE_RANGE, "without a technician: the plain range")
+	_board(w, cat, TECHNICIAN_SCENE)
+	for i in range(20):
+		_tick_world(w)
+	check_near(cat.fire_range(), SiegeEngine.FIRE_RANGE + 1.0, "the first technician: +1 m")
+	_board(w, cat, TECHNICIAN_SCENE)
+	for i in range(20):
+		_tick_world(w)
+	check_near(cat.fire_range(), SiegeEngine.FIRE_RANGE + 1.0, "a second one adds no more range")
 	_free_world(w)
 
 
@@ -290,8 +315,8 @@ func test_fire_ram_first_technician_gives_no_rate_bonus() -> void:
 	_board(w, ram, TECHNICIAN_SCENE)
 	for i in range(20):
 		_tick_world(w)
-	check_near(ram.flame_cooldown_now(2), FireRam.flame_cooldown_for_crew(2) / 1.10,
-		"the second one adds 10 %")
+	check_near(ram.flame_cooldown_now(2), FireRam.flame_cooldown_for_crew(2) / 1.12,
+		"the second one adds 12 % (2026-11-21, before 10 %)")
 	_free_world(w)
 
 
@@ -326,12 +351,12 @@ func test_airship_strength_aura_starts_with_the_second_technician() -> void:
 	check(brave.buff_stacks(Unit.BUFF_STRENGTH) == 1,
 		"the second technician buffs EVERY passenger with one stack")
 	check(t1.buff_stacks(Unit.BUFF_STRENGTH) == 1, "the technicians included")
-	check_near(brave.attack_multiplier(), 1.5, "which is 1.5x damage")
+	check_near(brave.attack_multiplier(), 1.6, "which is 1.6x damage (2026-11-21, before 1.5)")
 	_board(w, ship, TECHNICIAN_SCENE)
 	for i in range(10):
 		_tick_world(w)
 	check(brave.buff_stacks(Unit.BUFF_STRENGTH) == 2, "a third one adds a stack")
-	check_near(brave.attack_multiplier(), 2.25, "stacks multiply")
+	check_near(brave.attack_multiplier(), 2.56, "stacks multiply")
 	_free_world(w)
 
 

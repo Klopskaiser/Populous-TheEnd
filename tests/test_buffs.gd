@@ -279,8 +279,8 @@ func test_strength_multiplies_melee_damage() -> void:
 	var u: Unit = _spawn(w, BRAVE_SCENE, 0, _cell(w, 20, 20))
 	var base: int = u.melee_damage(&"punch")
 	u.set_aura_buffs(Unit.BUFF_STRENGTH, 1)
-	check_near(u.attack_multiplier(), 1.5, "one stack = 1.5x")
-	check(u.melee_damage(&"punch") == int(round(float(base) * 1.5)),
+	check_near(u.attack_multiplier(), Balance.BUFF_STRENGTH_MULT, "one stack = BUFF_STRENGTH_MULT (1.6x since 2026-11-21)")
+	check(u.melee_damage(&"punch") == int(round(float(base) * Balance.BUFF_STRENGTH_MULT)),
 		"and the punch hits that much harder")
 	_free_world(w)
 
@@ -289,9 +289,9 @@ func test_strength_stacks_multiply() -> void:
 	var w: Dictionary = _make_world()
 	var u: Unit = _spawn(w, BRAVE_SCENE, 0, _cell(w, 20, 20))
 	u.set_aura_buffs(Unit.BUFF_STRENGTH, 2)
-	check_near(u.attack_multiplier(), 2.25, "two stacks = 1.5^2")
+	check_near(u.attack_multiplier(), pow(Balance.BUFF_STRENGTH_MULT, 2.0), "two stacks = mult^2")
 	u.set_aura_buffs(Unit.BUFF_STRENGTH, 3)
-	check_near(u.attack_multiplier(), 3.375, "three stacks = 1.5^3")
+	check_near(u.attack_multiplier(), pow(Balance.BUFF_STRENGTH_MULT, 3.0), "three stacks = mult^3")
 	check(u.buff_stacks(Unit.BUFF_STRENGTH) == 3, "and the count is readable")
 	_free_world(w)
 
@@ -316,12 +316,12 @@ func test_strength_scales_the_fireball() -> void:
 	var full: int = victim.health
 	var ball: Fireball = Fireball.new()
 	ball.setup(shooter, victim, shooter.position + Vector3(0.0, 1.1, 0.0))
-	check_near(ball.strength_mult, 1.5, "the ball takes the multiplier along")
+	check_near(ball.strength_mult, Balance.BUFF_STRENGTH_MULT, "the ball takes the multiplier along")
 	for i in range(60):
 		ball.tick(TICK)
 		if ball.done:
 			break
-	var expected: int = int(round(float(Unit.FIREBALL_DAMAGE) * 1.5))
+	var expected: int = int(round(float(Unit.FIREBALL_DAMAGE) * Balance.BUFF_STRENGTH_MULT))
 	check(full - victim.health == expected,
 		"a strengthened firewarrior burns %d instead of %d" % [
 			expected, Unit.FIREBALL_DAMAGE])
@@ -337,7 +337,7 @@ func test_the_fireball_freezes_the_multiplier_at_launch() -> void:
 	var ball: Fireball = Fireball.new()
 	ball.setup(shooter, victim, shooter.position + Vector3(0.0, 1.1, 0.0))
 	shooter.set_aura_buffs(0)   # buff lost while the ball is in the air
-	check_near(ball.strength_mult, 1.5,
+	check_near(ball.strength_mult, Balance.BUFF_STRENGTH_MULT,
 		"the shot keeps the strength it was fired with")
 	ball.free()
 	_free_world(w)

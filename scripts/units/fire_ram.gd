@@ -32,6 +32,9 @@ const MIN_RANGE: float = Balance.FIRERAM_MIN_RANGE
 const FLAME_WIDTH: float = Balance.FIRERAM_FLAME_WIDTH
 const FLAME_END_WIDTH: float = Balance.FIRERAM_FLAME_END_WIDTH
 const FLAME_DURATION: float = Balance.FIRERAM_FLAME_DURATION
+## Flat damage of ONE burst to every unit the jet hits (user spec 2026-11-21) — once per
+## burst and unit, however often it leaves and re-enters the jet; the burn comes on top.
+const BURST_DAMAGE: int = Balance.FIRERAM_BURST_DAMAGE
 const COOLDOWN_MIN_CREW: float = Balance.FIRERAM_COOLDOWN_MIN_CREW
 const COOLDOWN_FULL_CREW: float = Balance.FIRERAM_COOLDOWN_FULL_CREW
 const RAM_AGGRO: float = Balance.FIRERAM_AGGRO_RADIUS
@@ -101,6 +104,9 @@ var _fire_hits: int = 0
 ## Bumped at the START of each own flame burst so one sustained burst counts as
 ## ONE hit on a target while separate bursts each count (see fire_attack_key).
 var _burst_seq: int = 0
+## Instance ids of the units the RUNNING burst already dealt BURST_DAMAGE to (cleared at
+## the start of every burst).
+var _burst_struck: Dictionary = {}
 ## Attack keys already counted toward _fire_hits (per-source/-attack throttle);
 ## cleared once the ram fully regenerates.
 var _seen_attacks: Dictionary = {}
@@ -578,6 +584,7 @@ func _burn_point(target_pos: Vector3, delta: float, approach: bool,
 	_flame_time = FLAME_DURATION
 	_flame_check = 0.0   # first area check right away
 	_burst_seq += 1      # new burst -> new fire_attack_key (one hit per burst)
+	_burst_struck.clear()   # every burst deals its BURST_DAMAGE afresh
 	_show_flame_cone(true)
 	# Dedicated attack whoosh — was wrongly reusing "siege_burning" (reserved
 	# for the vehicle CATCHING fire via ignite(), see CrewedVehicle) for every
@@ -629,13 +636,13 @@ static func flame_cooldown_for_crew(count: int) -> float:
 ## Reload of THIS ram: the static crew formula divided by the technician
 ## surcharge. Unlike the catapult the FIRST technician gives nothing here — he
 ## pays in resistances for the technicians aboard instead (user spec
-## 2026-09-09); every further one adds 10 %, so a full crew of four is +30 %.
+## 2026-09-09); every further one adds 12 % (2026-11-21), so a full crew of four is +36 %.
 func flame_cooldown_now(count: int) -> float:
 	var base: float = flame_cooldown_for_crew(count)
 	if is_inf(base):
 		return base
 	return base / _tech_rate_multiplier(
-		Balance.TECHNICIAN_FIRERAM_FIRERATE_BASE, Balance.TECHNICIAN_FIRERATE_PER_EXTRA)
+		Balance.TECHNICIAN_FIRERAM_FIRERATE_BASE, Balance.TECHNICIAN_FIRERAM_FIRERATE_PER_EXTRA)
 
 
 ## Nearest enemy unit inside `max_range` that the ram may burn (its splash-like
@@ -711,6 +718,13 @@ func _apply_flames() -> void:
 			var side: float = rel.x * right.x + rel.z * right.z
 			if along < 0.0 or along > FIRE_RANGE or absf(side) > _flame_half_width(along):
 				continue
+			# The burst's flat damage, once per unit and burst (2026-11-21).
+			var id: int = u.get_instance_id()
+			if not _burst_struck.has(id):
+				_burst_struck[id] = true
+				u.take_damage(BURST_DAMAGE, self)
+				if u.state == State.DEAD:
+					continue
 			u.scorch(origin, self)
 	# Buildings: sample the rectangle's centreline; one lava-contact credit
 	# per building per check (FLAME_CONTACT_FACTOR beats the grace window).
@@ -906,3 +920,8 @@ func _tick_visual(delta: float) -> void:
 		_flame_mm.set_instance_transform(i, Transform3D(
 			Basis.IDENTITY.scaled(Vector3(scale, scale, scale)),
 			Vector3(cx, cy, cz)))
+
+
+## Every technician after the first makes the ram 5 % faster still (user spec 2026-11-21).
+func technician_speed_per_extra() -> float:
+	return Balance.TECHNICIAN_FIRERAM_SPEED_PER_EXTRA
