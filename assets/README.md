@@ -320,6 +320,13 @@ nichts. Beim Tritt kommt der Fuß jetzt von oben (Sohle vor dem Treffer mindeste
 korrigiert: der Oberarm taucht beim Durchschwingen nicht mehr in den Oberkörper (der alte `swipe` ist entfernt). Die alten `walk`/`kick` liegen nur noch in der Werkstatt
 (`LIESMICH_POPULOUS.md`, Abschnitt „Niedliches Gehen und Treten“).
 
+**Stand 2026-11-21:** die drei Modelle haben **22 Knochen** (dazu `leftToes`, `rightToes`) und sind mit
+`--bewegung=./golem_bewegung_niedlich_ballen.mjs --zehen` erzeugt. Die Schuhe knicken am Ballen: in `grow` steht sie auf den Ballen (Ferse
+hoch, Vorfuß am Boden), in `walk` rollt der Schuh beim Abdrücken über den Ballen ab, statt als Ganzes auf die Spitze zu kippen; der
+niedliche Gang ist dabei leicht zurückgenommen (Becken und Knie auf 80 %). Je steifer der Schuh, desto niedriger die Ferse (Golem >
+Genesisgolem > Dämonengolem). Namen, Dauern und Schrittweg sind unverändert, 39 der 41 Clips zahlengleich; `golem_sit_anim.gd` zählt die
+Zehenknochen zu den Beinen (8 statt 6 Spuren in der Bein-Ebene). Einzelheiten: `LIESMICH_POPULOUS.md`, Abschnitt „Ballenstand beim Strecken“.
+
 ### Bäume — `models/trees/<kind>.glb`
 
 Ein Modell je Baumtyp, gezeichnet in **ausgewachsener** Größe (Platzhalter: rund 3 m

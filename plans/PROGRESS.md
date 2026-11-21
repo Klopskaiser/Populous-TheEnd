@@ -13300,3 +13300,20 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
 - Geprueft: Werkstatt `golem_pruefen.mjs` 0 Fehler je Modell (misst seit heute auch Arme gegen den Rumpf); `--headless --import`;
   `test_golem.gd` 1589, `test_demon_golem.gd` 174, `test_genesis_golem.gd` 119 bestanden, 0 fehlgeschlagen. Standbilder mit dem Renderer
   von Godot: `gymnastikschuh/out/golem_spiel/bilder/`. Offen: im laufenden Spiel hat die neuen Clips noch niemand angesehen.
+
+### Golems: Schuhe knicken am Ballen - Ballenstand in grow, Abrollen in walk (2026-11-21)
+
+- Modelle: `golem.glb`, `golem_demon.glb`, `golem_genesis.glb` neu aus der Werkstatt (`D:gamegymnastikschuhoutgolem_spiel`,
+  `--bewegung=./golem_bewegung_niedlich_ballen.mjs --zehen`), weiter je 41 Clips, jetzt **22 Knochen** (dazu `leftToes`, `rightToes`).
+  Netze und 39 Clips sind zahlengleich mit dem Stand davor; anders sind `grow` und `walk`.
+- `grow`: Ballenstand statt Abrollen des starren Schuhs auf die Spitze - Ferse hoch (Golem 40 / 52 Grad, Genesisgolem 36 / 47,
+  Daemonengolem 32 / 42; links / rechts), Vorfuss am Boden, Knick am Zehengelenk. Schuhspitzen weiter nach innen, Zeiten unveraendert.
+- `walk`: beim Abdruecken (36 bis 62 % des Schritts) dreht der Fuss um das Zehengelenk, der Vorfuss bleibt liegen (Ferse am Ende 53 / 50 /
+  46 Grad; vorher kippte der Schuh starr auf 40 Grad). Der niedliche Gang ist auf 80 % zurueckgenommen (Becken, Knie nach innen,
+  gestreckte Spitze des Spielbeins); Spur, Schuhspitzen nach innen und Arme wie vorher. Dauer und Schrittweg unveraendert - kein Spielcode geaendert.
+- Test: `test_sit_animation_layers_filter_legs_and_arms` erwartet jetzt 8 statt 6 Beinspuren (`GolemSitAnim.part_of` zaehlte `toe` schon
+  zu den Beinen; das Modell bringt die Knochen erst jetzt mit).
+- Geprueft: Werkstatt `golem_pruefen.mjs` 0 Fehler je Modell (misst jetzt Ballenstand, Knick am Ballen und dass der Ballen nicht rutscht);
+  `--headless --import`; `test_golem.gd` 1589, `test_demon_golem.gd` 174, `test_genesis_golem.gd` 119 bestanden, 0 fehlgeschlagen;
+  `--headless --quit` ohne Fehler. Die uebrigen Testdateien liefen nicht (sie laden die Modelle nicht). Standbilder mit dem Renderer von
+  Godot: `gymnastikschuh/out/golem_spiel/bilder/ballen_*`. Offen: im laufenden Spiel hat die neuen Clips noch niemand angesehen.

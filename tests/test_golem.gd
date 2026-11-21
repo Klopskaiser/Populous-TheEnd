@@ -4949,8 +4949,10 @@ func test_sit_animation_layers_filter_legs_and_arms() -> void:
 	var has_clips: bool = player.has_animation(&"sit_stomp_l")
 	check(layers.tree != null, "the tree is built")
 	check(layers.usable() == has_clips, "it is in use exactly when the model brings sit attack clips")
-	check(layers.leg_paths.size() == 6 and layers.arm_paths.size() == 8,
-		"6 leg and 8 arm tracks (%d / %d)" % [layers.leg_paths.size(), layers.arm_paths.size()])
+	# Seit 2026-11-21 bringt das Modell die Zehenknochen mit (leftToes, rightToes: der Schuh
+	# knickt in grow und walk am Ballen) - sie zaehlen zu den Beinen: 8 statt 6 Spuren.
+	check(layers.leg_paths.size() == 8 and layers.arm_paths.size() == 8,
+		"8 leg and 8 arm tracks (%d / %d)" % [layers.leg_paths.size(), layers.arm_paths.size()])
 	var legs: AnimationNodeOneShot = layers._blend.get_node(&"legs") as AnimationNodeOneShot
 	var arms: AnimationNodeOneShot = layers._blend.get_node(&"arms") as AnimationNodeOneShot
 	var leg_path: NodePath = layers.leg_paths[0]
