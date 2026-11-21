@@ -1815,10 +1815,13 @@ func _sit_damage_tick() -> void:
 
 ## Debug view (RangeRenderer, key G; user request 2026-11-18): the outlines to draw for her, flat in world
 ## x/z, as [[group, PackedVector2Array], ...] — group "legs", "arms", "big", "seat" while she sits; "body",
-## "limb", "air" in the crab stand. Empty when she neither sits nor crawls.
+## "limb", "air" in the crab stand. Standing or crouched (user request 2026-11-21): her stand attacks,
+## see stand_zone_outlines. Empty while she sits down or gets up from the seat.
 func debug_zone_outlines() -> Array:
 	var out: Array = []
-	if stance != STANCE_SIT or is_switching_stance() or _seat_center == Vector3.INF:
+	if stance != STANCE_SIT:
+		return stand_zone_outlines()
+	if is_switching_stance() or _seat_center == Vector3.INF:
 		return out
 	if is_crabbing():
 		out.append(["body", _debug_circle(position, crab_body_radius())])
@@ -1839,6 +1842,35 @@ func debug_zone_outlines() -> Array:
 	return out
 
 
+## Debug view of her STAND attacks (user request 2026-11-21, like the sit zones): built from the same
+## measures _in_hit_zone uses, in her current heading. "legs": the kick's lanes of both legs (kick, kick_l);
+## "arms": the circles of the slam and the drum around the spot where the hands come down; "big": the
+## stomp around her centre (only when she may jump at all); "air": the reach of the swat at airships
+## (only when she can strike them).
+func stand_zone_outlines() -> Array:
+	var out: Array = []
+	var frame: Array[Vector3] = _heading_frame()
+	var forward: Vector3 = frame[0]
+	var right: Vector3 = frame[1]
+	var ext: Vector2 = _kick_extent()
+	var half: float = KICK_HALF_WIDTH * reach_factor() + Balance.GOLEM_KICK_LANE_SLACK
+	for side in [1.0, -1.0]:
+		var mid: float = side * kick_leg_offset()
+		var lane: PackedVector2Array = PackedVector2Array()
+		for c in [Vector2(-half, -ext.y), Vector2(-half, ext.x), Vector2(half, ext.x), Vector2(half, -ext.y)]:
+			var p: Vector3 = position + right * (mid + c.x) + forward * c.y
+			lane.append(Vector2(p.x, p.z))
+		out.append(["legs", lane])
+	var hands: Vector3 = position + forward * (SLAM_FORWARD * limb_factor())
+	out.append(["arms", _debug_circle(hands, ground_radius(ATTACK_SLAM))])
+	out.append(["arms", _debug_circle(hands, ground_radius(ATTACK_DRUM))])
+	if stomp_enabled:
+		out.append(["big", _debug_circle(position, stomp_radius())])
+	if can_strike_air():
+		out.append(["air", _debug_circle(position, reach(), 64)])
+	return out
+
+
 static func _debug_circle(c: Vector3, r: float, n: int = 40) -> PackedVector2Array:
 	var pts: PackedVector2Array = PackedVector2Array()
 	for i in range(n):
@@ -1849,7 +1881,7 @@ static func _debug_circle(c: Vector3, r: float, n: int = 40) -> PackedVector2Arr
 
 func take_damage(amount: int, attacker = null) -> void:
 	if state != State.DEAD and amount > 0:
-		var k: StringName = (attacker as Unit).unit_kind() if attacker is Unit and is_instance_valid(attacker) else &"other"
+		var k: StringName = (attacker as Unit).unit_kind() if is_instance_valid(attacker) and attacker is Unit else &"other"
 		damage_taken[k] = int(damage_taken.get(k, 0)) + amount
 	super.take_damage(amount, attacker)
 

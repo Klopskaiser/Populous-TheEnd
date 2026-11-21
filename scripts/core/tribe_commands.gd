@@ -68,7 +68,7 @@ func _unit_active(unit: Unit) -> bool:
 func order_golem_sit(units: Array[Unit]) -> int:
 	var n: int = 0
 	for u in units:
-		if u is Golem and is_instance_valid(u) and u.state != Unit.State.DEAD \
+		if is_instance_valid(u) and u is Golem and u.state != Unit.State.DEAD \
 				and (u.tribe == null or not u.tribe.eliminated) and (u as Golem).sit_down():
 			n += 1
 	return n
@@ -78,7 +78,7 @@ func order_golem_sit(units: Array[Unit]) -> int:
 func order_golem_stand(units: Array[Unit]) -> int:
 	var n: int = 0
 	for u in units:
-		if u is Golem and is_instance_valid(u) and u.state != Unit.State.DEAD \
+		if is_instance_valid(u) and u is Golem and u.state != Unit.State.DEAD \
 				and (u as Golem).stand_up():
 			n += 1
 	return n
@@ -89,7 +89,7 @@ func order_golem_stand(units: Array[Unit]) -> int:
 func set_golem_stationary(units: Array[Unit], on: bool) -> int:
 	var n: int = 0
 	for u in units:
-		if u is Golem and is_instance_valid(u) and u.state != Unit.State.DEAD:
+		if is_instance_valid(u) and u is Golem and u.state != Unit.State.DEAD:
 			(u as Golem).set_sit_stationary(on)
 			n += 1
 	return n
@@ -99,7 +99,7 @@ func set_golem_stationary(units: Array[Unit], on: bool) -> int:
 ## up; otherwise every golem that can sits down. Returns how many answered.
 func toggle_golem_sit(units: Array[Unit]) -> int:
 	for u in units:
-		if u is Golem and is_instance_valid(u) and (u as Golem)._wants_sit:
+		if is_instance_valid(u) and u is Golem and (u as Golem)._wants_sit:
 			return order_golem_stand(units)
 	return order_golem_sit(units)
 

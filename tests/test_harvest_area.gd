@@ -303,6 +303,29 @@ func test_area_job_delivers_to_nearest_own_building() -> void:
 	_free_world(w)
 
 
+## Regression (user bug 2026-11-21): "left operand of 'is' is a previously freed instance" in
+## Brave._tick_loose_deliver — the wood station she carried to was freed during the walk, and the
+## arrival checked `is WoodDepot` before is_instance_valid. Now the load drops as a ground pile.
+func test_loose_delivery_survives_a_freed_target() -> void:
+	var w: Dictionary = _make_world()
+	var brave: Brave = _brave_at(w, Vector2i(20, 21))
+	var gone: WoodDepot = DEPOT_SCENE.instantiate() as WoodDepot
+	brave.carried_wood = 3
+	brave.state = Unit.State.GATHER
+	brave._start_loose_deliver()
+	brave._loose_deliver_goal = brave.position   # already there: the next tick delivers
+	brave._loose_deliver_recheck = 1.0            # no re-pick of the target this tick
+	brave._loose_deliver_building = gone
+	gone.free()
+	brave.tick(TICK)
+	check(brave.carried_wood == 0, "the load is put down")
+	check(brave._loose_deliver_building == null, "the freed target is forgotten")
+	var piled: int = w.wpm.wood_in_radius(brave.position, 2.0)
+	check(piled == 3,"as a ground pile at her feet (%d)" % piled)
+	brave._interrupt_tasks()
+	_free_world(w)
+
+
 func test_area_job_prefers_a_nearby_wood_depot() -> void:
 	var w: Dictionary = _make_world()
 	# Hut right next door, depot 15 m away: the depot still wins for an AREA job.

@@ -133,7 +133,8 @@ func _add_airship_rings(ship: Airship) -> void:
 			C_PREACHER)
 
 
-## A seated (or crawling) golem: the outlines of her sit zones (Golem.debug_zone_outlines).
+## A golem: the outlines of her attack zones (Golem.debug_zone_outlines) — sit zones while she sits or
+## crawls, stand zones (kick lanes, slam/drum circles, stomp, swat reach; 2026-11-21) otherwise.
 func _add_golem_zones(g: Golem) -> void:
 	for z in g.debug_zone_outlines():
 		if not _batch_open:

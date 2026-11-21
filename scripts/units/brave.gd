@@ -1445,8 +1445,10 @@ func _tick_loose_deliver(delta: float) -> void:
 	if wood_pile_manager != null:
 		# Deliver INTO a wood depot's rack first; leftovers (rack full) and
 		# non-depot targets drop as a normal ground pile.
-		if _loose_deliver_building is WoodDepot \
-				and is_instance_valid(_loose_deliver_building):
+		# Validity FIRST: the target may have been freed during the walk (demolished,
+		# destroyed) and `is` on a freed instance is a script error (user bug 2026-11-21).
+		if is_instance_valid(_loose_deliver_building) \
+				and _loose_deliver_building is WoodDepot:
 			carried_wood -= (_loose_deliver_building as WoodDepot).store_wood(carried_wood)
 		if carried_wood > 0:
 			wood_pile_manager.deposit(position, carried_wood)
@@ -1907,7 +1909,8 @@ func _tick_carry_hold(delta: float) -> void:
 func _drop_held_wood() -> void:
 	# Into a rack first (that is what "tidy the wood away" means now), leftovers and
 	# non-depot targets as a normal ground pile — which an own building absorbs.
-	if _carry_drop_into is WoodDepot and is_instance_valid(_carry_drop_into) 			and (_carry_drop_into as WoodDepot).is_usable():
+	if is_instance_valid(_carry_drop_into) and _carry_drop_into is WoodDepot \
+			and (_carry_drop_into as WoodDepot).is_usable():
 		carried_wood -= (_carry_drop_into as WoodDepot).store_wood(carried_wood)
 	if wood_pile_manager != null and carried_wood > 0:
 		wood_pile_manager.deposit(position, carried_wood)

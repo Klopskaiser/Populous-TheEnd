@@ -5834,6 +5834,56 @@ func test_sit_zone_debug_outlines_match_the_zones() -> void:
 	_free_world(w)
 
 
+## Debugansicht der Standangriffe (Nutzerwunsch 2026-11-21, Taste G wie die Sitzzonen): stehend und gebueckt zeigt
+## sie die Schneisen beider Beine, die Kreise von Handschlag und Trommeln, den Sprung und — wenn sie Luftschiffe
+## schlagen kann — die Reichweite des Luftschlags. Jeder Umriss umschliesst genau die Flaeche, die _in_hit_zone trifft.
+func test_stand_zone_debug_outlines_match_the_hit_zones() -> void:
+	var w: Dictionary = _make_world()
+	var g: Golem = _golem(w, 0, Vector3(64, 5, 64))
+	g.facing = Vector3(0.6, 0, 0.8)
+	g.snap_heading()
+	var frame: Array[Vector3] = g._heading_frame()
+	for stage in [0, Balance.GOLEM_FINAL_BONUS_LEVEL]:
+		while g.level < stage:
+			g._credit_kill()
+		var zones: Array = g.debug_zone_outlines()
+		var groups: Dictionary = {}
+		for z in zones:
+			groups[z[0]] = int(groups.get(z[0], 0)) + 1
+		check(int(groups.get("legs", 0)) == 2 and int(groups.get("arms", 0)) == 2 and int(groups.get("big", 0)) == 1,
+			"level %d: two kick lanes, slam and drum circle, the stomp (%s)" % [stage, str(groups)])
+		check(groups.has("air") == g.can_strike_air(), "level %d: the swat reach only when she can strike airships" % stage)
+		var kinds: Array = [Golem.ATTACK_KICK, Golem.ATTACK_KICK, Golem.ATTACK_SLAM, Golem.ATTACK_DRUM, Golem.ATTACK_STOMP]
+		for i in range(kinds.size()):
+			var kind: StringName = kinds[i]
+			g.kick_side = 1.0 if i == 0 else -1.0
+			var pts: PackedVector2Array = zones[i][1]
+			var centre: Vector2 = Vector2.ZERO
+			for q in pts:
+				centre += q
+			centre /= float(pts.size())
+			var inside: int = 0
+			var outside: int = 0
+			for q in pts:
+				var to: Vector2 = (centre - q).normalized()
+				var qi: Vector2 = q + to * 0.1
+				var qo: Vector2 = q - to * 0.1
+				if g._in_hit_zone(kind, Vector3(qi.x, 5, qi.y), frame[0], frame[1]):
+					inside += 1
+				if not g._in_hit_zone(kind, Vector3(qo.x, 5, qo.y), frame[0], frame[1]):
+					outside += 1
+			check(inside == pts.size(), "level %d, %s #%d: points just inside are struck (%d of %d)" % [stage, kind, i, inside, pts.size()])
+			check(outside == pts.size(), "level %d, %s #%d: points just outside are not (%d of %d)" % [stage, kind, i, outside, pts.size()])
+	var ranges: RangeRenderer = RangeRenderer.new()
+	ranges.setup(w.um, 0, w.td)
+	ranges._ready()
+	ranges.enabled = true
+	ranges._process(TICK)
+	check(ranges._im.get_surface_count() == 1, "key G draws them for a standing golem (one batched surface)")
+	ranges.free()
+	_free_world(w)
+
+
 ## Drehen im Krebsstand (Nutzervorgabe 2026-11-18): crab_turn_l / crab_turn_r nach der echten Drehrate
 ## (links = gegen den Uhrzeigersinn von oben, wie sit_turn_l), abgespielt mit Drehrate / 33,3 Grad je
 ## Durchlauf, damit nichts rutscht; dreht sie beim Krabbeln, gewinnt, was Haende und Fuesse schneller bewegt.
