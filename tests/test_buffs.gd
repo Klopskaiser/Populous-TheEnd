@@ -279,7 +279,7 @@ func test_strength_multiplies_melee_damage() -> void:
 	var u: Unit = _spawn(w, BRAVE_SCENE, 0, _cell(w, 20, 20))
 	var base: int = u.melee_damage(&"punch")
 	u.set_aura_buffs(Unit.BUFF_STRENGTH, 1)
-	check_near(u.attack_multiplier(), Balance.BUFF_STRENGTH_MULT, "one stack = BUFF_STRENGTH_MULT (1.6x since 2026-11-21)")
+	check_near(u.attack_multiplier(), Balance.BUFF_STRENGTH_MULT, "one stack = BUFF_STRENGTH_MULT (1.8x since 2026-11-21)")
 	check(u.melee_damage(&"punch") == int(round(float(base) * Balance.BUFF_STRENGTH_MULT)),
 		"and the punch hits that much harder")
 	_free_world(w)

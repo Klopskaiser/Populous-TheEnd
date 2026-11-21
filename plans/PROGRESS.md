@@ -13356,7 +13356,7 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
   gilt damit nicht mehr.
 - Techniker: Katapult erster +20 % Feuerrate (vorher 33 %), jeder weitere +15 % (`TECHNICIAN_SIEGE_FIRERATE_PER_EXTRA`),
   erster +1 m Reichweite (`SiegeEngine.fire_range()`, auch im Reichweitenring). Feuerramme jeder weitere +12 % Feuerrate
-  (vorher 10 %) und +5 % Tempo (`technician_speed_per_extra`). Luftschiff: Staerke 1,6 je Stapel (`BUFF_STRENGTH_MULT`,
+  (vorher 10 %) und +5 % Tempo (`technician_speed_per_extra`). Luftschiff: Staerke 1,8 je Stapel (`BUFF_STRENGTH_MULT`,
   vorher 1,5; einzige Quelle sind die Techniker an Bord). Tempo +33 % fuer alle wie bisher.
 - Feuerramme: jeder Feuerstoss macht jeder getroffenen Einheit einmal `FIRERAM_BURST_DAMAGE` (5) flach, der Brand bleibt.
 - Tests: `test_technician.gd`, `test_buffs.gd`, `test_fire_ram.gd` (neu: `test_each_burst_deals_its_flat_damage_once_per_unit`).

@@ -25,7 +25,7 @@ const PLANT_SPACING: int = 1
 const AREA_TREE_CAP: int = 30
 ## Mana per second drained per ACTIVE worker.
 const MANA_PER_WORKER: float = Balance.FORESTER_MANA_PER_WORKER
-## Worker-seconds of work per sapling: 4 active workers -> one per 15 s.
+## Worker-seconds of work per sapling: 4 active workers -> one per 7.5 s (2026-11-21, before 12.5 s).
 const PLANT_WORK_PER_TREE: float = Balance.FORESTER_PLANT_WORK_PER_TREE
 
 const C_WALL: Color = Color(0.42, 0.3, 0.16)

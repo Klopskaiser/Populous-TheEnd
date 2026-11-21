@@ -1915,14 +1915,14 @@ const FIREWARRIOR_CAMP_HP: int = 900
 const FIREWARRIOR_CAMP_TRAINING_TIME: float = 3.0   # war 4,0 (Nutzervorgabe 2026-11-21: -1 s)
 
 # --- Förster ---
-const FORESTER_WOOD_COST: int = 18
+const FORESTER_WOOD_COST: int = 15   # war 18 (Nutzervorgabe 2026-11-21)
 const FORESTER_HP: int = 375
 ## Mana/s je aktivem Arbeiter im Gebäude (Phase 10k: 1,5 -> 0,6; eine volle
 ## Försterei kostet damit 2,4 Mana/s). Mit 1,5 hätten fünf Förstereien nach der
 ## gedämpften Manakurve das GESAMTE Einkommen aufgefressen.
 const FORESTER_MANA_PER_WORKER: float = 0.6
-## Arbeiter-Sekunden pro gepflanztem Baum (4 Arbeiter -> 15 s).
-const FORESTER_PLANT_WORK_PER_TREE: float = 50.0
+## Arbeiter-Sekunden pro gepflanztem Baum (4 Arbeiter -> 7,5 s; Nutzervorgabe 2026-11-21, vorher 50).
+const FORESTER_PLANT_WORK_PER_TREE: float = 30.0
 
 # --- Katapultwerkstatt ---
 const WORKSHOP_WOOD_COST: int = 12          # war 13 (10h)
@@ -2324,11 +2324,11 @@ const BUFF_CONVERT_RESIST_DELAY: float = 3.0
 ## Der Vorlauf verfaellt, wenn so lange kein Bekehrungsversuch mehr kam — der
 ## Prediger hat aufgehoert. Muss ueber dem Scan-Takt (0,25 s) liegen.
 const BUFF_CONVERT_RESIST_GRACE: float = 0.6
-## Staerke: Angriffsmultiplikator je Stapel, multiplikativ (2 Stapel = 2,56x).
+## Staerke: Angriffsmultiplikator je Stapel, multiplikativ (2 Stapel = 3,24x).
 ## Wirkt auf Nahkampf UND die Feuerbaelle des Feuerkriegers. Einzige Quelle bisher: die
-## Techniker nach dem ersten auf dem Luftschiff (1,6 je Stapel, Nutzervorgabe 2026-11-21;
+## Techniker nach dem ersten auf dem Luftschiff (1,8 je Stapel, Nutzervorgabe 2026-11-21;
 ## vorher 1,5).
-const BUFF_STRENGTH_MULT: float = 1.6
+const BUFF_STRENGTH_MULT: float = 1.8
 ## Auren (z. B. die Fahrzeugboni des Technikers) werden jeden Tick mit dieser
 ## Restdauer aufgefrischt: faellt die Quelle weg, erlischt der Buff von selbst.
 const BUFF_AURA_REFRESH: float = 0.5

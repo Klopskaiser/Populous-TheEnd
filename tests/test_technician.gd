@@ -351,12 +351,12 @@ func test_airship_strength_aura_starts_with_the_second_technician() -> void:
 	check(brave.buff_stacks(Unit.BUFF_STRENGTH) == 1,
 		"the second technician buffs EVERY passenger with one stack")
 	check(t1.buff_stacks(Unit.BUFF_STRENGTH) == 1, "the technicians included")
-	check_near(brave.attack_multiplier(), 1.6, "which is 1.6x damage (2026-11-21, before 1.5)")
+	check_near(brave.attack_multiplier(), 1.8, "which is 1.8x damage (2026-11-21, before 1.5)")
 	_board(w, ship, TECHNICIAN_SCENE)
 	for i in range(10):
 		_tick_world(w)
 	check(brave.buff_stacks(Unit.BUFF_STRENGTH) == 2, "a third one adds a stack")
-	check_near(brave.attack_multiplier(), 2.56, "stacks multiply")
+	check_near(brave.attack_multiplier(), 3.24, "stacks multiply")
 	_free_world(w)
 
 
