@@ -44,6 +44,11 @@ const REPAIR_RATE: float = 10.0     # building HP repaired per second per worker
 const JOB_TREE_RADIUS: float = 40.0 # tree search radius around the site
 const CHOP_CHAIN_RADIUS: float = 8.0
 const TASK_RETRY: float = 0.6
+## How often a worker out fetching wood checks whether the job still needs it (s), and how
+## far from the building a worker whose job ended still walks back to it (m) — user bug
+## 2026-11-21: they stood idle in the woods once others had supplied the wood.
+const FETCH_CHECK_INTERVAL: float = 0.5
+const JOB_RETURN_MIN_DIST: float = 4.0
 ## Consecutive seek failures double the retry delay up to this cap (a worker
 ## whose goals stay unreachable must not burn a full-map failing A* at the
 ## base cadence forever)...
@@ -103,6 +108,8 @@ var _retry_timer: float = 0.0
 ## Throttle for the job reachability re-check (phase 10d): terrain deformation
 ## can cut a worker off from its site mid-job.
 var _job_reach_timer: float = 0.0
+## Throttle for the "is my wood fetch still needed?" check (_job_needs_my_wood).
+var _fetch_check_timer: float = 0.0
 ## Consecutive unreachable-goal failures (escalating backoff, see
 ## _on_seek_failed); reset by any successfully completed sub-task.
 var _seek_fail_streak: int = 0
@@ -797,9 +804,19 @@ func _tick_state(delta: float) -> void:
 
 func _tick_job(delta: float) -> void:
 	if job == null or not is_instance_valid(job) or not _job_active():
+		if _return_from_ended_job():
+			return
 		_interrupt_tasks()
 		_set_state(State.IDLE)
 		return
+	# Wood brought by others (user bug 2026-11-21): a fetch nobody needs any more is
+	# called off — on the way to the tree or pile she turns back to the site, with wood
+	# in hand she brings it there. Throttled; the check is a few sums.
+	_fetch_check_timer -= delta
+	if _fetch_check_timer <= 0.0:
+		_fetch_check_timer = FETCH_CHECK_INTERVAL
+		if (task == Task.CHOP or task == Task.PICKUP) and not _job_needs_my_wood():
+			_call_off_fetch()
 	# Terrain deformation (landbridge, earthquake, sink) can cut a worker off
 	# from its site. Checked once a second (O(1) island compare): the brave then
 	# drops its wood where it stands and quits instead of walking forever
@@ -1269,6 +1286,81 @@ func _tick_upgrade(delta: float) -> void:
 	_face_toward(job.center_world())
 	if not job.work_upgrade(BUILD_RATE * Balance.HUT_UPGRADE_RATE_FACTOR * delta):
 		_end_subtask()
+
+
+## Does the job still need the wood THIS brave is fetching? Like _job_wants_wood, but
+## without her own share (carried + claimed tree) in the incoming wood — counted in, her
+## own claim would always make the fetch look needed. False when the wood the others
+## bring (and what lies at the site) already covers the demand.
+func _job_needs_my_wood() -> bool:
+	if job == null or not is_instance_valid(job):
+		return false
+	var others: int = job.wood_incoming() - carried_wood - claimed_tree_yield()
+	if job.under_construction:
+		return not job.demolishing and job.wood_needed_total() > others
+	if job.upgrading:
+		return job.upgrade_wood_missing() > others
+	if job is Workshop and job.health >= job.max_health:
+		# Workshop stock (Workshop.wants_more_stock_wood) counts the occupants' wood in
+		# hand and claimed — hers taken out again, like `others` above.
+		var ws: Workshop = job as Workshop
+		if not ws.is_usable():
+			return false
+		var incoming: int = -(carried_wood + claimed_tree_yield())
+		for b in ws.occupants:
+			if is_instance_valid(b):
+				incoming += b.carried_wood + b.claimed_tree_yield()
+		return ws.stock_wood() + incoming < ws.stock_target()
+	return not job.demolishing and job.health > 0 and job.health < job.max_health \
+		and job.repair_wood_missing() > others
+
+
+## Calls off a wood fetch the job no longer needs (user bug 2026-11-21): the claimed tree
+## or pile is let go; wood already in hand goes to the site, else she re-chooses at once
+## (and walks back to build, repair or upgrade).
+func _call_off_fetch() -> void:
+	if tree_manager != null and _tree_valid(task_tree):
+		tree_manager.release_claim(task_tree, self)
+	task_tree = null
+	task_pile = null
+	_set_working(false)
+	if carried_wood > 0:
+		task = Task.DELIVER
+		_reset_seek()
+		return
+	_end_subtask()
+
+
+## The job ended while she was out (user bug 2026-11-21: the site was finished or the
+## upgrade done with wood others brought — before, she dropped her load on the spot and
+## stood idle in the woods, too far for the hut to take her back in). She walks back to
+## the building: with wood in hand she puts it down there (it absorbs it like any
+## delivery), empty-handed she just returns — near the building the hut's growth control
+## picks her up as crew again. False when there is nothing to return to or she is there.
+func _return_from_ended_job() -> bool:
+	if job == null or not is_instance_valid(job) or job.health <= 0 or job.demolishing \
+			or job.tribe_id != tribe_id or not job.worker_can_reach(position):
+		return false
+	var home: Vector3 = job.delivery_point()
+	var into: Building = job
+	var wood: int = carried_wood
+	if wood <= 0 and _flat_dist(position, home) <= JOB_RETURN_MIN_DIST:
+		return false
+	carried_wood = 0   # (kept out of _interrupt_tasks, which would drop it right here)
+	_interrupt_tasks()
+	carried_wood = wood
+	if wood > 0:
+		carry_hold = true
+		_carry_hold_timer = 0.0
+		_carry_drop_goal = home
+		_carry_drop_into = into
+		task = Task.NONE
+		_reset_seek()
+		_set_state(State.GATHER)
+		return true
+	_set_state(State.IDLE)
+	order_move(home)
+	return true
 
 
 ## Wood demand of the current job (construction vs. upgrade vs. repair vs.

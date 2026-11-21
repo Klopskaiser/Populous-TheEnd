@@ -509,6 +509,132 @@ func test_failed_subtask_backs_off() -> void:
 	_free_world(w)
 
 
+## User bug 2026-11-21: braves fetching wood for a site or an upgrade stood still once the
+## wood had come from elsewhere. Now: on the way to the tree she turns back to the site, with
+## wood in hand she brings it there; if the job ended meanwhile she walks back to the building
+## (with her load, which she puts down there) instead of dropping it in the woods and idling.
+func _fetching_worker(w: Dictionary) -> Array:
+	var hut: Hut = w.commands.place_building(w.tribe, HUT_SCENE, Vector2i(60, 60)) as Hut
+	hut._flatten_remaining.clear()
+	hut.foundation_done = true
+	var tree: TreeResource = w.tree_manager.spawn_tree(Vector2i(60, 85), 4)
+	var worker: Brave = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(60, 64))) as Brave
+	worker.order_build(hut)
+	var ticks: int = 0
+	while worker.task != Brave.Task.CHOP and ticks < 200:
+		worker.tick(TICK)
+		ticks += 1
+	return [hut, tree, worker]
+
+
+func test_fetch_is_called_off_when_others_supplied_the_wood() -> void:
+	var w: Dictionary = _make_world()
+	var got: Array = _fetching_worker(w)
+	var hut: Hut = got[0]
+	var tree: TreeResource = got[1]
+	var worker: Brave = got[2]
+	check(worker.task == Brave.Task.CHOP and worker.task_tree == tree, "she sets off for the tree")
+	for i in range(20):
+		worker.tick(TICK)
+	check(worker.task == Brave.Task.CHOP, "her own claim does not call the fetch off")
+	var far: float = worker._flat_dist(worker.position, tree.position)
+	check(far > Brave.CHOP_RANGE, "still on the way (%.1f m to the tree)" % far)
+	# Someone else drops the whole price at the site.
+	w.wood_pile_manager.deposit(hut.delivery_point(), hut.wood_needed_total())
+	for i in range(int(Brave.FETCH_CHECK_INTERVAL / TICK) + 2):
+		worker.tick(TICK)
+	check(worker.task != Brave.Task.CHOP and worker.task_tree == null, "she turns back (task %d)" % worker.task)
+	check(not tree.claimers.has(worker), "the tree claim is let go")
+	check(worker.state == Unit.State.BUILD and worker.job == hut, "she stays on the job")
+
+	# With wood in hand the load goes to the site.
+	var w2: Dictionary = _make_world()
+	var got2: Array = _fetching_worker(w2)
+	var worker2: Brave = got2[2]
+	worker2.carried_wood = 2
+	w2.wood_pile_manager.deposit((got2[0] as Hut).delivery_point(), (got2[0] as Hut).wood_needed_total())
+	for i in range(int(Brave.FETCH_CHECK_INTERVAL / TICK) + 2):
+		worker2.tick(TICK)
+	check(worker2.task == Brave.Task.DELIVER and worker2.carried_wood == 2, "with wood in hand she brings it back")
+	_free_world(w2)
+	_free_world(w)
+
+
+func test_worker_returns_when_the_job_ends_while_out() -> void:
+	var w: Dictionary = _make_world()
+	var got: Array = _fetching_worker(w)
+	var hut: Hut = got[0]
+	var worker: Brave = got[2]
+	worker.position = w.nav.cell_to_world(Vector2i(60, 80))   # out in the woods
+	worker.carried_wood = 2
+	hut.finish_construction()
+	worker.tick(TICK)
+	check(worker.carried_wood == 2, "she keeps her load instead of dropping it in the woods")
+	check(worker.holds_wood_for_drop() and worker._carry_drop_goal == hut.delivery_point(),
+		"she carries it back to the building")
+	var ticks: int = 0
+	while worker.carried_wood > 0 and ticks < 2000:
+		worker.tick(TICK)
+		ticks += 1
+	check(worker.carried_wood == 0, "the load is put down (%d ticks)" % ticks)
+	check(worker._flat_dist(worker.position, hut.delivery_point()) <= Brave.DELIVER_RANGE + 0.5,
+		"at the building")
+	check(w.wood_pile_manager.wood_in_radius(hut.delivery_point(), Building.ABSORB_RADIUS) >= 2,
+		"the wood lies at the building")
+	check(worker.state == Unit.State.IDLE, "then she idles there")
+
+	# Empty-handed she just walks back.
+	var w2: Dictionary = _make_world()
+	var got2: Array = _fetching_worker(w2)
+	var hut2: Hut = got2[0]
+	var worker2: Brave = got2[2]
+	worker2.position = w2.nav.cell_to_world(Vector2i(60, 80))
+	hut2.finish_construction()
+	worker2.tick(TICK)
+	check(worker2.state == Unit.State.MOVE, "empty-handed she walks back")
+	ticks = 0
+	while worker2.state == Unit.State.MOVE and ticks < 2000:
+		w2.unit_manager.tick(TICK)   # resolves the path request
+		worker2.tick(TICK)
+		ticks += 1
+	check(worker2._flat_dist(worker2.position, hut2.delivery_point()) <= Brave.JOB_RETURN_MIN_DIST,
+		"back at the building (%.1f m after %d ticks, state %d)" % [
+			worker2._flat_dist(worker2.position, hut2.delivery_point()), ticks, worker2.state])
+	_free_world(w2)
+	_free_world(w)
+
+
+## The same for a hut upgrade (10f): the rack (or anyone) brings the upgrade wood -> the fetch
+## is called off; the upgrade finishes while she is out with wood -> she carries it back.
+func test_upgrade_fetch_is_called_off_and_the_worker_returns() -> void:
+	var w: Dictionary = _make_world()
+	var hut: Hut = w.commands.place_building(w.tribe, HUT_SCENE, Vector2i(60, 60)) as Hut
+	hut.finish_construction()
+	hut.upgrading = true
+	hut.upgrade_wood = 0
+	var tree: TreeResource = w.tree_manager.spawn_tree(Vector2i(60, 85), 4)
+	var worker: Brave = w.unit_manager.spawn_unit(
+		BRAVE_SCENE, 0, w.nav.cell_to_world(Vector2i(60, 64))) as Brave
+	worker.order_upgrade(hut)
+	var ticks: int = 0
+	while worker.task != Brave.Task.CHOP and ticks < 200:
+		worker.tick(TICK)
+		ticks += 1
+	check(worker.task == Brave.Task.CHOP and worker.task_tree == tree, "the upgrade worker sets off for wood")
+	w.wood_pile_manager.deposit(hut.delivery_point(), Balance.HUT_UPGRADE_WOOD_COST)
+	for i in range(int(Brave.FETCH_CHECK_INTERVAL / TICK) + 2):
+		worker.tick(TICK)
+	check(worker.task != Brave.Task.CHOP and worker.job == hut, "the wood came from elsewhere: she turns back")
+	worker.position = w.nav.cell_to_world(Vector2i(60, 80))
+	worker.carried_wood = 1
+	hut._finish_upgrade()
+	worker.tick(TICK)
+	check(worker.holds_wood_for_drop() and worker._carry_drop_goal == hut.delivery_point(),
+		"the upgrade is done while she is out: she carries her wood back")
+	_free_world(w)
+
+
 func test_workers_use_piles_before_trees() -> void:
 	var w: Dictionary = _make_world()
 	var tm: TreeManager = w.tree_manager

@@ -13332,3 +13332,19 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
   und gegen feindliche Golems, Genesisgolem als Hauswache, Sitzen ab 30 m, Golems nach Leben gewichtet, Blitz/Feuerregen
   und Feuerkrieger gegen feindliche Golems, keine Miliz gegen Golems. Tests in `test_ai.gd`.
 
+
+### Bugfix: Holzholer bleiben stehen, wenn das Holz anderweitig kam (2026-11-21)
+
+- Nutzermeldung: Braves, die fuer Bau oder Ausbau Holz holen, blieben stehen, sobald das Holz von anderswo kam.
+- Ursache 1: endete der Auftrag unterwegs (Baustelle fertig, Ausbau fertig), liess `_interrupt_tasks` die Ladung an Ort
+  und Stelle fallen und der Brave stand untaetig im Wald - zu weit, als dass die Huette ihn wieder als Besatzung holte.
+  Jetzt (`Brave._return_from_ended_job`): mit Holz traegt er es zum Gebaeude und legt es dort ab (Trage-Mechanik von 10h),
+  ohne Holz laeuft er zurueck (ab `JOB_RETURN_MIN_DIST` 4 m Abstand).
+- Ursache 2: lief der Auftrag noch, war das Holz aber gedeckt, ging er trotzdem weiter zum Baum - Baustelle und Werkstatt
+  zaehlen seinen eigenen beanspruchten Baum als "unterwegs". Jetzt prueft er alle 0,5 s (`FETCH_CHECK_INTERVAL`) ohne
+  seinen eigenen Anteil (`_job_needs_my_wood`); wird er nicht mehr gebraucht, laesst er Baum oder Stapel los, kehrt um
+  und baut weiter - mit Holz in der Hand bringt er es zur Baustelle (`_call_off_fetch`). Gilt fuer Bau, Ausbau, Reparatur
+  und Werkstattvorrat.
+- Tests (`test_economy.gd`): `test_fetch_is_called_off_when_others_supplied_the_wood`,
+  `test_worker_returns_when_the_job_ends_while_out`, `test_upgrade_fetch_is_called_off_and_the_worker_returns`.
+  Gesamte Suite 8675 bestanden, 0 fehlgeschlagen.
