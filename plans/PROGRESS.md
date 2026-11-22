@@ -13453,3 +13453,18 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
   ist nur die Ruhepose (ein Frame), damit kein Platzhalter aufblitzt. Krieger hat nur sit, airborne, Leichen.
   `sit`, `roll`, liegende Posen unveraendert. Manifeste: fps der Leichen unter "dead". Pruefer ohne Fehler,
   Suite gruen; nicht im laufenden Spiel angesehen.
+
+### Tritt holt aus; Tritt-Schneise ab 30 m nach dem Clip (2026-11-22)
+
+- Modelle: `kick` / `kick_l` aller drei Golems holen jetzt aus (Unterschenkel schnippt vor dem Schnapptritt nach hinten
+  oben; Werkstatt `golem_bewegung_niedlich_ausholen.mjs`). 4-m-Modell: Bein 1,55 m hinter dem Ursprung (vorher 0,67),
+  Fussspitze 2,27-2,29 m davor (vorher 2,10-2,12). Dauer und Treffzeit unveraendert, 39 Clips zahlengleich.
+- Schneise (Nutzervorgabe: "wir balancen nur die Werte nach 30 m, wenn das Wachstum genau skaliert; dort so anpassen,
+  dass es zur Animation passt"): ab `GOLEM_BODY_SCALE_HEIGHT` reicht sie vorn bis zur Fussspitze, hinten so weit, wie
+  das Bein ausholt. `GOLEM_KICK_ANIM_TOE` / `_BACK` (gemessen, je der groesste Wert der drei Golems), daraus
+  `GOLEM_BODY_KICK_FRONT_SHARE` (0,95 -> 0,986) und neu `GOLEM_BODY_KICK_BACK_SHARE` (0,961) in `Golem._kick_extent`.
+  31,3 m: 19,9 statt 19,2 m vor, 13,6 statt 14,2 m zurueck. Nachgemessen gegen die Clips: ab 30 m bei allen drei
+  Golems 0-1 % Abweichung. Unter 30 m unveraendert (dort ist die Schneise beim normalen Golem laenger als das Bein,
+  Daemonen- und Genesisgolem ragen zwischen etwa 14 und 29 m bis 22 % hinaus).
+- Tests: `test_golem.gd` (31,3 m: Laenge vorn und hinten, Kopplung an die Modellmasse; 80 m: hinten mit dem neuen
+  Anteil). Nicht im laufenden Spiel angesehen.

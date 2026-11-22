@@ -1228,7 +1228,12 @@ func test_each_leg_kicks_into_its_own_lane() -> void:
 	while not big.can_sit():
 		big._credit_kill()
 	check_near(big.kick_leg_offset(), Golem.KICK_HALF_WIDTH * big.reach_factor(), "31,3 m: the two lanes just touch in the middle")
-	check_near(big._kick_extent().x, 19.2, "31,3 m: 5 %% shorter ahead (%.1f m)" % big._kick_extent().x, 0.1)
+	# From 30 m on the lane follows the clip (2026-11-22): as far as the toe ahead, as far as the leg swings back.
+	check_near(big._kick_extent().x, 19.95, "31,3 m: ahead to the toe of the kicking shoe (%.2f m)" % big._kick_extent().x, 0.01)
+	check_near(big._kick_extent().y, 13.61, "31,3 m: behind as far as the leg swings back (%.2f m)" % big._kick_extent().y, 0.01)
+	var ms: Vector3 = big.model_scale() * big.size_factor()
+	check_near(big._kick_extent().x, Balance.GOLEM_KICK_ANIM_TOE * ms.z, "the toe measured in the 4-m model, scaled like the model", 0.001)
+	check_near(big._kick_extent().y, Balance.GOLEM_KICK_ANIM_BACK * ms.z, "the leg measured in the 4-m model, scaled like the model", 0.001)
 	big.free()
 
 
@@ -1968,7 +1973,7 @@ func test_hit_zones_slam_front_half_of_the_body_kick_lane_only() -> void:
 		"kick: the lane runs through the whole body circle, ahead and behind")
 	var lane: Vector2 = g._kick_extent()
 	check_near(lane.x, Balance.GOLEM_KICK_LENGTH * g.kick_limb_factor() * Balance.GOLEM_BODY_KICK_FRONT_SHARE,
-		"kick: the lane is as long as her leg reaches, from 30 m 5 % shorter ahead")
+		"kick: the lane is as long as her leg reaches, from 30 m to the toe of the clip")
 	check(lane.x > body and g._in_hit_zone(Golem.ATTACK_KICK, at.call(lane.x - 0.2, 0.0), forward, right)
 		and not g._in_hit_zone(Golem.ATTACK_KICK, at.call(lane.x + 0.5, 0.0), forward, right),
 		"kick: and ends there (%.1f m ahead)" % lane.x)
@@ -2919,7 +2924,7 @@ func test_kick_lane_is_ten_percent_shorter_at_the_top() -> void:
 		"80 m: the share it has at 31,3 m, both grow with the body (%.4f)" % (g.kick_limb_factor() / g.limb_factor()), 0.0001)
 	var lane: Vector2 = g._kick_extent()
 	check_near(lane.x, Balance.GOLEM_KICK_LENGTH * g.kick_limb_factor() * Balance.GOLEM_BODY_KICK_FRONT_SHARE, "%.1f m ahead" % lane.x, 0.001)
-	check_near(lane.y, Balance.GOLEM_KICK_LENGTH * Balance.GOLEM_KICK_BACK_SHARE * g.kick_limb_factor(),
+	check_near(lane.y, Balance.GOLEM_KICK_LENGTH * Balance.GOLEM_KICK_BACK_SHARE * g.kick_limb_factor() * Balance.GOLEM_BODY_KICK_BACK_SHARE,
 		"%.1f m behind" % lane.y, 0.001)
 	check(lane.x > g.reach(), "still longer than her reach (%.1f m)" % g.reach())
 	_free_world(w)

@@ -4598,8 +4598,10 @@ func _hit_zone_reach(kind: StringName) -> float:
 func _kick_extent() -> Vector2:
 	var long: float = kick_limb_factor()   # the leg's length, not the lane's width
 	var body: float = trample_radius()
-	var front: float = Balance.GOLEM_BODY_KICK_FRONT_SHARE if body_scaled() else 1.0   # 2026-11-18
-	return Vector2(maxf(KICK_LENGTH * long * front, body), maxf(KICK_BACK * long, body))
+	# From 30 m on: as far as the clip's toe reaches ahead and its leg swings back (2026-11-22).
+	var front: float = Balance.GOLEM_BODY_KICK_FRONT_SHARE if body_scaled() else 1.0
+	var back: float = Balance.GOLEM_BODY_KICK_BACK_SHARE if body_scaled() else 1.0
+	return Vector2(maxf(KICK_LENGTH * long * front, body), maxf(KICK_BACK * long * back, body))
 
 
 ## Is this point struck by the attack `kind`? (User spec 2026-11-15.)

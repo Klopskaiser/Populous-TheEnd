@@ -818,9 +818,21 @@ const GOLEM_BODY_REACH_FACTOR_AT_ANCHOR: float = 2.276884
 const GOLEM_BODY_SLAM_SCALE_AT_ANCHOR: float = 2.706449
 const GOLEM_BODY_LIMB_FACTOR_AT_ANCHOR: float = 5.215458
 const GOLEM_BODY_KICK_LIMB_AT_ANCHOR: float = 4.761154
-## Ab GOLEM_BODY_SCALE_HEIGHT ist die Tritt-Schneise VORN um diesen Anteil kuerzer (Nutzervorgabe
-## 2026-11-18: "auf 31,3 m vorne etwas kuerzen, 5 %" — 31,3 m: 19,2 statt 20,2 m; hinten unveraendert).
-const GOLEM_BODY_KICK_FRONT_SHARE: float = 0.95
+## Ab GOLEM_BODY_SCALE_HEIGHT folgt die Tritt-Schneise der ANIMATION (Nutzervorgabe 2026-11-22: "wir balancen
+## nur die Werte nach 30 m, wenn das Wachstum genau skaliert; dort so anpassen, dass es zur Animation passt (vorne
+## laenger, hinten kuerzer)" — ersetzt "vorne 5 % kuerzen" vom 2026-11-18). Darunter bleibt alles, wie es war.
+## Vorn reicht sie bis zur Fussspitze beim Treffer, hinten so weit, wie das Bein ausholt. Gemessen am Clip kick
+## (golem_bewegung_niedlich_ausholen.mjs, 2026-11-22) im 4-m-Modell, je der groesste Wert der drei Golems
+## (Spitze: normaler Golem 2,291 / Genesis 2,275 / Daemon 2,266 m; Bein: Daemon 1,563 / normal 1,553 / Genesis 1,552 m).
+## Aendert sich der Clip, die beiden Masse nachmessen. Das Modell waechst ab 30 m wie body_anchor_ratio
+## (Modellbreite = Modelltiefe), daraus die Anteile an der bisherigen Laenge: vorn 0,986 (31,3 m: 19,9 statt
+## 19,2 m), hinten 0,961 (31,3 m: 13,6 statt 14,2 m).
+const GOLEM_KICK_ANIM_TOE: float = 2.2914
+const GOLEM_KICK_ANIM_BACK: float = 1.5630
+const GOLEM_BODY_KICK_FRONT_SHARE: float = GOLEM_KICK_ANIM_TOE * GOLEM_BODY_ANCHOR_WIDTH \
+	/ (GOLEM_KICK_LENGTH * GOLEM_BODY_KICK_LIMB_AT_ANCHOR)
+const GOLEM_BODY_KICK_BACK_SHARE: float = GOLEM_KICK_ANIM_BACK * GOLEM_BODY_ANCHOR_WIDTH \
+	/ (GOLEM_KICK_LENGTH * GOLEM_KICK_BACK_SHARE * GOLEM_BODY_KICK_LIMB_AT_ANCHOR)
 ## EIGENE SCHNEISE JE BEIN (Nutzervorgabe 2026-11-18, wie im Sitzen): die Schneise des Tritts liegt
 ## um den Abstand des Beins zur Seite versetzt — rechtes Bein (Clip kick) rechts, linkes (kick_l) links.
 ## Der Abstand waechst mit dem Koerper und ist so gewaehlt, dass die beiden Schneisen sich ab

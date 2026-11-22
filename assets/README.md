@@ -346,6 +346,12 @@ niedliche Gang ist dabei leicht zurückgenommen (Becken und Knie auf 80 %). Je s
 Genesisgolem > Dämonengolem). Namen, Dauern und Schrittweg sind unverändert, 39 der 41 Clips zahlengleich; `golem_sit_anim.gd` zählt die
 Zehenknochen zu den Beinen (8 statt 6 Spuren in der Bein-Ebene). Einzelheiten: `LIESMICH_POPULOUS.md`, Abschnitt „Ballenstand beim Strecken“.
 
+**Stand 2026-11-22:** `kick` und `kick_l` **holen aus** (erzeugt mit `--bewegung=./golem_bewegung_niedlich_ausholen.mjs --zehen`): Vor dem
+Schnapptritt schnippt der Unterschenkel nach hinten oben. Im 4-m-Modell reicht das Bein 1,55 m hinter den Ursprung (vorher 0,67 m) und
+die Fußspitze 2,27–2,29 m davor (vorher 2,10–2,12 m) – beim normalen Golem in der Ausgangsgröße 2,04 m und 3,01 m. Dauer (1,2 s) und
+Treffzeit (0,5 s) sind unverändert, die 39 übrigen Clips zahlengleich. Einzelheiten: `LIESMICH_POPULOUS.md`, Abschnitt „Niedlicher
+Tritt mit Ausholen“.
+
 ### Bäume — `models/trees/<kind>.glb`
 
 Ein Modell je Baumtyp, gezeichnet in **ausgewachsener** Größe (Platzhalter: rund 3 m
