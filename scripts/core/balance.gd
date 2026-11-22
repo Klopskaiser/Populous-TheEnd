@@ -837,7 +837,10 @@ const GOLEM_BODY_KICK_BACK_SHARE: float = GOLEM_KICK_ANIM_BACK * GOLEM_BODY_ANCH
 ## um den Abstand des Beins zur Seite versetzt — rechtes Bein (Clip kick) rechts, linkes (kick_l) links.
 ## Der Abstand waechst mit dem Koerper und ist so gewaehlt, dass die beiden Schneisen sich ab
 ## GOLEM_BODY_SCALE_HEIGHT in der Mitte genau beruehren (halbe Schneisenbreite bei 31,3 m); darunter ist
-## die Schneise im Verhaeltnis breiter und sie ueberlappen (gewollt). Getreten wird mit dem Bein, das
+## die Schneise des normalen Golems im Verhaeltnis breiter und sie ueberlappen (gewollt). Der Abstand ist
+## nie groesser als die halbe Schneisenbreite (Bugfix 2026-11-22: Daemon- und Genesisgolem hatten
+## zwischen ~17 und 30 m eine Luecke in der Mitte, ein Ziel genau vor ihnen wurde nie getroffen;
+## Golem.kick_leg_offset). Getreten wird mit dem Bein, das
 ## mehr trifft; bei Gleichstand das auf der Seite des Ziels, sonst abwechselnd. Ein Ziel genau vor ihr
 ## liegt in beiden Schneisen (GOLEM_KICK_LANE_SLACK).
 const GOLEM_KICK_LANE_SLACK: float = 0.001

@@ -6306,3 +6306,65 @@ func test_seated_selection_ring_shows_the_target_circle() -> void:
 		"seated: the ring's outer edge lies on the target circle (%.2f m)" % g.target_radius(), 0.001)
 	check(seated.x < standing.x, "and is smaller than the plain ring (factor 0,5 x %.1f)" % Balance.GOLEM_SIT_TARGET_RADIUS_FACTOR)
 	_free_world(w)
+
+
+## Bugfix 2026-11-22 (Spieltest): ein ~20 m hoher Daemonengolem trat im Stehen nach einem Feuerkrieger
+## genau vor sich und traf nie — der stand zwischen den beiden Schneisen. Unter 30 m wuchs der Beinabstand
+## mit der Koerperbreite (der Daemon ist 25 % breiter), die Schneise nur langsam; ab ~17 m (Genesis ~19 m)
+## klaffte in der Mitte eine Luecke. Jetzt: der Beinabstand ist hoechstens die halbe Schneisenbreite.
+## Steht bewusst am Dateiende: jeder Spawn zieht aus dem geseedeten RNG, und davor eingefuegt verschob der
+## Test den Strom so, dass test_sitting_she_turns_for_a_much_better_attack (strom-empfindlich) fehlschlug.
+func test_kick_lanes_leave_no_gap_in_the_middle() -> void:
+	var w: Dictionary = _make_world()
+	var d: DemonGolem = _spawn(w, load("res://scenes/units/demon_golem.tscn"), 0, Vector3(64, 5, 64)) as DemonGolem
+	while d.height_m() < 19.9:
+		d._credit_kill()
+	check_near(d.height_m(), 20.0, "(the demon golem at 20 m)")
+	d._stretch_queued = false
+	d.knock_height_override = 0.0   # no throw dice (keeps the seeded RNG stream of later tests untouched)
+	d.stance = Golem.STANCE_STAND
+	d.facing = Vector3(0, 0, 1)
+	d._heading = Vector3(0, 0, 1)
+	var half: float = Golem.KICK_HALF_WIDTH * d.reach_factor()
+	check(d.kick_leg_offset() <= half + Balance.GOLEM_KICK_LANE_SLACK,
+		"20 m: the legs' lanes touch or overlap (offset %.2f, half width %.2f)" % [d.kick_leg_offset(), half])
+	# A fire warrior right in the middle ahead, beyond the hands' circle but inside the lane's length.
+	var ahead: float = (Golem.SLAM_FORWARD * d.limb_factor() + d.ground_radius(Golem.ATTACK_DRUM) + d._kick_extent().x) * 0.5
+	var fw: Unit = _spawn(w, load("res://scenes/units/firewarrior.tscn"), 1, Vector3(64, 5, 64.0 + ahead))
+	fw.max_health = 100000
+	fw.health = 100000
+	var frame: Array[Vector3] = d._heading_frame()
+	for side in [1.0, -1.0]:
+		d.kick_side = side
+		check(d._in_hit_zone(Golem.ATTACK_KICK, fw.position, frame[0], frame[1]),
+			"the target in the middle lies in the lane of the %s leg" % ("right" if side > 0.0 else "left"))
+	check(d.attack_worth(Golem.ATTACK_KICK) > 0.0, "so the kick is worth something against it")
+	d._kick()
+	check(fw.health < 100000, "and the kick lands on it (%d HP left)" % fw.health)
+	_free_world(w)
+	# No golem has a gap at any size: offset <= half the lane's width.
+	# (normal golem up to 80 m, demon golem up to 119 m — he falls apart at 120 —, genesis golem up to 100 m)
+	for entry in [["res://scenes/units/golem.tscn", 80.0], ["res://scenes/units/demon_golem.tscn", 119.0],
+			["res://scenes/units/genesis_golem.tscn", 100.0]]:
+		var path: String = entry[0]
+		var g: Golem = (load(path) as PackedScene).instantiate() as Golem
+		var worst: float = -INF
+		var at: float = 0.0
+		for i in range(2000):
+			var gap: float = g.kick_leg_offset() - Golem.KICK_HALF_WIDTH * g.reach_factor()
+			if gap > worst:
+				worst = gap
+				at = g.height_m()
+			if g.height_m() >= entry[1] - 0.01:
+				break   # grown to the end
+			if g is GenesisGolem:
+				var gen: GenesisGolem = g as GenesisGolem
+				if gen.stage < 8:
+					gen.credit_brave(1.0)
+				else:
+					gen.grow_by_wood(200.0)
+			else:
+				g._credit_kill()
+		check(worst <= Balance.GOLEM_KICK_LANE_SLACK,
+			"%s: no gap between the lanes at any size (worst %.3f m at %.1f m)" % [path.get_file(), worst, at])
+		g.free()

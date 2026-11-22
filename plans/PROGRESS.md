@@ -13470,6 +13470,30 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
 - Tests: `test_golem.gd` (31,3 m: Laenge vorn und hinten, Kopplung an die Modellmasse; 80 m: hinten mit dem neuen
   Anteil). Nicht im laufenden Spiel angesehen.
 
+### Bugfix: Luecke zwischen den Tritt-Schneisen (2026-11-22, Spieltest)
+
+- Meldung: ein Daemonengolem mit ca. 20 m griff im Stehen einen Feuerkrieger mit dem Tritt an und traf nie, weil der
+  genau zwischen den beiden Beinzonen (`kick` / `kick_l`) stand.
+- Ursache: `Golem.kick_leg_offset()` waechst mit der Koerperbreite (`body_anchor_ratio`), die halbe Schneisenbreite
+  (`KICK_HALF_WIDTH * reach_factor()`) unter 30 m mit dem langsamen Flaechenwachstum. Beim normalen Golem ueberlappen
+  die Schneisen darunter (wie dokumentiert). Daemon (25 % breiter, `_base_reach_factor` = Groesse^0,25) und Genesis
+  ueberholt der Beinabstand die halbe Breite: Luecke in der Mitte beim Daemon von 17 bis 29 m (0,29 -> 1,89 m breit,
+  bei 20 m 0,68 m), beim Genesis von 19 bis 29,5 m (bis 1,23 m). Ein Ziel genau vor ihr lag in keiner Schneise,
+  der Tritt war 0 wert, sie trat trotzdem (nichts anderes traf) — Endlosschleife ohne Treffer. Ab 30 m sind beide
+  Werte gleich (Schneisen beruehren sich), deshalb ist der Commit 03c13e7 (Schneise ab 30 m nach dem Clip, nur die
+  Laenge) nicht beteiligt; der Fehler besteht seit den Schneisen je Bein (2026-11-18).
+- Fix: `kick_leg_offset()` ist hoechstens die halbe Schneisenbreite. Die Schneisen beruehren sich bei Daemon und
+  Genesis zwischen etwa 17 und 30 m in der Mitte; beim normalen Golem und ab 30 m aendert sich nichts.
+  Kommentar `GOLEM_KICK_LANE_SLACK` in `balance.gd` ergaenzt.
+- Test: `test_golem.gd::test_kick_lanes_leave_no_gap_in_the_middle` (Daemon 20 m stehend, Feuerkrieger genau mittig
+  vor ihr jenseits des Handkreises: in beiden Schneisen, Tritt > 0 wert und trifft; dazu alle drei Golems ueber alle
+  Groessen ohne Luecke). Vor dem Fix 7 Fehlschlaege, danach gruen. Suite 8808 bestanden / 0 fehlgeschlagen.
+  Nicht im laufenden Spiel angesehen.
+- Stolperstein: der neue Test steht am Ende von `test_golem.gd`. Jeder Spawn zieht aus dem geseedeten RNG; neben
+  seinen Kollegen eingefuegt verschob er den Strom, und `test_sitting_she_turns_for_a_much_better_attack` ("she keeps
+  what that plan strikes") schlug fehl — einzeln und ohne den neuen Test besteht er. Dieser Sitztest haengt also an
+  der Position im RNG-Strom (offen, nicht angefasst).
+
 ### KI-Persoenlichkeiten, Zauberwahl der KI, Ritualkammer immer baubar (2026-11-22)
 - Nutzervorgabe: die KI nutzte praktisch nur Feuerball und Schwarm (selten Tornado/Blitz) und sollte
   Persoenlichkeiten bekommen: aggressiv (wie bisher), oekonomisch (frueh Verteidiger, aber viele Huetten,

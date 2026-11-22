@@ -2980,9 +2980,13 @@ func _kick_side_of_target() -> float:
 
 ## Where the lane of the kicking leg runs: this far to the side of her middle (+ right).
 ## Grows with the body; from GOLEM_BODY_SCALE_HEIGHT on it is half the lane's width, so the
-## two lanes just touch in the middle — below, the lane is wider and they overlap.
+## two lanes just touch in the middle — below, the normal golem's lane is wider and they overlap.
+## Never more than half the lane's width (bugfix 2026-11-22): below 30 m the demon and the genesis
+## golem grow their lanes more slowly than their bodies, and from ~17 m on a gap opened in the
+## middle — a target right ahead of her stood between both lanes and was never struck.
 func kick_leg_offset() -> float:
-	return KICK_HALF_WIDTH * Balance.GOLEM_BODY_REACH_FACTOR_AT_ANCHOR * body_anchor_ratio()
+	return minf(KICK_HALF_WIDTH * Balance.GOLEM_BODY_REACH_FACTOR_AT_ANCHOR * body_anchor_ratio(),
+		KICK_HALF_WIDTH * reach_factor())
 
 
 func _worth_now(kind: StringName) -> float:
