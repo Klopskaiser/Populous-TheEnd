@@ -1,0 +1,30 @@
+{
+  "frame_width": 64,
+  "frame_height": 96,
+  "anims": {
+    "idle": {
+      "fps": 1
+    },
+    "sit": {
+      "fps": 1
+    },
+    "walk": {
+      "fps": 6
+    },
+    "punch": {
+      "fps": 10
+    },
+    "roll": {
+      "fps": 8
+    },
+    "airborne": {
+      "fps": 5
+    },
+    "dead": {
+      "fps": 1
+    },
+    "stand": {
+      "fps": 1
+    }
+  }
+}

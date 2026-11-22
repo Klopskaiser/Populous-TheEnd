@@ -13445,3 +13445,11 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
 - Feuerkrieger `throw.png` stand in den Seitenansichten 3,5 bis 5,5 px neben der Ruhepose und ist ebenfalls
   gerueckt (Massstab 1,0). Im Manifest steht fps der Leichen jetzt unter "dead". Der Pruefer meldet fuer den
   Feuerkrieger keinen Fehler mehr; Hinweis bleibt: `walk` von hinten 12 % niedriger als die Ruhepose.
+- Nachtrag: Brave, Krieger und Prediger eingebaut (`assets/units/brave|warrior|preacher`). Neu
+  `tools/sprites/sheet_ausrichten.py`: skaliert um den Fusspunkt und rueckt die Kopfmitte auf die Zellmitte.
+  Brave `walk`/`punch` und Prediger `stand` auf 0,894 (94 -> 84 px wie der Feuerkrieger), Brave-Ansichten bis
+  13 px zur Mitte gerueckt. Das gelieferte Brave-`idle.png` (62-px-Raster, alle Zeilen Seitenansicht) ist nicht
+  eingebaut; Ruhepose des Brave = Deckung aus `punch`, `punch` beginnt dort; `idle.png` von Brave und Prediger
+  ist nur die Ruhepose (ein Frame), damit kein Platzhalter aufblitzt. Krieger hat nur sit, airborne, Leichen.
+  `sit`, `roll`, liegende Posen unveraendert. Manifeste: fps der Leichen unter "dead". Pruefer ohne Fehler,
+  Suite gruen; nicht im laufenden Spiel angesehen.

@@ -1,0 +1,15 @@
+{
+  "frame_width": 64,
+  "frame_height": 96,
+  "anims": {
+    "airborne": {
+      "fps": 6
+    },
+    "sit": {
+      "fps": 1
+    },
+    "dead": {
+      "fps": 1
+    }
+  }
+}
