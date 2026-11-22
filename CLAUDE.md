@@ -314,9 +314,9 @@ $GODOT = 'C:\Users\johannes.wutzke\Downloads\Godot_v4.7-stable_win64.exe\Godot_v
   die langsamste Ausbildung im Spiel; der Techniker ist über seine Fahrzeugboni bezahlt,
   nicht über seine Werte). Ablauf: Brave betritt das Gebäude → kommt nach Ausbildungszeit als
   entsprechende Kampfeinheit heraus → läuft zum Rally Point.
-- **Ritualkammer (experimentell, Nutzervorgabe 2026-11-16, `RitualChamber`):** nur baubar,
-  wenn in den Optionen des Hauptmenüs „Ritualkammer (experimentell)“ an ist
-  (`GameSettings.ritual_chamber_enabled`, Standard aus, gespeichert in `user://settings.cfg`);
+- **Ritualkammer (Nutzervorgabe 2026-11-16, `RitualChamber`):** seit 2026-11-22 **immer**
+  im Baumenü (der Schalter „Ritualkammer (experimentell)“ in den Optionen ist entfallen; ein alter
+  Eintrag `ritual_chamber` in `user://settings.cfg` wird beim nächsten Speichern entfernt);
   die KI baut sie nie. **20 Holz, 3×3**, Ablauf wie ein Ausbildungsgebäude, aber **heraus
   kommt niemand** — der Brave ist nach **1 s** weg. Mana: je Brave so viel wie ein Krieger in
   der Kaserne (0,6/s × 2 s = 1,2, hier in 1 s; bis 2026-11-21 1,8 bei 3 s; `training_mana_rate()`). **Je zwei Opfer**
@@ -586,6 +586,47 @@ also keine Spielfläche. Alle Karten sind rund.
   Dorf greifen die Feuerkrieger der Verteidigung den Golem gezielt an, die Miliz geht nur auf Feinde zu Fuß und nur so
   viele, wie dort Nahkampfplätze sind (ein Brave ohne Platz nähme sonst den Golem).
 - Nicht gebaut: die KI erteilt dem Genesisgolem keine Holzfällaufträge (er wächst bei ihr nur aus den Braves).
+
+**KI-Persönlichkeiten (Nutzervorgabe 2026-11-22, `scripts/ai/ai_personality.gd`):** dieselben Regeln, derselbe
+Controller, verschiedene Prioritäten. Auswahl im Skirmish-Menü je KI („Zufällig“ = verschiedene, solange welche übrig
+sind; `AIPersonality.resolve_ids`), headless `-- personalities=aggressive,economic,defensive` (Stammreihenfolge).
+Im Spiel zeigt der Tooltip der Stammesbalken in der Seitenleiste die Persönlichkeit (`Tribe.ai_personality_name`).
+- **Aggressiv** = das bisherige Verhalten; seine Werte SIND die alten Konstanten, ein Controller ohne Wahl spielt so.
+- **Ökonom:** baut früh Verteidiger — eine **Hauswache** (6 + 12 % der Bevölkerung, `guard_size`), die auch im
+  BUILD-Zustand ausgebildet wird —, aber **12 Hütten** vor dem Tempel, früherer Wohnungsdruck, 4 Hüttenbaustellen,
+  mehr parallele Baustellen; greift erst ab 70 Anhängern mit 24er-Welle an (oder wenn die Armee die doppelte Welle
+  erreicht, `AIState.next_state` `attack_min_pop`).
+- **Verteidiger:** 10 Hütten, **1 Turm direkt nach dem Feuertempel**, die **Katapultwerkstatt gleich nach den
+  Hütten**, nach dem Tempel die Feuerrammenwerkstatt; Türme wachsen mit dem Dorf (3 + 1 je 4 Hütten, max. 10),
+  kompakteres Dorf (wenige Siedlungsanker), größerer Verteidigungsradius, mehr Feuerkrieger, Hauswache 6 + 15 %;
+  greift ab 80 Anhängern an; **keine Zaubervorstöße**. (Zwei Türme + Werkstatt VOR den Hütten verhungerte die
+  Wirtschaft: gemessen 32 Anhänger bei 300 s gegen 80 beim Ökonomen.)
+- Der Weg in die Logik: `AIController.next_building_kind` reicht die Persönlichkeit als `counts`-Schlüssel an die
+  reine Bauordnung (`target_huts`, `housing_*`, `max_hut_sites`, `early_towers`, `early_workshops`, `army_shares`);
+  fehlen sie, gilt die alte Ladder. Die erste Welle kommt jetzt aus der Persönlichkeit (`first_wave_for(cramped)`) —
+  `AIState.army_attack_size` war vorher toter Code, die enge Arena hatte nie eine kleinere erste Welle.
+
+**KI-Zauber (2026-11-22):** vorher nutzte die KI praktisch nur Feuerball und Schwarm.
+- **Ladeauswahl** `AIState.spell_charge_plan`: Alltagsvorrat (`spell_reserve` der Persönlichkeit, z. B. Feuerball 3,
+  Blitz 2, Schwarm/Hypnose/Tornado/Landbrücke 1) lädt billigste-zuerst im Zeitbudget, und **ein großer Zauber als
+  Sparziel lädt immer mit** (`spell_goal`: der erste aus `spell_goals` ohne Ladung, danach der erste nicht volle —
+  so sammelt sie reihum je einen), sobald das Einkommen ihn in `AI_SPELL_GOAL_TIME_BUDGET` (600 s) füllen könnte.
+  Ist alles voll, gilt die alte Regel über alle Zauber (kein Mana verfällt). Die alte `spells_to_charge` lud nur
+  die billigsten — weil Feuerball/Schwarm ständig verbraucht werden, kamen teure Zauber nie dran.
+- **Heuristik** `_cast_spells`: neu **Hypnose** (auf Predigergruppen ab 2, auf Trupps ab 3 im 4×4-Quadrat, bewertet
+  mit `HypnosisSpell.units_in_square`), **Supertornado/Erdbeben/Feuerregen auf Menschenmengen** ab 8 Bodenfeinden
+  (`_cast_on_crowd`), **Tornado auf Klumpen** ab 4, auf Dörfer Vulkan → Erdbeben (ab 2 Gebäuden) → Supertornado /
+  Feuerregen (ab 3) → Absinken → Ebene → Tornado → Erdbeben → Blitz (`_cast_on_village`). Ein **voller**
+  Feuerballvorrat wird auch auf Einzelziele verschossen. Stammesblinde Zauber (Tornado, Supertornado, Feuerregen)
+  nie, wo eigene Einheiten **oder Gebäude** stehen (`_area_free_of_own`); Erdbeben schont zwar Eigenes, verformt aber
+  den Boden — nicht neben eigenen Gebäuden.
+- **Zaubervorstoß** (`_tick_raid`, Aggressiv/Ökonom): ist ein Belagerungszauber geladen (`AI_RAID_SPELLS`: Vulkan,
+  Erdbeben, Supertornado, Feuerregen), zieht die Schamanin außerhalb der Angriffswelle mit der halben Armee
+  (mind. 6) zum nächsten Feindgebäude; zurück, wenn die Zauber verbraucht sind, nach 90 Takten oder bei Bedrohung
+  daheim (dann übernimmt die Verteidigung); danach 120 Takte Pause. Die Welle (ATTACK) übernimmt einen laufenden
+  Vorstoß.
+- Messwerkzeug: `tests/diag_ai_match.gd` (volle KI-Partie mit Zaubern, Zwischenstände je Stamm inkl. Zauber je
+  Stamm, `AIController.casts`).
 
 **Siegbedingungen (Phase 10d):**
 

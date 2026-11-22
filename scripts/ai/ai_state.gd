@@ -67,7 +67,12 @@ static func next_state(state: State, snap: Dictionary) -> State:
 			# Losing the essentials (destroyed base) sends the AI back to BUILD.
 			if huts < 1 or camps < 1:
 				return State.BUILD
-			if army >= int(snap.get("army_target", ARMY_ATTACK_SIZE)) and shaman_alive:
+			var target: int = int(snap.get("army_target", ARMY_ATTACK_SIZE))
+			# Personality (2026-11-22): the economist and the defender only march once
+			# their village stands — unless the army has grown to twice the wave anyway.
+			var pop_ok: bool = int(snap.get("population", 0)) >= int(snap.get("attack_min_pop", 0)) \
+				or army >= target * 2
+			if army >= target and shaman_alive and pop_ok:
 				return State.ATTACK
 			return State.TRAIN
 		State.ATTACK:
@@ -86,12 +91,18 @@ static func next_state(state: State, snap: Dictionary) -> State:
 ## preachers hit EXACT deficit ties, and Array.sort_custom is not stable in
 ## Godot — without a deterministic tiebreak the army mix would jitter and the
 ## mix test would be flaky.
-static func training_kind_order(warriors: int, firewarriors: int, preachers: int) -> Array[StringName]:
+## `shares` = [warrior, firewarrior, preacher] of the personality (2026-11-22);
+## empty = the Balance mix.
+static func training_kind_order(warriors: int, firewarriors: int, preachers: int,
+		shares: Array = []) -> Array[StringName]:
 	var total: float = float(warriors + firewarriors + preachers) + 1.0
+	var sw: float = float(shares[0]) if shares.size() == 3 else Balance.AI_ARMY_SHARE_WARRIOR
+	var sf: float = float(shares[1]) if shares.size() == 3 else Balance.AI_ARMY_SHARE_FIREWARRIOR
+	var sp: float = float(shares[2]) if shares.size() == 3 else Balance.AI_ARMY_SHARE_PREACHER
 	var deficits: Array = [
-		[Balance.AI_ARMY_SHARE_WARRIOR - float(warriors) / total, 0, &"warrior"],
-		[Balance.AI_ARMY_SHARE_FIREWARRIOR - float(firewarriors) / total, 1, &"firewarrior"],
-		[Balance.AI_ARMY_SHARE_PREACHER - float(preachers) / total, 2, &"preacher"],
+		[sw - float(warriors) / total, 0, &"warrior"],
+		[sf - float(firewarriors) / total, 1, &"firewarrior"],
+		[sp - float(preachers) / total, 2, &"preacher"],
 	]
 	deficits.sort_custom(func(a: Array, b: Array) -> bool:
 		if is_equal_approx(float(a[0]), float(b[0])):
@@ -113,9 +124,9 @@ static func next_training_kind(warriors: int, firewarriors: int, preachers: int)
 ## Braves kept out of training and logistics: a floor plus a share of the tribe,
 ## so a 300-pop tribe keeps a real workforce instead of the old fixed 8.
 ## 20 -> 8 | 100 -> 35 | 400 -> 140
-static func min_economy_braves(population: int) -> int:
-	return maxi(Balance.AI_MIN_ECONOMY_BRAVES,
-		int(float(population) * Balance.AI_ECONOMY_BRAVE_SHARE))
+static func min_economy_braves(population: int,
+		share: float = Balance.AI_ECONOMY_BRAVE_SHARE) -> int:
+	return maxi(Balance.AI_MIN_ECONOMY_BRAVES, int(float(population) * share))
 
 
 ## Workers ONE construction site should get (10g). Two regimes, because the two
@@ -149,10 +160,12 @@ static func site_worker_target(footprint_cells: int, needs_flatten: bool,
 ## decides what the economy does FIRST. Without that ceiling a wall of eight
 ## parallel sites could freeze army production entirely.
 ## braves 10 / pop 12 -> 4 | 40 / 60 -> 16 | 200 / 400 -> 80
-static func builder_budget(braves: int, population: int, site_demand: int) -> int:
+static func builder_budget(braves: int, population: int, site_demand: int,
+		economy_share: float = Balance.AI_ECONOMY_BRAVE_SHARE) -> int:
 	var share: int = maxi(Balance.AI_MIN_BUILDER_BRAVES,
 		int(float(braves) * Balance.AI_BUILDER_BRAVE_SHARE))
-	return clampi(mini(maxi(site_demand, 0), share), 0, min_economy_braves(population))
+	return clampi(mini(maxi(site_demand, 0), share), 0,
+		min_economy_braves(population, economy_share))
 
 
 ## Whether an existing site counts as supplied, i.e. may stop blocking a NEW one.
@@ -171,8 +184,9 @@ static func site_is_supplied(workers: int, wood_stalled: bool,
 
 
 ## Parallel construction sites. 8 -> 1 | 20 -> 2 | 64 -> 8 (cap).
-static func parallel_site_count(braves: int) -> int:
-	return clampi(braves / Balance.AI_BRAVES_PER_SITE, 1, Balance.AI_MAX_PARALLEL_SITES)
+static func parallel_site_count(braves: int,
+		braves_per_site: int = Balance.AI_BRAVES_PER_SITE) -> int:
+	return clampi(braves / maxi(braves_per_site, 1), 1, Balance.AI_MAX_PARALLEL_SITES)
 
 
 ## Standing wood crews. Deliberately 0 below AI_BRAVES_PER_WOOD_CREW braves:
@@ -267,20 +281,42 @@ static func next_building_kind(counts: Dictionary) -> StringName:
 	# planned, and the upgrade stages let capacity run ahead of the population so
 	# the percentage branch often never fires at all (user report: "should have
 	# built huts, wood was in reach"). The absolute headroom catches that.
+	# The personality (2026-11-22, AIPersonality) moves the three thresholds: the
+	# economist builds housing earlier and with more parallel hut sites.
 	var housing: int = int(counts.get("housing_capacity", 0))
 	var population: int = int(counts.get("population", 0))
-	var pressure: int = int(float(housing) * Balance.AI_HOUSING_PRESSURE)
+	var pressure: int = int(float(housing) * float(counts.get("housing_pressure",
+		Balance.AI_HOUSING_PRESSURE)))
 	var headroom: int = housing - population
 	if housing > 0 and huts < Balance.AI_MAX_HUTS \
-			and int(counts.get("hut_sites", 0)) < Balance.AI_MAX_HUT_SITES \
-			and (population >= pressure or headroom < Balance.AI_MIN_HOUSING_HEADROOM):
+			and int(counts.get("hut_sites", 0)) < int(counts.get("max_hut_sites",
+				Balance.AI_MAX_HUT_SITES)) \
+			and (population >= pressure or headroom < int(counts.get("housing_headroom",
+				Balance.AI_MIN_HOUSING_HEADROOM))):
 		return &"hut"
-	if huts < TARGET_HUTS:
+	# Base huts: the first TARGET_HUTS before the firewarrior camp as always; a
+	# personality with more (the economist: 12) builds the rest right after it.
+	var target_huts: int = int(counts.get("target_huts", TARGET_HUTS))
+	if huts < mini(target_huts, TARGET_HUTS):
 		return &"hut"
 	if int(counts.get("firewarrior_camp", 0)) < 1:
 		return &"firewarrior_camp"
+	# The defender (2026-11-22): its first tower right after the firewarrior camp,
+	# its first catapult shop right after its huts — both long before the end of
+	# the ladder. (Two towers plus the shop BEFORE the huts starved its economy:
+	# measured 32 followers at 300 s against 80 for the economist.)
+	var early_towers: int = int(counts.get("early_towers", 0))
+	if early_towers > 0 and int(counts.get("watchtower", 0)) < early_towers:
+		return &"watchtower"
+	if huts < target_huts:
+		return &"hut"
+	var early_shops: bool = bool(counts.get("early_workshops", false))
+	if early_shops and int(counts.get("workshop", 0)) < 1:
+		return &"workshop"
 	if int(counts.get("temple", 0)) < 1:
 		return &"temple"
+	if early_shops and int(counts.get("fireram_workshop", 0)) < 1:
+		return &"fireram_workshop"
 	# 10g: extra training camps moved from the very END of the ladder to HERE.
 	# They used to sit behind up to twelve workshops, and workshop_target grows
 	# with the braves while the hut count grows far more slowly — so the AI never
@@ -342,7 +378,8 @@ static func _may_add_shop(counts: Dictionary, have: int) -> bool:
 ## Picks the kind with the biggest ABSOLUTE shortfall so a tribe that needs three
 ## more barracks does not build one of each first.
 static func missing_camp_kind(counts: Dictionary) -> StringName:
-	var targets: Dictionary = camp_targets(float(counts.get("brave_stream", 0.0)))
+	var targets: Dictionary = camp_targets(float(counts.get("brave_stream", 0.0)),
+		counts.get("army_shares", []) as Array)
 	var best: StringName = &""
 	var worst: int = 0
 	for kind in [&"warrior_camp", &"firewarrior_camp", &"temple"]:
@@ -363,13 +400,18 @@ static func missing_camp_kind(counts: Dictionary) -> StringName:
 ## The per-camp throughput is DERIVED from the training times, not a second set
 ## of constants: a balance change to WARRIOR_CAMP_TRAINING_TIME must not silently
 ## leave the AI planning for the old rate.
-static func camp_targets(brave_stream: float) -> Dictionary:
+## `shares` = [warrior, firewarrior, preacher] of the personality; empty = Balance.
+static func camp_targets(brave_stream: float, shares: Array = []) -> Dictionary:
+	var ok: bool = shares.size() == 3
 	return {
-		&"warrior_camp": _camp_count(brave_stream, Balance.AI_ARMY_SHARE_WARRIOR,
+		&"warrior_camp": _camp_count(brave_stream,
+			float(shares[0]) if ok else Balance.AI_ARMY_SHARE_WARRIOR,
 			Balance.WARRIOR_CAMP_TRAINING_TIME),
 		&"firewarrior_camp": _camp_count(brave_stream,
-			Balance.AI_ARMY_SHARE_FIREWARRIOR, Balance.FIREWARRIOR_CAMP_TRAINING_TIME),
-		&"temple": _camp_count(brave_stream, Balance.AI_ARMY_SHARE_PREACHER,
+			float(shares[1]) if ok else Balance.AI_ARMY_SHARE_FIREWARRIOR,
+			Balance.FIREWARRIOR_CAMP_TRAINING_TIME),
+		&"temple": _camp_count(brave_stream,
+			float(shares[2]) if ok else Balance.AI_ARMY_SHARE_PREACHER,
 			Balance.TEMPLE_TRAINING_TIME),
 	}
 
@@ -391,13 +433,14 @@ static func _camp_count(brave_stream: float, share: float, training_time: float)
 ## braves at all — no builders, no wood crews, no workshop staff — and the
 ## economy dies without a single error message. In BUILD the share is low; it
 ## rises with how far the army is below its wave target.
-static func training_hut_share(state: State, army: int, army_target: int) -> float:
+static func training_hut_share(state: State, army: int, army_target: int,
+		share_build: float = Balance.AI_TRAINING_HUT_SHARE_BUILD,
+		share_army: float = Balance.AI_TRAINING_HUT_SHARE_ARMY) -> float:
 	if state == State.BUILD:
-		return Balance.AI_TRAINING_HUT_SHARE_BUILD
+		return share_build
 	var target: float = maxf(float(army_target), 1.0)
 	var lag: float = clampf(1.0 - float(army) / target, 0.0, 1.0)
-	return lerpf(Balance.AI_TRAINING_HUT_SHARE_BUILD,
-		Balance.AI_TRAINING_HUT_SHARE_ARMY, lag)
+	return lerpf(share_build, share_army, lag)
 
 
 ## fewest_camp_kind() was removed in 10g: missing_camp_kind() replaces it and picks
@@ -540,4 +583,61 @@ static func spells_to_charge(spells: Array, income: float,
 	best_k = maxi(best_k, 1)
 	for i in range(best_k):
 		result.append(open[i].get("id", &"") as StringName)
+	return result
+
+
+## The big spell the AI is saving for (2026-11-22): the first of `goals` the tribe
+## owns WITHOUT a charge; once each has one, the first that is not full; &"" when
+## all are full. `spells` entries: {"id", "cost", "full", "charges"}.
+static func spell_goal(spells: Array, goals: Array) -> StringName:
+	var by_id: Dictionary = {}
+	for s in spells:
+		by_id[s.get("id", &"")] = s
+	for id in goals:
+		var s = by_id.get(id)
+		if s != null and int(s.get("charges", 0)) <= 0 and not bool(s.get("full", false)):
+			return id
+	for id in goals:
+		var s = by_id.get(id)
+		if s != null and not bool(s.get("full", false)):
+			return id
+	return &""
+
+
+## Which spells the AI keeps charging — with a PERSONALITY (2026-11-22). Replaces
+## the pure cheapest-first rule as the controller's decision; spells_to_charge stays
+## the building block (and the fallback).
+##
+## Why: cheapest-first kept fireball and swarm on forever because they are used all
+## the time, so the expensive spells (earthquake, volcano, firestorm, supertornado,
+## golems) practically never charged — the reported "only fireball and swarm".
+##
+## 1. The everyday stock: spells below their `reserve` count, cheapest-first within
+##    the time budget (spells_to_charge on that subset).
+## 2. The savings goal (spell_goal) charges ALONGSIDE, as soon as the income could
+##    fill it within goal_budget — it gets an even share, so it always progresses.
+## 3. Nothing left (stock full, goals full or out of reach): the old rule over all
+##    spells, so no income is lost (there is no mana banking).
+static func spell_charge_plan(spells: Array, income: float, reserve: Dictionary,
+		goals: Array, budget: float = Balance.AI_SPELL_TIME_BUDGET,
+		goal_budget: float = Balance.AI_SPELL_GOAL_TIME_BUDGET) -> Array[StringName]:
+	var short: Array = []
+	for s in spells:
+		if bool(s.get("full", false)):
+			continue
+		if int(s.get("charges", 0)) < int(reserve.get(s.get("id", &""), 0)):
+			short.append(s)
+	var result: Array[StringName] = []
+	if not short.is_empty():
+		result = spells_to_charge(short, income, budget)
+	var goal: StringName = spell_goal(spells, goals)
+	if goal != &"" and not result.has(goal):
+		var cost: float = 0.0
+		for s in spells:
+			if s.get("id", &"") == goal:
+				cost = float(s.get("cost", 0.0))
+		if result.is_empty() or cost <= income * goal_budget:
+			result.append(goal)
+	if result.is_empty():
+		result = spells_to_charge(spells, income, budget)
 	return result

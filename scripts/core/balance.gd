@@ -2022,6 +2022,35 @@ const TRAINING_MANA_PER_BUILDING: float = 0.6
 ## einzigen Zauber, laedt sie trotzdem den billigsten, denn Einkommen ohne
 ## Abnehmer verfaellt (kein Mana-Banking).
 const AI_SPELL_TIME_BUDGET: float = 120.0
+## Sparziel der KI (2026-11-22, AIState.spell_charge_plan): ein grosser Zauber laedt
+## neben dem Alltagsvorrat mit, sobald das Einkommen ihn in so vielen Sekunden
+## fuellen koennte. Ohne Sparziel lud die KI immer nur die billigsten Zauber nach
+## (Feuerball und Schwarm werden staendig verbraucht) und kam an Erdbeben, Vulkan,
+## Feuerregen, Supertornado und Golems praktisch nie heran.
+const AI_SPELL_GOAL_TIME_BUDGET: float = 600.0
+## Zauber-Heuristik der KI (2026-11-22): ab so vielen Bodenfeinden im Zauberradius
+## gilt es als grosses Gefecht (Supertornado, Erdbeben, Feuerregen auf Truppen).
+const AI_BIG_FIGHT_ENEMIES: int = 8
+## Mindestens so viele Feinde im Wirkbereich fuer Supertornado / Erdbeben / Tornado /
+## Hypnose auf Truppen.
+const AI_SUPERTORNADO_MIN_ENEMIES: int = 8
+const AI_EARTHQUAKE_MIN_ENEMIES: int = 6
+const AI_TORNADO_MIN_ENEMIES: int = 4
+const AI_HYPNOSIS_MIN_UNITS: int = 3
+## Gebaeude im Wirkbereich, ab denen Erdbeben / Supertornado / Feuerregen auf ein Dorf lohnen.
+const AI_EARTHQUAKE_MIN_BUILDINGS: int = 2
+const AI_SUPERTORNADO_MIN_BUILDINGS: int = 3
+const AI_FIRESTORM_MIN_BUILDINGS: int = 3
+## Zaubervorstoss (2026-11-22): die Schamanin zieht mit Begleitschutz zu einem
+## feindlichen Dorf, sobald ein grosser Zauber geladen ist — auch ohne Angriffswelle.
+## Mindestgroesse des Begleitschutzes, Anteil der Armee, Hoechstdauer in KI-Takten und
+## Abstand zwischen zwei Vorstoessen.
+const AI_RAID_MIN_ESCORT: int = 6
+const AI_RAID_ESCORT_SHARE: float = 0.5
+const AI_RAID_MAX_TICKS: int = 90
+const AI_RAID_COOLDOWN_TICKS: int = 120
+## Zauber, die einen Vorstoss rechtfertigen (Belagerungszauber).
+const AI_RAID_SPELLS: Array[StringName] = [&"volcano", &"earthquake", &"supertornado", &"firestorm"]
 ## Hardcap Einheiten pro Stamm (zusätzlich zum Hütten-Bevölkerungslimit).
 const TRIBE_MAX_UNITS: int = 1000
 

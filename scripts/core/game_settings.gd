@@ -16,21 +16,6 @@ const RESOLUTIONS: Array[Vector2i] = [Vector2i(1920, 1080), Vector2i(2560, 1440)
 static var _loaded: bool = false
 static var _show_fps: bool = false
 static var _resolution: Vector2i = DEFAULT_RESOLUTION
-## Experimental: the ritual chamber in the build menu (default OFF, 2026-11-16).
-static var _ritual_chamber: bool = false
-
-
-static func ritual_chamber_enabled() -> bool:
-	_ensure_loaded()
-	return _ritual_chamber
-
-
-static func set_ritual_chamber_enabled(value: bool) -> void:
-	_ensure_loaded()
-	_ritual_chamber = value
-	_save()
-
-
 static func show_fps() -> bool:
 	_ensure_loaded()
 	return _show_fps
@@ -79,7 +64,6 @@ static func _ensure_loaded() -> void:
 		var w: int = int(cfg.get_value(SECTION, "resolution_w", DEFAULT_RESOLUTION.x))
 		var h: int = int(cfg.get_value(SECTION, "resolution_h", DEFAULT_RESOLUTION.y))
 		_resolution = Vector2i(w, h)
-		_ritual_chamber = bool(cfg.get_value(SECTION, "ritual_chamber", false))
 
 
 static func _save() -> void:
@@ -88,5 +72,7 @@ static func _save() -> void:
 	cfg.set_value(SECTION, "show_fps", _show_fps)
 	cfg.set_value(SECTION, "resolution_w", _resolution.x)
 	cfg.set_value(SECTION, "resolution_h", _resolution.y)
-	cfg.set_value(SECTION, "ritual_chamber", _ritual_chamber)
+	# The ritual chamber option is gone (always buildable since 2026-11-22): drop the stale key.
+	if cfg.has_section_key(SECTION, "ritual_chamber"):
+		cfg.erase_section_key(SECTION, "ritual_chamber")
 	cfg.save(FILE_PATH)

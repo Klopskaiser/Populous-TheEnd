@@ -12,6 +12,13 @@ var _pages: Array[Control] = []
 const SURVIVAL_PAGE: int = 4
 var _center: CenterContainer = null
 var _ai_count_option: OptionButton = null
+## One personality choice per AI slot (2026-11-22); rows beyond the AI count hide.
+var _personality_rows: Array[HBoxContainer] = []
+var _personality_options: Array[OptionButton] = []
+## Personality ids, index-aligned with the items of every personality option.
+const PERSONALITY_CHOICES: Array[StringName] = [
+	MatchConfig.PERSONALITY_RANDOM, &"aggressive", &"economic", &"defensive"]
+const PERSONALITY_LABELS: Array[String] = ["Zufällig", "Aggressiv", "Ökonom", "Verteidiger"]
 var _map_option: OptionButton = null
 var _map_desc: Label = null
 ## Selectable map ids, index-aligned with the OptionButton items.
@@ -197,7 +204,37 @@ func _build_skirmish_page() -> Control:
 	for n in range(MatchConfig.MIN_AI, MatchConfig.MAX_AI + 1):
 		_ai_count_option.add_item("%d KI%s" % [n, "" if n == 1 else "s"], n)
 	_ai_count_option.select(0)
+	_ai_count_option.item_selected.connect(func(_i: int) -> void: _update_personality_rows())
 	vb.add_child(_ai_count_option)
+
+	# Personality per AI (2026-11-22): aggressive attacks early, the economist builds
+	# many huts first, the defender towers and vehicles.
+	var pers_label: Label = Label.new()
+	pers_label.text = "KI-Persönlichkeit"
+	pers_label.add_theme_color_override("font_color", UiTheme.GOLD_BRIGHT)
+	pers_label.tooltip_text = "Aggressiv: greift früh mit kleinen Wellen an.\n" \
+		+ "Ökonom: baut früh viele Hütten, greift später und stärker an.\n" \
+		+ "Verteidiger: mehr Türme, früh Fahrzeuge, breitet sich langsamer aus."
+	pers_label.mouse_filter = Control.MOUSE_FILTER_PASS
+	vb.add_child(pers_label)
+	for slot in range(MatchConfig.MAX_AI):
+		var row: HBoxContainer = HBoxContainer.new()
+		var name_label: Label = Label.new()
+		name_label.text = "KI %d" % (slot + 1)
+		name_label.custom_minimum_size = Vector2(48, 0)
+		name_label.add_theme_color_override("font_color", UiTheme.GOLD)
+		row.add_child(name_label)
+		var option: OptionButton = OptionButton.new()
+		UiTheme.style_button(option)
+		option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		for label in PERSONALITY_LABELS:
+			option.add_item(label)
+		option.select(0)
+		row.add_child(option)
+		vb.add_child(row)
+		_personality_rows.append(row)
+		_personality_options.append(option)
+	_update_personality_rows()
 
 	var map_label: Label = Label.new()
 	map_label.text = "Karte"
@@ -243,16 +280,6 @@ func _build_options_page() -> Control:
 	fps_check.button_pressed = GameSettings.show_fps()
 	fps_check.toggled.connect(GameSettings.set_show_fps)
 	vb.add_child(fps_check)
-
-	# Experimental building (2026-11-16): the ritual chamber in the build menu.
-	var ritual_check: CheckButton = CheckButton.new()
-	ritual_check.text = "Ritualkammer (experimentell)"
-	ritual_check.tooltip_text = "Gebäude, das Braves opfert: je zwei bekommt ein eigener " \
-		+ "Golem einen Kill, ohne Golem gibt es Mana für einen Golemzauber."
-	UiTheme.style_button(ritual_check)
-	ritual_check.button_pressed = GameSettings.ritual_chamber_enabled()
-	ritual_check.toggled.connect(GameSettings.set_ritual_chamber_enabled)
-	vb.add_child(ritual_check)
 
 	# Window resolution (bug backlog #1), persisted via GameSettings.
 	var resolution_label: Label = Label.new()
@@ -407,10 +434,21 @@ func _on_map_selected(index: int) -> void:
 		_map_desc.text = _map_description(_map_ids[index])
 
 
+## Shows one personality row per selected AI.
+func _update_personality_rows() -> void:
+	var count: int = _ai_count_option.get_selected_id() if _ai_count_option != null else 1
+	for slot in range(_personality_rows.size()):
+		_personality_rows[slot].visible = slot < count
+
+
 func _start_skirmish() -> void:
 	var ai_count: int = _ai_count_option.get_selected_id()
 	var map_id: String = _map_ids[_map_option.selected]
-	_launch(MatchConfig.skirmish(ai_count, map_id))
+	var personalities: Array[StringName] = []
+	for slot in range(ai_count):
+		var index: int = _personality_options[slot].selected if slot < _personality_options.size() else 0
+		personalities.append(PERSONALITY_CHOICES[clampi(index, 0, PERSONALITY_CHOICES.size() - 1)])
+	_launch(MatchConfig.skirmish(ai_count, map_id, personalities))
 
 
 func _start_mission() -> void:

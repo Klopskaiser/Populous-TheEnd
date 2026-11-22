@@ -24,14 +24,28 @@ const VARIANT_GOLEMS: StringName = &"golems"
 var variant: StringName = VARIANT_BASE
 ## Map selection (phase 7i: island / seenland / bergpass / plateau).
 var map_id: String = MapGenerator.DEFAULT_MAP
+## SKIRMISH only (2026-11-22): the personality per AI slot — an AIPersonality id
+## (&"aggressive", &"economic", &"defensive") or PERSONALITY_RANDOM. Missing slots
+## are random; Main resolves them (AIPersonality.resolve_ids).
+const PERSONALITY_RANDOM: StringName = &"random"
+var ai_personalities: Array[StringName] = []
 
 
-static func skirmish(p_ai_count: int, p_map_id: String = MapGenerator.DEFAULT_MAP) -> MatchConfig:
+static func skirmish(p_ai_count: int, p_map_id: String = MapGenerator.DEFAULT_MAP,
+		p_personalities: Array[StringName] = []) -> MatchConfig:
 	var config: MatchConfig = MatchConfig.new()
 	config.mode = Mode.SKIRMISH
 	config.ai_count = clampi(p_ai_count, MIN_AI, MAX_AI)
 	config.map_id = p_map_id if p_map_id in MapGenerator.map_ids() else MapGenerator.DEFAULT_MAP
+	config.ai_personalities = p_personalities.duplicate()
 	return config
+
+
+## The personality choice of AI slot `index` (0-based), PERSONALITY_RANDOM if unset.
+func personality_choice(index: int) -> StringName:
+	if index >= 0 and index < ai_personalities.size():
+		return ai_personalities[index]
+	return PERSONALITY_RANDOM
 
 
 static func start_mission() -> MatchConfig:

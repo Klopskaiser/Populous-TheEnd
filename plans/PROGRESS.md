@@ -13454,6 +13454,7 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
   `sit`, `roll`, liegende Posen unveraendert. Manifeste: fps der Leichen unter "dead". Pruefer ohne Fehler,
   Suite gruen; nicht im laufenden Spiel angesehen.
 
+
 ### Tritt holt aus; Tritt-Schneise ab 30 m nach dem Clip (2026-11-22)
 
 - Modelle: `kick` / `kick_l` aller drei Golems holen jetzt aus (Unterschenkel schnippt vor dem Schnapptritt nach hinten
@@ -13468,3 +13469,51 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
   Daemonen- und Genesisgolem ragen zwischen etwa 14 und 29 m bis 22 % hinaus).
 - Tests: `test_golem.gd` (31,3 m: Laenge vorn und hinten, Kopplung an die Modellmasse; 80 m: hinten mit dem neuen
   Anteil). Nicht im laufenden Spiel angesehen.
+
+### KI-Persoenlichkeiten, Zauberwahl der KI, Ritualkammer immer baubar (2026-11-22)
+- Nutzervorgabe: die KI nutzte praktisch nur Feuerball und Schwarm (selten Tornado/Blitz) und sollte
+  Persoenlichkeiten bekommen: aggressiv (wie bisher), oekonomisch (frueh Verteidiger, aber viele Huetten,
+  spaeter Angriff), Verteidiger (wie Oekonom, mehr Tuerme, frueher Fahrzeuge, breitet sich langsamer aus).
+- Ursache Zauber (gemessen mit dem neuen `tests/diag_ai_match.gd`, Insel, 4 KIs, 30 min, alte Logik): ueber die
+  ganze Partie nur fireball/swarm, am Ende standen Blitz, Hypnose, Tornado, Erdbeben, Feuerregen, Golems,
+  Supertornado und Vulkan GELADEN herum. (1) `AIState.spells_to_charge` laedt die billigsten offenen Zauber -
+  Feuerball und Schwarm werden staendig verbraucht, teure kamen nie dran; (2) Hypnose und Supertornado hatten
+  keinen Cast-Code; (3) die Gebaeude-Leiter endete praktisch beim Tornado.
+- `scripts/ai/ai_personality.gd` (neu, `AIPersonality`): reine Daten + Helfer (`from_id`, `resolve_ids`,
+  `tower_target`, `guard_size`, `min_economy_braves`, `first_wave_for`). Aggressiv = die alten Konstanten.
+  Oekonom: 12 Huetten vor dem Tempel, frueherer Wohnungsdruck, 4 Huettenbaustellen, Hauswache 6 + 12 % der
+  Bevoelkerung (wird auch im BUILD-Zustand ausgebildet), Angriff erst ab 70 Anhaengern (oder doppelter Welle).
+  Verteidiger: 10 Huetten, 1 Turm direkt nach dem Feuertempel, Katapultwerkstatt nach den Huetten,
+  Feuerrammenwerkstatt nach dem Tempel, Tuerme 3 + 1 je 4 Huetten (max. 10), kompaktes Dorf, 30/45/25-Mix,
+  Hauswache 6 + 15 %, Angriff ab 80, keine Zaubervorstoesse.
+- `AIState`: Persoenlichkeit kommt als optionale Parameter bzw. `counts`-Schluessel an (`training_kind_order`,
+  `camp_targets`, `training_hut_share`, `min_economy_braves`, `builder_budget`, `parallel_site_count`,
+  `next_building_kind`, `next_state` mit `attack_min_pop`); Defaults = altes Verhalten, alte Tests unveraendert.
+  Neu `spell_goal` / `spell_charge_plan`: Alltagsvorrat billigste-zuerst + EIN Sparziel laedt immer mit
+  (sobald in `AI_SPELL_GOAL_TIME_BUDGET` 600 s fuellbar), sonst alte Regel ueber alle (kein Verfall).
+- `AIController`: `personality` (Standard aggressiv), erste Welle aus der Persoenlichkeit (vorher war
+  `AIState.army_attack_size` toter Code - die enge Arena hatte nie eine kleinere erste Welle). Zauber-Heuristik
+  neu: Hypnose (Prediger ab 2, Trupps ab 3 im Quadrat, `HypnosisSpell.units_in_square`), `_cast_on_crowd`
+  (Supertornado/Erdbeben/Feuerregen ab 8 Bodenfeinden), Tornado auf Klumpen, `_cast_on_village` (Vulkan zaehlt
+  jetzt im Lava-Radius 7,5 statt 5 m - vorher fand er fast nie zwei Gebaeude), voller Feuerballvorrat wird
+  verschossen. Stammesblinde Zauber nie bei eigenen Einheiten ODER Gebaeuden (`_area_free_of_own`, Supertornado
+  mit eigenem Schutzradius 9,2 m - der volle Satellitenradius 12,4 m schloss die Schamanin selbst ein).
+  Zauberziele nur noch `is_targetable()`. Zaubervorstoss `_tick_raid` (Schamanin + halbe Armee, mind. 6, zum
+  naechsten Feindgebaeude, sobald Vulkan/Erdbeben/Supertornado/Feuerregen geladen ist).
+- Menue: je KI eine Auswahl Zufaellig/Aggressiv/Oekonom/Verteidiger (`MatchConfig.ai_personalities`);
+  `Main._skirmish_personalities` loest auf (Zufall = verschiedene), headless `-- personalities=a,b,c`.
+  Seitenleiste: Tooltip der Stammesbalken nennt die Persoenlichkeit (`Tribe.ai_personality_name`).
+- Ritualkammer: Schalter "Ritualkammer (experimentell)" aus Optionen und `GameSettings` entfernt, immer im
+  Baumenue (`Sidebar.default_build_entries()` ohne Parameter); alter Settings-Eintrag wird beim Speichern geloescht.
+- Messungen (`diag_ai_match`, je 20-30 min, mehrere Karten/Seeds): jetzt gezaubert werden zusaetzlich Hypnose,
+  Tornado, Blitz, Erdbeben, Feuerregen, Golem und Genesisgolem (Seenland, Oekonom: Hypnose 18, Tornado 16,
+  Erdbeben 10, Golem 2). Oekonom: 11-14 Huetten / ~80-136 Anhaenger bei 300 s gegen 6 / ~30-100 beim
+  Aggressiven; gewinnt auf Seenland klar, faellt auf engen Karten mit 4 KIs aber manchmal frueh gegen einen
+  aggressiven Nachbarn. Sieger: Verteidiger 3x, Oekonom 2x, Aggressiv 2x - starke Streuung je Startplatz.
+  Spaete Skalierung: der Sieger erreicht in allen Laeufen den Einheiten-Hardcap (~950-1000, 30-54 Huetten).
+- Nicht belegt: Zaubervorstoesse kamen in den Messpartien nicht vor (die Partien waren entschieden, bevor ein
+  Belagerungszauber geladen war); Vulkan und Supertornado wurden geladen, aber mangels Gegner nicht gezaubert.
+  Der Zaehler `casts` zaehlt angenommene Befehle, nicht ausgeloeste Effekte. Nicht im laufenden Spiel gegen
+  einen Menschen getestet.
+- Pruefung: `tests/test_ai_personality.gd` (neu, 49), test_ai 460, Suite 8799 bestanden / 0 fehlgeschlagen;
+  headless Skirmish-Start mit 3 KIs ohne Fehler.

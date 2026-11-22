@@ -235,16 +235,13 @@ static func tribe_bar_fractions(populations: Array[int]) -> Array[float]:
 
 ## Registry for the building tab. Disabled entries have no scene (so they yield
 ## no start_placement target); the hut entry references the Hut scene and cost.
-## The experimental ritual chamber comes last and only while its option is on
-## (`experimental`: 1 = with it, 0 = without, -1 = as GameSettings says).
-static func default_build_entries(experimental: int = -1) -> Array[Dictionary]:
+## The ritual chamber comes last — a regular building since 2026-11-22 (the
+## experimental option in the main menu is gone, user spec).
+static func default_build_entries() -> Array[Dictionary]:
 	var entries: Array[Dictionary] = _base_build_entries()
-	var with_ritual: bool = GameSettings.ritual_chamber_enabled() if experimental < 0 \
-		else experimental > 0
-	if with_ritual:
-		entries.append({"id": &"ritual_chamber", "name": "Ritualkammer (experimentell)",
-			"scene": RITUAL_CHAMBER_SCENE, "icon": &"ritual_chamber",
-			"wood_cost": RitualChamber.WOOD_COST, "enabled": true})
+	entries.append({"id": &"ritual_chamber", "name": "Ritualkammer",
+		"scene": RITUAL_CHAMBER_SCENE, "icon": &"ritual_chamber",
+		"wood_cost": RitualChamber.WOOD_COST, "enabled": true})
 	return entries
 
 
@@ -1596,6 +1593,12 @@ func _refresh_tribe_bars() -> void:
 	var fracs: Array[float] = tribe_bar_fractions(pops)
 	for i in range(_tribe_bars.size()):
 		_tribe_bars[i].value = fracs[i]
+		# Who is who (2026-11-22): an AI tribe names its personality on hover.
+		if i < _tribes.size():
+			var who: String = "Du" if i == _player_id else (
+				"KI – %s" % _tribes[i].ai_personality_name
+				if _tribes[i].ai_personality_name != "" else "KI")
+			_tribe_bars[i].tooltip_text = "%s: %d Anhänger" % [who, pops[i]]
 
 
 func _refresh_followers() -> void:

@@ -1,6 +1,6 @@
 extends TestBase
 
-## Ritualkammer (experimentell, Nutzervorgabe 2026-11-16): ein Ausbildungsgebaeude,
+## Ritualkammer (Nutzervorgabe 2026-11-16, seit 2026-11-22 immer baubar): ein Ausbildungsgebaeude,
 ## aus dem niemand herauskommt. Je zwei geopferte Braves bekommt ein zufaelliger
 ## eigener Golem einen Kill; ohne Golem gehen 10 Mana in einen der Golemzauber.
 ## Nur mit dem Optionsschalter im Baumenue. Dazu der Bauabstand: um jedes Gebaeude
@@ -105,16 +105,12 @@ func test_numbers() -> void:
 	c.free()
 
 
-func test_build_menu_only_with_the_option() -> void:
-	var ids_off: Array = []
-	for e in Sidebar.default_build_entries(0):
-		ids_off.append(e["id"])
-	check(not ids_off.has(&"ritual_chamber"), "option off: not in the build menu")
+func test_build_menu_always_has_it() -> void:
 	var found: Dictionary = {}
-	for e in Sidebar.default_build_entries(1):
+	for e in Sidebar.default_build_entries():
 		if e["id"] == &"ritual_chamber":
 			found = e
-	check(not found.is_empty() and found["enabled"], "option on: buildable")
+	check(not found.is_empty() and found["enabled"], "always buildable (no option since 2026-11-22)")
 	check(found.get("scene") == Sidebar.RITUAL_CHAMBER_SCENE, "pointing at its scene")
 	check(int(found.get("wood_cost", 0)) == 20, "for 20 wood")
 

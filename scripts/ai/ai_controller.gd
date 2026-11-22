@@ -277,6 +277,10 @@ const FIRESTORM_MIN_ENEMIES: int = 5
 ## its lava radius of the target building.
 const VOLCANO_MIN_BUILDINGS: int = 2
 ## A building counts as coastal (sink floods it) below this ground height.
+## Friendly-fire guard of the supertornado: its satellites spawn
+## SUPERTORNADO_SATELLITE_DIST out, each a normal twister — the main funnel itself
+## lies inside that. Must stay below the cast range, or the shaman blocks herself.
+const SUPERTORNADO_GUARD: float = Balance.SUPERTORNADO_SATELLITE_DIST + Balance.TORNADO_RADIUS + 1.0
 const SINK_COAST_HEIGHT: float = TerrainData.SEA_LEVEL + 2.0
 ## Offset of the flatten cast next to a slope building (square edge cuts
 ## through the footprint) and the height step that promises a foundation break.
@@ -331,6 +335,19 @@ var _expansion_anchor_age: int = 0
 ## Army size required for the next attack; grows after every wave
 ## (gradually bigger attacks).
 var attack_wave_size: int = AIState.ARMY_ATTACK_SIZE
+## Set from the personality on the first tick (needs the arena span): until then
+## the field keeps its old default, which tests rely on.
+var _wave_initialized: bool = false
+## Personality (2026-11-22, AIPersonality): aggressive by default — the old behaviour.
+var personality: AIPersonality = AIPersonality.aggressive()
+## Spell raid (2026-11-22): shaman + escort on the way to an enemy village.
+var _raid_squad: Array[Unit] = []
+var _raid_target: Vector3 = Vector3.INF
+var _raid_ticks: int = 0
+var _raid_cooldown: int = 0
+static var dbg_raids: int = 0
+## Spell raids of THIS AI (diag_ai_match).
+var raids: int = 0
 ## Periodic status prints (enabled by the `ai-log` command-line user arg).
 var debug_log: bool = false
 ## Own golems: sitting/standing and the pure golem decisions (2026-11-21).
@@ -401,6 +418,8 @@ static var dbg_threat_ticks: int = 0
 ## der Ladeauswahl. OHNE diese Zaehler ist "kann die KI nach der Manakurve noch
 ## zaubern?" nicht beantwortbar — vorher gab es kein Instrument dafuer.
 static var dbg_casts: Dictionary = {}
+## The same per AI (2026-11-22): spell id -> casts of THIS tribe (diag_ai_match).
+var casts: Dictionary = {}
 static var dbg_spell_toggles: int = 0
 ## Baustellen, die die Nachkontrolle als abgeschnitten verworfen hat (10g Teil 2).
 static var dbg_site_scraps: int = 0
@@ -417,6 +436,9 @@ func tick_ai() -> void:
 		return
 	if tribe.eliminated:
 		return   # out of the match (10d): no decisions, no orders
+	if not _wave_initialized:
+		_wave_initialized = true
+		attack_wave_size = personality.first_wave_for(AIState.is_cramped(_arena_span()))
 	var cache: TickCache = build_tick_cache()
 	var snap: Dictionary = make_snapshot(cache)
 	_tick_count += 1
@@ -429,9 +451,10 @@ func tick_ai() -> void:
 	if next != state:
 		# Leaving ATTACK ends a wave: the next one has to be bigger.
 		if state == AIState.State.ATTACK:
-			attack_wave_size = mini(attack_wave_size + AIState.ATTACK_WAVE_GROWTH,
+			attack_wave_size = mini(attack_wave_size + personality.wave_growth,
 				AIState.ATTACK_WAVE_MAX)
-		print("KI %d: %s -> %s (Pop %d, Armee %d, nächste Welle %d)" % [tribe.id,
+		print("KI %d (%s): %s -> %s (Pop %d, Armee %d, nächste Welle %d)" % [tribe.id,
+			personality.display_name(),
 			AIState.State.keys()[state], AIState.State.keys()[next],
 			snap.get("population", 0), snap.get("army", 0), attack_wave_size])
 		state = next
@@ -487,7 +510,14 @@ func tick_ai() -> void:
 	# An attack on the own village takes priority over everything else.
 	if not threat.is_empty():
 		_tick_defend(cache, threat)
+	# Spell raid (2026-11-22): the shaman takes a charged siege spell to the enemy.
+	_tick_raid(cache, threat)
 	match state:
+		AIState.State.BUILD:
+			# Home guard (2026-11-22): the economist and the defender train their first
+			# defenders while the village is still going up.
+			if _below_guard(cache):
+				_tick_train(cache)
 		AIState.State.TRAIN:
 			_tick_train(cache)
 		AIState.State.ATTACK:
@@ -640,6 +670,7 @@ func make_snapshot(cache: TickCache = null) -> Dictionary:
 		c.army_count, c.usable_huts, c.camps_by_kind.size(), c.shaman_alive)
 	snap["army_target"] = attack_wave_size
 	snap["pop_for_train"] = AIState.pop_for_train(_arena_span())
+	snap["attack_min_pop"] = personality.attack_min_pop
 	return snap
 
 
@@ -655,7 +686,8 @@ func _tick_build(cache: TickCache) -> void:
 	if _plot_fail_ticks > 0:
 		_plot_fail_ticks -= 1
 		return
-	var max_sites: int = AIState.parallel_site_count(cache.brave_count)
+	var max_sites: int = AIState.parallel_site_count(cache.brave_count,
+		personality.braves_per_site)
 	if cache.sites.size() >= max_sites:
 		return
 	# 10g: do not open a site nobody can staff. Judged on the PREVIOUS tick's
@@ -757,7 +789,7 @@ func _tick_build_crews(cache: TickCache) -> int:
 			return int(a[0]) > int(b[0])
 		return float(a[1]) > float(b[1]))
 	var budget: int = AIState.builder_budget(cache.brave_count, cache.population,
-		_site_demand(cache))
+		_site_demand(cache), personality.economy_brave_share)
 	var assigned: int = 0
 	var staffed: int = 0
 	for entry in ranked:
@@ -872,8 +904,34 @@ func next_building_kind(cache: TickCache) -> StringName:
 			hut_racks += 1
 	counts["hut_rack"] = hut_racks
 	counts["huts_without_rack"] = 1 if _hut_needing_rack(cache) != null else 0
-	counts["watchtower_target"] = AIState.target_watchtowers(arena)
+	counts["watchtower_target"] = personality.tower_target(cache.usable_huts,
+		AIState.is_cramped(arena))
+	# Personality (2026-11-22): how many huts first, how eagerly to house, and the
+	# defender's early towers and workshops.
+	counts["target_huts"] = personality.target_huts
+	counts["housing_pressure"] = personality.housing_pressure
+	counts["housing_headroom"] = personality.housing_headroom
+	counts["max_hut_sites"] = personality.max_hut_sites
+	counts["early_towers"] = personality.early_towers
+	counts["early_workshops"] = personality.early_workshops
+	counts["army_shares"] = _army_shares()
 	return AIState.next_building_kind(counts)
+
+
+## True while the standing army is below the personality's home guard.
+func _below_guard(cache: TickCache) -> bool:
+	return cache.army_count < personality.guard_size(cache.population)
+
+
+## The personality's army mix as [warrior, firewarrior, preacher].
+func _army_shares() -> Array:
+	return [personality.share_warrior, personality.share_firewarrior,
+		personality.share_preacher]
+
+
+## Braves this AI keeps out of training (personality share).
+func _min_economy(cache: TickCache) -> int:
+	return personality.min_economy_braves(cache.population)
 
 
 ## Kept as a thin wrapper so existing tests can ask for the next SCENE.
@@ -1050,7 +1108,7 @@ func _tick_forward_haul(cache: TickCache) -> void:
 ## counts are advanced per assignment, so one batch rotates through the
 ## kinds); keeps a minimum economy crew.
 func _tick_train(cache: TickCache) -> void:
-	var spare: int = cache.brave_count - AIState.min_economy_braves(cache.population)
+	var spare: int = cache.brave_count - _min_economy(cache)
 	if spare <= 0:
 		return
 	var counts: Dictionary = cache.kind_counts.duplicate()
@@ -1058,7 +1116,7 @@ func _tick_train(cache: TickCache) -> void:
 		cache.idle_left())
 	for i in range(batch_size):
 		var order: Array[StringName] = AIState.training_kind_order(
-			counts[&"warrior"], counts[&"firewarrior"], counts[&"preacher"])
+			counts[&"warrior"], counts[&"firewarrior"], counts[&"preacher"], _army_shares())
 		# Biggest deficit whose camp actually stands and is usable.
 		for kind in order:
 			var building: TrainingBuilding = _camp_for(cache, kind)
@@ -1296,6 +1354,19 @@ func _arena_span() -> float:
 	return best
 
 
+## Defence radius of this AI: the arena rule times the personality factor.
+func _defend_radius() -> float:
+	return AIState.defend_radius(_arena_span()) * personality.defend_radius_mult
+
+
+## Settlement anchors: the cramped arena keeps its compact value, the open arena
+## follows the personality (the economist spreads wider, the defender stays compact).
+func _settlement_anchor_limit() -> int:
+	if AIState.is_cramped(_arena_span()):
+		return mini(Balance.AI_MAX_SETTLEMENT_ANCHORS_CRAMPED, personality.settlement_anchors)
+	return personality.settlement_anchors
+
+
 func _flat_span(a: Vector3, b: Vector3) -> float:
 	return Vector2(a.x - b.x, a.z - b.z).length()
 
@@ -1324,7 +1395,7 @@ func _detect_threat() -> Dictionary:
 	# only counts while it is closer to OUR anchor than to its own. Both together
 	# end the island failure where the neighbouring base itself was a permanent
 	# "threat" (see _in_own_territory).
-	var radius: float = AIState.defend_radius(_arena_span())
+	var radius: float = _defend_radius()
 	var nearest: Unit = null
 	var nearest_dist: float = INF
 	# The nearest enemy that is NOT a golem — the militia's target (2026-11-21: braves
@@ -1515,23 +1586,25 @@ func _cast(spell_id: StringName, at: Vector3) -> bool:
 	if commands == null or not commands.cast_spell(tribe, spell_id, at):
 		return false
 	dbg_casts[spell_id] = int(dbg_casts.get(spell_id, 0)) + 1
+	casts[spell_id] = int(casts.get(spell_id, 0)) + 1
 	return true
 
 
-## Decides which spells keep charging (phase 10k). Without this the AI would
-## spread its whole income over twelve spells and never reach the expensive ones —
-## and once the cheap ones are full it would LOSE the income entirely (there is no
-## mana banking). The decision itself is a pure static in AIState; here it is only
-## applied, and only where it differs, so the signal does not fire every tick.
+## Decides which spells keep charging (phase 10k; personality since 2026-11-22):
+## the personality's everyday stock first, plus ONE big spell it saves for — the
+## rule lives in AIState.spell_charge_plan. Before, the AI kept the cheapest open
+## spells on, and because fireball and swarm are used all the time the expensive
+## ones never charged. Applied only where it differs, so the signal does not fire
+## every tick.
 func _tick_spell_charging() -> void:
 	if tribe == null or commands == null or tribe.spells.is_empty():
 		return
 	var listed: Array = []
 	for spell in tribe.spells:
 		listed.append({"id": spell.id, "cost": spell.charge_cost,
-			"full": spell.is_full()})
-	var wanted: Array[StringName] = AIState.spells_to_charge(
-		listed, tribe.charging_income())
+			"full": spell.is_full(), "charges": spell.charges})
+	var wanted: Array[StringName] = AIState.spell_charge_plan(listed,
+		tribe.charging_income(), personality.spell_reserve, personality.spell_goals)
 	for spell in tribe.spells:
 		var want: bool = spell.id in wanted
 		if spell.active != want:
@@ -1539,6 +1612,20 @@ func _tick_spell_charging() -> void:
 			dbg_spell_toggles += 1
 
 
+## Heuristic, in priority order (one cast per tick; a spell without a stored
+## charge simply falls through to the next option). Reworked 2026-11-22 — before,
+## hypnosis and the supertornado were never cast at all and the building ladder
+## stopped at the tornado:
+##  1. Lightning on the enemy shaman near ours.
+##  2. An enemy golem: lightning, else firestorm.
+##  3. Enemy preachers: hypnosis on a group of them, else lightning / fireball.
+##  4. Own golems (AIGolems).
+##  5. A big fight (AI_BIG_FIGHT_ENEMIES ground foes): supertornado, earthquake,
+##     firestorm on the crowd — each only where it cannot hit the own side.
+##  6. Hypnosis on a squad (AI_HYPNOSIS_MIN_UNITS in its square).
+##  7. Enemy building: volcano / earthquake / supertornado / firestorm on clusters,
+##     sink on the coast, flatten on slopes, then tornado / earthquake / lightning.
+##  8. Swarm on a big group, tornado on a clump, firestorm / fireball on a cluster.
 func _cast_spells(cache: TickCache = null, threat: Dictionary = {}) -> void:
 	if not _shaman_alive() or unit_manager == null:
 		return
@@ -1547,7 +1634,11 @@ func _cast_spells(cache: TickCache = null, threat: Dictionary = {}) -> void:
 		return
 	var enemies: Array[Unit] = []
 	for unit in unit_manager.get_units_in_radius(shaman.position, SPELL_SCAN_RADIUS):
-		if unit.tribe_id != tribe.id and unit.state != Unit.State.DEAD:
+		# is_targetable (2026-11-22): a hidden / out-of-world target makes the spell
+		# fail with the charge kept — the AI re-ordered the same cast every tick and
+		# the shaman did nothing else (measured: hundreds of lightning orders).
+		if unit.tribe_id != tribe.id and unit.state != Unit.State.DEAD \
+				and unit.is_targetable():
 			enemies.append(unit)
 	for enemy in enemies:
 		if enemy.unit_kind() == &"shaman":
@@ -1561,21 +1652,25 @@ func _cast_spells(cache: TickCache = null, threat: Dictionary = {}) -> void:
 	if enemy_golem != null:
 		if _cast(&"lightning", enemy_golem.position):
 			return
-		if not _own_units_near(enemy_golem.position, FirestormSpell.SPREAD_RADIUS) \
+		if _firestorm_safe(enemy_golem.position) \
 				and _cast(&"firestorm", enemy_golem.position):
 			return
 	# Enemy preachers are the AI's worst matchup — they convert its army away
-	# and converting units cannot even be attacked in melee. They die first;
-	# lightning one-shots them, fireball is the fallback. Filtering the already
-	# collected `enemies` list costs no extra scan.
+	# and converting units cannot even be attacked in melee. Two or more in one
+	# square are hypnotised (they then preach for us), otherwise they die first:
+	# lightning one-shots them, fireball is the fallback.
+	var preachers: Array[Unit] = []
 	for enemy in enemies:
-		if enemy.unit_kind() != &"preacher":
-			continue
-		if _cast(&"lightning", enemy.position):
+		if enemy.unit_kind() == &"preacher":
+			preachers.append(enemy)
+	if not preachers.is_empty():
+		var spot: Vector3 = _hypnosis_spot(preachers, 2)
+		if spot != Vector3.INF and _cast(&"hypnosis", spot):
 			return
-		if _cast(&"fireball", enemy.position):
+		if _cast(&"lightning", preachers[0].position):
 			return
-		break
+		if _cast(&"fireball", preachers[0].position):
+			return
 	var target_building: Building = _nearest_enemy_building(shaman.position,
 		SPELL_SCAN_RADIUS)
 	# Own golems (2026-11-21, AIGolems): against an enemy golem, in a big fight, or at an
@@ -1598,44 +1693,298 @@ func _cast_spells(cache: TickCache = null, threat: Dictionary = {}) -> void:
 			aim = target_building.center_world()
 		if aim != Vector3.INF and _summon_golem(shaman, aim, _shaman_at_home(shaman, threat)):
 			return
-	if target_building != null:
-		var center: Vector3 = target_building.center_world()
-		# Building priorities (7c): volcano on clusters, sink floods coastal
-		# plots, flatten breaks foundations on slopes, then the old
-		# tornado/quake/lightning ladder.
-		if _enemy_buildings_near(center, VolcanoZone.RADIUS) >= VOLCANO_MIN_BUILDINGS:
-			if _cast(&"volcano", center):
-				return
-		if center.y <= SINK_COAST_HEIGHT:
-			if _cast(&"sink", center):
-				return
-		var flatten_at: Vector3 = _flatten_break_point(target_building)
-		if flatten_at != Vector3.INF:
-			if _cast(&"flatten", flatten_at):
-				return
-		if _cast(&"tornado", center):
-			return
-		if _cast(&"earthquake", center):
-			return
-		if _cast(&"lightning", center):
-			return
+	# A big fight: the crowd spells (2026-11-22).
+	if ground_foes.size() >= Balance.AI_BIG_FIGHT_ENEMIES and _cast_on_crowd(ground_foes):
+		return
+	# Hypnosis on a squad (2026-11-22): turns the enemy's soldiers against it for 30 s.
+	var hypno: Vector3 = _hypnosis_spot(ground_foes, Balance.AI_HYPNOSIS_MIN_UNITS)
+	if hypno != Vector3.INF and _cast(&"hypnosis", hypno):
+		return
+	if target_building != null and _cast_on_village(target_building):
+		return
 	if enemies.size() >= SWARM_MIN_ENEMIES:
 		var centroid: Vector3 = Vector3.ZERO
 		for enemy in enemies:
 			centroid += enemy.position
 		if _cast(&"swarm", centroid / float(enemies.size())):
 			return
+	# A clump of enemies and none of ours nearby: the tornado flings them (2026-11-22).
+	# It is tribe-blind, hence the own-units/-buildings guard.
+	var clump: Array = _best_spot(ground_foes, CLUSTER_RADIUS)
+	if int(clump[1]) >= Balance.AI_TORNADO_MIN_ENEMIES \
+			and _area_free_of_own(clump[0], Balance.TORNADO_RADIUS + 5.0) \
+			and _cast(&"tornado", clump[0]):
+		return
 	var cluster: Vector3 = _densest_cluster(enemies)
 	if cluster != Vector3.INF:
 		# A big pile is worth the salvo; smaller ones get the single fireball.
 		# The firestorm burns friend and foe alike (2026-09-06): never rain it
 		# down where own units stand — in a melee that is the whole wave.
 		if _count_enemies_near(enemies, cluster, FirestormSpell.SPREAD_RADIUS) \
-				>= FIRESTORM_MIN_ENEMIES \
-				and not _own_units_near(cluster, FirestormSpell.SPREAD_RADIUS):
+				>= FIRESTORM_MIN_ENEMIES and _firestorm_safe(cluster):
 			if _cast(&"firestorm", cluster):
 				return
 		_cast(&"fireball", cluster)
+		return
+	# A FULL fireball stock is income going to waste (no mana banking): spend one on
+	# the nearest soldier, else on anyone (2026-11-22).
+	var fireball: Spell = tribe.get_spell(&"fireball")
+	if fireball != null and fireball.is_full() and not ground_foes.is_empty():
+		var pick: Unit = ground_foes[0]
+		for foe in ground_foes:
+			if foe.unit_kind() in [&"warrior", &"firewarrior", &"preacher"]:
+				pick = foe
+				break
+		_cast(&"fireball", pick.position)
+
+
+## The crowd spells for a big fight (2026-11-22). Supertornado and earthquake were
+## never aimed at troops before; the firestorm only on a tight clump.
+func _cast_on_crowd(foes: Array[Unit]) -> bool:
+	var wide: Array = _best_spot(foes, Balance.SUPERTORNADO_RADIUS + 1.5)
+	if int(wide[1]) >= Balance.AI_SUPERTORNADO_MIN_ENEMIES \
+			and _area_free_of_own(wide[0], SUPERTORNADO_GUARD) \
+			and _cast(&"supertornado", wide[0]):
+		return true
+	# The earthquake spares own units and buildings, but it reshapes the ground and
+	# opens a lava fault — not inside the own village.
+	var quake: Array = _best_spot(foes, EarthquakeSpell.RADIUS * 0.6)
+	if int(quake[1]) >= Balance.AI_EARTHQUAKE_MIN_ENEMIES \
+			and not _own_buildings_near(quake[0], EarthquakeSpell.RADIUS + 3.0) \
+			and _cast(&"earthquake", quake[0]):
+		return true
+	var rain: Array = _best_spot(foes, FirestormSpell.SPREAD_RADIUS * 0.7)
+	if int(rain[1]) >= FIRESTORM_MIN_ENEMIES and _firestorm_safe(rain[0]) \
+			and _cast(&"firestorm", rain[0]):
+		return true
+	return false
+
+
+## Building spells around `building` (7c, extended 2026-11-22): the cluster spells
+## first, then the old single-building ladder.
+func _cast_on_village(building: Building) -> bool:
+	var center: Vector3 = building.center_world()
+	if _enemy_buildings_near(center, VolcanoZone.LAVA_REACH) >= VOLCANO_MIN_BUILDINGS \
+			and _cast(&"volcano", center):
+		return true
+	if _enemy_buildings_near(center, EarthquakeSpell.RADIUS) \
+			>= Balance.AI_EARTHQUAKE_MIN_BUILDINGS and _cast(&"earthquake", center):
+		return true
+	if _enemy_buildings_near(center, Balance.SUPERTORNADO_RADIUS + 4.0) \
+			>= Balance.AI_SUPERTORNADO_MIN_BUILDINGS \
+			and _area_free_of_own(center, SUPERTORNADO_GUARD) \
+			and _cast(&"supertornado", center):
+		return true
+	if _enemy_buildings_near(center, FirestormSpell.SPREAD_RADIUS) \
+			>= Balance.AI_FIRESTORM_MIN_BUILDINGS and _firestorm_safe(center) \
+			and _cast(&"firestorm", center):
+		return true
+	if center.y <= SINK_COAST_HEIGHT and _cast(&"sink", center):
+		return true
+	var flatten_at: Vector3 = _flatten_break_point(building)
+	if flatten_at != Vector3.INF and _cast(&"flatten", flatten_at):
+		return true
+	if _cast(&"tornado", center):
+		return true
+	if _cast(&"earthquake", center):
+		return true
+	return _cast(&"lightning", center)
+
+
+## Best square for a hypnosis among `foes`: the candidate whose 4 x 4 m square
+## (HypnosisSpell.units_in_square — the spell's own truth) catches the most
+## hypnotisable enemies, soldiers counting 1.5. INF below `min_units` heads.
+func _hypnosis_spot(foes: Array[Unit], min_units: int) -> Vector3:
+	var hypnosis: Spell = tribe.get_spell(&"hypnosis")
+	if hypnosis == null or hypnosis.charges <= 0 or foes.size() < min_units:
+		return Vector3.INF
+	var best: Vector3 = Vector3.INF
+	var best_score: float = 0.0
+	var tried: int = 0
+	for cand in foes:
+		if tried >= 24:
+			break   # bounded: one radius query per candidate
+		if cand.is_hypnosis_immune():
+			continue
+		tried += 1
+		var caught: Array[Unit] = HypnosisSpell.units_in_square(unit_manager,
+			cand.position, tribe.id)
+		if caught.size() < min_units:
+			continue
+		var score: float = 0.0
+		for u in caught:
+			score += 1.5 if u.unit_kind() in [&"warrior", &"firewarrior", &"preacher"] \
+				else 1.0
+		if score > best_score:
+			best_score = score
+			best = cand.position
+	return best
+
+
+## [centroid, count] of the densest group of `foes` within `radius` of one of them
+## ([INF, 0] for none). Bounded to the first 40 candidates.
+func _best_spot(foes: Array[Unit], radius: float) -> Array:
+	var best: Vector3 = Vector3.INF
+	var best_n: int = 0
+	var r2: float = radius * radius
+	for i in range(mini(foes.size(), 40)):
+		var c: Vector3 = foes[i].position
+		var n: int = 0
+		var sum: Vector3 = Vector3.ZERO
+		for other in foes:
+			if other.position.distance_squared_to(c) <= r2:
+				n += 1
+				sum += other.position
+		if n > best_n:
+			best_n = n
+			best = sum / float(n)
+	return [best, best_n]
+
+
+## The firestorm burns everything (2026-09-06): no own unit and no own building
+## inside its spread.
+func _firestorm_safe(at: Vector3) -> bool:
+	return _area_free_of_own(at, FirestormSpell.SPREAD_RADIUS)
+
+
+## Neither own units nor own buildings within `radius` of `at` (guard for the
+## tribe-blind spells: tornado, supertornado, firestorm).
+func _area_free_of_own(at: Vector3, radius: float) -> bool:
+	if at == Vector3.INF:
+		return false
+	return not _own_units_near(at, radius) and not _own_buildings_near(at, radius)
+
+
+## True when an own building's centre lies within `radius` (+ half its footprint).
+func _own_buildings_near(at: Vector3, radius: float) -> bool:
+	if tribe == null:
+		return false
+	for b in tribe.buildings:
+		if not is_instance_valid(b) or b.health <= 0:
+			continue
+		var c: Vector3 = b.center_world()
+		var reach: float = radius + 0.5 * float(maxi(b.footprint.x, b.footprint.y))
+		if Vector2(c.x - at.x, c.z - at.z).length_squared() <= reach * reach:
+			return true
+	return false
+
+
+# --- Spell raid (2026-11-22) -------------------------------------------------------
+
+## With a siege spell charged (Balance.AI_RAID_SPELLS) the shaman does not wait for
+## the next attack wave: she takes an escort to the nearest enemy village, the
+## normal spell heuristic casts there (_cast_on_village), and the squad comes home
+## once the siege spells are spent, the time is up or the village is threatened.
+## Personalities with spell_raids only (the defender keeps its shaman at home).
+func _tick_raid(cache: TickCache, threat: Dictionary) -> void:
+	if _raid_cooldown > 0:
+		_raid_cooldown -= 1
+	if not _raid_squad.is_empty():
+		_continue_raid(threat)
+		return
+	if not personality.spell_raids or _raid_cooldown > 0 or not threat.is_empty():
+		return
+	if state == AIState.State.ATTACK or not _shaman_alive():
+		return
+	var shaman: Unit = tribe.shaman
+	if shaman.state == Unit.State.CAST or shaman.garrison_housed or not _raid_spell_ready():
+		return
+	var target: Vector3 = _raid_target_building()
+	if target == Vector3.INF or nav_grid == null \
+			or not nav_grid.same_island(shaman.position, target):
+		return
+	var escort: Array[Unit] = []
+	for u in _marching_only(cache.army):
+		if AIGolems.marches_with_wave(u) and not (u is CrewedVehicle):
+			escort.append(u)
+	if escort.size() < Balance.AI_RAID_MIN_ESCORT:
+		return
+	var take: int = maxi(Balance.AI_RAID_MIN_ESCORT,
+		int(ceil(float(escort.size()) * Balance.AI_RAID_ESCORT_SHARE)))
+	escort.sort_custom(func(a: Unit, b: Unit) -> bool:
+		return a.position.distance_squared_to(shaman.position) \
+			< b.position.distance_squared_to(shaman.position))
+	_raid_squad = escort.slice(0, take)
+	_raid_squad.append(shaman)
+	_raid_target = target
+	_raid_ticks = 0
+	dbg_raids += 1
+	raids += 1
+	commands.order_move(_raid_squad, target, false, true)   # attack-move
+	if debug_log:
+		print("KI %d (%s): Zaubervorstoss mit %d Mann" % [tribe.id,
+			personality.display_name(), _raid_squad.size() - 1])
+
+
+func _continue_raid(threat: Dictionary) -> void:
+	_raid_ticks += 1
+	var alive: Array[Unit] = []
+	for u in _raid_squad:
+		if is_instance_valid(u) and u.state != Unit.State.DEAD and u.tribe_id == tribe.id:
+			alive.append(u)
+	_raid_squad = alive
+	# The attack wave or the village defence takes the squad over (both order the
+	# whole army anyway).
+	if state == AIState.State.ATTACK or not threat.is_empty():
+		_end_raid(false)
+		return
+	var done: bool = not _shaman_alive() or not (tribe.shaman in _raid_squad) \
+		or not _raid_spell_ready() or _raid_ticks >= Balance.AI_RAID_MAX_TICKS
+	if done:
+		_end_raid(true)
+		return
+	# The target fell: the next building of the same village, if any is near.
+	var target: Vector3 = _raid_target_building()
+	if target == Vector3.INF:
+		_end_raid(true)
+		return
+	_raid_target = target
+	if _raid_ticks % ATTACK_ORDER_TICKS == 0:
+		var marching: Array[Unit] = _marching_only(_raid_squad)
+		if not marching.is_empty():
+			commands.order_move(marching, _raid_target, false, true)
+
+
+## Ends the raid; `recall` walks the survivors home (attack-move, so they fight
+## their way back).
+func _end_raid(recall: bool) -> void:
+	if recall and nav_grid != null:
+		var home: Vector3 = nav_grid.cell_to_world(base_anchor)
+		var squad: Array[Unit] = _marching_only(_raid_squad)
+		if not squad.is_empty():
+			commands.order_move(squad, home, false, true)
+	_raid_squad.clear()
+	_raid_target = Vector3.INF
+	_raid_cooldown = Balance.AI_RAID_COOLDOWN_TICKS
+
+
+## True while a siege spell has a stored charge.
+func _raid_spell_ready() -> bool:
+	for id in Balance.AI_RAID_SPELLS:
+		var s: Spell = tribe.get_spell(id)
+		if s != null and s.charges > 0:
+			return true
+	return false
+
+
+## The raid goes to the nearest attackable enemy BUILDING (never a unit) — INF
+## when there is none.
+func _raid_target_building() -> Vector3:
+	if building_manager == null or nav_grid == null:
+		return Vector3.INF
+	var from: Vector3 = tribe.shaman.position if _shaman_alive() \
+		else nav_grid.cell_to_world(base_anchor)
+	var best: Vector3 = Vector3.INF
+	var best_d: float = INF
+	for b in building_manager.buildings:
+		if not is_instance_valid(b) or b.tribe_id == tribe.id or b.health <= 0 \
+				or not b.is_attackable():
+			continue
+		var d: float = b.center_world().distance_squared_to(from)
+		if d < best_d:
+			best_d = d
+			best = b.center_world()
+	return best
 
 
 ## The tribe's living golems (from the tick cache when there is one).
@@ -1668,7 +2017,7 @@ func _shaman_at_home(shaman: Unit, threat: Dictionary) -> bool:
 	if nav_grid == null:
 		return false
 	var anchor_world: Vector3 = nav_grid.cell_to_world(base_anchor)
-	var home: bool = _flat_span(shaman.position, anchor_world) <= AIState.defend_radius(_arena_span())
+	var home: bool = _flat_span(shaman.position, anchor_world) <= _defend_radius()
 	return home and (not threat.is_empty() or state != AIState.State.ATTACK)
 
 
@@ -2067,7 +2416,7 @@ func _settlement_anchors(cache: TickCache) -> Array[Vector2i]:
 	anchors.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
 		return Vector2(a - base_anchor).length_squared() \
 			< Vector2(b - base_anchor).length_squared())
-	var anchor_limit: int = AIState.settlement_anchor_limit(_arena_span())
+	var anchor_limit: int = _settlement_anchor_limit()
 	if anchors.size() > anchor_limit:
 		anchors.resize(anchor_limit)
 	_settlement_cache = anchors
@@ -2223,7 +2572,7 @@ func _wood_thin_near_base() -> bool:
 func _staff_foresters(cache: TickCache) -> void:
 	if cache.foresters.is_empty():
 		return
-	if cache.brave_count <= AIState.min_economy_braves(cache.population):
+	if cache.brave_count <= _min_economy(cache):
 		return
 	# 2 workers early, up to the forester's full 4 once the tribe can spare them.
 	var workers: int = AIState.forester_workers(cache.brave_count)
@@ -2242,7 +2591,7 @@ func _staff_foresters(cache: TickCache) -> void:
 func _staff_workshops(cache: TickCache) -> void:
 	if cache.workshops.is_empty():
 		return
-	if cache.brave_count <= AIState.min_economy_braves(cache.population):
+	if cache.brave_count <= _min_economy(cache):
 		return
 	for ws in cache.workshops:
 		while ws.occupants.size() < ws.worker_slots() and ws.has_free_slot():
@@ -2274,14 +2623,17 @@ func _tick_hut_rallies(cache: TickCache) -> void:
 	# truth _tick_train uses, so the routing and the batch cannot disagree.
 	var order: Array[StringName] = AIState.training_kind_order(
 		cache.kind_counts[&"warrior"], cache.kind_counts[&"firewarrior"],
-		cache.kind_counts[&"preacher"])
+		cache.kind_counts[&"preacher"], _army_shares())
 	var camps: Array[Building] = []
 	for kind in order:
 		var camp: TrainingBuilding = _camp_for(cache, kind)
 		if camp != null:
 			camps.append(camp)
 	var share: float = AIState.training_hut_share(state, cache.army_count,
-		attack_wave_size)
+		attack_wave_size, personality.training_share_build, personality.training_share_army)
+	# Below the home guard the huts feed the camps at the army share, even in BUILD.
+	if _below_guard(cache):
+		share = maxf(share, personality.training_share_army)
 	# floori, never ceil: rounding UP would route every hut of a one-hut tribe and
 	# leave it without a single free brave.
 	var wanted: int = clampi(int(floor(float(cache.usable_huts) * share)),
@@ -2571,7 +2923,7 @@ func _crew_vehicle(cache: TickCache, vehicle: CrewedVehicle, target: int) -> int
 ## there is barely any military to draw on (early rushes, after a lost wave) —
 ## the user's rule.
 func _braves_may_crew(cache: TickCache) -> bool:
-	var spare: int = cache.brave_count - AIState.min_economy_braves(cache.population)
+	var spare: int = cache.brave_count - _min_economy(cache)
 	return spare >= Balance.AI_VEHICLE_BRAVE_SURPLUS \
 		or cache.army_count < Balance.AI_VEHICLE_MILITARY_SCARCE
 
@@ -2629,7 +2981,7 @@ func _tick_supply_runs(cache: TickCache) -> void:
 			return
 		if not _supply_crew_for(target).is_empty():
 			continue
-		if cache.brave_count <= AIState.min_economy_braves(cache.population):
+		if cache.brave_count <= _min_economy(cache):
 			return
 		var crew: Array[Unit] = cache.take_idle_for(target,
 			Balance.AI_SUPPLY_BRAVES_PER_TARGET, Balance.AI_BUILDER_WALK_RADIUS)

@@ -1,6 +1,6 @@
 class_name RitualChamber extends TrainingBuilding
 
-## Ritual chamber (Ritualkammer, experimental — user spec 2026-11-16): built
+## Ritual chamber (Ritualkammer — user spec 2026-11-16, regular since 2026-11-22): built
 ## like a training building and fed like one (braves queue, one goes in), but
 ## nobody ever comes out — the brave is gone. Every RITUAL_CHAMBER_BRAVES_PER_REWARD
 ## braves the tribe sacrifices (counted per tribe, over all its chambers) either
@@ -10,8 +10,8 @@ class_name RitualChamber extends TrainingBuilding
 ## golem) — one that is switched on (charging) and not full; only when there is none, into any that is
 ## not full (user spec 2026-11-18).
 ##
-## Only buildable while the option "Ritualkammer (experimentell)" is switched on
-## (GameSettings.ritual_chamber_enabled, main menu options); the AI never builds it.
+## Always in the build menu since 2026-11-22 (the experimental option was removed);
+## the AI never builds it.
 ##
 ## Placeholder mesh: a dark stone ring with four obelisks around an altar and a
 ## violet glow — unmistakably not a barracks.

@@ -396,6 +396,10 @@ func _setup_skirmish(tribes: Array[Tribe], nav: NavGrid) -> Vector2i:
 	var ai_player: bool = OS.get_cmdline_user_args().has("ai-player")
 	var anchors: Array[Vector2i] = MapGenerator.spawn_anchors(
 		GameState.terrain_data, GameState.map_id, tribes.size())
+	# Personalities (2026-11-22): the menu choice per AI slot (tribe 1 = slot 0), random
+	# slots resolved here — different ones while any are left. `-- personalities=a,b,c`
+	# overrides it for headless runs (tribe order, the player tribe included with ai-player).
+	var personalities: Array[StringName] = _skirmish_personalities(tribes.size())
 	for tribe in tribes:
 		var anchor: Vector2i = anchors[tribe.id]
 		_setup_skirmish_base(tribe, anchor, nav)
@@ -410,7 +414,33 @@ func _setup_skirmish(tribes: Array[Tribe], nav: NavGrid) -> Vector2i:
 			add_child(ai)
 			ai.setup(tribe, _tribe_commands, _unit_manager, _building_manager,
 				_tree_manager, nav, anchor)
+			ai.personality = AIPersonality.from_id(personalities[tribe.id])
+			tribe.ai_personality_name = ai.personality.display_name()
+			print("KI %d: Persönlichkeit %s" % [tribe.id, ai.personality.display_name()])
 	return anchors[GameState.PLAYER_TRIBE]
+
+
+## One resolved personality id per tribe (index = tribe id; the player's entry is
+## only used with `-- ai-player`).
+func _skirmish_personalities(count: int) -> Array[StringName]:
+	var choices: Array[StringName] = []
+	var config: MatchConfig = GameState.match_config
+	for id in range(count):
+		# Tribe 0 is the player; AI slot = tribe id - 1.
+		choices.append(config.personality_choice(id - 1) if config != null and id > 0
+			else MatchConfig.PERSONALITY_RANDOM)
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("personalities="):
+			var parts: PackedStringArray = arg.get_slice("=", 1).split(",")
+			for i in range(mini(parts.size(), count)):
+				choices[i] = StringName(parts[i])
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	rng.randomize()
+	# The AI slots are resolved together (different personalities while any are
+	# left); the player's entry on its own, so it never takes one away from them.
+	var out: Array[StringName] = AIPersonality.resolve_ids([choices[0]] as Array[StringName], rng)
+	out.append_array(AIPersonality.resolve_ids(choices.slice(1), rng))
+	return out
 
 
 ## One symmetric starter kit — the SAME for player and AI (no cheats).

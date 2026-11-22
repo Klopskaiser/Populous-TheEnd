@@ -96,6 +96,9 @@ var eliminated: bool = false
 ## Braves sacrificed in the tribe's ritual chambers (RitualChamber): every
 ## RITUAL_CHAMBER_BRAVES_PER_REWARD-th brings a reward.
 var ritual_sacrifices: int = 0
+## Personality of the AI driving this tribe (AIPersonality.display_name, set by
+## Main in skirmish; empty for the player) — shown in the sidebar's tribe bars.
+var ai_personality_name: String = ""
 
 var _events: Node = null
 var _events_resolved: bool = false
