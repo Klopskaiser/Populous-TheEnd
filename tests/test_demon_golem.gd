@@ -380,7 +380,7 @@ func test_everything_that_hangs_on_the_size_uses_the_golems_formula() -> void:
 	check_near(d._base_reach_factor(), pow(d.size_factor(), DemonGolem.area_exponent()), "own area factor = size ^ 0,25")
 	check_near(d._base_slam_scale(), pow(d.size_factor(), DemonGolem.slam_exponent()), "own slam scale = size ^ 0,47")
 	check_near(d.slam_radius(), full.slam_radius() * Balance.DEMON_GOLEM_WIDTH_FACTOR,
-		"80 m: the 80-m golem's slam, 25 % more (%.1f m)" % d.slam_radius(), 0.01)
+		"80 m: the 80-m golem's slam, 25 %% more (%.1f m)" % d.slam_radius(), 0.01)
 	check_near(d.ground_radius(Golem.ATTACK_DRUM), d.slam_radius() * (float(Golem.stand_attack(Golem.ATTACK_DRUM)["area"]) / Golem.SLAM_RADIUS),
 		"the drum's circle 10 % larger, as the golem's")
 	full.free()

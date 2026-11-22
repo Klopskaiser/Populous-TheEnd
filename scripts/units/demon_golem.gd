@@ -35,11 +35,6 @@ const WALK_CLIP_STRIDE: float = 2.575
 ## The same for one loop of crab_walk (crab walk, 2026-11-18): 0,997 m.
 const CRAB_CLIP_STRIDE_DEMON: float = 0.997
 
-## Running heals over time: one entry per kill or growth step, x = seconds left,
-## y = health per second.
-var _heal_stacks: Array[Vector2] = []
-var _heal_frac: float = 0.0
-
 
 func _init() -> void:
 	super._init()
@@ -334,46 +329,6 @@ static func kill_heal_for(victim_hp: int) -> Vector2i:
 		return Vector2i(Balance.DEMON_GOLEM_KILL_HEAL, Balance.DEMON_GOLEM_KILL_HEAL_OVER_TIME)
 	var now: int = victim_hp / 2
 	return Vector2i(now, victim_hp - now)
-
-
-func tick(delta: float) -> void:
-	super.tick(delta)
-	if state != State.DEAD and not doomed:
-		_tick_kill_heal(delta)
-
-
-## The healing over time of the last kills: every kill's share runs for
-## DEMON_GOLEM_KILL_HEAL_DURATION, all of them side by side.
-func _tick_kill_heal(delta: float) -> void:
-	if _heal_stacks.is_empty() or delta <= 0.0:
-		return
-	for i in range(_heal_stacks.size() - 1, -1, -1):
-		var s: Vector2 = _heal_stacks[i]
-		_heal_frac += s.y * minf(delta, s.x)
-		s.x -= delta
-		if s.x <= 0.0:
-			_heal_stacks.remove_at(i)
-		else:
-			_heal_stacks[i] = s
-	if _heal_frac >= 1.0:
-		var heal: int = int(_heal_frac)
-		_heal_frac -= float(heal)
-		health = mini(health + heal, max_health)
-
-
-## Starts a heal of `amount` health spread over `duration` seconds; it runs beside
-## all others (stacking).
-func _add_heal_over_time(amount: int, duration: float) -> void:
-	if amount > 0 and duration > 0.0:
-		_heal_stacks.append(Vector2(duration, float(amount) / duration))
-
-
-## Leben, das die Heilung ueber Zeit (Kills, Wachstum) noch nachliefert (fuer die Anzeige).
-func pending_kill_heal() -> float:
-	var left: float = _heal_frac
-	for s in _heal_stacks:
-		left += s.x * s.y
-	return left
 
 
 func status_text() -> String:

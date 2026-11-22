@@ -10,8 +10,9 @@ class_name GenesisGolem extends Golem
 ##
 ##  * Er waechst NICHT durch Kills (sie werden nur gezaehlt), sondern durch die
 ##    BRAVES seines Stammes: jeder Brave, den eine Huette erzeugt, ist ein Punkt
-##    Erfahrung, geteilt durch die Zahl der lebenden Genesisgolems des Stammes
-##    (credit_brave_to_tribe). 8 Stufen (GENESIS_GOLEM_STAGE_BRAVES), jede +3,5 m
+##    Erfahrung fuer GENAU EINEN Genesisgolem des Stammes — den mit den wenigsten
+##    Braves (credit_brave_to_tribe, 2026-11-22; vorher geteilt) — und heilt ihn um
+##    30 sofort und 30 ueber 5 s. Ab 100 m ist er gehaertet (is_full_size). 8 Stufen (GENESIS_GOLEM_STAGE_BRAVES), jede +3,5 m
 ##    (2026-11-17, vorher 9 Stufen zu 5, dann 4 m), +40 Leben, +2 Leben/s. Start 5 m und 1000 Leben,
 ##    keine Lebenszeit. Aggroreichweite: die halbe der anderen Golems.
 ##  * Startwerte: Schaden des frisch beschworenen Daemonengolems, Reichweite,
@@ -32,7 +33,7 @@ class_name GenesisGolem extends Golem
 ##    (_wood_pile) — dort holen es Braves wie von jedem Stapel. Der Stapel ist
 ##    UNSICHTBAR (2026-11-17): das Holz steht nur als Zahl im Besatzungsfeld.
 ##    Bleibt das Holz 30 s unberuehrt, verbraucht er 15 je Sekunde und waechst um
-##    2 % je Sekunde, bis 200 m; je Meter daraus +2 Leben und +0,15 Leben/s.
+##    1 % je Sekunde, bis 100 m; je Meter daraus +20 Leben und +1 Leben/s (2026-11-22).
 
 ## Seconds between two re-aimed walks toward the tree he is to fell.
 const HARVEST_REPATH: float = 1.0
@@ -45,7 +46,7 @@ const WALK_CLIP_STRIDE: float = 2.614
 ## The same for one loop of crab_walk (crab walk, 2026-11-18): 1,012 m.
 const CRAB_CLIP_STRIDE_GENESIS: float = 1.012
 
-## Stage 0..9 and the experience (braves, fractions when shared) behind it.
+## Stage 0..8 and the experience (braves assigned to him) behind it.
 var stage: int = 0
 var brave_xp: float = 0.0
 ## Metres he has grown by eating wood (on top of the stage height).
@@ -120,27 +121,36 @@ static func max_body_radius() -> float:
 	return Balance.GOLEM_BODY_HALF_WIDTH * Balance.GENESIS_GOLEM_MAX_HEIGHT / Balance.GOLEM_HEIGHT
 
 
-## A hut of `tribe` has brought forth a brave: one point of experience, shared by
-## the tribe's living Genesis golems.
+## A hut of `tribe` has brought forth a brave: it is assigned to ONE of the tribe's living
+## Genesis golems (user spec 2026-11-22: a brave never counts for several) — the one with the
+## fewest braves so far, so a newly summoned one catches up; a tie goes to the older one.
 static func credit_brave_to_tribe(tribe: Tribe) -> void:
 	if tribe == null:
 		return
-	var golems: Array[GenesisGolem] = []
+	var best: GenesisGolem = null
 	for u in tribe.units:
 		if is_instance_valid(u) and u is GenesisGolem and u.state != State.DEAD and not u.doomed:
-			golems.append(u as GenesisGolem)
-	if golems.is_empty():
-		return
-	var share: float = 1.0 / float(golems.size())
-	for g in golems:
-		g.credit_brave(share)
+			var g: GenesisGolem = u as GenesisGolem
+			if best == null or g.brave_xp < best.brave_xp - 0.000001:
+				best = g
+	if best != null:
+		best.credit_brave(1.0)
 
 
+## `amount` braves assigned to him: experience (and stages), and every whole brave heals
+## GENESIS_GOLEM_BRAVE_HEAL at once and GENESIS_GOLEM_BRAVE_HEAL_OVER_TIME over
+## GENESIS_GOLEM_BRAVE_HEAL_DURATION (user spec 2026-11-22).
 func credit_brave(amount: float) -> void:
 	brave_xp += amount
 	var target: int = stage_for_xp(brave_xp)
 	while stage < target:
 		_stage_up()
+	var braves: int = int(floor(amount + 0.000001))
+	if braves <= 0 or state == State.DEAD:
+		return
+	health = mini(health + Balance.GENESIS_GOLEM_BRAVE_HEAL * braves, max_health)
+	_add_heal_over_time(Balance.GENESIS_GOLEM_BRAVE_HEAL_OVER_TIME * braves,
+		Balance.GENESIS_GOLEM_BRAVE_HEAL_DURATION)
 
 
 func _stage_up() -> void:
@@ -217,8 +227,10 @@ func aggro_radius() -> float:
 	return super.aggro_radius() * Balance.GENESIS_GOLEM_AGGRO_SHARE
 
 
+## Hardened (fire 5/s, plain lightning, catapult capped) from GENESIS_GOLEM_HARDEN_HEIGHT (100 m,
+## user spec 2026-11-22). His health, healing and damage do not use the golem's full-size bonuses.
 func is_full_size() -> bool:
-	return false
+	return height_m() >= Balance.GENESIS_GOLEM_HARDEN_HEIGHT - 0.0001
 
 
 func has_lifetime() -> bool:

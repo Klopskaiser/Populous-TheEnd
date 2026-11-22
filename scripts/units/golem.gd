@@ -504,6 +504,44 @@ func _tick_regen(delta: float) -> void:
 	_no_combat_timer += delta
 
 
+## The healing over time still running (demon golem: kills and growth steps; Genesis golem: his braves):
+## one entry per heal, x = seconds left, y = health per second. They run side by side (stacking).
+var _heal_stacks: Array[Vector2] = []
+var _heal_frac: float = 0.0
+
+
+func _tick_kill_heal(delta: float) -> void:
+	if _heal_stacks.is_empty() or delta <= 0.0:
+		return
+	for i in range(_heal_stacks.size() - 1, -1, -1):
+		var s: Vector2 = _heal_stacks[i]
+		_heal_frac += s.y * minf(delta, s.x)
+		s.x -= delta
+		if s.x <= 0.0:
+			_heal_stacks.remove_at(i)
+		else:
+			_heal_stacks[i] = s
+	if _heal_frac >= 1.0:
+		var heal: int = int(_heal_frac)
+		_heal_frac -= float(heal)
+		health = mini(health + heal, max_health)
+
+
+## Starts a heal of `amount` health spread over `duration` seconds; it runs beside
+## all others (stacking).
+func _add_heal_over_time(amount: int, duration: float) -> void:
+	if amount > 0 and duration > 0.0:
+		_heal_stacks.append(Vector2(duration, float(amount) / duration))
+
+
+## Leben, das die Heilung ueber Zeit noch nachliefert (fuer die Anzeige).
+func pending_kill_heal() -> float:
+	var left: float = _heal_frac
+	for s in _heal_stacks:
+		left += s.x * s.y
+	return left
+
+
 func _is_combatant() -> bool:
 	return true
 
@@ -670,6 +708,7 @@ func tick(delta: float) -> void:
 	super.tick(delta)
 	if state != State.DEAD and not doomed:
 		_pay_upkeep(delta)
+		_tick_kill_heal(delta)
 	if state != State.DEAD:
 		_slew_heading(delta)
 		_tick_stance(delta)

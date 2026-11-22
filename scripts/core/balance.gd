@@ -167,10 +167,11 @@ const GOLEM_SIT_MULT_AREA: float = 1.0   # 0,9 -> 1,0 (Nutzervorgabe 2026-11-19)
 ## Zielzahl im Sitzen: Faktor auf den Zielanteil jedes Sitzangriffs (Nutzervorgabe 2026-11-19: +20 %), abgerundet.
 const GOLEM_SIT_MULT_TARGETS: float = 1.2
 ## SITZ-MODIFIKATOREN JE GOLEM (Nutzervorgabe 2026-11-19): veraendern die Sitzangriffe eines Golems
-## unabhaengig von seiner Stufe — Faktoren auf Schaden, Abklingzeit und Flaeche (vorerst alle 1; der
-## Tempovorteil des Daemonengolems steckt schon in seinem Takt).
+## unabhaengig von seiner Stufe — Faktoren auf Schaden, Abklingzeit und Flaeche (der Tempovorteil des
+## Daemonengolems steckt schon in seinem Takt). Der Daemonengolem macht im Sitzen immer 30 % weniger Schaden
+## (Nutzervorgabe 2026-11-22; gilt fuer alle Sitzangriffe der Tabelle, auch den Po-Klatscher).
 const GOLEM_SIT_MOD: Dictionary = {damage = 1.0, cooldown = 1.0, area = 1.0}
-const DEMON_GOLEM_SIT_MOD: Dictionary = {damage = 1.0, cooldown = 1.0, area = 1.0}
+const DEMON_GOLEM_SIT_MOD: Dictionary = {damage = 0.7, cooldown = 1.0, area = 1.0}
 const GENESIS_GOLEM_SIT_MOD: Dictionary = {damage = 1.0, cooldown = 1.0, area = 1.0}
 ## =====================================================================================
 ## HANDSCHLAG (slam): sie bueckt sich und schlaegt beide Haende auf den Boden —
@@ -1069,7 +1070,7 @@ const DEMON_GOLEM_GIANT_HEIGHT: float = 30.0
 ##  * Start GENESIS_GOLEM_START_HEIGHT (5 m), GENESIS_GOLEM_HP (1000) Leben, keine
 ##    Lebenszeit.
 ##  * STUFEN aus eigenen Braves: jeder Brave, den eine Huette des Stammes erzeugt,
-##    zaehlt fuer die Genesisgolems des Stammes (bei mehreren geteilt).
+##    geht an einen Genesisgolem des Stammes (seit 2026-11-22 zugeteilt, vorher geteilt).
 ##    GENESIS_GOLEM_STAGE_BRAVES je Stufe (8 Stufen, zusammen 154; 2026-11-17 fiel
 ##    die neunte weg), jede Stufe +GENESIS_GOLEM_STAGE_HEIGHT (3,5 m, Stufe 8 =
 ##    33 m; 2026-11-17 erst 5 -> 4, dann 3,5 m), +GENESIS_GOLEM_STAGE_MAX_HP
@@ -1095,6 +1096,15 @@ const GENESIS_GOLEM_STAGE_HEIGHT: float = 3.5
 const GENESIS_GOLEM_STAGE_BRAVES: Array[int] = [10, 12, 14, 17, 20, 23, 27, 31]
 const GENESIS_GOLEM_STAGE_MAX_HP: int = 40
 const GENESIS_GOLEM_STAGE_REGEN: float = 2.0
+## Nutzervorgabe 2026-11-22: jeder Brave geht an GENAU EINEN Genesisgolem des Stammes (den mit den wenigsten
+## Braves; vorher bekam jeder einen Anteil) und heilt ihn um GENESIS_GOLEM_BRAVE_HEAL sofort und
+## GENESIS_GOLEM_BRAVE_HEAL_OVER_TIME ueber GENESIS_GOLEM_BRAVE_HEAL_DURATION Sekunden (stapelbar).
+const GENESIS_GOLEM_BRAVE_HEAL: int = 30
+const GENESIS_GOLEM_BRAVE_HEAL_OVER_TIME: int = 30
+const GENESIS_GOLEM_BRAVE_HEAL_DURATION: float = 5.0
+## Ab dieser Koerperhoehe ist er gehaertet wie der ausgewachsene Golem (Nutzervorgabe 2026-11-22):
+## Brand 5/s, einfacher Blitz, hoechstens GOLEM_SIEGE_DAMAGE_FULL_SIZE je Katapult-Volltreffer.
+const GENESIS_GOLEM_HARDEN_HEIGHT: float = 100.0
 const GENESIS_GOLEM_GROWTH_SHARE: float = 2.0 / 3.0
 const GENESIS_GOLEM_GIANT_STAGE: int = 4
 const GENESIS_GOLEM_TRAMPLE_WOOD_STAGE: int = 7
@@ -1108,8 +1118,8 @@ const GENESIS_GOLEM_WOOD_IDLE_TIME: float = 30.0
 const GENESIS_GOLEM_WOOD_BURN_RATE: float = 15.0
 const GENESIS_GOLEM_WOOD_GROWTH_RATE: float = 0.01   # 2 % -> 1 % je Sekunde (Nutzervorgabe 2026-11-18)
 const GENESIS_GOLEM_MAX_HEIGHT: float = 100.0
-const GENESIS_GOLEM_WOOD_HP_PER_M: float = 4.0   # 2 -> 3 (2026-11-17) -> 4 (Nutzervorgabe 2026-11-18)
-const GENESIS_GOLEM_WOOD_REGEN_PER_M: float = 0.3   # 0,15 -> 0,3 (Nutzervorgabe 2026-11-18)
+const GENESIS_GOLEM_WOOD_HP_PER_M: float = 20.0   # 2 -> 3 -> 4 (2026-11-18) -> 20 (Nutzervorgabe 2026-11-22)
+const GENESIS_GOLEM_WOOD_REGEN_PER_M: float = 1.0   # 0,15 -> 0,3 (2026-11-18) -> 1,0 (Nutzervorgabe 2026-11-22)
 ## Abstand des mitgefuehrten Holzstapels vor seinem Koerperrand (Annahme): dort
 ## erreichen ihn die Braves, ohne unter den Koerper zu muessen.
 const GENESIS_GOLEM_PILE_GAP: float = 0.8

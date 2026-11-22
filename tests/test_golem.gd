@@ -1228,7 +1228,7 @@ func test_each_leg_kicks_into_its_own_lane() -> void:
 	while not big.can_sit():
 		big._credit_kill()
 	check_near(big.kick_leg_offset(), Golem.KICK_HALF_WIDTH * big.reach_factor(), "31,3 m: the two lanes just touch in the middle")
-	check_near(big._kick_extent().x, 19.2, "31,3 m: 5 % shorter ahead (%.1f m)" % big._kick_extent().x, 0.1)
+	check_near(big._kick_extent().x, 19.2, "31,3 m: 5 %% shorter ahead (%.1f m)" % big._kick_extent().x, 0.1)
 	big.free()
 
 
@@ -4080,7 +4080,7 @@ func test_sit_big_attacks_take_the_users_values() -> void:
 	var hop: StringName = GolemSitCombat.HOP
 	check(c.damage(hop) == g.attack_damage(Golem.ATTACK_STOMP)
 		and c.max_targets(hop) == int(floor(float(g.max_targets()) * 2.0 * Balance.GOLEM_SIT_MULT_TARGETS + 0.000001)),
-		"po clap: damage of the jump, 200 % targets times the sit factor (%d)" % c.max_targets(hop))
+		"po clap: damage of the jump, 200 %% targets times the sit factor (%d)" % c.max_targets(hop))
 	# (user spec 2026-11-18: first 0,2 s slower at 30 m, then 0,15 s faster again; values of the
 	# attack table since 2026-11-19 — pinned here at her first seated size, 31,3 m)
 	check_near(g.height_m(), 31.337, "her first seated size", 0.01)
@@ -4092,7 +4092,7 @@ func test_sit_big_attacks_take_the_users_values() -> void:
 		"the circle around the seat")
 	var ds: StringName = GolemSitCombat.DOUBLE_STOMP
 	check(c.damage(ds) > g.attack_damage(Golem.ATTACK_SWAT) and c.max_targets(ds) == int(floor(float(g.max_targets()) * 1.3 * Balance.GOLEM_SIT_MULT_TARGETS + 0.000001)),
-		"double stomp: more than the swat, 130 % of her base targets times the sit factor (%d)" % c.max_targets(ds))
+		"double stomp: more than the swat, 130 %% of her base targets times the sit factor (%d)" % c.max_targets(ds))
 	check_near(c.cooldown_of(ds), 1.738987, "its cooldown at 31,3 m: 1,74 s (-0,05 s in the table, 2026-11-20)", 0.0001)
 	check_near(c.cooldown_of(GolemSitCombat.CLAP), 1.641008, "the hand stomp behind: 1,64 s at 31,3 m", 0.0001)
 	check(c.in_area(ds, c.feet_point() - g.heading() * 1.0), "it reaches a little behind the feet")
@@ -4200,15 +4200,16 @@ func test_sit_damage_counts_only_growth_from_thirty_metres() -> void:
 	check_near(d.height_m(), 32.0, "(the demon golem at his first sit size)")
 	var c: GolemSitCombat = GolemSitCombat.new(d)
 	check(d.sit_steps() == 0, "the step 29 -> 32 m does not count")
-	check(c.damage(GolemSitCombat.STOMP_L) == 60 and c.damage(GolemSitCombat.DOUBLE_STOMP) == 95,
-		"he starts with the table's values like every golem (%d / %d)" % [c.damage(GolemSitCombat.STOMP_L), c.damage(GolemSitCombat.DOUBLE_STOMP)])
+	# Seated the demon golem always does 30 % less (user spec 2026-11-22, DEMON_GOLEM_SIT_MOD).
+	check(c.damage(GolemSitCombat.STOMP_L) == roundi(60.0 * 0.7) and c.damage(GolemSitCombat.DOUBLE_STOMP) == roundi(95.0 * 0.7),
+		"he starts with the table's values, 30 %% less (%d / %d)" % [c.damage(GolemSitCombat.STOMP_L), c.damage(GolemSitCombat.DOUBLE_STOMP)])
 	d._credit_kill()
 	while d.height_m() < 34.9:
 		d._credit_kill()
 	check(d.sit_steps() == 1, "32 -> 35 m counts")
-	check(c.damage(GolemSitCombat.STOMP_L) == roundi(60.0 + Balance.DEMON_GOLEM_GROWTH_SLAM_DAMAGE)
-		and c.damage(GolemSitCombat.DOUBLE_STOMP) == roundi(95.0 + Balance.DEMON_GOLEM_GROWTH_DRUM_DAMAGE),
-		"his growth per step by category from there")
+	check(c.damage(GolemSitCombat.STOMP_L) == roundi((60.0 + Balance.DEMON_GOLEM_GROWTH_SLAM_DAMAGE) * 0.7)
+		and c.damage(GolemSitCombat.DOUBLE_STOMP) == roundi((95.0 + Balance.DEMON_GOLEM_GROWTH_DRUM_DAMAGE) * 0.7),
+		"his growth per step by category from there, 30 % less")
 	var same: Golem = _golem_of_height(d.height_m())
 	check(c.cooldown_of(GolemSitCombat.STOMP_L) < GolemSitCombat.new(same).cooldown_of(GolemSitCombat.STOMP_L) * 0.9,
 		"and he stays 15 % quicker than the golem")
@@ -5110,7 +5111,7 @@ func test_crab_walk_follows_a_move_order_and_sits_again() -> void:
 	for i in range(10):
 		_tick_world(w)
 	var v: float = _flat(g.position, a) / (10.0 * TICK)
-	check_near(v, g.current_speed() * Balance.GOLEM_CRAB_SPEED_SHARE, "she crawls at 40 % of her walking speed (%.2f m/s)" % v, 0.05)
+	check_near(v, g.current_speed() * Balance.GOLEM_CRAB_SPEED_SHARE, "she crawls at %d %% of her walking speed (%.2f m/s)" % [roundi(Balance.GOLEM_CRAB_SPEED_SHARE * 100.0), v], 0.05)
 	check(g.heading().dot(Vector3(0, 0, 1)) > 0.99 and g.position.z > a.z, "feet first, the way she faces")
 	check(g._seat_center == g.position, "her middle moves with her (the seat layout follows)")
 	# Someone at the goal, under the new seat.

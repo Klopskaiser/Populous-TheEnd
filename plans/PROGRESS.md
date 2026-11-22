@@ -13362,6 +13362,24 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
 - Tests: `test_technician.gd`, `test_buffs.gd`, `test_fire_ram.gd` (neu: `test_each_burst_deals_its_flat_damage_once_per_unit`).
 
 
+### Balance Golems: Daemon im Sitzen, Genesis-Braves, Holz-Boni, Haertung (2026-11-22)
+
+- Daemonengolem: im Sitzen immer 30 % weniger Schaden (`DEMON_GOLEM_SIT_MOD.damage` 0,7; alle Sitzangriffe der
+  Tabelle, auch der Po-Klatscher). Sitzschaden beim Aufsetzen, Strecken im Sitzen und Trampeln beim Drehen unveraendert.
+- Genesisgolem, Braves: jeder Brave geht an GENAU EINEN Genesisgolem des Stammes - den mit den wenigsten Braves, bei
+  Gleichstand den aelteren (`GenesisGolem.credit_brave_to_tribe`; vorher bekam jeder 1/n). Jeder zugeteilte Brave heilt
+  30 LP sofort und 30 LP ueber 5 s (`GENESIS_GOLEM_BRAVE_HEAL*`, stapelbar). Die Heilung ueber Zeit
+  (`_heal_stacks`, `_add_heal_over_time`, `_tick_kill_heal`, `pending_kill_heal`) liegt dafuer jetzt in `Golem`
+  statt im Daemonengolem; `Golem.tick` ruft sie.
+- Genesisgolem, Holzwachstum: je Meter +20 LP und +1 LP/s (vorher 4 / 0,3; Nutzerentscheidung: "Wachstumsstufe durch
+  Holz" = je Meter). 80 m: 2260 LP, 69 LP/s; 100 m: 2660 LP, 89 LP/s.
+- Genesisgolem ab 100 m gehaertet (`GENESIS_GOLEM_HARDEN_HEIGHT`, `is_full_size()`): Brand 5/s, einfacher Blitz,
+  Katapult hoechstens 40 - ohne die Leben-, Heilungs- und Schadensboni des ausgewachsenen Golems (die ueberschreibt er).
+- Tests: `test_genesis_golem.gd` (neu `test_braves_are_assigned_to_one_genesis_golem_each`,
+  `test_an_assigned_brave_heals_thirty_at_once_and_thirty_over_five_seconds`, `test_hardened_from_one_hundred_metres`;
+  Holzwerte angepasst), `test_golem.gd` (`test_sit_damage_counts_only_growth_from_thirty_metres`: Daemon x 0,7).
+  Nebenbei in `test_demon_golem.gd` ein `%` in einer Pruefmeldung maskiert (Formatierungsfehler in der Ausgabe).
+
 
 ### Fahrzeugmodelle: Katapult und Feuerramme mit Wurfarm und drehenden Raedern (2026-11-22)
 

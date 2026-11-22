@@ -2,7 +2,8 @@ extends TestBase
 
 ## Zauber 15 "Genesisgolem beschwören" (Nutzervorgabe 2026-11-17). Diese Datei
 ## nagelt die Vorgabe fest (Werte in Balance.GENESIS_GOLEM_*): 5 m und 1000 LP beim
-## Erscheinen, keine Lebenszeit; Wachstum nur durch eigene Braves (geteilt), 9 Stufen
+## Erscheinen, keine Lebenszeit; Wachstum nur durch eigene Braves (seit 2026-11-22 je Brave genau
+## einem Genesisgolem zugeteilt, er heilt 30 + 30 ueber 5 s; ab 100 m gehaertet), 9 Stufen
 ## zu 10/12/14/17/20/23/27/31/36 Braves, je +5 m, +40 LP, +2 LP/s; Schaden des
 ## frischen Daemonengolems, Reichweite des frischen Golems, Anstieg 2/3 des
 ## Daemonengolems; ab Stufe 5 Kollision, Einebnen, Luftschlag; Baeume mit einem
@@ -151,16 +152,42 @@ func test_every_stage_adds_three_and_a_half_metres_forty_health_two_regen() -> v
 	_free_world(w)
 
 
-func test_braves_are_shared_between_the_tribes_genesis_golems() -> void:
+func test_braves_are_assigned_to_one_genesis_golem_each() -> void:
 	var w: Dictionary = _make_world()
 	var a: GenesisGolem = _genesis(w, 0, Vector3(40, 5, 50))
 	var b: GenesisGolem = _genesis(w, 0, Vector3(70, 5, 50))
 	var foe: GenesisGolem = _genesis(w, 1, Vector3(100, 5, 50))
-	for i in range(20):
+	GenesisGolem.credit_brave_to_tribe(w.t0)
+	check(a.brave_xp + b.brave_xp == 1.0 and (a.brave_xp == 1.0 or b.brave_xp == 1.0),
+		"one brave counts for one golem only, whole (%.2f / %.2f)" % [a.brave_xp, b.brave_xp])
+	for i in range(19):
 		GenesisGolem.credit_brave_to_tribe(w.t0)
-	check_near(a.brave_xp, 10.0, "each of two gets half (%.2f)" % a.brave_xp)
+	check(a.brave_xp == 10.0 and b.brave_xp == 10.0, "the one with fewer braves gets the next: 10 each")
 	check(a.stage == 1 and b.stage == 1, "twenty braves: both on stage 1")
 	check(foe.brave_xp == 0.0, "another tribe's braves do not count")
+	var c: GenesisGolem = _genesis(w, 0, Vector3(50, 5, 80))
+	for i in range(5):
+		GenesisGolem.credit_brave_to_tribe(w.t0)
+	check(c.brave_xp == 5.0 and a.brave_xp == 10.0, "a newly summoned one catches up first")
+	_free_world(w)
+
+
+func test_an_assigned_brave_heals_thirty_at_once_and_thirty_over_five_seconds() -> void:
+	var w: Dictionary = _make_world()
+	var g: GenesisGolem = _genesis(w, 0, Vector3(50, 5, 50))
+	g.health = 500
+	g.credit_brave(1.0)
+	check(g.health == 530, "30 at once (%d)" % g.health)
+	check_near(g.pending_kill_heal(), 30.0, "30 still to come", 0.001)
+	for i in range(int(5.0 / TICK) + 2):
+		g._tick_kill_heal(TICK)
+	check_near(float(g.health) + g._heal_frac, 560.0, "and 30 over 5 s (%d)" % g.health, 0.001)
+	check_near(g.pending_kill_heal(), 0.0, "nothing left", 0.001)
+	g.health = 500
+	g._heal_frac = 0.0
+	GenesisGolem.credit_brave_to_tribe(w.t0)
+	GenesisGolem.credit_brave_to_tribe(w.t0)
+	check(g.health == 560 and is_equal_approx(g.pending_kill_heal(), 60.0), "it stacks (%d)" % g.health)
 	_free_world(w)
 
 
@@ -245,7 +272,28 @@ func test_from_stage_four_collision_levelling_and_air_strike() -> void:
 	_to_stage(g, 8)
 	check(g.flattens(), "stage 8, 33 m: he levels")
 	check(not g.is_giant() and not g.walks_straight(), "but not the rest of the giant's package")
-	check(not g.is_full_size(), "never hardened")
+	check(not g.is_full_size(), "not hardened at 33 m")
+	_free_world(w)
+
+
+func test_hardened_from_one_hundred_metres() -> void:
+	var w: Dictionary = _make_world()
+	var g: GenesisGolem = _genesis(w, 0, Vector3(50, 5, 50))
+	_to_stage(g, 8)
+	g.grow_by_wood(15.0 * 100.0)   # 100 s of eating: 33 m x 1,01^100 = 89 m
+	check(g.height_m() > 80.0 and g.height_m() < 99.0, "(%.1f m)" % g.height_m())
+	check(not g.is_full_size(), "below 100 m: not hardened")
+	g.grow_by_wood(100000.0)
+	check_near(g.height_m(), 100.0, "100 m")
+	check(g.is_full_size(), "hardened at 100 m (user spec 2026-11-22)")
+	check(is_equal_approx(g.burn_damage_per_second(), Balance.GOLEM_BURN_DPS), "fire 5/s")
+	check(g.lightning_damage(Balance.LIGHTNING_UNIT_DAMAGE) == Balance.LIGHTNING_UNIT_DAMAGE, "plain lightning")
+	check(g.siege_shock_damage(Balance.SIEGE_SHOT_SHOCK_DAMAGE, 0.0) <= Balance.GOLEM_SIEGE_DAMAGE_FULL_SIZE,
+		"the catapult capped")
+	var grown: float = g.wood_growth_m
+	check(g.max_health == g.max_health_cap() and g.max_health_cap() == 1320 + int(floor(20.0 * grown + 0.000001)),
+		"no golem full-size health bonus (%d)" % g.max_health)
+	check_near(g.regen_per_second(), 22.0 + 1.0 * grown, "no golem full-size regen bonus")
 	_free_world(w)
 
 
@@ -413,8 +461,8 @@ func test_unused_wood_is_eaten_after_thirty_seconds_for_growth() -> void:
 	var want: float = 33.0 * pow(1.01, 10.0)
 	check_near(g.height_m(), want, "1 %% a second (user spec 2026-11-18, before 2 %%): %.2f m" % want, 0.05)
 	var grown: float = g.wood_growth_m
-	check(g.max_health == 1320 + int(floor(4.0 * grown + 0.000001)), "+4 health a metre (%d)" % g.max_health)
-	check_near(g.regen_per_second(), 22.0 + 0.3 * grown, "+0,3 regen a metre")
+	check(g.max_health == 1320 + int(floor(20.0 * grown + 0.000001)), "+20 health a metre (%d)" % g.max_health)
+	check_near(g.regen_per_second(), 22.0 + 1.0 * grown, "+1 regen a metre (user spec 2026-11-22)")
 	_free_world(w)
 
 
