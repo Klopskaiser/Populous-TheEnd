@@ -1,0 +1,27 @@
+{
+  "frame_width": 64,
+  "frame_height": 96,
+  "anims": {
+    "airborne": {
+      "fps": 7
+    },
+    "sit": {
+      "fps": 1
+    },
+    "walk": {
+      "fps": 8
+    },
+    "throw": {
+      "fps": 6
+    },
+    "stand": {
+      "fps": 1
+    },
+    "idle": {
+      "fps": 6
+    },
+    "dead": {
+      "fps": 1
+    }
+  }
+}

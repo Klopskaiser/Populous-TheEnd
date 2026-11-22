@@ -13419,3 +13419,29 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
   Luftabfang rechnen weiter mit der Position des Schusses. Ohne `Stone` im Modell bleibt der Feuerball.
   Geprueft mit `diag_vehicle_models.gd` (Bild `6_flug`), Suite 8748 bestanden, 0 fehlgeschlagen; nicht in
   einem laufenden Gefecht angesehen.
+
+
+### Feuerkrieger-Sprites: Idle auf die Ruhepose angeglichen (2026-11-22)
+
+- `assets/units/firewarrior/` neu: die gelieferten Sheets (stand, idle, walk, throw, sit, airborne, dead_back,
+  dead_front; 64x96, 5 Zeilen) samt `manifest.json`. Es fehlen punch, kick, shove, roll, drown - dafuer zeigt
+  das Spiel weiter den Platzhalter.
+- Fehler im gelieferten `idle.png`: die Figur war 9 % groesser gezeichnet als in `stand.png` und `throw.png`
+  (91-94 statt 84-85 px hoch) und stand in den Seitenansichten 6 px weiter links; beim Wechsel Ruhepose - Idle
+  wuchs und sprang sie. Das Spiel schneidet Frames unveraendert aus (`UnitSpriteLibrary._cut_sheet`), der Fehler
+  lag also im Sheet.
+- `tools/sprites/sheet_angleichen.py` (neu, Pillow): legt Frame 1 jeder Zeile gegen `stand.png`, sucht einen
+  Massstab fuers ganze Sheet (hier 0,920) und je Zeile die waagerechte Verschiebung (+0,5 / +0,5 / +5,5 / +5,0 /
+  +4,5 px), skaliert um den Fusspunkt. Deckung der Umrisse danach 94-97 %.
+- Pruefung: im Spielcode geschnittene Frames gemessen (stand 84/85 px, idle jetzt 84-87 px), Import ohne
+  Meldung, Suite 8748 bestanden, 0 fehlgeschlagen. Nicht im laufenden Spiel angesehen.
+- Offen, vom Nutzer gelieferte Sheets fuer brave, warrior, preacher liegen noch nicht im Projekt: brave/idle.png
+  ist 1116 px breit (18 Frames zu 62 px statt 64) und zeigt in allen 8 Zeilen dieselbe Seitenansicht.
+- Nachtrag: die Sheets kommen aus einem KI-Bildgenerator (Auskunft des Nutzers). `tools/sprites/sheets_pruefen.py`
+  (neu) prueft einen Einheitenordner gegen die Regeln: Raster, Groesse und Stand gegen die Ruhepose (ueber die
+  Deckung der Umrisse, nur wo Frame 1 die Ruhepose ist), gleiche Ansicht in allen Zeilen, Figur am Zellenrand,
+  leere Frames, Takt von Schlag und Wurf, fehlende Animationen. `tools/sprites/LIESMICH.md` (neu): Aufrufe,
+  Vorgaben fuer neue Sheets je Animation, fehlende Sheets je Einheit, bekannte Maengel der Lieferung.
+- Feuerkrieger `throw.png` stand in den Seitenansichten 3,5 bis 5,5 px neben der Ruhepose und ist ebenfalls
+  gerueckt (Massstab 1,0). Im Manifest steht fps der Leichen jetzt unter "dead". Der Pruefer meldet fuer den
+  Feuerkrieger keinen Fehler mehr; Hinweis bleibt: `walk` von hinten 12 % niedriger als die Ruhepose.

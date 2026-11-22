@@ -173,6 +173,12 @@ Spielbild unruhig). Zeichne `idle.png` deshalb so, dass es in der Ruhepose
   eigenen `idle.png`**. Es ist damit die einzige Animation, deren Fehlen nicht auf
   den Platzhalter zurückfällt — eine handgezeichnete Idle-Animation soll nie
   zwischen ihren Durchläufen auf einer prozeduralen Strichfigur ruhen.
+- **Gleiche Größe und gleicher Stand wie die Ruhepose.** Das Spiel schneidet die Frames
+  unverändert aus; ist die Figur in `idle.png` größer gezeichnet als in `stand.png` oder
+  steht sie in der Zelle woanders, wächst und springt sie bei jedem Idle-Durchlauf (so
+  geliefert beim Feuerkrieger: 9 % größer, in den Seitenansichten 6 px versetzt).
+  `tools\sprites\sheet_angleichen.py` misst das an Frame 1 gegen `stand.png` und schreibt ein
+  angeglichenes Sheet (Aufruf im Kopf des Skripts, braucht Pillow).
 - **Mindestens ~0,4 s Idle-Länge.** Der Renderer wertet jede Einheit nur jeden
   dritten Bildschirmframe aus; eine kürzere Animation könnte zwischen zwei
   Auswertungen komplett durchlaufen und gelegentlich unsichtbar bleiben.
