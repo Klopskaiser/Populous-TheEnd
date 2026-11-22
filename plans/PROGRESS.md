@@ -13361,3 +13361,43 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
 - Feuerramme: jeder Feuerstoss macht jeder getroffenen Einheit einmal `FIRERAM_BURST_DAMAGE` (5) flach, der Brand bleibt.
 - Tests: `test_technician.gd`, `test_buffs.gd`, `test_fire_ram.gd` (neu: `test_each_burst_deals_its_flat_damage_once_per_unit`).
 
+
+
+### Fahrzeugmodelle: Katapult und Feuerramme mit Wurfarm und drehenden Raedern (2026-11-22)
+
+- Neue Modelle `assets/models/units/siege_engine.glb` (1,5 MB) und `fire_ram.glb` (0,8 MB), gebaut von
+  `tools/fahrzeuge/fahrzeuge_bauen.py` (Blender im Hintergrund) aus den gelieferten Rohmodellen in
+  `tools/fahrzeuge/quelle/`. `tools/` hat eine `.gdignore`. Anleitung, Knotenvertrag und Stolpersteine:
+  `tools/fahrzeuge/LIESMICH.md`.
+- Katapult: 45 Einzelteile des Rohmodells nach Lage in Rumpf, vier Raeder, `Arm` (Ursprung im Bolzen),
+  `Stone`, `Winch` sortiert; das Spannseil wird geteilt, die Schlinge fliegt mit dem Arm. Feuerramme: ein
+  verschmolzenes Netz, die Raeder an zwei Ebenen abgeschnitten und die Schnittflaechen dunkel verschlossen;
+  Schnauze 1,15 m vor dem Ursprung (`FireRam.NOZZLE_OFFSET` 1,2). Beide bekommen einen Wimpel `Flag`, weil die
+  Rohmodelle keine Stelle fuer die Stammesfarbe haben.
+- `CrewedVehicle`: `_collect_wheels` (in `_finish_model`) sammelt alle Nodes `Wheel*`, `_spin_wheels` (in
+  `_tick_visual`) dreht sie um X um gefahrene Strecke / Radius (Radius = Achshoehe); beim Drehen auf der Stelle
+  laufen linke und rechte Raeder gegeneinander. Spruenge ueber 1 m je Tick (`WHEEL_MAX_STEP`) zaehlen nicht.
+  Platzhalterraeder haben keinen Namen und bleiben stehen.
+- `SiegeEngine`: die Armbewegung laeuft jetzt ueber die Zeit seit dem Schuss (`_arm_time`, `arm_snap()`):
+  0,12 s hochschnellen, 0,25 s am Anschlag federn, 0,7 s zurueckspannen (`ARM_SNAP_TIME` / `ARM_HOLD_TIME` /
+  `ARM_WIND_TIME`, zusammen 1,07 s, schnellstes Nachladen 1,54 s). Vorher sprang der Arm sofort in die
+  Endlage und lief in 0,33 s zurueck. Das Modell schwingt um `ARM_MODEL_SWING` 1,15 rad aus seiner Ruhelage,
+  der Platzhalter wie bisher von 0,6 um -1,5 rad. `Stone` ist vom Abwurf bis zum gespannten Arm unsichtbar,
+  `Winch` dreht eine Umdrehung mit. Am Schuss selbst (Zeitpunkt, Startpunkt 1,4 m ueber der Mitte) ist nichts
+  geaendert.
+- Stolperstein: Godot 4.7 laedt keine JPEGs mit ICC-Profil, Blender bettet beim Neuschreiben von
+  sRGB-Texturen eines ein (Modell erschien weiss, Import meldet `Couldn't load image index`). Das Bauskript
+  markiert die Bilder deshalb vor dem Export als Non-Color, und zwar vor dem Verkleinern.
+- Pruefung: `tests/diag_vehicle_models.gd` (neu, ohne --headless, echte Einheitenszenen: Standbilder von Wurf
+  und Raddrehung, `messwerte.txt` mit Radius und Drehwinkel je Rad); `test_siege.gd` neu
+  `test_throwing_arm_is_cocked_again_before_the_fastest_reload`; Suite 8748 bestanden, 0 fehlgeschlagen.
+  Nicht in einem laufenden Gefecht angesehen.
+- Nachtrag am selben Tag, der Stein ist das Geschoss: `SiegeEngine._dress_shot` gibt dem `SiegeShot` das Netz
+  des Modellsteins mit (`stone_mesh`, `stone_scale`, `release_from`, `release_delay`); der Schuss zeichnet es
+  statt des Feuerballs (`_ready`, `_tick_look`): 0,1 s unsichtbar (`STONE_RELEASE_TIME`, so lange liegt der
+  Stein noch sichtbar in der Schale), dann vom Punkt, an dem der Arm ihn in diesem Moment haelt, bis 60 % der
+  Flugstrecke auf die simulierte Bahn einlaufend (`RELEASE_BLEND_END`), taumelnd, 1,6-fach vergroessert
+  (`STONE_FLIGHT_SCALE`, Lesbarkeit beim Standardzoom), Funken auf 70 %. Nur Optik: Bahn, Treffer und
+  Luftabfang rechnen weiter mit der Position des Schusses. Ohne `Stone` im Modell bleibt der Feuerball.
+  Geprueft mit `diag_vehicle_models.gd` (Bild `6_flug`), Suite 8748 bestanden, 0 fehlgeschlagen; nicht in
+  einem laufenden Gefecht angesehen.

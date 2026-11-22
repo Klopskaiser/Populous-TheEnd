@@ -39,9 +39,34 @@ const SIEGE_AGGRO: float = Balance.SIEGE_AGGRO_RADIUS
 ## a unit outside the fire band — auto-acquired unit targets are never chased
 ## (trundling after a fleeing brave was the "drives in, never shoots" bug).
 
+## Throwing-arm animation, in seconds since the shot: the arm snaps up, rebounds
+## off the stop bar and is wound back down. All three together stay below the
+## fastest reload (1.5 s, six technicians), so it is cocked again for every shot.
+const ARM_SNAP_TIME: float = 0.12
+const ARM_HOLD_TIME: float = 0.25
+const ARM_WIND_TIME: float = 0.7
+const ARM_ANIM_TIME: float = ARM_SNAP_TIME + ARM_HOLD_TIME + ARM_WIND_TIME
+## The stone leaves the bucket just before the arm hits the stop bar.
+const STONE_RELEASE_TIME: float = ARM_SNAP_TIME * 0.8
+## Swing of a user model's arm from its cocked rest pose up to the stop bar
+## (rad, about the arm's X axis; positive lifts the bucket at the rear).
+const ARM_MODEL_SWING: float = 1.15
+## Placeholder arm: raised 0.6 rad at rest, the shot swings it by -1.5 rad.
+const ARM_PLACEHOLDER_REST: float = 0.6
+const ARM_PLACEHOLDER_SWING: float = -1.5
+## The winch of a user model turns this far while the arm travels.
+const WINCH_TURN: float = TAU
+
 var _fire_cooldown: float = 0.0
 var _arm: Node3D = null
-var _arm_anim: float = 1.0
+var _arm_rest: float = ARM_PLACEHOLDER_REST
+var _arm_swing: float = ARM_PLACEHOLDER_SWING
+var _arm_time: float = ARM_ANIM_TIME
+## Optional parts of a user model: the stone in the bucket (hidden while the shot
+## is in the air) and the winch (turns with the arm).
+var _stone: Node3D = null
+var _winch: Node3D = null
+var _winch_rest: float = 0.0
 
 
 func _init() -> void:
@@ -261,11 +286,12 @@ func fire_cooldown_now(count: int) -> float:
 func _launch_shot(target_pos: Vector3) -> void:
 	if path_service == null:
 		return
-	_arm_anim = 0.0   # throwing-arm snap animation
+	_arm_time = 0.0   # throwing-arm snap animation
 	anim_start_ms = Time.get_ticks_msec()
 	var shot: SiegeShot = SiegeShot.new()
 	shot.setup(tribe_id, position, target_pos, self, path_service,
 		terrain_data, building_manager)
+	_dress_shot(shot)
 	# Aimed at an airship hull: a miss fizzles in the air instead of dropping
 	# phantom lava on the ground far below the dodged ship.
 	shot.air_shot = attack_target is Airship
@@ -334,13 +360,22 @@ func _create_model() -> void:
 	_model = root
 
 	# User-provided model (assets/models/units/siege_engine.glb) when present.
-	# Optional named children: "Arm" (Node3D) pivots on firing, "Flag"
-	# (MeshInstance3D) takes the tribe colour. Without them the vehicle simply
-	# fires without the snap animation / shows no flag.
+	# Optional named children: "Arm" (Node3D) pivots on firing — its rest pose is
+	# the cocked arm —, "Stone" is hidden while the shot flies, "Winch" turns
+	# with the arm, "Wheel*" roll (CrewedVehicle), "Flag" (MeshInstance3D) takes
+	# the tribe colour. Without them the vehicle simply fires without the snap
+	# animation / shows no flag.
 	var custom: Node3D = AssetLibrary.instantiate_model("models/units/siege_engine.glb")
 	if custom != null:
 		root.add_child(custom)
 		_arm = custom.find_child("Arm", true, false) as Node3D
+		if _arm != null:
+			_arm_rest = _arm.rotation.x
+			_arm_swing = ARM_MODEL_SWING
+		_stone = custom.find_child("Stone", true, false) as Node3D
+		_winch = custom.find_child("Winch", true, false) as Node3D
+		if _winch != null:
+			_winch_rest = _winch.rotation.x
 		_flag_mesh = custom.find_child("Flag", true, false) as MeshInstance3D
 		_finish_model(root)
 		return
@@ -381,6 +416,7 @@ func _create_model() -> void:
 	# Throwing arm (pivots at the back; snaps up when firing).
 	_arm = Node3D.new()
 	_arm.position = Vector3(0.0, 1.0, 0.55)
+	_arm.rotation.x = ARM_PLACEHOLDER_REST
 	root.add_child(_arm)
 	var arm_mesh: MeshInstance3D = MeshInstance3D.new()
 	var arm_box: BoxMesh = BoxMesh.new()
@@ -423,12 +459,56 @@ func _tick_visual(delta: float) -> void:
 	super._tick_visual(delta)
 	if not is_inside_tree() or _arm == null:
 		return
-	if _arm_anim < 1.0:
-		_arm_anim = minf(_arm_anim + delta * 3.0, 1.0)
-	# Cocked back (0.6 rad) at rest; the shot snaps it up-forward, then it
-	# winds back over ~0.3 s.
-	var snap: float = 1.0 - _arm_anim
-	_arm.rotation.x = 0.6 - snap * 1.5
+	if _arm_time >= ARM_ANIM_TIME:
+		return   # cocked and at rest: nothing to move
+	_arm_time = minf(_arm_time + delta, ARM_ANIM_TIME)
+	var snap: float = arm_snap(_arm_time)
+	_arm.rotation.x = _arm_rest + snap * _arm_swing
+	if _winch != null:
+		_winch.rotation.x = _winch_rest + snap * WINCH_TURN
+	if _stone != null:
+		# The stone leaves the bucket just before the arm hits the stop bar and
+		# lies in it again once the arm is wound back.
+		_stone.visible = _arm_time < STONE_RELEASE_TIME or _arm_time >= ARM_ANIM_TIME
+
+
+## Look of the shot (in-game only): the "Stone" of a user model flies as the
+## projectile. It leaves the bucket STONE_RELEASE_TIME after the shot, from
+## where the swinging arm holds it at that moment — until then the shot stays
+## invisible and the stone in the bucket visible. Without a "Stone" mesh the
+## shot keeps its fireball.
+func _dress_shot(shot: SiegeShot) -> void:
+	var stone: MeshInstance3D = _stone as MeshInstance3D
+	if stone == null or stone.mesh == null or _arm == null or not is_inside_tree():
+		return
+	var arm_parent: Node3D = _arm.get_parent() as Node3D
+	if arm_parent == null:
+		return
+	# Where the stone sits in the arm's frame, and the arm at the release angle.
+	var in_arm: Vector3 = _arm.global_transform.affine_inverse() * stone.global_position
+	var lifted: Transform3D = Transform3D(Basis.from_euler(Vector3(
+		_arm_rest + arm_snap(STONE_RELEASE_TIME) * _arm_swing,
+		_arm.rotation.y, _arm.rotation.z)), _arm.position)
+	shot.stone_mesh = stone.mesh
+	shot.stone_scale = stone.global_transform.basis.get_scale()
+	shot.release_delay = STONE_RELEASE_TIME
+	shot.release_from = arm_parent.global_transform * (lifted * in_arm)
+
+
+## How far the arm has swung `time` seconds after the shot: 0 = cocked, 1 = at
+## the stop bar. Accelerates up, bounces twice off the bar, eases back down.
+static func arm_snap(time: float) -> float:
+	if time < ARM_SNAP_TIME:
+		var up: float = time / ARM_SNAP_TIME
+		return up * up
+	time -= ARM_SNAP_TIME
+	if time < ARM_HOLD_TIME:
+		var held: float = time / ARM_HOLD_TIME
+		return 1.0 - 0.1 * absf(sin(held * TAU)) * (1.0 - held)
+	time -= ARM_HOLD_TIME
+	if time < ARM_WIND_TIME:
+		return 1.0 - smoothstep(0.0, 1.0, time / ARM_WIND_TIME)
+	return 0.0
 
 
 ## How far she fires right now: FIRE_RANGE, 1 m more with a technician aboard (user spec

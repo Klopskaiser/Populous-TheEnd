@@ -21,6 +21,9 @@ const CREW_LEASH: float = Balance.SIEGE_CREW_LEASH
 ## Burn time after a fire-spell/lava hit, then the wreck sinks.
 const VEHICLE_BURN_TIME: float = Balance.SIEGE_VEHICLE_BURN_TIME
 const SINK_SPEED: float = 0.8   # m/s downward while the wreck sinks
+## A jump farther than this in one tick is a placement, not a drive: the wheels
+## of a user model do not spin for it.
+const WHEEL_MAX_STEP: float = 1.0
 ## Height span under the chassis that bursts it. Deliberately ABOVE what
 ## drivable terrain can present — only real terrain rips trigger.
 const BREAK_HEIGHT_SPAN: float = 3.5
@@ -93,6 +96,15 @@ var _tornado_captured: bool = false
 ## Own 3D model parts (in-game only, built in _ready).
 var _model: Node3D = null
 var _flag_mesh: MeshInstance3D = null
+## Wheels of a user model (nodes named "Wheel*", origin on the axle): spun about
+## their X axis by the distance the vehicle rolled. Radius = axle height above
+## the ground, side = lateral offset of the axle (the wheels counter-rotate when
+## the vehicle turns on the spot).
+var _wheels: Array[Node3D] = []
+var _wheel_radius: PackedFloat32Array = PackedFloat32Array()
+var _wheel_side: PackedFloat32Array = PackedFloat32Array()
+var _wheel_last_pos: Vector3 = Vector3.ZERO
+var _wheel_last_yaw: float = 0.0
 
 
 func _init() -> void:
@@ -1202,6 +1214,46 @@ func _finish_model(root: Node3D) -> void:
 	blob.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	blob.position.y = 0.04
 	root.add_child(blob)
+	_collect_wheels(root)
+
+
+## Registers the "Wheel*" nodes of a user model. The placeholder wheels are
+## plain cylinders without a name: a spin would not show on them.
+func _collect_wheels(root: Node3D) -> void:
+	_wheels.clear()
+	_wheel_radius.clear()
+	_wheel_side.clear()
+	if not is_inside_tree():
+		return
+	var to_root: Transform3D = root.global_transform.affine_inverse()
+	for n in root.find_children("Wheel*", "Node3D", true, false):
+		var wheel: Node3D = n as Node3D
+		var axle: Vector3 = (to_root * wheel.global_transform).origin
+		_wheels.append(wheel)
+		_wheel_radius.append(maxf(axle.y, 0.05))
+		_wheel_side.append(axle.x)
+	_wheel_last_pos = position
+	_wheel_last_yaw = rotation.y
+
+
+## Rolls the wheels by the distance driven since the last visual tick (forward
+## along the heading; a turn adds the arc each wheel travels around the centre).
+func _spin_wheels() -> void:
+	var yaw: float = rotation.y
+	var step: Vector3 = position - _wheel_last_pos
+	var turned: float = wrapf(yaw - _wheel_last_yaw, -PI, PI)
+	_wheel_last_pos = position
+	_wheel_last_yaw = yaw
+	step.y = 0.0
+	if step.length_squared() > WHEEL_MAX_STEP * WHEEL_MAX_STEP:
+		return
+	var forward: float = step.x * sin(yaw) + step.z * cos(yaw)
+	if is_zero_approx(forward) and is_zero_approx(turned):
+		return
+	for i in range(_wheels.size()):
+		var rolled: float = forward - turned * _wheel_side[i]
+		_wheels[i].rotation.x = wrapf(
+			_wheels[i].rotation.x + rolled / _wheel_radius[i], -PI, PI)
 
 
 ## Owner colour, or the grey neutral flag while nobody serves the vehicle.
@@ -1236,6 +1288,8 @@ func _tick_visual(delta: float) -> void:
 	var heading: Vector3 = _model_heading()
 	if heading.length_squared() > 0.000001:
 		rotation.y = atan2(heading.x, heading.z)
+	if not _wheels.is_empty() and state != State.DEAD:
+		_spin_wheels()
 	# Neutral <-> served: repaint the flag (grey while nobody serves).
 	if _flag_mesh != null and state != State.DEAD and is_neutral() != _flag_neutral:
 		_refresh_flag_color()

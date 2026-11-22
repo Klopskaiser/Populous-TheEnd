@@ -54,11 +54,35 @@ var unit_manager: UnitManager = null
 var terrain_data: TerrainData = null
 var building_manager: BuildingManager = null
 
+## Look only, handed over by a catapult whose model carries a "Stone" (see
+## SiegeEngine._dress_shot): that stone flies instead of the fireball. It stays
+## hidden for `release_delay` seconds — it still rides the arm — and then shows
+## up at `release_from`, the point where the arm lets go of it. From there it
+## closes in on the simulated arc; the arc itself, and with it every hit, is
+## untouched.
+var stone_mesh: Mesh = null
+var stone_scale: Vector3 = Vector3.ONE
+var release_from: Vector3 = Vector3.ZERO
+var release_delay: float = 0.0
+## The released stone has caught up with the simulated arc at this share of the flight.
+const RELEASE_BLEND_END: float = 0.6
+## Tumble of the flying stone (rad/s) and size of its embers next to the fireball's.
+const STONE_SPIN: float = 7.0
+const STONE_EMBER_SCALE: float = 0.7
+## The stone flies larger than it lies in the bucket (0.34 m there): at the
+## game's default zoom a metre is about 16 pixels, and an incoming shot has to
+## stay readable. The fireball it replaces was 0.9 m across.
+const STONE_FLIGHT_SCALE: float = 1.6
+
 var _start: Vector3 = Vector3.ZERO
 var _travelled: float = 0.0
 var _total: float = 0.0
 var _trail: Array[MeshInstance3D] = []
 var _trail_timer: float = 0.0
+var _ball: MeshInstance3D = null
+var _age: float = 0.0
+var _release_frac: float = -1.0
+var _release_offset: Vector3 = Vector3.ZERO
 
 
 func setup(p_tribe_id: int, from: Vector3, to: Vector3, p_shooter,
@@ -84,6 +108,7 @@ func tick(delta: float) -> void:
 	position.y += sin(t * PI) * ARC_HEIGHT
 	if _check_air_intercept():
 		return
+	_tick_look(delta, t)
 	_tick_trail(delta)
 	if t >= 1.0:
 		if air_shot:
@@ -258,8 +283,16 @@ func _slope_at(pos: Vector3) -> float:
 
 func _ready() -> void:
 	var ball: MeshInstance3D = MeshInstance3D.new()
+	_ball = ball
 	# No real shadow (phase 8 rule): a glowing stone casts none.
 	ball.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	if stone_mesh != null:
+		# The stone of the catapult model, with the materials it came with.
+		ball.mesh = stone_mesh
+		ball.scale = stone_scale * STONE_FLIGHT_SCALE
+		ball.visible = release_delay <= 0.0
+		add_child(ball)
+		return
 	var sphere: SphereMesh = SphereMesh.new()
 	sphere.radius = 0.45
 	sphere.height = 0.9
@@ -273,11 +306,32 @@ func _ready() -> void:
 	add_child(ball)
 
 
+## The model stone: hidden while it rides the arm, then from the release point
+## onto the simulated arc, tumbling.
+func _tick_look(delta: float, flown: float) -> void:
+	if _ball == null or stone_mesh == null:
+		return
+	_age += delta
+	if _age < release_delay:
+		return
+	if _release_frac < 0.0:
+		_release_frac = flown
+		_release_offset = release_from - global_position if release_delay > 0.0 else Vector3.ZERO
+		_ball.visible = true
+	var closed: float = 1.0
+	if _release_frac < RELEASE_BLEND_END:
+		closed = smoothstep(_release_frac, RELEASE_BLEND_END, flown)
+	_ball.position = _release_offset * (1.0 - closed)
+	_ball.rotate_x(STONE_SPIN * delta)
+
+
 ## Fading tail: small embers dropped along the arc (cheap, a handful of
 ## spheres that shrink and free themselves).
 func _tick_trail(delta: float) -> void:
 	if not is_inside_tree():
 		return
+	if _ball != null and not _ball.visible:
+		return   # the stone has not left the arm yet
 	for i in range(_trail.size() - 1, -1, -1):
 		var ember: MeshInstance3D = _trail[i]
 		if not is_instance_valid(ember):
@@ -305,5 +359,7 @@ func _tick_trail(delta: float) -> void:
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	ember.material_override = mat
 	get_parent().add_child(ember)
-	ember.global_position = global_position
+	if stone_mesh != null:
+		ember.scale = Vector3.ONE * STONE_EMBER_SCALE
+	ember.global_position = _ball.global_position if _ball != null else global_position
 	_trail.append(ember)

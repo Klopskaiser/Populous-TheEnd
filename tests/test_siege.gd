@@ -2287,3 +2287,28 @@ func test_an_idle_airship_steps_aside_for_a_flying_one() -> void:
 	check(side > 0.5 and side > along,
 		"the idle ship moved aside (%.2f m across, %.2f m along the course)" % [side, along])
 	_free_world(w)
+
+
+## The throwing arm of the model: cocked before and after, at the stop bar when
+## the snap ends, and back down before even the fastest crew can fire again —
+## otherwise the next shot would leave a half-wound arm.
+func test_throwing_arm_is_cocked_again_before_the_fastest_reload() -> void:
+	check_near(SiegeEngine.arm_snap(0.0), 0.0, "cocked at the moment of the shot")
+	check_near(SiegeEngine.arm_snap(SiegeEngine.ARM_SNAP_TIME), 1.0, "at the stop bar after the snap")
+	check_near(SiegeEngine.arm_snap(SiegeEngine.ARM_ANIM_TIME), 0.0, "cocked again at the end")
+	var last: float = 0.0
+	var t: float = 0.0
+	while t < SiegeEngine.ARM_SNAP_TIME:
+		check(SiegeEngine.arm_snap(t) >= last, "the arm only rises during the snap (%.2f s)" % t)
+		last = SiegeEngine.arm_snap(t)
+		t += 0.01
+	t = SiegeEngine.ARM_SNAP_TIME
+	while t < SiegeEngine.ARM_SNAP_TIME + SiegeEngine.ARM_HOLD_TIME:
+		check(SiegeEngine.arm_snap(t) > 0.85 and SiegeEngine.arm_snap(t) <= 1.0,
+			"it stays at the bar while it rebounds (%.2f s)" % t)
+		t += 0.01
+	var fastest: float = SiegeEngine.COOLDOWN_FULL_CREW / (1.0
+		+ Balance.TECHNICIAN_SIEGE_FIRERATE_BASE
+		+ Balance.TECHNICIAN_SIEGE_FIRERATE_PER_EXTRA * float(SiegeEngine.MAX_CREW - 1))
+	check(SiegeEngine.ARM_ANIM_TIME < fastest,
+		"the whole swing (%.2f s) fits into the fastest reload (%.2f s)" % [SiegeEngine.ARM_ANIM_TIME, fastest])
