@@ -695,6 +695,12 @@ var _combat_waiting: bool = false
 var _unreach_targets: Dictionary = {}
 ## Last unit that damaged this one (drives brave retaliation).
 var last_attacker: Unit = null
+## Kill statistics (2026-11-23): the tribe that harmed this unit last and whether
+## a golem did it — plain values, because the harmer may be gone by the time the
+## unit dies (burn, fall, drowning after the blow). -1 = nobody yet. Read by
+## TribeStats.record_death.
+var last_harm_tribe: int = -1
+var last_harm_by_golem: bool = false
 var _attack_cooldown: float = 0.0
 var _target_search_timer: float = 0.0
 ## True on ticks where the unit is in range and striking (vs. still approaching);
@@ -1508,6 +1514,7 @@ func take_damage(amount: int, attacker = null) -> void:
 	_no_combat_timer = 0.0
 	if attacker != null and is_instance_valid(attacker):
 		last_attacker = attacker
+		note_harm(attacker)
 	if health <= 0:
 		# Already tumbling (thrown through the air or rolling): the damage still
 		# lands but the DEATH is deferred to the end of the tumble. This makes a
@@ -1561,6 +1568,26 @@ func take_damage(amount: int, attacker = null) -> void:
 		if health <= threshold and health_before > threshold:
 			_play_sfx(&"unit_injured", 300)
 	_maybe_retaliate(attacker)
+
+
+## Remembers `source` as the last one who harmed this unit (kill statistics):
+## a unit, or a spell effect that carries a `tribe_id` (tornado, swarm, volcano).
+## Sources without a tribe (lava, the fall itself) leave the record alone, so a
+## unit that burns or falls to death after a blow counts for whoever struck it.
+func note_harm(source) -> void:
+	if source == null or not is_instance_valid(source):
+		return
+	var t = source.get("tribe_id")
+	if not (t is int):
+		return
+	last_harm_tribe = t
+	last_harm_by_golem = source is Unit and (source as Unit).is_golem()
+
+
+## All three golems (normal, demon, Genesis) answer true — the kill statistics
+## split by it.
+func is_golem() -> bool:
+	return false
 
 
 ## Lethal damage while tumbling through the air (or rolling): the death itself
@@ -2448,6 +2475,7 @@ func burn_fx_height() -> float:
 func ignite(source_pos: Vector3, _source = null) -> void:
 	if state == State.DEAD:
 		return
+	note_harm(_source)
 	_clear_soa_hold()   # burn damage/panic re-assert need the object tick (C2)
 	var fresh: bool = not is_burning()
 	_burn_time = BURN_DURATION
@@ -2467,6 +2495,7 @@ func ignite(source_pos: Vector3, _source = null) -> void:
 func scorch(source_pos: Vector3, _source = null) -> void:
 	if state == State.DEAD:
 		return
+	note_harm(_source)
 	_clear_soa_hold()   # burn damage/panic re-assert need the object tick (C2)
 	if not is_burning():
 		_play_sfx(&"unit_burning", 200)

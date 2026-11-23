@@ -438,6 +438,10 @@ func unit_kind() -> StringName:
 	return &"golem"
 
 
+func is_golem() -> bool:
+	return true
+
+
 func display_name() -> String:
 	return "Golem"
 
@@ -3939,6 +3943,8 @@ func _crumble() -> void:
 		return
 	life_left = 0.0
 	health = 0
+	# Falling apart (lifetime, the demon's last growth step) is nobody's kill.
+	last_harm_tribe = -1
 	_die()
 
 

@@ -69,6 +69,20 @@ static func next_boom(boom: float, dir: int, step: float, lo: float, hi: float,
 	return maxf(boom - step, lo)
 
 
+## Save game (2026-11-23): where the player was looking.
+func save_view() -> Dictionary:
+	return {"pos": global_position, "yaw": rotation.y, "boom": _boom}
+
+
+func load_view(data: Dictionary) -> void:
+	if data.has("pos"):
+		global_position = data["pos"]
+	rotation.y = float(data.get("yaw", rotation.y))
+	_boom = float(data.get("boom", _boom))
+	if is_node_ready():
+		_apply_boom()
+
+
 func _apply_boom() -> void:
 	# Camera sits behind the pitch pivot along its local +Z, then looks forward.
 	_camera.position = Vector3(0.0, 0.0, _boom)

@@ -10,6 +10,10 @@ const GAME_SCENE_PATH: String = "res://scenes/main.tscn"
 var _pages: Array[Control] = []
 ## Index of the survival scenario page in _pages.
 const SURVIVAL_PAGE: int = 4
+## Index of the save-game page in _pages (2026-11-23).
+const LOAD_PAGE: int = 5
+var _load_list: VBoxContainer = null
+var _load_status: Label = null
 var _center: CenterContainer = null
 var _ai_count_option: OptionButton = null
 ## One personality choice per AI slot (2026-11-22); rows beyond the AI count hide.
@@ -66,6 +70,7 @@ func _ready() -> void:
 	_pages.append(_build_options_page())
 	_pages.append(_build_controls_page())
 	_pages.append(_build_survival_page())   # index SURVIVAL_PAGE
+	_pages.append(_build_load_page())       # index LOAD_PAGE
 	_show_page(0)
 
 	# Headless verification hook: `godot ... -- skirmish=N [map=<id>]` skips the
@@ -162,6 +167,7 @@ func _build_root_page() -> Control:
 	_add_button(vb, "Startmission", _start_mission)
 	_add_button(vb, "Debugschlacht", _start_debug_battle)
 	_add_button(vb, "Survivalszenarien", func() -> void: _show_page(SURVIVAL_PAGE))
+	_add_button(vb, "Spielstand laden", _open_load_page)
 	_add_button(vb, "Stresstest", _start_stress_test)
 	_add_button(vb, "Optionen", func() -> void: _show_page(2))
 	_add_button(vb, "Beenden", func() -> void: get_tree().quit())
@@ -190,6 +196,38 @@ func _build_survival_page() -> Control:
 	vb.add_child(HSeparator.new())
 	_add_button(vb, "Zurück", func() -> void: _show_page(0))
 	return vb.get_parent() as Control
+
+
+## Save games (2026-11-23): one button per slot, newest first. Today the match
+## writes only the quick slot, but the list already shows every slot on disk.
+func _build_load_page() -> Control:
+	var vb: VBoxContainer = _make_page("Spielstand laden")
+	_load_list = VBoxContainer.new()
+	_load_list.add_theme_constant_override("separation", 6)
+	vb.add_child(_load_list)
+	_load_status = Label.new()
+	_load_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_load_status.custom_minimum_size = Vector2(300, 0)
+	_load_status.add_theme_color_override("font_color", UiTheme.GOLD)
+	vb.add_child(_load_status)
+	vb.add_child(HSeparator.new())
+	_add_button(vb, "Zurück", func() -> void: _show_page(0))
+	return vb.get_parent() as Control
+
+
+func _open_load_page() -> void:
+	for child in _load_list.get_children():
+		child.queue_free()
+	var slots: Array[Dictionary] = SaveGame.list_slots()
+	_load_status.text = ("" if not slots.is_empty()
+		else "Noch kein Spielstand vorhanden. Im Spiel speichert F5 (oder das Pausemenü).")
+	for header in slots:
+		var slot: String = String(header.get("slot", ""))
+		_add_button(_load_list, SaveGame.describe(header), func() -> void:
+			var error: String = SaveGame.load_into_game(get_tree(), slot)
+			if error != "":
+				_load_status.text = error)
+	_show_page(LOAD_PAGE)
 
 
 func _build_skirmish_page() -> Control:

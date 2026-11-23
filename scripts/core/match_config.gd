@@ -103,6 +103,57 @@ static func survival_golems() -> MatchConfig:
 	return config
 
 
+## Plain-data copy for the save game (GameSnapshot).
+func to_dict() -> Dictionary:
+	return {
+		"mode": int(mode),
+		"ai_count": ai_count,
+		"endless": endless,
+		"variant": String(variant),
+		"map_id": map_id,
+		"ai_personalities": ai_personalities.map(func(p: StringName) -> String: return String(p)),
+	}
+
+
+static func from_dict(data: Dictionary) -> MatchConfig:
+	var config: MatchConfig = MatchConfig.new()
+	config.mode = int(data.get("mode", Mode.SKIRMISH)) as Mode
+	config.ai_count = int(data.get("ai_count", MIN_AI))
+	config.endless = bool(data.get("endless", false))
+	config.variant = StringName(String(data.get("variant", String(VARIANT_BASE))))
+	config.map_id = String(data.get("map_id", MapGenerator.DEFAULT_MAP))
+	config.ai_personalities.clear()
+	for p in data.get("ai_personalities", []):
+		config.ai_personalities.append(StringName(String(p)))
+	return config
+
+
+## Can a match of this mode be saved? The sandboxes (debug battle, stress test)
+## run on scripted drivers in Main that the save game does not cover.
+func can_save() -> bool:
+	return mode == Mode.SKIRMISH or mode == Mode.SURVIVAL or mode == Mode.START_MISSION
+
+
+## German name of the mode for save-game slots.
+func mode_label() -> String:
+	match mode:
+		Mode.SKIRMISH:
+			return "Skirmish (%d KI)" % clampi(ai_count, MIN_AI, MAX_AI)
+		Mode.START_MISSION:
+			return "Startmission"
+		Mode.SURVIVAL:
+			if variant == VARIANT_GOLEMS:
+				return "Golem-Überleben"
+			if variant == VARIANT_LARGE:
+				return "Überleben (große Karte)"
+			return "Endlos-Überleben" if endless else "Überleben"
+		Mode.DEBUG_BATTLE:
+			return "Debugschlacht"
+		Mode.STRESS_TEST:
+			return "Stresstest"
+	return "Partie"
+
+
 ## Number of tribes the match needs (player + AIs). START_MISSION, DEBUG_BATTLE
 ## and SURVIVAL always run with two tribes (blue vs. red), like before; the
 ## stress test always fields four armies.

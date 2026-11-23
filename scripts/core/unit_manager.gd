@@ -1380,6 +1380,7 @@ func _on_unit_died(unit: Unit) -> void:
 	# The unit is NOT removed here: it stays registered (and rendered) as a
 	# lying corpse — combat, selection, separation and target scans all skip
 	# DEAD units. Only the tribe loses it immediately (population drops).
+	TribeStats.record_death(unit, tribes)
 	if unit.tribe != null:
 		unit.tribe.remove_unit(unit)
 	if is_inside_tree():

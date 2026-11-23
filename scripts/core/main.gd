@@ -165,6 +165,13 @@ func _ready() -> void:
 	Engine.time_scale = 1.0
 	Engine.max_physics_steps_per_frame = 2
 
+	# A save game to restore (2026-11-23): its match configuration replaces the
+	# menu's, its world replaces the generated setup below.
+	var pending: Dictionary = GameState.take_pending_load()
+	var loading: bool = not pending.is_empty()
+	if loading:
+		GameState.match_config = MatchConfig.from_dict(pending.get("match_config", {}))
+
 	# Match configuration (set by the main menu); direct scene starts (tests,
 	# headless checks) fall back to the start mission — today's behaviour.
 	var config: MatchConfig = GameState.match_config
@@ -172,6 +179,7 @@ func _ready() -> void:
 		config = MatchConfig.start_mission()
 		GameState.match_config = config
 	GameState.stop_win_tracking()
+	GameState.match_time = 0.0
 
 	# Map (phase 7i): skirmish uses the chosen map; other modes use the default
 	# island. The map decides the grid size (128 or 256) and its heightmap.
@@ -179,6 +187,8 @@ func _ready() -> void:
 		or config.mode == MatchConfig.Mode.SURVIVAL else MapGenerator.DEFAULT_MAP
 	GameState.map_id = map_id
 	var td: TerrainData = MapGenerator.create_terrain(map_id, GameState.ISLAND_SEED)
+	if loading:
+		GameSnapshot.apply_terrain(td, pending)   # every deformation of the saved match
 	GameState.terrain_data = td
 	GameState.terrain = _terrain
 
@@ -308,6 +318,17 @@ func _ready() -> void:
 	var area_factor: float = float(td.size * td.size) \
 		/ float(MapGenerator.STANDARD_SIZE * MapGenerator.STANDARD_SIZE)
 	var tree_count: int = int(round(float(TREE_COUNT) * area_factor * wood_bonus))
+	if loading:
+		# The saved match brings its own trees, bases, units and scenario.
+		camera_anchor = _setup_from_save(pending, tribes, nav)
+		_camera_rig.global_position = nav.cell_to_world(camera_anchor)
+		if pending.has("camera"):
+			_camera_rig.load_view(pending["camera"])
+		_check_roundtrip_after_load()
+		_setup_endscreen_shot()
+		return
+	_setup_roundtrip_hook()
+	_setup_endscreen_shot()
 	_tree_manager.spawn_trees(tree_count, GameState.ISLAND_SEED)
 	# Pure leaf/bamboo groves on grass — same area scaling AND the same bonus, so the
 	# tree-type ratio does not shift; deterministic because spawn_groves reuses the
@@ -1159,7 +1180,267 @@ func _ring_cells(center: Vector2i, radius: int) -> Array[Vector2i]:
 	return cells
 
 
+# --- Save game (2026-11-23) ------------------------------------------------------------
+
+## Seconds a save/load notice stays on screen.
+const NOTICE_DURATION: float = 2.5
+
+var _notice: Label = null
+var _notice_tween: Tween = null
+
+
+## The world as GameSnapshot sees it. `with_scenario` adds what only capture
+## reads (AIs, survival, win tracking, camera).
+func _snapshot_context(with_scenario: bool = false) -> SnapshotContext:
+	var ctx: SnapshotContext = SnapshotContext.new()
+	ctx.terrain_data = GameState.terrain_data
+	ctx.nav_grid = GameState.nav_grid
+	ctx.unit_manager = _unit_manager
+	ctx.building_manager = _building_manager
+	ctx.tree_manager = _tree_manager
+	ctx.wood_pile_manager = _wood_pile_manager
+	ctx.tribe_commands = _tribe_commands
+	ctx.spell_context = _tribe_commands.spell_context
+	ctx.tribes = GameState.tribes
+	ctx.match_config = GameState.match_config
+	ctx.map_id = GameState.map_id
+	if with_scenario:
+		ctx.game_state = GameState
+		ctx.camera = _camera_rig
+		ctx.survival = get_node_or_null("SurvivalMode") as SurvivalMode
+		for child in get_children():
+			if child is AIController:
+				ctx.ai_controllers.append(child)
+	return ctx
+
+
+## Can the running match be saved right now? (Not the sandboxes, not once decided.)
+func can_save_game() -> bool:
+	var config: MatchConfig = GameState.match_config
+	return config != null and config.can_save() and not GameState.match_over
+
+
+## Writes the running match into `slot`. Returns a German message for the notice.
+func save_game(slot: String = SaveGame.QUICKSAVE_SLOT,
+		title: String = SaveGame.QUICKSAVE_TITLE) -> String:
+	if not can_save_game():
+		return _notify("Die Partie ist entschieden." if GameState.match_over
+			else "In diesem Modus kann nicht gespeichert werden.")
+	var data: Dictionary = GameSnapshot.capture(_snapshot_context(true))
+	var err: Error = SaveGame.write(slot, data, title)
+	if err != OK:
+		return _notify("Speichern fehlgeschlagen (%s)." % error_string(err))
+	return _notify("Spiel gespeichert.")
+
+
+## Loads `slot`: the scene is rebuilt from the save (Main._ready). Returns the
+## notice text (an error stays in the running match).
+func load_game(slot: String = SaveGame.QUICKSAVE_SLOT) -> String:
+	var error: String = SaveGame.load_into_game(get_tree(), slot)
+	if error != "":
+		return _notify(error)
+	return ""
+
+
+## Rebuilds the saved match (instead of the mode's own setup): world, AIs,
+## survival driver, win tracking. Returns the camera anchor (a player unit).
+func _setup_from_save(data: Dictionary, tribes: Array[Tribe], nav: NavGrid) -> Vector2i:
+	var restored: Dictionary = GameSnapshot.apply(data, _snapshot_context())
+	var units: Array = restored["units"]
+	var config: MatchConfig = GameState.match_config
+	if config.mode != MatchConfig.Mode.DEBUG_BATTLE and config.mode != MatchConfig.Mode.STRESS_TEST:
+		GameState.start_win_tracking()
+	var ai_list: Array = data.get("ai", [])
+	for i in range(ai_list.size()):
+		var ai_data: Dictionary = ai_list[i]
+		var id: int = int(ai_data.get("tribe", -1))
+		if id < 0 or id >= tribes.size():
+			continue
+		var ai: AIController = AIController.new()
+		ai.name = "AIController%d" % id
+		ai.debug_log = OS.get_cmdline_user_args().has("ai-log")
+		ai.stagger_offset(float(id) / float(tribes.size()))
+		add_child(ai)
+		ai.setup(tribes[id], _tribe_commands, _unit_manager, _building_manager,
+			_tree_manager, nav, ai_data.get("anchor", Vector2i.ZERO))
+		ai.load_state(ai_data)
+		print("KI %d: Persönlichkeit %s (geladen)" % [id, ai.personality.display_name()])
+	if data.has("survival"):
+		var sd: Dictionary = data["survival"]
+		var survival: SurvivalMode = SurvivalMode.new()
+		survival.name = "SurvivalMode"
+		survival.configure_from_save(sd, units)
+		add_child(survival)
+		var wave_tribe: int = clampi(int(sd.get("wave_tribe", 1)), 0, tribes.size() - 1)
+		survival.setup(tribes[wave_tribe], tribes[GameState.PLAYER_TRIBE], _unit_manager,
+			_tribe_commands, nav, sd.get("base_cell", TerrainData.center_cell(nav.terrain)),
+			GameState)
+		survival.load_state(sd)
+		_add_survival_hud(survival)
+		if config.variant != MatchConfig.VARIANT_GOLEMS:
+			_end_screen.victory_subtitle = "Du hast alle %d Wellen überstanden." % [
+				SurvivalMode.WAVE_COUNT]
+	if data.has("tracking"):
+		GameState.load_tracking(data["tracking"])
+	print("Spielstand geladen: %d Einheiten, %d Gebäude, Spielzeit %s" % [
+		units.size(), (restored["buildings"] as Array).size(),
+		TribeStats.format_time(GameState.match_time)])
+	var player: Tribe = tribes[GameState.PLAYER_TRIBE]
+	for unit in player.units:
+		if is_instance_valid(unit) and unit.in_world:
+			return nav.world_to_cell(unit.position)
+	return TerrainData.center_cell(nav.terrain)
+
+
+## Headless check of the real save/load flow (2026-11-23):
+## `godot --headless --path . -- skirmish=2 save-roundtrip=120` plays 120 s of game
+## time (in 10x time-lapse), saves into ROUNDTRIP_SLOT, loads it through the real
+## scene reload and compares the fingerprints of the match before and after
+## (GameSnapshot.fingerprint). Exit code 0 = identical, 1 = differences (printed).
+const ROUNDTRIP_SLOT: String = "roundtrip_check"
+var _roundtrip_at: float = -1.0
+
+
+func _setup_roundtrip_hook() -> void:
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("save-roundtrip="):
+			_roundtrip_at = float(arg.get_slice("=", 1))
+			Engine.time_scale = 10.0
+			Engine.max_physics_steps_per_frame = 40
+			print("Spielstand-Rundlauf: speichert bei %.0f s Spielzeit" % _roundtrip_at)
+
+
+func _run_roundtrip_save() -> void:
+	_roundtrip_at = -1.0
+	Engine.time_scale = 1.0
+	var data: Dictionary = GameSnapshot.capture(_snapshot_context(true))
+	GameState.set_meta(&"roundtrip_fingerprint", GameSnapshot.fingerprint(data))
+	print("Spielstand-Rundlauf: %d Einheiten, %d Gebäude, %d Bäume gespeichert" % [
+		(data["units"] as Array).size(), (data["buildings"] as Array).size(),
+		(data["trees"] as Array).size()])
+	save_game(ROUNDTRIP_SLOT, "Rundlauf")
+	load_game(ROUNDTRIP_SLOT)
+
+
+func _check_roundtrip_after_load() -> void:
+	if not GameState.has_meta(&"roundtrip_fingerprint"):
+		return
+	var before: PackedStringArray = GameState.get_meta(&"roundtrip_fingerprint")
+	GameState.remove_meta(&"roundtrip_fingerprint")
+	var after: PackedStringArray = GameSnapshot.fingerprint(
+		GameSnapshot.capture(_snapshot_context(true)))
+	var diffs: int = 0
+	for line in before:
+		if not after.has(line):
+			diffs += 1
+			if diffs <= 20:
+				print("  nur vorher:  ", line.left(400))
+	for line in after:
+		if not before.has(line):
+			diffs += 1
+			if diffs <= 40:
+				print("  nur nachher: ", line.left(400))
+	SaveGame.delete_slot(ROUNDTRIP_SLOT)
+	print("Spielstand-Rundlauf: %s (%d Zeilen, %d Abweichungen)" % [
+		"IDENTISCH" if diffs == 0 else "ABWEICHUNG", before.size(), diffs])
+	_roundtrip_exit = 0 if diffs == 0 else 1
+	# `roundtrip-run=<s>`: play on for that long after the load (does the restored
+	# match keep running?), then quit.
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("roundtrip-run="):
+			_roundtrip_quit_at = GameState.match_time + float(arg.get_slice("=", 1))
+			Engine.time_scale = 10.0
+			Engine.max_physics_steps_per_frame = 40
+			return
+	get_tree().quit.call_deferred(_roundtrip_exit)
+
+
+var _roundtrip_exit: int = 0
+var _roundtrip_quit_at: float = -1.0
+
+
+func _tick_roundtrip_run() -> void:
+	if _roundtrip_quit_at < 0.0:
+		return
+	if GameState.match_time < _roundtrip_quit_at and not GameState.match_over:
+		return
+	_roundtrip_quit_at = -1.0
+	var parts: PackedStringArray = PackedStringArray()
+	for tribe in GameState.tribes:
+		parts.append("Stamm %d: %d Anhänger, %d Gebäude, Kills %d/%d, gefallen %d" % [
+			tribe.id, tribe.population(), tribe.buildings.size(), tribe.kills_by_golems,
+			tribe.kills_other, tribe.units_lost])
+	print("Spielstand-Rundlauf: weitergespielt bis %s — %s" % [
+		TribeStats.format_time(GameState.match_time), "; ".join(parts)])
+	get_tree().quit.call_deferred(_roundtrip_exit)
+
+
+## Still of the end screen (2026-11-23, needs a real renderer — run WITHOUT
+## --headless): `godot --path . res://scenes/main.tscn -- endscreen-shot=<png>`
+## plays the match in 10x time-lapse until it is decided, waits for the overlay
+## and saves the window as PNG, then quits. The start mission decides itself
+## within ~1:30 game time (the blue golems clear the red range).
+var _endscreen_shot_path: String = ""
+var _endscreen_frames: int = 0
+
+
+func _setup_endscreen_shot() -> void:
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("endscreen-shot="):
+			_endscreen_shot_path = arg.get_slice("=", 1)
+			Engine.time_scale = 10.0
+			Engine.max_physics_steps_per_frame = 40
+			# A SceneTree signal: it fires while the end screen pauses the tree.
+			get_tree().process_frame.connect(_poll_endscreen_shot)
+
+
+func _poll_endscreen_shot() -> void:
+	if not _end_screen.visible:
+		return
+	_endscreen_frames += 1
+	if _endscreen_frames < 10:
+		return
+	get_tree().process_frame.disconnect(_poll_endscreen_shot)
+	var err: Error = get_viewport().get_texture().get_image().save_png(_endscreen_shot_path)
+	print("Endbildschirm-Standbild: %s (%s)" % [_endscreen_shot_path, error_string(err)])
+	get_tree().quit()
+
+
+## Short message in the middle of the play area (save/load feedback). Returns it.
+func _notify(text: String) -> String:
+	print(text)
+	if _notice == null:
+		_notice = Label.new()
+		_notice.name = "SaveNotice"
+		_notice.process_mode = Node.PROCESS_MODE_ALWAYS
+		_notice.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_notice.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_notice.set_anchors_preset(Control.PRESET_CENTER_TOP)
+		_notice.position.y = 80.0
+		_notice.add_theme_font_size_override("font_size", 22)
+		_notice.add_theme_color_override("font_color", UiTheme.GOLD_BRIGHT)
+		_notice.add_theme_color_override("font_outline_color", Color.BLACK)
+		_notice.add_theme_constant_override("outline_size", 6)
+		$UI.add_child(_notice)
+	_notice.text = text
+	_notice.modulate.a = 1.0
+	_notice.visible = true
+	if _notice_tween != null:
+		_notice_tween.kill()
+	_notice_tween = create_tween()
+	_notice_tween.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	_notice_tween.tween_interval(NOTICE_DURATION)
+	_notice_tween.tween_property(_notice, "modulate:a", 0.0, 0.5)
+	return text
+
+
 func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("quicksave"):
+		save_game()
+		return
+	if event.is_action_pressed("quickload"):
+		load_game()
+		return
 	if event.is_action_pressed("stress_test"):
 		_queue_stress_batch()
 		return
@@ -1205,6 +1486,14 @@ func _queue_stress_batch() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	_tick_roundtrip_run()
+	if _roundtrip_at >= 0.0 and GameState.match_over:
+		_roundtrip_at = -1.0
+		print("Spielstand-Rundlauf: Partie schon entschieden (%s) — kein Rundlauf" % [
+			TribeStats.format_time(GameState.match_time)])
+		get_tree().quit.call_deferred(2)
+	if _roundtrip_at >= 0.0 and GameState.match_time >= _roundtrip_at:
+		_run_roundtrip_save()
 	if _stress_match:
 		_tick_stress_match(delta)
 	if _stress_pending.is_empty():

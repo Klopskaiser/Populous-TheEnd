@@ -100,6 +100,17 @@ var ritual_sacrifices: int = 0
 ## Main in skirmish; empty for the player) — shown in the sidebar's tribe bars.
 var ai_personality_name: String = ""
 
+# --- Statistics (end screen; saved with the game, 2026-11-23) ------------------------
+## Enemy units this tribe killed — by its golems (all three kinds) and by anything
+## else (units, vehicles, towers, spells). Vehicles do not count as kills or losses:
+## they are devices, not living beings. See TribeStats.record_death.
+var kills_by_golems: int = 0
+var kills_other: int = 0
+## Own units that died (vehicles excluded).
+var units_lost: int = 0
+## Most followers the tribe ever had at the same time.
+var peak_population: int = 0
+
 var _events: Node = null
 var _events_resolved: bool = false
 
@@ -424,6 +435,7 @@ func add_unit(unit: Unit) -> void:
 	unit.tribe = self
 	if unit.counts_population:
 		_population += 1
+		peak_population = maxi(peak_population, _population)
 	if unit.unit_kind() == &"shaman":
 		shaman = unit
 	elif unit.unit_kind() == &"preacher" and unit not in preachers:

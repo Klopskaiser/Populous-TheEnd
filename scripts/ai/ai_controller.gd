@@ -389,6 +389,41 @@ func setup(p_tribe: Tribe, p_commands: TribeCommands, p_unit_manager: UnitManage
 	golem_ai = AIGolems.new(self)
 
 
+## Save game (2026-11-23): the AI's lasting decisions. Everything else — crews,
+## raid squads, plot and island caches — is rebuilt by the next ticks from the
+## world itself, so a loaded AI simply re-plans its logistics.
+func save_state() -> Dictionary:
+	return {
+		"tribe": tribe.id if tribe != null else -1,
+		"anchor": base_anchor,
+		"personality": String(personality.id()),
+		"state": int(state),
+		"attack_wave_size": attack_wave_size,
+		"wave_initialized": _wave_initialized,
+		"raids": raids,
+		"raid_cooldown": _raid_cooldown,
+		"tick_count": _tick_count,
+		"attack_order_countdown": _attack_order_countdown,
+		"rebuild_ticks": _rebuild_ticks,
+	}
+
+
+## Restores save_state() — after setup() (personality and anchor are part of it).
+func load_state(data: Dictionary) -> void:
+	base_anchor = data.get("anchor", base_anchor)
+	personality = AIPersonality.from_id(StringName(String(data.get("personality", "aggressive"))))
+	if tribe != null:
+		tribe.ai_personality_name = personality.display_name()
+	state = int(data.get("state", int(state))) as AIState.State
+	attack_wave_size = int(data.get("attack_wave_size", attack_wave_size))
+	_wave_initialized = bool(data.get("wave_initialized", _wave_initialized))
+	raids = int(data.get("raids", raids))
+	_raid_cooldown = int(data.get("raid_cooldown", _raid_cooldown))
+	_tick_count = int(data.get("tick_count", _tick_count))
+	_attack_order_countdown = int(data.get("attack_order_countdown", _attack_order_countdown))
+	_rebuild_ticks = int(data.get("rebuild_ticks", _rebuild_ticks))
+
+
 ## Phase-shifts this AI's 1-Hz tick by `fraction` of the interval so several
 ## AIs spread their work across different frames (still exactly 1 Hz each).
 func stagger_offset(fraction: float) -> void:

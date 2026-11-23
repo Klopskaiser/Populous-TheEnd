@@ -59,7 +59,8 @@ const ACTIONS: Array[Array] = [
 
 ## Non-rebindable actions whose keys are still off-limits for rebinding (their
 ## keycodes are read from the live InputMap, so enum values never drift).
-const _BLOCKED_ACTIONS: Array[StringName] = [&"stress_test", &"time_scale_toggle"]
+const _BLOCKED_ACTIONS: Array[StringName] = [&"stress_test", &"time_scale_toggle",
+	&"quicksave", &"quickload"]
 
 ## Actions bound WITH Shift held (Shift+B = alle Hütten wählen, so plain B stays
 ## free for harvest_area_arm). Three consequences, all handled below:

@@ -83,6 +83,7 @@ func _sting_nearby() -> void:
 	for u in unit_manager.get_units_in_radius(position, RADIUS):
 		if u.state == Unit.State.DEAD or u.tribe_id == tribe_id:
 			continue
+		u.note_harm(self)   # kill statistics: the sting counts for the caster
 		u.take_damage(DPS)
 
 

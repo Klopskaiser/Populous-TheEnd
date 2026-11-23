@@ -23,6 +23,14 @@ var _delay_left: float = 0.0
 
 var _title: Label = null
 var _subtitle: Label = null
+## Statistics per tribe (2026-11-23): header row + one row per tribe.
+var _stats_grid: GridContainer = null
+var _time_label: Label = null
+
+## Column headers of the statistics table (TribeStats.rows keys in that order).
+const STAT_COLUMNS: Array[String] = ["Stamm", "Anhänger", "Höchststand", "Gefallen",
+	"Kills Golems", "Kills sonst"]
+const STAT_KEYS: Array[String] = ["name", "alive", "peak", "lost", "kills_golem", "kills_other"]
 
 
 func _ready() -> void:
@@ -40,6 +48,10 @@ func _ready() -> void:
 	var box: PanelContainer = PanelContainer.new()
 	box.add_theme_stylebox_override("panel", UiTheme.panel_style())
 	box.set_anchors_preset(Control.PRESET_CENTER)
+	# Grow from the centre in every direction: with the statistics table the box is
+	# big, and the default (grow right/down) pushed it off the middle.
+	box.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	box.grow_vertical = Control.GROW_DIRECTION_BOTH
 	add_child(box)
 	var vb: VBoxContainer = VBoxContainer.new()
 	vb.add_theme_constant_override("separation", 12)
@@ -54,6 +66,26 @@ func _ready() -> void:
 	_subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_subtitle.add_theme_color_override("font_color", UiTheme.GOLD_BRIGHT)
 	vb.add_child(_subtitle)
+
+	_time_label = Label.new()
+	_time_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_time_label.add_theme_color_override("font_color", UiTheme.GOLD)
+	vb.add_child(_time_label)
+
+	_stats_grid = GridContainer.new()
+	_stats_grid.columns = STAT_COLUMNS.size()
+	_stats_grid.add_theme_constant_override("h_separation", 18)
+	_stats_grid.add_theme_constant_override("v_separation", 4)
+	vb.add_child(_stats_grid)
+
+	var note: Label = Label.new()
+	note.text = ("Anhänger: am Ende lebend · Höchststand: die meisten gleichzeitig · "
+		+ "Gefallen: eigene Tote\nKills Golems: von Golems getötet · Kills sonst: Einheiten, "
+		+ "Türme, Fahrzeuge, Zauber, Lava …")
+	note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	note.add_theme_font_size_override("font_size", 12)
+	note.add_theme_color_override("font_color", UiTheme.GOLD)
+	vb.add_child(note)
 
 	var menu: Button = Button.new()
 	menu.text = "Zurück zum Menü"
@@ -102,8 +134,35 @@ func present_result(winner_id: int) -> void:
 		UiTheme.GOLD_BRIGHT if won else Color(0.85, 0.25, 0.2))
 	_subtitle.text = victory_subtitle if won \
 		else "Dein Stamm wurde ausgelöscht."
+	var gs: Node = get_node_or_null("/root/GameState")
+	if gs != null:
+		show_stats(gs.tribes, gs.PLAYER_TRIBE, gs.match_time)
 	visible = true
 	get_tree().paused = true
+
+
+## Fills the statistics table (also used by the stand-alone render check).
+func show_stats(tribes: Array[Tribe], player_id: int, match_time: float) -> void:
+	_time_label.text = "Spielzeit %s" % TribeStats.format_time(match_time)
+	for child in _stats_grid.get_children():
+		_stats_grid.remove_child(child)
+		child.queue_free()
+	for title in STAT_COLUMNS:
+		var head: Label = Label.new()
+		head.text = title
+		head.add_theme_color_override("font_color", UiTheme.GOLD_BRIGHT)
+		_stats_grid.add_child(head)
+	for row in TribeStats.rows(tribes, player_id):
+		for key in STAT_KEYS:
+			var cell: Label = Label.new()
+			cell.text = str(row[key])
+			if key == "name":
+				cell.add_theme_color_override("font_color", row["color"] as Color)
+				if bool(row["eliminated"]):
+					cell.text += " †"
+			else:
+				cell.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+			_stats_grid.add_child(cell)
 
 
 func _back_to_menu() -> void:

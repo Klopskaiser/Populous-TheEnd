@@ -49,6 +49,16 @@ var _defeat_timer: float = 0.0
 ## Empty in every other mode, so skirmish and the start mission are untouched.
 var _defeat_exempt: Dictionary[int, bool] = {}
 
+## Game time of the running match in seconds (2026-11-23: save game metadata and
+## end screen). Counts while the tree runs (this autoload pauses with it) and the
+## match is not decided; Main resets it at every match start, a loaded game sets it.
+var match_time: float = 0.0
+
+## A save game waiting to be restored (SaveGame body, see GameSnapshot): set by the
+## load buttons right before the main scene is (re)loaded, consumed once by
+## Main._ready (take_pending_load). Empty = start a fresh match from match_config.
+var pending_load: Dictionary = {}
+
 
 func _ready() -> void:
 	# First autoload: apply persisted keyboard overrides to the InputMap once,
@@ -57,6 +67,8 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	if not tribes.is_empty() and not match_over:
+		match_time += delta
 	for tribe in tribes:
 		# An eliminated tribe (10d) is dead weight: no mana income, no spell
 		# charges. Without this it would keep charging spells forever.
@@ -167,7 +179,36 @@ func _last_survivor() -> int:
 	return -1
 
 
+## Hands the waiting save game over exactly once (Main._ready).
+func take_pending_load() -> Dictionary:
+	var data: Dictionary = pending_load
+	pending_load = {}
+	return data
+
+
+## Save-game view of the win tracking: which tribes are out and which are shielded.
+func save_tracking() -> Dictionary:
+	return {
+		"match_time": match_time,
+		"defeated": _defeated.keys(),
+		"exempt": _defeat_exempt.keys(),
+	}
+
+
+## Restores save_tracking() — after start_win_tracking() and after the scenario
+## nodes (SurvivalMode) set their own shields, so the saved state wins.
+func load_tracking(data: Dictionary) -> void:
+	match_time = float(data.get("match_time", 0.0))
+	_defeated.clear()
+	for id in data.get("defeated", []):
+		_defeated[int(id)] = true
+	_defeat_exempt.clear()
+	for id in data.get("exempt", []):
+		_defeat_exempt[int(id)] = true
+
+
 func reset() -> void:
+	match_time = 0.0
 	terrain_data = null
 	terrain = null
 	nav_grid = null

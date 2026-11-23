@@ -204,6 +204,63 @@ func setup(p_wave_tribe: Tribe, p_player_tribe: Tribe, p_unit_manager: UnitManag
 		_game_state.set_defeat_exempt(_player_tribe.id, true)
 
 
+## Save game (2026-11-23): the scenario knobs, the wave counter and its timers.
+## `unit_index` maps the saved units to their index in the save (the guardians).
+func save_state(unit_index: Dictionary) -> Dictionary:
+	var guard: Array = []
+	for unit in guardians:
+		if is_instance_valid(unit) and unit_index.has(unit):
+			guard.append(unit_index[unit])
+	return {
+		"wave": wave,
+		"timer": _timer,
+		"regroup_timer": _regroup_timer,
+		"endless": endless,
+		"wave_interval": wave_interval,
+		"first_wave_delay": first_wave_delay,
+		"growth_mult": growth_mult,
+		"linear_first": linear_first,
+		"linear_step": linear_step,
+		"all_fronts": all_fronts,
+		"spawn_cells": spawn_cells.duplicate(),
+		"base_cell": base_cell,
+		"guardians": guard,
+		"wave_tribe": _wave_tribe.id if _wave_tribe != null else 1,
+	}
+
+
+## First half of the restore, BEFORE setup(): the knobs and the guardians
+## (`units` = the restored units in save order).
+func configure_from_save(data: Dictionary, units: Array) -> void:
+	endless = bool(data.get("endless", endless))
+	wave_interval = float(data.get("wave_interval", wave_interval))
+	first_wave_delay = float(data.get("first_wave_delay", first_wave_delay))
+	growth_mult = int(data.get("growth_mult", growth_mult))
+	linear_first = int(data.get("linear_first", linear_first))
+	linear_step = int(data.get("linear_step", linear_step))
+	all_fronts = bool(data.get("all_fronts", all_fronts))
+	guardians.clear()
+	for index in data.get("guardians", []):
+		var i: int = int(index)
+		if i >= 0 and i < units.size() and units[i] != null:
+			guardians.append(units[i])
+
+
+## Second half, AFTER setup(): the wave counter, the timers and the spawn points
+## as they were (setup() searched them anew on the possibly deformed terrain).
+func load_state(data: Dictionary) -> void:
+	wave = int(data.get("wave", wave))
+	_timer = float(data.get("timer", _timer))
+	_regroup_timer = float(data.get("regroup_timer", _regroup_timer))
+	var cells: Array = data.get("spawn_cells", [])
+	if not cells.is_empty():
+		spawn_cells.clear()
+		for c in cells:
+			spawn_cells.append(c as Vector2i)
+	if all_waves_spawned() and _game_state != null and _wave_tribe != null:
+		_game_state.set_defeat_exempt(_wave_tribe.id, false)
+
+
 ## Units in wave `p_wave` (1-based) of THIS scenario (see the knobs; the defaults give wave_size).
 func size_of(p_wave: int) -> int:
 	var k: int = maxi(p_wave, 1) - 1

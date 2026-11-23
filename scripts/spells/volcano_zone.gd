@@ -143,6 +143,7 @@ func _ignite_covered_units() -> void:
 	for u in unit_manager.get_units_in_radius(position, CRATER_REACH):
 		if u.state == Unit.State.DEAD or u.is_airborne():
 			continue   # airborne units (thrown, airship deck) pass over the lava
+		u.note_harm(self)   # kill statistics: the crater's fire counts for the caster
 		u.ignite(position)
 
 

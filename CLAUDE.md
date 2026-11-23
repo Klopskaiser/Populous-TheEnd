@@ -25,6 +25,8 @@
 - **Kernschleife:** Stamm aufbauen (Hütten → Bevölkerung → Mana), Braves zu Kampfeinheiten
   ausbilden, mit Schamanin + Truppen den gegnerischen Stamm vernichten.
 - **Out of Scope (bewusst ausgeschlossen):** Kampagne, Spione, Boote, Ballons.
+- **Spielstand:** F5 speichert, F8 lädt (Pausemenü, Hauptmenü „Spielstand laden");
+  Endbildschirm mit Statistik je Stamm — Details §11.
 
 ## 2. Engine, Werkzeuge & Befehle
 
@@ -809,3 +811,44 @@ D:\game\Populous-TheEnd\
   damit ist der bisherige Stand bekannt, ohne den Code durchsuchen zu müssen.
 - **Nach Abschluss einer Phase oder größeren Erweiterung:** PROGRESS.md ergänzen
   (Schritt 7 der Arbeitsanweisung in `plans\00_overview.md`).
+
+## 11. Spielstand & Partiestatistik (2026-11-23)
+
+- **Speichern/Laden:** **F5** = Schnellspeichern, **F8** = Schnellladen (feste Tasten, nicht
+  umbelegbar), dieselben zwei Knöpfe im Pausemenü; im Hauptmenü „Spielstand laden" listet
+  alle Spielstände (neueste zuerst). Speicherbar sind **Skirmish, alle Überleben-Szenarien
+  und die Startmission** — nicht die Sandkästen (Debugschlacht, Stresstest) und keine
+  entschiedene Partie. Laden baut die Szene neu auf (`GameState.pending_load` →
+  `Main._ready` → `Main._setup_from_save`).
+- **Dateien:** `user://saves/<slot>.sav`, Zstandard-komprimiert, zwei `store_var`-Werte:
+  **Kopf** (Format-ID, `SaveGame.FORMAT_VERSION`, Titel, Datum, Modus, Karte, Spielzeit,
+  Stammzahl — einzeln lesbar für eine Slotliste) und **Rumpf** (`GameSnapshot`,
+  `DATA_VERSION`). Heute gibt es genau einen Slot (`quicksave`); Schema, `list_slots()`,
+  `describe()` und die Ladeseite können schon mehrere benannte Slots. Neuere Versionen werden
+  abgelehnt, Objekte nie dekodiert.
+- **Was gespeichert wird** (`scripts/core/game_snapshot.gd`): Terrainhöhen (alle
+  Verformungen), Bäume, Holzstapel (auch Regalbestand), Gebäude (Typ, Stamm, Zelle,
+  Ausrichtung, LP, Bau-/Abriss-/Reparatur-/Ausbaufortschritt, Sammelpunkt, Pause, Hütten-
+  stufe und -timer, Besatzung von Hütten/Türmen, Arbeiter von Werkstatt/Försterei,
+  Ausbildungsschlange + Auszubildender mit Restzeit, Reinkarnationstimer), Einheiten aller Art
+  (Position, Blickrichtung, LP, Laufweg, Fahrzeugsitz, Bauauftrag, getragenes Holz, Hypnose,
+  Golem-Größe/Stufe/Kills/Einstellungen/Sitzen, Genesis-Stufe/Erfahrung/Holz,
+  Fahrzeugschäden), Stämme (Mana, Schuld, Zauberladungen/-schalter, Wachstum, Fahrzeug-
+  limits, Statistik, ausgeschieden), KI-Zustand + Persönlichkeit, MatchConfig, Spielzeit,
+  Sieg-/Schutzstatus, Überleben-Wellenstand, Kamera.
+- **Was bewusst NICHT** (vereinfacht): alles Fliegende/Brennende — Projektile, Zauber-
+  wirkungen in der Luft (Tornado, Schwarm, Feuerregen, Lavaströme), Brand, Panik, Würfe/
+  Rollen, Leichen, zeitlich begrenzte Buffs, laufende Kämpfe/Zielbindungen (Einheiten suchen
+  sich ihre Kämpfe neu), KI-Logistiktrupps (die KI plant sie neu), Auswahl.
+- **Prüfung:** `tests/test_save_game.gd` (Rundlauf über Datei, Fingerabdruck
+  `GameSnapshot.fingerprint`) und der echte Ablauf über den Szenenwechsel:
+  `& $GODOT --path D:\game\Populous-TheEnd --headless -- skirmish=3 save-roundtrip=240 roundtrip-run=120`
+  (Exit 0 = identisch; geht auch mit `survival`, `survival_golems`, `survival_large` oder
+  `res://scenes/main.tscn` für die Startmission).
+- **Statistik am Endbildschirm** (`TribeStats`, Zähler auf `Tribe`): je Stamm Anhänger am
+  Ende, Höchststand, Gefallene, **Kills durch Golems** (alle drei Arten) und **Kills sonst**,
+  dazu die Spielzeit. Wer getötet hat, merkt sich jede Einheit beim Schaden
+  (`Unit.note_harm`: Stamm + Golem ja/nein); Tod ohne neuen Treffer (Lava, Brand, Sturz,
+  Ertrinken) zählt für den letzten Verursacher; eigene Tote, Fahrzeuge und zerfallende Golems
+  sind kein Kill. Standbild: `& $GODOT --path D:\game\Populous-TheEnd res://scenes/main.tscn -- endscreen-shot=<png>`
+  (ohne `--headless`).

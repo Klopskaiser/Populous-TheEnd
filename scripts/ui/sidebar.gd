@@ -1426,6 +1426,18 @@ func _build_pause_menu() -> void:
 	resume.pressed.connect(_toggle_pause)
 	vb.add_child(resume)
 
+	# Save game (2026-11-23): one quick slot for now, also on F5 / F8 in the match.
+	var save_button: Button = Button.new()
+	save_button.text = "Schnellspeichern (F5)"
+	UiTheme.style_button(save_button)
+	save_button.pressed.connect(func() -> void: _call_main(&"save_game"))
+	vb.add_child(save_button)
+	var load_button: Button = Button.new()
+	load_button.text = "Schnellladen (F8)"
+	UiTheme.style_button(load_button)
+	load_button.pressed.connect(func() -> void: _call_main(&"load_game"))
+	vb.add_child(load_button)
+
 	# Lautstärke je Kanal (Gesamt, Effekte, Bedienung, Musik & Umgebung) —
 	# dieselben Regler wie im Hauptmenü, nur schmaler. Persistiert.
 	for channel in AudioSettings.CHANNELS:
@@ -1448,6 +1460,13 @@ func _build_pause_menu() -> void:
 	UiTheme.style_button(quit)
 	quit.pressed.connect(func() -> void: get_tree().quit())
 	vb.add_child(quit)
+
+
+## Save / load from the pause menu: Main owns the world, so the call goes there.
+func _call_main(method: StringName) -> void:
+	var main: Node = get_tree().current_scene
+	if main != null and main.has_method(method):
+		main.call(method)
 
 
 ## Reloads the map as the debug battle scenario (two 800-unit armies meeting

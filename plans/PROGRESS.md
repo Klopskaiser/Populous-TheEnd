@@ -13742,3 +13742,56 @@ Nutzervorgabe 2026-11-23: „bei den golems: hinsetzen soll jetzt immer nur nach
   `test_he_tramples_from_stage_one_and_buildings_and_vehicles_from_thirty_metres`; 13 Erwartungswerte an die neue
   Trampelformel und die Schwellen angepasst; der Sprung-Ablauftest gibt den Gegnern 2 Spruenge LP. Suite 8950 bestanden.
 
+
+### Spielstand (Speichern/Laden) und Statistik am Endbildschirm (2026-11-23)
+
+**Speichern/Laden.** F5 = Schnellspeichern, F8 = Schnellladen (neue Input-Actions `quicksave`/`quickload`,
+in `InputSettings._BLOCKED_ACTIONS`, also nicht umbelegbar), dieselben Knoepfe im Pausemenue (`Sidebar._call_main`),
+Hauptmenue-Seite „Spielstand laden" (`MainMenu._build_load_page`, listet alle Slots). Speicherbar: Skirmish, alle
+Ueberleben-Szenarien, Startmission (`MatchConfig.can_save`); nicht Debugschlacht/Stresstest, nicht nach der Entscheidung.
+- `scripts/core/save_game.gd` (`SaveGame`): `user://saves/<slot>.sav`, Zstd, zwei `store_var` — Kopf (Format-ID,
+  `FORMAT_VERSION` 1, Titel, Datum, Modus, Karte, Spielzeit, Stammzahl) und Rumpf. `write` ueber `.tmp` + Umbenennen,
+  `read`/`read_header` (neuere Version und fremde Dateien werden abgelehnt, nie `allow_objects`), `list_slots`,
+  `describe`, `delete_slot`, `sanitize_slot`, `load_into_game`. Heute ein Slot (`quicksave`), Schema fuer viele bereit.
+- `scripts/core/game_snapshot.gd` (`GameSnapshot`, `DATA_VERSION` 1): `capture(ctx)`, `apply_terrain(td, data)` (vor
+  NavGrid/Mesh), `apply(data, ctx)` ueber die normalen APIs (`BuildingManager.place`, `UnitManager.spawn_unit`,
+  `TreeManager.spawn_tree`, `admit_crew`, `order_train`/`_admit_front`, `order_crew`/`on_crew_boarded`,
+  `order_workshop`/`admit_worker`, `order_build`/`order_upgrade`/...), `fingerprint(data)` fuer Rundlauf-Vergleiche.
+  `scripts/core/snapshot_context.gd` (`SnapshotContext`) buendelt Manager, Staemme und optionale Teile.
+- Gespeichert: Terrainhoehen, Baeume (Zelle, Typ, Wachstum), Stapel (auch Regalbestand per Index), Gebaeude (Typ ueber
+  `scene_file_path`, Stamm, Zelle, Ausrichtung, LP, Bau-/Abriss-/Reparatur-/Ausbaustand, Sammelpunkt, Pause, Huettenstufe
+  und -timer, Crews von Huette/Turm, Werkstatt-/Foerstereiarbeiter mit drinnen/draussen, Schlange + Azubi mit Restzeit,
+  Reinkarnationstimer), Einheiten (Szene, Position, Blick, LP, Route, Fahrzeugsitz, Weg zur Huette/zum Turm, Bauauftrag,
+  getragenes Holz, Hypnose mit Herkunft, Golem: Kills/Stufe/Wachstum/Lebenszeit/Einstellungen/Sitzen/abgesenkter Boden,
+  Genesis: Stufe/Erfahrung/Holz, Feuerramme/Luftschiff-Schaeden), Staemme (Mana, Schuld, Zauber, Schalter, Limits,
+  Statistik, ausgeschieden, Persoenlichkeit), `AIController.save_state/load_state`, `SurvivalMode.save_state` +
+  `configure_from_save`/`load_state`, `GameState.save_tracking/load_tracking` (Spielzeit, Besiegte, Schutz), Kamera
+  (`CameraRig.save_view/load_view`), `MatchConfig.to_dict/from_dict`.
+- **Vereinfacht/weggelassen:** Projektile, Zauberwirkungen in der Luft (Tornado, Schwarm, Feuerregen, Lavastroeme),
+  Brand, Panik, Wuerfe/Rollen (Einheit landet an ihrer Position), Leichen und Todgeweihte, zeitliche Buffs, Kampfgruppen und
+  Ziele, KI-Logistiktrupps und Raubzugtrupp, Pfade (die Route wird neu befohlen), Auswahl, `pending_engine` der Werkstatt,
+  Zufallsgeneratoren. Ein Golem im Sitzen wird von seinen Fuessen aus wieder hingesetzt (eigene Ticks im Laden).
+  Holztraeger ohne Auftrag liefern ihr Holz nach dem Laden lose ab (`_start_loose_deliver`).
+- Ablauf: `GameState.pending_load` -> `Main._ready` (MatchConfig aus dem Stand, Hoehen vor `Terrain.build`) ->
+  `Main._setup_from_save` (Welt, KIs, Ueberleben, Tracking). `GameState.match_time` neu (zaehlt, solange die Partie laeuft).
+- Rueckmeldung als Einblendung (`Main._notify`).
+
+**Kill-Zaehlung je Stamm.** `Unit.note_harm(source)` merkt Stamm und „Golem ja/nein" des letzten Verursachers
+(`take_damage` mit Angreifer, `ignite`/`scorch` mit Quelle, Tornado/Schwarm/Vulkan neu mit `note_harm(self)`);
+`Unit.is_golem()` (Golem -> true). `TribeStats.record_death` (aus `UnitManager._on_unit_died`): Verlust beim Opferstamm,
+Kill beim Verursacher — Golem oder sonst. Lava/Brand/Sturz/Ertrinken zaehlen fuer den letzten Verursacher, eigene Tote
+und Fahrzeuge zaehlen nicht, `Golem._crumble` loescht den Verursacher. Zaehler auf `Tribe`: `kills_by_golems`,
+`kills_other`, `units_lost`, `peak_population` (in `add_unit`), im Spielstand mit.
+
+**Endbildschirm** (`EndScreen.show_stats`): Spielzeit und je Stamm Anhaenger am Ende, Hoechststand, Gefallen, Kills Golems,
+Kills sonst; Ausgeschiedene mit †. Entscheidung: **kein „insgesamt erzeugt"** — ein ausgebildeter Krieger ist eine neue
+Einheit aus einem Brave, Bekehrte wechseln die Seite; Hoechststand + Ende + Verluste erzaehlen den Verlauf ohne
+Doppelzaehlung. Box waechst jetzt in alle Richtungen (vorher rechts unten aus der Mitte).
+
+**Pruefung.** `tests/test_save_game.gd` (Rundlauf ueber Datei mit Huettencrew, Azubi + Schlange, Baustelle mit Bauarbeiter,
+Turmwache, Katapult mit Besatzung, Route, Holztraeger, sitzendem Golem, Daemon, Genesis, Hypnose, Zaubern, Einstellungen,
+Statistik; Dateikopf/Versionen/Slotliste; MatchConfig/KI/Ueberleben/Tracking), `tests/test_kill_stats.gd`. Suite 9049
+bestanden, 0 fehlgeschlagen. Echter Ablauf ueber den Szenenwechsel (`Main`-Hook `-- save-roundtrip=<s> [roundtrip-run=<s>]`):
+Skirmish 3 KIs bei 4:00 (120 Einheiten, 42 Gebaeude), Ueberleben, Ueberleben grosse Karte, Golem-Ueberleben und Startmission
+jeweils **identischer Fingerabdruck**, danach 1-4 min fehlerfrei weitergespielt. Standbild des Endbildschirms per
+`-- endscreen-shot=<png>` ohne `--headless` (Startmission, Sieg) angesehen.
