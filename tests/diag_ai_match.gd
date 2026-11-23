@@ -148,6 +148,8 @@ func _report(t: float, ais: Array[AIController], tribes: Array[Tribe]) -> void:
 				elif g is GenesisGolem and (g as GenesisGolem).is_harvesting():
 					what = "FAELLT"
 				var wood: String = " Holz %d" % (g as GenesisGolem).total_wood() if g is GenesisGolem else ""
+				if g is GenesisGolem:
+					wood += " (%s)" % str(ai.golem_ai.dbg_genesis_why.get(g.get_instance_id(), "-"))
 				now.append("%s %.0fm %d/%d LP %s%s" % [tag, g.height_m(), g.health, g.max_health, what, wood])
 			print("        Golems: %s | Rueckzuege %d, Holzauftraege %d, Lieferungen %d" % [
 				"; ".join(now), ai.golem_ai.dbg_retreats, ai.golem_ai.dbg_genesis_harvests,

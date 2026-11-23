@@ -3031,9 +3031,13 @@ func test_ai_pulls_back_a_dying_golem_and_puts_the_genesis_golem_to_work() -> vo
 	for i in range(12):
 		w.tree_manager.spawn_tree(anchor + Vector2i(12 + 3 * (i % 4), -4 + 3 * (i / 4)), TreeResource.MAX_STAGE)
 	ai._grove_cache_tick = -100000   # (fresh grove search)
+	# Measured 2026-11-23: a winner stays in ATTACK with no target left — the wave gives no orders then,
+	# so he must not wait for it.
+	ai.state = AIState.State.ATTACK
+	check(ai._attack_target_position() == Vector3.INF, "(attacking, but no enemy left to attack)")
 	cache = ai.build_tick_cache()
 	ai.golem_ai.tick(cache.golems, cache, {})
-	check(gen.is_harvesting(), "idle, he is sent to fell wood")
+	check(gen.is_harvesting(), "idle, he is sent to fell wood (even in ATTACK without a target)")
 	# Carrying wood, with a site that lacks some: he takes it there.
 	var site: Building = w.building_manager.place(HUT_SCENE, w.tribes[1], anchor + Vector2i(-12, 6), 0, false)
 	check(site != null and site.wood_needed_total() > 0, "(an own hut site that lacks wood)")

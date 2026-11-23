@@ -34,10 +34,18 @@ var _calm_ticks: Dictionary = {}
 var _retreating: Dictionary = {}
 ## A threat at home this tick (set in tick, read by joins_wave in the same AI tick).
 var _threat: bool = false
+## The AI is attacking and its wave has a target this tick (set in tick).
+var _wave_has_target: bool = false
+## Grove centre -> AI tick until which no Genesis golem is sent there (its order ran dry at once).
+var _banned_groves: Dictionary = {}
+## Instance id -> centre of the grove he was last sent to while that order still counts as fresh.
+var _last_grove: Dictionary = {}
 ## Diagnostics: how often the AI sent a golem home / a Genesis golem to the trees / to a site.
 var dbg_retreats: int = 0
 var dbg_genesis_harvests: int = 0
 var dbg_genesis_deliveries: int = 0
+## Instance id -> why _tick_genesis left him as he is this tick (diagnostics, tests/diag_ai_match.gd).
+var dbg_genesis_why: Dictionary = {}
 
 
 func _init(p_ai = null) -> void:
@@ -121,6 +129,10 @@ func tick(golems: Array[Unit], cache = null, threat: Dictionary = {}) -> void:
 	if _ai == null or _ai.commands == null:
 		return
 	_threat = not threat.is_empty()
+	# Measured 2026-11-23: an AI that had won stayed in ATTACK without a target, the wave gave no
+	# orders and its Genesis golems stood idle for good. The wave leads him only while it has a target.
+	_wave_has_target = _ai.state == AIState.State.ATTACK \
+		and _ai._attack_target_position() != Vector3.INF
 	var seen: Dictionary = {}
 	for u in golems:
 		if not is_instance_valid(u) or u.state == Unit.State.DEAD or not (u is Golem):
@@ -150,6 +162,12 @@ func tick(golems: Array[Unit], cache = null, threat: Dictionary = {}) -> void:
 	for id in _retreating.keys():
 		if not seen.has(id):
 			_retreating.erase(id)
+	for id in _last_grove.keys():
+		if not seen.has(id):
+			_last_grove.erase(id)
+	for centre in _banned_groves.keys():
+		if int(_banned_groves[centre]) <= _ai._tick_count:
+			_banned_groves.erase(centre)
 
 
 ## The base (the AI's anchor cell in the world), INF without one.
@@ -202,11 +220,19 @@ func _tick_retreat(g: Golem) -> bool:
 ## enough, he takes his wood to the nearest site that still lacks some. Not under a threat at home
 ## (he defends), not while the wave leads him, not while he fights, sits or is already on a delivery.
 func _tick_genesis(g: GenesisGolem, cache) -> void:
-	if _threat or g.is_sit_locked() or g.state == Unit.State.ATTACK:
+	var why: Dictionary = dbg_genesis_why
+	var gid: int = g.get_instance_id()
+	if _threat:
+		why[gid] = "Bedrohung"
 		return
-	if _ai.state == AIState.State.ATTACK and joins_wave(g):
+	if g.is_sit_locked() or g.state == Unit.State.ATTACK:
+		why[gid] = "kaempft/sitzt"
 		return
+	if _wave_has_target and joins_wave(g):
+		why[gid] = "Welle"
+		return   # the wave leads him (without a target it gives no orders: then he works)
 	if g.deliver_target != null and is_instance_valid(g.deliver_target):
+		why[gid] = "liefert"
 		return
 	var carried: int = g.total_wood()
 	if carried > 0:
@@ -218,17 +244,43 @@ func _tick_genesis(g: GenesisGolem, cache) -> void:
 				dbg_genesis_deliveries += 1
 				return
 	if g.is_harvesting() or g.state != Unit.State.IDLE:
+		why[gid] = "faellt" if g.is_harvesting() else "unterwegs"
 		return
 	var home: Vector3 = _home()
 	if home == Vector3.INF:
 		return
+	# Measured 2026-11-23: an order on a grove with nothing he can fell ended at once and was given again
+	# every AI tick (1228 orders, no wood). A grove whose order ran dry right away is banned for a while,
+	# and only groves with a standing tree on his island are tried.
+	var id: int = g.get_instance_id()
+	if _last_grove.has(id):
+		_banned_groves[_last_grove[id]] = _ai._tick_count + Balance.AI_GENESIS_GROVE_BAN_TICKS
+		_last_grove.erase(id)
 	for grove in _ai._grove_candidates_cached(home):
 		var centre: Vector2 = (grove as Rect2).get_center()
-		if not _ai.nav_grid.same_island(g.position, Vector3(centre.x, 0.0, centre.y)):
+		if int(_banned_groves.get(centre, -1)) > _ai._tick_count:
+			continue
+		if not _grove_has_tree_for(g, grove):
 			continue
 		if _ai.commands.order_chop_area(_one(g), grove) > 0:
 			dbg_genesis_harvests += 1
+			_last_grove[id] = centre
+			why[gid] = "Auftrag"
+		else:
+			why[gid] = "Auftrag abgelehnt"
 		return
+	why[gid] = "kein Waldstueck"
+
+
+## Does the grove hold a standing tree he could reach (on his island)?
+func _grove_has_tree_for(g: GenesisGolem, grove: Rect2) -> bool:
+	if _ai.tree_manager == null:
+		return false
+	for tree in _ai.tree_manager.area_trees(grove, PackedVector2Array()):
+		if is_instance_valid(tree) and not tree.felled_flag \
+				and (_ai.nav_grid == null or _ai.nav_grid.same_island(g.position, tree.position)):
+			return true
+	return false
 
 
 ## The nearest own construction site on his island that still lacks wood (after what is on its way).

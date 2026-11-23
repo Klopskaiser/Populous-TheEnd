@@ -966,7 +966,7 @@ func _value(kind: StringName, hit: Array[Unit], hit_b: Array = [], hit_v: Array 
 		if is_instance_valid(b):
 			sum += minf(to_building, float(b.health))
 	for u in hit:
-		sum += float(mini(dmg, u.health))
+		sum += minf(float(dmg) * g.golem_hit_mult(u), float(u.health))   # (another golem: multiplied, 2026-11-23)
 	return sum / maxf(cooldown_of(kind), 0.05)
 
 

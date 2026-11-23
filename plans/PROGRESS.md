@@ -13684,4 +13684,23 @@ Nutzervorgabe 2026-11-23: „bei den golems: hinsetzen soll jetzt immer nur nach
   `test_genesis_golem.gd` `test_he_carries_his_wood_to_a_site_that_needs_it`, `test_golem.gd`
   `test_lightning_on_a_big_golems_body_strikes_him`; die alte Pruefung von `marches_with_wave` entfiel.
 - Nicht geprueft: das rote Blinken im laufenden Spiel (UI, headless nicht testbar).
+- Nachgemessen (`diag_ai_match.gd`, Seenland, Oekonom/Verteidiger/Aggressiv/Verteidiger, Seed 7, 2000 s), zwei Korrekturen:
+  (1) eine KI, die gewonnen hatte, blieb in ATTACK ohne Ziel - die Welle gab keine Befehle, ihre Genesisgolems
+  standen ab 1200 s fuer immer still; die Welle fuehrt ihn jetzt nur, solange `_attack_target_position()` ein Ziel hat
+  (`_wave_has_target`). (2) Ein Faellauftrag auf ein Waldstueck, in dem er nichts faellen kann, endete sofort und kam
+  jeden KI-Takt wieder (1228 Auftraege, kein Holz): nur Waldstuecke mit einem stehenden Baum auf seiner Insel
+  (`_grove_has_tree_for`), ein sofort leergelaufenes ist `AI_GENESIS_GROVE_BAN_TICKS` (60) gesperrt.
+  Danach: Rueckzuege bis 9 je KI (Daemonengolems ziehen sich heim und kommen geheilt wieder), die Genesisgolems
+  faellen meistens (Grundzeile `dbg_genesis_why` in der Diagnose: faellt / liefert / Welle / Bedrohung / kaempft-sitzt /
+  unterwegs / kein Waldstueck), liefern an Baustellen und tragen teils mehrere hundert Holz, das sie ohne Bedarf
+  essen (bis 50 m). Untaetig nur noch sitzend.
+
+### Golem gegen Golem: Schadensfaktor nach Groesse des angreifenden Golems (2026-11-23)
+
+- `Golem.take_damage`: kommt der Schaden von einem anderen Golem, mal dessen `golem_damage_mult()` - aus SEINER Hoehe,
+  Stuetzpunkte `Balance.GOLEM_VS_GOLEM_DAMAGE_MULT` [[4,73 m, 1], [80 m, 4], [120 m, 6]], linear, darueber 6.
+  Alle Golem-Schadenswege geben den Golem als Angreifer mit (Stand, Trampeln, Sitzschaden, Sitzangriffe).
+  Angriffswahl im Stand (`_worth_now`) und im Sitzen (`GolemSitCombat._value`) rechnen mit `golem_hit_mult(u)`.
+- Nutzerklaerung: gestaffelt nach der Groesse des VERURSACHENDEN Golems (ein 80-m-Golem trifft jeden Golem 4-fach).
+- Test `test_bigger_golems_hit_other_golems_harder`; Suite 8935 bestanden.
 

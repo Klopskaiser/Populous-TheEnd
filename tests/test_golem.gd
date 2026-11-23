@@ -6527,3 +6527,33 @@ func test_lightning_on_a_big_golems_body_strikes_him() -> void:
 	check(spell.execute(w.t1, click, w.ctx), "the bolt finds a victim")
 	check(g.health < before, "the golem under the click is struck (%.1f m from his middle), not the brave beside it" % (r - 0.5))
 	_free_world(w)
+
+
+## Golem gegen Golem (Nutzervorgabe 2026-11-23): ein Golem macht anderen Golems mehr Schaden, je groesser
+## der ANGREIFENDE Golem ist — 1 bei Startgroesse, 4 bei 80 m, 6 bei 120 m, linear dazwischen.
+## Nur gegen Golems; andere Einheiten nehmen den normalen Schaden.
+func test_bigger_golems_hit_other_golems_harder() -> void:
+	check_near(Golem.golem_damage_mult_for_height(Balance.GOLEM_HEIGHT), 1.0, "starting size: 1")
+	check_near(Golem.golem_damage_mult_for_height(80.0), 4.0, "80 m: 4")
+	check_near(Golem.golem_damage_mult_for_height(120.0), 6.0, "120 m: 6")
+	check_near(Golem.golem_damage_mult_for_height(100.0), 5.0, "100 m: 5 (linear)")
+	var mid: float = (Balance.GOLEM_HEIGHT + 80.0) * 0.5
+	check_near(Golem.golem_damage_mult_for_height(mid), 2.5, "half way to 80 m: 2,5")
+	check_near(Golem.golem_damage_mult_for_height(150.0), 6.0, "beyond 120 m: stays 6")
+	var w: Dictionary = _make_world()
+	var big: Golem = _big_dummy(w, 0, Vector3(64, 5, 64), 80.0)
+	check_near(big.golem_damage_mult(), 4.0, "(the full-grown golem: %.1f m)" % big.height_m())
+	var small: Golem = _golem(w, 1, Vector3(90, 5, 64))
+	var brave: Unit = _spawn(w, BRAVE_SCENE, 1, Vector3(90, 5, 70))
+	var before: int = small.health
+	small.take_damage(10, big)
+	check(before - small.health == 40, "a blow of 10 from the 80-m golem costs the small one 40 (%d)" % (before - small.health))
+	before = big.health
+	big.take_damage(10, small)
+	check(before - big.health == 10, "the small one's 10 stays 10 against the big one")
+	before = brave.health
+	brave.take_damage(10, big)
+	check(before - brave.health == 10, "against anyone but a golem the big one's 10 stays 10")
+	check_near(big.golem_hit_mult(small), 4.0, "his attack choice counts the multiplied blow against a golem")
+	check_near(big.golem_hit_mult(brave), 1.0, "and the plain one against a brave")
+	_free_world(w)

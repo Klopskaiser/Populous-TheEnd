@@ -636,6 +636,29 @@ static func max_ranged_reach_bonus(mgr, tribe: int) -> float:
 	return best
 
 
+## How much harder her blows hit other golems (user spec 2026-11-23): by her own height, 1 at the
+## starting size, 4 at 80 m, 6 at 120 m, linear between (Balance.GOLEM_VS_GOLEM_DAMAGE_MULT).
+func golem_damage_mult() -> float:
+	return golem_damage_mult_for_height(height_m())
+
+
+## What one of her blows is worth against `u` in her attack choice: another golem takes it multiplied.
+func golem_hit_mult(u) -> float:
+	return golem_damage_mult() if u is Golem and u != self else 1.0
+
+
+static func golem_damage_mult_for_height(h: float) -> float:
+	var pts: Array = Balance.GOLEM_VS_GOLEM_DAMAGE_MULT
+	if h <= float(pts[0][0]):
+		return float(pts[0][1])
+	for i in range(1, pts.size()):
+		var h1: float = float(pts[i][0])
+		if h <= h1:
+			var h0: float = float(pts[i - 1][0])
+			return lerpf(float(pts[i - 1][1]), float(pts[i][1]), (h - h0) / (h1 - h0))
+	return float(pts[pts.size() - 1][1])
+
+
 ## True once the body has reached GOLEM_MAX_HEIGHT (no growth step left).
 func is_full_size() -> bool:
 	return level >= Balance.GOLEM_MAX_LEVEL and growth_steps >= max_growth_steps()
@@ -1957,7 +1980,10 @@ static func _debug_circle(c: Vector3, r: float, n: int = 40) -> PackedVector2Arr
 	return pts
 
 
+## Blows of another golem hurt her more the bigger THAT golem is (its golem_damage_mult, user spec 2026-11-23).
 func take_damage(amount: int, attacker = null) -> void:
+	if amount > 0 and attacker != self and is_instance_valid(attacker) and attacker is Golem:
+		amount = int(round(float(amount) * (attacker as Golem).golem_damage_mult()))
 	if state != State.DEAD and amount > 0:
 		var k: StringName = (attacker as Unit).unit_kind() if is_instance_valid(attacker) and attacker is Unit else &"other"
 		damage_taken[k] = int(damage_taken.get(k, 0)) + amount
@@ -3013,7 +3039,7 @@ func _worth_now(kind: StringName) -> float:
 	else:
 		var damage: float = float(attack_damage(kind))
 		for u in struck.units:
-			worth += minf(damage, float(u.health))
+			worth += minf(damage * golem_hit_mult(u), float(u.health))
 	# A building: GOLEM_BUILDING_VALUE_SHARE of what the same hit is worth against a unit (user spec
 	# 2026-11-18), no more than it has left; a vehicle: GOLEM_STRUCTURE_VALUE.
 	var per_building: float = building_value(kind)

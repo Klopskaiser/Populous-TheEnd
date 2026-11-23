@@ -949,6 +949,10 @@ const GOLEM_BURN_DPS: float = 5.0
 const GOLEM_LIGHTNING_MULT: float = 2.0
 const GOLEM_SIEGE_DAMAGE_MAX: int = 80
 const GOLEM_SIEGE_DAMAGE_FULL_SIZE: int = 40
+## Golem gegen Golem (Nutzervorgabe 2026-11-23): die Angriffe eines Golems (Stand, Sitz, Trampeln, Sitzschaden)
+## machen anderen Golems mehr Schaden, je groesser der ANGREIFENDE Golem ist — Stuetzpunkte [Koerperhoehe m,
+## Faktor], dazwischen linear, darueber der letzte Wert. `Golem.golem_damage_mult`.
+const GOLEM_VS_GOLEM_DAMAGE_MULT: Array = [[GOLEM_HEIGHT, 1.0], [80.0, 4.0], [120.0, 6.0]]
 ## Abstand, den andere grosse Koerper (Fahrzeuge, Golems) zum Golem halten
 ## (2,0 -> 1,5 mit dem schlanken Koerper, -> 1,125 mit der kleineren Koerperbox,
 ## beides 2026-11-15).
@@ -2407,6 +2411,8 @@ const AI_GOLEM_RETURN_HP_SHARE: float = 0.8
 ## traegt (oder so viel, wie die Baustelle noch braucht, oder er nicht mehr faellt).
 const AI_GENESIS_ATTACK_HP_SHARE: float = 0.75
 const AI_GENESIS_DELIVER_MIN: int = 10
+## Ein Waldstueck, dessen Faellauftrag sofort leerlief, ist fuer den Genesisgolem so viele KI-Takte gesperrt.
+const AI_GENESIS_GROVE_BAN_TICKS: int = 60
 
 # =============================================================================
 # BUFFS (generisches Effektsystem)
