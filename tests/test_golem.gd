@@ -1831,11 +1831,19 @@ func test_status_text_reports_level_size_health_and_lifetime() -> void:
 	check(text.contains("Lebenszeit: %d s" % int(ceil(g.life_left))), "the lifetime left in seconds")
 	check(text.contains("Heilung: 6.0 LP/s") and text.contains("Tempo: %.1f m/s" % g.current_speed()),
 		"healing and walking speed, as for every golem (user spec 2026-11-18)")
+	check(text.contains("Ziele: %d" % g.max_targets()) and not text.contains("sitzend"),
+		"the target cap (user spec 2026-11-23); no seated count while she cannot sit")
 	_level_to(g, 7)
 	text = g.status_text()
 	check(text.contains("Stufe 7/7") and text.contains("Lebenszeit: unbegrenzt")
 		and text.contains("nächsten Wachstum") and text.contains("Größe: %.1f m" % g.height_m()),
 		"the giant: unlimited lifetime, kills to the next growth step, the new size")
+	while not g.can_sit():
+		g._credit_kill()
+	text = g.status_text()
+	check(text.contains("Ziele: %d (sitzend %d)" % [g.max_targets(), g.sit_max_targets()])
+		and g.sit_max_targets() == int(floor(float(g.max_targets()) * Balance.GOLEM_SIT_MULT_TARGETS + 0.000001)),
+		"once she can sit, her seated cap too (x%.1f): %s" % [Balance.GOLEM_SIT_MULT_TARGETS, text.get_slice("\n", 3)])
 	_free_world(w)
 
 
@@ -2005,10 +2013,11 @@ func test_hit_zones_slam_front_half_of_the_body_kick_lane_only() -> void:
 func test_target_cap_limits_every_damage_tick() -> void:
 	check(Balance.GOLEM_MAX_TARGETS == ([5, 6, 6, 6, 7, 8, 8, 8] as Array[int]),
 		"targets per level 0-7: 5, 6, 6, 6, 7, 8, 8, 8")
-	check(Golem.max_targets_for(7, 2) == 12 and Golem.max_targets_for(7, 3) == 14
-		and Golem.max_targets_for(7, Golem.max_growth_steps() - 1) == 48
-		and Golem.max_targets_for(7, Golem.max_growth_steps()) == 51,
-		"beyond level 7 every growth step adds two (user spec 2026-11-19), 80 m one more (%d at 80 m)"
+	check(Golem.max_targets_for(7, 1) == 9 and Golem.max_targets_for(7, 2) == 11
+		and Golem.max_targets_for(7, 3) == 12
+		and Golem.max_targets_for(7, Golem.max_growth_steps() - 1) == 38
+		and Golem.max_targets_for(7, Golem.max_growth_steps()) == 39,
+		"beyond level 7 every growth step adds 1,5, summed and rounded down (user spec 2026-11-23), no extra at 80 m (%d at 80 m)"
 			% Golem.max_targets_for(7, Golem.max_growth_steps()))
 	# --- slam into a crowd: 5 of 9, the attack target among them -----------------
 	var w: Dictionary = _make_world()
@@ -2632,9 +2641,9 @@ func test_every_attack_has_its_share_of_the_target_count() -> void:
 		check(got == want[lv] and g.max_targets() == want[lv][0],
 			"level %d: slam/kick/drum/stomp %s (want %s), trampling the base %d" % [lv, got, want[lv], g.max_targets()])
 	_grow_to_the_end(g)
-	check(g.max_targets() == 51 and g.max_targets_of(Golem.ATTACK_KICK) == 30
-		and g.max_targets_of(Golem.ATTACK_DRUM) == 63 and g.max_targets_of(Golem.ATTACK_STOMP) == 102,
-		"80 m: base 51, kick 30, drum 63, stomp 102")
+	check(g.max_targets() == 39 and g.max_targets_of(Golem.ATTACK_KICK) == 23
+		and g.max_targets_of(Golem.ATTACK_DRUM) == 48 and g.max_targets_of(Golem.ATTACK_STOMP) == 78,
+		"80 m: base 39, kick 23, drum 48, stomp 78 (2026-11-23; before 51 / 30 / 63 / 102)")
 	_free_world(w)
 
 

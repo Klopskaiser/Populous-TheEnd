@@ -336,8 +336,7 @@ func status_text() -> String:
 	if growth_steps < max_steps():
 		next = "   noch %d Kills bis %d m" % [
 			kills_for_steps(growth_steps + 1) - kills, int(round(height_for_steps(growth_steps + 1)))]
-	return status_lines("Dämonengolem   Wachstumsstufe %d/%d%s" % [growth_steps, max_steps(), next],
-		"Ziele: %d" % max_targets())
+	return status_lines("Dämonengolem   Wachstumsstufe %d/%d%s" % [growth_steps, max_steps(), next], "")
 
 
 # --- Build ----------------------------------------------------------------------------

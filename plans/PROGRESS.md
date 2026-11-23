@@ -13704,3 +13704,26 @@ Nutzervorgabe 2026-11-23: „bei den golems: hinsetzen soll jetzt immer nur nach
 - Nutzerklaerung: gestaffelt nach der Groesse des VERURSACHENDEN Golems (ein 80-m-Golem trifft jeden Golem 4-fach).
 - Test `test_bigger_golems_hit_other_golems_harder`; Suite 8935 bestanden.
 
+### Statfenster: maximale Ziele bei allen Golems (2026-11-23)
+
+- `Golem.status_lines` zeigt bei allen drei Golems "Ziele: N" (Grundzahl `max_targets()`), ab Sitzgroesse
+  "(sitzend M)" mit `sit_max_targets()` = N x `GOLEM_SIT_MULT_TARGETS` (1,2) abgerundet; Kills und Haltung
+  stehen jetzt in einer eigenen Zeile. Der Daemonengolem gibt sein bisheriges "Ziele" nicht mehr extra mit.
+- Nutzerfrage "mehr Ziele im Sitzen?": gibt es schon - jeder Sitzangriff trifft 1,2 x so viele (Faktor, kein fester
+  Bonus; 31,3 m: 28 statt 24, 80 m: 61 statt 51). Ein fester Bonus ist nicht eingebaut.
+- Tests: Statfenster-Tests in test_golem / test_demon_golem / test_genesis_golem pruefen die Ziele.
+
+### Golem: weniger Ziele nach Stufe 7 (2026-11-23)
+
+- `GOLEM_GROWTH_TARGETS_PER_STEP` 2 -> 1,5 (float; `max_targets_for` rundet die Summe ab), `GOLEM_FULL_SIZE_TARGETS`
+  1 -> 0. Grundzahl: Stufe 7 8, 31,3 m 20 (vorher 24), 53,7 m 30 (38), 80 m 39 (51); bei 80 m Tritt 23, Trommeln 48,
+  Sprung 78, sitzend 46 (vorher 30 / 63 / 102 / 61). Nur der normale Golem; Daemonen- und Genesisgolem unveraendert.
+- Test `test_target_cap_limits_every_damage_tick` und der 80-m-Check angepasst; Suite 8938 bestanden.
+- Ziele im Sitzen: `GOLEM_SIT_MULT_TARGETS` 1,2 -> 1,3 (Nutzervorgabe 2026-11-23). Normaler Golem sitzend: 31,3 m 26,
+  53,7 m 39, 80 m 50 (Grundzahl 20 / 30 / 39); gilt fuer jeden Sitzangriff aller drei Golems.
+- Daemonengolem: `DEMON_GOLEM_GROWTH_TARGETS` 3 -> 2 je Stufe bis 62 m (Nutzervorgabe 2026-11-23), danach weiter +1 alle
+  2 Stufen. Grundzahl: 5 m 5, 32 m 23, 50 m 35, 62 m 43, 80 m 46, 119 m 52 (vorher 6 / 33 / 51 / 63 / 66 / 72). Der
+  Genesisgolem nutzte dieselbe Konstante; er hat jetzt die eigene `GENESIS_GOLEM_TARGETS_PER_DEMON_STEP`, auf
+  Nutzervorgabe ebenfalls 2 statt 3 (4/9 Ziel je Meter): 33 m 17, 50 m 24, 80 m 38, 100 m 47 (vorher 23 / 34 / 54 / 68).
+  Test `test_targets_start_at_three_and_two_more_every_step`; Suite 8938 bestanden.
+

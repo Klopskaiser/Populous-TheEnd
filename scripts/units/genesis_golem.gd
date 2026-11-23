@@ -261,7 +261,7 @@ func can_strike_air() -> bool:
 
 func max_targets() -> int:
 	return Balance.GOLEM_MAX_TARGETS[0] + int(floor(combat_demon_steps()
-		* float(Balance.DEMON_GOLEM_GROWTH_TARGETS) + 0.000001))
+		* float(Balance.GENESIS_GOLEM_TARGETS_PER_DEMON_STEP) + 0.000001))
 
 
 ## His upkeep: GENESIS_GOLEM_MANA_UPKEEP_SHARE of the gross income (+ the flat part, Golem.mana_upkeep_rate).

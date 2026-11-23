@@ -245,7 +245,7 @@ func test_attack_values_grow_two_thirds_as_fast_as_the_demons() -> void:
 	check_near(g.damage_exact(Golem.ATTACK_SLAM), 15.5 + 0.75 * m, "slam +0,5 a metre")
 	check_near(g.damage_exact(Golem.ATTACK_KICK), 24.5 + 0.8 * m, "kick +0,53 a metre")
 	check_near(g.damage_exact(Golem.ATTACK_DRUM), 24.0 + 1.2 * m, "drum +0,8 a metre")
-	check(g.max_targets() == 5 + 18, "two thirds of a target a metre (%d)" % g.max_targets())
+	check(g.max_targets() == 5 + 12, "four ninths of a target a metre (user spec 2026-11-23, before two thirds): %d" % g.max_targets())
 	var cf: float = 1.0 + 28.0 / Balance.GOLEM_HEIGHT * 2.0 / 3.0
 	check_near(g.combat_factor(), cf, "attack size factor %.2f" % cf)
 	check_near(g._base_limb_factor(), Golem.limb_factor_for(cf), "his own limb factor from it")
@@ -498,7 +498,8 @@ func test_status_text_names_him_his_stage_and_wood() -> void:
 	g.add_wood(7)
 	var text: String = g.status_text()
 	check(text.contains("Genesisgolem") and text.contains("Stufe 0/8")
-		and text.contains("noch 10 Braves") and text.contains("Holz: 7"), text)
+		and text.contains("noch 10 Braves") and text.contains("Holz: 7")
+		and text.contains("Ziele: %d" % g.max_targets()), text)
 	check(text.contains("Heilung: 6.0 LP/s") and text.contains("Tempo: %.1f m/s" % g.current_speed())
 		and text.contains("Größe: 5.0 m") and text.contains("Leben: 1000/1000"), "the golems' common lines: %s" % text)
 	_free_world(w)

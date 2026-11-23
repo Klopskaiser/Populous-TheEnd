@@ -233,26 +233,27 @@ func test_trample_and_stomp_damage_follow_the_height_like_the_golems() -> void:
 	_free_world(w)
 
 
-func test_targets_start_at_three_and_three_more_every_step() -> void:
+## Ziele: Start 3, je Stufe +2 bis 62 m (Nutzervorgabe 2026-11-23, vorher +3), danach +1 alle 2 Stufen.
+func test_targets_start_at_three_and_two_more_every_step() -> void:
 	var w: Dictionary = _make_world()
 	var d: DemonGolem = _demon(w, 0, Vector3(50, 5, 50))
-	check(d.max_targets() == 6, "3 + his first step's 3 at the summoning")
-	check(d.max_targets_of(Golem.ATTACK_SLAM) == 6 and d.max_targets_of(Golem.ATTACK_KICK) == 3
-		and d.max_targets_of(Golem.ATTACK_DRUM) == 7 and d.max_targets_of(Golem.ATTACK_STOMP) == 12,
-		"shares like the golem's: slam 6, kick 3, drum 7, stomp 12")
+	check(d.max_targets() == 5, "3 + his first step's 2 at the summoning")
+	check(d.max_targets_of(Golem.ATTACK_SLAM) == 5 and d.max_targets_of(Golem.ATTACK_KICK) == 3
+		and d.max_targets_of(Golem.ATTACK_DRUM) == 6 and d.max_targets_of(Golem.ATTACK_STOMP) == 10,
+		"shares like the golem's: slam 5, kick 3, drum 6, stomp 10")
 	_grow_to(d, 26.0)
-	check(d.max_targets() == 27, "26 m (8 steps): 27")
-	check(d.max_targets_of(Golem.ATTACK_KICK) == 16 and d.max_targets_of(Golem.ATTACK_DRUM) == 33
-		and d.max_targets_of(Golem.ATTACK_STOMP) == 54, "kick 16, drum 33, stomp 54")
+	check(d.max_targets() == 19, "26 m (8 steps): 19")
+	check(d.max_targets_of(Golem.ATTACK_KICK) == 11 and d.max_targets_of(Golem.ATTACK_DRUM) == 23
+		and d.max_targets_of(Golem.ATTACK_STOMP) == 38, "kick 11, drum 23, stomp 38")
 	# Past 60 m only one more every two steps (user spec 2026-11-18).
 	_grow_to(d, 62.0)
-	check(d.growth_steps == 20 and d.max_targets() == 63, "62 m (step 20): 63")
+	check(d.growth_steps == 20 and d.max_targets() == 43, "62 m (step 20): 43")
 	_grow_to(d, 65.0)
-	check(d.max_targets() == 63, "65 m (step 21): still 63")
+	check(d.max_targets() == 43, "65 m (step 21): still 43")
 	_grow_to(d, 68.0)
-	check(d.max_targets() == 64, "68 m (step 22): 64")
+	check(d.max_targets() == 44, "68 m (step 22): 44")
 	_grow_to(d, 119.0)
-	check(d.max_targets() == 72, "119 m (step 39): 72 (was 120)")
+	check(d.max_targets() == 52, "119 m (step 39): 52 (was 72)")
 	_free_world(w)
 
 
@@ -510,6 +511,7 @@ func test_status_text_names_him_and_his_growth() -> void:
 	check(text.contains("Heilung: 6.5 LP/s") and text.contains("Tempo:"), "healing and walking speed (%s)" % text)
 	check(text.contains("noch 4 Kills bis 8 m"), "kills to the next growth step")
 	check(not text.contains("Stufe") and not text.contains("Lebenszeit"), "no level, no lifetime")
+	check(text.contains("Ziele: %d" % d.max_targets()), "his target cap")
 	_free_world(w)
 
 

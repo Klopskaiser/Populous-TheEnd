@@ -466,11 +466,22 @@ func status_text() -> String:
 
 
 ## The panel's lines, the same for all three golems (user spec 2026-11-18): the head (name, step, what
-## comes next), size and health, healing and walking speed, then `extra` (lifetime, targets, wood), kills
-## and stance.
+## comes next), size and health, healing and walking speed, then `extra` (lifetime, wood; may be empty)
+## with the target cap (since 2026-11-23 for all three: the base count, and once she can sit the count of
+## her sit attacks), then kills and stance.
 func status_lines(head: String, extra: String) -> String:
-	return "%s\nGröße: %.1f m   Leben: %d/%d\nHeilung: %.1f LP/s   Tempo: %.1f m/s\n%s   Kills: %d   Haltung: %s" % [
-		head, height_m(), health, max_health, regen_per_second(), current_speed(), extra, kills, stance_name()]
+	var targets: String = "Ziele: %d" % max_targets()
+	if can_sit():
+		targets += " (sitzend %d)" % sit_max_targets()
+	var line4: String = targets if extra == "" else "%s   %s" % [extra, targets]
+	return "%s\nGröße: %.1f m   Leben: %d/%d\nHeilung: %.1f LP/s   Tempo: %.1f m/s\n%s\nKills: %d   Haltung: %s" % [
+		head, height_m(), health, max_health, regen_per_second(), current_speed(), line4, kills, stance_name()]
+
+
+## Her target cap seated: the base count times GOLEM_SIT_MULT_TARGETS, rounded down (what a sit attack with
+## the full share strikes; GolemSitCombat.max_targets applies each attack's own share on top).
+func sit_max_targets() -> int:
+	return maxi(int(floor(float(max_targets()) * Balance.GOLEM_SIT_MULT_TARGETS + 0.000001)), 1)
 
 
 ## Her mana upkeep per second (user spec 2026-11-18, all golems): mana_upkeep_share() of her tribe's gross
@@ -796,14 +807,14 @@ static func kills_for_level(p_level: int) -> int:
 
 
 ## Most targets ONE damage tick of the golem strikes (slam, kick; trampling: per
-## second): GOLEM_MAX_TARGETS by level, plus one for every
-## GOLEM_GROWTH_TARGETS_PER_STEP for every growth step beyond level 7, and GOLEM_FULL_SIZE_TARGETS
-## more for the full-grown golem (80 m, user spec 2026-11-19).
+## second): GOLEM_MAX_TARGETS by level, plus GOLEM_GROWTH_TARGETS_PER_STEP for every growth step
+## beyond level 7, summed and rounded down (1,5 since 2026-11-23), and GOLEM_FULL_SIZE_TARGETS
+## more for the full-grown golem (80 m; 0 since 2026-11-23).
 static func max_targets_for(p_level: int, p_growth_steps: int) -> int:
 	var table: Array[int] = Balance.GOLEM_MAX_TARGETS
 	var full_size: bool = p_level >= Balance.GOLEM_MAX_LEVEL and p_growth_steps >= max_growth_steps()
 	return table[clampi(p_level, 0, table.size() - 1)] \
-		+ p_growth_steps * Balance.GOLEM_GROWTH_TARGETS_PER_STEP \
+		+ int(floor(float(p_growth_steps) * Balance.GOLEM_GROWTH_TARGETS_PER_STEP + 0.000001)) \
 		+ (Balance.GOLEM_FULL_SIZE_TARGETS if full_size else 0)
 
 

@@ -164,8 +164,9 @@ const GOLEM_SIT_ATTACKS: Dictionary = {
 const GOLEM_SIT_MULT_DAMAGE: float = 1.0
 const GOLEM_SIT_MULT_COOLDOWN: float = 0.8   # 0,9 -> 0,85 -> 0,8 (Nutzervorgaben 2026-11-19)
 const GOLEM_SIT_MULT_AREA: float = 1.0   # 0,9 -> 1,0 (Nutzervorgabe 2026-11-19)
-## Zielzahl im Sitzen: Faktor auf den Zielanteil jedes Sitzangriffs (Nutzervorgabe 2026-11-19: +20 %), abgerundet.
-const GOLEM_SIT_MULT_TARGETS: float = 1.2
+## Zielzahl im Sitzen: Faktor auf den Zielanteil jedes Sitzangriffs, abgerundet (Nutzervorgabe 2026-11-19: +20 %,
+## 2026-11-23: +30 %).
+const GOLEM_SIT_MULT_TARGETS: float = 1.3
 ## SITZ-MODIFIKATOREN JE GOLEM (Nutzervorgabe 2026-11-19): veraendern die Sitzangriffe eines Golems
 ## unabhaengig von seiner Stufe — Faktoren auf Schaden, Abklingzeit und Flaeche (der Tempovorteil des
 ## Daemonengolems steckt schon in seinem Takt). Der Daemonengolem macht im Sitzen immer 30 % weniger Schaden
@@ -540,7 +541,7 @@ const GOLEM_LIFE_PER_KILL: float = 6.0
 ## die Dauerheilung um GOLEM_GROWTH_REGEN; bei 80 m kommen GOLEM_FULL_SIZE_MAX_HP dazu (und weiter
 ## GOLEM_FULL_SIZE_REGEN). 80 m: 1000 + 30 + 21 x 30 + 100 = 1760 LP, 21 + 21 + 3 = 45 LP/s.
 ## Nutzervorgabe 2026-11-19: Stufe 7 und jede Wachstumsstufe +40 LP (statt 30), jede Wachstumsstufe +3 LP/s
-## (statt 1); bei 80 m +120 LP (statt 100) und +10 LP/s (statt 3) und ein Ziel mehr (GOLEM_FULL_SIZE_TARGETS).
+## (statt 1); bei 80 m +120 LP (statt 100) und +10 LP/s (statt 3) (das Ziel mehr, GOLEM_FULL_SIZE_TARGETS, seit 2026-11-23 nicht mehr).
 ## 80 m: 1000 + 40 + 21 x 40 + 120 = 2000 LP, 6 + 21 + 21 x 3 + 10 = 100 LP/s, 8 + 21 + 1 = 30 Ziele.
 const GOLEM_HP_PER_KILL: int = 15
 const GOLEM_MAX_HP_PER_KILL: int = 5
@@ -607,11 +608,12 @@ const GOLEM_MAX_TARGETS: Array[int] = [5, 6, 6, 6, 7, 8, 8, 8]
 ##   Sprung                   200 %   (              10 / 12 / 12 / 12 / 14 / 16 / 16 / 16;
 ##                                     doppelt so viele wie das Trampeln, Nutzer 2026-11-16 —
 ##                                     vorher 150 %)
-## Golem.max_targets_of(). Bei 80 m (Grundzahl 51, s. GOLEM_FULL_SIZE_TARGETS): 30 / 63 / 102.
-## Ziele je Wachstumsstufe nach Stufe 7 (Nutzervorgabe 2026-11-19: 2 statt 1; 80 m: 8 + 21 x 2 + 1 = 51).
-const GOLEM_GROWTH_TARGETS_PER_STEP: int = 2
-## Der ausgewachsene Golem (80 m) trifft so viele Ziele mehr (Nutzervorgabe 2026-11-19: 29 -> 30).
-const GOLEM_FULL_SIZE_TARGETS: int = 1
+## Golem.max_targets_of(). Bei 80 m (Grundzahl 39): Tritt 23 / Trommeln 48 / Sprung 78.
+## Ziele je Wachstumsstufe nach Stufe 7, aufsummiert und abgerundet (Nutzervorgabe 2026-11-23: 1,5 statt 2;
+## 2026-11-19: 2 statt 1; 80 m: 8 + floor(21 x 1,5) = 39, vorher 51).
+const GOLEM_GROWTH_TARGETS_PER_STEP: float = 1.5
+## Der ausgewachsene Golem (80 m) trifft so viele Ziele mehr (Nutzervorgabe 2026-11-23: entfaellt, vorher 1).
+const GOLEM_FULL_SIZE_TARGETS: int = 0
 const GOLEM_MAX_LEVEL: int = 7
 const GOLEM_FINAL_BONUS_LEVEL: int = 6
 const GOLEM_TOP_LEVEL_GROWTH: float = 0.2
@@ -974,7 +976,8 @@ const GOLEM_SEPARATION: float = 1.0
 ##    62 m nach 260 Kills, 119 m nach 478, Tod nach 480 (bis 2026-11-18: einer mehr alle 2 Stufen,
 ##    540 Kills).
 ##  * Ziele: ab DEMON_GOLEM_SLOW_HEIGHT nur noch +1 alle DEMON_GOLEM_SLOW_TARGETS_STEP (2) Stufen
-##    statt +DEMON_GOLEM_GROWTH_TARGETS je Stufe (Nutzervorgabe 2026-11-18): 62 m 63, 119 m 72.
+##    statt +DEMON_GOLEM_GROWTH_TARGETS je Stufe (Nutzervorgabe 2026-11-18): 62 m 43, 119 m 52 (seit 2026-11-23,
+##    2 statt 3 je Stufe; vorher 63 / 72).
 ##  * Alles je Stufe wurde 2026-11-17 VERDREIFACHT (Leben, Dauerheilung, Schaden,
 ##    Ziele, Heilung beim Wachsen) — bei 3 m je Stufe ist der Zuwachs JE METER
 ##    derselbe wie vorher.
@@ -1061,7 +1064,11 @@ const DEMON_GOLEM_GROWTH_KICK_DAMAGE: float = 2.4
 ## 2026-11-17 alle Zuwaechse je Stufe verdreifacht (1,2 -> 3,6 usw.).
 const DEMON_GOLEM_GROWTH_DRUM_DAMAGE: float = 3.6
 const DEMON_GOLEM_TARGETS: int = 3
-const DEMON_GOLEM_GROWTH_TARGETS: int = 3
+## Ziele je Wachstumsstufe bis DEMON_GOLEM_SLOW_HEIGHT (Nutzervorgabe 2026-11-23: 2 statt 3).
+const DEMON_GOLEM_GROWTH_TARGETS: int = 2
+## Ziele des Genesisgolems je Daemonen-Stufe seiner Kampfgroesse (combat_demon_steps; Nutzervorgabe 2026-11-23:
+## 2 statt 3, also 4/9 Ziel je Meter statt 2/3).
+const GENESIS_GOLEM_TARGETS_PER_DEMON_STEP: int = 2
 const DEMON_GOLEM_KILL_HEAL: int = 10
 const DEMON_GOLEM_KILL_HEAL_OVER_TIME: int = 15   # 10 -> 15 (Nutzervorgabe 2026-11-16)
 const DEMON_GOLEM_KILL_HEAL_DURATION: float = 5.0
