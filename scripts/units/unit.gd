@@ -1584,6 +1584,34 @@ func note_harm(source) -> void:
 	last_harm_by_golem = source is Unit and (source as Unit).is_golem()
 
 
+## Out of the world ON PURPOSE — held by something that brings it back: the
+## crew of a hut (garrison_housed) or a melee raider inside a building it storms.
+## Brave adds workshop, forester and training. A unit out of the world that no
+## holder claims is an orphan (UnitManager._sweep_orphans).
+func is_held_out_of_world() -> bool:
+	if garrison_housed and garrison_target != null and is_instance_valid(garrison_target) \
+			and garrison_target.health > 0:
+		return true
+	return state == State.RAID and raiding_building != null \
+		and is_instance_valid(raiding_building) and raiding_building.health > 0
+
+
+## Clears every "inside something" binding of an orphan the UnitManager just put
+## back into the world (it is registered again when this runs): idle, nothing held.
+func reset_after_orphaned() -> void:
+	garrison_target = null
+	garrison_housed = false
+	garrison_reached = false
+	man_hut_manual = false
+	push_immune = false
+	station_channeling = false
+	raiding_building = null
+	waypoint_queue.clear()
+	_clear_path()
+	_sync_soa_flags()
+	_set_state(State.IDLE)
+
+
 ## All three golems (normal, demon, Genesis) answer true — the kill statistics
 ## split by it.
 func is_golem() -> bool:

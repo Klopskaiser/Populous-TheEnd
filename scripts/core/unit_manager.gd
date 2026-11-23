@@ -694,6 +694,79 @@ func tick(delta: float) -> void:
 	_apply_combat_groups(delta)
 	_apply_idle_regroup(delta)
 	_tick_projectiles(delta)
+	_sweep_orphans(delta)
+
+
+# --- Orphans (2026-11-23) --------------------------------------------------------
+
+## Seconds between two orphan sweeps (one pass over the tribes' unit lists).
+const ORPHAN_SWEEP_INTERVAL: float = 2.0
+var _orphan_timer: float = ORPHAN_SWEEP_INTERVAL
+## Orphans put back into the world since the start (diagnostics, tests).
+var orphans_returned: int = 0
+
+
+## Safety net for the "invisible brave" (user report 2026-11-23): a living unit of
+## a tribe that is out of the world but held by nothing (Unit.is_held_out_of_world)
+## is never ticked, drawn or attacked — and keeps its tribe in the match forever.
+## Every ORPHAN_SWEEP_INTERVAL such units step back into the world where they are,
+## idle. A unit that DIED out of the world (its died signal had no listener) is
+## dropped from its tribe, so population and the defeat check stay honest.
+func _sweep_orphans(delta: float) -> void:
+	_orphan_timer -= delta
+	if _orphan_timer > 0.0:
+		return
+	_orphan_timer = ORPHAN_SWEEP_INTERVAL
+	for tribe in tribes:
+		var lost: Array[Unit] = []
+		var zombies: Array[Unit] = []
+		for u in tribe.units:
+			if not is_instance_valid(u):
+				continue
+			if u.in_world:
+				# A doomed body (lethal hit in mid-air) that is no longer in its
+				# throw or roll will never die on its own — tick() skips everything
+				# but its state for it, and nobody targets it. Seen in a 4-AI match:
+				# such a body kept its tribe in the game.
+				if u.doomed and u.state != Unit.State.THROWN and u.state != Unit.State.ROLL \
+						and u.state != Unit.State.DEAD:
+					zombies.append(u)
+				continue
+			if u.state == Unit.State.DEAD or not u.is_held_out_of_world():
+				lost.append(u)
+		for u in zombies:
+			u.health = 0
+			u._die()
+		for u in lost:
+			if u.state == Unit.State.DEAD:
+				tribe.remove_unit(u)
+			else:
+				return_orphan(u)
+
+
+## Puts an orphan back into the world at (or next to) where it was, idle — or,
+## when it already took its lethal hit (doomed, e.g. thrown while out of the
+## world), lets it die there properly (corpse, tribe and statistics bookkeeping).
+func return_orphan(u: Unit) -> void:
+	orphans_returned += 1
+	push_warning("Verwaiste Einheit zurückgeholt: %s von Stamm %d" % [u.unit_kind(), u.tribe_id])
+	if nav_grid != null:
+		var cell: Vector2i = nav_grid.world_to_cell(u.position)
+		if not nav_grid.is_cell_walkable(cell):
+			var near: Vector2i = nav_grid.nearest_walkable_cell(cell)
+			if near.x >= 0:
+				var w: Vector3 = nav_grid.cell_to_world(near)
+				u.position = Vector3(w.x, u.position.y, w.z)
+	if terrain_data != null:
+		u.position.y = terrain_data.get_height(u.position.x, u.position.z)
+	register(u)
+	u._sync_soa_pos()
+	if u.doomed or u.health <= 0:
+		u.reset_after_orphaned()
+		u.health = 0
+		u._die()
+		return
+	u.reset_after_orphaned()
 
 
 ## Rebuilds the CSR bucket grid from the authoritative position arrays

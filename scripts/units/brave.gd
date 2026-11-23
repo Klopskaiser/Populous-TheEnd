@@ -221,7 +221,11 @@ func claimed_tree_yield() -> int:
 ## Move orders interrupt any running task (claims are released, carried wood
 ## is dropped as a pile).
 func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = false) -> void:
-	if state == State.GATHER or state == State.BUILD:
+	# FORESTER and TRAIN too (2026-11-23): a forester worker sitting INSIDE took the
+	# move without leaving the building — state MOVE, still out of the world: the
+	# invisible brave. _interrupt_tasks steps him out and frees his slot.
+	if state == State.GATHER or state == State.BUILD or state == State.FORESTER \
+			or state == State.TRAIN:
 		_interrupt_tasks()
 	super.order_move(target, queue_up, aggressive)
 
@@ -1761,9 +1765,44 @@ func _tick_forester(delta: float) -> void:
 
 # --- Task bookkeeping --------------------------------------------------------------------
 
+## Unit.is_held_out_of_world plus the brave's own holders: a workshop or forester
+## it is housed in, the training building it is being trained in.
+func is_held_out_of_world() -> bool:
+	if super():
+		return true
+	if workshop_inside and job != null and is_instance_valid(job) and job is Workshop \
+			and (job as Workshop).occupants.has(self):
+		return true
+	if forester_inside and forester_home != null and is_instance_valid(forester_home) \
+			and forester_home.occupants.has(self):
+		return true
+	return train_target != null and is_instance_valid(train_target) \
+		and train_target.trainee == self
+
+
+func reset_after_orphaned() -> void:
+	# The stale "inside" flags first: _interrupt_tasks would otherwise try to step
+	# out of a building that no longer holds this brave.
+	workshop_inside = false
+	forester_inside = false
+	_interrupt_tasks()
+	super.reset_after_orphaned()
+
+
 ## Releases all claims, drops carried wood as a pile and leaves the job.
 ## Called before any new order and on death.
 func _interrupt_tasks() -> void:
+	# Housed inside a workshop / forester (removed from the world): step back out
+	# at the door BEFORE the slot is released. Without this the brave lost its
+	# building but stayed out of the world — never ticked, never drawn, never
+	# attackable, yet alive in tribe.units: the tribe could not be defeated and its
+	# reincarnation circle never sank (user report 2026-11-23: "an invisible brave
+	# that turned up after loading"). The training queue had this safety net since
+	# the vanished-trainee fix (TrainingBuilding.remove_trainee).
+	if forester_inside and forester_home != null and is_instance_valid(forester_home):
+		forester_home._return_to_world(self)
+	if workshop_inside and job != null and is_instance_valid(job) and job is Workshop:
+		(job as Workshop)._return_to_world(self)
 	if task_cell.x >= 0 and job != null and is_instance_valid(job):
 		job.release_flatten_cell(task_cell)
 	if tree_manager != null and _tree_valid(task_tree):

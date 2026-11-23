@@ -13795,3 +13795,35 @@ bestanden, 0 fehlgeschlagen. Echter Ablauf ueber den Szenenwechsel (`Main`-Hook 
 Skirmish 3 KIs bei 4:00 (120 Einheiten, 42 Gebaeude), Ueberleben, Ueberleben grosse Karte, Golem-Ueberleben und Startmission
 jeweils **identischer Fingerabdruck**, danach 1-4 min fehlerfrei weitergespielt. Standbild des Endbildschirms per
 `-- endscreen-shot=<png>` ohne `--headless` (Startmission, Sieg) angesehen.
+
+### Bugfix: unsichtbarer Brave verhinderte die Niederlage (2026-11-23, Nutzerreport)
+
+Symptom: ein Stamm ohne sichtbare Anhaenger schied nicht aus, sein Schamanenkreis blieb stehen (einmal stand
+nur noch ein Huettengrundriss). Nutzerbefund: nach dem Laden eines Spielstands tauchte ein Brave auf, der im
+laufenden Spiel nicht zu sehen war. Der Spielstand legt jede lebende Einheit aus `tribe.units` neu in die Welt —
+der Brave lebte also in der Stammliste, war aber aus der Welt genommen (nicht getickt, nicht gezeichnet, nicht
+angreifbar) und von nichts mehr gefuehrt. `GameState.is_tribe_defeated` und `ReincarnationSite._tribe_has_no_followers`
+zaehlen ihn als Anhaenger.
+
+Gefundene Wege und Behebung:
+- `Brave._interrupt_tasks` gab den Platz in Werkstatt/Foersterei frei, holte einen DRINNEN sitzenden Brave aber
+  nicht in die Welt zurueck (fuer die Ausbildung gab es das seit dem Fix „verschwundene Azubis"). Jetzt tritt er
+  vorher durch `Workshop._return_to_world` / `Forester._return_to_world` an der Tuer aus.
+- `Brave.order_move` unterbrach nur GATHER/BUILD: ein Foerster-Arbeiter drinnen nahm einen Laufbefehl an und war
+  danach MOVE, aber weiter ausserhalb der Welt. Jetzt auch FORESTER und TRAIN.
+- `tests/diag_defeat_orphans.gd` (volle KI-Partien MIT Niederlagepruefung, sucht verwaiste und auffaellige
+  Einheiten) hat auf Seenland (Seed 3, alter Code) einen weiteren Fall nachgestellt: ein Brave, im Flug toedlich
+  getroffen (`doomed`, THROWN), ausserhalb der Welt und ohne Bindung — er landet nie und stirbt nie. Woher genau
+  er aus der Welt kam, ist nicht festgenagelt (vermutlich ein Wurf/Treffer ueber eine gehaltene Referenz auf eine
+  Einheit, die inzwischen in einem Gebaeude war).
+- Sicherheitsnetz `UnitManager._sweep_orphans` (alle 2 s, eine Runde ueber die Stammlisten): eine lebende Einheit
+  ausserhalb der Welt, die kein Halter beansprucht (`Unit/Brave.is_held_out_of_world`: Huettencrew, Stuermer,
+  Werkstatt/Foersterei drinnen, Azubi), kommt an ihrem Ort zurueck (`return_orphan`, `reset_after_orphaned`, idle,
+  Warnung, Zaehler `orphans_returned`); eine todgeweihte stirbt dort ordentlich; eine ausserhalb der Welt
+  gestorbene fliegt aus der Stammliste (vorher blieb die Bevoelkerung zu hoch); ein todgeweihter Koerper IN der
+  Welt, der nicht mehr fliegt oder rollt, stirbt (`tick()` ueberspringt fuer ihn alles ausser seinem Zustand).
+- Tests: `tests/test_orphan_units.gd` (Werkstatt-/Foerster-Arbeiter per Befehl zurueck, Sweep holt zurueck und
+  der Stamm kann wieder besiegt werden, todgeweihter Verwaister und Zombie sterben, ausserhalb Gestorbene werden
+  entfernt, gehaltene Einheiten bleiben drin). Suite 9075 bestanden, 0 fehlgeschlagen.
+- Nebenbei: `tests/diag_inspect_save.gd` zeigt den Inhalt eines Spielstands je Stamm (Einheiten mit Bindungen,
+  Gebaeude) ohne ihn zu laden.
