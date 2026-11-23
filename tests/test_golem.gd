@@ -654,7 +654,7 @@ func test_levels_grow_size_reach_area_damage_and_speed() -> void:
 		"the limbs grow faster than the areas and a little slower than the body (%.2f)" % g.limb_factor())
 	check(g.attack_damage(Golem.ATTACK_SLAM) == int(Golem.stand_attack(Golem.ATTACK_SLAM)["damage"]) + 10
 		and g.attack_damage(Golem.ATTACK_KICK) == int(Golem.stand_attack(Golem.ATTACK_KICK)["damage"]) + 10
-		and g.trample_damage() == maxi(1, int(round(g.height_m() / 3.2))),
+		and g.trample_damage() == maxi(1, int(round(g.height_m() / Balance.GOLEM_TRAMPLE_HEIGHT_PER_DAMAGE))),
 		"every level adds 5 damage flat to the attacks; trampling follows the size")
 	check_near(g.speed, Balance.GOLEM_SPEED * sqrt(1.44), "the speed grows with the root of the SIZE")
 	check(Golem.in_slam_area(1.2 * r2, 2.6 * r2, r2)
@@ -686,8 +686,8 @@ func test_levels_grow_size_reach_area_damage_and_speed() -> void:
 	check_near(g.speed, Balance.GOLEM_SPEED * sqrt(s6 * 1.2), "the speed follows the size")
 	check(g.attack_damage(Golem.ATTACK_KICK) == dmg6 + 5
 		and g.attack_damage(Golem.ATTACK_SLAM) == int(Golem.stand_attack(Golem.ATTACK_SLAM)["damage"]) + 35
-		and g.trample_damage() == 5,
-		"level 7 adds 5 damage like the others; trampling is 16,9 m / 3,2 = 5")
+		and g.trample_damage() == 6,
+		"level 7 adds 5 damage like the others; trampling is 16,9 m / (80/30) = 6")
 	g.health = 100
 	g._tick_level_regen(1.0)
 	check(g.health == 127, "level 7 heals 6 + 21 per second (3 more than level 6)")
@@ -775,10 +775,10 @@ func test_trample_hurts_enemies_under_a_walking_golem_only() -> void:
 	# Walking: the enemy under him is hit, friend and bystander are not.
 	g._tick_pos = g.position - step
 	g._tick_trample(TICK)
-	# Trample damage = body height in metres / 3,2, rounded, at least 1 (user spec;
-	# 25 at 80 m since 2026-11-17).
+	# Trample damage = body height in metres / (80/30), rounded, at least 1 (user spec;
+	# 30 at 80 m since 2026-11-23, before 25).
 	var hit: int = g.trample_damage()
-	check(hit == 2 and is_equal_approx(Balance.GOLEM_TRAMPLE_HEIGHT_PER_DAMAGE, 3.2),
+	check(hit == 2 and is_equal_approx(Balance.GOLEM_TRAMPLE_HEIGHT_PER_DAMAGE, 80.0 / 30.0),
 		"at level 1 (5,7 m tall) trampling does 2 damage")
 	check(under.health == 1000 - hit, "the enemy under the walking golem takes the trample damage")
 	check(friend.health == 1000, "own units are never trampled")
@@ -2656,8 +2656,8 @@ func test_stomp_strikes_all_around_her_with_twice_the_trample_damage() -> void:
 	g.facing = Vector3(0, 0, 1)
 	check_near(float(Golem.stand_attack(Golem.ATTACK_STOMP)["area"]), 5.0 / 3.0, "two thirds more than the trample radius")
 	check_near(g.stomp_radius(), g.trample_radius() * 5.0 / 3.0, "the stomp's radius follows the body (%.2f m)" % g.stomp_radius())
-	check(g.attack_damage(Golem.ATTACK_STOMP) == 2 * g.trample_damage() and g.attack_damage(Golem.ATTACK_STOMP) == 2,
-		"level 0: twice the trample tick = 2")
+	check(g.attack_damage(Golem.ATTACK_STOMP) == 2 * g.trample_damage() and g.attack_damage(Golem.ATTACK_STOMP) == 4,
+		"level 0: twice the trample tick = 4")
 	var inside: Array = [_foe(w, 50.0, 51.2, 1000), _foe(w, 50.0, 48.8, 1000), _foe(w, 51.2, 50.0, 1000),
 		_foe(w, 48.8, 50.0, 1000)]
 	var outside: Array = [_foe(w, 50.0, 51.4, 1000), _foe(w, 48.6, 50.0, 1000)]
@@ -2669,15 +2669,15 @@ func test_stomp_strikes_all_around_her_with_twice_the_trample_damage() -> void:
 	var all_hit: bool = true
 	var none_thrown: bool = true
 	for u in inside:
-		all_hit = all_hit and u.health == 998
+		all_hit = all_hit and u.health == 996
 		none_thrown = none_thrown and u.state != Unit.State.THROWN and u.state != Unit.State.ROLL
-	check(all_hit, "all four take the 2 damage — the one behind her as well")
+	check(all_hit, "all four take the 4 damage — the one behind her as well")
 	check(none_thrown, "the stomp throws nobody")
 	check(outside[0].health == 1000 and outside[1].health == 1000, "1,4 m away is outside")
 	check(friend.health == 1000, "own units are never hit")
 	check(g.stance == Golem.STANCE_CROUCH and g._stomp_landed, "after the landing she is crouched")
 	_level_to(g, 7)
-	check(g.attack_damage(Golem.ATTACK_STOMP) == 10, "level 7 (16,9 m): 2 x 5 = 10, no level bonus on top")
+	check(g.attack_damage(Golem.ATTACK_STOMP) == 12, "level 7 (16,9 m): 2 x 6 = 12, no level bonus on top")
 	check_near(g.stomp_radius(), Balance.GOLEM_BODY_HALF_WIDTH * g.size_factor() * 5.0 / 3.0, "and the circle grows with the body")
 	_free_world(w)
 
@@ -2854,9 +2854,10 @@ func test_stomp_opens_the_assault_and_the_slams_follow_without_a_switch() -> voi
 	var g: Golem = _golem(w, 0, Vector3(50, 5, 50))
 	g.facing = Vector3(0, 0, 1)
 	var ring: Array = []
+	var hp: int = 2 * g.attack_damage(Golem.ATTACK_STOMP)   # (the stomp leaves them half: the slams follow)
 	for i in range(10):
 		var a: float = TAU * float(i) / 10.0
-		ring.append(_foe(w, 50.0 + cos(a) * 0.9, 50.0 + sin(a) * 0.9, 4))
+		ring.append(_foe(w, 50.0 + cos(a) * 0.9, 50.0 + sin(a) * 0.9, hp))
 	g.order_attack(ring[0])
 	var saw_stomp: bool = false
 	var saw_ground: bool = false
@@ -2873,7 +2874,7 @@ func test_stomp_opens_the_assault_and_the_slams_follow_without_a_switch() -> voi
 		if saw_stomp and not saw_ground and g._pending_attack == &"" and not hurt_by_stomp:
 			hurt_by_stomp = true
 			for u in ring:
-				hurt_by_stomp = hurt_by_stomp and is_instance_valid(u) and u.health < 4
+				hurt_by_stomp = hurt_by_stomp and is_instance_valid(u) and u.health < hp
 		var alive: int = 0
 		for u in ring:
 			if is_instance_valid(u) and u.state != Unit.State.DEAD:
@@ -6565,4 +6566,32 @@ func test_bigger_golems_hit_other_golems_harder() -> void:
 	check(before - brave.health == 10, "against anyone but a golem the big one's 10 stays 10")
 	check_near(big.golem_hit_mult(small), 4.0, "his attack choice counts the multiplied blow against a golem")
 	check_near(big.golem_hit_mult(brave), 1.0, "and the plain one against a brave")
+	_free_world(w)
+
+
+## Trampeln unter Golems (Nutzervorgabe 2026-11-23): ein Golem, der mindestens ein Viertel so gross ist wie
+## der Trampelnde, nimmt von dessen Fuessen keinen Schaden; ein kleinerer schon (mit dem Golem-Faktor).
+func test_a_golem_a_quarter_her_height_is_not_trampled() -> void:
+	var w: Dictionary = _make_world()
+	var at: Vector3 = Vector3(64, 5, 64)
+	var big: Golem = _big_dummy(w, 0, at, 80.0)
+	var quarter: Golem = _golem(w, 1, at + Vector3(1.0, 0, 0))
+	while quarter.height_m() < big.height_m() * Balance.GOLEM_TRAMPLE_IMMUNE_SHARE:
+		quarter._credit_kill()
+	quarter._stretch_queued = false
+	var small: Golem = _golem(w, 1, at + Vector3(-1.0, 0, 0))
+	_level_to(small, 7)
+	small._stretch_queued = false
+	check(small.height_m() < big.height_m() * 0.25 and quarter.height_m() >= big.height_m() * 0.25,
+		"(%.1f m and %.1f m under the %.0f-m golem)" % [small.height_m(), quarter.height_m(), big.height_m()])
+	for u in [quarter, small]:
+		u.max_health = 100000
+		u.health = 100000
+	big._tick_pos = big.position
+	big.position += Vector3(0.3, 0, 0)
+	big._tick_trample(TICK)
+	check(quarter.health == 100000, "a quarter of her height: not hurt by her feet")
+	check(small.health == 100000 - big.trample_damage() * 4,
+		"smaller: trampled, %d x the golem factor 4 at 80 m" % big.trample_damage())
+	check(big.trample_damage() == 30, "30 trample damage at 80 m (user spec 2026-11-23)")
 	_free_world(w)

@@ -228,8 +228,8 @@ func test_trample_and_stomp_damage_follow_the_height_like_the_golems() -> void:
 	var d: DemonGolem = _demon(w, 0, Vector3(50, 5, 50))
 	check(d.trample_damage() == 2 and d.attack_damage(Golem.ATTACK_STOMP) == 4, "5 m: 2 and 4")
 	_grow_to(d, 50.0)
-	check(d.trample_damage() == 16 and d.attack_damage(Golem.ATTACK_STOMP) == 32,
-		"50 m: height / 3,2 = 16, the stomp twice that")
+	check(d.trample_damage() == 19 and d.attack_damage(Golem.ATTACK_STOMP) == 38,
+		"50 m: height / (80/30) = 19 (user spec 2026-11-23: 30 at 80 m), the stomp twice that")
 	_free_world(w)
 
 
@@ -374,7 +374,7 @@ func test_everything_that_hangs_on_the_size_uses_the_golems_formula() -> void:
 	check_near(d.reach(), full.reach() * Balance.DEMON_GOLEM_WIDTH_FACTOR, "80 m: the 80-m golem's reach, 25 % more for his width", 0.05)
 	check_near(d.current_speed(), full.current_speed() * 1.15, "its speed, 15 % faster", 0.05)
 	check_near(d._kick_extent().x, full._kick_extent().x * Balance.DEMON_GOLEM_WIDTH_FACTOR, "the length of the kick's lane", 0.1)
-	check(d.trample_damage() == full.trample_damage() and d.trample_damage() == 25, "its trample damage (25)")
+	check(d.trample_damage() == full.trample_damage() and d.trample_damage() == 30, "its trample damage (30, user spec 2026-11-23)")
 	check_near(d.stance_switch_time(), full.stance_switch_time() * 0.85, "its stance switch, 15 % shorter", 0.01)
 	check_near(d.turn_rate(), full.turn_rate() * 1.15, "and its turn rate, 15 % faster (user spec 2026-11-18)", 0.01)
 	# Below 30 m his areas grow as the golem's do beyond level 7; from 30 m with the body.
@@ -447,13 +447,14 @@ func test_all_attacks_are_fifteen_percent_faster_than_a_golems_of_the_same_size(
 func test_airships_from_twenty_metres_the_giants_package_from_thirty() -> void:
 	var w: Dictionary = _make_world()
 	var d: DemonGolem = _demon(w, 0, Vector3(50, 5, 50))
-	check(not d.can_strike_air() and not d.is_giant() and not d.tramples()
-		and not d.ignores_unit_collision() and not d.walks_straight(), "2 m: none of it")
+	check(not d.can_strike_air() and not d.is_giant()
+		and not d.ignores_unit_collision() and not d.walks_straight(), "5 m (summoned): none of it")
+	check(d.tramples(), "but he tramples from his first step (user spec 2026-11-23; before: from 30 m)")
 	_grow_to(d, 17.0)
 	check(not d.can_strike_air(), "17 m: no airships yet")
 	_grow_to(d, 20.0)
 	check(d.can_strike_air(), "20 m: he strikes at airships")
-	check(not d.is_giant() and not d.tramples() and not d.ignores_unit_collision(),
+	check(not d.is_giant() and not d.ignores_unit_collision(),
 		"but the rest still waits")
 	_grow_to(d, 29.0)
 	check(not d.is_giant() and not d.ignores_unit_collision() and not d.walks_straight(), "29 m: not yet")
@@ -482,7 +483,8 @@ func test_giant_demon_tramples_what_stands_under_him() -> void:
 	small._tick_pos = small.position
 	small.position += Vector3(0.3, 0, 0)
 	small._tick_trample(TICK)
-	check(spared.health == spared.max_health, "the 2-m demon does not")
+	check(spared.health == spared.max_health - small.trample_damage(),
+		"the freshly summoned 5-m demon tramples too, with his own smaller damage (%d; since 2026-11-23)" % small.trample_damage())
 	_free_world(w)
 
 

@@ -13727,3 +13727,18 @@ Nutzervorgabe 2026-11-23: „bei den golems: hinsetzen soll jetzt immer nur nach
   Nutzervorgabe ebenfalls 2 statt 3 (4/9 Ziel je Meter): 33 m 17, 50 m 24, 80 m 38, 100 m 47 (vorher 23 / 34 / 54 / 68).
   Test `test_targets_start_at_three_and_two_more_every_step`; Suite 8938 bestanden.
 
+### Trampeln: Golem-Immunitaet, alle ab Stufe 1, Genesis trampelt Gebaeude/Fahrzeuge, 30 bei 80 m (2026-11-23)
+
+- `GOLEM_TRAMPLE_HEIGHT_PER_DAMAGE` 3,2 -> 80/30 (80 m: 30 statt 25; 16,9 m 6, 31,3 m 12, Daemon 119 m 45). Davon
+  abhaengig: Sprung und Po-Klatscher (2x), Sitzschaden (4x), Gebaeudetrampeln (halb).
+- `Golem.tramples_off(u)`: ein Golem mit mindestens `GOLEM_TRAMPLE_IMMUNE_SHARE` (1/4) der Hoehe des Trampelnden
+  nimmt keinen Trampelschaden (nur das Trampeln; Sprung, Sitzschaden und Angriffe treffen weiter).
+- Alle Golems trampeln ab der ersten Stufe: `DemonGolem.tramples()` = `growth_steps >= 1` (also ab Beschwoerung,
+  vorher ab 30 m), `GenesisGolem.tramples()` = Stufe >= 1 (vorher 4). Kollision, Luftschlag beim Genesis bleiben an
+  Stufe 4 (`ignores_unit_collision`, `can_strike_air` jetzt eigen), beim Daemon an 30 m.
+- Neu `Golem.tramples_structures()` (Standard `is_giant()`), genutzt in `_tick_trample` fuer Gebaeude/Fahrzeuge und in
+  `crushes_vehicle`; `GenesisGolem` ab 30 m Hoehe, also Stufe 8 (`GENESIS_GOLEM_STRUCTURE_TRAMPLE_HEIGHT`, Nutzervorgabe).
+- Tests: `test_a_golem_a_quarter_her_height_is_not_trampled`,
+  `test_he_tramples_from_stage_one_and_buildings_and_vehicles_from_thirty_metres`; 13 Erwartungswerte an die neue
+  Trampelformel und die Schwellen angepasst; der Sprung-Ablauftest gibt den Gegnern 2 Spruenge LP. Suite 8950 bestanden.
+

@@ -232,7 +232,7 @@ func test_start_values_damage_of_the_demon_reach_of_the_golem() -> void:
 	check_near(g.slam_radius(), golem.slam_radius(), "the fresh golem's slam circle")
 	check_near(g.reach_factor(), golem.reach_factor(), "and lane width")
 	check(g.max_targets() == golem.max_targets(), "the fresh golem's targets (%d)" % g.max_targets())
-	check(g.trample_damage() == 1, "trample damage 1 (4,7 m / 3,2)")
+	check(g.trample_damage() == 2, "trample damage 2 (4,7 m / (80/30), user spec 2026-11-23)")
 	_free_world(w)
 
 
@@ -252,7 +252,7 @@ func test_attack_values_grow_two_thirds_as_fast_as_the_demons() -> void:
 	check(g.body_scaled(), "33 m: from 30 m on the reach grows with the body (2026-11-18)")
 	check_near(g.reach(), Balance.GOLEM_REACH * Balance.GOLEM_BODY_LIMB_FACTOR_AT_ANCHOR * g.body_anchor_ratio(),
 		"the golem's share of the body (%.1f m)" % g.reach())
-	check(g.trample_damage() == int(round(Balance.GOLEM_HEIGHT * cf / 3.2)) and g.trample_damage() == 7,
+	check(g.trample_damage() == int(round(Balance.GOLEM_HEIGHT * cf / Balance.GOLEM_TRAMPLE_HEIGHT_PER_DAMAGE)) and g.trample_damage() == 9,
 		"trample damage from the attack size (%d)" % g.trample_damage())
 	check_near(g.trample_radius(), Balance.GOLEM_BODY_HALF_WIDTH * 33.0 / Balance.GOLEM_HEIGHT,
 		"the body itself is 33 m")
@@ -263,8 +263,9 @@ func test_from_stage_four_collision_levelling_and_air_strike() -> void:
 	var w: Dictionary = _make_world()
 	var g: GenesisGolem = _genesis(w, 0, Vector3(50, 5, 50))
 	_to_stage(g, 3)
-	check(not g.tramples() and not g.ignores_unit_collision() and not g.flattens()
-		and not g.can_strike_air(), "stage 3: none of it")
+	check(not g.ignores_unit_collision() and not g.flattens() and not g.can_strike_air()
+		and not g.tramples_structures(), "stage 3: none of it")
+	check(g.tramples(), "but he tramples from stage 1 (user spec 2026-11-23)")
 	_to_stage(g, 4)
 	check(g.tramples() and g.ignores_unit_collision() and g.can_strike_air(),
 		"stage 4: walks through units, tramples, strikes airships")
@@ -541,4 +542,30 @@ func test_he_carries_his_wood_to_a_site_that_needs_it() -> void:
 		"he put down at the door what it lacked (%d of %d, after %.0f s)" % [there, need, float(ticks) * TICK])
 	check(g.total_wood() == 6, "and keeps the rest (%d)" % g.total_wood())
 	check(not g.order_deliver_wood(null), "no building: nothing")
+	_free_world(w)
+
+
+## Trampeln (Nutzervorgabe 2026-11-23): er trampelt ab Stufe 1 und ab 30 m (Stufe 8) auch Gebaeude
+## (halber Trampelschaden in Lebenspunkten) und Bodenfahrzeuge (ein Zerstoerungstreffer) — wie der Gigant.
+func test_he_tramples_from_stage_one_and_buildings_and_vehicles_from_thirty_metres() -> void:
+	var w: Dictionary = _make_world()
+	var g: GenesisGolem = _genesis(w, 0, Vector3(50, 5, 50))
+	check(not g.tramples(), "fresh (stage 0): no trampling yet")
+	_to_stage(g, 1)
+	check(g.tramples() and not g.tramples_structures() and not g.ignores_unit_collision(),
+		"stage 1: he tramples units, not yet buildings or vehicles, and does not walk through units")
+	_to_stage(g, 7)
+	check(not g.tramples_structures(), "stage 7 (%.1f m): not yet" % g.height_m())
+	_to_stage(g, 8)
+	check(g.tramples_structures() and g.height_m() >= 30.0, "stage 8 (%.0f m): buildings and vehicles too" % g.height_m())
+	var hut: Building = w.bm.place(HUT_SCENE, w.t1, Vector2i(48, 48), 0, true)
+	var cat: Unit = w.um.spawn_unit(load("res://scenes/units/siege_engine.tscn"), 1, Vector3(50.2, 5, 50.6))
+	check(hut != null and cat != null, "(an enemy hut and an enemy catapult under him)")
+	var hp: int = hut.health
+	g._tick_pos = g.position
+	g.position += Vector3(0.3, 0, 0)
+	g._tick_trample(TICK)
+	check(hut.health == hp - Golem.building_damage_for(g.trample_damage()),
+		"the hut loses half his trample damage (%d)" % (hp - hut.health))
+	check(not is_instance_valid(cat) or cat.state == Unit.State.DEAD or cat.doomed, "the catapult is wrecked")
 	_free_world(w)

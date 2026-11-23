@@ -158,15 +158,15 @@ func credit_brave(amount: float) -> void:
 
 
 func _stage_up() -> void:
-	var was_giant: bool = tramples()
+	var was_giant: bool = ignores_unit_collision()
 	var cap_before: int = max_health_cap()
 	stage += 1
 	max_health = max_health_cap()
 	health = mini(health + max_health - cap_before, max_health)
 	_queue_stretch()
 	_apply_speed()
-	if tramples() != was_giant:
-		_sync_soa_flags()   # from stage 5 he walks through units
+	if ignores_unit_collision() != was_giant:
+		_sync_soa_flags()   # from his giant stage he walks through units
 
 
 ## Kills only count — he does not grow, heal or live longer by them.
@@ -245,16 +245,24 @@ func is_giant() -> bool:
 	return false
 
 
+## He tramples from stage 1 (user spec 2026-11-23: every golem from its first step; before: stage 4).
 func tramples() -> bool:
+	return stage >= 1
+
+
+## From his giant stage (GENESIS_GOLEM_GIANT_STAGE) on: walking through units and the swat.
+func ignores_unit_collision() -> bool:
 	return stage >= Balance.GENESIS_GOLEM_GIANT_STAGE
 
 
-func ignores_unit_collision() -> bool:
-	return tramples()
-
-
 func can_strike_air() -> bool:
-	return tramples()
+	return stage >= Balance.GENESIS_GOLEM_GIANT_STAGE
+
+
+## Trampling buildings and ground vehicles like the giant: from GENESIS_GOLEM_STRUCTURE_TRAMPLE_HEIGHT
+## (30 m, stage 8; user spec 2026-11-23).
+func tramples_structures() -> bool:
+	return height_m() >= Balance.GENESIS_GOLEM_STRUCTURE_TRAMPLE_HEIGHT - 0.0001
 
 
 # --- Values ---------------------------------------------------------------------------

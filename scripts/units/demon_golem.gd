@@ -133,8 +133,10 @@ func is_giant() -> bool:
 	return height_m() >= Balance.DEMON_GOLEM_GIANT_HEIGHT - 0.0001
 
 
+## Every golem tramples from its first step on (user spec 2026-11-23; before: from 30 m) — he is
+## summoned with it. Walking through units stays with the giant (ignores_unit_collision).
 func tramples() -> bool:
-	return is_giant()
+	return growth_steps >= 1
 
 
 func ignores_unit_collision() -> bool:

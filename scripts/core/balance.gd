@@ -708,7 +708,11 @@ const GOLEM_FULL_SIZE_DAMAGE: Dictionary = {&"slam": 5, &"kick": 10, &"drum": 8,
 ## Metern / GOLEM_TRAMPLE_HEIGHT_PER_DAMAGE, gerundet, mindestens 1. Seit
 ## 2026-11-17 25 bei 80 m (vorher 20 bei 100 m; zwischendurch 40): Stufe 1 mit
 ## 5,7 m: 2; Stufe 6 mit 14,1 m: 4; Stufe 7 mit 16,9 m: 5. Kein Stufenbonus obendrauf.
-const GOLEM_TRAMPLE_HEIGHT_PER_DAMAGE: float = 3.2
+## Nutzervorgabe 2026-11-23: 30 Schaden bei 80 m (vorher 3,2 m je Schaden, 25 bei 80 m).
+const GOLEM_TRAMPLE_HEIGHT_PER_DAMAGE: float = 80.0 / 30.0
+## Ein Golem, der mindestens so viel der Hoehe des Trampelnden hat, nimmt von dessen Trampeln keinen Schaden
+## (Nutzervorgabe 2026-11-23: ab einem Viertel).
+const GOLEM_TRAMPLE_IMMUNE_SHARE: float = 0.25
 ## Ab der hoechsten Stufe trampelt der Gigant auch GEBAEUDE nieder, solange er laeuft. Seit 2026-11-18
 ## (Nutzer) ueber Lebenspunkte wie jeder Golem-Angriff: jedes feindliche Gebaeude unter seinem Koerper nimmt
 ## alle GOLEM_TRAMPLE_BUILDING_INTERVAL Sekunden die Haelfte des Trampelschadens (GOLEM_BUILDING_DAMAGE_SHARE;
@@ -1140,6 +1144,9 @@ const GENESIS_GOLEM_HARDEN_HEIGHT: float = 100.0
 const GENESIS_GOLEM_GROWTH_SHARE: float = 2.0 / 3.0
 const GENESIS_GOLEM_GIANT_STAGE: int = 4
 const GENESIS_GOLEM_TRAMPLE_WOOD_STAGE: int = 7
+## Ab dieser Koerperhoehe trampelt er auch Gebaeude und Bodenfahrzeuge nieder (Nutzervorgabe 2026-11-23: ab Stufe 8,
+## wenn er 30 m gross ist).
+const GENESIS_GOLEM_STRUCTURE_TRAMPLE_HEIGHT: float = 30.0
 const GENESIS_GOLEM_HARVEST_BONUS: float = 0.5
 ## Nutzervorgabe 2026-11-17: seine Aggroreichweite ist die halbe der anderen Golems
 ## (gleicher Groesse), und ein Gebaeude, das er zerstoert, bringt ihm diesen Anteil

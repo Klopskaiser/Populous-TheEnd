@@ -3416,6 +3416,18 @@ func is_giant() -> bool:
 	return level >= Balance.GOLEM_MAX_LEVEL
 
 
+## Does her trampling also hit buildings (hit points) and wreck ground vehicles? The giant; the
+## Genesis golem from his giant stage (user spec 2026-11-23).
+func tramples_structures() -> bool:
+	return is_giant()
+
+
+## Is `u` spared by her trampling? Another golem at least GOLEM_TRAMPLE_IMMUNE_SHARE of her height
+## (user spec 2026-11-23).
+func tramples_off(u) -> bool:
+	return u is Golem and (u as Golem).height_m() >= height_m() * Balance.GOLEM_TRAMPLE_IMMUNE_SHARE - 0.0001
+
+
 ## Does he level the ground under him? Every golem from GOLEM_FLATTEN_MIN_HEIGHT on (user spec
 ## 2026-11-18; before: the giant of level 7, the genesis golem from stage 4).
 func flattens() -> bool:
@@ -3688,6 +3700,8 @@ func _tick_trample(delta: float) -> void:
 			continue
 		if not u.is_targetable() or u.is_airborne() or u is CrewedVehicle:
 			continue
+		if tramples_off(u):
+			continue   # a golem at least a quarter her height is not hurt by her feet (2026-11-23)
 		var id: int = u.get_instance_id()
 		if _trampled.has(id):
 			continue
@@ -3702,7 +3716,7 @@ func _tick_trample(delta: float) -> void:
 			before - (maxi(u.health, 0) if is_instance_valid(u) else 0))
 		if gone:
 			_credit_kill(hp)
-	if not is_giant():
+	if not tramples_structures():
 		return
 	# The giant (maximum level) also walks over vehicles that do not fly his
 	# flag: one crush hit per vehicle every GOLEM_TRAMPLE_VEHICLE_INTERVAL.
@@ -4813,7 +4827,7 @@ func _buildings_in_area(kind: StringName) -> Array:
 ## follows the crew, so an abandoned ENEMY vehicle keeps the enemy flag).
 ## Airships fly above feet and ground blows; the swat is theirs.
 func crushes_vehicle(v) -> bool:
-	if not is_giant() or not (v is CrewedVehicle) or v is Airship:
+	if not tramples_structures() or not (v is CrewedVehicle) or v is Airship:
 		return false
 	if not is_instance_valid(v) or v.state == State.DEAD:
 		return false
