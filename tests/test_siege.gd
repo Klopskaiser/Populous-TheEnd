@@ -1045,6 +1045,11 @@ func test_bombard_construction_site_shatters() -> void:
 	var site: Hut = w.building_manager.place(
 		HUT_SCENE, w.tribe1, Vector2i(70, 60), 0, false) as Hut
 	check(site.under_construction, "the site is under construction")
+	# From the first built-in wood on (a bare plot is no target, 2026-11-23).
+	for c in site._flatten_remaining.keys():
+		site.work_flatten(c, 100.0)
+	site.wood_delivered = 1
+	site.add_build_progress(0.01)
 	var shot: SiegeShot = SiegeShot.new()
 	shot.setup(0, w.nav.cell_to_world(Vector2i(60, 60)), site.center_world(),
 		null, w.unit_manager, w.td, w.building_manager)

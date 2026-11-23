@@ -386,6 +386,12 @@ func _target_wants_wood(target: Building) -> bool:
 func _choose_supply_task() -> bool:
 	if not _target_wants_wood(_supply_target):
 		return false
+	# Crewmates' loads count too (2026-11-23): supply carriers are not in the
+	# site's workers, so wood_incoming() cannot see them — without this each one
+	# went for another load after the site was already paid for.
+	if _supply_target.under_construction and _supply_target.wood_needed_total() \
+			<= _supply_target.wood_incoming() + _supply_peers_load(_supply_target):
+		return false
 	var drop: Vector3 = _supply_target.delivery_point()
 	# 1) A rack with stock that does not already feed the target itself.
 	var depot: WoodDepot = _nearest_depot_with_stock(drop)
@@ -418,6 +424,20 @@ func _choose_supply_task() -> bool:
 			_reset_seek()
 			return true
 	return false
+
+
+## Wood the OTHER braves supplying `target` carry or have claimed on a tree.
+func _supply_peers_load(target: Building) -> int:
+	if tribe == null:
+		return 0
+	var total: int = 0
+	for u in tribe.units:
+		if u == self or not is_instance_valid(u) or not (u is Brave):
+			continue
+		var b: Brave = u as Brave
+		if b._supply_target == target:
+			total += b.carried_wood + b.claimed_tree_yield()
+	return total
 
 
 ## Nearest own usable rack with stock, same island, that is not the target and does
@@ -699,6 +719,10 @@ func order_train(building: TrainingBuilding) -> void:
 	if not can_take_orders():
 		return
 	if building == null or not is_instance_valid(building) or not building.is_usable():
+		return
+	# A full line takes nobody else (user spec 2026-11-23): the brave keeps what
+	# it was doing. Callers check train_target to see whether it was accepted.
+	if not (self in building.incoming) and not building.has_queue_room():
 		return
 	_interrupt_tasks()
 	building.add_trainee(self)
@@ -1188,7 +1212,12 @@ func _tick_pickup(delta: float) -> void:
 ## Depot->depot haul: fetch a load from the source depot's rack, then deliver
 ## it via the loose-deliver path (fixed `_haul_target`).
 func _tick_haul_pickup(delta: float) -> void:
-	if not _haul_valid() or not is_instance_valid(_haul_source) \
+	# A supply job (10g) fetches from a rack WITHOUT a depot target: its target is
+	# _supply_target. _haul_valid() demands a depot target and called every rack
+	# pickup of a supply job off on the first tick (bug found 2026-11-23).
+	var source_ok: bool = _haul_valid() or (has_supply_job()
+		and is_instance_valid(_haul_source) and _haul_source.is_usable())
+	if not source_ok or not is_instance_valid(_haul_source) \
 			or _haul_source.stored_wood() <= 0:
 		_stop_all()
 		return
@@ -1489,7 +1518,14 @@ func _tick_loose_deliver(delta: float) -> void:
 	_loose_deliver_recheck -= delta
 	if _loose_deliver_goal == Vector3.INF or _loose_deliver_recheck <= 0.0:
 		_loose_deliver_recheck = 1.5
-		if _haul_target != null and is_instance_valid(_haul_target) \
+		if has_supply_job():
+			# Supply job: the load goes to exactly this target (2026-11-23). It used
+			# to fall through to the neediest building within DEPOT_PREFER_RADIUS of
+			# the carrier — i.e. next to the SOURCE, so wood fetched from the far side
+			# of the base never reached the site it was fetched for.
+			_loose_deliver_goal = _supply_target.delivery_point()
+			_loose_deliver_building = _supply_target
+		elif _haul_target != null and is_instance_valid(_haul_target) \
 				and _haul_target.is_usable() and _haul_target.storage_left() > 0:
 			# Fixed depot target (pile relay / depot haul): no nearest-building
 			# re-pick — the wood goes into exactly this rack.

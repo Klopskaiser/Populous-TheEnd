@@ -75,6 +75,10 @@ var _harvest_own_order: bool = false
 ## He fells from the crouch right now (slam or drum): keeps him down between blows.
 var _harvest_low: bool = false
 var _trample_wood_timer: float = 0.0
+## Wood delivery (order_deliver_wood, 2026-11-23): the building he carries his wood to, null = none,
+## and how long he has been on the way (he gives up after GENESIS_GOLEM_DELIVER_GIVE_UP).
+var deliver_target = null
+var _deliver_time: float = 0.0
 
 
 func _init() -> void:
@@ -325,6 +329,7 @@ func tick(delta: float) -> void:
 		_tick_wood_growth(delta)
 		return   # seated: no felling, no trampling
 	_tick_harvest(delta)
+	_tick_delivery(delta)
 	_tick_trample_wood(delta, before)
 	_tick_wood_store()
 	_tick_wood_growth(delta)
@@ -521,21 +526,80 @@ func _halt_for_harvest() -> void:
 	_harvest_own_order = false
 
 
-## Any order from outside ends the harvest.
+## Any order from outside ends the harvest (and a wood delivery).
 func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = false) -> void:
 	if not _harvest_own_order:
 		end_harvest()
+		deliver_target = null
 	super.order_move(target, queue_up, aggressive)
 
 
 func order_attack(enemy: Unit) -> void:
 	end_harvest()
+	deliver_target = null
 	super.order_attack(enemy)
 
 
 func order_attack_building(building) -> void:
 	end_harvest()
+	deliver_target = null
 	super.order_attack_building(building)
+
+
+# --- Wood delivery (AI, user spec 2026-11-23) ----------------------------------------------
+
+## Carries his wood to building `b`, which still lacks wood (a construction site): he walks to its
+## door and puts down there what it lacks, as piles the building takes in like any pile at its door.
+## The rest stays with him. Any other order ends it; so does a fight on the way only for its length.
+func order_deliver_wood(b) -> bool:
+	if b == null or not is_instance_valid(b) or b.health <= 0 or b.wood_needed_total() <= 0:
+		return false
+	if total_wood() <= 0 or not can_take_orders():
+		return false
+	end_harvest()
+	deliver_target = b
+	_deliver_time = 0.0
+	_harvest_own_order = true
+	order_move(b.delivery_point())
+	_harvest_own_order = false
+	return true
+
+
+## How far from a door he puts his wood down: in front of his body, within his reach.
+func deliver_reach() -> float:
+	return trample_radius() + maxf(reach(), Balance.GENESIS_GOLEM_DELIVER_MIN_REACH)
+
+
+func _tick_delivery(delta: float) -> void:
+	if deliver_target == null:
+		return
+	var b = deliver_target
+	if not is_instance_valid(b) or b.health <= 0 or total_wood() <= 0 or b.wood_needed_total() <= 0:
+		deliver_target = null
+		return
+	_deliver_time += delta
+	if _deliver_time > Balance.GENESIS_GOLEM_DELIVER_GIVE_UP:
+		deliver_target = null   # never got there (blocked, cut off): the AI tries again later
+		return
+	var door: Vector3 = b.delivery_point()
+	if _flat_dist(position, door) > deliver_reach():
+		if state == State.IDLE:
+			# A fight on the way ended, or the march stopped short: on to the door again.
+			_harvest_own_order = true
+			order_move(door)
+			_harvest_own_order = false
+		return
+	var amount: int = mini(b.wood_needed_total(), total_wood())
+	_eat_wood(amount)   # out of his store (carried first, then his pile) ...
+	_wood_idle = 0.0
+	var wpm: WoodPileManager = _wood_piles()
+	if wpm != null:
+		wpm.deposit(door, amount)   # ... onto the ground at the door, where the building takes it in
+	deliver_target = null
+	if state == State.MOVE:
+		_harvest_own_order = true
+		order_move(position)   # put down: he stops here
+		_harvest_own_order = false
 
 
 ## Nearest standing tree of the area order on his island.

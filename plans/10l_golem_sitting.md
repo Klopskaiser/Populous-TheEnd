@@ -324,6 +324,9 @@ die Aufschlagzeiten oben sind Vorschläge und werden mit den Clips festgelegt.
 - **Drehen im Sitzen ist möglich, aber langsam**, möglichst mit eigener Animation.
 - Im Sitzen **keine Bewegung**. **Bewegungs- und Angriffsbefehle werden ignoriert**
   (Abgelehnt-Ton), solange er sitzt; nur „Aufstehen“ wirkt.
+- **Überholt am 2026-11-23** (Nutzervorgabe: „hinsetzen soll jetzt immer nur nach terrain schauen, gebäude sind
+  egal (wie beim krebsgang hinsetzen), schadensticks gleich wie beim krebsgang hinsetzen“): Gebäude zählen beim
+  Hinsetzen nicht mehr, Gelände wie bisher (`Golem.seat_spot_near`); ursprünglich galt:
 - **Nicht auf Gebäude:** die Sitzfläche darf kein Gebäude und keine Baustelle berühren.
   Gibt es keinen freien Platz **innerhalb eines halben Körperradius**, wird der Befehl
   ignoriert.

@@ -26,6 +26,10 @@ const QUEUE_START_OFFSET: float = 0.9
 const QUEUE_WINDING_SPACING: float = 1.0
 const QUEUE_MAX_WINDINGS: int = 3
 
+## Extra queue limit set by the owner (the AI keeps its queues short, user spec
+## 2026-11-23); 0 = only the physical limit of queue_capacity().
+var queue_limit: int = 0
+
 ## Combat unit spawned when a brave finishes training.
 var produces: PackedScene = null
 var training_time: float = 3.0
@@ -59,11 +63,47 @@ func has_occupants() -> bool:
 # --- Enrolment ------------------------------------------------------------------
 
 ## Registers a brave at the back of the training queue (called by
-## Brave.order_train).
-func add_trainee(brave: Brave) -> void:
-	if brave == null or brave in incoming or brave == trainee:
-		return
+## Brave.order_train). Refused (false) once the queue is full.
+func add_trainee(brave: Brave) -> bool:
+	if brave == null:
+		return false
+	if brave in incoming or brave == trainee:
+		return true
+	if not has_queue_room():
+		return false
 	incoming.append(brave)
+	return true
+
+
+## Places in the line: every slot of the QUEUE_MAX_WINDINGS windings around the
+## building (user spec 2026-11-23: after the third ring nobody else joins — the
+## slot search used to run out there and every further brave was sent to the
+## same last point, where they piled up into a ball).
+func queue_capacity() -> int:
+	var cs: float = TerrainData.CELL_SIZE
+	var total: float = 0.0
+	for winding in range(QUEUE_MAX_WINDINGS):
+		var margin: float = QUEUE_MARGIN + float(winding) * QUEUE_WINDING_SPACING
+		total += 2.0 * ((float(footprint.x) * cs + 2.0 * margin)
+			+ (float(footprint.y) * cs + 2.0 * margin))
+	return maxi(1, int(ceil((total - QUEUE_START_OFFSET) / QUEUE_SPACING)))
+
+
+## The queue length this building accepts: the physical capacity, or the
+## owner's tighter queue_limit.
+func queue_max() -> int:
+	var cap: int = queue_capacity()
+	return mini(cap, queue_limit) if queue_limit > 0 else cap
+
+
+## Braves waiting or inside (the AI weighs camps by this).
+func queue_load() -> int:
+	return incoming.size() + (1 if is_instance_valid(trainee) else 0)
+
+
+func has_queue_room() -> bool:
+	_prune_queue()
+	return incoming.size() < queue_max()
 
 
 ## Removes a brave from the queue (on death / new order / interruption). If it

@@ -1114,9 +1114,15 @@ const GENESIS_GOLEM_STAGE_REGEN: float = 2.0
 ## Nutzervorgabe 2026-11-22: jeder Brave geht an GENAU EINEN Genesisgolem des Stammes (den mit den wenigsten
 ## Braves; vorher bekam jeder einen Anteil) und heilt ihn um GENESIS_GOLEM_BRAVE_HEAL sofort und
 ## GENESIS_GOLEM_BRAVE_HEAL_OVER_TIME ueber GENESIS_GOLEM_BRAVE_HEAL_DURATION Sekunden (stapelbar).
-const GENESIS_GOLEM_BRAVE_HEAL: int = 30
-const GENESIS_GOLEM_BRAVE_HEAL_OVER_TIME: int = 30
+## Nutzervorgabe 2026-11-23: 15 + 15 (vorher 30 + 30, zusammen 60).
+const GENESIS_GOLEM_BRAVE_HEAL: int = 15
+const GENESIS_GOLEM_BRAVE_HEAL_OVER_TIME: int = 15
 const GENESIS_GOLEM_BRAVE_HEAL_DURATION: float = 5.0
+## Holz abliefern (Nutzervorgabe 2026-11-23, `GenesisGolem.order_deliver_wood`): er legt es vor der Tuer ab,
+## sobald die Tuer hoechstens Koerperradius + Reichweite (mindestens diese) von ihm entfernt ist; nach so
+## vielen Sekunden ohne Ankunft gibt er auf.
+const GENESIS_GOLEM_DELIVER_MIN_REACH: float = 3.0
+const GENESIS_GOLEM_DELIVER_GIVE_UP: float = 90.0
 ## Ab dieser Koerperhoehe ist er gehaertet wie der ausgewachsene Golem (Nutzervorgabe 2026-11-22):
 ## Brand 5/s, einfacher Blitz, hoechstens GOLEM_SIEGE_DAMAGE_FULL_SIZE je Katapult-Volltreffer.
 const GENESIS_GOLEM_HARDEN_HEIGHT: float = 100.0
@@ -1233,6 +1239,11 @@ const VEHICLE_NEUTRAL_TAKEOVER_TIME: float = 10.0
 ## Brenndauer des Fahrzeugs nach Feuerzauber-Treffer, dann versinkt das Wrack.
 const SIEGE_VEHICLE_BURN_TIME: float = 3.0
 const SIEGE_FIRE_RANGE: float = 16.0
+## Nutzervorgabe 2026-11-23: Katapulte und die Feuerkrieger an Deck eines Luftschiffs reichen gegen
+## Golems weiter — je volle GOLEM_RANGED_REACH_STEP Meter Golemhoehe +GOLEM_RANGED_REACH_BONUS Meter
+## (nur gegen Golems; 31,3 m: +6 m, 80 m: +16 m). `Golem.ranged_reach_bonus`.
+const GOLEM_RANGED_REACH_STEP: float = 10.0
+const GOLEM_RANGED_REACH_BONUS: float = 2.0
 ## Ziele näher dran kann der Bogenschuss nicht treffen.
 const SIEGE_MIN_RANGE: float = 3.0
 const SIEGE_AGGRO_RADIUS: float = 20.0
@@ -1240,8 +1251,9 @@ const SIEGE_AGGRO_RADIUS: float = 20.0
 const SIEGE_COOLDOWN_MIN_CREW: float = 6.0
 const SIEGE_COOLDOWN_FULL_CREW: float = 3.0
 ## Kugel-Einschlag: Flächenschaden (Friendly Fire!) und Radius.
-const SIEGE_SHOT_SHOCK_DAMAGE: int = 15    # 1/4 Brave-Leben
-const SIEGE_SHOT_SHOCK_RADIUS: float = 2.0
+## Nutzervorgabe 2026-11-23: 20 Schaden in 3 m (vorher 15 = 1/4 Brave-Leben in 2 m).
+const SIEGE_SHOT_SHOCK_DAMAGE: int = 20
+const SIEGE_SHOT_SHOCK_RADIUS: float = 3.0
 ## Zerstörungsstufen, die ein Treffer einem Gebäude zufügt.
 const SIEGE_SHOT_BUILDING_STAGES: int = 1
 ## Schaden pro Treffer an feindlichen Raidern im EIGENEN Gebäude (sie werden
@@ -1893,6 +1905,13 @@ const REINCARNATION_SITE_FOOTPRINT: Vector2i = Vector2i(3, 3)
 ## kommen als so viele Zellen - zwischen zwei Gebaeuden bleibt also mindestens
 ## dieser Abstand frei. 0 = dicht an dicht wie bisher.
 const BUILDING_MIN_GAP: int = 1
+## Vor dem Eingang reicht der freie Rand so viele Zellen WEITER (Nutzervorgabe
+## 2026-11-23: "1 m weiter vorgezogen" - vorher liess sich der Eingang durch enges
+## Bauen versperren). Gilt fuer den Eingang des neuen Bauplatzes UND fuer die
+## Eingaenge der stehenden Gebaeude, in einem Streifen von Tuerzelle +-
+## BUILDING_ENTRANCE_APRON_HALF_WIDTH Zellen.
+const BUILDING_ENTRANCE_EXTRA_GAP: int = 1
+const BUILDING_ENTRANCE_APRON_HALF_WIDTH: int = 1
 
 # --- Hütte (Phase 10f: klein und billig, in vier Stufen zum Wohnpalast) ---
 const HUT_WOOD_COST: int = 7               # war 12, dann 8 (10h)
@@ -2231,7 +2250,17 @@ const AI_TARGET_WATCHTOWERS: int = 2
 ## AI_HUTS_PER_EXTRA_CAMP ist in 10g entfallen: die Lagerzahl kommt jetzt aus dem
 ## BRAVESTROM (AIState.camp_targets), nicht aus der Hüttenzahl — ein Lager bildet
 ## eine Einheit auf einmal aus, der Durchsatz ist also das Maß.
-const AI_MAX_CAMPS_PER_KIND: int = 4
+## 4 -> 6 (Nutzervorgabe 2026-11-23: lieber mehr Ausbildungsgebaeude als lange
+## Schlangen; zusammen mit AI_TRAIN_QUEUE_PER_CAMP).
+const AI_MAX_CAMPS_PER_KIND: int = 6
+## Hoechstens so viele Braves stellt die KI an EIN Ausbildungsgebaeude an (wartend +
+## drinnen, Nutzervorgabe 2026-11-23: die Schlangen waren viel zu lang). Gilt auch fuer
+## die Braves, die eine Huette per Sammelpunkt in die Schlange schickt
+## (TrainingBuilding.queue_limit).
+const AI_TRAIN_QUEUE_PER_CAMP: int = 6
+## Stehen ALLE fertigen Lager einer Art so viele KI-Takte am Schlangenlimit (und ist
+## keines dieser Art im Bau), plant die KI ein weiteres (AIState.missing_camp_kind).
+const AI_CAMP_BACKLOG_TICKS: int = 15
 
 # --- Ausbildungs-Routing über Hütten-Rally-Points (10g) ---
 ## Anteil der Hütten, deren Rally Point auf einem Ausbildungszentrum liegt: deren
@@ -2317,7 +2346,11 @@ const AI_VEHICLE_MUSTER_DISTANCE: float = 12.0
 
 # --- KI: Holznachschub und Werkstatt-Regal (10g Teil 4) ---
 const AI_SUPPLY_BRAVES_PER_TARGET: int = 3
-const AI_MAX_SUPPLY_CREWS: int = 3
+## 3 -> 4 (Nutzervorgabe 2026-11-23): Nachschubtrupps fahren jetzt auch fuer jede
+## Baustelle, deren Holz noch fehlt, solange es irgendwo einen Vorrat gibt, den ihre
+## Bauarbeiter selbst nie holen (Holzstation oder Stapel weiter als
+## Brave.PILE_PREFER_RADIUS) - nicht mehr nur fuer blockierte Baustellen.
+const AI_MAX_SUPPLY_CREWS: int = 4
 ## Werkstaetten, die pro Holz-Tick die EXAKTE Pruefung bezahlen (ein Stapel-Scan) —
 ## Round-Robin ueber die Ticks. Workshop.wants_more_stock_wood kostet
 ## O(Stapel x Gebaeude) und darf von der KI NIE aufgerufen werden.
@@ -2363,6 +2396,17 @@ const AI_GOLEM_POWER_HP: float = 80.0
 ## KI-Takte (je 1 s) lang keiner mehr darin steht.
 const AI_GOLEM_SIT_MIN_ENEMIES: int = 8
 const AI_GOLEM_STAND_TICKS: int = 6
+## Rueckzug (Nutzervorgabe 2026-11-23: "auch mal einen Golem zurueckziehen, wenn er zu sterben droht"): faellt
+## ein KI-Golem unter AI_GOLEM_RETREAT_HP_SHARE seines Lebens, waehrend er weiter als der Verteidigungsradius
+## von der Basis steht, marschiert er heim (ohne sich zu wehren); ab AI_GOLEM_RETURN_HP_SHARE ist er wieder dabei.
+const AI_GOLEM_RETREAT_HP_SHARE: float = 0.3
+const AI_GOLEM_RETURN_HP_SHARE: float = 0.8
+## Genesisgolem (Nutzervorgabe 2026-11-23): er zieht mit der Angriffswelle, wenn daheim keine Bedrohung ist,
+## er mindestens AI_GENESIS_ATTACK_HP_SHARE seines Lebens hat und kein Holz ausliefert. Untaetig faellt er
+## Holz nahe der Basis und liefert es an Baustellen, die welches brauchen, sobald er AI_GENESIS_DELIVER_MIN
+## traegt (oder so viel, wie die Baustelle noch braucht, oder er nicht mehr faellt).
+const AI_GENESIS_ATTACK_HP_SHARE: float = 0.75
+const AI_GENESIS_DELIVER_MIN: int = 10
 
 # =============================================================================
 # BUFFS (generisches Effektsystem)

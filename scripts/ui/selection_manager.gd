@@ -1125,6 +1125,31 @@ func enemy_device_at(screen_pos: Vector2, camera: Camera3D = null) -> Unit:
 	return best
 
 
+## Enemy golem under the cursor (its whole body counts, as for selecting it), or null — lightning
+## locks onto it and blinks its ring (SpellTargeting.GOLEM_SPELLS, 2026-11-23).
+func enemy_golem_at(screen_pos: Vector2, camera: Camera3D = null) -> Unit:
+	if _unit_manager == null:
+		return null
+	if camera == null:
+		camera = get_viewport().get_camera_3d()
+	if camera == null:
+		return null
+	var best: Unit = null
+	var best_dist: float = INF
+	for unit in _unit_manager.vehicles:
+		if not (unit is Golem) or not is_instance_valid(unit) or unit.state == Unit.State.DEAD \
+				or unit.tribe_id == player_tribe_id:
+			continue
+		var rect: Rect2 = _unit_screen_rect(unit, camera)
+		if rect.size.y <= 0.0 or not rect.grow(PICK_MARGIN_PX).has_point(screen_pos):
+			continue
+		var dist: float = rect.get_center().distance_to(screen_pos)
+		if dist < best_dist:
+			best_dist = dist
+			best = unit
+	return best
+
+
 ## Enemy airship under the cursor (dedicated pass — the generic enemy pick
 ## skips non-targetable vehicles), or null. A NEUTRAL ship (nobody serving
 ## aboard) is no attack target: it is skipped here so the click falls through to

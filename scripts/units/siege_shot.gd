@@ -17,7 +17,7 @@ class_name SiegeShot extends Node3D
 ##   (usual lava effects: ignite + burn panic). When the shot already damaged
 ##   a building, the puddle does NOT wreck buildings on top of that; on open
 ##   ground it does (sustained-contact rule, Building.add_lava_contact).
-## - Always: a shockwave in SHOCK_RADIUS — 1/4 brave life to EVERY unit
+## - Always: a shockwave in SHOCK_RADIUS — SHOCK_DAMAGE to EVERY unit
 ##   (stones know no friends), and ENEMIES are knocked into a roll with a
 ##   slope-dependent chance (flat 40% / mild 80% / steep 100%); the roll
 ##   lasts at least MIN_ROLL_DURATION even on flat ground.

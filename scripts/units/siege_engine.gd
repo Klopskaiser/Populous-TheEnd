@@ -195,7 +195,8 @@ func _retarget_or_idle() -> void:
 ## that crept inside the minimum range is swapped for another in-band enemy.
 func _bombard_unit(target: Unit, delta: float) -> void:
 	var dist: float = _flat_dist(position, target.position)
-	if dist > fire_range():
+	var reach: float = fire_range_vs(target)   # farther against a big golem (user spec 2026-11-23)
+	if dist > reach:
 		if not _target_ordered:
 			_end_attack()
 			_retarget_or_idle()
@@ -221,15 +222,16 @@ func _bombard_unit(target: Unit, delta: float) -> void:
 		_in_melee = true
 		_face_point(target.position)
 		return   # too close — hold fire until it clears the minimum
-	_bombard_point(target.position, delta, false)
+	_bombard_point(target.position, delta, false, reach)
 
 
 ## Stands in the [MIN_RANGE, FIRE_RANGE] band and fires at a fixed point.
 ## `approach` closes the gap when the point is beyond the fire range (used for
 ## buildings — stationary and catchable). Never melees.
-func _bombard_point(target_pos: Vector3, delta: float, approach: bool) -> void:
+## `max_range` < 0: fire_range() (a unit target passes its own, see fire_range_vs).
+func _bombard_point(target_pos: Vector3, delta: float, approach: bool, max_range: float = -1.0) -> void:
 	var dist: float = _flat_dist(position, target_pos)
-	if dist > fire_range():
+	if dist > (max_range if max_range >= 0.0 else fire_range()):
 		if not approach:
 			return
 		_in_melee = false
@@ -313,7 +315,7 @@ func _nearest_enemy_unit(max_range: float) -> Unit:
 	if path_service == null:
 		return null
 	var best: Unit = null
-	var best_d: float = max_range
+	var best_d: float = INF
 	# get_enemy_candidates is the phase-8.2 query: friendly units and corpses do
 	# NOT consume the candidate budget, and buckets are walked ring-outward. The
 	# old get_units_in_radius(..., SCAN_MAX_CANDIDATES) went BLIND inside the own
@@ -327,7 +329,8 @@ func _nearest_enemy_unit(max_range: float) -> Unit:
 	var cands: Array[Unit] = path_service.get_enemy_candidates(
 		position, max_range, tribe_id, SCAN_MAX_CANDIDATES)
 	cands.append_array(
-		path_service.get_enemy_vehicles_in_radius(position, max_range, tribe_id))
+		path_service.get_enemy_vehicles_in_radius(position,
+			max_range + Golem.max_ranged_reach_bonus(path_service, tribe_id), tribe_id))
 	for u in cands:
 		if u == self or u.state == State.DEAD or u.tribe_id == tribe_id:
 			continue
@@ -343,7 +346,8 @@ func _nearest_enemy_unit(max_range: float) -> Unit:
 		if u is CrewedVehicle and not u.auto_attackable():
 			continue
 		var d: float = _flat_dist(position, u.position)
-		if d < MIN_RANGE or d > max_range:
+		# Against a golem she reaches farther (Golem.ranged_reach_bonus, user spec 2026-11-23).
+		if d < MIN_RANGE or d > max_range + Golem.ranged_reach_bonus(u):
 			continue
 		if d < best_d:
 			best_d = d
@@ -517,3 +521,9 @@ func fire_range() -> float:
 	if technician_crew_count() > 0:
 		return FIRE_RANGE + Balance.TECHNICIAN_SIEGE_RANGE_BONUS
 	return FIRE_RANGE
+
+
+## How far she fires at `u`: fire_range(), against a golem plus +2 m for every full 10 m of its height
+## (Golem.ranged_reach_bonus, user spec 2026-11-23).
+func fire_range_vs(u) -> float:
+	return fire_range() + Golem.ranged_reach_bonus(u)

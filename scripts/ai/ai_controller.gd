@@ -69,6 +69,9 @@ class TickCache extends RefCounted:
 	var housing_capacity: int = 0
 	## Kind identifier -> the usable TrainingBuilding with the shortest queue.
 	var camps_by_kind: Dictionary = {}
+	## Kind identifier -> every usable TrainingBuilding of that kind (2026-11-23:
+	## the batch spreads over all of them, each capped at AI_TRAIN_QUEUE_PER_CAMP).
+	var camp_lists: Dictionary = {}
 	var foresters: Array[Building] = []
 	var workshops: Array[Building] = []
 	var towers: Array[Building] = []
@@ -506,7 +509,7 @@ func tick_ai() -> void:
 	_cast_spells(cache, threat)
 	# Own golems sit down among many enemies (from 30 m) and get up again (2026-11-21).
 	if golem_ai != null:
-		golem_ai.tick(cache.golems)
+		golem_ai.tick(cache.golems, cache, threat)
 	# An attack on the own village takes priority over everything else.
 	if not threat.is_empty():
 		_tick_defend(cache, threat)
@@ -658,6 +661,12 @@ func _note_camp(cache: TickCache, building: Building, key: StringName,
 		usable: bool) -> void:
 	if not usable:
 		return
+	# The AI keeps its lines short (2026-11-23): the limit also holds for braves a
+	# hut's rally point sends straight into the queue.
+	(building as TrainingBuilding).queue_limit = Balance.AI_TRAIN_QUEUE_PER_CAMP
+	if not cache.camp_lists.has(key):
+		cache.camp_lists[key] = []
+	cache.camp_lists[key].append(building)
 	var current = cache.camps_by_kind.get(key)
 	if current == null or building.incoming.size() < current.incoming.size():
 		cache.camps_by_kind[key] = building
@@ -915,6 +924,7 @@ func next_building_kind(cache: TickCache) -> StringName:
 	counts["early_towers"] = personality.early_towers
 	counts["early_workshops"] = personality.early_workshops
 	counts["army_shares"] = _army_shares()
+	counts["camp_backlog"] = _camp_backlog(cache)
 	return AIState.next_building_kind(counts)
 
 
@@ -968,13 +978,16 @@ func _tick_wood_logistics(cache: TickCache) -> void:
 		return
 	_prune_wood_crews()
 	_tick_forward_haul(cache)
+	# Supply runs BEFORE the crew gate (2026-11-23): they used to start only while
+	# felling crews were still missing, so a tribe with its full crew count never
+	# carried its stock to a site at all.
+	_tick_supply_runs(cache)
 	var target_crews: int = AIState.wood_crew_count(cache.brave_count)
 	if _wood_crews.size() >= target_crews:
 		return
 	# Demand: unfunded wood on own sites (cache.sites is a short list — no extra
 	# full pass). wood_incoming() does a pile radius query per site, which is why
 	# this only runs on the throttled tick.
-	_tick_supply_runs(cache)
 	var need: int = 0
 	for site in cache.sites:
 		if site.demolishing:
@@ -1119,7 +1132,9 @@ func _tick_train(cache: TickCache) -> void:
 			counts[&"warrior"], counts[&"firewarrior"], counts[&"preacher"], _army_shares())
 		# Biggest deficit whose camp actually stands and is usable.
 		for kind in order:
-			var building: TrainingBuilding = _camp_for(cache, kind)
+			# The least loaded camp of this kind that is below the AI's queue limit
+			# (2026-11-23) — none: all lines of this kind are full, try the next kind.
+			var building: TrainingBuilding = _camp_with_room(cache, kind)
 			if building == null:
 				continue
 			# Claimed only once a camp is found — a kind without a camp must not
@@ -1147,7 +1162,8 @@ func _tick_attack(cache: TickCache) -> void:
 		return
 	var squad: Array[Unit] = []
 	for u in _marching_only(cache.army):
-		if AIGolems.marches_with_wave(u):   # the Genesis golem guards the village (2026-11-21)
+		# The Genesis golem guards the village, and joins only while that is safe (2026-11-23).
+		if golem_ai == null or golem_ai.joins_wave(u):
 			squad.append(u)
 	var shaman: Unit = tribe.shaman
 	if _shaman_alive() and shaman.state != Unit.State.CAST \
@@ -1523,6 +1539,9 @@ func _marching_only(squad: Array[Unit]) -> Array[Unit]:
 		# A seated golem takes no orders anyway (it stands up on its own, AIGolems).
 		if u is Golem and (u as Golem).is_sit_locked():
 			continue
+		# A golem on its way home to heal stays out of every march (AIGolems, 2026-11-23).
+		if golem_ai != null and golem_ai.is_retreating(u):
+			continue
 		out.append(u)
 	return out
 
@@ -1895,7 +1914,7 @@ func _tick_raid(cache: TickCache, threat: Dictionary) -> void:
 		return
 	var escort: Array[Unit] = []
 	for u in _marching_only(cache.army):
-		if AIGolems.marches_with_wave(u) and not (u is CrewedVehicle):
+		if (golem_ai == null or golem_ai.joins_wave(u)) and not (u is CrewedVehicle):
 			escort.append(u)
 	if escort.size() < Balance.AI_RAID_MIN_ESCORT:
 		return
@@ -2118,6 +2137,60 @@ func _densest_cluster(enemies: Array[Unit]) -> Vector3:
 func _shaman_alive() -> bool:
 	return tribe.shaman != null and is_instance_valid(tribe.shaman) \
 		and tribe.shaman.state != Unit.State.DEAD
+
+
+## Building key of a unit kind's camps.
+static func _camp_key(kind: StringName) -> StringName:
+	match kind:
+		&"warrior":
+			return &"warrior_camp"
+		&"firewarrior":
+			return &"firewarrior_camp"
+		&"preacher":
+			return &"temple"
+	return &""
+
+
+## The usable camp of `kind` with the shortest line that still takes a brave
+## (queue_limit = AI_TRAIN_QUEUE_PER_CAMP), or null when every line is full.
+func _camp_with_room(cache: TickCache, kind: StringName) -> TrainingBuilding:
+	var best: TrainingBuilding = null
+	for b in cache.camp_lists.get(_camp_key(kind), []):
+		var camp: TrainingBuilding = b as TrainingBuilding
+		if not is_instance_valid(camp) or not camp.has_queue_room():
+			continue
+		if best == null or camp.queue_load() < best.queue_load():
+			best = camp
+	return best
+
+
+## Per camp kind: how many AI ticks in a row EVERY usable camp of the kind stood at
+## its queue limit while none of the kind was being built (2026-11-23).
+var _camp_full_ticks: Dictionary = {}
+var _camp_full_tick: int = -1
+
+
+## Updates the full-line counters once per AI tick and returns the kinds whose
+## lines have been full for AI_CAMP_BACKLOG_TICKS: those get one more camp
+## (AIState.missing_camp_kind, counts "camp_backlog").
+func _camp_backlog(cache: TickCache) -> Dictionary:
+	if _camp_full_tick != _tick_count:
+		_camp_full_tick = _tick_count
+		for key in [&"warrior_camp", &"firewarrior_camp", &"temple"]:
+			var camps: Array = cache.camp_lists.get(key, [])
+			var full: bool = not camps.is_empty() \
+				and int(cache.planned.get(key, 0)) <= camps.size()
+			for b in camps:
+				if not is_instance_valid(b) or (b as TrainingBuilding).queue_load() \
+						< Balance.AI_TRAIN_QUEUE_PER_CAMP:
+					full = false
+					break
+			_camp_full_ticks[key] = int(_camp_full_ticks.get(key, 0)) + 1 if full else 0
+	var out: Dictionary = {}
+	for key in _camp_full_ticks.keys():
+		if int(_camp_full_ticks[key]) >= Balance.AI_CAMP_BACKLOG_TICKS:
+			out[key] = true
+	return out
 
 
 ## The usable training building that produces `kind` units, from the tick cache.
@@ -2626,7 +2699,11 @@ func _tick_hut_rallies(cache: TickCache) -> void:
 		cache.kind_counts[&"preacher"], _army_shares())
 	var camps: Array[Building] = []
 	for kind in order:
-		var camp: TrainingBuilding = _camp_for(cache, kind)
+		# Prefer a camp whose line still has room (2026-11-23); a hut pointing at
+		# a full line just yields an idle brave, which the AI then uses elsewhere.
+		var camp: TrainingBuilding = _camp_with_room(cache, kind)
+		if camp == null:
+			camp = _camp_for(cache, kind)
 		if camp != null:
 			camps.append(camp)
 	var share: float = AIState.training_hut_share(state, cache.army_count,
@@ -2983,8 +3060,13 @@ func _tick_supply_runs(cache: TickCache) -> void:
 			continue
 		if cache.brave_count <= _min_economy(cache):
 			return
-		var crew: Array[Unit] = cache.take_idle_for(target,
-			Balance.AI_SUPPLY_BRAVES_PER_TARGET, Balance.AI_BUILDER_WALK_RADIUS)
+		# A site gets as many carriers as its missing wood needs trips (2026-11-23).
+		var size: int = Balance.AI_SUPPLY_BRAVES_PER_TARGET
+		if target.under_construction:
+			size = clampi(int(ceil(float(_site_unfunded(target)) / float(Brave.CARRY_CAPACITY))),
+				1, Balance.AI_SUPPLY_BRAVES_PER_TARGET)
+		var crew: Array[Unit] = cache.take_idle_for(target, size,
+			Balance.AI_BUILDER_WALK_RADIUS)
 		if crew.is_empty():
 			return
 		if commands.order_supply_wood(crew, target) > 0:
@@ -2998,6 +3080,22 @@ func _supply_targets(cache: TickCache) -> Array[Building]:
 	for site in cache.stalled_sites:
 		if is_instance_valid(site) and not site.demolishing:
 			out.append(site)
+	# 2026-11-23 (user report: the wood lies on one side of the base, the AI builds
+	# on the other and waits for wood to turn up there by chance): every site that
+	# still lacks wood, biggest gap first — as long as there is a stock its own
+	# workers never fetch (a rack: they do not use racks at all; a pile beyond
+	# Brave.PILE_PREFER_RADIUS of the site). Without such a stock the carriers
+	# would only chop next to the site like the workers do.
+	var unfunded: Array = []
+	for site in cache.sites:
+		if not is_instance_valid(site) or site.demolishing or site.wood_stalled:
+			continue
+		var gap: int = _site_unfunded(site)
+		if gap > 0 and _has_remote_stock(cache, site):
+			unfunded.append([gap, site])
+	unfunded.sort_custom(func(a: Array, b: Array) -> bool: return int(a[0]) > int(b[0]))
+	for entry in unfunded:
+		out.append(entry[1])
 	for shop in _starved_shops(cache):
 		out.append(shop)
 	for hut in cache.huts:
@@ -3082,6 +3180,29 @@ func _prune_supply_crews() -> void:
 		crew["units"] = alive
 		kept.append(crew)
 	_supply_crews = kept
+
+
+## Wood a site still lacks after its workers' loads, the piles at its door and
+## any supply crew already on the way.
+func _site_unfunded(site: Building) -> int:
+	return maxi(0, site.wood_needed_total() - site.wood_incoming() - _supply_inbound(site))
+
+
+## True while wood lies somewhere the site's own workers will never fetch it from:
+## a rack with stock outside the site's absorb radius (workers do not use racks),
+## or a ground pile beyond Brave.PILE_PREFER_RADIUS (they chop instead).
+func _has_remote_stock(cache: TickCache, site: Building) -> bool:
+	var drop: Vector3 = site.delivery_point()
+	var flat: Vector2 = Vector2(drop.x, drop.z)
+	for depot in cache.depots:
+		if is_instance_valid(depot) and (depot as WoodDepot).stored_wood() > 0 \
+				and depot.footprint_distance_to(flat) > Building.ABSORB_RADIUS:
+			return true
+	var wpm: WoodPileManager = building_manager.wood_pile_manager \
+		if building_manager != null else null
+	if wpm == null:
+		return false
+	return wpm.nearest_pile(drop, site.center_world(), Brave.PILE_PREFER_RADIUS) != null
 
 
 ## Wood already walking toward `target` in supply crews — without this the demand

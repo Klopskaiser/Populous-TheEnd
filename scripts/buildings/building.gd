@@ -165,6 +165,11 @@ var unit_manager: UnitManager = null
 var wood_pile_manager: WoodPileManager = null
 
 var _mesh_root: Node3D = null
+## Construction visuals (2026-11-23): ground plan + door arrow of a bare plot,
+## and the scaffold while it is being built. Created lazily, freed when done.
+var _plot_marker: MeshInstance3D = null
+var _plot_marker_y: float = 0.0
+var _scaffold: Scaffold = null
 ## True when a user-provided .glb (assets/models/buildings/<asset_kind>.glb)
 ## was loaded in _create_visuals — subclasses then skip their placeholder meshes.
 var _has_custom_model: bool = false
@@ -309,6 +314,25 @@ static func entrance_cell_for(cell: Vector2i, footprint: Vector2i,
 			return cell + Vector2i(half_x, -1)
 		_:
 			return cell + Vector2i(-1, half_y)
+
+
+## Cells in front of the door that must stay free of other buildings (user spec
+## 2026-11-23): a strip `half_width` cells to each side of the entrance cell and
+## `depth` cells deep, starting right at the footprint edge. STATIC for the same
+## reason as entrance_cell_for: placement asks it for plots without a building.
+static func entrance_apron_rect(cell: Vector2i, footprint: Vector2i, orientation: int,
+		depth: int, half_width: int) -> Rect2i:
+	var e: Vector2i = entrance_cell_for(cell, footprint, orientation)
+	var w: int = 2 * half_width + 1
+	match orientation:
+		0:
+			return Rect2i(e.x - half_width, e.y, w, depth)
+		1:
+			return Rect2i(e.x, e.y - half_width, depth, w)
+		2:
+			return Rect2i(e.x - half_width, e.y - depth + 1, w, depth)
+		_:
+			return Rect2i(e.x - depth + 1, e.y - half_width, depth, w)
 
 
 ## Cell workers actually stand on to serve a building with this footprint,
@@ -597,7 +621,7 @@ func is_usable() -> bool:
 ## (otherwise workers would finish a spell-damaged site and the building
 ## seemed indestructible while under construction).
 func apply_destruction_stages(count: int) -> void:
-	if count <= 0:
+	if count <= 0 or is_bare_plot():
 		return
 	if under_construction:
 		destroy()
@@ -612,7 +636,7 @@ func apply_destruction_stages(count: int) -> void:
 ## Balance.LAVA_BUILDING_CONTACT_GRACE seconds. Construction sites shatter on
 ## their first stage (fragile rule in apply_destruction_stages).
 func add_lava_contact(seconds: float) -> void:
-	if health <= 0 or seconds <= 0.0:
+	if health <= 0 or seconds <= 0.0 or is_bare_plot():
 		return
 	_lava_contact_grace = Balance.LAVA_BUILDING_CONTACT_GRACE
 	_lava_contact_accum += seconds
@@ -777,7 +801,18 @@ func _eject_unit(u, killed: bool) -> void:
 ## circle no-ops take_damage()/apply_destruction_stages()/add_lava_contact()
 ## itself (10d), so a spell landing on it is harmless regardless of this flag.
 func is_attackable() -> bool:
-	return true
+	return not is_bare_plot()
+
+
+## A construction site with no wood built in yet (user spec 2026-11-23): only a
+## marked ground plan with an arrow at the door — no building, no scaffold. It is
+## no attack target (is_attackable) and nothing can damage it (take_damage,
+## apply_destruction_stages, add_lava_contact): there is nothing standing yet.
+## A terrain morph that breaks the ground still removes it (shatter/destroy).
+## The scaffold — and with it the attackability — begins with the first build
+## progress, i.e. once the first wood is actually built in (has_build_stage).
+func is_bare_plot() -> bool:
+	return under_construction and not _destroyed and build_progress <= 0.0
 
 
 ## Max melee raiders that may storm this building at once (watchtower: 5).
@@ -858,6 +893,13 @@ func nearest_entrance_threat() -> Unit:
 		# (walk anim in place, no approach, no storm — user bug report).
 		if not u.is_targetable():
 			continue
+		# A defender nobody can walk up to does not guard the door either (bug
+		# 2026-11-23, diag_building_stuck_village): a brave across a water channel
+		# or on a cliff 7 m from the door locked every attacker onto it forever —
+		# they marked it unreachable, fell back to the building, got it back as
+		# the "entrance threat" and never stormed.
+		if not _reachable_from_door(u):
+			continue
 		var d: float = Vector2(u.position.x, u.position.z).distance_to(flat)
 		if d < best_d:
 			best_d = d
@@ -867,6 +909,32 @@ func nearest_entrance_threat() -> Unit:
 
 func has_entrance_threat() -> bool:
 	return nearest_entrance_threat() != null
+
+
+## True when an attacker coming to this building's door can get into melee with
+## `u`: the unit's own cell or one of its four neighbours is walkable ground of
+## the island the door (approach point) lies on. Permissive without navigation.
+func _reachable_from_door(u: Unit) -> bool:
+	if nav_grid == null:
+		return true
+	var island: int = approach_island()
+	if island < 0:
+		return true   # no approach at all: nothing to compare with, keep the old rule
+	var c: Vector2i = nav_grid.world_to_cell(u.position)
+	for d in [Vector2i.ZERO, Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+		var n: Vector2i = c + d
+		if nav_grid.is_cell_walkable(n) and nav_grid.island_at(n) == island:
+			return true
+	return false
+
+
+## Where melee raiders go in (bug 2026-11-23): the walkable approach point
+## (delivery_point — the entrance cell, or the nearest walkable perimeter cell
+## when the entrance lies in water, on a slope or against a wall). Measuring to
+## the raw entrance cell left the whole storm standing 2.7 m short of a doorway
+## in the water, forever.
+func raid_entry_point() -> Vector3:
+	return delivery_point()
 
 
 ## Lets an attacker enter as a melee raider: removed from the world (like a
@@ -1675,9 +1743,13 @@ func _mark_dirty(c: Vector2i) -> void:
 ## terrain mesh. Grown by 1 because edge vertices affect neighbouring cells.
 func _flush_deformation() -> void:
 	if _dirty.size == Vector2i.ZERO:
+		# The building may have settled (position.y) without a dirty cell.
+		if _plot_marker != null and position.y != _plot_marker_y:
+			_refresh_plot_marker()
 		return
 	var r: Rect2i = _dirty.grow(1)
 	_dirty = Rect2i()
+	_refresh_plot_marker()   # the ground plan follows the graded terrain
 	if nav_grid != null:
 		nav_grid.update_region(r)
 	if is_inside_tree():
@@ -1802,7 +1874,7 @@ func finish_construction() -> void:
 # --- Damage / destruction ------------------------------------------------------------
 
 func take_damage(amount: int, source: int = DMG_GENERIC) -> void:
-	if health <= 0:
+	if health <= 0 or is_bare_plot():
 		return
 	var was_usable: bool = is_usable()
 	var stage_before: int = destruction_stage()
@@ -1910,6 +1982,8 @@ func _begin_sinking() -> void:
 		_overlay_sprite.visible = false
 	if _rally_marker != null:
 		_rally_marker.visible = false
+	if _plot_marker != null:
+		_plot_marker.visible = false   # a ground plan does not sink, it is just gone
 	if _vanish_on_destroy:
 		visible = false
 		queue_free()
@@ -2146,31 +2220,196 @@ func _click_body_height() -> float:
 	return 2.5
 
 
-## The building "grows out of the ground" with the build progress
-## (placeholder); during the flatten phase only a sliver is visible. A demolition
-## (10d) runs the same visual backwards — build_progress is the single source for
-## both directions.
+## Visual construction stages (user spec 2026-11-23), all from build_progress:
+##   0            bare plot: no wood built in — white ground plan + door arrow
+##   1, 2, 3      scaffold with 1 / 2 / 3 height tiers (progress < 1/4, 2/4, 3/4)
+##   4            last build stage: the finished building inside the full scaffold
+##   VIS_FINISHED finished: the building alone
+## A demolition (10d) runs the same stages backwards.
+const VIS_FINISHED: int = 5
+
+
+func construction_visual_stage() -> int:
+	if not under_construction and not demolishing:
+		return VIS_FINISHED
+	if build_progress <= 0.0:
+		return 0
+	return 1 + clampi(int(build_progress * 4.0), 0, 3)
+
+
+## No more "growing out of the ground": the model is hidden until the last build
+## stage and then stands at full size; before that the plot marker (stage 0) or
+## the scaffold (stages 1-4) shows the progress.
 func _update_construction_visual() -> void:
 	if _mesh_root == null:
 		return
-	var building_up: bool = under_construction or demolishing
-	# Asset-driven path: full-size model, texture swapped per build stage
-	# (4 stages over build_progress; finished -> baked/default texture).
+	var stage: int = construction_visual_stage()
+	_mesh_root.scale = Vector3.ONE
+	_mesh_root.visible = stage >= 4
+	# Asset-driven path: the last build stage may show a build texture.
 	if _has_custom_model and _has_build_textures():
-		_mesh_root.scale = Vector3.ONE
-		if not building_up:
-			if _build_visual_stage != 0:
-				_build_visual_stage = 0
-				_apply_surface_texture(null)
-			return
-		var idx: int = 1 if not foundation_done else clampi(int(build_progress * 4.0), 0, 3) + 1
+		var idx: int = 0 if stage == VIS_FINISHED else 4
 		if idx != _build_visual_stage:
 			_build_visual_stage = idx
-			_apply_surface_texture(_stage_texture(_build_tex_rel(idx)))
+			_apply_surface_texture(null if idx == 0 else _stage_texture(_build_tex_rel(idx)))
+	_update_plot_marker(stage == 0)
+	_update_scaffold(stage)
+
+
+## Shows/hides the bare-plot marker; it is built on first need and dropped once
+## the site has a build stage (the progress never returns to 0 without the
+## building disappearing — a demolition at 0 destroys it).
+func _update_plot_marker(show: bool) -> void:
+	if not show:
+		if _plot_marker != null:
+			_plot_marker.queue_free()
+			_plot_marker = null
 		return
-	# Fallback: the placeholder "grows out of the ground" via Y scaling.
-	var s: float = 1.0 if not building_up else 0.1 + 0.9 * build_progress
-	_mesh_root.scale = Vector3(1.0, maxf(s, 0.05), 1.0)
+	if _plot_marker == null:
+		_plot_marker = MeshInstance3D.new()
+		_plot_marker.name = "PlotMarker"
+		_plot_marker.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_plot_marker.material_override = _plot_material()
+		add_child(_plot_marker)
+		_refresh_plot_marker()
+
+
+## Brightness of the ground plan fill, its rim and the door arrow.
+const PLOT_FILL: Color = Color(1.0, 1.0, 1.0, 0.22)
+const PLOT_RIM: Color = Color(1.0, 1.0, 1.0, 0.7)
+const PLOT_ARROW: Color = Color(1.0, 1.0, 1.0, 0.9)
+const PLOT_LIFT: float = 0.06
+const PLOT_RIM_WIDTH: float = 0.18
+
+static var _plot_mat: StandardMaterial3D = null
+
+
+static func _plot_material() -> StandardMaterial3D:
+	if _plot_mat == null:
+		_plot_mat = StandardMaterial3D.new()
+		_plot_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_plot_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		_plot_mat.vertex_color_use_as_albedo = true
+		_plot_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		_plot_mat.render_priority = 1
+	return _plot_mat
+
+
+## Rebuilds the plot mesh on the CURRENT terrain (it follows the ground while
+## the graders level it; called from _flush_deformation). Coordinates are local
+## to the (unrotated) building root.
+func _refresh_plot_marker() -> void:
+	if _plot_marker == null or terrain_data == null:
+		return
+	_plot_marker_y = position.y
+	var st: SurfaceTool = SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var cs: float = TerrainData.CELL_SIZE
+	var origin: Vector3 = position
+	# Fill: one quad per footprint cell on the vertex heights.
+	for z in range(cell.y, cell.y + footprint.y):
+		for x in range(cell.x, cell.x + footprint.x):
+			var q: Array[Vector3] = [_plot_vertex(x, z, origin), _plot_vertex(x + 1, z, origin),
+				_plot_vertex(x + 1, z + 1, origin), _plot_vertex(x, z + 1, origin)]
+			_plot_quad(st, q, PLOT_FILL)
+	# Rim: a strip along each edge, inside the footprint.
+	var x0: int = cell.x
+	var z0: int = cell.y
+	var x1: int = cell.x + footprint.x
+	var z1: int = cell.y + footprint.y
+	var rim: float = PLOT_RIM_WIDTH
+	for x in range(x0, x1):
+		_plot_quad(st, [_plot_vertex(x, z0, origin), _plot_vertex(x + 1, z0, origin),
+			_plot_vertex(x + 1, z0, origin) + Vector3(0, 0, rim), _plot_vertex(x, z0, origin) + Vector3(0, 0, rim)], PLOT_RIM)
+		_plot_quad(st, [_plot_vertex(x, z1, origin) - Vector3(0, 0, rim), _plot_vertex(x + 1, z1, origin) - Vector3(0, 0, rim),
+			_plot_vertex(x + 1, z1, origin), _plot_vertex(x, z1, origin)], PLOT_RIM)
+	for z in range(z0, z1):
+		_plot_quad(st, [_plot_vertex(x0, z, origin), _plot_vertex(x0, z, origin) + Vector3(rim, 0, 0),
+			_plot_vertex(x0, z + 1, origin) + Vector3(rim, 0, 0), _plot_vertex(x0, z + 1, origin)], PLOT_RIM)
+		_plot_quad(st, [_plot_vertex(x1, z, origin) - Vector3(rim, 0, 0), _plot_vertex(x1, z, origin),
+			_plot_vertex(x1, z + 1, origin), _plot_vertex(x1, z + 1, origin) - Vector3(rim, 0, 0)], PLOT_RIM)
+	# Door arrow: straddles the entrance edge at the door cell, pointing inside.
+	var e: Vector2i = entrance_cell()
+	var door: Vector2
+	var out: Vector2
+	match orientation:
+		0:
+			door = Vector2(float(e.x) + 0.5, float(z1)); out = Vector2(0, 1)
+		1:
+			door = Vector2(float(x1), float(e.y) + 0.5); out = Vector2(1, 0)
+		2:
+			door = Vector2(float(e.x) + 0.5, float(z0)); out = Vector2(0, -1)
+		_:
+			door = Vector2(float(x0), float(e.y) + 0.5); out = Vector2(-1, 0)
+	door *= cs
+	var side: Vector2 = Vector2(-out.y, out.x)
+	var tail: Vector2 = door + out * 1.0
+	var neck: Vector2 = door - out * 0.05
+	var tip: Vector2 = door - out * 0.65
+	_plot_quad(st, [_arrow_point(tail + side * 0.16, origin), _arrow_point(tail - side * 0.16, origin),
+		_arrow_point(neck - side * 0.16, origin), _arrow_point(neck + side * 0.16, origin)], PLOT_ARROW)
+	for v in [_arrow_point(neck + side * 0.45, origin), _arrow_point(neck - side * 0.45, origin),
+			_arrow_point(tip, origin)]:
+		st.set_color(PLOT_ARROW)
+		st.add_vertex(v)
+	_plot_marker.mesh = st.commit()
+
+
+func _plot_vertex(vx: int, vz: int, origin: Vector3) -> Vector3:
+	var cs: float = TerrainData.CELL_SIZE
+	return Vector3(float(vx) * cs - origin.x,
+		terrain_data.vertex_height(vx, vz) - origin.y + PLOT_LIFT, float(vz) * cs - origin.z)
+
+
+func _arrow_point(p: Vector2, origin: Vector3) -> Vector3:
+	return Vector3(p.x - origin.x, terrain_data.get_height(p.x, p.y) - origin.y + PLOT_LIFT + 0.02,
+		p.y - origin.z)
+
+
+static func _plot_quad(st: SurfaceTool, q: Array, color: Color) -> void:
+	for idx in [0, 1, 2, 0, 2, 3]:
+		st.set_color(color)
+		st.add_vertex(q[idx])
+
+
+## Scaffold for stages 1-4, built on first need around the footprint and as high
+## as the building model; freed once the building is finished.
+func _update_scaffold(stage: int) -> void:
+	if stage <= 0 or stage == VIS_FINISHED:
+		if _scaffold != null:
+			_scaffold.queue_free()
+			_scaffold = null
+		return
+	if _scaffold == null:
+		var base: Vector2i = footprint
+		if orientation % 2 == 1:
+			base = Vector2i(footprint.y, footprint.x)   # authored entrance south
+		_scaffold = Scaffold.create(base, scaffold_height(), asset_kind())
+		_scaffold.rotation.y = float(orientation) * PI * 0.5
+		add_child(_scaffold)
+	_scaffold.set_tiers(mini(stage, Scaffold.TIERS))
+
+
+## Height the scaffold reaches: the model's own height (measured once from its
+## meshes) plus a little headroom. Subclasses may override.
+func scaffold_height() -> float:
+	if _mesh_root == null:
+		return 3.0
+	var top: float = _visual_top(_mesh_root, Transform3D())
+	return clampf(top + 0.3, 1.8, 14.0)
+
+
+static func _visual_top(node: Node, xform: Transform3D) -> float:
+	var top: float = 0.0
+	for child in node.get_children():
+		if not child is Node3D:
+			continue
+		var t: Transform3D = xform * (child as Node3D).transform
+		if child is VisualInstance3D:
+			var box: AABB = t * (child as VisualInstance3D).get_aabb()
+			top = maxf(top, box.end.y)
+		top = maxf(top, _visual_top(child, t))
+	return top
 
 
 func _build_tex_rel(idx: int) -> String:

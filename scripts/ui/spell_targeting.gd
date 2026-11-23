@@ -21,6 +21,9 @@ const HOTKEY_SPELLS: Array[StringName] = [
 ## Damaging spells that may lock onto an enemy DEVICE (catapult, fire ram,
 ## airship) under the cursor: the cast then tracks that unit's live position.
 const DEVICE_SPELLS: Array[StringName] = [&"fireball", &"lightning", &"tornado", &"supertornado"]
+## Spells that lock onto an enemy GOLEM under the cursor the same way, with the same red blink of its
+## ring (user spec 2026-11-23: lightning on a golem shows its target ring like on an airship).
+const GOLEM_SPELLS: Array[StringName] = [&"lightning"]
 
 var _tribe_commands: TribeCommands = null
 var _tribe: Tribe = null
@@ -280,6 +283,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			# first). A ground click falls through to the normal terrain cast.
 			if _armed_spell in DEVICE_SPELLS and _selection != null:
 				var dev: Unit = _selection.enemy_device_at(mb.position)
+				if dev == null and _armed_spell in GOLEM_SPELLS:
+					dev = _selection.enemy_golem_at(mb.position)
 				if dev != null:
 					if _tribe_commands != null and _tribe_commands.cast_spell(
 							_tribe, _armed_spell, dev.position, dev):

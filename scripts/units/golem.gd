@@ -385,7 +385,7 @@ var _crab_idle_time: float = 0.0
 var _crab_backward: bool = false
 var _crab_want_heading: Vector3 = Vector3.ZERO
 var _crab_ignore: Dictionary = {}
-## Enemy buildings she sat down on (from the crab walk): they take part of the sit damage.
+## Enemy buildings she sat down on (from the stand or the crab walk): they take part of the sit damage.
 var _sit_buildings: Array = []
 ## The airship strike in the crab stand: the ship it is wound up at, seconds to the impact,
 ## seconds to the next strike.
@@ -613,6 +613,27 @@ static func siege_damage_for_height(base: int, height: float) -> int:
 	var k: float = clampf((height - Balance.GOLEM_HEIGHT)
 		/ (Balance.GOLEM_MAX_HEIGHT - Balance.GOLEM_HEIGHT), 0.0, 1.0)
 	return int(round(lerpf(float(base), float(Balance.GOLEM_SIEGE_DAMAGE_MAX), k)))
+
+
+## Extra range of catapults and the firewarriors on an airship's deck against `u` (user spec 2026-11-23):
+## GOLEM_RANGED_REACH_BONUS for every full GOLEM_RANGED_REACH_STEP metres of a golem's height; 0 for
+## anything that is not a golem.
+static func ranged_reach_bonus(u) -> float:
+	if not is_instance_valid(u) or not (u is Golem):
+		return 0.0
+	var steps: float = floorf((u as Golem).height_m() / Balance.GOLEM_RANGED_REACH_STEP + 0.000001)
+	return steps * Balance.GOLEM_RANGED_REACH_BONUS
+
+
+## Largest ranged_reach_bonus of any enemy golem of `tribe` (scans widen by it); 0 without one.
+static func max_ranged_reach_bonus(mgr, tribe: int) -> float:
+	var best: float = 0.0
+	if not (mgr is UnitManager):
+		return best
+	for v in (mgr as UnitManager).vehicles:
+		if is_instance_valid(v) and v is Golem and v.tribe_id != tribe and v.state != State.DEAD:
+			best = maxf(best, ranged_reach_bonus(v))
+	return best
 
 
 ## True once the body has reached GOLEM_MAX_HEIGHT (no growth step left).
@@ -1402,11 +1423,22 @@ func seat_half_extent() -> Vector2:
 		Balance.GOLEM_SIT_SEAT_LENGTH * 0.5 * model_scale().z) * size_factor()
 
 
-## Where her FEET have to stand for a free seat: her own spot, else a spot up to
-## GOLEM_SIT_SEARCH_SHARE of her body radius aside (two rings of eight); INF = none.
+## Where her FEET have to stand for a possible seat: her own spot, else a spot up to
+## GOLEM_SIT_SEARCH_SHARE of her body radius aside (two rings of eight); INF = none. Only the
+## terrain counts, buildings do not — as from the crab walk (user spec 2026-11-23, seat_spot_near).
 func find_seat() -> Vector3:
+	var back: Vector3 = heading() * seat_back_m()
+	var seat: Vector3 = seat_spot_near(position - back)
+	return seat + back if seat != Vector3.INF else Vector3.INF
+
+
+## Where the middle of her seat can go down near `seat` (facing her heading): there, else up to
+## GOLEM_SIT_SEARCH_SHARE of her body radius aside (two rings of eight); INF = none. The seat on the
+## disc and her feet and hands on possible ground (seat_on_disc, sit_pose_ok) — buildings do not
+## count. One rule for sitting down from the stand (find_seat) and from the crab walk (user spec
+## 2026-11-23; until then the stand also kept the seat off buildings, seat_free).
+func seat_spot_near(seat: Vector3) -> Vector3:
 	var fwd: Vector3 = heading()
-	var back: float = seat_back_m()
 	var half: Vector2 = seat_half_extent()
 	var search: float = trample_radius() * Balance.GOLEM_SIT_SEARCH_SHARE
 	var offsets: Array[Vector2] = [Vector2.ZERO]
@@ -1414,9 +1446,9 @@ func find_seat() -> Vector3:
 		for k in range(8):
 			offsets.append(Vector2.from_angle(float(k) * TAU / 8.0) * search * ring)
 	for off in offsets:
-		var feet: Vector3 = Vector3(position.x + off.x, position.y, position.z + off.y)
-		if seat_free(feet - fwd * back, fwd, half) and sit_pose_ok(feet - fwd * back, fwd):
-			return feet
+		var c: Vector3 = Vector3(seat.x + off.x, seat.y, seat.z + off.y)
+		if seat_on_disc(c, fwd, half) and sit_pose_ok(c, fwd):
+			return c
 	return Vector3.INF
 
 
@@ -1449,14 +1481,15 @@ func sit_pose_ok(seat: Vector3, fwd: Vector3) -> bool:
 
 
 ## Seated: may she face `fwd`? Her limbs on possible ground (sit_pose_ok). Buildings do not
-## count here — only when she sits down (seat_free; user spec 2026-11-18).
+## count here (user spec 2026-11-18), and since 2026-11-23 not when she sits down either.
 func sit_heading_ok(fwd: Vector3) -> bool:
 	return sit_pose_ok(position, fwd)
 
 
 ## Is the seat (middle, long axis, half extents) free: wholly inside the disc (water is
 ## fine since 2026-11-18 — she sits from 30 m on, and from there she wades), touching no
-## building or construction site of any tribe?
+## building or construction site of any tribe? A query only: since 2026-11-23 no way of sitting
+## down asks it any more (buildings do not matter there, seat_spot_near).
 func seat_free(center: Vector3, fwd: Vector3, half: Vector2) -> bool:
 	if not seat_on_disc(center, fwd, half):
 		return false
@@ -1732,7 +1765,7 @@ func _on_seated() -> void:
 				continue
 			if on_seat(u.position):
 				_sit_victims.append(u)
-	# Enemy buildings under the seat (she may sit down on them from the crab walk).
+	# Enemy buildings under the seat (she may sit down on them, user spec 2026-11-23: from the stand as from the crab walk).
 	_sit_buildings.clear()
 	if building_manager != null:
 		var c: Vector2 = Vector2(_seat_center.x, _seat_center.z)
@@ -1846,7 +1879,7 @@ func _sit_damage_tick() -> void:
 			continue
 		kept.append(u)
 	_sit_victims = kept
-	# Enemy buildings she sat down on (from the crab walk, user spec 2026-11-18): half the sit
+	# Enemy buildings she sat down on (user spec 2026-11-18, from the stand too since 2026-11-23): half the sit
 	# damage in hit points, like every golem attack on a building.
 	var standing: Array = []
 	for b in _sit_buildings:
@@ -2619,7 +2652,7 @@ func _begin_crab_down() -> bool:
 	facing = heading()
 	var shift: Vector3 = Vector3.ZERO
 	if _wants_sit:
-		var spot: Vector3 = _crab_seat_spot()
+		var spot: Vector3 = seat_spot_near(position)
 		if spot == Vector3.INF:
 			return false
 		shift = Vector3(spot.x - position.x, 0.0, spot.z - position.z)
@@ -2628,23 +2661,6 @@ func _begin_crab_down() -> bool:
 	_crab = CRAB_DOWN
 	_crab_time = crab_switch_time()
 	return true
-
-
-## Where the middle of her seat can go down from the crab stand: here, else up to
-## GOLEM_SIT_SEARCH_SHARE of her body radius aside (as find_seat, but buildings do not count).
-func _crab_seat_spot() -> Vector3:
-	var fwd: Vector3 = heading()
-	var half: Vector2 = seat_half_extent()
-	var search: float = trample_radius() * Balance.GOLEM_SIT_SEARCH_SHARE
-	var offsets: Array[Vector2] = [Vector2.ZERO]
-	for ring in [0.5, 1.0]:
-		for k in range(8):
-			offsets.append(Vector2.from_angle(float(k) * TAU / 8.0) * search * ring)
-	for off in offsets:
-		var c: Vector3 = Vector3(position.x + off.x, position.y, position.z + off.y)
-		if seat_on_disc(c, fwd, half) and sit_pose_ok(c, fwd):
-			return c
-	return Vector3.INF
 
 
 ## crab_down has played out: she sits — the seat fixed anew, the sit damage strikes who is under it now.
@@ -2887,7 +2903,7 @@ func _tick_stance(delta: float) -> void:
 func _target_in_reach() -> bool:
 	if _unit_target_attackable(attack_target) and attack_target.tribe_id != tribe_id:
 		return not attack_target.is_airborne() \
-			and _flat_dist(position, attack_target.position) <= reach()
+			and reach_dist_to(attack_target) <= reach()
 	if _building_target_valid():
 		return attack_building.footprint_distance_to(Vector2(position.x, position.z)) <= reach() - 0.5
 	return false
@@ -3925,7 +3941,9 @@ func _tick_attack(delta: float) -> void:
 	if has_ordered_building() and not _near_ordered_building(target):
 		_retarget_or_idle()   # it left the building's surroundings: next one there, or the building
 		return
-	var dist: float = _flat_dist(position, target.position)
+	# To the rim of its target circle (bugfix 2026-11-23): a big golem is struck at its edge —
+	# measured to its middle, a small golem never got close enough (the bodies keep apart).
+	var dist: float = reach_dist_to(target)
 	if dist > reach() or target.is_airborne():
 		# An ORDERED target is kept (user report 2026-11-16: the order was ignored
 		# while others fought around her — a golem is never tied down in melee):
@@ -3988,14 +4006,14 @@ func _nearest_enemy_in_reach() -> Unit:
 		return null
 	var best: Unit = null
 	var best_d: float = INF
-	for u in path_service.get_units_in_radius(position, reach()):
+	for u in path_service.get_units_in_radius(position, reach() + _max_target_radius()):
 		if u == self or u.tribe_id == tribe_id or u.state == State.DEAD \
 				or u.state == State.SIT:
 			continue
 		if not u.is_targetable() or u.is_airborne() or u is CrewedVehicle:
 			continue
-		var d: float = _flat_dist(position, u.position)
-		if d < best_d:
+		var d: float = reach_dist_to(u)   # to the rim of a big body (bugfix 2026-11-23)
+		if d <= reach() and d < best_d:
 			best_d = d
 			best = u
 	return best
@@ -4519,7 +4537,35 @@ func _scan_for_enemy(radius: float, max_examined: int = 0) -> Unit:
 		return null
 	if has_ordered_building():
 		return _enemy_near_ordered_building()
-	return super._scan_for_enemy(radius, max_examined)
+	var best: Unit = super._scan_for_enemy(radius, max_examined)
+	# The base scan measures to the middle; an enemy golem counts from the rim of its target circle
+	# (bugfix 2026-11-23: a small golem at a giant's feet never noticed it).
+	var big: Unit = _nearest_enemy_golem(radius)
+	if big != null and (best == null or reach_dist_to(big) < reach_dist_to(best)):
+		return big
+	return best
+
+
+## The nearest enemy golem whose target circle lies within `radius` (to its rim) — null if none.
+func _nearest_enemy_golem(radius: float) -> Golem:
+	if not (path_service is UnitManager):
+		return null
+	var best: Golem = null
+	var best_d: float = radius
+	var now: int = Time.get_ticks_msec()
+	for v in (path_service as UnitManager).vehicles:
+		if not (v is Golem) or not is_instance_valid(v) or v == self or v.tribe_id == tribe_id:
+			continue
+		var g: Golem = v as Golem
+		if g.state == State.DEAD or g.doomed or not g.is_targetable() or g.is_airborne():
+			continue
+		if int(_unreach_targets.get(g.get_instance_id(), 0)) > now:
+			continue
+		var d: float = reach_dist_to(g)
+		if d <= best_d:
+			best_d = d
+			best = g
+	return best
 
 
 ## Retargeting after a fight: during the ordered assault no "fight on against my
@@ -4574,14 +4620,52 @@ func _victims(kind: StringName) -> Array[Unit]:
 	var frame: Array[Vector3] = _heading_frame()
 	var forward: Vector3 = frame[0]
 	var right: Vector3 = frame[1]
-	for u in path_service.get_units_in_radius(position, _hit_zone_reach(kind)):
+	for u in path_service.get_units_in_radius(position, _hit_zone_reach(kind) + _max_target_radius()):
 		if u == self or u.state == State.DEAD or u.tribe_id == tribe_id:
 			continue
 		if not u.is_targetable() or u.is_airborne() or u is CrewedVehicle:
 			continue   # protected reserves, flyers, and devices (no HP) are out
-		if _in_hit_zone(kind, u.position, forward, right):
+		if _in_hit_zone(kind, _zone_point_of(kind, u, forward, right), forward, right):
 			out.append(u)
 	return out
+
+
+## Largest target circle of any unit right now (UnitManager.max_target_radius): broad scans
+## widen by it, so a big body whose middle lies outside the scan is still found.
+func _max_target_radius() -> float:
+	return (path_service as UnitManager).max_target_radius() if path_service is UnitManager else 0.0
+
+
+## The point of `u` her attack `kind` is tested at (bugfix 2026-11-23: small golems never struck big
+## ones): an ordinary unit is a point; a big body (another golem, Unit.target_radius) is struck
+## anywhere on its target circle — the point of that circle nearest to the hit zone. For the round
+## zones (slam, drum, stomp) that is the point nearest the zone's middle, for the kick's lane the
+## point nearest the lane — the zone touches the circle exactly when that point lies in it.
+func _zone_point_of(kind: StringName, u: Unit, forward: Vector3, right: Vector3) -> Vector3:
+	var r: float = u.target_radius()
+	if r <= 0.0:
+		return u.position
+	var ref: Vector3 = position
+	if kind == ATTACK_KICK:
+		var rel: Vector3 = u.position - position
+		var ext: Vector2 = _kick_extent()
+		var mid: float = kick_side * kick_leg_offset()
+		var half: float = KICK_HALF_WIDTH * reach_factor() + Balance.GOLEM_KICK_LANE_SLACK
+		var along: float = clampf(rel.x * forward.x + rel.z * forward.z, -ext.y, ext.x)
+		var side: float = clampf(rel.x * right.x + rel.z * right.z, mid - half, mid + half)
+		ref = position + forward * along + right * side
+	elif kind != ATTACK_STOMP:
+		ref = position + forward * (SLAM_FORWARD * limb_factor())
+	return nearest_on_circle(u.position, r, ref)
+
+
+## The point of the flat circle (centre `c`, radius `r`) nearest to `p` — `p` itself when it lies inside.
+static func nearest_on_circle(c: Vector3, r: float, p: Vector3) -> Vector3:
+	var d: Vector2 = Vector2(p.x - c.x, p.z - c.z)
+	var l: float = d.length()
+	if l <= r:
+		return Vector3(p.x, c.y, p.z)
+	return c + Vector3(d.x, 0.0, d.y) * (r / l)
 
 
 ## Radius around the golem that contains the whole hit zone of `kind` (broad phase).
@@ -4662,7 +4746,7 @@ func _ordered_victims(kind: StringName) -> Array[Unit]:
 		origin += _heading_frame()[0] * (SLAM_FORWARD * limb_factor())
 	var units: Array[Unit] = _victims(kind)
 	units.sort_custom(func(a: Unit, b: Unit) -> bool:
-		return _flat_dist(a.position, origin) < _flat_dist(b.position, origin))
+		return _flat_dist(a.position, origin) - a.target_radius() < _flat_dist(b.position, origin) - b.target_radius())
 	if state == State.ATTACK and _target_valid(attack_target) and units.has(attack_target):
 		units.erase(attack_target)
 		units.push_front(attack_target)

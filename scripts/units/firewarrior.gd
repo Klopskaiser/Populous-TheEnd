@@ -225,7 +225,12 @@ func _bombard_building(building, delta: float) -> void:
 	var center: Vector3 = building.center_world()
 	if _flat_dist(position, center) > FIRE_RANGE:
 		_in_melee = false
-		_approach(center, delta)
+		if not _approach(center, delta):
+			# Out of range and no way closer: give it up instead of standing
+			# in place forever (bug 2026-11-23, see Unit._storm_building).
+			_clear_building_target()
+			_retarget_or_idle()
+			return
 		_face_point(center)
 		return
 	if _has_path():

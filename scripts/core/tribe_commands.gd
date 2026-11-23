@@ -165,7 +165,7 @@ func can_place_at(cell: Vector2i, footprint: Vector2i, orientation: int = 0) -> 
 				return false
 			if terrain.cell_height(c) <= TerrainData.SEA_LEVEL + 0.1:
 				return false
-	if not keeps_building_gap(cell, footprint):
+	if not keeps_building_gap(cell, footprint, orientation):
 		return false
 	for vz in range(cell.y, cell.y + footprint.y + 1):
 		for vx in range(cell.x, cell.x + footprint.x + 1):
@@ -178,17 +178,46 @@ func can_place_at(cell: Vector2i, footprint: Vector2i, orientation: int = 0) -> 
 ## True when no cell within Balance.BUILDING_MIN_GAP cells around the footprint
 ## belongs to another building or construction site (user spec 2026-11-16: at
 ## least that much free ground between two buildings).
-func keeps_building_gap(cell: Vector2i, footprint: Vector2i) -> bool:
+##
+## In front of a door the gap reaches Balance.BUILDING_ENTRANCE_EXTRA_GAP further
+## (user spec 2026-11-23: tight building could wall an entrance in) — both ways:
+## the new plot's own apron must be free, and the plot must not cover the apron
+## of a building that already stands.
+func keeps_building_gap(cell: Vector2i, footprint: Vector2i, orientation: int = 0) -> bool:
 	var g: int = Balance.BUILDING_MIN_GAP
-	if g <= 0 or nav_grid == null:
+	if nav_grid == null:
 		return true
-	for z in range(cell.y - g, cell.y + footprint.y + g):
-		for x in range(cell.x - g, cell.x + footprint.x + g):
-			if x >= cell.x and x < cell.x + footprint.x \
-					and z >= cell.y and z < cell.y + footprint.y:
-				continue   # the footprint itself is checked by the caller
+	if g > 0:
+		for z in range(cell.y - g, cell.y + footprint.y + g):
+			for x in range(cell.x - g, cell.x + footprint.x + g):
+				if x >= cell.x and x < cell.x + footprint.x \
+						and z >= cell.y and z < cell.y + footprint.y:
+					continue   # the footprint itself is checked by the caller
+				var c: Vector2i = Vector2i(x, z)
+				if nav_grid.terrain.in_bounds(c) and nav_grid.is_cell_blocked_by_building(c):
+					return false
+	var depth: int = maxi(g, 0) + Balance.BUILDING_ENTRANCE_EXTRA_GAP
+	if depth <= 0:
+		return true
+	var half: int = Balance.BUILDING_ENTRANCE_APRON_HALF_WIDTH
+	var apron: Rect2i = Building.entrance_apron_rect(cell, footprint, orientation, depth, half)
+	for z in range(apron.position.y, apron.end.y):
+		for x in range(apron.position.x, apron.end.x):
 			var c: Vector2i = Vector2i(x, z)
 			if nav_grid.terrain.in_bounds(c) and nav_grid.is_cell_blocked_by_building(c):
+				return false
+	if building_manager != null:
+		var plot: Rect2i = Rect2i(cell, footprint)
+		# Cheap reject first: an apron never reaches farther than depth plus the
+		# largest footprint (8) from its building's origin cell.
+		var near: Rect2i = plot.grow(depth + 9)
+		for b in building_manager.buildings:
+			if not is_instance_valid(b) or b.health <= 0:
+				continue
+			if not near.has_point(b.cell):
+				continue
+			if Building.entrance_apron_rect(b.cell, b.footprint, b.orientation, depth,
+					half).intersects(plot):
 				return false
 	return true
 
@@ -678,10 +707,26 @@ func order_forester(units: Array[Unit], forester: Forester) -> void:
 func order_train(building: TrainingBuilding, units: Array[Unit]) -> void:
 	if building == null or not is_instance_valid(building) or not building.is_usable():
 		return
+	# A line holds three windings around the building (2026-11-23). Braves that
+	# do not fit any more go to the next camp of the same kind with room, nearest
+	# first; with every line full they keep what they were doing.
+	var camps: Array[TrainingBuilding] = [building]
+	if building.tribe != null:
+		var others: Array = []
+		for b in building.tribe.buildings:
+			if b != building and is_instance_valid(b) and b is TrainingBuilding \
+					and b.get_script() == building.get_script() and b.is_usable():
+				others.append([b.center_world().distance_squared_to(building.center_world()), b])
+		others.sort_custom(func(a: Array, c: Array) -> bool: return float(a[0]) < float(c[0]))
+		for entry in others:
+			camps.append(entry[1])
 	for unit in units:
 		if unit is Brave and unit.state != Unit.State.DEAD \
 				and _unit_active(unit) and unit.tribe_id == building.tribe_id:
-			(unit as Brave).order_train(building)
+			for camp in camps:
+				if unit in camp.incoming or camp.has_queue_room():
+					(unit as Brave).order_train(camp)
+					break
 
 
 ## Switches a spell's charging on or off (right-click on its button in the

@@ -434,6 +434,14 @@ func test_fragile_construction_site() -> void:
 	var tribe: Tribe = w.tribes[1]
 	var site: Building = w.commands.place_building(tribe, HUT_SCENE, Vector2i(60, 60))
 	check(site != null and site.under_construction, "construction site placed")
+	# A bare plot (no wood built in) takes no damage at all (2026-11-23) ...
+	site.apply_destruction_stages(1)
+	check(site.health > 0 and site in tribe.buildings, "a bare plot ignores the hit")
+	# ... from the first built-in wood on it is a fragile scaffold.
+	for c in site._flatten_remaining.keys():
+		site.work_flatten(c, 100.0)
+	site.wood_delivered = 1
+	site.add_build_progress(0.01)
 	site.apply_destruction_stages(1)
 	check(site.health == 0, "one staged spell hit levels a construction site")
 	check(not site.under_construction,
@@ -650,6 +658,58 @@ func test_train_tick_enrolls_braves() -> void:
 	check(braves_left >= AIState.min_economy_braves(12) - AIState.train_batch(12),
 		"a minimum economy crew stays out of training")
 
+	ai.free()
+	_free_world(w)
+
+
+## Nutzervorgabe 2026-11-23: die KI schickt nicht mehr so viele Leute an EIN
+## Ausbildungsgebaeude (AI_TRAIN_QUEUE_PER_CAMP), verteilt auf alle Lager einer Art
+## und plant lieber ein weiteres Lager, wenn alle Schlangen eine Weile voll stehen.
+func test_ai_keeps_training_lines_short_and_builds_another_camp() -> void:
+	var w: Dictionary = _make_world()
+	var ai_tribe: Tribe = w.tribes[1]
+	var anchor: Vector2i = Vector2i(64, 64)
+	var camp: TrainingBuilding = w.building_manager.place(
+		WARRIOR_CAMP_SCENE, ai_tribe, anchor, 0, true) as TrainingBuilding
+	for i in range(80):
+		w.unit_manager.spawn_unit(BRAVE_SCENE, 1,
+			w.nav.cell_to_world(anchor + Vector2i(10 + i % 10, i / 10 - 4)))
+	var ai: AIController = _make_ai(w, ai_tribe, anchor)
+	for t in range(6):
+		ai._tick_train(ai.build_tick_cache())
+	check(camp.queue_limit == Balance.AI_TRAIN_QUEUE_PER_CAMP, "the AI caps its own line")
+	check(camp.queue_load() == Balance.AI_TRAIN_QUEUE_PER_CAMP,
+		"six batches, but only %d braves at the one camp (got %d)"
+			% [Balance.AI_TRAIN_QUEUE_PER_CAMP, camp.queue_load()])
+	# The line stays full: after AI_CAMP_BACKLOG_TICKS ticks the AI wants a second camp.
+	var backlog: Dictionary = {}
+	for t in range(Balance.AI_CAMP_BACKLOG_TICKS):
+		ai._tick_count += 1
+		backlog = ai._camp_backlog(ai.build_tick_cache())
+	check(backlog.get(&"warrior_camp", false), "full lines for a while = backlog")
+	var counts: Dictionary = {"warrior_camp": 1, "firewarrior_camp": 1, "temple": 1,
+		"brave_stream": 0.0}
+	check(AIState.missing_camp_kind(counts) == &"", "without backlog: one camp each is enough")
+	counts["camp_backlog"] = backlog
+	check(AIState.missing_camp_kind(counts) == &"warrior_camp", "with backlog: another barracks")
+	# A second barracks: the batch spreads over both lines, each capped.
+	var camp2: TrainingBuilding = w.building_manager.place(
+		WARRIOR_CAMP_SCENE, ai_tribe, anchor + Vector2i(0, 14), 0, true) as TrainingBuilding
+	for t in range(4):
+		ai._tick_train(ai.build_tick_cache())
+	check(camp2.queue_load() > 0 and camp2.queue_load() <= Balance.AI_TRAIN_QUEUE_PER_CAMP
+		and camp.queue_load() <= Balance.AI_TRAIN_QUEUE_PER_CAMP,
+		"the second line fills too, both capped (%d / %d)" % [camp.queue_load(), camp2.queue_load()])
+	# While that camp is still a site, the backlog does not ask for a third.
+	ai._tick_count += 1
+	ai._camp_full_ticks.clear()
+	var site: Building = w.building_manager.place(
+		WARRIOR_CAMP_SCENE, ai_tribe, anchor + Vector2i(16, 14), 0, false)
+	for t in range(Balance.AI_CAMP_BACKLOG_TICKS):
+		ai._tick_count += 1
+		backlog = ai._camp_backlog(ai.build_tick_cache())
+	check(not backlog.get(&"warrior_camp", false), "a barracks under construction: no further one")
+	check(site != null, "(site placed)")
 	ai.free()
 	_free_world(w)
 
@@ -941,9 +1001,7 @@ func test_golem_decisions_are_pure_and_follow_the_spec() -> void:
 	check(AIGolems.sit_decision(true, true, 1, 99) == 0, "seated with a foe in reach: stay")
 	check(AIGolems.sit_decision(true, true, 0, Balance.AI_GOLEM_STAND_TICKS - 1) == 0, "calm only briefly: stay")
 	check(AIGolems.sit_decision(true, true, 0, Balance.AI_GOLEM_STAND_TICKS) == -1, "calm long enough: get up")
-	var gen: Unit = w.unit_manager.spawn_unit(GENESIS_SCENE, 0, Vector3(60, 5, 60))
-	check(AIGolems.marches_with_wave(g) and not AIGolems.marches_with_wave(gen),
-		"the Genesis golem guards the village, the others march")
+	# (Who marches with the wave: AIGolems.joins_wave, test_ai_pulls_back_a_dying_golem_... below.)
 	_free_world(w)
 
 
@@ -2928,5 +2986,60 @@ func test_plot_sweep_shares_the_cell_budget_between_anchors() -> void:
 	ai._find_supplied_plot(Vector2i(64, 64), AIController.BUILD_FOOTPRINTS[&"hut"], 0)
 	ai._plot_sweep = false
 	check(AIController.dbg_plot_cells <= 101, "one anchor stops at its share (%d cells)" % AIController.dbg_plot_cells)
+	ai.free()
+	_free_world(w)
+
+
+## KI und Golems (Nutzervorgabe 2026-11-23): ein Golem, der fern der Basis zu sterben droht, zieht sich
+## heim zurueck und ist aus allen Maerschen heraus, bis er geheilt ist. Der Genesisgolem zieht mit der Welle,
+## solange daheim Ruhe ist und er gesund ist; untaetig faellt er Holz und bringt es zu Baustellen.
+func test_ai_pulls_back_a_dying_golem_and_puts_the_genesis_golem_to_work() -> void:
+	check(AIGolems.retreat_decision(0.2, false, true) == 1, "far from home and nearly dead: home")
+	check(AIGolems.retreat_decision(0.2, false, false) == 0, "at home she fights on")
+	check(AIGolems.retreat_decision(0.5, true, true) == 0, "on the way, not healed yet: stays out")
+	check(AIGolems.retreat_decision(Balance.AI_GOLEM_RETURN_HP_SHARE, true, true) == -1, "healed: back in")
+	var w: Dictionary = _make_world()
+	var anchor: Vector2i = Vector2i(30, 30)
+	var ai: AIController = _make_ai(w, w.tribes[1], anchor)
+	var home: Vector3 = w.nav.cell_to_world(anchor)
+	var far: Vector3 = home + Vector3(ai._defend_radius() + 20.0, 0, ai._defend_radius() + 20.0)
+	check(far.x < 120.0, "(the far spot lies on the map: %.0f)" % far.x)
+	var g: Golem = w.unit_manager.spawn_unit(GOLEM_SCENE, 1, far) as Golem
+	g.health = int(float(g.max_health) * 0.2)
+	var cache = ai.build_tick_cache()
+	ai.golem_ai.tick(cache.golems, cache, {})
+	check(ai.golem_ai.is_retreating(g) and g.state == Unit.State.MOVE and not g.move_aggressive,
+		"a dying golem far out marches home, without fighting on the way")
+	check(not ai.golem_ai.joins_wave(g) and not ai._marching_only(cache.army).has(g),
+		"and is left out of the wave and every march")
+	g.health = g.max_health
+	cache = ai.build_tick_cache()
+	ai.golem_ai.tick(cache.golems, cache, {})
+	check(not ai.golem_ai.is_retreating(g) and ai.golem_ai.joins_wave(g), "healed: back in the army")
+	# The Genesis golem and the wave.
+	var gen: GenesisGolem = w.unit_manager.spawn_unit(GENESIS_SCENE, 1, home + Vector3(6, 0, 0)) as GenesisGolem
+	cache = ai.build_tick_cache()
+	ai.golem_ai.tick(cache.golems, cache, {})
+	check(ai.golem_ai.joins_wave(gen), "home quiet and he is healthy: he joins the wave")
+	ai.golem_ai.tick(cache.golems, cache, {"count": 3})
+	check(not ai.golem_ai.joins_wave(gen), "a threat at home: he stays and defends")
+	gen.health = int(float(gen.max_health) * 0.5)
+	ai.golem_ai.tick(cache.golems, cache, {})
+	check(not ai.golem_ai.joins_wave(gen), "hurt: he stays home")
+	gen.health = gen.max_health
+	# Idle at home: he fells wood in a grove near the base.
+	for i in range(12):
+		w.tree_manager.spawn_tree(anchor + Vector2i(12 + 3 * (i % 4), -4 + 3 * (i / 4)), TreeResource.MAX_STAGE)
+	ai._grove_cache_tick = -100000   # (fresh grove search)
+	cache = ai.build_tick_cache()
+	ai.golem_ai.tick(cache.golems, cache, {})
+	check(gen.is_harvesting(), "idle, he is sent to fell wood")
+	# Carrying wood, with a site that lacks some: he takes it there.
+	var site: Building = w.building_manager.place(HUT_SCENE, w.tribes[1], anchor + Vector2i(-12, 6), 0, false)
+	check(site != null and site.wood_needed_total() > 0, "(an own hut site that lacks wood)")
+	gen.add_wood(Balance.AI_GENESIS_DELIVER_MIN)
+	cache = ai.build_tick_cache()
+	ai.golem_ai.tick(cache.golems, cache, {})
+	check(gen.deliver_target == site and not gen.is_harvesting(), "with %d wood he carries it to the site" % gen.total_wood())
 	ai.free()
 	_free_world(w)

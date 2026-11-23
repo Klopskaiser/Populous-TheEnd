@@ -131,17 +131,25 @@ func _vehicle_at(tribe: Tribe, target: Vector3, ctx: SpellContext) -> CrewedVehi
 	return best
 
 
+## Measured to the rim of a big body's target circle (a golem, 2026-11-23): a click on his body
+## hits him even far from his middle. Ties (inside his circle) go to the nearer middle.
 func _nearest_enemy(tribe: Tribe, target: Vector3, ctx: SpellContext) -> Unit:
 	if ctx.unit_manager == null:
 		return null
 	var best: Unit = null
 	var best_d: float = INF
-	for u in ctx.unit_manager.get_units_in_radius(target, TARGET_RADIUS):
+	var best_c: float = INF
+	for u in ctx.unit_manager.get_units_in_radius(target,
+			TARGET_RADIUS + ctx.unit_manager.max_target_radius()):
 		if u.state == Unit.State.DEAD or u.tribe_id == tribe.id:
 			continue
-		var d: float = Vector2(u.position.x - target.x, u.position.z - target.z).length()
-		if d < best_d:
+		var c: float = Vector2(u.position.x - target.x, u.position.z - target.z).length()
+		var d: float = UnitManager.rim_dist(target, u)
+		if d > TARGET_RADIUS:
+			continue
+		if d < best_d or (d == best_d and c < best_c):
 			best_d = d
+			best_c = c
 			best = u
 	return best
 

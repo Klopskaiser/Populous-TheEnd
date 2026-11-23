@@ -348,3 +348,51 @@ func test_equal_demand_goes_to_the_nearer_target() -> void:
 		"bei gleichem Bedarf gewinnt die kuerzere Strecke - ein Dorf gleich hungriger "
 			+ "Huetten behaelt kurze Wege")
 	_free_world(w)
+
+
+# --- KI schafft Holz gezielt zu Baustellen (Nutzervorgabe 2026-11-23) --------------
+
+## Holz liegt auf der einen Basisseite (Regal), gebaut wird auf der anderen: die
+## Bauarbeiter holen nie aus Regalen und Stapel nur bis 24 m um die Baustelle. Die KI
+## schickt jetzt Nachschub-Braves fuer jede Baustelle, der Holz fehlt, sobald es einen
+## solchen Vorrat gibt - nicht mehr nur fuer blockierte, und auch dann, wenn ihre
+## Faelltrupps vollzaehlig sind (vorher lief der Nachschub nur, solange welche fehlten).
+func test_ai_carries_stock_from_the_far_side_to_its_sites() -> void:
+	var w: Dictionary = _make_world()
+	var anchor: Vector2i = Vector2i(64, 64)
+	var site: Building = w.building_manager.place(HUT_SCENE, w.tribe, Vector2i(84, 62), 0, false)
+	var depot: Building = w.building_manager.place(DEPOT_SCENE, w.tribe, Vector2i(44, 64), 0, true)
+	for i in range(14):
+		w.unit_manager.spawn_unit(BRAVE_SCENE, 1, w.nav.cell_to_world(anchor + Vector2i(i % 7, i / 7)))
+	# A grove far south, so the AI fields its felling crew first.
+	for i in range(16):
+		w.tree_manager.spawn_tree(Vector2i(56 + (i % 4) * 3, 96 + (i / 4) * 3), TreeResource.MAX_STAGE)
+	var ai: AIController = AIController.new()
+	ai.setup(w.tribe, w.commands, w.unit_manager, w.building_manager, w.tree_manager, w.nav, anchor)
+	var cache: AIController.TickCache = ai.build_tick_cache()
+	check(not site.wood_stalled, "the site is not stalled (nobody gave up on it)")
+	check(not ai._supply_targets(cache).has(site), "no stock anywhere: no supply target")
+	ai._tick_count = Balance.AI_WOOD_TICK_INTERVAL * 10
+	ai._tick_wood_logistics(cache)
+	check(ai._wood_crews.size() >= AIState.wood_crew_count(cache.brave_count),
+		"the felling crews are complete (%d)" % ai._wood_crews.size())
+	check(ai._supply_crew_for(site).is_empty(), "nothing to carry yet")
+	(depot as WoodDepot).store_wood(20)
+	cache = ai.build_tick_cache()
+	check(ai._supply_targets(cache).has(site), "stock in a rack on the far side: the site is a supply target")
+	# The crew target is met - before 2026-11-23 the supply never ran in that case.
+	ai._tick_count += Balance.AI_WOOD_TICK_INTERVAL
+	ai._tick_wood_logistics(cache)
+	var crew: Dictionary = ai._supply_crew_for(site)
+	check(not crew.is_empty(), "a supply crew is on its way")
+	if not crew.is_empty():
+		var n: int = (crew["units"] as Array).size()
+		check(n == clampi(int(ceil(float(Balance.HUT_WOOD_COST) / float(Brave.CARRY_CAPACITY))),
+			1, Balance.AI_SUPPLY_BRAVES_PER_TARGET), "as many carriers as trips are missing (%d)" % n)
+	var ticks: int = _run(w, func() -> bool: return site.wood_delivered >= Balance.HUT_WOOD_COST)
+	check(ticks < MAX_TICKS, "the rack's wood funds the whole site (%d ticks, %d wood)"
+		% [ticks, site.wood_delivered])
+	check((depot as WoodDepot).stored_wood() >= 20 - Balance.HUT_WOOD_COST - Brave.CARRY_CAPACITY,
+		"no more than one load too many left the rack (%d left)" % (depot as WoodDepot).stored_wood())
+	ai.free()
+	_free_world(w)

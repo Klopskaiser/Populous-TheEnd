@@ -380,10 +380,16 @@ static func _may_add_shop(counts: Dictionary, have: int) -> bool:
 static func missing_camp_kind(counts: Dictionary) -> StringName:
 	var targets: Dictionary = camp_targets(float(counts.get("brave_stream", 0.0)),
 		counts.get("army_shares", []) as Array)
+	# Lines full for a while (2026-11-23, "camp_backlog" from the controller): one
+	# camp more of that kind rather than ever longer queues.
+	var backlog: Dictionary = counts.get("camp_backlog", {}) as Dictionary
 	var best: StringName = &""
 	var worst: int = 0
 	for kind in [&"warrior_camp", &"firewarrior_camp", &"temple"]:
-		var short: int = int(targets[kind]) - int(counts.get(kind, 0))
+		var target: int = int(targets[kind])
+		if backlog.get(kind, false):
+			target = maxi(target, mini(int(counts.get(kind, 0)) + 1, Balance.AI_MAX_CAMPS_PER_KIND))
+		var short: int = target - int(counts.get(kind, 0))
 		if short > worst:
 			worst = short
 			best = kind

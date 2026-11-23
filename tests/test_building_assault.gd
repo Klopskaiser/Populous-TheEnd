@@ -589,3 +589,57 @@ func test_storm_ejects_workshop_crew_alive() -> void:
 	ws.begin_storm()
 	check(ws.occupants.is_empty(), "workshop crew ejected on the storm")
 	_free_world(w)
+
+
+# --- Festhaengen am Gebaeude (Bugfix 2026-11-23, diag_building_stuck_village) -----
+
+## Lowers one cell (all four corner vertices) into the sea.
+func _flood_cell(w: Dictionary, c: Vector2i) -> void:
+	for dz in range(2):
+		for dx in range(2):
+			w.td.set_vertex_height(c.x + dx, c.y + dz, -2.0)
+	w.nav.update_region(Rect2i(c - Vector2i.ONE, Vector2i(3, 3)))
+
+
+## Die Tuer liegt im Wasser (Ufergebaeude): die Stuermer standen 2,7 m davor und
+## kamen nie in RAID_ENTER_RANGE. Jetzt gehen sie am begehbaren Zugang hinein.
+func test_storm_enters_a_building_whose_door_is_in_the_water() -> void:
+	var w: Dictionary = _make_world()
+	var hut: Building = w.bm.place(HUT_SCENE, w.tribe1, Vector2i(40, 40), 0, true)
+	var e: Vector2i = hut.entrance_cell()
+	for dz in range(0, 3):
+		for dx in range(-2, 3):
+			_flood_cell(w, e + Vector2i(dx, dz))
+	check(not w.nav.is_cell_walkable(e), "the door cell is water")
+	var squad: Array[Unit] = []
+	for i in range(5):
+		var wr: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, Vector3(30 + i, 0, 30))
+		wr.order_attack_building(hut)
+		squad.append(wr)
+	var razed: int = _run(w, squad, func() -> bool: return hut.health <= 0)
+	check(razed < 600, "the storm gets in through the walkable approach and levels it (%d ticks)" % razed)
+	_free_world(w)
+
+
+## Ein Verteidiger, an den niemand herankommt (Felsen im Wasser vor der Tuer),
+## hielt als "Torwache" jeden Sturm auf, und die Krieger standen am Ufer fest.
+func test_unreachable_defender_neither_guards_the_door_nor_binds_the_attackers() -> void:
+	var w: Dictionary = _make_world()
+	var hut: Building = w.bm.place(HUT_SCENE, w.tribe1, Vector2i(40, 40), 0, true)
+	var e: Vector2i = hut.entrance_cell()
+	for dz in range(2, 8):
+		for dx in range(-3, 4):
+			if dz >= 4 and dz <= 5 and absi(dx) <= 1:
+				continue   # the rock
+			_flood_cell(w, e + Vector2i(dx, dz))
+	var guard: Unit = w.unit_manager.spawn_unit(BRAVE_SCENE, 1, w.nav.cell_to_world(e + Vector2i(0, 4)))
+	check(not hut.has_entrance_threat(), "a defender nobody can walk up to is no door guard")
+	var squad: Array[Unit] = []
+	for i in range(6):
+		var wr: Unit = w.unit_manager.spawn_unit(WARRIOR_SCENE, 0, Vector3(30 + i, 0, 36))
+		wr.order_move(hut.center_world(), false, true)   # attack-move, like an AI wave
+		squad.append(wr)
+	var razed: int = _run(w, squad, func() -> bool: return hut.health <= 0)
+	check(razed < 600, "the attackers storm the hut instead of staring at the rock (%d ticks)" % razed)
+	check(is_instance_valid(guard) and guard.state != Unit.State.DEAD, "(the guard on the rock is unharmed)")
+	_free_world(w)

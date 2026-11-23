@@ -417,3 +417,48 @@ func test_no_state_falls_through_to_idle_while_moving() -> void:
 		brave.free()
 	check(covered == Unit.State.values().size() - deliberately_idle.size(),
 		"every state is either handled or on the exception list")
+
+
+## Nutzervorgabe 2026-11-23: nach der dritten Reihe geht niemand mehr in die
+## Schlange (vorher lief die Platzsuche dort aus und alle weiteren Braves standen
+## als Knaeuel auf dem letzten Punkt). Ueberzaehlige gehen zum naechsten Lager
+## derselben Art mit Platz; sind alle voll, machen sie weiter, was sie taten.
+func test_queue_stops_after_the_third_winding() -> void:
+	var w: Dictionary = _make_world()
+	var camp: WarriorCamp = w.building_manager.place(
+		WARRIOR_CAMP_SCENE, w.tribe, Vector2i(30, 30), 0, true) as WarriorCamp
+	var cap: int = camp.queue_capacity()
+	# The last slot still lies on the third winding, distinct from the one before.
+	var last: Vector3 = camp.queue_slot_world(cap - 1)
+	var before: Vector3 = camp.queue_slot_world(cap - 2)
+	check(last.distance_to(before) > 0.5, "every slot up to the capacity is its own spot")
+	var fp: Vector2i = camp.footprint
+	var outer: float = TrainingBuilding.QUEUE_MARGIN \
+		+ float(TrainingBuilding.QUEUE_MAX_WINDINGS - 1) * TrainingBuilding.QUEUE_WINDING_SPACING
+	check(cap > 2 * (fp.x + fp.y) and cap < int(ceil(2.0 * TrainingBuilding.QUEUE_MAX_WINDINGS
+		* (float(fp.x + fp.y) + 4.0 * outer))), "capacity = three windings (%d)" % cap)
+	var braves: Array[Unit] = []
+	for i in range(cap + 5):
+		braves.append(_spawn_brave(w, Vector2i(10 + i % 40, 60 + i / 40)))
+	w.commands.order_train(camp, braves)
+	check(camp.incoming.size() == cap, "the line takes exactly its capacity (%d of %d)"
+		% [camp.incoming.size(), braves.size()])
+	var left_out: int = 0
+	for b in braves:
+		if (b as Brave).train_target == null:
+			left_out += 1
+			check(b.state != Unit.State.TRAIN, "a brave left out does not queue")
+	check(left_out == 5, "five braves stay out (got %d)" % left_out)
+	# A second camp of the same kind takes the overflow.
+	var camp2: WarriorCamp = w.building_manager.place(
+		WARRIOR_CAMP_SCENE, w.tribe, Vector2i(60, 30), 0, true) as WarriorCamp
+	w.commands.order_train(camp, braves)
+	check(camp.incoming.size() == cap and camp2.incoming.size() == 5,
+		"the overflow goes to the next camp of the same kind (%d / %d)"
+			% [camp.incoming.size(), camp2.incoming.size()])
+	# An owner limit (the AI) shortens the line.
+	camp2.queue_limit = 6
+	check(camp2.queue_max() == 6 and camp2.has_queue_room(), "queue_limit caps the line (5 of 6)")
+	camp2.queue_limit = 5
+	check(not camp2.has_queue_room(), "5 of 5: full")
+	_free_world(w)

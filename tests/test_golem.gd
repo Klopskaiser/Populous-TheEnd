@@ -1655,12 +1655,12 @@ func test_catapult_hits_hurt_more_the_bigger_the_golem_is() -> void:
 	check(Golem.siege_damage_for_height(shock, Balance.GOLEM_HEIGHT) == shock
 		and Golem.siege_damage_for_height(shock, 79.9) == Balance.GOLEM_SIEGE_DAMAGE_MAX
 		and Balance.GOLEM_SIEGE_DAMAGE_MAX == 80,
-		"from the plain 15 at the starting size up to 80 just below 80 m")
+		"from the plain 20 at the starting size (2026-11-23, before 15) up to 80 just below 80 m")
 	check(g.siege_shock_damage(shock, 0.0) == shock, "a fresh golem takes the plain shock damage")
 	_level_to(g, 7)
 	g.health = g.max_health
 	var expect7: int = Golem.siege_damage_for_height(shock, g.height_m())
-	check(expect7 > shock and expect7 == 26, "level 7 (16,9 m): %d per direct hit" % expect7)
+	check(expect7 > shock and expect7 == 30, "level 7 (16,9 m): %d per direct hit (26 with the old 15)" % expect7)
 	# A real shot: the stone lands 2 m beside his centre — inside his body circle (2,8 m).
 	var shot: SiegeShot = SiegeShot.new()
 	shot.setup(1, Vector3(40, 5, 60), g.position + Vector3(2.0, 0, 0), null, w.um, w.td, w.bm)
@@ -3699,34 +3699,52 @@ func test_key_v_toggles_sitting() -> void:
 	_free_world(w)
 
 
-## Sitzplatz: die Sitzflaeche beruehrt kein Gebaeude; ist ihr Platz belegt, rueckt
-## sie bis zu einem halben Koerperradius aus, sonst setzt sie sich nicht.
-func test_no_seat_on_buildings() -> void:
+## Hinsetzen schaut nur nach dem Gelaende (Nutzervorgabe 2026-11-23, wie das Hinsetzen aus dem Krebsgang):
+## Gebaeude an oder unter der Sitzflaeche halten sie nicht ab und lassen sie nicht ausruecken; feindliche
+## Gebaeude darunter nehmen dieselben Sitzschaden-Ticks wie aus dem Krebsgang (je Tick den halben
+## Sitzschaden), eigene nichts. Das Gelaende laesst sie weiter bis zu einem halben Koerperradius ausruecken.
+func test_sit_down_looks_at_terrain_only() -> void:
 	var w: Dictionary = _make_world()
 	var g: Golem = _sit_golem(w, 0, Vector3(64, 5, 90))
 	var seat: Vector3 = g.position - g.heading() * g.seat_back_m()
 	check(g.seat_free(seat, g.heading(), g.seat_half_extent()), "her seat is free on open ground")
-	# A hut whose corner reaches just into the seat: she moves aside.
-	var half: Vector2 = g.seat_half_extent()
-	var hut: Building = w.bm.place(HUT_SCENE, w.t1,
-		Vector2i(int(floor(seat.x + half.x - 0.5)), int(floor(seat.z - 1.0))), 0, true)
-	check(hut != null, "a hut stands at the edge of the seat")
-	check(not g.seat_free(seat, g.heading(), g.seat_half_extent()), "the seat touches it")
+	# An enemy hut under the middle of the seat, an own hut at its edge (as in the crab-walk test).
+	var hut: Building = w.bm.place(HUT_SCENE, w.t1, Vector2i(int(seat.x) - 1, int(seat.z) - 1), 0, true)
+	var own: Building = w.bm.place(HUT_SCENE, w.t0, Vector2i(int(seat.x) - 4, int(seat.z) - 1), 0, true)
+	check(hut != null and own != null, "an enemy hut under the seat, an own one at its edge")
+	check(not g.seat_free(seat, g.heading(), g.seat_half_extent()), "the seat touches them")
 	var feet: Vector3 = g.find_seat()
-	check(feet != Vector3.INF and _flat(feet, g.position) <= g.trample_radius() * 0.5 + 0.01,
-		"a free seat within half her body radius (%.2f m aside)" % (_flat(feet, g.position) if feet != Vector3.INF else -1.0))
-	var start: Vector3 = g.position
-	check(_sit_until_seated(w, g), "she sits down there")
-	check(_flat(g.position + g.heading() * g.seat_back_m(), feet) < 0.05,
-		"her feet moved onto the free spot while she bent down")
-	check(g.seat_free(g.position, g.heading(), g.seat_half_extent()), "the seat touches no building")
-	check(_flat(start, feet) > 0.01, "she did have to move")
-	# A hut right under the middle of the seat: no seat within reach, the order is ignored.
+	check(feet != Vector3.INF and _flat(feet, g.position) < 0.01, "find_seat: her own spot, buildings do not count")
+	check(_flat(g.seat_spot_near(seat), seat) < 0.01, "the same spot the crab walk would sit down on")
+	var hp: int = hut.health
+	var own_hp: int = own.health
+	g.sit_attacks_enabled = false   # only the sit damage here
+	check(w.commands.order_golem_sit([g] as Array[Unit]) == 1, "the sit order (key V, AI) takes")
+	var ticks: int = 0
+	while not (g.is_sitting() and not g.is_switching_stance()) and ticks < 400:
+		_tick_world(w)
+		ticks += 1
+	check(g.is_sitting() and _flat(g.position, seat) < 0.05, "she sits on the huts (%.2f m off)" % _flat(g.position, seat))
+	check(g.sit_buildings().has(hut) and not g.sit_buildings().has(own), "the enemy hut is under her, her own does not count")
+	var dmg: int = g.building_damage_for(Balance.GOLEM_SIT_DAMAGE_MULT * g.trample_damage())
+	check(hut.health == hp - dmg, "the enemy hut takes half the sit damage at once (%d -> %d)" % [hp, hut.health])
+	for i in range(int(Balance.GOLEM_SIT_DAMAGE_INTERVAL / TICK) + 1):
+		_tick_world(w)
+	check(hut.health == hp - 2 * dmg, "and again after 5 s, like from the crab walk (%d)" % hut.health)
+	check(own.health == own_hp, "her own hut nothing")
+	# The terrain still counts: a pillar under her left hand moves her aside on the way down.
 	var g2: Golem = _sit_golem(w, 0, Vector3(30, 5, 50))
-	var seat2: Vector3 = g2.position - g2.heading() * g2.seat_back_m()
-	w.bm.place(HUT_SCENE, w.t1, Vector2i(int(seat2.x) - 1, int(seat2.z) - 1), 0, true)
-	check(g2.find_seat() == Vector3.INF and not g2.sit_down() and not g2.is_sit_locked(),
-		"a hut under the middle of the seat: she does not sit")
+	var fwd2: Vector3 = g2.heading()
+	var seat2: Vector3 = g2.position - fwd2 * g2.seat_back_m()
+	_set_ground(w, g2.sit_contacts(seat2, fwd2)[2], 0.5, 45.0)
+	check(not g2.sit_pose_ok(seat2, fwd2), "a cliff under her hand where she stands")
+	var feet2: Vector3 = g2.find_seat()
+	check(feet2 != Vector3.INF and _flat(feet2, g2.position) > 0.01 \
+			and _flat(feet2, g2.position) <= g2.trample_radius() * 0.5 + 0.01,
+		"a possible seat within half her body radius (%.2f m aside)" % (_flat(feet2, g2.position) if feet2 != Vector3.INF else -1.0))
+	check(_sit_until_seated(w, g2), "she sits down there")
+	check(_flat(g2.position + g2.heading() * g2.seat_back_m(), feet2) < 0.05,
+		"her feet moved onto the possible spot while she bent down")
 	_free_world(w)
 
 
@@ -6368,3 +6386,144 @@ func test_kick_lanes_leave_no_gap_in_the_middle() -> void:
 		check(worst <= Balance.GOLEM_KICK_LANE_SLACK,
 			"%s: no gap between the lanes at any size (worst %.3f m at %.1f m)" % [path.get_file(), worst, at])
 		g.free()
+
+
+# --- Klein gegen gross, Reichweite gegen Golems (2026-11-23) ------------------------
+
+func _big_dummy(w: Dictionary, tribe_id: int, at: Vector3, height: float) -> Golem:
+	var g: Golem = _golem(w, tribe_id, at)
+	while g.height_m() < height:
+		g._credit_kill()
+	g._stretch_queued = false
+	g.snap_shown_size()
+	g.max_health = 100000
+	g.health = 100000
+	return g
+
+
+## Holds a golem in place and idle (it neither walks nor keeps a target).
+func _pin(g: Golem, at: Vector3) -> void:
+	g.state = Unit.State.IDLE
+	g.attack_target = null
+	g.position = at
+	g._sync_soa_pos()
+
+
+## Bugmeldung 2026-11-23: kleine Golems konnten grosse nicht angreifen. Sie massen Reichweite und
+## Trefferzonen zur Mitte des Ziels, der Abstand der Koerper liess sie aber nie so nah heran — mit
+## Angriffsbefehl standen sie davor und schlugen nie zu, ohne Befehl bemerkten sie den Riesen nicht.
+## Jetzt zaehlt der Rand seines Zielkreises (Angriff, Zielsuche, Trefferzonen).
+func test_a_small_golem_strikes_a_big_one() -> void:
+	for ordered in [true, false]:
+		var w: Dictionary = _make_world()
+		var at: Vector3 = Vector3(60, 5, 60)
+		var big: Golem = _big_dummy(w, 0, at, 31.0)
+		var small: Golem = _golem(w, 1, at + Vector3(big.target_radius() + 6.0, 0, 0))
+		small.max_health = 100000
+		small.health = 100000
+		check(small._flat_dist(small.position, big.position) > small.aggro_radius()
+			and small.reach_dist_to(big) <= small.aggro_radius(),
+			"(her middle lies beyond the small one's aggro radius, her rim within)")
+		if ordered:
+			small.order_attack(big)
+		for i in range(200):
+			_pin(big, at)
+			_tick_world(w)
+		var dealt: int = int(big.damage_taken.get(&"golem", 0))
+		var label: String = "ordered" if ordered else "on her own"
+		check(small.attack_target == big and small.reach_dist_to(big) <= small.reach(),
+			"%s: the 4,7-m golem stands within reach of the 31-m one's rim (%.1f m)" % [label, small.reach_dist_to(big)])
+		check(dealt > 0, "%s: and strikes her (%d damage in 20 s)" % [label, dealt])
+		_free_world(w)
+
+
+## Nutzervorgabe 2026-11-23: Katapulte und die Feuerkrieger an Deck eines Luftschiffs reichen gegen
+## Golems weiter — je volle 10 m Golemhoehe +2 m, nur gegen Golems.
+func test_catapult_and_deck_firewarriors_reach_farther_at_big_golems() -> void:
+	var w: Dictionary = _make_world()
+	var at: Vector3 = Vector3(64, 5, 64)
+	var g: Golem = _golem(w, 1, at)
+	check_near(Golem.ranged_reach_bonus(g), 0.0, "a fresh golem (4,7 m): no bonus")
+	check_near(Golem.ranged_reach_bonus(null), 0.0, "nothing: no bonus")
+	g = _big_dummy(w, 1, at + Vector3(0, 0, 30), 31.0)
+	check_near(Golem.ranged_reach_bonus(g), 6.0, "%.1f m: +6 m" % g.height_m())
+	var brave: Unit = _spawn(w, BRAVE_SCENE, 1, at)
+	check_near(Golem.ranged_reach_bonus(brave), 0.0, "a brave: no bonus")
+	# The catapult: 16 m, +6 m against her.
+	var cat: SiegeEngine = _spawn(w, CATAPULT_SCENE, 0, Vector3(20, 5, 20)) as SiegeEngine
+	for k in range(2):
+		var crew: Unit = _spawn(w, BRAVE_SCENE, 0, cat.position + Vector3(1, 0, 0))
+		crew.order_crew(cat)
+		for i in range(300):
+			_tick_world(w)
+			if crew.siege_boarded:
+				break
+	check(cat.active_crew_count() >= 2, "(the catapult is manned)")
+	var spot: Vector3 = cat.position + Vector3(cat.fire_range() + 5.0, 0, 0)
+	brave.position = cat.position + Vector3(0, 0, cat.fire_range() + 5.0)
+	brave._sync_soa_pos()
+	_pin(g, spot)
+	w.um.tick(TICK)
+	check_near(cat.fire_range_vs(g), cat.fire_range() + 6.0, "the catapult's range against her: 16 + 6 m")
+	check(cat._nearest_enemy_unit(cat.fire_range()) == g, "she stands 21 m away: in its range")
+	_pin(g, cat.position + Vector3(cat.fire_range() + 6.5, 0, 0))
+	w.um.tick(TICK)
+	check(cat._nearest_enemy_unit(cat.fire_range()) == null, "22,5 m: out of it (and the brave at 21 m too)")
+	var hurt: bool = false
+	for i in range(150):
+		_pin(g, spot)
+		brave.position = cat.position + Vector3(0, 0, cat.fire_range() + 5.0)
+		brave._sync_soa_pos()
+		_tick_world(w)
+		if int(g.damage_taken.get(&"siege", 0)) + int(g.damage_taken.get(&"other", 0)) > 0:
+			hurt = true
+			break
+	check(hurt, "it fires at her from 21 m and hits (%s)" % str(g.damage_taken))
+	_free_world(w)
+	# The airship's deck firewarriors: 9 + 3 m to her rim, +6 m against her.
+	var w2: Dictionary = _make_world()
+	var ship: Airship = _spawn(w2, AIRSHIP_SCENE, 0, Vector3(40, 5, 64)) as Airship
+	for i in range(80):
+		_tick_world(w2)
+	var fw: Unit = _spawn(w2, load("res://scenes/units/firewarrior.tscn"), 0, Vector3(41, 5, 64))
+	fw.order_crew(ship)
+	for i in range(300):
+		_tick_world(w2)
+		if fw.siege_boarded:
+			break
+	check(fw.siege_boarded, "(a firewarrior on deck)")
+	var g2: Golem = _big_dummy(w2, 1, Vector3(100, 5, 100), 31.0)
+	var reach: float = Firewarrior.FIRE_RANGE + Airship.RANGE_BONUS
+	var spot2: Vector3 = ship.position + Vector3(reach + 5.0 + g2.target_radius(), 0, 0)
+	spot2.y = 5.0
+	_pin(g2, spot2)
+	w2.um.tick(TICK)
+	check(ship._best_enemy(reach) == null, "her rim 17 m away: beyond the plain deck reach (12 m)")
+	check(ship._best_enemy(reach, true) == g2, "but within it plus her bonus (18 m)")
+	var shot: bool = false
+	for i in range(150):
+		_pin(g2, spot2)
+		_tick_world(w2)
+		if int(g2.damage_taken.get(&"firewarrior", 0)) > 0:
+			shot = true
+			break
+	var gap: float = UnitManager.rim_dist(ship.position, g2)
+	check(shot and gap > reach, "the deck firewarrior hits her from %.1f m (%s)" % [gap, str(g2.damage_taken)])
+	_free_world(w2)
+
+
+## Blitz auf einen grossen Golem (2026-11-23): ein Klick auf seinen Koerper trifft ihn, auch weit von
+## seiner Mitte — der Blitz misst zum Rand seines Zielkreises (wie jede Reichweite seit 2026-11-16).
+func test_lightning_on_a_big_golems_body_strikes_him() -> void:
+	var w: Dictionary = _make_world()
+	var at: Vector3 = Vector3(64, 5, 64)
+	var g: Golem = _big_dummy(w, 0, at, 60.0)
+	var r: float = g.target_radius()
+	check(r > LightningSpell.TARGET_RADIUS + 1.0, "(his target circle %.1f m is wider than the bolt's search)" % r)
+	var click: Vector3 = at + Vector3(r - 0.5, 0, 0)
+	_spawn(w, BRAVE_SCENE, 0, click + Vector3(LightningSpell.TARGET_RADIUS - 0.5, 0, 0))
+	var spell: LightningSpell = LightningSpell.new()
+	var before: int = g.health
+	check(spell.execute(w.t1, click, w.ctx), "the bolt finds a victim")
+	check(g.health < before, "the golem under the click is struck (%.1f m from his middle), not the brave beside it" % (r - 0.5))
+	_free_world(w)

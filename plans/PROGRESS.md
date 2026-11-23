@@ -13541,3 +13541,147 @@ Haltung; die Knie sollen dabei nicht mehr durch den Koerper gehen, auch nicht im
   einen Menschen getestet.
 - Pruefung: `tests/test_ai_personality.gd` (neu, 49), test_ai 460, Suite 8799 bestanden / 0 fehlgeschlagen;
   headless Skirmish-Start mit 3 KIs ohne Fehler.
+
+### Golemkampf: klein gegen gross, Genesis-Heilung, Reichweite gegen Golems (2026-11-23)
+
+- **Bugfix klein gegen gross:** der Golem mass Reichweite und Trefferzonen zur Mitte seines Ziels; der
+  Golem-Abstand (`golem_pair_need`) liess einen kleinen aber nie so nah an die Mitte eines grossen (4,7 m gegen
+  31 m: stand 3,4 m vor der Mitte, Reichweite 3 m, 0 Schaden). Jetzt zum Rand des Zielkreises
+  (`Unit.reach_dist_to`): `_tick_attack`, `_target_in_reach`, `_nearest_enemy_in_reach`; Trefferzonen ueber
+  `Golem._zone_point_of` (Punkt des Zielkreises, der der Zone am naechsten liegt; Kreis-Zonen exakt, Schneise ueber
+  den naechsten Punkt der Schneise) und breitere Vorauswahl (`_max_target_radius`). Ohne Befehl bemerkte der
+  kleine den Riesen nicht (Aggro-Suche zur Mitte): `Golem._scan_for_enemy` nimmt jetzt `_nearest_enemy_golem`
+  (zum Rand) dazu. Sitzangriffe geprueft (31-m-Golemin gegen 80-m-Golem vorn und seitlich: trifft), unveraendert.
+- **Genesisgolem:** je zugewiesenem Brave 15 LP sofort + 15 LP ueber 5 s (`GENESIS_GOLEM_BRAVE_HEAL*`, vorher 30 + 30).
+- **Reichweite gegen Golems:** `Golem.ranged_reach_bonus(u)` = 2 m je volle 10 m Golemhoehe
+  (`GOLEM_RANGED_REACH_STEP` 10, `_BONUS` 2), sonst 0. Katapult: `SiegeEngine.fire_range_vs` in `_bombard_unit` /
+  `_bombard_point(max_range)` / `_nearest_enemy_unit` (Fahrzeugpass um `Golem.max_ranged_reach_bonus` erweitert).
+  Luftschiff (nur Feuerkrieger an Deck): `_best_enemy(radius, golem_bonus)` mit eigenem Golem-Pass, Deck-Schuss,
+  befohlener Angriff (`_golem_reach_extra`: Zielradius + Bonus, solange kein Prediger an Bord die Reichweite
+  bestimmt), automatischer Anflug. Feuerball: zielt auf den Rand des Zielkreises (`_aim_point`) statt auf die
+  Mitte, Lebenszeit mindestens Flugzeit + 1 s (`_max_age`) - sonst verpufften lange Deckschuesse auf grosse Golems.
+- Tests: `test_golem.gd` `test_a_small_golem_strikes_a_big_one` (mit/ohne Befehl),
+  `test_catapult_and_deck_firewarriors_reach_farther_at_big_golems`; `test_genesis_golem.gd` auf 15 + 15 angepasst.
+- Nicht gebaut: Reichweitenring in der UI zeigt den Bonus nicht (er gilt je Ziel); Katapult misst weiter zur Mitte.
+
+### Katapult: Schockwelle 3 m / 20, Lavapfuetze zeigt ihren echten Radius (2026-11-23)
+
+- Schockwelle `SIEGE_SHOT_SHOCK_RADIUS` 2 -> 3 m, `SIEGE_SHOT_SHOCK_DAMAGE` 15 -> 20 (Luftschuss damit 6 m; Golem-Volltreffer
+  beginnen bei 20, Stufe 7: 30). Test `test_catapult_hits_hurt_more_the_bigger_the_golem_is` angepasst.
+- Nutzermeldung: die Optik der Feuerpfuetze passte nicht zum Schaden. Gemessen (Nachrechnung der Netzinterpolation):
+  Zuendradius 0,8 m, sichtbar im Mittel 1,15-1,42 m, bis 1,9 m, je nach Lage zum Raster rautenfoermig - die
+  Abdeckung (UV.y) stand nur an den Ecken des 1-m-Gelaenderasters. Dazu lag bei jeder LavaSurge der sichtbare Rand
+  0,28 m vor der Front (`EDGE_REACH` 0,35 bei halber Deckkraft auf Abdeckung 0,08).
+- Fix: `shaders/lava.gdshader` `radial_cover` rechnet die Abdeckung je Bildpunkt aus `centre_xz` und den 20
+  Sektorfronten (wie `_front_at`), nach aussen ungeklemmt (sonst machte das Randrauschen Flecken in den Nachbarzellen);
+  `LavaSurge` zeichnet jede Zelle, die der Rand beruehrt, und setzt die Parameter (`_update_material`); Randbreite
+  `edge_width()` = min(0,9, halber Radius), `edge_reach()` = 8 % davon. Eine Pfuetze, die in einer Mulde nicht
+  waechst, wird jetzt auch gezeichnet (vorher kein Netz unter INNER_RADIUS + 0,05).
+- Geprueft: gerenderte Draufsicht von vier Pfuetzen an verschiedenen Rasterlagen mit dem Zuendkreis als Ring (deckungsgleich),
+  `diag_lava_waterfall_look.gd` (Vulkan fliessend/erkaltend, keine Streuflecken).
+
+
+### Baustellen-Geruest, Eingangsabstand, Festhaengen am Gebaeude, KI-Holz und -Ausbildung (2026-11-23)
+
+Fuenf Nutzervorgaben in einem Paket.
+
+- **Baustelle ohne verbautes Holz = nur Grundriss** (`Building.is_bare_plot()`: `build_progress` = 0): kein
+  Modell, ein leicht weisser Grundriss (Fuellung + Rand, folgt den Gelaendeecken, wird in `_flush_deformation`
+  nachgezogen) mit Pfeil an der Tuer (`_refresh_plot_marker`). `is_attackable()` falsch, `take_damage` /
+  `apply_destruction_stages` / `add_lava_contact` wirkungslos; nur `shatter`/`destroy` (Gelaendebruch, Abriss,
+  Verfall) raeumen sie ab. Alle Zielsuchen hingen schon an `is_attackable()` (Einheiten, Katapult, Luftschiff,
+  Golems, Feuerball, KI-Wellenziel, Ueberleben, Rechtsklick). Annahme: "Holz verbaut" = Baufortschritt > 0
+  (wie `has_build_stage()`), angeliefertes aber nicht verbautes Holz zaehlt nicht.
+- **Geruest** (`scripts/buildings/scaffold.gd`, `Scaffold.create(footprint, height, kind)`): Pfosten alle
+  <= 2,2 m, Riegel, Laufbretter innen, je Stufe eine Diagonale; Groesse = Grundriss + 0,35 m Rand, Hoehe = Oberkante
+  der Modellmeshes + 0,3 m (`Building.scaffold_height`, 1,8-14 m). Stufen aus `construction_visual_stage()`:
+  0 Grundriss, 1-3 Geruest mit 1/2/3 Hoehenstufen (Fortschritt < 1/4, < 1/2, < 3/4), 4 fertiges Gebaeude im vollen
+  Geruest (Annahme fuer "in der letzten Baustufe steht das fertige Gebaeude"), `VIS_FINISHED` = Gebaeude allein.
+  Das Herauswachsen per Y-Skalierung ist entfallen; ein Abriss laeuft die Stufen rueckwaerts. Modell austauschbar
+  ueber `assets/models/buildings/<kind>_scaffold.glb` / `scaffold.glb` (Kinder `Tier1`-`Tier3`, 1x1x1 m).
+- **Eingangsabstand:** `Balance.BUILDING_ENTRANCE_EXTRA_GAP` 1, `..._APRON_HALF_WIDTH` 1;
+  `TribeCommands.keeps_building_gap(cell, fp, orientation)` prueft den Tuerstreifen des neuen Platzes (2 m tief,
+  Tuerzelle +-1) und ob der Platz den Tuerstreifen eines stehenden Gebaeudes ueberdeckt
+  (`Building.entrance_apron_rect`). Gilt ueber `can_place_at` fuer Spieler, KI und Platzsuche.
+- **Festhaengen am Gebaeude:** volle KI-Partie (`tests/diag_building_stuck.gd`, Insel, 1500 s) zeigte keinen
+  Fall - die KIs bauen weit auseinander. `tests/diag_building_stuck_village.gd` stellte Lagen nach: **Tuer im
+  Wasser** (Nahkaempfer standen 2,7 m vor der Tuer, `RAID_ENTER_RANGE` 2 m nie erreicht) und **Verteidiger auf einer
+  Wasserinsel vor der Tuer** (Torwache, an die niemand herankommt; find_path schnappte zum Ufer, der Pfad "gelang",
+  die Krieger standen ewig) - beide 0 von 1 Gebaeude in 300 s, jetzt 17 s. Fix: `Building.raid_entry_point()`
+  (= `delivery_point()`), `_reachable_from_door` in `nearest_entrance_threat`, `Unit._melee_reachable` in
+  `_tick_attack` (kleine Ziele, Nachbarzellen auf der eigenen Insel), Aufgeben bei fehlendem Pfad in
+  `_storm_building` und `Firewarrior._bombard_building`, Gebaeudesuche fuer Nahkaempfer nur auf der eigenen Insel
+  (`worker_can_reach`). Enge Huettenringe, Lager mit Schlange und Baustellen mit Planierern fielen schon vorher.
+- **Warteschlange:** `TrainingBuilding.queue_capacity()` (Plaetze der drei Windungen), `queue_limit` (Besitzer),
+  `queue_max()`, `queue_load()`, `has_queue_room()`; `add_trainee` gibt bool zurueck, `Brave.order_train` nimmt
+  nichts an, wenn voll; `TribeCommands.order_train` schickt Ueberzaehlige zum naechsten Lager derselben Art mit
+  Platz.
+- **KI-Ausbildung:** `AI_TRAIN_QUEUE_PER_CAMP` 6 (als `queue_limit`, gesetzt in `_note_camp`), `TickCache.camp_lists`,
+  `_camp_with_room` in `_tick_train` und `_tick_hut_rallies`, `_camp_backlog` (alle Lager einer Art
+  `AI_CAMP_BACKLOG_TICKS` 15 Takte am Limit, keines im Bau) -> `missing_camp_kind` +1; `AI_MAX_CAMPS_PER_KIND` 4 -> 6.
+- **KI-Holz:** Ursachen gefunden: Bauarbeiter nutzen keine Holzstationen und Stapel nur bis `PILE_PREFER_RADIUS`
+  24 m; der Nachschub (10g) bediente nur blockierte Baustellen und lief nur, solange Faelltrupps fehlten; und der
+  Nachschub-Brave war zweifach kaputt - `_tick_haul_pickup` brach jede Stationsabholung ab (`_haul_valid` verlangt ein
+  Depot-Ziel; der alte Test lief nur, weil der Stationsbestand ohnehin aufgesogen wurde), und `_tick_loose_deliver`
+  lieferte an das beduerftigste Gebaeude in 30 m um den Traeger statt ans Ziel. Jetzt: jede Baustelle mit Holzluecke
+  ist Nachschubziel, wenn `_has_remote_stock`, Truppgroesse nach fehlenden Gaengen, `AI_MAX_SUPPLY_CREWS` 3 -> 4,
+  Nachschub vor der Faelltrupp-Schranke, Ziel fest beim Liefern, `_supply_peers_load` gegen Ueberlieferung.
+- Tests: `test_construction_assault.gd` (Grundriss kein Ziel / Stufen; Optik im Knoten, `site._ready()` von Hand;
+  bestehende Tests bauen erst an), `test_ritual_chamber.gd` `test_entrance_keeps_one_more_metre_free`,
+  `test_building_assault.gd` (Tuer im Wasser, unerreichbare Torwache), `test_training.gd`
+  `test_queue_stops_after_the_third_winding`, `test_ai.gd` `test_ai_keeps_training_lines_short_and_builds_another_camp`,
+  `test_wood_supply.gd` `test_ai_carries_stock_from_the_far_side_to_its_sites`; angepasst: `test_ai` (fragile Baustelle),
+  `test_siege` (Baustelle zerspringt), `test_construction_stuck` (enge Huetten mit abgewandter Tuer).
+- Geprueft: Suite 8894 bestanden / 0 fehlgeschlagen; Standbilder `tests/diag_construction_look.gd` (ohne
+  `--headless`): Grundriss auf welligem Boden mit Tuer S/O/N, Huetten- und Feuertempelreihe in allen Stufen,
+  Werkstatt-Geruest in drei Stufen. `diag_ai_match` (Insel, Seed 4242, A/Oe/V/Oe): bei 300 s Aggressiv 125 Anhaenger,
+  7 Huetten, Oekonom 65 / 12, Verteidiger 74 / 10; bei 600 s hat der Aggressive (259 Anhaenger, 13 Huetten, Lager
+  K2 F2 T2) alle anderen ausgeschaltet. Kein Vorher-Lauf mit demselben Seed - die Zahlen sind ein Plausibilitaets-
+  check, kein Balancing-Vergleich. Nicht im laufenden Spiel gegen einen Menschen getestet.
+
+### Golems: Hinsetzen nur nach dem Gelaende, Sitzschaden wie aus dem Krebsgang (2026-11-23)
+
+Nutzervorgabe 2026-11-23: „bei den golems: hinsetzen soll jetzt immer nur nach terrain schauen, gebaeude sind egal
+(wie beim krebsgang hinsetzen), schadensticks gleich wie beim krebsgang hinsetzen“.
+- **Unterschied vorher:** das normale Hinsetzen (Taste V, `TribeCommands.order_golem_sit`, KI ueber `AIGolems`) suchte
+  den Platz mit `find_seat` -> `seat_free` (Scheibe **und** kein Gebaeude/keine Baustelle an der Sitzflaeche) +
+  `sit_pose_ok`; der Krebsgang mit `_crab_seat_spot` -> `seat_on_disc` + `sit_pose_ok`. Die Schadensticks liefen schon
+  auf beiden Wegen durch dasselbe `_on_seated` / `_sit_damage_tick` (Einheiten 4 x Trampelschaden, Fahrzeuge ein
+  Treffer, feindliche Gebaeude halber Sitzschaden, alle `GOLEM_SIT_DAMAGE_INTERVAL`) — nur sass sie aus dem Stand nie
+  auf einem Gebaeude, der Gebaeudeteil kam dort also nie zum Zug.
+- **Jetzt:** eine Suche fuer beide Wege, `Golem.seat_spot_near(seat)` (der bisherige `_crab_seat_spot`, entfernt):
+  Sitzflaeche auf der Scheibe, Fuesse und Haende auf moeglichem Boden, Ausruecken bis zum halben Koerperradius,
+  Gebaeude egal. `find_seat` rechnet daraus die Fussstelle. `seat_free` bleibt als reine Abfrage (Tests), keine
+  Sitzregel mehr. Damit nehmen feindliche Gebaeude unter der Sitzflaeche auch beim normalen Hinsetzen je Tick den
+  halben Sitzschaden, eigene nichts — dieselben Ticks wie aus dem Krebsgang.
+- Annahmen: auch Baustellen und eigene Gebaeude halten sie nicht mehr ab (eigene nehmen keinen Schaden; die
+  Einebnung laesst Gebaeude weiter stehen, `sit_level_plan`). Der Genesisgolem (kein Riese) kann sich damit auf
+  Gebaeude setzen und steht beim Aufstehen ggf. mit den Fuessen darin — wie schon nach dem Krebsgang.
+- Test: `test_golem.gd` `test_sit_down_looks_at_terrain_only` (ersetzt `test_no_seat_on_buildings`): feindliche Huette
+  unter, eigene am Rand der Sitzflaeche -> kein Ausruecken, gleicher Platz wie `seat_spot_near`, Sitzbefehl ueber
+  `order_golem_sit`, Huette nimmt halben Sitzschaden sofort und nach 5 s erneut, eigene nichts; eine Klippe unter der
+  Hand laesst sie weiter ausruecken.
+- Geprueft: Suite 8900 bestanden / 0 fehlgeschlagen. Nicht im laufenden Spiel getestet.
+
+### KI-Golems: Genesis faellt und liefert Holz, zieht mit, Rueckzug; Blitz-Zielkreis auf Golems (2026-11-23)
+
+- Nutzermeldung: die KI setzt vor allem den Genesisgolem ein, der oft nur herumsteht (kein Holz, nur Verteidigung);
+  Golems werden kaum gesteuert, keiner zieht sich zurueck.
+- `GenesisGolem.order_deliver_wood(b)` / `deliver_target` / `_tick_delivery`: zur Tuer laufen, innerhalb
+  `deliver_reach()` (Koerperradius + Reichweite, mind. `GENESIS_GOLEM_DELIVER_MIN_REACH` 3 m) ablegen, was fehlt
+  (`WoodPileManager.deposit` an `delivery_point`, die Baustelle saugt es ein), Rest behalten; jeder andere Befehl
+  beendet es; nach `GENESIS_GOLEM_DELIVER_GIVE_UP` (90 s) Abbruch.
+- `AIGolems`: `tick(golems, cache, threat)`; `retreat_decision` / `_tick_retreat` / `is_retreating` (unter 30 % fern
+  der Basis heim, bis 80 %; `AIController._marching_only` laesst sie aus); `joins_wave` ersetzt `marches_with_wave`
+  (Welle und Vorstoss; Genesis nur ohne Bedrohung, ab 75 % Leben, ohne Lieferung); `_tick_genesis` (untaetig:
+  Waldstueck nahe der Basis ueber `_grove_candidates_cached`; mit Holz: naechste Baustelle mit `_site_unfunded > 0`).
+  Diagnosezaehler `dbg_retreats`, `dbg_genesis_harvests`, `dbg_genesis_deliveries`; `diag_ai_match.gd` druckt eine
+  Golemzeile je KI.
+- Blitz: `LightningSpell._nearest_enemy` misst zum Rand des Zielkreises (Suche um `max_target_radius` erweitert, bei
+  Gleichstand die naehere Mitte); `SpellTargeting.GOLEM_SPELLS` (`lightning`) rastet auf einen feindlichen Golem unter
+  dem Cursor ein (`SelectionManager.enemy_golem_at`) und laesst seinen Ring rot blinken (`flash_target_ring`).
+- Tests: `test_ai.gd` `test_ai_pulls_back_a_dying_golem_and_puts_the_genesis_golem_to_work`,
+  `test_genesis_golem.gd` `test_he_carries_his_wood_to_a_site_that_needs_it`, `test_golem.gd`
+  `test_lightning_on_a_big_golems_body_strikes_him`; die alte Pruefung von `marches_with_wave` entfiel.
+- Nicht geprueft: das rote Blinken im laufenden Spiel (UI, headless nicht testbar).
+

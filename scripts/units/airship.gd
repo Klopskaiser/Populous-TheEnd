@@ -401,7 +401,7 @@ func order_attack(enemy: Unit) -> void:
 		return
 	attack_building = null
 	_ordered_unit = enemy
-	_fly_into_reach(enemy.position)
+	_fly_into_reach(enemy.position, _golem_reach_extra(enemy))
 
 
 ## The airship never auto-fights as a Unit: all engagement runs through
@@ -464,8 +464,9 @@ func _unload_all(dest: Vector3) -> void:
 ## ship flew up, stood there and never fired a shot (user bug, measured at
 ## 12.0 m with a reach of 11.0). _tick_auto_engage already carried this
 ## correction; the ORDER path did not.
-func _fly_into_reach(point: Vector3) -> void:
-	var reach: float = _best_reach()
+## `extra`: added to the crew's reach (a golem target, see _golem_reach_extra).
+func _fly_into_reach(point: Vector3, extra: float = 0.0) -> void:
+	var reach: float = _best_reach() + extra
 	if _flat_dist(position, point) > reach:
 		var dir: Vector3 = Vector3(point.x - position.x, 0.0, point.z - position.z)
 		var gap: float = maxf(reach * ENGAGE_STOP_FRAC - arrive_eps(), 1.0)
@@ -495,6 +496,15 @@ func _best_reach() -> float:
 				and m.unit_kind() == &"preacher":
 			return Preacher.CONVERT_RANGE + RANGE_BONUS
 	return Firewarrior.FIRE_RANGE + RANGE_BONUS
+
+
+## How much farther the ship may stand from `u` than _best_reach(): against a golem, with firewarriors as
+## the reach that counts, the rim of its target circle plus +2 m for every full 10 m of its height
+## (Golem.ranged_reach_bonus, user spec 2026-11-23). 0 for anything else.
+func _golem_reach_extra(u) -> float:
+	if not (is_instance_valid(u) and u is Golem) or _has_deck_preacher() or not _has_deck_firewarrior():
+		return 0.0
+	return (u as Unit).target_radius() + Golem.ranged_reach_bonus(u)
 
 
 # --- Hull damage & explosion ------------------------------------------------------------
@@ -632,8 +642,9 @@ func _tick_auto_engage(delta: float) -> void:
 		# follow it once it leaves the firing envelope (throttled by this scan).
 		if state == State.IDLE and is_instance_valid(_ordered_unit) \
 				and _ordered_unit.state != State.DEAD \
-				and UnitManager.rim_dist(position, _ordered_unit) > _best_reach():
-			_fly_into_reach(_ordered_unit.position)
+				and UnitManager.rim_dist(position, _ordered_unit) \
+					> _best_reach() + Golem.ranged_reach_bonus(_ordered_unit) * float(_has_deck_firewarrior()):
+			_fly_into_reach(_ordered_unit.position, _golem_reach_extra(_ordered_unit))
 		return
 	if attack_building != null or route_end_action.is_valid():
 		return
@@ -659,13 +670,15 @@ func _tick_auto_engage(delta: float) -> void:
 	# past the stop line; that micro-positioning (targets churn, separation
 	# nudges) was the attack-move STUTTER, and buys nothing since every crew
 	# member fires/converts on the ship-centred reach anyway.
-	if state == State.IDLE and (_best_enemy(reach) != null \
+	if state == State.IDLE and (_best_enemy(reach, not has_pr) != null \
 			or (has_pr and _deck_preacher_channeling())):
 		return
 	var stop_at: Vector3
 	var dist: float
-	var target: Unit = _best_enemy(aggro)
+	var target: Unit = _best_enemy(aggro, has_fw)
 	if target != null:
+		if not has_pr:
+			reach += Golem.ranged_reach_bonus(target)   # firewarriors reach farther at a golem (2026-11-23)
 		_auto_building = null
 		stop_at = target.position
 		dist = UnitManager.rim_dist(position, target)
@@ -841,7 +854,8 @@ func _tick_deck_firewarrior(fw, delta: float) -> void:
 	var reach: float = Firewarrior.FIRE_RANGE + RANGE_BONUS
 	# Ordered unit first, then the ordered building, then free fire at will.
 	var target: Unit = null
-	if _ordered_unit != null and UnitManager.rim_dist(position, _ordered_unit) <= reach \
+	if _ordered_unit != null \
+			and UnitManager.rim_dist(position, _ordered_unit) <= reach + Golem.ranged_reach_bonus(_ordered_unit) \
 			and _ordered_unit.is_targetable():
 		target = _ordered_unit
 	if target == null and attack_building != null \
@@ -855,7 +869,7 @@ func _tick_deck_firewarrior(fw, delta: float) -> void:
 		_fire_cd[fw] = cd
 		return
 	if target == null:
-		target = _best_enemy(reach)
+		target = _best_enemy(reach, true)
 	if target == null:
 		# No unit in reach: free-fire at the nearest enemy BUILDING (lowest
 		# priority, like ground firewarriors — user spec: buildings in reach
@@ -964,7 +978,9 @@ func _set_deck_anim(u, base: StringName) -> void:
 ## then CATAPULT crew — over anything else; ties break on distance. Enemy
 ## firewarriors garrisoned on a tower are unreachable as units (protected
 ## reserve) — they are prioritised through the building scan instead.
-func _best_enemy(radius: float) -> Unit:
+## `golem_bonus`: an enemy golem counts within radius + Golem.ranged_reach_bonus (firewarriors on the deck,
+## user spec 2026-11-23).
+func _best_enemy(radius: float, golem_bonus: bool = false) -> Unit:
 	var best: Unit = null
 	var best_pri: int = -1
 	var best_d: float = INF
@@ -987,6 +1003,21 @@ func _best_enemy(radius: float) -> Unit:
 			best_pri = pri
 			best_d = d
 			best = u
+	if golem_bonus:
+		# Golems are few (they sit in the vehicle list too): those only the bonus brings in reach.
+		for v in (path_service as UnitManager).vehicles:
+			if not (is_instance_valid(v) and v is Golem) or v.tribe_id == tribe_id or v.state == State.DEAD:
+				continue
+			if v.state == State.SIT or not v.is_targetable():
+				continue
+			var dg: float = UnitManager.rim_dist(position, v)
+			if dg <= radius or dg > radius + Golem.ranged_reach_bonus(v):
+				continue   # (within radius: the scan above already weighed it)
+			var pg: int = _enemy_priority(v)
+			if pg > best_pri or (pg == best_pri and dg < best_d):
+				best_pri = pg
+				best_d = dg
+				best = v
 	return best
 
 

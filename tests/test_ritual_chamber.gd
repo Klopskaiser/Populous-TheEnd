@@ -216,6 +216,37 @@ func test_buildings_keep_a_free_gap_around_them() -> void:
 		"one free metre between them: allowed")
 	check(not w.commands.can_place_at(Vector2i(40, 40 - 2), Vector2i(2, 2)),
 		"touching from the north: refused")
-	check(w.commands.can_place_at(Vector2i(40, 40 - 3), Vector2i(2, 2)),
+	# Door facing away (north): a south door would now need 2 m (2026-11-23).
+	check(w.commands.can_place_at(Vector2i(40, 40 - 3), Vector2i(2, 2), 2),
 		"one free metre to the north: allowed")
+	_free_world(w)
+
+
+## Nutzervorgabe 2026-11-23: vor dem Eingang reicht der Abstand 1 m weiter, sonst
+## liess sich die Tuer durch enges Bauen versperren - in beide Richtungen.
+func test_entrance_keeps_one_more_metre_free() -> void:
+	var w: Dictionary = _make_world()
+	check(Balance.BUILDING_ENTRANCE_EXTRA_GAP == 1, "1 m more in front of the door")
+	var hut: Building = w.building_manager.place(HUT_SCENE, w.tribe, Vector2i(40, 40), 0, true)
+	var fp: Vector2i = hut.footprint
+	var door: Vector2i = hut.entrance_cell()   # south side, just outside the footprint
+	var south: int = 40 + fp.y
+	check(door.y == south, "door faces south")
+	# Straight in front of the door: one free metre is no longer enough.
+	check(not w.commands.can_place_at(Vector2i(door.x - 1, south + 1), Vector2i(2, 2)),
+		"1 m in front of the door: refused")
+	check(w.commands.can_place_at(Vector2i(door.x - 1, south + 2), Vector2i(2, 2)),
+		"2 m in front of the door: allowed")
+	# Beside the door strip the normal 1 m still holds.
+	var side_x: int = door.x + Balance.BUILDING_ENTRANCE_APRON_HALF_WIDTH + 1
+	check(w.commands.can_place_at(Vector2i(side_x, south + 1), Vector2i(2, 2)),
+		"south of the hut but beside the door strip: 1 m is enough")
+	# The other way round: a new plot must not put ITS door 1 m before a wall.
+	# A 2x2 plot north of the hut with its door facing south (towards the hut).
+	check(not w.commands.can_place_at(Vector2i(40, 40 - 3), Vector2i(2, 2), 0),
+		"own door 1 m before the hut wall: refused")
+	check(w.commands.can_place_at(Vector2i(40, 40 - 4), Vector2i(2, 2), 0),
+		"own door 2 m before the hut wall: allowed")
+	check(w.commands.can_place_at(Vector2i(40, 40 - 3), Vector2i(2, 2), 2),
+		"same plot with the door facing away: 1 m is enough")
 	_free_world(w)

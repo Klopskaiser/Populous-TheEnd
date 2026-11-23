@@ -89,6 +89,8 @@ var _speed: float = SPEED
 
 
 var _launch_from: Vector3 = Vector3.ZERO
+## Lifetime of this ball: MAX_LIFETIME, longer for a long shot (setup).
+var _max_age: float = MAX_LIFETIME
 
 
 func setup(p_shooter, p_target, from: Vector3) -> void:
@@ -97,7 +99,20 @@ func setup(p_shooter, p_target, from: Vector3) -> void:
 	target = p_target
 	position = from
 	_launch_from = from
-	_dest = p_target.position + Vector3(0.0, TARGET_HEIGHT, 0.0)
+	_dest = _aim_point()
+	# A long shot (deck crew at a big golem, user spec 2026-11-23) gets the time it needs to arrive.
+	_max_age = maxf(MAX_LIFETIME, from.distance_to(_dest) / SPEED + 1.0)
+
+
+## Where the ball flies: the target's chest — at a big body (a golem, Unit.target_radius) the nearest
+## point of its target circle, where every reach is measured (2026-11-23; before, it flew on to the
+## middle and a long shot from an airship deck fizzled on the way).
+func _aim_point() -> Vector3:
+	var p: Vector3 = target.position
+	var r: float = target.target_radius()
+	if r > 0.0:
+		p = Golem.nearest_on_circle(p, r, position)
+	return p + Vector3(0.0, TARGET_HEIGHT, 0.0)
 
 
 ## Building bombardment variant (phase 7g): flies at the footprint centre and
@@ -119,7 +134,7 @@ func tick(delta: float) -> void:
 		_tick_building(delta)
 		return
 	if _target_alive():
-		_dest = target.position + Vector3(0.0, TARGET_HEIGHT, 0.0)
+		_dest = _aim_point()
 		if target.is_airborne():
 			_speed = minf(_speed + AIR_ACCEL * delta, AIR_MAX_SPEED)
 	var was: Vector3 = position
@@ -127,7 +142,7 @@ func tick(delta: float) -> void:
 	if not _follow_ground_or_block(was):
 		done = true   # smacked into a cliff face — no damage
 		return
-	if position.distance_to(_dest) <= HIT_RANGE or _age >= MAX_LIFETIME:
+	if position.distance_to(_dest) <= HIT_RANGE or _age >= _max_age:
 		_impact()
 
 
@@ -204,8 +219,7 @@ func _building_alive() -> bool:
 ## hits, see Unit.apply_knockback) and interrupts a running conversion.
 func _impact() -> void:
 	done = true
-	if not _target_alive() or position.distance_to(
-			target.position + Vector3(0.0, TARGET_HEIGHT, 0.0)) > HIT_RANGE * 2.0:
+	if not _target_alive() or position.distance_to(_aim_point()) > HIT_RANGE * 2.0:
 		return
 	# Targets in the air (airship deck crew AND whirled-up units) take a damage
 	# bonus — fire feeds on the wind. Phase 10c trimmed it from double to +20 %

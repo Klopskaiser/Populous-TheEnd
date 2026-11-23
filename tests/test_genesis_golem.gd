@@ -172,22 +172,22 @@ func test_braves_are_assigned_to_one_genesis_golem_each() -> void:
 	_free_world(w)
 
 
-func test_an_assigned_brave_heals_thirty_at_once_and_thirty_over_five_seconds() -> void:
+func test_an_assigned_brave_heals_fifteen_at_once_and_fifteen_over_five_seconds() -> void:
 	var w: Dictionary = _make_world()
 	var g: GenesisGolem = _genesis(w, 0, Vector3(50, 5, 50))
 	g.health = 500
 	g.credit_brave(1.0)
-	check(g.health == 530, "30 at once (%d)" % g.health)
-	check_near(g.pending_kill_heal(), 30.0, "30 still to come", 0.001)
+	check(g.health == 515, "15 at once (user spec 2026-11-23, before 30) (%d)" % g.health)
+	check_near(g.pending_kill_heal(), 15.0, "15 still to come", 0.001)
 	for i in range(int(5.0 / TICK) + 2):
 		g._tick_kill_heal(TICK)
-	check_near(float(g.health) + g._heal_frac, 560.0, "and 30 over 5 s (%d)" % g.health, 0.001)
+	check_near(float(g.health) + g._heal_frac, 530.0, "and 15 over 5 s (%d)" % g.health, 0.001)
 	check_near(g.pending_kill_heal(), 0.0, "nothing left", 0.001)
 	g.health = 500
 	g._heal_frac = 0.0
 	GenesisGolem.credit_brave_to_tribe(w.t0)
 	GenesisGolem.credit_brave_to_tribe(w.t0)
-	check(g.health == 560 and is_equal_approx(g.pending_kill_heal(), 60.0), "it stacks (%d)" % g.health)
+	check(g.health == 530 and is_equal_approx(g.pending_kill_heal(), 30.0), "it stacks (%d)" % g.health)
 	_free_world(w)
 
 
@@ -516,4 +516,28 @@ func test_a_real_brave_fetches_wood_from_him() -> void:
 			break
 	check(brave.carried_wood > 0, "the brave carries wood from him (%d)" % brave.carried_wood)
 	check(g.total_wood() == 12 - brave.carried_wood, "taken from his store (%d left)" % g.total_wood())
+	_free_world(w)
+
+
+## Holz abliefern (Nutzervorgabe 2026-11-23): er traegt sein Holz zu einer Baustelle, legt vor ihrer Tuer ab,
+## was ihr fehlt, und behaelt den Rest. Ohne Holz oder ohne Bedarf nimmt er den Auftrag nicht an.
+func test_he_carries_his_wood_to_a_site_that_needs_it() -> void:
+	var w: Dictionary = _make_world()
+	var site: Building = w.bm.place(HUT_SCENE, w.t0, Vector2i(80, 50), 0, false)
+	check(site != null and site.wood_needed_total() > 0, "(a hut site that lacks wood)")
+	var need: int = site.wood_needed_total()
+	var g: GenesisGolem = _genesis(w, 0, Vector3(40, 5, 52))
+	check(not g.order_deliver_wood(site), "without wood: no delivery")
+	g.add_wood(need + 6)
+	check(g.order_deliver_wood(site), "with wood: he sets off")
+	var ticks: int = 0
+	while g.deliver_target != null and ticks < 1200:
+		_tick_world(w)
+		ticks += 1
+	var door: Vector3 = site.delivery_point()
+	var there: int = site.wood_delivered + w.wpm.wood_in_radius(door, Building.ABSORB_RADIUS)
+	check(g.deliver_target == null and there >= need,
+		"he put down at the door what it lacked (%d of %d, after %.0f s)" % [there, need, float(ticks) * TICK])
+	check(g.total_wood() == 6, "and keeps the rest (%d)" % g.total_wood())
+	check(not g.order_deliver_wood(null), "no building: nothing")
 	_free_world(w)

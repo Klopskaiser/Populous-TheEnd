@@ -13,6 +13,9 @@ render_mode unshaded, blend_mix, cull_disabled, depth_draw_never, shadows_disabl
 //   COLOR.a    fade-out of a crust that leaves no scorch
 //   UV.x       heat: 1 = just poured, 0 = cooled
 //   UV.y       coverage: 1 inside the body, falling to 0 at its edge
+// With radial_cover (LavaSurge, 2026-11-23) the coverage is NOT taken from UV.y but computed
+// per fragment from the sheet's real sector fronts: on the 1-m terrain grid the per-vertex
+// coverage smeared a small catapult puddle (0,8 m) out to 1,2-1,9 m.
 // The pattern is anchored in WORLD space, so a sheet that is rebuilt five times
 // a second (and a ribbon that grows) never drags its texture along.
 
@@ -23,6 +26,13 @@ uniform vec3 crust : source_color = vec3(0.10, 0.035, 0.025);
 // Size of the crust plates (metres per noise cell) and how fast the melt creeps.
 uniform float plate_size = 1.1;
 uniform float creep = 0.09;
+// Radial coverage (LavaSurge): centre of the sheet in world XZ, the front radius of each of its
+// LAVA_SECTORS sectors (sector i points at angle TAU * i / 20), and the soft edge.
+uniform bool radial_cover = false;
+uniform vec2 centre_xz = vec2(0.0);
+uniform float fronts[20];
+uniform float edge_reach = 0.07;
+uniform float edge_width = 0.9;
 
 varying vec3 world_pos;
 
@@ -47,6 +57,15 @@ void vertex() {
 void fragment() {
 	float heat = clamp(UV.x, 0.0, 1.0);
 	float cover = UV.y;
+	if (radial_cover) {
+		vec2 d = world_pos.xz - centre_xz;
+		float f = mod(atan(d.y, d.x), 6.2831853) / 6.2831853 * 20.0;
+		int i = int(floor(f)) % 20;
+		float front = mix(fronts[i], fronts[(i + 1) % 20], fract(f));
+		// Not clamped at 0: beyond the edge it keeps falling, so the ragged noise below cannot
+		// light up stray blobs in the cells around the sheet.
+		cover = min((front + edge_reach - length(d)) / edge_width, 1.0);
+	}
 	float t = TIME * creep;
 	vec2 p = world_pos.xz / plate_size;
 	// The melt churns: the pattern is warped by a second, slower field.

@@ -35,8 +35,14 @@ const SURFACE_LIFT: float = 0.08
 ## Width of the soft edge the shader frays (metres): the coverage falls from 1
 ## to 0 over this distance in front of a sector's front, and the sheet reaches
 ## EDGE_REACH beyond the front so the visible edge sits on it, not inside it.
+## The shader shows half alpha at coverage EDGE_HALF_ALPHA_COVER (smoothstep 0..0,16), so the
+## reach is that share of the width — with the old 0,35 m the visible edge lay 0,28 m beyond the
+## burning front (user report 2026-11-23). A small sheet (the catapult puddle) gets a narrower edge:
+## at most EDGE_SMALL_SHARE of its radius, or the ragged noise would be as wide as the puddle.
 const EDGE_WIDTH: float = 0.9
-const EDGE_REACH: float = 0.35
+const EDGE_HALF_ALPHA_COVER: float = 0.08
+const EDGE_REACH: float = EDGE_WIDTH * EDGE_HALF_ALPHA_COVER
+const EDGE_SMALL_SHARE: float = 0.5
 
 var done: bool = false
 var unit_manager: UnitManager = null
@@ -175,6 +181,15 @@ func _ignite_covered_units() -> void:
 		unit_manager.wood_pile_manager.ignite_in_radius(position, _front_radius)
 
 
+## Soft edge of THIS sheet (see EDGE_WIDTH / EDGE_SMALL_SHARE) and how far it reaches past the front.
+func edge_width() -> float:
+	return minf(EDGE_WIDTH, max_radius * EDGE_SMALL_SHARE)
+
+
+func edge_reach() -> float:
+	return edge_width() * EDGE_HALF_ALPHA_COVER
+
+
 ## Front radius of the sector that contains the offset (dx, dz).
 func _sector_radius_at(dx: float, dz: float) -> float:
 	var a: float = fposmod(atan2(dz, dx), TAU)
@@ -236,11 +251,13 @@ func _rebuild_mesh() -> void:
 		return
 	var im: ImmediateMesh = _mesh.mesh
 	im.clear_surfaces()
-	if _front_radius <= INNER_RADIUS + 0.05:
-		return
+	if _front_radius <= 0.0:
+		return   # (a sheet stuck at its crater rim - a puddle in a hollow - burns there: draw it too)
 	var td: TerrainData = terrain_data
 	var cs: float = TerrainData.CELL_SIZE
-	var reach: float = _front_radius + EDGE_REACH + cs
+	var e_reach: float = edge_reach()
+	var e_width: float = edge_width()
+	var reach: float = _front_radius + e_reach + cs
 	var x0: int = clampi(int(floor((position.x - reach) / cs)), 0, td.size - 1)
 	var x1: int = clampi(int(floor((position.x + reach) / cs)), 0, td.size - 1)
 	var z0: int = clampi(int(floor((position.z - reach) / cs)), 0, td.size - 1)
@@ -273,7 +290,7 @@ func _rebuild_mesh() -> void:
 			var cooled: bool = age >= MOLTEN_TIME
 			colors[k] = LavaCommon.color_for(age, MOLTEN_TIME, cooled, true)
 			uvs[k] = Vector2(LavaCommon.heat_for(age, MOLTEN_TIME, cooled),
-				clampf((_front_at(dx, dz) + EDGE_REACH - r) / EDGE_WIDTH, 0.0, 1.0))
+				clampf((_front_at(dx, dz) + e_reach - r) / e_width, 0.0, 1.0))
 	var begun: bool = false
 	for rz in range(rows - 1):
 		for rx in range(cols - 1):
@@ -281,8 +298,11 @@ func _rebuild_mesh() -> void:
 			var tr: int = tl + 1
 			var bl: int = tl + cols
 			var br: int = bl + 1
-			if uvs[tl].y <= 0.0 and uvs[tr].y <= 0.0 and uvs[bl].y <= 0.0 \
-					and uvs[br].y <= 0.0:
+			# The shader computes the coverage per fragment (radial_cover): a cell is drawn when the
+			# sheet's outer edge touches it, even if none of its corners is covered.
+			var near_x: float = clampf(position.x, float(x0 + rx) * cs, float(x0 + rx + 1) * cs)
+			var near_z: float = clampf(position.z, float(z0 + rz) * cs, float(z0 + rz + 1) * cs)
+			if Vector2(near_x - position.x, near_z - position.z).length() > _front_radius + e_reach:
 				continue   # the lava has not reached this cell
 			if not td.has_ground((float(x0 + rx) + 0.5) * cs, (float(z0 + rz) + 0.5) * cs):
 				continue   # the void beyond the disc's rim
@@ -295,6 +315,20 @@ func _rebuild_mesh() -> void:
 				im.surface_add_vertex(pts[k])
 	if begun:
 		im.surface_end()
+	_update_material(e_reach, e_width)
+
+
+## Hands the shader the real fronts, so the visible edge follows them per pixel (radial_cover).
+func _update_material(e_reach: float, e_width: float) -> void:
+	var mat: ShaderMaterial = _mesh.material_override as ShaderMaterial
+	if mat == null:
+		return
+	var c: Vector3 = global_position if is_inside_tree() else position
+	mat.set_shader_parameter(&"radial_cover", true)
+	mat.set_shader_parameter(&"centre_xz", Vector2(c.x, c.z))
+	mat.set_shader_parameter(&"fronts", _sector_radius)
+	mat.set_shader_parameter(&"edge_reach", e_reach)
+	mat.set_shader_parameter(&"edge_width", e_width)
 
 
 ## Downward offset at the end of life: the crust sinks into the ground.

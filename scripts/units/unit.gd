@@ -3407,7 +3407,7 @@ func _tick_attack(delta: float) -> void:
 			var slot: int = g.attacker_index(self)
 			if slot >= 0:
 				dest = target.melee_slot_position(slot)
-		if not _approach(dest, delta):
+		if not _melee_reachable(target) or not _approach(dest, delta):
 			# Unreachable (A* failed, e.g. an enemy up on a cliff): remember it
 			# briefly and disengage instead of running into the wall (phase 8.2).
 			_mark_target_unreachable(target)
@@ -3686,6 +3686,10 @@ func _scan_for_enemy_building(radius: float):
 		# bombard from range and are unaffected by the raider cap.
 		if not ranged and not b.has_raider_room():
 			continue
+		# ... nor one whose door it cannot walk to (other island): it would only
+		# pick it up, fail the path and drop it again (bug 2026-11-23).
+		if not ranged and not b.worker_can_reach(position):
+			continue
 		checked += 1
 		if checked > SCAN_MAX_CANDIDATES:
 			break
@@ -3734,10 +3738,17 @@ func _storm_building(building, delta: float) -> void:
 	if foe != null:
 		_engage_assault_foe(foe)   # clear the doorway first (keeps attack_building)
 		return
-	var entrance: Vector3 = building.entrance_world()
+	# The walkable approach point, not the raw entrance cell (bug 2026-11-23: a
+	# door in the water or against a slope was never within RAID_ENTER_RANGE).
+	var entrance: Vector3 = building.raid_entry_point()
 	if _flat_dist(position, entrance) > RAID_ENTER_RANGE:
 		_in_melee = false
-		_approach(entrance, delta)
+		if not _approach(entrance, delta):
+			# No path to the door at all (another island, walled in): give the
+			# building up instead of walking on the spot forever.
+			_clear_building_target()
+			_retarget_or_idle()
+			return
 		_face_point(entrance)
 		return
 	if not building.has_raider_room():
@@ -4289,6 +4300,27 @@ func _dissolve_own_group() -> void:
 		if m != null and is_instance_valid(m) and m.combat_group == g:
 			m.combat_group = null
 			m._on_target_died(self)
+
+
+## False when a melee attacker can never get into striking distance of `target`:
+## a small target whose own cell and four neighbours hold no walkable ground of
+## the attacker's island (a brave on a rock in the water, deep inside a footprint).
+## A* does not catch that — find_path snaps to the nearest walkable cell, the
+## "path" succeeds and the attacker stood at the shore forever (bug 2026-11-23,
+## diag_building_stuck_village). Permissive without navigation, for big targets
+## (a golem's reach is its radius) and when the attacker itself stands off-grid.
+func _melee_reachable(target: Unit) -> bool:
+	if nav_grid == null or target.target_radius() >= 1.0:
+		return true
+	var mine: int = nav_grid.island_at(nav_grid.world_to_cell(position))
+	if mine < 0:
+		return true
+	var c: Vector2i = nav_grid.world_to_cell(target.position)
+	for d in [Vector2i.ZERO, Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+		var n: Vector2i = c + d
+		if nav_grid.is_cell_walkable(n) and nav_grid.island_at(n) == mine:
+			return true
+	return false
 
 
 ## Remembers a combat target as unreachable for a short while (scans skip it,

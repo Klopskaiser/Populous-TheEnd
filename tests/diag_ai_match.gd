@@ -133,6 +133,25 @@ func _report(t: float, ais: Array[AIController], tribes: Array[Tribe]) -> void:
 			veh, c.sites.size(), tribe.charging_income()])
 		print("        Zauber: %s | geladen: %s | Vorstoesse: %d" % [", ".join(casts) if not casts.is_empty() else "-",
 			" ".join(charges) if not charges.is_empty() else "-", int(ai.get("raids") if "raids" in ai else 0)])
+		# Golems (2026-11-23): retreats, the Genesis golem's wood, and what each golem is doing now.
+		if ai.golem_ai != null and not c.golems.is_empty():
+			var now: Array[String] = []
+			for g in c.golems:
+				if not is_instance_valid(g):
+					continue
+				var tag: String = "Gen" if g is GenesisGolem else ("Dae" if g is DemonGolem else "Gol")
+				var what: String = Unit.State.keys()[g.state]
+				if ai.golem_ai.is_retreating(g):
+					what = "RUECKZUG"
+				elif g is GenesisGolem and (g as GenesisGolem).deliver_target != null:
+					what = "LIEFERT"
+				elif g is GenesisGolem and (g as GenesisGolem).is_harvesting():
+					what = "FAELLT"
+				var wood: String = " Holz %d" % (g as GenesisGolem).total_wood() if g is GenesisGolem else ""
+				now.append("%s %.0fm %d/%d LP %s%s" % [tag, g.height_m(), g.health, g.max_health, what, wood])
+			print("        Golems: %s | Rueckzuege %d, Holzauftraege %d, Lieferungen %d" % [
+				"; ".join(now), ai.golem_ai.dbg_retreats, ai.golem_ai.dbg_genesis_harvests,
+				ai.golem_ai.dbg_genesis_deliveries])
 
 
 ## Mirrors main.gd::_setup_skirmish_base (site + shaman + prebuilt hut +

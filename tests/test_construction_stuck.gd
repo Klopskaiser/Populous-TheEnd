@@ -222,10 +222,12 @@ func test_wood_is_booked_even_after_the_entrance_frees_up() -> void:
 ## Symptom 1 end to end: a hut right next to a hut gets built.
 func test_site_next_to_a_hut_still_makes_progress() -> void:
 	var w: Dictionary = _make_world()
+	# Doors facing away from each other: since 2026-11-23 a door keeps 2 m free
+	# (Balance.BUILDING_ENTRANCE_EXTRA_GAP), the backs may stand 1 m apart.
 	var first: Hut = w.building_manager.place(
-		HUT_SCENE, w.tribe, Vector2i(60, 60), 0, true) as Hut
+		HUT_SCENE, w.tribe, Vector2i(60, 60), 2, true) as Hut
 	check(first != null, "the finished neighbour stands")
-	var site: Hut = w.commands.place_building(w.tribe, HUT_SCENE, Vector2i(60, 65)) as Hut
+	var site: Hut = w.commands.place_building(w.tribe, HUT_SCENE, Vector2i(60, 65), 0) as Hut
 	check(site != null, "the tight second plot was placeable")
 
 	w.wood_pile_manager.deposit(site.delivery_point(), Hut.WOOD_COST)
@@ -369,9 +371,10 @@ func test_can_place_at_still_allows_tight_but_workable_placement() -> void:
 	var first: Hut = w.building_manager.place(
 		HUT_SCENE, w.tribe, Vector2i(60, 65), 0, true) as Hut
 	check(first != null, "the neighbour stands")
-	# Directly against the neighbour, entrance cell covered by it — but the
-	# perimeter is wide open, so workers can serve it.
-	var site: Hut = w.commands.place_building(w.tribe, HUT_SCENE, Vector2i(60, 60)) as Hut
+	# 1 m from the neighbour (the BUILDING_MIN_GAP), door facing away — since
+	# 2026-11-23 a door facing the neighbour would need 2 m. The perimeter is
+	# wide open, so workers can serve it.
+	var site: Hut = w.commands.place_building(w.tribe, HUT_SCENE, Vector2i(60, 60), 2) as Hut
 	check(site != null, "a hut right next to a hut is still placeable")
 	check(site.approach_island() >= 0, "and it has a reachable approach spot")
 	_free_world(w)
