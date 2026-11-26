@@ -16,6 +16,7 @@ const GOLEM_SCENE: PackedScene = preload("res://scenes/units/golem.tscn")
 const DEMON_SCENE: PackedScene = preload("res://scenes/units/demon_golem.tscn")
 const GENESIS_SCENE: PackedScene = preload("res://scenes/units/genesis_golem.tscn")
 const HUT_SCENE: PackedScene = preload("res://scenes/buildings/hut.tscn")
+const WARRIOR_SCENE: PackedScene = preload("res://scenes/units/warrior.tscn")
 
 const TICK: float = 0.1
 
@@ -568,4 +569,92 @@ func test_he_tramples_from_stage_one_and_buildings_and_vehicles_from_thirty_metr
 	check(hut.health == hp - Golem.building_damage_for(g.trample_damage()),
 		"the hut loses half his trample damage (%d)" % (hp - hut.health))
 	check(not is_instance_valid(cat) or cat.state == Unit.State.DEAD or cat.doomed, "the catapult is wrecked")
+	_free_world(w)
+
+# --- Felling is a worker job; afterwards he walks home (user spec 2026-11-26) ---------
+
+func test_enemies_nearby_do_not_break_off_the_felling() -> void:
+	var w: Dictionary = _make_world()
+	var g: GenesisGolem = _genesis(w, 0, Vector3(40.5, 5, 40.5))
+	for x in [46, 49, 52]:
+		w.tm.spawn_tree(Vector2i(x, 46), TreeResource.MAX_STAGE)
+	# Enemy warriors right next to the grove, well inside his aggro radius.
+	var foes: Array[Unit] = []
+	for i in range(3):
+		foes.append(w.um.spawn_unit(WARRIOR_SCENE, 1, Vector3(48.5 + i, 5, 50.5)))
+	check(w.commands.order_chop_area([g] as Array[Unit], Rect2(44, 44, 12, 6)) == 1,
+		"the B order is taken")
+	var fought: bool = false
+	for i in range(600):
+		_tick_world(w)
+		if g.state == Unit.State.ATTACK:
+			fought = true
+		if not g.is_harvesting():
+			break
+	check(not fought, "he never turned on the enemies while felling")
+	check(g.trees_felled == 3, "and felled the whole grove (%d)" % g.trees_felled)
+	_free_world(w)
+
+
+func test_attacked_while_felling_he_keeps_felling() -> void:
+	var w: Dictionary = _make_world()
+	var g: GenesisGolem = _genesis(w, 0, Vector3(40.5, 5, 40.5))
+	# Two trees in reach: he stands (IDLE) and fells — the state in which a hit used
+	# to be answered at once.
+	w.tm.spawn_tree(Vector2i(42, 40), TreeResource.MAX_STAGE)
+	w.tm.spawn_tree(Vector2i(42, 41), TreeResource.MAX_STAGE)
+	var foe: Unit = w.um.spawn_unit(WARRIOR_SCENE, 1, Vector3(39.5, 5, 39.5))
+	w.commands.order_chop_area([g] as Array[Unit], Rect2(41, 39, 3, 3))
+	for i in range(30):
+		_tick_world(w)
+		if g.state == Unit.State.IDLE and g.is_harvesting():
+			break
+	check(g.state == Unit.State.IDLE and g.is_harvesting(), "the setup: he stands felling")
+	g._maybe_retaliate(foe)
+	check(g.state != Unit.State.ATTACK and g.is_harvesting(), "a hit is not answered")
+	_free_world(w)
+
+
+func test_after_felling_he_walks_back_to_the_settlement() -> void:
+	var w: Dictionary = _make_world()
+	var hut: Building = w.bm.place(HUT_SCENE, w.t0, Vector2i(20, 20), 0, true)
+	check(hut != null and w.t0.buildings.has(hut), "the setup: a hut of his tribe")
+	var g: GenesisGolem = _genesis(w, 0, Vector3(60.5, 5, 60.5))
+	for x in [66, 69]:
+		w.tm.spawn_tree(Vector2i(x, 66), TreeResource.MAX_STAGE)
+	w.commands.order_chop_area([g] as Array[Unit], Rect2(64, 64, 8, 6))
+	var done: bool = false
+	for i in range(800):
+		_tick_world(w)
+		if not g.is_harvesting():
+			done = true
+			break
+	check(done and g.trees_felled == 2, "the grove is felled")
+	check(g.state == Unit.State.MOVE, "and he sets off home at once")
+	var home: Vector3 = hut.delivery_point()
+	for i in range(1500):
+		_tick_world(w)
+		if g.state == Unit.State.IDLE:
+			break
+	check(g._flat_dist(g.position, home) <= g.trample_radius() + Balance.GENESIS_GOLEM_HOME_RADIUS + 2.0,
+		"he ends up back at the hut (%.1f m from its door)" % g._flat_dist(g.position, home))
+	_free_world(w)
+
+
+func test_no_walk_home_when_shift_orders_wait() -> void:
+	var w: Dictionary = _make_world()
+	w.bm.place(HUT_SCENE, w.t0, Vector2i(20, 20), 0, true)
+	var g: GenesisGolem = _genesis(w, 0, Vector3(60.5, 5, 60.5))
+	var tree: TreeResource = w.tm.spawn_tree(Vector2i(66, 60), TreeResource.MAX_STAGE)
+	var other: TreeResource = w.tm.spawn_tree(Vector2i(70, 66), TreeResource.MAX_STAGE)
+	var trees: Array = [tree, other]
+	g.queue_order((func(u: Unit) -> void: w.commands.order_chop([u] as Array[Unit], trees[0])).bind(g))
+	g.queue_order((func(u: Unit) -> void: w.commands.order_chop([u] as Array[Unit], trees[1])).bind(g))
+	check(g.order_queue.size() == 1, "the second tree waits in the queue")
+	var other_ref: WeakRef = weakref(other)
+	for i in range(800):
+		_tick_world(w)
+		if other_ref.get_ref() == null or other_ref.get_ref().felled_flag:
+			break
+	check(g.trees_felled == 2, "both trees are felled one after the other (%d)" % g.trees_felled)
 	_free_world(w)

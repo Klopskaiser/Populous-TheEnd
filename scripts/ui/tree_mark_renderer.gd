@@ -14,14 +14,17 @@ class_name TreeMarkRenderer extends MultiMeshInstance3D
 ## their ON phase keeps the material unshaded and opaque, and makes the visible
 ## state exactly testable.
 
-const MAX_MARKS: int = 256
+## A full 80 x 80 m rectangle over dense forest holds several hundred trees; with
+## 256 the rest silently got no ring (2026-11-26).
+const MAX_MARKS: int = 1024
 const RING_COLOR: Color = Color(1.0, 1.0, 1.0)
 const RING_HEIGHT: float = 0.1
 ## Ring radius = the tree's stage scale times this (so the circle clears the crown).
-const RADIUS_PER_SCALE: float = 1.6
-const MIN_RADIUS: float = 0.5
+## Defined in TreeManager: the fell rectangle counts a tree whose RING touches it.
+const RADIUS_PER_SCALE: float = TreeManager.TREE_RING_PER_SCALE
+const MIN_RADIUS: float = TreeManager.TREE_RING_MIN
 ## Wood piles have no growth stage — one radius, just clearing the log sprite.
-const PILE_RADIUS: float = 0.8
+const PILE_RADIUS: float = WoodPileManager.RING_RADIUS
 const BLINKS: int = Balance.TREE_MARK_BLINKS
 const BLINK_TIME: float = Balance.TREE_MARK_BLINK_TIME
 const TOTAL_TIME: float = float(BLINKS) * 2.0 * BLINK_TIME
@@ -94,9 +97,7 @@ func add_mark(pos: Vector3, radius: float) -> void:
 ## not from node.scale, so the value is defined for a tree whose visual transform
 ## was never applied (headless).
 static func mark_radius(tree: TreeResource) -> float:
-	var scales: Array = Balance.TREE_TYPE_PARAMS[tree.type].stage_scales
-	var s: float = float(scales[clampi(tree.stage, 0, scales.size() - 1)])
-	return maxf(s * RADIUS_PER_SCALE, MIN_RADIUS)
+	return TreeManager.ring_radius(tree)
 
 
 ## On during the FIRST half of every blink period -> on/off/on/off across

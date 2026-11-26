@@ -566,6 +566,46 @@ static func harvest_job_shape(area: Rect2, polygon: PackedVector2Array) -> Array
 	return [job, poly]
 
 
+## Bounding rect of the part of `area` that lies over the disc (`center`, `radius`;
+## the circle as a circumscribed 64-gon, so it never loses ground). The player's
+## fell rectangle reaches out over the void when drawn at the map edge; the hull
+## that feeds the size clamp and the job must only span the ground under it — a
+## hull far out over space used to be clamped around a centre in the void.
+## Empty Rect2 when nothing of it is over the disc.
+static func crop_to_disc(area: Rect2, center: Vector2, radius: float) -> Rect2:
+	var a: Rect2 = area.abs()
+	if a.size.x <= 0.0 or a.size.y <= 0.0:
+		return a   # degenerate: nothing to cut (the size clamp rejects it anyway)
+	var circle_box: Rect2 = Rect2(center - Vector2(radius, radius), Vector2(radius, radius) * 2.0)
+	if circle_box.encloses(a):
+		# Common case: test the four corners against the circle — all inside, done.
+		var all_in: bool = true
+		for c in [a.position, Vector2(a.end.x, a.position.y), a.end, Vector2(a.position.x, a.end.y)]:
+			if (c as Vector2).distance_to(center) > radius:
+				all_in = false
+				break
+		if all_in:
+			return a
+	const SEGMENTS: int = 64
+	var r: float = radius / cos(PI / float(SEGMENTS))
+	var disc: PackedVector2Array = PackedVector2Array()
+	for i in range(SEGMENTS):
+		var ang: float = TAU * float(i) / float(SEGMENTS)
+		disc.append(center + Vector2(cos(ang), sin(ang)) * r)
+	var rect_poly: PackedVector2Array = PackedVector2Array([a.position,
+		Vector2(a.end.x, a.position.y), a.end, Vector2(a.position.x, a.end.y)])
+	var out: Rect2 = Rect2()
+	var first: bool = true
+	for poly in Geometry2D.intersect_polygons(rect_poly, disc):
+		for p in poly:
+			if first:
+				out = Rect2(p, Vector2.ZERO)
+				first = false
+			else:
+				out = out.expand(p)
+	return out
+
+
 ## Area orders are clamped AROUND THEIR CENTRE: a whole-map drag must not become
 ## an absurd standing order. Below the minimum on BOTH sides it was a stray click
 ## (empty Rect2 = rejected); a legitimately thin strip along a row of trees only
@@ -574,6 +614,12 @@ static func clamp_harvest_area(area: Rect2) -> Rect2:
 	var a: Rect2 = area.abs()
 	if a.size.x < HARVEST_AREA_MIN_SIDE and a.size.y < HARVEST_AREA_MIN_SIDE:
 		return Rect2()
+	if a.size.x >= HARVEST_AREA_MIN_SIDE and a.size.x <= HARVEST_AREA_MAX_SIDE \
+			and a.size.y >= HARVEST_AREA_MIN_SIDE and a.size.y <= HARVEST_AREA_MAX_SIDE:
+		# Nothing to clamp: hand back the SAME rect. Recentring it costs float bits
+		# (p + s/2 - s/2 != p), and harvest_job_shape then took the rect for a
+		# clamped one and silently dropped the drawn quad.
+		return a
 	var size: Vector2 = Vector2(
 		clampf(a.size.x, HARVEST_AREA_MIN_SIDE, HARVEST_AREA_MAX_SIDE),
 		clampf(a.size.y, HARVEST_AREA_MIN_SIDE, HARVEST_AREA_MAX_SIDE))

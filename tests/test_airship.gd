@@ -1464,3 +1464,15 @@ func test_neutral_airship_with_inbound_owner_recruits_is_captured_at_once() -> v
 	check(not ship.is_neutral() and not ship.capturable_by(0),
 		"served by the new crew: no longer neutral, the old owner cannot take it back")
 	_free_world(w)
+
+## Voice (user spec 2026-11-26): an airship with the shaman aboard answers in HER voice.
+func test_airship_with_the_shaman_aboard_speaks_with_her_voice() -> void:
+	var w: Dictionary = _make_world()
+	var ship: Airship = _spawn_ship(w, 0, w.nav.cell_to_world(Vector2i(60, 60)))
+	_board(w, ship, BRAVE_SCENE)
+	check(not SelectionManager.airship_carries_shaman(ship), "braves only: the normal voice")
+	_board(w, ship, SHAMAN_SCENE)
+	check(SelectionManager.airship_carries_shaman(ship), "with the shaman aboard: her voice")
+	check(SelectionManager.voice_key("move", SelectionManager.airship_carries_shaman(ship), false)
+		== &"move_shaman", "the move acknowledgement is hers")
+	_free_world(w)

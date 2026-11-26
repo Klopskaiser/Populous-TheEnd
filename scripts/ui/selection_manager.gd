@@ -152,7 +152,8 @@ func _process(_delta: float) -> void:
 		_dragging = false
 		drag_active = false
 		if harvest_arm_active:
-			_fire_harvest(_drag_rect(_drag_current), _drag_max_dist)
+			_fire_harvest(_drag_rect(_drag_current), _drag_max_dist,
+				Input.is_key_pressed(KEY_SHIFT))
 		elif _drag_max_dist >= DRAG_THRESHOLD_PX:
 			_box_select(_drag_rect(_drag_current))
 		queue_redraw()
@@ -212,7 +213,7 @@ func _unhandled_input(event: InputEvent) -> void:
 					# The armed release NEVER selects: the braves that just got the
 					# order must stay selected (a box select would replace them
 					# with whatever happens to stand in the grove).
-					_fire_harvest(_drag_rect(mb.position), _drag_max_dist)
+					_fire_harvest(_drag_rect(mb.position), _drag_max_dist, mb.shift_pressed)
 				# Once a real box was drawn (max extent counts, not just the
 				# release point), it stays a box — a fast out-and-back drag must
 				# never degrade into a deselecting ground click.
@@ -340,7 +341,9 @@ func _fire_unload(screen_pos: Vector2) -> void:
 ## ground, and the resulting world quad plus its hull become the standing area
 ## order. Below the drag threshold it was a click, not a rectangle — then this
 ## only DISARMS, so a stray click can never turn into a giant standing order.
-func _fire_harvest(screen_rect: Rect2, drag_dist: float) -> void:
+## `queue_up` (Shift held on release, 2026-11-26): the area order waits behind what
+## each brave is doing (Unit.queue_order) instead of replacing it.
+func _fire_harvest(screen_rect: Rect2, drag_dist: float, queue_up: bool = false) -> void:
 	harvest_arm_active = false
 	queue_redraw()
 	if drag_dist < DRAG_THRESHOLD_PX or _tribe_commands == null:
@@ -358,38 +361,61 @@ func _fire_harvest(screen_rect: Rect2, drag_dist: float) -> void:
 		screen_rect.end,
 		Vector2(screen_rect.position.x, screen_rect.end.y)]
 	var corners: PackedVector2Array = PackedVector2Array()
-	var area: Rect2 = Rect2()
+	var hull: Rect2 = Rect2()
 	for i in range(4):
 		var ground: Vector3 = _screen_to_ground(screen[i])
 		if ground == Vector3.INF:
 			return   # a corner ray points at/above the horizon: no order at all
 		var p: Vector2 = Vector2(ground.x, ground.z)
 		corners.append(p)
-		area = Rect2(p, Vector2.ZERO) if i == 0 else area.expand(p)
-	if _tribe_commands.order_chop_area(braves, area, corners) <= 0:
+		hull = Rect2(p, Vector2.ZERO) if i == 0 else hull.expand(p)
+	# Corners out over the void stay where the player drew them (_screen_to_ground);
+	# only the HULL is cut down to the part over the disc, so the size clamp and the
+	# job see the ground actually covered, while the quad keeps the drawn edges.
+	var area: Rect2 = hull
+	var td: TerrainData = GameState.terrain_data
+	if td != null:
+		area = TribeCommands.crop_to_disc(hull,
+			Vector2(td.disc_center(), td.disc_center()), td.disc_radius() + 1.0)
+		if area.size.x <= 0.0 and area.size.y <= 0.0:
+			return   # drawn entirely over the void
+	if queue_up:
+		var shape_q: Array = TribeCommands.harvest_job_shape(area, corners)
+		if (shape_q[0] as Rect2).size.x <= 0.0:
+			return
+		var chop_area: Callable = func(target: Unit) -> void:
+			_tribe_commands.order_chop_area([target] as Array[Unit], area, corners)
+		for u in braves:
+			var unit: Unit = u
+			unit.queue_order(chop_area.bind(unit))
+	elif _tribe_commands.order_chop_area(braves, area, corners) <= 0:
 		return
 	# Confirmation blink on the SAME shape the braves were given (one truth) —
-	# for trees AND for lying wood, which the order also collects now (10g).
+	# for trees AND for lying wood, which the order also collects now (10g). A tree
+	# or pile counts when its RING reaches into the area (ring_touch, 2026-11-26).
 	var tm: TreeManager = _tribe_commands.tree_manager
 	if tree_mark != null:
 		var shape: Array = TribeCommands.harvest_job_shape(area, corners)
 		if tm != null:
-			tree_mark.flash(tm.area_trees(shape[0], shape[1]))
+			tree_mark.flash(tm.area_trees(shape[0], shape[1], true))
 		var wpm: WoodPileManager = _pile_manager()
 		if wpm != null:
-			tree_mark.flash_piles(wpm.area_piles(shape[0], shape[1]))
+			tree_mark.flash_piles(wpm.area_piles(shape[0], shape[1], true))
 
 
 ## Ground point under a screen position. Terrain raycast first; a ray that leaves
 ## the terrain BODY (drag corner past the coast or over the map edge) falls back
-## to the analytic sea-level plane hit clamped into the disc, so a corner over the
-## void still yields a usable rectangle edge. Vector3.INF only when the ray points
-## at or above the horizon and cannot be resolved at all.
+## to the analytic sea-level plane hit, so a corner over the void still yields a
+## usable rectangle edge. Vector3.INF only when the ray points at or above the
+## horizon and cannot be resolved at all.
 ##
-## Phase 10j: a hit in the void counts as a MISS so it takes the clamping path.
+## Phase 10j: a hit in the void counts as a MISS so it takes the plane path.
 ## Deliberately NOT Vector3.INF — this feeds the CORNERS of the harvest rectangle,
-## and one corner over space would cancel the whole chop order. Clamping the corner
-## onto the rim is harmless because nothing grows in the void anyway.
+## and one corner over space would cancel the whole chop order.
+## The plane point is NOT pulled onto the rim any more (bug 2026-11-26): the radial
+## clamp turned the drawn edge into a chord through the disc, and the trees between
+## that chord and the rim — inside the rectangle on screen — neither blinked nor
+## got felled. _fire_harvest crops the hull to the disc instead.
 func _screen_to_ground(screen_pos: Vector2) -> Vector3:
 	var hit: Dictionary = _raycast(screen_pos, TERRAIN_MASK)
 	if not hit.is_empty() and not _is_void(hit.position):
@@ -402,11 +428,7 @@ func _screen_to_ground(screen_pos: Vector2) -> Vector3:
 	if dir.y > -0.05:
 		return Vector3.INF
 	var p: Vector3 = from + dir * ((TerrainData.SEA_LEVEL - from.y) / dir.y)
-	var td: TerrainData = GameState.terrain_data
-	if td == null:
-		return Vector3(p.x, TerrainData.SEA_LEVEL, p.z)
-	var inside: Vector2 = TerrainData.clamp_into_world(td, p.x, p.z)
-	return Vector3(inside.x, TerrainData.SEA_LEVEL, inside.y)
+	return Vector3(p.x, TerrainData.SEA_LEVEL, p.z)
 
 
 ## True when a world point lies over the VOID (phase 10j). `HeightMapShape3D` is
@@ -578,23 +600,89 @@ func _unit_screen_rect(unit: Unit, camera: Camera3D) -> Rect2:
 	return Rect2(cx - half_w, top, half_w * 2.0, height)
 
 
-## Screen-space bounding rect of a set of world points (all must be in front of
-## the camera). Empty rect if any point is behind. Clamped to a minimum size so
-## a tiny on-screen footprint stays clickable.
+## Screen-space bounding rect of a set of world points (the corners of a hull).
+## Clamped to a minimum size so a tiny on-screen footprint stays clickable.
+## Points behind the camera are CLIPPED, not fatal: the hull is cut at a plane just
+## in front of the camera (every front/behind pair contributes its crossing point,
+## which covers every hull edge through the plane), so a giant golem whose head is
+## behind the camera stays pickable by the part of her that is on screen. Empty
+## rect only when the whole hull is behind.
 func _screen_rect_from_points(points: PackedVector3Array, camera: Camera3D) -> Rect2:
-	var min_p: Vector2 = Vector2(INF, INF)
-	var max_p: Vector2 = Vector2(-INF, -INF)
-	for p in points:
-		if camera.is_position_behind(p):
-			return Rect2()
-		var sp: Vector2 = camera.unproject_position(p)
-		min_p = min_p.min(sp)
-		max_p = max_p.max(sp)
+	var visible: PackedVector3Array = clip_hull_to_front(points,
+		camera.global_transform.origin, -camera.global_transform.basis.z,
+		camera.near * 1.5 + 0.01)
+	if visible.is_empty():
+		return Rect2()
+	var projected: PackedVector2Array = PackedVector2Array()
+	for p in visible:
+		projected.append(camera.unproject_position(p))
+	var on_screen: Rect2 = screen_part_of_hull(projected,
+		Rect2(Vector2.ZERO, camera.get_viewport().get_visible_rect().size))
+	if on_screen.size == Vector2.ZERO and on_screen.position == Vector2.ZERO:
+		return Rect2()
+	var min_p: Vector2 = on_screen.position
+	var max_p: Vector2 = on_screen.end
 	var size: Vector2 = max_p - min_p
 	var center: Vector2 = (min_p + max_p) * 0.5
 	size.x = maxf(size.x, MIN_PICK_SIZE_PX)
 	size.y = maxf(size.y, MIN_PICK_SIZE_PX)
 	return Rect2(center - size * 0.5, size)
+
+
+## Bounding rect of the part of a projected convex hull that lies on screen
+## (`view`, grown by a small margin so a body at the very edge stays pickable).
+## The BOUNDING BOX of the whole projection is not good enough: a hull cut close to
+## the camera projects to points far out on every side, and its box covered the
+## whole screen while nothing of the body was visible. Empty Rect2() when the hull
+## misses the screen. Static and camera-free (tests).
+static func screen_part_of_hull(projected: PackedVector2Array, view: Rect2) -> Rect2:
+	var v: Rect2 = view.grow(PICK_MARGIN_PX * 2.0)
+	var hull: PackedVector2Array = Geometry2D.convex_hull(projected)
+	if hull.size() < 4:   # convex_hull repeats the first point: < 3 corners
+		var box: Rect2 = Rect2(projected[0], Vector2.ZERO)
+		for p in projected:
+			box = box.expand(p)
+		return box.intersection(v) if box.grow(0.5).intersects(v) else Rect2()
+	var view_poly: PackedVector2Array = PackedVector2Array([v.position,
+		Vector2(v.end.x, v.position.y), v.end, Vector2(v.position.x, v.end.y)])
+	var out: Rect2 = Rect2()
+	var first: bool = true
+	for poly in Geometry2D.intersect_polygons(hull, view_poly):
+		for p in poly:
+			if first:
+				out = Rect2(p, Vector2.ZERO)
+				first = false
+			else:
+				out = out.expand(p)
+	return out
+
+
+## The hull points at least `clip` metres in front of the camera (depth along
+## `forward` from `origin`), plus, for every front/behind pair, the point where the
+## segment between them crosses that plane. Empty when the whole hull is behind.
+## Static and camera-free so it can be asserted headless.
+static func clip_hull_to_front(points: PackedVector3Array, origin: Vector3,
+		forward: Vector3, clip: float) -> PackedVector3Array:
+	var front: PackedVector3Array = PackedVector3Array()
+	var behind: PackedVector3Array = PackedVector3Array()
+	var behind_depth: PackedFloat32Array = PackedFloat32Array()
+	var front_depth: PackedFloat32Array = PackedFloat32Array()
+	for p in points:
+		var depth: float = (p - origin).dot(forward)
+		if depth >= clip:
+			front.append(p)
+			front_depth.append(depth)
+		else:
+			behind.append(p)
+			behind_depth.append(depth)
+	if front.is_empty():
+		return front
+	var visible: PackedVector3Array = front.duplicate()
+	for i in range(front.size()):
+		for j in range(behind.size()):
+			var t: float = (front_depth[i] - clip) / (front_depth[i] - behind_depth[j])
+			visible.append(front[i].lerp(behind[j], t))
+	return visible
 
 
 ## Nearest unit of `tribe_id` (or any ENEMY when negative) whose sprite rect
@@ -977,9 +1065,24 @@ func _command_move(screen_pos: Vector2, queue_up: bool, aggressive: bool = false
 	_play_move_sound()
 
 
+## An airship with the shaman ABOARD counts too (user spec 2026-11-26): selecting
+## the ship and ordering it about answers in her voice, whoever else rides along.
+## Only who is on deck (siege_boarded) — not a shaman still walking up to board.
 func _selection_has_shaman() -> bool:
 	for unit in selected:
-		if is_instance_valid(unit) and unit.unit_kind() == &"shaman":
+		if not is_instance_valid(unit):
+			continue
+		if unit.unit_kind() == &"shaman" or airship_carries_shaman(unit):
+			return true
+	return false
+
+
+static func airship_carries_shaman(unit: Unit) -> bool:
+	if not (unit is Airship):
+		return false
+	for member in (unit as Airship).crew:
+		if is_instance_valid(member) and member.unit_kind() == &"shaman" \
+				and member.siege_boarded and member.siege_engine == unit:
 			return true
 	return false
 
@@ -1206,12 +1309,16 @@ func _try_crew_assignment(screen_pos: Vector2, camera: Camera3D, queue_up: bool 
 	if crewable.is_empty():
 		return false
 	if queue_up:
-		# Walk the waypoint route first, then board (Shift+right-click).
-		_tribe_commands.order_move(crewable, engine.position, true)
-		var eng: Unit = engine
+		# Shift+right-click: board once the orders before it are done (route,
+		# wood work, other queued orders). Weak: the engine may be gone by then.
+		var eng_ref: WeakRef = weakref(engine)
+		var board: Callable = func(target: Unit) -> void:
+			var eng = eng_ref.get_ref()
+			if eng != null:
+				target.order_crew(eng)
 		for u in crewable:
 			var unit: Unit = u
-			unit.route_end_action = (func(target: Unit) -> void: target.order_crew(eng)).bind(unit)
+			unit.queue_order(board.bind(unit))
 	else:
 		_tribe_commands.order_crew(crewable, engine)
 	if engine is CrewedVehicle:
@@ -1284,8 +1391,14 @@ func _dispatch_context_command(hit: Dictionary, queue_up: bool = false) -> bool:
 		if pile == null or pile.amount <= 0:
 			return false
 		if queue_up:
-			_queue_route_action(pile.position,
-				func(u: Unit) -> void: _tribe_commands.order_pickup([u] as Array[Unit], pile))
+			# Weak: the pile may be gone before its turn comes (a freed lambda
+			# capture logs an engine error).
+			var pile_ref: WeakRef = weakref(pile)
+			var pickup: Callable = func(u: Unit) -> void:
+				var p = pile_ref.get_ref()
+				if p != null and p.amount > 0:
+					_tribe_commands.order_pickup([u] as Array[Unit], p)
+			_queue_route_action(pickup)
 			if _selection_has_brave():
 				_flash_piles([pile])   # queued: acknowledge the target right away
 		elif _tribe_commands.order_pickup(selected, pile) > 0:
@@ -1296,8 +1409,12 @@ func _dispatch_context_command(hit: Dictionary, queue_up: bool = false) -> bool:
 		if tree == null or tree.felled_flag:
 			return false
 		if queue_up:
-			_queue_route_action(tree.position,
-				func(u: Unit) -> void: _tribe_commands.order_chop([u] as Array[Unit], tree))
+			var tree_ref: WeakRef = weakref(tree)   # may be felled and freed before its turn
+			var chop: Callable = func(u: Unit) -> void:
+				var t = tree_ref.get_ref()
+				if t != null and not t.felled_flag:
+					_tribe_commands.order_chop([u] as Array[Unit], t)
+			_queue_route_action(chop)
 			if _selection_has_brave():
 				_flash_trees([tree])   # queued: acknowledge the target right away
 		elif _tribe_commands.order_chop(selected, tree) > 0:
@@ -1325,8 +1442,12 @@ func _dispatch_context_command(hit: Dictionary, queue_up: bool = false) -> bool:
 		if not _building_is_actionable(building):
 			return false
 		if queue_up:
-			_queue_route_action(building.center_world(),
-				func(u: Unit) -> void: _apply_building_command([u] as Array[Unit], building))
+			var building_ref: WeakRef = weakref(building)   # may be gone before its turn
+			var act: Callable = func(u: Unit) -> void:
+				var b = building_ref.get_ref()
+				if b != null and b.health > 0 and _building_is_actionable(b):
+					_apply_building_command([u] as Array[Unit], b)
+			_queue_route_action(act)
 		else:
 			_apply_building_command(selected, building)
 		return true
@@ -1392,11 +1513,13 @@ func _apply_building_command(units: Array[Unit], building: Building) -> void:
 		_tribe_commands.order_repair(units, building)
 
 
-## Appends `approach` as a final waypoint for the whole selection, then arms
-## each unit's route-end follow-up (Shift+right-click on a building/tree): the
-## unit walks its waypoints and only then runs `per_unit` for itself.
-func _queue_route_action(approach: Vector3, per_unit: Callable) -> void:
-	_tribe_commands.order_move(selected, approach, true)
+## Shift+right-click on a building/tree/pile: QUEUES `per_unit` for every selected
+## unit (Unit.queue_order) — it runs once the unit has finished what it is doing
+## (waypoint route, wood work, the orders queued before it), or at once when the
+## unit is free. Until 2026-11-26 this was a single route-end follow-up per unit:
+## a second Shift-click overwrote the first (only the LAST tree got felled), and
+## a chopping brave dropped its work for the queued order.
+func _queue_route_action(per_unit: Callable) -> void:
 	for u in selected.duplicate():
 		var unit: Unit = u
-		unit.route_end_action = per_unit.bind(unit)
+		unit.queue_order(per_unit.bind(unit))

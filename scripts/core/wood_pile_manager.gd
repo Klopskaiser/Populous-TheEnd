@@ -7,6 +7,9 @@ class_name WoodPileManager extends Node
 const PILE_SCENE: PackedScene = preload("res://scenes/wood_pile.tscn")
 ## A deposit merges into an existing pile within this radius (if it has space).
 const MERGE_RADIUS: float = 2.5
+## Radius of the white confirmation ring around a pile (TreeMarkRenderer); the fell
+## rectangle collects a pile whose ring touches it (area_piles ring_touch).
+const RING_RADIUS: float = 0.8
 
 var terrain_data: TerrainData = null
 var piles: Array[WoodPile] = []
@@ -67,12 +70,15 @@ func piles_in_radius(pos: Vector3, radius: float) -> Array[WoodPile]:
 ## Added in 10g: the fell rectangle (key B) treats lying wood as a wood source
 ## too, so a cleared battlefield can be swept up in one order.
 func area_piles(area: Rect2,
-		poly: PackedVector2Array = PackedVector2Array()) -> Array[WoodPile]:
+		poly: PackedVector2Array = PackedVector2Array(),
+		ring_touch: bool = false) -> Array[WoodPile]:
 	var result: Array[WoodPile] = []
+	var margin: float = RING_RADIUS if ring_touch else 0.0
 	for pile in piles:
 		if not is_instance_valid(pile) or pile.amount <= 0 or pile.is_burning():
 			continue
-		if TreeManager.point_in_area(Vector2(pile.position.x, pile.position.z), area, poly):
+		if TreeManager.point_in_area(Vector2(pile.position.x, pile.position.z), area, poly,
+				margin):
 			result.append(pile)
 	return result
 

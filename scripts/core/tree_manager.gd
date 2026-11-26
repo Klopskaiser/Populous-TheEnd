@@ -266,7 +266,12 @@ const QUAD_EPS: float = 0.001
 ## then — with a usable convex quad — four half-plane tests. Boundary points
 ## count as inside (a tree exactly on the drag edge belongs to the order).
 ## Winding-agnostic, so the caller need not normalise the corner order.
-static func point_in_area(p: Vector2, area: Rect2, poly: PackedVector2Array) -> bool:
+## `margin` > 0 widens the shape by that many metres on every side (the white ring
+## of a tree touching the drawn area counts — see area_trees(ring_touch)).
+static func point_in_area(p: Vector2, area: Rect2, poly: PackedVector2Array,
+		margin: float = 0.0) -> bool:
+	if margin > 0.0:
+		return _point_near_area(p, area, poly, margin)
 	if not area.has_point(p):
 		return false
 	if poly.size() != 4:
@@ -281,6 +286,44 @@ static func point_in_area(p: Vector2, area: Rect2, poly: PackedVector2Array) -> 
 		elif side < -QUAD_EPS:
 			neg_side = true
 	return not (pos_side and neg_side)   # mixed sides = outside
+
+
+## point_in_area with every edge pushed `margin` outward (mitred, the hull rect
+## grown alike). Signed edge distances, so the winding is read off the quad first.
+static func _point_near_area(p: Vector2, area: Rect2, poly: PackedVector2Array,
+		margin: float) -> bool:
+	if not area.grow(margin).has_point(p):
+		return false
+	if poly.size() != 4:
+		return true
+	var twice_area: float = 0.0
+	for i in range(4):
+		twice_area += poly[i].cross(poly[(i + 1) % 4])
+	var orient: float = 1.0 if twice_area >= 0.0 else -1.0
+	for i in range(4):
+		var a: Vector2 = poly[i]
+		var edge: Vector2 = poly[(i + 1) % 4] - a
+		var length: float = edge.length()
+		if length < 0.000001:
+			continue
+		if edge.cross(p - a) * orient / length < -margin:
+			return false
+	return true
+
+
+## Radius of the white confirmation ring around a tree (TreeMarkRenderer draws it):
+## the tree's growth stage scale x TREE_RING_PER_SCALE, at least TREE_RING_MIN.
+## Read from Balance, not node.scale, so it is defined headless too.
+const TREE_RING_PER_SCALE: float = 1.6
+const TREE_RING_MIN: float = 0.5
+## Upper bound of ring_radius over all tree types (bucket search margin).
+const TREE_RING_MAX: float = TREE_RING_PER_SCALE
+
+
+static func ring_radius(tree: TreeResource) -> float:
+	var scales: Array = Balance.TREE_TYPE_PARAMS[tree.type].stage_scales
+	var s: float = float(scales[clampi(tree.stage, 0, scales.size() - 1)])
+	return maxf(s * TREE_RING_PER_SCALE, TREE_RING_MIN)
 
 
 ## True when `poly` is a usable convex quad. The four drag corners are raycast
@@ -306,17 +349,23 @@ static func is_convex_quad(poly: PackedVector2Array) -> bool:
 ## Standing trees whose position lies inside the harvest area (Rect2 hull plus
 ## optional convex quad). Bucket-indexed via _pos_buckets: a 20 m rectangle
 ## touches ~9 buckets instead of the whole registry.
+## `ring_touch` (the player's fell rectangle, 2026-11-26): a tree also counts when
+## only its white ring reaches into the area, not its trunk — what the player sees
+## inside the rectangle is what gets felled (and blinks).
 func area_trees(area: Rect2,
-		poly: PackedVector2Array = PackedVector2Array()) -> Array[TreeResource]:
+		poly: PackedVector2Array = PackedVector2Array(),
+		ring_touch: bool = false) -> Array[TreeResource]:
 	var out: Array[TreeResource] = []
-	var lo: Vector2i = _pos_bucket(Vector3(area.position.x, 0.0, area.position.y))
-	var hi: Vector2i = _pos_bucket(Vector3(area.end.x, 0.0, area.end.y))
+	var search: Rect2 = area.grow(TREE_RING_MAX) if ring_touch else area
+	var lo: Vector2i = _pos_bucket(Vector3(search.position.x, 0.0, search.position.y))
+	var hi: Vector2i = _pos_bucket(Vector3(search.end.x, 0.0, search.end.y))
 	for bz in range(lo.y, hi.y + 1):
 		for bx in range(lo.x, hi.x + 1):
 			for tree in _pos_buckets.get(Vector2i(bx, bz), []):
 				if not is_instance_valid(tree) or tree.felled_flag:
 					continue
-				if point_in_area(Vector2(tree.position.x, tree.position.z), area, poly):
+				var margin: float = ring_radius(tree) if ring_touch else 0.0
+				if point_in_area(Vector2(tree.position.x, tree.position.z), area, poly, margin):
 					out.append(tree)
 	return out
 
@@ -500,7 +549,7 @@ const AREA_MIN_SEARCH_RADIUS: float = 8.0
 ## after every load.
 func claim_area_tree(area: Rect2, poly: PackedVector2Array, claimer: Object,
 		walker: Vector3) -> TreeResource:
-	var pool: Array[TreeResource] = area_trees(area, poly)
+	var pool: Array[TreeResource] = area_trees(area, poly, true)
 	if pool.is_empty():
 		return null
 	var flat: Vector2 = Vector2(walker.x, walker.z)

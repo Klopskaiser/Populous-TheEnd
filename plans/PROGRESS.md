@@ -13827,3 +13827,41 @@ Gefundene Wege und Behebung:
   entfernt, gehaltene Einheiten bleiben drin). Suite 9075 bestanden, 0 fehlgeschlagen.
 - Nebenbei: `tests/diag_inspect_save.gd` zeigt den Inhalt eines Spielstands je Stamm (Einheiten mit Bindungen,
   Gebaeude) ohne ihn zu laden.
+
+### Bugfixes Auswahl und Holzbefehle (2026-11-26, Nutzerreport)
+
+- **Golem in der Rechteckauswahl, obwohl nicht im Bild:** `SelectionManager._unit_screen_rect` stapelte die Hoehe
+  wie bei den Billboard-Sprites entlang der KAMERA-Hochachse. Ein 30-120-m-Golem unter dem unteren Bildrand bekam so
+  ein Rechteck ueber den halben Bildschirm. Jetzt liefert `Golem.pick_world_points` die 3D-Koerperbox (Blickrichtung,
+  Welt-Hoch; sitzend bis zu den Fuessen), `clip_hull_to_front` schneidet sie an der Kamera ab (statt bei einem Punkt
+  hinter der Kamera ganz aufzugeben) und `screen_part_of_hull` nimmt nur den Teil der projizierten Huelle, der auf
+  dem Bildschirm liegt (die Bounding-Box einer nah an der Kamera abgeschnittenen Huelle deckte sonst alles ab).
+  Gilt auch fuer das Luftschiff.
+- **Shift-Queue fuer Holzbefehle:** vorher gab es je Einheit nur EINE Folgeaktion (`route_end_action`) — ein zweiter
+  Shift-Klick auf einen Baum ueberschrieb den ersten, ein Shift-Klick unterbrach das laufende Faellen, und das
+  B-Rechteck kannte Shift gar nicht. Neu: `Unit.order_queue` (Callables) mit `queue_order` (sofort, wenn die Einheit
+  frei ist, sonst anhaengen), gefeuert im `Unit.tick`, sobald sie IDLE ist und `_busy_with_task()` nichts meldet
+  (Brave: GATHER ausser dem gehaltenen Holz; Genesisgolem: Faellen/Liefern). Jeder frische Befehl leert die Queue
+  (`clear_order_queue`: `order_move` ohne Shift, Angriff, Gebaeudeangriff, Crew, Turm, Huette, `Brave._interrupt_tasks`,
+  Genesis-Faellbefehle, Bekehrung), nicht aber das Ende einer Aufgabe (`Brave._stop_all`), ein Befehl aus der Queue
+  selbst oder interne Befehle (`_is_internal_order`: Golem `_own_order`, Genesis `_harvest_own_order`). Shift auf
+  Baum, Stapel, Gebaeude, Fahrzeug und das B-Rechteck (Shift beim Loslassen) laufen ueber `queue_order`; ein
+  Shift-Bewegungsbefehl wartet hinter Arbeit oder vorhandener Queue (`_defers_queued_move`), sonst bleibt er ein
+  angehaengter Wegpunkt. Warten weitere Befehle, faellt ein Einzel-Baumbefehl nur DIESEN Baum (`Brave._order_tree`,
+  kein Weiterziehen zu Nachbarn) und ein Stapel wird automatisch abgeliefert statt gehalten. Die Queue wird nicht
+  gespeichert.
+- **Faellrechteck am Kartenrand / Ringe blinken nicht:** Ecken ueber dem Void wurden radial auf den Rand gezogen —
+  die Rechteckkante wurde zur Sehne, die Baeume zwischen Sehne und Rand fielen heraus. Jetzt bleiben die Ecken, wo
+  sie gezeichnet wurden (Ebenentreffer auf Meereshoehe), und nur die Huelle wird auf die Scheibe beschnitten
+  (`TribeCommands.crop_to_disc`). Ausserdem zaehlt ein Baum/Stapel, sobald sein weisser RING ins Rechteck reicht
+  (`area_trees(..., ring_touch)`, `area_piles(..., ring_touch)`, `TreeManager.ring_radius`; fuer Blinken, Brave-
+  und Genesis-Auftrag gleich). `clamp_harvest_area` gibt ein Rechteck ohne Klemmung unveraendert zurueck (das
+  Umzentrieren kostete Float-Bits, und `harvest_job_shape` verwarf dann das gezeichnete Viereck). Markenlimit
+  256 -> 1024.
+- Tests: `tests/test_selection_queue.gd`.
+- **Nachtrag (gleicher Tag):** Genesisgolem faellt ohne Unterbrechung durch Feinde (keine Idle-Suche, kein
+  Zurueckschlagen, kein Luftschlag/Luftschiff-Jagen, Weg zum Baum als einfacher Marsch statt Angriffsmove) und
+  laeuft danach zur Tuer des naechsten eigenen Gebaeudes zurueck (`GenesisGolem._return_home`,
+  `GENESIS_GOLEM_HOME_RADIUS`; nicht bei wartender Shift-Queue). Luftschiff mit der Schamanin an Deck: Anwahl- und
+  Bewegungssound der Schamanin (`SelectionManager.airship_carries_shaman`). Tests in `test_genesis_golem.gd`
+  und `test_airship.gd`.

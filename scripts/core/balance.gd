@@ -1138,6 +1138,9 @@ const GENESIS_GOLEM_BRAVE_HEAL_DURATION: float = 5.0
 ## vielen Sekunden ohne Ankunft gibt er auf.
 const GENESIS_GOLEM_DELIVER_MIN_REACH: float = 3.0
 const GENESIS_GOLEM_DELIVER_GIVE_UP: float = 90.0
+## Heimweg nach dem Faellen (Nutzervorgabe 2026-11-26, `GenesisGolem._return_home`): ist die Tuer des
+## naechsten eigenen Gebaeudes weiter als Koerperradius + so viele Meter weg, laeuft er dorthin zurueck.
+const GENESIS_GOLEM_HOME_RADIUS: float = 6.0
 ## Ab dieser Koerperhoehe ist er gehaertet wie der ausgewachsene Golem (Nutzervorgabe 2026-11-22):
 ## Brand 5/s, einfacher Blitz, hoechstens GOLEM_SIEGE_DAMAGE_FULL_SIZE je Katapult-Volltreffer.
 const GENESIS_GOLEM_HARDEN_HEIGHT: float = 100.0

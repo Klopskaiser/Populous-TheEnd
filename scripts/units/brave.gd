@@ -82,6 +82,9 @@ var task: Task = Task.NONE
 var carried_wood: int = 0
 var task_cell: Vector2i = Vector2i(-1, -1)
 var task_tree: Object = null   # untyped: may be freed by another worker
+## The tree of the last single-tree chop order (untyped: may be freed). With Shift
+## orders waiting, the brave finishes THIS tree instead of chaining (_next_loose_tree).
+var _order_tree: Object = null
 var task_pile: Object = null   # untyped: may be freed
 var target_building: Building = null   # forester / training site
 ## Training building this brave queues at (State.TRAIN). The building assigns a
@@ -224,10 +227,19 @@ func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = fals
 	# FORESTER and TRAIN too (2026-11-23): a forester worker sitting INSIDE took the
 	# move without leaving the building — state MOVE, still out of the world: the
 	# invisible brave. _interrupt_tasks steps him out and frees his slot.
-	if state == State.GATHER or state == State.BUILD or state == State.FORESTER \
-			or state == State.TRAIN:
+	# A Shift-move that waits behind the wood work (Unit._defers_queued_move) must
+	# not break that work off — it only joins the queue.
+	if (state == State.GATHER or state == State.BUILD or state == State.FORESTER \
+			or state == State.TRAIN) and not (queue_up and _defers_queued_move()):
 		_interrupt_tasks()
 	super.order_move(target, queue_up, aggressive)
+
+
+## Wood work a Shift order waits for (2026-11-26): every GATHER task — chopping,
+## an area order, a pickup with its delivery — except the HELD load waiting for its
+## drop order (the next click is that drop order, not a queued follow-up).
+func _busy_with_task() -> bool:
+	return state == State.GATHER and not holds_wood_for_drop()
 
 
 ## Braves keep a small guard radius even while idling (phase 7b): enemies
@@ -252,7 +264,9 @@ func order_pickup(pile: WoodPile) -> void:
 	_interrupt_tasks()
 	task_pile = pile
 	task = Task.PICKUP
-	carry_hold = true
+	# Held for a drop order — unless further Shift orders wait: then the load goes to
+	# the nearest drop-off on its own (like the area order) and the queue moves on.
+	carry_hold = order_queue.is_empty()
 	_carry_hold_timer = 0.0
 	_carry_drop_goal = Vector3.INF
 	_loose_return_pos = Vector3.INF
@@ -313,6 +327,7 @@ func order_chop(tree: TreeResource) -> bool:
 		return false
 	_interrupt_tasks()
 	task_tree = tree
+	_order_tree = tree
 	tree.add_claimer(self)
 	_chop_timer = tree.chop_time()
 	task = Task.CHOP
@@ -533,7 +548,7 @@ func _next_area_pile() -> bool:
 		return false
 	var best: WoodPile = null
 	var best_dist: float = INF
-	for pile: WoodPile in wood_pile_manager.area_piles(chop_area, chop_area_poly):
+	for pile: WoodPile in wood_pile_manager.area_piles(chop_area, chop_area_poly, true):
 		# A depot's own stock lies INSIDE its footprint and is not a collection
 		# target (`clickable` is the same flag that keeps the depot's click body in
 		# front of it). Without this filter two depots would relay their stock to
@@ -1697,6 +1712,17 @@ func _next_loose_tree() -> bool:
 		return _next_area_tree()
 	if tree_manager == null:
 		return false
+	if not order_queue.is_empty():
+		# Shift orders wait: the single-tree order covers THAT tree only (piece by
+		# piece) and does not chain on to its neighbours, so the queue moves on.
+		if not _tree_valid(_order_tree) or _order_tree.wood_yield() <= 0:
+			return false
+		task_tree = _order_tree
+		_order_tree.add_claimer(self)
+		task = Task.CHOP
+		_chop_timer = _order_tree.chop_time()
+		_reset_seek()
+		return true
 	var search_from: Vector3 = _loose_return_pos if _loose_return_pos != Vector3.INF else position
 	var tree: TreeResource = tree_manager.claim_nearest_tree(
 		search_from, CHOP_CHAIN_RADIUS, self, position)
@@ -1830,6 +1856,8 @@ func _interrupt_tasks() -> void:
 	_area_retry = 0.0
 	_area_retries = 0
 	route_end_action = Callable()   # a fresh task cancels a queued follow-up order
+	clear_order_queue()   # ... and the Shift queue (not when the task just ran out, _stop_all)
+	_order_tree = null
 	train_target = null
 	train_slot_pos = Vector3.INF
 	train_reached_slot = false
@@ -1859,8 +1887,12 @@ func _interrupt_tasks() -> void:
 	_reset_seek()
 
 
+## The current task is over (worked out, refused, dropped): back to IDLE. The Shift
+## queue survives — its next entry is exactly what comes now (Unit.tick fires it).
 func _stop_all() -> void:
+	_keep_order_queue = true
 	_interrupt_tasks()
+	_keep_order_queue = false
 	_clear_path()
 	_set_state(State.IDLE)
 

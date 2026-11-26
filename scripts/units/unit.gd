@@ -257,6 +257,19 @@ var waypoint_queue: Array[Vector3] = []
 ## waypoints first and only THEN enters the building / boards the engine. Cleared
 ## by any fresh (non-queued) order.
 var route_end_action: Callable = Callable()
+## Shift-queued follow-up orders (player, 2026-11-26): each entry issues one order
+## for this unit when called. They run one after another, each as soon as the unit
+## has nothing left to do (IDLE, and no running work task — `_busy_with_task`).
+## Filled by queue_order() and by a Shift-move that has to wait (_defers_queued_move);
+## emptied by any fresh, unqueued order (clear_order_queue). Not saved: a loaded
+## game has no pending shift orders (like route_end_action).
+var order_queue: Array[Callable] = []
+## True while a queued entry runs: the order it issues is "fresh" by its own rules
+## and would otherwise wipe the rest of the queue.
+var _running_queued_order: bool = false
+## True while a work task ends on its own (Brave._stop_all): the cleanup it shares
+## with fresh orders must not wipe the queue — the queue is what comes next.
+var _keep_order_queue: bool = false
 var patrol: bool = false
 ## Move mode of the current route: aggressive (attack-move — combatants engage
 ## enemies they pass) or passive (plain move/flee: march through, only the
@@ -1096,6 +1109,9 @@ func tick(delta: float) -> void:
 	_tick_regen(delta)
 	_tick_burning(delta)
 	_tick_hypnosis(delta)   # early-outs when not hypnotized (10k)
+	if not order_queue.is_empty() and state == State.IDLE and not _busy_with_task() \
+			and can_take_orders():
+		_run_next_queued_order()
 	_tick_state(delta)
 	_apply_animation(false)
 
@@ -1293,6 +1309,60 @@ func _finish_route() -> void:
 	_set_state(State.IDLE)
 
 
+# --- Shift order queue (2026-11-26) ----------------------------------------------
+
+## Issues `order` now if the unit is free, otherwise appends it to the queue: it is
+## free when nothing waits in the queue, it is not marching a route, has no route
+## follow-up armed and no work task running. Used by the Shift-variants of the
+## context orders (tree, pile, harvest rectangle, building).
+func queue_order(order: Callable) -> void:
+	if not order_queue.is_empty() or state == State.MOVE or route_end_action.is_valid() \
+			or _busy_with_task():
+		order_queue.append(order)
+		return
+	_run_queued(order)
+
+
+## A running work task that a Shift order must wait for (and that keeps the queue
+## from firing while the state is IDLE). Base units have none; Brave (wood work) and
+## GenesisGolem (felling, delivering) override.
+func _busy_with_task() -> bool:
+	return false
+
+
+## Whether a Shift-move has to go into the queue rather than onto the waypoint
+## route: something is queued already (order must be kept) or a work task runs.
+## A plain march with an empty queue keeps the classic "append a waypoint".
+func _defers_queued_move() -> bool:
+	return not order_queue.is_empty() or _busy_with_task()
+
+
+## Orders a unit gives ITSELF through the public entry points (a golem's air chase,
+## the Genesis golem's walk to the next tree) are not player orders and must not
+## empty the queue.
+func _is_internal_order() -> bool:
+	return false
+
+
+## A fresh, unqueued order replaces the whole plan. No-op for the order a queued
+## entry issues itself, for internal orders and for a task that ends on its own.
+func clear_order_queue() -> void:
+	if _running_queued_order or _keep_order_queue or _is_internal_order():
+		return
+	order_queue.clear()
+
+
+func _run_next_queued_order() -> void:
+	_run_queued(order_queue.pop_front())
+
+
+func _run_queued(order: Callable) -> void:
+	_running_queued_order = true
+	if order.is_valid():
+		order.call()
+	_running_queued_order = false
+
+
 # --- Orders --------------------------------------------------------------------
 
 ## While pacified by an enemy preacher (SIT) the unit accepts NO orders at all —
@@ -1330,6 +1400,11 @@ func _leave_building_for_order() -> bool:
 ## selects attack-move (engage enemies on the way) vs. plain move (default —
 ## also the flee order: breaks off the current fight).
 func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = false) -> void:
+	if queue_up and _defers_queued_move():
+		# Shift behind queued orders or a running work task: this waypoint waits
+		# its turn instead of breaking the work off (2026-11-26).
+		order_queue.append(order_move.bind(target, false, aggressive))
+		return
 	if not _leave_building_for_order() or not can_take_orders():
 		return
 	leave_crew()   # an explicit move order pulls the unit off its siege engine
@@ -1341,6 +1416,7 @@ func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = fals
 	_flee_hits = 0
 	if not queue_up:
 		route_end_action = Callable()   # a fresh route cancels a queued follow-up
+		clear_order_queue()
 		waypoint_queue.clear()
 		waypoint_queue.append(target)
 		_start_path_to(target)
@@ -2910,6 +2986,8 @@ func _stand_up(fight_preacher: bool) -> void:
 ## running orders are gone and everyone attacking it drops the (now friendly)
 ## target.
 func convert_to_tribe(new_tribe: Tribe) -> void:
+	route_end_action = Callable()   # the old owner's plans do not travel along
+	order_queue.clear()
 	leave_crew()   # a converted crew member no longer serves the old engine
 	reset_sermon()
 	if tribe != null:
@@ -3293,6 +3371,7 @@ func order_crew(engine) -> void:
 	if siege_engine == engine and state == State.CREW:
 		return
 	route_end_action = Callable()
+	clear_order_queue()
 	_on_combat_interrupt()
 	_end_attack()
 	if not engine.add_crew(self):
@@ -3656,6 +3735,7 @@ func _begin_attack(enemy: Unit) -> void:
 func order_attack(enemy: Unit) -> void:
 	if not _leave_building_for_order():
 		return
+	clear_order_queue()
 	_begin_attack(enemy)
 	if attack_target == enemy:
 		_target_ordered = true
@@ -3692,6 +3772,7 @@ func order_attack_building(building) -> void:
 	if not building.is_attackable():
 		return   # e.g. the reincarnation site — units cannot assault it
 	_on_combat_interrupt()
+	clear_order_queue()
 	_end_attack()
 	waypoint_queue.clear()
 	attack_building = building
@@ -3880,6 +3961,7 @@ func order_garrison(tower) -> void:
 	if tower.tribe_id != tribe_id or not tower.is_usable() or not tower.has_crew_room():
 		return
 	route_end_action = Callable()
+	clear_order_queue()
 	_on_combat_interrupt()
 	_end_attack()
 	_clear_building_target()
@@ -3976,6 +4058,7 @@ func order_man_hut(hut, manual: bool = false) -> void:
 	if hut.tribe_id != tribe_id or not hut.is_usable() or not hut.has_crew_room():
 		return
 	route_end_action = Callable()
+	clear_order_queue()
 	_on_combat_interrupt()
 	_end_attack()
 	_clear_building_target()

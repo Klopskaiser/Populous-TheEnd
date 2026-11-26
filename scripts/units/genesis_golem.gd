@@ -231,6 +231,36 @@ func aggro_radius() -> float:
 	return super.aggro_radius() * Balance.GENESIS_GOLEM_AGGRO_SHARE
 
 
+# --- Felling is not interrupted by enemies (user spec 2026-11-26) ----------------------
+# Until then every enemy in his aggro radius pulled him off the trees (idle scan, the
+# walk to the next tree was an attack-move, hits were answered, airships swatted and
+# chased) and he went back afterwards. A felling order is now a worker job like the
+# braves': he only fights again when the player or the AI gives him another order.
+
+func _engage_on_sight(delta: float) -> bool:
+	if is_harvesting():
+		return false
+	return super._engage_on_sight(delta)
+
+
+func _maybe_retaliate(attacker) -> void:
+	if is_harvesting():
+		return
+	super._maybe_retaliate(attacker)
+
+
+func _tick_air_strike(delta: float) -> void:
+	if is_harvesting():
+		return
+	super._tick_air_strike(delta)
+
+
+func _tick_air_chase(delta: float) -> void:
+	if is_harvesting():
+		return
+	super._tick_air_chase(delta)
+
+
 ## Hardened (fire 5/s, plain lightning, catapult capped) from GENESIS_GOLEM_HARDEN_HEIGHT (100 m,
 ## user spec 2026-11-22). His health, healing and damage do not use the golem's full-size bonuses.
 func is_full_size() -> bool:
@@ -496,6 +526,7 @@ func is_harvesting() -> bool:
 func order_harvest_tree(tree: TreeResource) -> bool:
 	if not _tree_ok(tree) or not can_take_orders():
 		return false
+	clear_order_queue()   # a fresh (unqueued) order replaces the Shift plan
 	_halt_for_harvest()
 	harvest_tree = tree
 	harvest_area = Rect2()
@@ -507,6 +538,7 @@ func order_harvest_tree(tree: TreeResource) -> bool:
 func order_harvest_area(area: Rect2, poly: PackedVector2Array = PackedVector2Array()) -> bool:
 	if area.size.x <= 0.0 or not can_take_orders():
 		return false
+	clear_order_queue()   # a fresh (unqueued) order replaces the Shift plan
 	_halt_for_harvest()
 	harvest_tree = null
 	harvest_area = area
@@ -517,6 +549,35 @@ func order_harvest_area(area: Rect2, poly: PackedVector2Array = PackedVector2Arr
 ## Asked to sit: the harvest ends.
 func _on_sit_requested() -> void:
 	end_harvest()
+
+
+## The felling is done (user spec 2026-11-26): back to the settlement like the
+## braves, which end at their drop-off. Goal: the delivery point of the nearest own
+## building on his island; skipped when he is already that close, when Shift orders
+## wait (they come next) or when the tribe has no building.
+func _return_home() -> void:
+	if not order_queue.is_empty() or tribe == null:
+		return
+	var best: Building = null
+	var best_d: float = INF
+	for b in tribe.buildings:
+		if not is_instance_valid(b) or b.health <= 0:
+			continue
+		var d: float = _flat_dist(position, b.position)
+		if d >= best_d:
+			continue
+		if nav_grid != null and not nav_grid.same_island(position, b.delivery_point()):
+			continue
+		best_d = d
+		best = b
+	if best == null:
+		return
+	var goal: Vector3 = best.delivery_point()
+	if _flat_dist(position, goal) <= trample_radius() + Balance.GENESIS_GOLEM_HOME_RADIUS:
+		return   # felled right at home
+	_harvest_own_order = true
+	order_move(goal)
+	_harvest_own_order = false
 
 
 func end_harvest() -> void:
@@ -536,10 +597,21 @@ func _halt_for_harvest() -> void:
 
 ## Any order from outside ends the harvest (and a wood delivery).
 func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = false) -> void:
-	if not _harvest_own_order:
+	# A Shift-move behind his felling waits in the queue and leaves the work alone.
+	if not _harvest_own_order and not (queue_up and _defers_queued_move()):
 		end_harvest()
 		deliver_target = null
 	super.order_move(target, queue_up, aggressive)
+
+
+## Felling and a wood delivery are work a Shift order waits for (2026-11-26).
+func _busy_with_task() -> bool:
+	return is_harvesting() or deliver_target != null
+
+
+## His walks to the next tree / to the door are no player order: the queue stays.
+func _is_internal_order() -> bool:
+	return _harvest_own_order or super()
 
 
 func order_attack(enemy: Unit) -> void:
@@ -617,7 +689,7 @@ func _next_area_tree() -> TreeResource:
 		return null
 	var best: TreeResource = null
 	var best_d: float = INF
-	for tree in tm.area_trees(harvest_area, harvest_poly):
+	for tree in tm.area_trees(harvest_area, harvest_poly, true):
 		if not _tree_ok(tree):
 			continue
 		if nav_grid != null and not nav_grid.same_island(position, tree.position):
@@ -641,6 +713,7 @@ func _tick_harvest(delta: float) -> void:
 		harvest_tree = _next_area_tree()
 		if harvest_tree == null:
 			end_harvest()
+			_return_home()
 			return
 	var d: float = _flat_dist(position, harvest_tree.position)
 	if d > reach():
@@ -648,7 +721,7 @@ func _tick_harvest(delta: float) -> void:
 		if state != State.MOVE or _harvest_repath <= 0.0:
 			_harvest_repath = HARVEST_REPATH
 			_harvest_own_order = true
-			order_move(harvest_tree.position, false, true)
+			order_move(harvest_tree.position)   # a plain march: no fights on the way
 			_harvest_own_order = false
 		return
 	if state == State.MOVE:
@@ -685,7 +758,7 @@ func _harvest_attack() -> StringName:
 		kick_side = -_last_kick_side   # one tree, straight ahead: in both lanes — the legs take turns
 		return plain
 	var frame: Array[Vector3] = _heading_frame()
-	var trees: Array[TreeResource] = tm.area_trees(harvest_area, harvest_poly)
+	var trees: Array[TreeResource] = tm.area_trees(harvest_area, harvest_poly, true)
 	var order: Array[StringName] = [ATTACK_KICK, ATTACK_SLAM, ATTACK_DRUM]
 	if stance == STANCE_CROUCH:
 		order = [ATTACK_SLAM, ATTACK_DRUM, ATTACK_KICK]
@@ -740,7 +813,7 @@ func _land_attack(kind: StringName, hit: int = 0) -> Dictionary:
 		# An area order: every tree of the order in the blow's area falls with it.
 		var tm: TreeManager = _trees()
 		if harvest_area.size.x > 0.0 and tm != null:
-			for other in harvest_trees_in_blow(kind, tm.area_trees(harvest_area, harvest_poly)):
+			for other in harvest_trees_in_blow(kind, tm.area_trees(harvest_area, harvest_poly, true)):
 				collect_tree(other)
 		if _tree_ok(tree) and _flat_dist(position, tree.position) <= reach() + 1.0:
 			collect_tree(tree)

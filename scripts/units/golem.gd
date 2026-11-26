@@ -730,6 +730,32 @@ func pick_size_m() -> Vector2:
 	return Vector2(body_half_width() * 2.0, Balance.GOLEM_HEIGHT) * size_factor()
 
 
+## The pick rect is framed by the 3D BODY BOX (heading frame, world up), not by the
+## billboard formula of the sprites: that one stacks the height along the CAMERA up
+## axis, and for a 30-120 m figure standing below the bottom edge of the screen it
+## threw a rect over half the screen — the golem landed in box selects although it
+## was neither visible nor inside the box (user report 2026-11-26).
+func pick_world_points() -> PackedVector3Array:
+	var fwd: Vector3 = heading()
+	var right: Vector3 = Vector3(-fwd.z, 0.0, fwd.x)
+	var s: float = size_factor()
+	var half_w: float = body_half_width() * s
+	var half_d: float = body_half_depth() * s
+	var up: Vector3 = Vector3(0.0, height_m(), 0.0)
+	# Seated (and in the crab stand) her standpoint is the middle of the seat and
+	# the legs reach forward to the feet: the box runs from the seat to the toes.
+	var front: float = half_d
+	if _seat_center != Vector3.INF or is_crabbing():
+		front += seat_back_m()
+	var pts: PackedVector3Array = PackedVector3Array()
+	for sd in [-half_d, front]:
+		for sw in [-half_w, half_w]:
+			var foot: Vector3 = position + fwd * sd + right * sw
+			pts.append(foot)
+			pts.append(foot + up)
+	return pts
+
+
 func selection_ring_scale() -> float:
 	return 2.43 * size_factor()   # ring radius 0,83 m around the 1,55-m-wide body
 
@@ -4447,6 +4473,11 @@ func _tick_air_chase(delta: float) -> void:
 
 ## An order from outside (player, AI) ends the airship chase; the chase's own
 ## move orders pass through.
+## Her own marches (air chase, ship approach) are no player order: the Shift queue stays.
+func _is_internal_order() -> bool:
+	return _own_order
+
+
 func order_move(target: Vector3, queue_up: bool = false, aggressive: bool = false) -> void:
 	if is_sit_locked():
 		# Seated: only stand_up() reaches her — unless she may crab-walk (user spec 2026-11-18; on her way
